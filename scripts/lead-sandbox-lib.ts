@@ -69,26 +69,42 @@ export const CLAUDE_READ_WRITE = ['.claude', '.local/state/claude'];
 export const CLAUDE_READ = ['.local/bin', CLAUDE_INSTALL, '.bun', 'Library/Keychains'];
 
 /**
- * What under `~/.claude` an unsandboxed session later runs or obeys:
- * settings (hooks, MCP servers, the status line), plugin and skill code,
- * instructions, and the shell snapshot and env files each Bash call
- * sources. Readable, never writable, after every other rule, with
- * `~/.claude.json` (its MCP servers) and the `~/.claude` folder itself, so
- * it cannot be renamed away, edited and put back. Measured on 2.1.302: a
- * `claude -p` with every write under `~/.claude` refused still signed in
- * and ran a Bash call.
+ * What under `~/.claude` a lead may read and not write, and the transcript
+ * slug rule, are shared with the server (`packages/core/src/lead-wall.ts`).
+ * The folders and `~/.claude` itself are written after every other rule, with
+ * `~/.claude.json` (its MCP servers), so nothing can be renamed away, edited
+ * and put back.
  */
-export const CLAUDE_CODE_FOLDERS = [
-  'hooks',
-  'plugins',
-  'skills',
-  'agents',
-  'commands',
-  'rules',
-  'output-styles',
-  'shell-snapshots',
-  'session-env',
-];
+import {
+  CLAUDE_CODE_FOLDERS,
+  CLAUDE_READ_ONLY_FILES,
+  CLAUDE_READ_ONLY_FOLDERS,
+  SERVER_STATE_FOLDERS,
+  projectSlugs,
+  transcriptSlug,
+} from '../packages/core/src/lead-wall.ts';
+export { CLAUDE_CODE_FOLDERS, CLAUDE_READ_ONLY_FOLDERS, SERVER_STATE_FOLDERS, transcriptSlug };
+
+/**
+ * What in a project makes the owner's own git run a command: in a git folder,
+ * `config` (`core.fsmonitor`, filter drivers), `config.worktree`, `commondir`
+ * (where git reads the config from), `info/` (which filters apply) and
+ * `hooks/`. A lead that wrote one would run code outside the wall the next
+ * time the owner, or an unwalled session, ran git in that project. The names
+ * `.git`, `.git/worktrees/<name>` and `.git/modules/…` are read only too:
+ * Seatbelt judges a rename by the two names it moves, so a git folder built
+ * elsewhere and renamed into place passed the rules on the files in it, and
+ * a `.git` file can point git at any folder. At any depth, so a nested repo
+ * and a worktree are covered. The cost: a walled lead cannot `git init`,
+ * `git clone`, `git worktree add` or update a submodule inside a project.
+ * A `core.hooksPath` inside a project is refused at launch
+ * (`lead-sandbox-git.ts`).
+ */
+export function gitCodeRegex(projectEnd: string): string {
+  const gitFolder = '\\.git(/(modules/.+|worktrees(/[^/]+)?))?';
+  const runs = '(/(config(\\.worktree)?|commondir|info(/.*)?|hooks(/.*)?))?';
+  return `^${escapeRegex(projectEnd)}/(.*/)?${gitFolder}${runs}$`;
+}
 
 /**
  * The tmux server's socket folder, at both spellings: `/tmp` is a symlink
@@ -158,11 +174,6 @@ interface Rule {
   last?: true;
 }
 
-/** Claude Code's name for a project's transcript folder: every other character a dash. */
-export function transcriptSlug(path: string): string {
-  return path.replace(/[^a-zA-Z0-9]/g, '-');
-}
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -196,9 +207,13 @@ function rulesFor(
   });
 
   // Other projects' transcripts and scratch folders are other projects' data.
-  const transcripts = `${m.home}/.claude/projects`;
+  // From both ends of `~/.claude`, like claudeCodeRules: a `projects` folder
+  // not made yet resolves to itself, and a lead would make it at the far end
+  // of the link, where a rule on the near end denies nothing (measured).
+  const claude = under(m.home, '.claude');
+  const transcripts = [...new Set([claude, m.realpath(claude)])].map((e) => `${e}/projects`);
   const scratch = `/private/tmp/claude-${m.uid}`;
-  add('deny', transcripts, 'other projects');
+  for (const t of transcripts) add('deny', t, 'other projects');
   add('deny', scratch, 'other projects');
   // Claude Code opens the scratch root itself at start (measured: EPERM on
   // open without this). It lists the other projects' folder names, not
@@ -210,9 +225,8 @@ function rulesFor(
   });
   for (const p of lead.projects) {
     add('write', p, 'own project');
-    const slugs = new Set([transcriptSlug(p), transcriptSlug(m.realpath(p))]);
-    for (const slug of slugs) {
-      for (const root of [transcripts, scratch]) {
+    for (const slug of projectSlugs([p], m.realpath)) {
+      for (const root of [...transcripts, scratch]) {
         // The project's own folder, and one per worktree launched inside it.
         const regex = `^${escapeRegex(m.realpath(root))}/${escapeRegex(slug)}(--claude-worktrees-[^/]+)?(/|$)`;
         rules.push({ access: 'write', filter: { regex, under: root }, why: 'own transcripts' });
@@ -232,6 +246,14 @@ function rulesFor(
   for (const parent of parents)
     if (!theirs.some((t) => parent === t || parent.startsWith(`${t}/`)))
       rules.push({ access: 'list', filter: { literal: parent }, why: 'bun needs its env' });
+  for (const p of lead.projects)
+    for (const end of new Set([p, m.realpath(p)]))
+      rules.push({
+        access: 'nowrite',
+        filter: { regex: gitCodeRegex(end), under: p },
+        why: 'git runs it outside the wall',
+        last: true,
+      });
   for (const p of lead.allow) add('write', p, 'config allow');
   for (const p of lead.allowRead) add('read', p, 'config allowRead');
   for (const p of gitProxyPaths(lead, m.home)) {
@@ -266,14 +288,22 @@ function claudeCodeRules(m: Machine): Rule[] {
   // that does not exist yet resolves to itself, and a lead would create it
   // at the far end of the symlink, where nothing denies it (measured).
   for (const end of new Set([claude, m.realpath(claude)])) {
-    for (const rel of CLAUDE_CODE_FOLDERS)
+    // What runs outside the sandbox, what the server reads by name (the
+    // discovery file, the hook markers, board-sync's state), and the plans.
+    for (const rel of CLAUDE_READ_ONLY_FOLDERS)
       rules.push({ access: 'nowrite', filter: { subpath: `${end}/${rel}` }, why, last: true });
-    rules.push({ access: 'nowrite', filter: { literal: `${end}/CLAUDE.md` }, why, last: true });
-    // settings.json, settings.local.json and the files they are replaced through.
+    // CLAUDE.md, the settings, and every name they are replaced through.
+    for (const name of CLAUDE_READ_ONLY_FILES)
+      rules.push({
+        access: 'nowrite',
+        filter: { regex: `^${escapeRegex(end)}/${name}$`, under: claude },
+        why,
+        last: true,
+      });
     rules.push({
-      access: 'nowrite',
-      filter: { regex: `^${escapeRegex(end)}/settings[^/]*$`, under: claude },
-      why,
+      access: 'deny',
+      filter: { subpath: `${end}/${SERVER_STATE_FOLDERS[0]}/board-sync` },
+      why: 'board-sync token',
       last: true,
     });
   }

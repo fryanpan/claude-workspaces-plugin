@@ -1,0 +1,43 @@
+/** What `lead-chat-mirror-browser-driver.ts` prints, read by
+ *  `lead-chat-mirror-browser.test.ts`. */
+
+export interface MirrorWidthRun {
+  width: number;
+  /** The tool call's line, then its body once tapped. */
+  tool: { head: string; open: string[]; expanded: string | null };
+  /** Board-event rows shown, then after the toggle, then the toggle's count;
+   *  and whether the heading shows whole and the toggle sits level with Start a meeting. */
+  channel: { before: number; hidden: number; count: string; after: number; headerFits: boolean };
+  /** The spoken reply's words before and after a tap. */
+  voice: { closedText: boolean; label: string; words: string };
+  /** A flush of the lead's text reached the open page within a second. */
+  liveWithin1s: boolean;
+  /** The panel's place: docked on the right, or a sheet. */
+  layout: { docked: boolean; sheet: boolean; right: number; width: number; vw: number };
+  /** At 1100px or narrower: where the full-screen pane and the pinned navbar
+   *  sit, and whether tapping Library there closed the chat and opened it. */
+  full: {
+    paneTop: number;
+    paneBottom: number;
+    navTop: number;
+    navBottom: number;
+    navLeft: number;
+    navWidth: number;
+    vh: number;
+    /** The agent button keeps the bar's left end, as on a phone's bar. */
+    agentFirst: boolean;
+    closedByPageTap: boolean;
+    libraryCurrent: string | null;
+    /** Each visible tab's and the agent button's box ("nav left,top,width,
+     *  height") with the chat closed, then open: equal when nothing moved. */
+    tabsClosed: string[];
+    tabsOpen: string[];
+  } | null;
+  /** After dragging the docked panel's edge, and after loading the page again. */
+  resized: { width: number } | null;
+  afterNav: { open: boolean; width: number; docked: boolean } | null;
+}
+
+export interface MirrorRun {
+  widths: MirrorWidthRun[];
+}

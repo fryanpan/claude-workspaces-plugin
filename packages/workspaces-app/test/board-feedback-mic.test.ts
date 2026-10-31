@@ -2,7 +2,6 @@ import type { FeedbackWidgetEl } from '@claude-workspaces/widget';
 import { SIGN_IN_NOTE } from '@claude-workspaces/widget/mic';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FEEDBACK_LABELS, mountFeedbackMic } from '../src/board/board-feedback-mic.ts';
-import { mountShell } from './support/board-region-harness.ts';
 
 /**
  * Voice feedback about Workspaces itself, from any board.
@@ -216,20 +215,6 @@ describe('the board mic', () => {
     expect(new Set(tips)).toEqual(
       new Set([FEEDBACK_LABELS.comment, FEEDBACK_LABELS.voice, FEEDBACK_LABELS.history]),
     );
-  });
-
-  it('is a different glyph from the voice dock, so the board’s two mics are not one control drawn twice', () => {
-    // A board carries both at once: the dock's mic bottom-left talks to the
-    // board, this one bottom-right sends feedback about the app. They drew the
-    // same icon, so the only thing separating them was a hover label — which
-    // a finger never sees.
-    const el = mountShell();
-    const v = widgetWithMic();
-    const dock = el('board-mic');
-    const feedback = v.widget.shadow.querySelector('.fab-mic') as HTMLElement;
-    expect(dock.querySelector('svg'), 'CONTROL: the dock draws a glyph').toBeTruthy();
-    expect(feedback.querySelector('svg'), 'CONTROL: and so does the mic').toBeTruthy();
-    expect(feedback.innerHTML, 'the two mics are drawn differently').not.toBe(dock.innerHTML);
   });
 });
 

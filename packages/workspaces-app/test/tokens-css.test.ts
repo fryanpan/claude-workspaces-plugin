@@ -192,7 +192,7 @@ describe('tokens.css mapping layer', () => {
     installBuiltTokens();
     setViewport(IPAD);
     expect(styleOf(attach('board-btn', { tag: 'button' })).borderTopColor).toBe(token('--border'));
-    expect(styleOf(attach('voice-indicator')).color).toBe(token('--fg'));
+    expect(styleOf(attach('icon-btn', { tag: 'button' })).color).toBe(token('--fg'));
     expect(token('--fg')).toBe(token('--gray-9'));
   });
 });

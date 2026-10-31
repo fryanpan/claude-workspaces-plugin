@@ -74,6 +74,16 @@ export interface ServerOptions {
    * enough for a socket path (`boardSocketDirError`).
    */
   boardSocketDir?: string;
+  /**
+   * The one board whose socket the members of `boardSocketGroup` may open:
+   * that socket is the group's, mode 660, and the folder 710, so a member (a
+   * project machine's lead, `infra/project-machine/entrypoint.sh`) reaches
+   * that socket and can list none. Without both, every socket is this
+   * user's alone.
+   */
+  boardSocketShared?: string;
+  /** The gid `boardSocketShared`'s socket is given to. This user must be a member. */
+  boardSocketGroup?: number;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,
@@ -153,6 +163,25 @@ export interface ServerOptions {
    * is `CW_ACCESS_ONLY_BROWSER_HOSTS`.
    */
   accessOnlyBrowserHosts?: boolean;
+  /**
+   * In whole-server Access mode (an Access audience and no sharing surface),
+   * admit a request from this machine itself without a token: a local Host
+   * from a loopback peer, never through the Cloudflare edge. A project
+   * machine sets it (`CW_LOOPBACK_SKIPS_ACCESS=1` in its fly.toml), because
+   * the server listens on loopback only and its own tools (the board move's
+   * check, the restore drill) read it there. Off by default, so a server
+   * with a LAN name stays gated.
+   */
+  loopbackSkipsAccess?: boolean;
+  /**
+   * Loopback TCP from these uids is refused before anything else reads it
+   * (`middleware/loopback-uid-door.ts`). A project machine names its lead's
+   * uid (`CW_LOOPBACK_REFUSED_UIDS`), so the lead reaches its board only
+   * through that board's socket. Empty, nothing is refused.
+   */
+  loopbackRefusedUids?: number[];
+  /** Tests only: who owns a loopback caller's socket, in place of `/proc/net/tcp`. */
+  peerUid?: (peer: { address: string; port: number }, serverPort: number) => number | null;
   /**
    * Whether this server offers its OWN emailed-code sign-in: the `/signin`
    * page and the `/api/auth/start` + `/api/auth/verify` routes.

@@ -339,6 +339,9 @@ export async function handleWorkspaceAttachments(
     const workspaceId = safeDecodeSegment(wsVoiceAckMatch[1] ?? '');
     const entryId = safeDecodeSegment(wsVoiceAckMatch[2] ?? '');
     const cleared = taskStore.ackVoiceRequest(workspaceId, entryId);
+    // The receiving session has it: a lead-chat message it carried now
+    // shows as received, and as worked on until that session's turn ends.
+    leadChat.received(workspaceId, entryId);
     return j(200, { ok: true, cleared });
   }
   // The lead's answer to a spoken request, said on the page that asked

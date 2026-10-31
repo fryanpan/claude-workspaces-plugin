@@ -124,6 +124,10 @@ describe.skipIf(CHROME === null)('the comment view on a served mock', () => {
         } else {
           expect(opened.alone).toBe(false);
           expect(opened.panelHeight / opened.frameHeight).toBeGreaterThan(0.9);
+          // Brought to the middle: unscrolled, the button sits near the foot
+          // of the frame, inside it, so being in the frame proves no scroll.
+          const mid = ((opened.spot?.top ?? 0) + (opened.spot?.bottom ?? 0)) / 2;
+          expect(Math.abs(mid - opened.frameHeight / 2)).toBeLessThan(opened.frameHeight / 4);
         }
       },
       CASE_MS,

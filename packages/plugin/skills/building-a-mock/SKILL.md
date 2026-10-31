@@ -23,6 +23,24 @@ A mock exists so a person can act on it and comment on it. Each step leaves a pr
 4. **Run a UX walk in a subagent**, using the `ux-review` skill as `qa-delegate` describes (team-lead-fleet). Give it the URL, persona and states. A severe finding goes back to step 2.
 5. **Hand off.** **REQUIRED SUB-SKILL:** `claude-workspaces:handing-off-for-review`. Answer on the reader's existing thread on the mock and revise your existing item ("Keep one place to work together" in `claude-workspaces:working-in-a-workspace`). Widget details: `claude-workspaces:embedding-widget`.
 
+## Keep the reader's place when a round lands
+
+When you save the file, an open page swaps in the new round without reloading. The frame's query, hash and scroll stay as they were. Your scripts run again from the start, so a reader on an inner screen goes back to the first one unless the mock saves and restores its state:
+
+```html
+<script>
+  let tab = 'overview';
+  // Before the swap: put on e.detail.state what the next round needs.
+  addEventListener('cw-round-leaving', (e) => { e.detail.state = { tab }; });
+  // In the new round: window.cwRoundState is that value (undefined on a first load).
+  document.addEventListener('DOMContentLoaded', () => show(window.cwRoundState?.tab ?? 'overview'));
+</script>
+```
+
+- The board calls each `DOMContentLoaded` and `load` listener the new round's inline scripts add, and an `onload` they set, once after the swap, because the page does not reload and the browser does not fire those events again. Scripts loaded by `src` and `type="module"` scripts run later, so this call misses them. In those scripts, read `window.cwRoundState` or listen for `cw-round-arrived`.
+- `cw-round-arrived` fires on `window` after the swap. Its `e.detail.state` holds the same value. Add that listener with `{ once: true }`, or an earlier round's code runs again on the new page.
+- If more than one round added a `cw-round-leaving` listener, the listener added last sets the value that is kept.
+
 ## Done criteria this workflow adds to the task
 
 | Criterion | Proof |

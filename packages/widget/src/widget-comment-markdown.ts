@@ -26,6 +26,10 @@ export const MD_CSS = [
   '.thread-popover .body code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:#f6f8fa;border-radius:3px;padding:0 3px}',
   '.thread-popover .body pre{background:#f6f8fa;border-radius:4px;padding:6px;overflow-x:auto}',
   '.thread-popover .body pre code{padding:0}',
+  '.cw-round-body[data-md]{white-space:normal}',
+  '.cw-round-body[data-md] p,.cw-round-body[data-md] ul,.cw-round-body[data-md] ol{margin:0 0 6px}',
+  '.cw-round-body[data-md]>:last-child{margin-bottom:0}',
+  '.cw-round-body[data-md] ul,.cw-round-body[data-md] ol{padding-left:20px}',
 ].join('');
 
 /**
@@ -117,6 +121,19 @@ export function renderMarkdown(text: string): DocumentFragment {
 }
 
 /**
+ * An ask's round body as the markdown it was written in. The shared sheet
+ * (`core/review-dock.ts`) wrote it as escaped words and has already turned
+ * its safe links into anchors, so each anchor is spelled back as a link.
+ */
+function roundSource(body: HTMLElement): string {
+  return Array.from(body.childNodes, (n) =>
+    n instanceof HTMLAnchorElement
+      ? `[${n.textContent ?? ''}](${n.getAttribute('href') ?? ''})`
+      : (n.textContent ?? ''),
+  ).join('');
+}
+
+/**
  * Draw every comment in the widget's popovers rendered, from now on. The base
  * bundle wrote each `.body` as the comment's escaped words, so its
  * `textContent` is the comment as written. A comment carrying page edits is
@@ -124,6 +141,10 @@ export function renderMarkdown(text: string): DocumentFragment {
  * draws their `~~` and `**` as a diff. The observer runs before the
  * popover is measured for its place (`widget-threads.ts`), so it is placed at
  * its rendered height.
+ *
+ * An ask's rounds — in the dock's sheet and in a thread's ask — are drawn the
+ * same way, so a review item's bold, lists and links read as written there
+ * too. They are swapped for a `<div>`, since a list cannot sit in a `<p>`.
  */
 export function mountCommentMarkdown(widget: FeedbackWidgetEl): void {
   const shadow = widget.shadow;
@@ -133,6 +154,13 @@ export function mountCommentMarkdown(widget: FeedbackWidgetEl): void {
   style.textContent = MD_CSS;
   shadow.append(style);
   const scan = (): void => {
+    for (const round of shadow.querySelectorAll<HTMLElement>('.cw-round-body:not([data-md])')) {
+      const div = document.createElement('div');
+      div.className = round.className;
+      div.dataset.md = '';
+      div.append(renderMarkdown(roundSource(round)));
+      round.replaceWith(div);
+    }
     const bodies = shadow.querySelectorAll<HTMLElement>(
       '.thread-popover .comment .body:not([data-md])',
     );

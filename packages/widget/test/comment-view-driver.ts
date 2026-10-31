@@ -103,7 +103,9 @@ const mockPage = `<!doctype html><html><head><meta charset="utf-8">
    const p = location.hash.slice(1) || 'timetable';
    for (const s of document.querySelectorAll('section')) s.hidden = s.dataset.pg !== p;
  };
- addEventListener('hashchange', show);
+ // A page drawn after it loads its data: the section shows a moment after
+ // the fragment moves, so a widget that scrolls before then lands nowhere.
+ addEventListener('hashchange', () => setTimeout(show, 150));
  show();
 </script>
 </body></html>`;
@@ -322,7 +324,10 @@ async function main(): Promise<void> {
       await poll('the Pay thread open', () =>
         frame.eval(`${SHADOW}?.querySelector('.thread.active')?.dataset.threadId ?? null`),
       ).catch(() => null);
-      // The spot is scrolled to a frame after the thread opens.
+      // The widget scrolls to the spot in the first frame it has a box.
+      await poll('the Pay page drawn', () =>
+        frame.eval(`document.querySelector('[data-pg=pay]').hidden ? null : true`),
+      ).catch(() => null);
       await frame.eval(
         'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))',
       );

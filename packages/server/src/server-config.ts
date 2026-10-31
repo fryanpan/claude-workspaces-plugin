@@ -22,6 +22,7 @@ import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
+import { parseRefusedUids } from './middleware/loopback-uid-door.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -267,6 +268,18 @@ export function resolveServerConfig(opts: {
    * rather than stopping the server.
    */
   const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
+
+  /** `CW_BOARD_SOCKET_SHARED=<boardId>`: see ServerOptions.boardSocketShared. */
+  const boardSocketShared = env.CW_BOARD_SOCKET_SHARED?.trim() || undefined;
+  /** `CW_BOARD_SOCKET_GROUP=<gid>`: see ServerOptions.boardSocketGroup. */
+  const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
+  /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
+  const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
+
+  /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
+  const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
+    (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
+  );
 
   /**
    * ACCESS-ONLY browser hosts. Default ON (Bryan, 2026-09-02: *"Let's make
@@ -682,7 +695,11 @@ export function resolveServerConfig(opts: {
     requireSignInToWrite,
     requireAgentToken,
     boardSocketDir,
+    boardSocketShared,
+    boardSocketGroup,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess,
+    loopbackRefusedUids,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,
@@ -720,19 +737,21 @@ export type ServerConfig = ReturnType<typeof resolveServerConfig>;
  * folder: a staging server sharing it would unlink prod's sockets as stale.
  * And only a server that bound its port opens it (`createServer` opens the
  * sockets after `Bun.serve`), so a second server started on 8787 fails before
- * it touches them.
+ * it touches them. The default is macOS only: the folder is under `/private`,
+ * which a Linux project machine cannot create, and its server crashed at boot.
  */
 export function resolveBoardSocketDir(
   env: NodeJS.ProcessEnv,
   arg: ArgReader,
   uid: number = process.getuid?.() ?? 0,
   port?: number,
+  platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   const named = arg('board-socket-dir', env.CW_BOARD_SOCKET_DIR?.trim() || undefined);
   const flag = (env.CW_BOARD_SOCKETS ?? '').trim().toLowerCase();
   const on = ['1', 'true', 'yes', 'on'].includes(flag);
   const off = ['0', 'false', 'no', 'off'].includes(flag);
-  const byDefault = flag === '' && port === BOARD_SERVER_PORTS[0];
+  const byDefault = flag === '' && port === BOARD_SERVER_PORTS[0] && platform === 'darwin';
   const dir = named ?? (on || (byDefault && !off) ? defaultBoardSocketDir(uid) : undefined);
   if (dir === undefined) return undefined;
   const refused = boardSocketDirError(dir);
@@ -741,6 +760,15 @@ export function resolveBoardSocketDir(
     return undefined;
   }
   return dir;
+}
+
+/** A gid, or undefined for unset. Anything else is an error, not a guess. */
+function parseGid(raw: string | undefined): number | undefined {
+  const s = (raw ?? '').trim();
+  if (s === '') return undefined;
+  if (!/^\d{1,10}$/.test(s))
+    throw new Error(`CW_BOARD_SOCKET_GROUP: ${JSON.stringify(s)} is not a gid`);
+  return Number(s);
 }
 
 function pathOrNull(p: string): string | null {

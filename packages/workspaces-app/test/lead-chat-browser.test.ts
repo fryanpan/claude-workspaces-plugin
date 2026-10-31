@@ -110,4 +110,29 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
       expect(v.barGone, at).toBe(true);
     }
   });
+
+  it('Voice first: the agent button is the one listen control; in the open panel its tap stops listening and Close closes', () => {
+    for (const v of result().voice) {
+      const at = String(v.width);
+      expect(v.listeningOut, at).toBe(true);
+      expect(v.listenControlsOut, at).toBe(0);
+      expect(v.listeningInPane, at).toBe(true);
+      expect(v.listenControlsInPane, at).toBe(0);
+      expect(v.listeningAfter, at).toBe(false);
+      expect(v.paneKept, at).toBe(true);
+      expect(v.paneGone, at).toBe(true);
+    }
+  });
+
+  it('Chat first: the first tap opens the chat listening; the next taps stop and start listening; only Close closes', () => {
+    for (const s of result().surfaces) {
+      const at = `${s.surface}@${s.width}`;
+      expect(s.listeningOnOpen, at).toBe(true);
+      expect(s.listenControls, at).toBe(0);
+      expect(s.pausedOpen, at).toBe(true);
+      expect(s.resumedOpen, at).toBe(true);
+      expect(s.listeningAfterClose, at).toBe(false);
+      expect(s.closedAfter, at).toBe(true);
+    }
+  });
 });

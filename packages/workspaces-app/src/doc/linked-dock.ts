@@ -21,19 +21,27 @@
  * withdraws the item through the ticket's own withdraw route, so the reader
  * closes it without typing an answer.
  *
+ * Each round's detail is drawn with the Home card's renderer
+ * (`renderCommentMarkdown`), so bold, lists and links read the same here as
+ * on the card. The shared markup writes it as escaped text, because the
+ * widget's budgeted bundle has no room for a renderer; this page has one.
+ *
  * Calm: nothing moves, pulses or wears a count.
  */
-import type { User } from '@claude-workspaces/core';
+import type { ReviewPayload, User } from '@claude-workspaces/core';
 import {
   type DockItem,
   type LinkedDockItem,
   dockBarHtml,
   dockItems,
+  dockRounds,
   dockSheetHtml,
   linkedDockItems,
+  refusalOf,
   wireDockSheet,
 } from '@claude-workspaces/core/review-dock';
 import { dockStyles } from '@claude-workspaces/core/review-dock-styles';
+import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { api } from '../doc-path.ts';
 import type { MountScope } from '../mount-scope.ts';
 import type { DocRecordReader } from './doc-record.ts';
@@ -59,6 +67,13 @@ button:disabled, textarea:disabled { opacity: 0.55; cursor: default; }
  * The expanded item keeps the sheet's own place above all of them.
  */
 const PAGE_STYLES = `.cw-dock { z-index: 900; }
+.cw-round-body.doc-dock-md { white-space: normal; }
+.doc-dock-md p, .doc-dock-md ul, .doc-dock-md ol, .doc-dock-md pre { margin: 0 0 6px; }
+.doc-dock-md > :last-child { margin-bottom: 0; }
+.doc-dock-md ul, .doc-dock-md ol { padding-left: 20px; }
+.doc-dock-md code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f6f8fa; border-radius: 3px; padding: 0 3px; }
+.doc-dock-md pre { background: #f6f8fa; border-radius: 4px; padding: 6px; overflow-x: auto; white-space: pre; }
+.doc-dock-md .cm-h { font-size: inherit; margin: 6px 0 2px; }
 .cw-dock.doc-dock-readable { display: flex; align-items: center; }
 .doc-dock-readable .cw-dock-item { flex: 1 1 auto; min-width: 0; }
 .doc-dock-read { flex: 0 0 auto; margin-right: max(12px, env(safe-area-inset-right)); }`;
@@ -75,17 +90,40 @@ export interface LinkedDockOptions {
   scope: MountScope;
   /** The answer and Mark read requests; injected so a test sees what went
    *  over the wire.
-   *  Resolves true when the server took the answer. */
-  post?: (path: string, body: Record<string, unknown>) => Promise<boolean>;
+   *  Resolves true when the server took the answer, else false or the
+   *  server's own sentence for the refusal. */
+  post?: (path: string, body: Record<string, unknown>) => Promise<boolean | string>;
 }
 
-async function defaultPost(path: string, body: Record<string, unknown>): Promise<boolean> {
+/**
+ * Replace each round's escaped detail with its rendered markdown. A round
+ * with no detail draws no body, so the bodies pair in order with the rounds
+ * that have one.
+ */
+function renderRoundBodies(scrim: HTMLElement, review: ReviewPayload): void {
+  const details = dockRounds(review)
+    .map((r) => r.detail)
+    .filter((d): d is string => !!d);
+  const bodies = Array.from(scrim.querySelectorAll('.cw-round-body'));
+  bodies.forEach((body, i) => {
+    const detail = details[i];
+    if (detail === undefined) return;
+    // A <div>, not the shared <p>: the rendered detail holds paragraphs and
+    // lists, which a <p> cannot contain.
+    const div = document.createElement('div');
+    div.className = 'cw-round-body doc-dock-md';
+    div.innerHTML = renderCommentMarkdown(detail);
+    body.replaceWith(div);
+  });
+}
+
+async function defaultPost(path: string, body: Record<string, unknown>): Promise<boolean | string> {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return res.ok;
+  return refusalOf(res);
 }
 
 export function mountLinkedDock(opts: LinkedDockOptions): void {
@@ -139,6 +177,7 @@ export function mountLinkedDock(opts: LinkedDockOptions): void {
         render();
       },
     });
+    renderRoundBodies(scrim, item.review);
     if (!canWrite) {
       for (const el of Array.from(
         scrim.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>(
@@ -168,7 +207,7 @@ export function mountLinkedDock(opts: LinkedDockOptions): void {
         .catch(() => false)
         .then((ok) => {
           if (scope.disposed) return;
-          if (!ok) {
+          if (ok !== true) {
             btn.disabled = false;
             return;
           }

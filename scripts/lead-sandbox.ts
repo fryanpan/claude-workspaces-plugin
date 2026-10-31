@@ -58,6 +58,7 @@ import {
 } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { projectSlugs } from '../packages/core/src/lead-wall.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
   boardSocketRows,
@@ -65,7 +66,9 @@ import {
   escapeRows,
   installRow,
   keychainRow,
+  probeRuntime,
 } from './lead-sandbox-escapes.ts';
+import { gitHooksPath, hooksPathRefusal } from './lead-sandbox-git.ts';
 import {
   CLAUDE_LAUNCHER,
   type Lead,
@@ -121,6 +124,9 @@ function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, st
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+  // Made outside the wall, which denies the lead every write to it but its
+  // own folders: one the lead made would be the lead's.
+  mkdirSync(join(machine.home, '.claude', 'projects'), { recursive: true, mode: 0o700 });
   const path = profilePath(lead);
   writeFileSync(path, buildProfile(lead, config, machine, guard), { mode: 0o600 });
   return path;
@@ -162,10 +168,16 @@ function wallRows(
   const dir = config.boardSocketDir ?? defaultBoardSocketDir(machine.uid);
   const own = join(dir, `${lead.boardId}.sock`);
   const others = otherSockets(dir, own);
+  const node = probeRuntime();
+  if (node === null) {
+    return [
+      { ok: false, says: 'board wall: no node on PATH to probe with (bun cannot tell a refusal)' },
+    ];
+  }
   try {
     return [
-      ...boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces())),
-      ...boardSocketRows(profile, unwalled, cwd, own, others),
+      ...boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces()), undefined, node),
+      ...boardSocketRows(profile, unwalled, cwd, own, others, node),
       ...(others.length === 0
         ? [{ ok: false, says: `board socket: no other board's socket in ${dir} to try` }]
         : []),
@@ -222,6 +234,8 @@ export interface LaunchDeps {
   spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
   /** Tells the server the folders a walled lead can write. */
   registerRoots: RootsRegistrar;
+  /** `core.hooksPath` in a project (`lead-sandbox-git.ts`); git by default. */
+  hooksPathOf?: (project: string) => string | null;
 }
 
 const realDeps: LaunchDeps = {
@@ -288,8 +302,21 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say('nothing to launch: put the command after --');
       return 2;
     }
+    const hooks = hooksPathRefusal(
+      lead.projects,
+      deps.hooksPathOf ?? ((p) => gitHooksPath(p)),
+      machine.realpath,
+    );
+    if (hooks) {
+      say(`launch refused for ${lead.name}: ${hooks}`);
+      return 2;
+    }
     if (lead.boardWall && lead.boardId) {
-      const refused = deps.registerRoots(lead.boardId, leadRoots(lead, machine.realpath));
+      const refused = deps.registerRoots(
+        lead.boardId,
+        leadRoots(lead, machine.realpath),
+        projectSlugs(lead.projects, machine.realpath),
+      );
       // The list is what holds the server's reads and git to the lead's
       // projects, so a lead the server does not know about is not started.
       if (refused) {

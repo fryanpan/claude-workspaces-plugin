@@ -5,8 +5,10 @@
  * packages/plugin/bin/claude-workspaces-mcp.sh for when it runs instead of
  * the compiled relay.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { serverFetch } from '../access-headers.ts';
+import { readDiscoveryText, resolveBaseUrl } from '../http-client.ts';
 import { createRelay } from './relay-core.ts';
 import { unixSocketFetch } from './unix-fetch.ts';
 
@@ -18,8 +20,22 @@ const relay = createRelay({
   cwd: process.cwd(),
   homedir,
   existsSync,
-  readFileSync,
-  fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
+  readFileSync: readDiscoveryText,
+  // A board socket is on this machine and never behind Access.
+  fetch: boardSocket
+    ? unixSocketFetch(boardSocket)
+    : serverFetch(
+        process.env,
+        (url, init) => fetch(url, init),
+        (line) => console.error(`[relay] ${line}`),
+        () =>
+          resolveBaseUrl({
+            env: process.env,
+            homedir,
+            existsSync,
+            readFileSync: readDiscoveryText,
+          }),
+      ),
   ...(boardSocket ? { boardSocket } : {}),
   write: (line) => {
     process.stdout.write(`${line}\n`);

@@ -1,7 +1,8 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
+import { containedRoot, includedStat, readdirContained } from './fs-scan-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
@@ -332,11 +333,9 @@ export function admitIncluded(
       continue;
     }
     const abs = join(root, rel);
-    let stat: import('node:fs').Stats;
-    try {
-      stat = lstatSync(abs);
-    } catch {
-      skipped.push({ path: rel, reason: 'not-found' });
+    const stat = includedStat(abs);
+    if (typeof stat === 'string') {
+      skipped.push({ path: rel, reason: stat });
       continue;
     }
     if (!stat.isFile()) skipped.push({ path: rel, reason: 'not-a-regular-file' });
@@ -446,7 +445,28 @@ export function isSecretShapedName(name: string): boolean {
   return isCredentialShapedName(name);
 }
 
+/** Why the walk does not enter a folder, or null to enter it: any dotdir,
+ *  and the hardcoded heavy dirs. */
+function dirSkip(name: string): SkipReason | null {
+  return name.startsWith('.') ? 'hidden' : SKIP_DIRS.has(name) ? 'skipped-directory' : null;
+}
+
+/** Why the walk does not list a file, or null to list it. */
+function fileSkip(name: string): SkipReason | null {
+  if (isCredentialShapedName(name)) return 'credential-name';
+  if (isSecretShapedName(name)) return 'hidden';
+  return isUnsupportedType(name) ? 'unsupported-type' : null;
+}
+
+const CONTAINED_SKIPS = {
+  skipDir: dirSkip,
+  skipFile: fileSkip,
+  notRegular: 'not-a-regular-file',
+} as const;
+
 function readdirRecursive(root: string, dir: string, skipped: SkippedFile[] | null): string[] {
+  const contained = dir === root ? containedRoot(root) : null;
+  if (contained) return readdirContained(root, contained, skipped, CONTAINED_SKIPS);
   const out: string[] = [];
   let entries: import('node:fs').Dirent[];
   try {
@@ -459,24 +479,12 @@ function readdirRecursive(root: string, dir: string, skipped: SkippedFile[] | nu
     const abs = join(dir, name);
     const rel = (): string => relative(root, abs).split(sep).join('/');
     if (entry.isDirectory()) {
-      // Skip .git, any dotdir, and the hardcoded heavy dirs.
-      if (name.startsWith('.') || SKIP_DIRS.has(name)) {
-        // `.git` is the repository's own store, not a file anybody left out.
-        if (name !== '.git') {
-          const reason = name.startsWith('.') ? 'hidden' : 'skipped-directory';
-          skipped?.push({ path: `${rel()}/`, reason });
-        }
-        continue;
-      }
-      out.push(...readdirRecursive(root, abs, skipped));
+      const reason = dirSkip(name);
+      // `.git` is the repository's own store, not a file anybody left out.
+      if (reason === null) out.push(...readdirRecursive(root, abs, skipped));
+      else if (name !== '.git') skipped?.push({ path: `${rel()}/`, reason });
     } else if (entry.isFile()) {
-      const reason = isCredentialShapedName(name)
-        ? 'credential-name'
-        : isSecretShapedName(name)
-          ? 'hidden'
-          : isUnsupportedType(name)
-            ? 'unsupported-type'
-            : null;
+      const reason = fileSkip(name);
       if (reason) skipped?.push({ path: rel(), reason });
       else out.push(abs);
     } else {

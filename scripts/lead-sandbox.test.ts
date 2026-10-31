@@ -176,7 +176,8 @@ describe('buildProfile', () => {
       `(deny file-write* (literal "${TWIN}/.claude"))`,
       `(deny file-write* (subpath "${TWIN}/.claude/hooks"))`,
       `(deny file-write* (subpath "${HOME}/.claude/plugins"))`,
-      `(deny file-write* (literal "${TWIN}/.claude/CLAUDE.md"))`,
+      `(deny file-write* (regex #"^${TWIN}/\\.claude/CLAUDE\\.md$"))`,
+      `(deny file-write* (subpath "${TWIN}/.claude/plans"))`,
       `(deny file-write* (regex #"^${TWIN}/\\.claude/settings[^/]*$"))`,
       `(deny file-write* (regex #"^${HOME}/\\.claude\\.json[^/]*$"))`,
     ])
@@ -276,6 +277,8 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
     join(home, 'Library'),
     join(twin, 'secrets'),
     join(twin, '.claude', 'hooks'),
+    // The launcher makes it before the wall goes up (`writeProfile`).
+    join(twin, '.claude', 'projects'),
   ])
     mkdirSync(d, { recursive: true });
   // The owner's home links onto the data volume, as `~/.claude` does.

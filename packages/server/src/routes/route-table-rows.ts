@@ -401,10 +401,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/answer/undo', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/more-info', 'POST'],
   ]),
+  ...family('routes/task-review-ask-back.ts', [
+    ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info', 'POST'],
+  ]),
   ...family('routes/task-review-items.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer', 'POST'],
-    ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/release', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise', 'POST'],
     // NOT `share-scope`, and that is the point: every sibling verb above is
@@ -467,6 +469,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
   ...family('routes/prompt-marks.ts', [
     ['trusted-local', '/workspaces/:ws/agents/:agent/prompts', 'POST'],
+  ]),
+  ...family('routes/lead-mirror.ts', [
+    ['trusted-local', '/workspaces/:ws/agents/:agent/mirror', 'POST'],
   ]),
   ...family('routes/chat-audit-routes.ts', [
     ['trusted-local', '/workspaces/:ws/chat-audit', 'GET POST'],

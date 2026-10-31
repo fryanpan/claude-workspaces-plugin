@@ -68,12 +68,13 @@ describe('a long answer in a meeting is said short', () => {
     m.listen();
     await m.ready();
     m.hear(1, 'Claude, can you check who signs off the berth?', true);
-    await waitFor(() => m?.said.length === 1, { describe: 'On it' });
+    await waitFor(() => m?.json.some((f) => f.type === 'doing'), { describe: 'the lead working' });
+    expect(m.said).toEqual([]);
     m.listen();
     m.session.sayLead('q-berth', shapedAnswer(LONG_ACK, LEAD_ANSWER_ROUTE));
-    await waitFor(() => m?.said.length === 2, { describe: 'the lead’s answer said' });
-    expect(wordsIn(m.said[1] ?? '')).toBeLessThanOrEqual(CAP);
-    expect(m.said[1]).not.toMatch(/\. \S/);
+    await waitFor(() => m?.said.length === 1, { describe: 'the lead’s answer said' });
+    expect(wordsIn(m.said[0] ?? '')).toBeLessThanOrEqual(CAP);
+    expect(m.said[0]).not.toMatch(/\. \S/);
   });
 
   it('from the planning voice', async () => {

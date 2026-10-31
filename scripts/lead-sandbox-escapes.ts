@@ -225,6 +225,23 @@ export function escapeRows(
   ];
 }
 
+/**
+ * The runtime the connect probes run under: node, never bun. Bun answers a
+ * connect the sandbox refused with `ECONNREFUSED` (TCP) or `ENOENT` (unix
+ * socket), the codes of an empty port and a missing path, so every wall row
+ * failed on a wall that held. Node answers `EPERM`. Measured 30 Oct under
+ * `sandbox-exec`. Null when no node is on `PATH`.
+ */
+export function probeRuntime(
+  versions: NodeJS.ProcessVersions = process.versions,
+  execPath: string = process.execPath,
+): string | null {
+  if (!versions.bun) return execPath;
+  const r = spawnSync('/bin/sh', ['-c', 'command -v node'], { encoding: 'utf8' });
+  const found = r.status === 0 ? r.stdout.trim() : '';
+  return found === '' ? null : found;
+}
+
 /** What a TCP connect from `runtime` answers, inside `profile` or, with null, outside any. */
 export function connectFrom(
   runtime: string,
@@ -245,9 +262,20 @@ export function connectFrom(
 }
 
 /**
+ * A wall row passes when the connect inside answers `EPERM` and the control
+ * got past the sandbox: `connected`, `ECONNREFUSED`, or `timeout`. A timeout
+ * is the network's answer, not the sandbox's: this Mac's own Tailscale IPv6
+ * address times out with no sandbox at all (measured 30 Oct), so a control
+ * that times out still shows the `EPERM` came from the wall.
+ */
+export function wallRowPasses(inside: string, control: string): boolean {
+  return inside === 'EPERM' && ['connected', 'ECONNREFUSED', 'timeout'].includes(control);
+}
+
+/**
  * The board wall (`lead-sandbox-wall.ts`): a connect to each port at each
- * address must answer `EPERM` inside the profile, and `connected` or
- * `ECONNREFUSED` inside `unwalled`, the same lead's profile with the wall
+ * address must answer `EPERM` inside the profile, and anything but `EPERM`
+ * that a connect can answer (`wallRowPasses`) inside `unwalled`, the same lead's profile with the wall
  * left out (the control).
  * Nothing is sent: a connect that lands is closed at once.
  */
@@ -257,14 +285,14 @@ export function boardWallRows(
   cwd: string,
   hosts: readonly string[],
   ports: readonly number[] = BOARD_SERVER_PORTS,
-  runtime: string = process.execPath,
+  runtime: string = probeRuntime() ?? process.execPath,
 ): EscapeRow[] {
   return ports.flatMap((port) =>
     hosts.map((host) => {
       const inside = connectFrom(runtime, profile, cwd, host, port);
       const control = connectFrom(runtime, unwalled, cwd, host, port);
       return {
-        ok: inside === 'EPERM' && (control === 'connected' || control === 'ECONNREFUSED'),
+        ok: wallRowPasses(inside, control),
         says: `board wall: ${host} port ${port} answers ${control} without the wall (the control), ${inside} inside (must be EPERM)`,
       };
     }),
@@ -302,7 +330,7 @@ export function boardSocketRows(
   cwd: string,
   own: string,
   others: readonly string[],
-  runtime: string = process.execPath,
+  runtime: string = probeRuntime() ?? process.execPath,
 ): EscapeRow[] {
   const inside = socketConnectFrom(runtime, profile, cwd, own);
   return [

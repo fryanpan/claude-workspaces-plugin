@@ -42,7 +42,8 @@ export interface SpokenReplyRelayDeps {
   timings: SpokenTimings;
   /** Setup 4's custom-LLM route reaches each socket's answerer through this. */
   agentCallbacks?: AgentCallbacks;
-  parseContext(raw: unknown): VoiceContext | undefined;
+  /** `workspaceId` is the socket's board: the one a context's link may name. */
+  parseContext(raw: unknown, workspaceId: string): VoiceContext | undefined;
   /** Interview mode's docs and timing record; absent, "interview me" is
    *  routed like anything else said. */
   interview?: SpokenInterviewDeps;
@@ -131,7 +132,7 @@ export class SpokenReplyRelay {
       ...(this.deps.agentCallbacks ? { agentCallbacks: this.deps.agentCallbacks } : {}),
       provenActor,
       readOnly: ws.data.readOnly === true,
-      parseContext: this.deps.parseContext,
+      parseContext: (raw) => this.deps.parseContext(raw, workspaceId),
       ...(this.deps.meetingEars ? { meetingEars: this.deps.meetingEars } : {}),
       ownerOnPage: ws.data.ownerProven === true,
       sendJson: send,

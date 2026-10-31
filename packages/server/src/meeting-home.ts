@@ -34,14 +34,19 @@
  */
 
 import {
+  constants,
   appendFileSync,
+  closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  rmSync,
-  writeFileSync,
+  unlinkSync,
+  writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { readSmallFile } from '@claude-workspaces/core/safe-file';
 
 // ---------------------------------------------------------------------------
 // What a project chose to keep
@@ -142,8 +147,15 @@ export function applyMeetingGitignore(
   gitignore: boolean,
 ): 'written' | 'kept' | 'removed' | 'absent' | 'foreign' {
   const path = meetingGitignorePath(folderAbs);
-  const present = existsSync(path);
-  const ours = present && readFileSync(path, 'utf8') === MEETING_GITIGNORE_BODY;
+  // Anything at the name counts, a link or a FIFO included, and only a plain
+  // file holding our bytes is ours: the read never blocks or follows a link.
+  let present = true;
+  try {
+    lstatSync(path);
+  } catch {
+    present = false;
+  }
+  const ours = present && readSmallFile(path) === MEETING_GITIGNORE_BODY;
   if (gitignore) {
     if (ours) return 'kept';
     // A foreign file is left exactly where it is: it may ignore MORE than
@@ -151,12 +163,23 @@ export function applyMeetingGitignore(
     // project commits, which is the one thing rule 1 forbids.
     if (present) return 'foreign';
     mkdirSync(folderAbs, { recursive: true });
-    writeFileSync(path, MEETING_GITIGNORE_BODY);
+    // Created new and never through a link, so a name planted since the
+    // check fails the write rather than redirecting it.
+    const fd = openSync(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o644,
+    );
+    try {
+      writeSync(fd, MEETING_GITIGNORE_BODY);
+    } finally {
+      closeSync(fd);
+    }
     return 'written';
   }
   if (!present) return 'absent';
   if (!ours) return 'foreign';
-  rmSync(path);
+  unlinkSync(path);
   return 'removed';
 }
 

@@ -28,7 +28,8 @@
 #      exec'd: it has to pass `--self-test` first.
 #   2. The node relay, mcp/relay.js, run by node or bun, wherever there is
 #      no working build: Linux, a Mac without the command line tools, a
-#      failed build.
+#      failed build. Also whenever CW_ACCESS_CLIENT_ID or
+#      CW_ACCESS_SECRET_SERVICE is set.
 #   3. The full child, mcp/index.js — today's connector in-process — when
 #      CW_MCP_RELAY=0 (the rollback lever), or when an identity value is not
 #      plain ASCII and so cannot travel as an HTTP header.
@@ -174,7 +175,12 @@ build_relay() {
 }
 
 # The compiled relay's path, when a build that passes its self-test exists.
+# A board behind Cloudflare Access (CW_ACCESS_CLIENT_ID or
+# CW_ACCESS_SECRET_SERVICE set) takes the node relay instead: only it reads
+# the Access secret from Keychain, and only it says when half of the pair is
+# missing (packages/plugin/hooks/lib/access-headers.ts).
 compiled_relay() {
+  [ -z "${CW_ACCESS_CLIENT_ID:-}${CW_ACCESS_SECRET_SERVICE:-}" ] || return 1
   [ -f "$relay_src" ] || return 1
   [ "$(uname -s 2>/dev/null)" = "Darwin" ] || return 1
   cache="${CW_RELAY_CACHE_DIR:-}"

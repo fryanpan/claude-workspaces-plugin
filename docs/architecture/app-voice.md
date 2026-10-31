@@ -177,11 +177,19 @@ reconnects as after any drop.
 
 ## What does not work yet
 
-- **The microphone inside the sandboxed frame.** A frame with an opaque
-  origin cannot call `getUserMedia`. `listen()` with the microphone works
-  only in a page in its own tab, or on the frame-only hostname once that
-  hostname is live. A sandboxed mock can still hear audio that it captures
-  some other way and sends with `sendAudio`.
+- **The microphone in an opaque frame.** Chrome refuses `getUserMedia` in
+  a frame with an opaque origin, whatever its `allow="microphone"` says.
+  `listen()` with the microphone works on the frame-only hostname, where the
+  frame has an origin of its own that is not the board's, and in a page the
+  mock's author serves in its own tab. The board's opaque frame is what a
+  board without `CW_FRAME_ORIGIN` serves, what a board hostname outside
+  `CW_FRAME_BOARD_HOSTS` gets, and what a share or collaboration visitor
+  always gets. There `listen()` rejects with a message
+  naming the frame rather than the site settings (`OPAQUE_MIC_REFUSAL`,
+  `widget/src/voice/voice-audio.ts`). The board's own mock address offers
+  no way around it: opened at the top, it sends itself back to the board's
+  page. A sandboxed mock can still hear audio that it captures some other
+  way and sends with `sendAudio`.
 - **Voice and tone on ElevenLabs.** A server without the Soniox key speaks
   every line in its one ElevenLabs voice, with no tone.
 - **An app's cross-origin reads.** The app proxy still drops
@@ -223,3 +231,8 @@ reconnects as after any drop.
 - `packages/widget/test/app-voice-mock.test.ts`: a served mock in headless
   Chromium speaks and hears a turn end through the relay. It runs only when
   `CW_BROWSER_TESTS` is set, as it is in CI.
+- `packages/widget/test/app-voice-mic.test.ts`: a served mock tapped to
+  listen through Chromium's fake microphone. On the frame-only hostname the
+  audio reaches the server and the turn comes back; in the opaque frame
+  `connect()` works and `listen()` is refused with the frame's message. Also
+  behind `CW_BROWSER_TESTS`.

@@ -5,10 +5,9 @@ import {
   type SpokenSocket,
   createSpokenReply,
 } from '../../src/board/spoken-reply-client.ts';
-import { mountShell } from './board-region-harness.ts';
 
 /**
- * The board mic's spoken reply, driven end to end on the page with the
+ * The spoken reply client, driven end to end on the page with the
  * server, the microphone and the speaker replaced: a socket whose frames the
  * test reads and answers, a capture that emits the frames the test says, and
  * an audio context whose clock the test holds.
@@ -82,7 +81,9 @@ export function fakePlayback() {
 }
 
 export function spokenHarness(over: Partial<SpokenReplyOpts> = {}) {
-  const el = mountShell();
+  const mic = document.createElement('button');
+  mic.id = 'spoken-mic';
+  document.body.append(mic);
   const sockets: FakeSocket[] = [];
   const captures: SpokenCaptureOpts[] = [];
   let captureStops = 0;
@@ -92,7 +93,7 @@ export function spokenHarness(over: Partial<SpokenReplyOpts> = {}) {
   const navigated: string[] = [];
   const reply = createSpokenReply({
     document,
-    button: el('board-mic'),
+    button: mic,
     url: 'ws://board.test/workspaces/w-1/voice/converse',
     setups: [1, 2],
     timings: {},
@@ -121,7 +122,6 @@ export function spokenHarness(over: Partial<SpokenReplyOpts> = {}) {
     now: () => clock,
     ...over,
   });
-  const mic = el('board-mic');
   return {
     reply,
     panel: reply.panel,

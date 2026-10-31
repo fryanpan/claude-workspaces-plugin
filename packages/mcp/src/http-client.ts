@@ -17,6 +17,18 @@
  */
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { discoveryCandidates, resolveDiscoveryFile } from '@claude-workspaces/core/machine-paths';
+import { readSmallFile } from '@claude-workspaces/core/safe-file';
+
+/**
+ * The real process's discovery read: never through a link, never blocking on
+ * a FIFO, capped (`safe-file.ts`). A walled lead can write `~/.claude`; a
+ * plain read of a FIFO there would hang this child and its session. A file
+ * it refuses reads as empty, so discovery falls through to the "not found"
+ * error.
+ */
+export function readDiscoveryText(path: string): string {
+  return readSmallFile(path) ?? '';
+}
 
 /** The filesystem reads discovery needs, injectable for tests. */
 export interface DiscoveryDeps {

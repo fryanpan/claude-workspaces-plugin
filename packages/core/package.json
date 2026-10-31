@@ -22,6 +22,8 @@
     "./comment-receipt": "./src/comment-receipt.ts",
     "./counted-routes": "./src/counted-routes.ts",
     "./discovery-file": "./src/discovery-file.ts",
+    "./safe-file": "./src/safe-file.ts",
+    "./lead-wall": "./src/lead-wall.ts",
     "./done-when": "./src/done-when.ts",
     "./done-when-refusal": "./src/done-when-refusal.ts",
     "./env-names": "./src/env-names.ts",
@@ -71,6 +73,7 @@
     "./task-schedule": "./src/task-schedule.ts",
     "./task-wire": "./src/task-wire.ts",
     "./whiteboard-scene": "./src/whiteboard-scene.ts",
+    "./workspace-presence": "./src/workspace-presence.ts",
     "./word-count": "./src/word-count.ts"
   },
   "dependencies": {

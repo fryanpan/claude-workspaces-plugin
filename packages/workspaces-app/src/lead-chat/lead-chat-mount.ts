@@ -2,13 +2,17 @@
  * The lead chat on a page: the agent button, its bar and its panel, wired to
  * the board's conversation with its lead (`lead-chat-client.ts`).
  *
- * What a tap on the agent button does is this device's choice
- * (`lead-chat-mode.ts`), read at the tap:
- *   - Chat first: the panel opens at once with the cursor in its composer.
+ * The agent button is the chat's one listen control (Bryan, 2026-10-31).
+ * What its first tap does is this device's choice (`lead-chat-mode.ts`),
+ * read at the tap:
+ *   - Chat first: the panel opens with the cursor in its composer, and the
+ *     page starts listening.
  *   - Voice first: the bar comes out and the page starts listening; every
  *     line heard goes to the lead as it ends.
- * While anything is out, the next tap closes it and stops listening. A tap
- * on the bar grows it into the panel.
+ * With the panel open, each tap stops or starts listening, and only the
+ * panel's Close closes it. With only the bar out, a tap puts it away and
+ * stops listening. A tap on the bar grows it into the panel. In a meeting
+ * the room's voice is the meeting's, so the button only opens and closes.
  *
  * Listening is the board mic's own path (`lead-chat-voice.ts`): the
  * microphone streams to this server over the converse socket, which hears it
@@ -21,7 +25,12 @@
  */
 import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
-import { type LeadMeetingSeams, wireLeadMeeting } from './lead-chat-meeting-wiring.ts';
+import { messageLinkOf, withMessageLink } from './lead-chat-link.ts';
+import {
+  type LeadMeetingSeams,
+  PANE_OPEN_KEY,
+  wireLeadMeeting,
+} from './lead-chat-meeting-wiring.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
 import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
 import {
@@ -34,8 +43,11 @@ import {
 export interface LeadChatMountOpts {
   workspaceId: string;
   author: { id: string; name: string; kind?: string };
-  /** Where the reader is, read at each send. */
+  /** Where the reader is, read at each send. The page's link is added to it
+   *  here, from the address (`lead-chat-link.ts`). */
   getContext?: () => VoiceContext | undefined;
+  /** The thread a doc page has open, which its address does not follow. */
+  openThread?: () => string | null;
   /** A slot in the board's dock; omitted, the button floats bottom-left. */
   dock?: HTMLElement;
   document?: Document;
@@ -59,6 +71,9 @@ export interface LeadChatMountOpts {
 
 export interface LeadChatMount {
   view: LeadChatView;
+  /** Open the pane on the Start a meeting wizard — the board's "Have a
+   *  meeting". With a meeting already running, only the pane opens. */
+  startMeeting(): void;
   destroy(): void;
 }
 
@@ -79,10 +94,13 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   host.dataset.leadChat = 'button';
   if (!opts.dock) doc.body.append(host);
   host.hidden = true;
+  const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
+  const session = opts.session === undefined ? tabStorage(win) : opts.session;
   const view = createLeadChatView({
     document: doc,
     buttonHost: host,
     placement: opts.dock ? 'dock' : 'float',
+    storage,
   });
   // A floated button sits under the coach's card; this keeps the card above it.
   if (!opts.dock) doc.documentElement.style.setProperty('--lc-agent-room', '56px');
@@ -92,15 +110,33 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       workspaceId: opts.workspaceId,
       ...(opts.stream ? { stream: opts.stream } : {}),
     });
-  const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
   const reduced =
     opts.reducedMotion ?? (() => win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   const ui = { open: false, bar: false, notice: '' };
+  /** The panel stays open as the reader moves between the board's pages:
+   *  this tab remembers it was open, and the next page opens it again. */
+  const keepOpen = (open: boolean): void => {
+    try {
+      if (open) session?.setItem(PANE_OPEN_KEY, '1');
+      else session?.removeItem(PANE_OPEN_KEY);
+    } catch {
+      // Unkept, the next page opens closed.
+    }
+  };
+  let restored = false;
   let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
 
   const render = (): void => {
     const s = client.state();
+    if (!restored && s.loaded) {
+      restored = true;
+      try {
+        if (s.canTalk && session?.getItem(PANE_OPEN_KEY) === '1') ui.open = true;
+      } catch {
+        // Nothing kept.
+      }
+    }
     host.hidden = !(s.loaded && s.canTalk);
     view.render({
       lead: s.lead,
@@ -115,8 +151,17 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       heard: heard.heard,
       notice: ui.notice || heard.notice,
       ...(meet ? { meeting: meet.model() } : {}),
+      more: s.more,
+      loadingOlder: s.loadingOlder,
     });
     view.button.dataset.meeting = String(!!s.meeting);
+    olderIfAtTop();
+  };
+  /** Scrolled to the top of the open list, or a first page too short to
+   *  scroll: read the page before, until the first message. */
+  const olderIfAtTop = (retry = false): void => {
+    const s = client.state();
+    if (ui.open && s.more && !s.loadingOlder && view.nearTop()) void client.loadOlder({ retry });
   };
   // Assigned below; the first renders run before the meeting is wired.
   let meet: ReturnType<typeof wireLeadMeeting> | null = null;
@@ -125,8 +170,15 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     render();
   });
 
+  /** Where the reader is, with the link to what they have open. */
+  const context = (): VoiceContext | undefined =>
+    withMessageLink(
+      opts.getContext?.(),
+      messageLinkOf(win.location.pathname, win.location.search, opts.openThread?.()),
+    );
+
   const deliver = async (text: string, via: 'chat' | 'voice'): Promise<boolean> => {
-    const res = await client.send(text, opts.author, opts.getContext?.(), via);
+    const res = await client.send(text, opts.author, context(), via);
     ui.notice = res.ok ? '' : 'Not sent. Check the connection and try again.';
     render();
     return res.ok;
@@ -136,7 +188,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     ...opts.voice,
     workspaceId: opts.workspaceId,
     author: opts.author,
-    getContext: () => opts.getContext?.(),
+    getContext: context,
     agent: () => client.state().lead?.agentId,
     onChange: (v) => {
       heard = v;
@@ -169,6 +221,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const openPane = (from: DOMRect | null, focus = true): void => {
     ui.open = true;
     ui.bar = false;
+    keepOpen(true);
     render();
     grow(from);
     if (focus) view.composer.focus();
@@ -177,22 +230,31 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const closeAll = (): void => {
     ui.open = false;
     ui.bar = false;
+    keepOpen(false);
     stopListening();
     render();
   };
 
+  const inMeeting = (): boolean => !!client.state().meeting;
+
   const onAgent = (): void => {
+    if (ui.open && !inMeeting()) {
+      if (voice.state().phase !== 'off') stopListening();
+      else startListening();
+      return;
+    }
     if (ui.open || ui.bar) {
       closeAll();
       return;
     }
-    if (readLeadChatMode(storage) === 'voice') {
+    if (readLeadChatMode(storage) === 'voice' && !inMeeting()) {
       ui.bar = true;
       startListening();
       render();
       return;
     }
     openPane(view.button.getBoundingClientRect());
+    if (!inMeeting()) startListening();
   };
 
   const sendTyped = async (): Promise<void> => {
@@ -210,11 +272,8 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.button.addEventListener('click', onAgent);
   view.bar.addEventListener('click', () => openPane(view.bar.getBoundingClientRect()));
   view.close.addEventListener('click', closeAll);
-  view.mic.addEventListener('click', () => {
-    if (voice.state().phase !== 'off') stopListening();
-    else startListening();
-  });
   view.send.addEventListener('click', () => void sendTyped());
+  view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {
     view.send.disabled = view.composer.value.trim() === '';
     view.composer.style.height = 'auto';
@@ -234,13 +293,12 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     client,
     view,
     ...(opts.getContext ? { getContext: opts.getContext } : {}),
-    session: opts.session === undefined ? tabStorage(win) : opts.session,
+    session,
     ...(opts.meeting ? { seams: opts.meeting } : {}),
     changed: render,
     openPane: () => {
       if (!ui.open) openPane(null, false);
     },
-    paneOpen: () => ui.open,
     notice: (text) => {
       ui.notice = text;
       render();
@@ -253,6 +311,10 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
 
   return {
     view,
+    startMeeting() {
+      if (!ui.open) openPane(view.button.getBoundingClientRect(), false);
+      if (!client.state().meeting) meet?.wizard.show();
+    },
     destroy() {
       meet?.destroy();
       voice.destroy();

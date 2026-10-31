@@ -19,6 +19,7 @@
  * or `say` frames.
  */
 import type { VoiceActor } from '../voice-action.ts';
+import type { VoiceContext } from '../voice-prompt.ts';
 
 /** Turns kept per conversation: enough for the agent to follow the thread,
  *  few enough that a long talk does not grow every frame without bound. */
@@ -48,6 +49,9 @@ export interface AgentVoiceFrame {
   conversation: ConversationTurn[];
   actor: { id: string; name: string; kind?: string };
   ts: number;
+  /** Where the speaker was when they said it; its `link` is what the agent
+   *  is shown of that. */
+  context?: VoiceContext;
 }
 
 export interface AgentLine {
@@ -114,7 +118,7 @@ export class AgentConversation {
     this.asked.clear();
   }
 
-  turn(transcript: string, actor: VoiceActor): AgentTurn {
+  turn(transcript: string, actor: VoiceActor, context?: VoiceContext): AgentTurn {
     const agentId = this.agent;
     if (agentId === undefined) return { kind: 'not-attached' };
     const who = this.line.attached(this.workspaceId, agentId);
@@ -132,6 +136,7 @@ export class AgentConversation {
       conversation: this.turns.map((t) => ({ ...t })),
       actor: { id: actor.id, name: actor.name, ...(actor.kind ? { kind: actor.kind } : {}) },
       ts: this.now(),
+      ...(context ? { context } : {}),
     });
     if (sent === null) return { kind: 'failed' };
     this.remember({ from: 'owner', text: transcript });

@@ -10,7 +10,7 @@
  * hears and who speaks.
  *
  * Every question is tapped (Bryan, 2 Oct: holding is wrong): a tap on the
- * mic or Space starts it, the listener ends it about half a second after the
+ * mic or Space starts it, the listener ends it at most a second after the
  * last word, and a second tap ends it by hand. Frames said before the socket
  * opens are held and sent behind the `start`. Once the question reaches the
  * answerer the panel says it is being worked on until the reply arrives, so
@@ -79,7 +79,7 @@ export interface SpokenReplyOpts {
   agent?: () => string | undefined;
   onNavigate(url: string): void;
   /** Write a review decision the server read back and heard confirmed, and
-   *  say whether it landed (`spoken-review-decide.ts`). */
+   *  say whether it landed. */
   onDecide?: (d: SpokenDecide) => Promise<boolean>;
   openSocket?: (url: string) => SpokenSocket;
   startCapture?: (opts: SpokenCaptureOpts) => Promise<SpokenCaptureStart>;
@@ -412,7 +412,10 @@ export function createSpokenReply(opts: SpokenReplyOpts): SpokenReply {
           ...(m.choices ? { choices: m.choices } : {}),
           ...(m.points ? { points: m.points } : {}),
         });
-        if (!m.spoken) {
+        if (!m.spoken && m.route === 'agent') {
+          // The lead took it: nothing is said until its answer comes back.
+          panel.setState('working');
+        } else if (!m.spoken) {
           panel.note('Didn’t catch anything.');
           panel.setState('done');
         } else if (audioOpen) {

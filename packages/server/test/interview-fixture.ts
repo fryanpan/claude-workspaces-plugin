@@ -9,9 +9,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import type { User } from '@claude-workspaces/core';
+import type { AgentSpots } from '../src/agent-spots.ts';
 import { DocStore } from '../src/doc-store.ts';
 import { SpokenAnswerer, type SpokenBoard } from '../src/spoken-reply/answer.ts';
-import { interviewDocs } from '../src/spoken-reply/interview-docs.ts';
+import { interviewDocs, voicePointer } from '../src/spoken-reply/interview-docs.ts';
 import { InterviewLog, type InterviewRow } from '../src/spoken-reply/interview-log.ts';
 import type { PlanComplete } from '../src/spoken-reply/interview-reader.ts';
 import { SpokenInterview } from '../src/spoken-reply/interview.ts';
@@ -90,6 +91,8 @@ export async function planFixture(
     /** Keep the meeting's quiet first minute (`MeetingWarmup`); off, a
      *  meeting's first pause may ask, as every other test here assumes. */
     warmup?: boolean;
+    /** The board's presence room; the voice's cursor is its spot there. */
+    spots?: AgentSpots;
   } = {},
 ): Promise<Fixture> {
   const docStore = new DocStore({
@@ -121,6 +124,8 @@ export async function planFixture(
     docStore,
     (ws) => (ws === WS && opts.onBoard !== false ? [DOC_ID] : []),
     opts.ears,
+    undefined,
+    opts.spots ? voicePointer(opts.spots) : undefined,
   );
   const interview = new SpokenInterview(
     {

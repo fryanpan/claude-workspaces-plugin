@@ -445,8 +445,11 @@ describe('the markdown composer is styled', () => {
     expect(doc.fontFamily).toContain('serif');
     expect(doc.fontSize).toBe('18px');
 
+    // font-family is not compared: `.thread-reply .md-composer-surface` sets `font: inherit`,
+    // so a browser hands the composer its ancestor's serif either way. Size and
+    // height are what the descendant rule set, and what a composer of its own
+    // overrides.
     const nested = styleOf(replyEditor);
-    expect(nested.fontFamily).not.toBe(doc.fontFamily);
     expect(nested.fontSize).not.toBe(doc.fontSize);
     expect(nested.minHeight).not.toBe(doc.minHeight);
   });

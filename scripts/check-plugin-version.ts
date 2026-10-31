@@ -224,10 +224,10 @@ if (compare(current, parseSemver(baseVersion, baseRef)) <= 0) {
       `Peers install by version. Merged at ${pluginVersion}, "claude plugin update"\n` +
       'copies nothing — it only acts when the string moves FORWARD — and still reports\n' +
       'success, so the change reaches nobody and nothing anywhere goes red.\n\n' +
-      `Re-bump all three sites, to the same value, above ${baseVersion}:\n` +
+      `Re-bump both manifests, to the same value, above ${baseVersion}:\n` +
       `    ${PLUGIN_MANIFEST}\n` +
       `    ${MARKETPLACE_MANIFEST}\n` +
-      '    PLUGIN_VERSION in packages/mcp/src/mcp.ts\n\n' +
+      'then run `bun run build:mcp`, which inlines the version into the MCP bundle.\n\n' +
       'With several branches in flight, reading the next number off the tip is not\n' +
       'enough on its own: two branches that independently pick the same number both\n' +
       'clear THIS check and merge clean, because a conflict requires disagreement.\n' +
@@ -326,11 +326,11 @@ if (openPrsFile === undefined) {
           'clean, because identical strings do not conflict. Whichever lands second publishes\n' +
           `a string that never moved: "claude plugin update" copies nothing and reports\n` +
           'success, so that PR reaches no peer and nothing anywhere goes red.\n\n' +
-          'The tie-break is the lowest PR number, so it is this PR that re-bumps. Move all\n' +
-          `three sites past ${pluginVersion} — and past anything else in flight:\n` +
+          'The tie-break is the lowest PR number, so it is this PR that re-bumps. Move both\n' +
+          `manifests past ${pluginVersion} — and past anything else in flight — then run\n` +
+          '`bun run build:mcp`:\n' +
           `    ${PLUGIN_MANIFEST}\n` +
-          `    ${MARKETPLACE_MANIFEST}\n` +
-          '    PLUGIN_VERSION in packages/mcp/src/mcp.ts\n\n' +
+          `    ${MARKETPLACE_MANIFEST}\n\n` +
           'If the PR above is abandoned, close it rather than racing it — a version an open\n' +
           'PR declares is a version this check will keep reserving.',
       );

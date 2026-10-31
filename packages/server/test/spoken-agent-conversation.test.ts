@@ -199,7 +199,8 @@ describe('who may talk to an agent by name', () => {
 
   it('the owner, proven, reaches the agent', async () => {
     const r = await sayTo({ ownerProven: true, author: { id: 'owner', name: 'Bryan' } });
-    expect(r.spoken).toBe('Sent to harborlight agent.');
+    // Reached, and nothing said for it: the agent's answer is the reply.
+    expect(r.spoken).toBe('');
     expect(r.frames.map((f) => f.transcript)).toEqual(['hello there']);
   });
 

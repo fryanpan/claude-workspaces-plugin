@@ -1,22 +1,22 @@
 /**
  * The markdown surface's mount: everything a markdown doc needs once its text
- * is on screen — the Tiptap editor, the review chrome, the margin, the meeting
- * strip, the voices, the gates.
+ * is on screen — the Tiptap editor, the review chrome, the margin, the
+ * agent's cursor, the gates.
  *
  * It is its own chunk, loaded by `app.ts` with an `import()` after the doc's
  * text is painted (`doc/prose-paint.ts`). It used to be the doc page's entry,
- * and every byte of it — ProseMirror, Yjs bindings, the meeting surface — was
+ * and every byte of it — ProseMirror, Yjs bindings — was
  * downloaded and parsed before a reader saw a word.
  */
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
-import { wantsHuddleStart } from '../huddle-entry.ts';
-import type { MeetingLiveZone } from '../meeting-live-zone.ts';
 import type { MountContext } from '../mount-context.ts';
+import { wireDocSpot } from '../presence/doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type ReviewChrome, mountReviewChrome } from '../review-chrome.ts';
 import { navigateTo } from '../router.ts';
+import { wireAgentFocus } from './agent-focus.ts';
 import { el, showToast } from './chrome-dom.ts';
 import { wireThreadRangeClicks } from './chrome-panels.ts';
 import { marginComposerSlot } from './composer-slot.ts';
@@ -26,15 +26,14 @@ import { mountDocFloats } from './doc-floats.ts';
 import { wireDocGates } from './doc-gates.ts';
 import { mountMeetingHeading } from './doc-heading.ts';
 import { mountDocMargin } from './doc-margin.ts';
-import { type DocMeetingMount, mountDocMeeting } from './doc-meeting-mount.ts';
 import { mountPointerPillLayer } from './doc-pointer-pill.ts';
 import { mountDocPreview } from './doc-preview.ts';
 import { wireDocReady } from './doc-ready.ts';
 import { mountDocSaveState } from './doc-save-state.ts';
 import { mountDocSetNav } from './doc-set-nav.ts';
 import { mountDocSpeakerMenu } from './doc-speaker-menu.ts';
-import { mountDocVoices } from './doc-voice-mount.ts';
 import { createNotesLinkRefs } from './notes-link-refs.ts';
+import { openThreadId } from './open-thread.ts';
 
 /** Per-document mount for the markdown (Tiptap) surface.
  *
@@ -99,12 +98,9 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   // biome-ignore lint/style/useConst: assigned in the selection-affordance phase below
   let pill: CommentPillHandle | undefined;
   // Same shape again: the chrome's selection callback can fire before the
-  // meeting strip has mounted and the viewport is wired.
-  // biome-ignore lint/style/useConst: assigned after the meeting strip mounts
+  // viewport is wired.
+  // biome-ignore lint/style/useConst: assigned once the viewport is wired below
   let editViewport: ReturnType<typeof wireEditViewport> | undefined;
-  // Forward ref like `chrome`: the zone is made where the meeting strip mounts
-  // (only on docs that can hold a meeting); the wash extension needs it now.
-  let liveZone: MeetingLiveZone | undefined;
   // Which rows this doc is linked from, and the two writes that change it.
   // Read once the document has synced (`wireDocReady`) — before that the
   // notes are not on screen and there is nothing to draw a control beside.
@@ -130,12 +126,6 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       link: (taskId) => notesLinkRefs.link(taskId),
       unlink: (taskId) => notesLinkRefs.unlink(taskId),
       onChanged: () => notesLinkRefs.refresh(),
-    },
-    // Inert until the zone exists AND a meeting is (recently) live; the
-    // zone's bot fallback rides the same signal.
-    settleWash: {
-      isLive: () => liveZone?.washActive() ?? false,
-      onNotesInsert: () => liveZone?.clearSettled(),
     },
   });
   // Editor teardown runs before the client closes (LIFO — client.close was
@@ -197,44 +187,9 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
   void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: false });
 
-  // Opened by the Board's "Make a plan" / "Have a meeting": the address carries
-  // a flag, and the strip asks for the mic at once instead of waiting for a
-  // press. Read ONCE, here, because the strip block below takes the flag back
-  // out of the address — and the edit-mode decision that also needs it runs
-  // much later, by which time `location.search` no longer says anything.
-  const startedHuddleHere = wantsHuddleStart(location.search);
-  // The meeting surface, once one is mounted: the lead banner's read and
-  // stream (so the floats' receipts can say "no lead attached" off the same
-  // answer, on a huddle doc), and the channel a speaker rename travels on.
-  let meeting: DocMeetingMount | undefined;
-  // Live-meeting transcript strip along the bottom of the editor pane — the
-  // whole surface (strip, live zone, bot client, lead banner) mounts together
-  // in doc/doc-meeting-mount.ts. Bound to this scope, so navigating away
-  // closes the audio socket and releases the microphone.
-  //
-  // Ordinary markdown docs only. A `.md` diff member's File view mounts this
-  // same surface over a companion doc (that is what `navDocId` marks), and a
-  // review of somebody's branch is not a place a meeting is recorded.
-  const meetingStripEl = document.getElementById('meeting-strip');
-  if (meetingStripEl && ctx.docType === 'markdown' && ctx.navDocId === undefined) {
-    meeting = mountDocMeeting({
-      docId,
-      stripEl: meetingStripEl,
-      scope,
-      editor,
-      editorMount,
-      user,
-      awareness,
-      huddleStart: startedHuddleHere,
-      huddle,
-      navigate: navigateTo,
-    });
-    liveZone = meeting.liveZone;
-  }
-
-  // The two always-in-view floats — Approve (the plan gate) and Review. Same
-  // rule as the meeting strip above: a review of somebody's branch, or a
-  // companion doc under `navDocId`, is not a plan a person approves.
+  // The two always-in-view floats — Approve (the plan gate) and Review. A
+  // review of somebody's branch, or a companion doc under `navDocId`, is not
+  // a plan a person approves.
   if (ctx.docType === 'markdown' && ctx.navDocId === undefined) {
     // A meeting's title as its page's heading, with its dates under it.
     mountMeetingHeading({
@@ -253,19 +208,25 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       canWrite,
       scope,
       whenSynced: (cb) => client.onReady(cb),
-      ...(meeting?.watchLeadPresence ? { watchLeadPresence: meeting.watchLeadPresence } : {}),
     });
-    // The agent's cursor, the voice mic and the planning voice.
-    const voice = { docId, user, editor, editorMount, presence: awareness, canWrite, scope };
-    mountDocVoices({ ...voice, ydoc, meeting });
+    // The agent's cursor (`agent-focus.ts`).
+    wireAgentFocus({ editor, presence: awareness, scroller: editorMount, scope });
   }
+  // Where the person here is reading, for the workspace's presence room.
+  wireDocSpot({
+    docId,
+    editor,
+    scroller: editorMount,
+    openThread: openThreadId,
+    revealThread: (id) => reviewChrome.revealThread(id),
+    scope,
+  });
 
   mountDocSpeakerMenu({
     docId,
     editor,
     scope,
     canWrite: () => canWrite,
-    ...(meeting ? { meeting } : {}),
   });
 
   // Editing under an on-screen keyboard: the meeting strip gives its grid row
@@ -274,7 +235,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   editViewport = wireEditViewport({
     roots: () => [editorMount, composer],
     scroller: () => editorMount,
-    strip: () => meetingStripEl,
+    strip: () => document.getElementById('meeting-strip'),
     caretRect: () => {
       const view = editor.editor.view;
       // View mode never focuses the editor; there is no caret to follow and

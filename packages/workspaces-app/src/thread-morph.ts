@@ -425,5 +425,10 @@ const running = new WeakMap<HTMLElement, Animation[]>();
 function play(el: HTMLElement, keyframes: Keyframe[], opts: KeyframeAnimationOptions): void {
   for (const a of running.get(el) ?? []) a.cancel();
   const anim = el.animate(keyframes, opts);
+  // cancel() rejects `finished` with an AbortError. Browsers mark that
+  // rejection handled; happy-dom does not, so nobody awaiting it is an
+  // unhandled rejection there. Nothing here waits on it (and a test stub
+  // may hand back no `finished` at all).
+  anim?.finished?.catch(() => {});
   running.set(el, anim ? [anim] : []);
 }

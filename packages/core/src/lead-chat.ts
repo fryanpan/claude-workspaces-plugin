@@ -20,25 +20,72 @@ export const LEAD_CHAT_MAX_CHARS = 4000;
  *
  * - `sent`: on the lead's stream now.
  * - `queued`: the lead holds no stream; it reads the message when it is back.
+ * - `received`: the lead's session has it (its MCP child acked the row), and
+ *   the lead is working until that session's turn ends.
+ * - `done`: the turn that took it ended without an answer to this message.
  * - `answered`: the lead replied.
  * - `no-lead`: the board has no lead, so nobody was sent it.
  */
-export type LeadChatState = 'sent' | 'queued' | 'answered' | 'no-lead';
+export type LeadChatState = 'sent' | 'queued' | 'received' | 'done' | 'answered' | 'no-lead';
+
+/**
+ * Where a message came from.
+ *
+ * - `chat`: typed into the board's chat.
+ * - `voice`: said to the lead, on the page or in a meeting.
+ * - `terminal`: typed into the lead's own Claude Code session, mirrored here
+ *   by its UserPromptSubmit hook.
+ * - `channel`: a board event the lead's session received as a prompt,
+ *   mirrored the same way. Its `author` names who caused it.
+ *
+ * The last two are the mirror (`server/src/lead-chat/mirror.ts`): nothing in
+ * them is sent to the lead again, and nothing in them is spoken. An agent's
+ * message `via: 'terminal'` is the lead's session talking: text it wrote
+ * mid-turn, or a tool call it made.
+ */
+export type LeadChatVia = 'chat' | 'voice' | 'terminal' | 'channel';
 
 export interface LeadChatMessage {
   id: string;
-  /** `person`: someone on the board. `agent`: the lead. */
+  /** `person`: someone on the board, or a board event the lead received
+   *  (`via: 'channel'`). `agent`: the lead. */
   role: 'person' | 'agent';
   author: { id: string; name: string };
   text: string;
   ts: number;
-  /** How a person's message was made: typed, or said to the lead. */
-  via?: 'chat' | 'voice';
+  /** How a person's message was made (`LeadChatVia`). */
+  via?: LeadChatVia;
   /** On a person's message only. */
   state?: LeadChatState;
   /** On an agent's message: the person's message it answers. */
   replyTo?: string;
+  /** On an agent's message: what its session showed when its turn ended,
+   *  mirrored by the Stop hook. Shown, never spoken. */
+  turnEnd?: true;
+  /** On a person's message in `received`: when the lead's session took it,
+   *  so a page can count how long it has been working. */
+  receivedAt?: number;
+  /** On an agent's message: a tool call the lead's session made, mirrored by
+   *  its PostToolBatch hook. `text` is the call in one line. */
+  tool?: LeadChatToolCall;
+  /** On an agent's message: its session is still writing it, so its text
+   *  grows. Kept out of the log until it is whole. */
+  streaming?: true;
 }
+
+/** A tool call as the lead's terminal shows it, reduced by the hook the way
+ *  a turn note is and capped. */
+export interface LeadChatToolCall {
+  name: string;
+  input: string;
+  output?: string;
+  /** The call failed. */
+  failed?: true;
+}
+
+/** The most of a tool call's input and output a message carries. */
+export const LEAD_CHAT_TOOL_INPUT_MAX = 2000;
+export const LEAD_CHAT_TOOL_OUTPUT_MAX = 4000;
 
 export interface LeadChatLead {
   agentId: string;
@@ -47,7 +94,11 @@ export interface LeadChatLead {
 
 export interface LeadChatSnapshot {
   lead: LeadChatLead | null;
+  /** The latest `LEAD_CHAT_PAGE` messages, oldest first. */
   messages: LeadChatMessage[];
+  /** Older messages exist: page back with `LeadChatHistoryPage`. Absent
+   *  from a server built before paging, which reads as none. */
+  more?: boolean;
   /** The meeting this chat is running, or null. Absent from a server built
    *  before meetings, which reads as none. */
   meeting?: LeadChatMeeting | null;
@@ -155,6 +206,40 @@ export function addressesLead(text: string): boolean {
   return /^\s*lead\s*[,:]\s*\S/i.test(text);
 }
 
+/** How many messages one read hands a page: the first read, and each page
+ *  back through the history. */
+export const LEAD_CHAT_PAGE = 50;
+/** The most a page may ask for in one history read. */
+export const LEAD_CHAT_PAGE_MAX = 100;
+
+/**
+ * Where a page back through the history starts: the oldest entry the page
+ * already shows. Everything strictly before it in `compareLeadChatEntries`
+ * order comes next.
+ *
+ * Keyed on time and id rather than on a position in one log, so a later
+ * kind of entry kept somewhere else (the lead's own session, mirrored into
+ * the chat) can join the same list and page back in the same order.
+ */
+export interface LeadChatCursor {
+  ts: number;
+  id: string;
+}
+
+/** `GET /workspaces/<ws>/lead-chat?beforeTs=&beforeId=&limit=`: the
+ *  messages just before the cursor, oldest first, and whether there are
+ *  older ones still. */
+export interface LeadChatHistoryPage {
+  messages: LeadChatMessage[];
+  more: boolean;
+}
+
+/** The one order every list of the chat is kept in: by time, then by id so
+ *  two entries written in the same millisecond still sort one way. */
+export function compareLeadChatEntries(a: LeadChatCursor, b: LeadChatCursor): number {
+  return a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 /** `GET /workspaces/<ws>/lead-chat`: the snapshot, and whether this reader
  *  may write to the lead (the owner alone may). */
 export interface LeadChatRead extends LeadChatSnapshot {
@@ -168,7 +253,8 @@ export interface LeadChatFrame {
   message: LeadChatMessage;
 }
 
-const STATES: readonly string[] = ['sent', 'queued', 'answered', 'no-lead'];
+const STATES: readonly string[] = ['sent', 'queued', 'received', 'done', 'answered', 'no-lead'];
+const VIAS: readonly string[] = ['chat', 'voice', 'terminal', 'channel'];
 
 function str(v: unknown, max: number): string | null {
   return typeof v === 'string' && v.length > 0 && v.length <= max ? v : null;
@@ -188,15 +274,37 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
   if (typeof m.ts !== 'number' || !Number.isFinite(m.ts)) return null;
   const state = typeof m.state === 'string' && STATES.includes(m.state) ? m.state : undefined;
   const replyTo = str(m.replyTo, 200);
+  const receivedAt =
+    typeof m.receivedAt === 'number' && Number.isFinite(m.receivedAt) ? m.receivedAt : undefined;
+  const tool = parseToolCall(m.tool);
   return {
     id,
     role: m.role,
     author: { id: authorId, name: authorName },
     text,
     ts: m.ts,
-    ...(m.via === 'chat' || m.via === 'voice' ? { via: m.via } : {}),
+    ...(typeof m.via === 'string' && VIAS.includes(m.via) ? { via: m.via as LeadChatVia } : {}),
     ...(state ? { state: state as LeadChatState } : {}),
     ...(replyTo ? { replyTo } : {}),
+    ...(m.turnEnd === true ? { turnEnd: true as const } : {}),
+    ...(receivedAt !== undefined ? { receivedAt } : {}),
+    ...(tool ? { tool } : {}),
+    ...(m.streaming === true ? { streaming: true as const } : {}),
+  };
+}
+
+function parseToolCall(raw: unknown): LeadChatToolCall | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const t = raw as Record<string, unknown>;
+  const name = str(t.name, 200);
+  const input = typeof t.input === 'string' && t.input.length <= LEAD_CHAT_TOOL_INPUT_MAX;
+  if (!name || !input) return null;
+  const output = str(t.output, LEAD_CHAT_TOOL_OUTPUT_MAX);
+  return {
+    name,
+    input: t.input as string,
+    ...(output ? { output } : {}),
+    ...(t.failed === true ? { failed: true as const } : {}),
   };
 }
 
@@ -210,6 +318,6 @@ export function upsertLeadChatMessage(
 ): LeadChatMessage[] {
   const out = list.filter((x) => x.id !== m.id);
   out.push(m);
-  out.sort((x, y) => x.ts - y.ts || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  out.sort(compareLeadChatEntries);
   return out;
 }

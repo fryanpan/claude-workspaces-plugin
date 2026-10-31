@@ -78,6 +78,7 @@ import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
+import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -85,6 +86,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { wireMeetings } from './meeting-wiring.ts';
 import { isLoopbackAddress } from './middleware/host-guard.ts';
+import { loopbackUidDoor } from './middleware/loopback-uid-door.ts';
 import { isBrowserRequest } from './middleware/write-gate.ts';
 import { boardLinkedItems } from './mockup-linked-items.ts';
 import { MountStore } from './mount-store.ts';
@@ -178,7 +180,7 @@ import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
 import { AgentCallbacks } from './spoken-reply/agent-llm.ts';
 import type { SpokenBoard } from './spoken-reply/answer.ts';
-import { interviewDocs } from './spoken-reply/interview-docs.ts';
+import { interviewDocs, voicePointer } from './spoken-reply/interview-docs.ts';
 import { INTERVIEW_TIMINGS_FILE, InterviewLog } from './spoken-reply/interview-log.ts';
 import { PlanMinutes } from './spoken-reply/plan-minutes.ts';
 import { SpokenReplyRelay } from './spoken-reply/relay.ts';
@@ -189,7 +191,7 @@ import { HTTP_IDLE_TIMEOUT_SEC, SseBus, openSseStream } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { cryptoId } from './task-fields.ts';
 import { isReservedGoalId } from './task-goals.ts';
-import { TaskProjection, taskBodyDocId } from './task-projection.ts';
+import { TaskProjection, taskBodyDocId, workspaceDocId } from './task-projection.ts';
 import {
   type RunOutputSource,
   itemsLinking,
@@ -230,6 +232,7 @@ const ANONYMOUS_ACTOR: User = {
   color: '#8a8a8a',
 };
 
+import { createAgentSpots } from './agent-spots.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import {
   HTML_SHELL_HEADERS,
@@ -1297,11 +1300,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     agentConnected: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
     ...(opts.askFeedWindowMs === undefined ? {} : { askWindowMs: opts.askFeedWindowMs }),
   });
+  // Where each agent points, in its boards' presence rooms (agent-spots.ts).
+  const agentSpots = createAgentSpots({
+    boardsForDoc: (docId) => boardsForDoc(docId),
+    boardAwareness: (workspaceId) =>
+      docStore.peek(workspaceDocId(workspaceId))?.peekAwareness() ?? null,
+    surfaceOf: (docId) => (docStore.peekMeta(docId)?.type === 'whiteboard' ? 'whiteboard' : 'doc'),
+    listening: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+  });
+  {
+    const onAgentStreams = sse.onAgentStreams;
+    sse.onAgentStreams = (channel, agentId) => {
+      onAgentStreams?.(channel, agentId);
+      if (channel.startsWith('ws~')) agentSpots.streamsChanged(channel.slice(3));
+    };
+  }
   {
     const stallDocEvent = stallWiring.onLiveDocEvent;
     onLiveDocEvent = (docId, payload) => {
       stallDocEvent(docId, payload);
       leadRanks.onDocEvent(docId, payload);
+      agentSpots.onDocEvent(docId, payload);
     };
   }
   // One queue over every board, in project order, and the ledger that records
@@ -1537,6 +1556,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
     newId: () => cryptoId('lc'),
   });
+  // What the lead's session writes mid-turn and the tools it calls.
+  const leadSessionMirror = new LeadSessionMirror(leadChat, () => cryptoId('lc'));
   // The meeting a board's lead chat runs (`lead-chat/meeting.ts`), on the
   // same page-only channel.
   const leadChatMeetings = new LeadChatMeetings({
@@ -1564,8 +1585,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     parseContext: parseVoiceContext,
     // The planning voice: a plan read at each pause, answers written in.
     interview: {
-      docs: interviewDocs(docStore, boardDocIds, meetingEars, (docId, headingId) =>
-        planMinutes.talkedAbout(docId, headingId),
+      // Its cursor is also its spot in the board's presence room.
+      docs: interviewDocs(
+        docStore,
+        boardDocIds,
+        meetingEars,
+        (docId, headingId) => planMinutes.talkedAbout(docId, headingId),
+        voicePointer(agentSpots),
       ),
       log: new InterviewLog(join(dataDir, INTERVIEW_TIMINGS_FILE)),
       ...(opts.voiceComplete ? { complete: opts.voiceComplete } : {}),
@@ -2043,6 +2069,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinkHosts,
     recallCallbackHost,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess: opts.loopbackSkipsAccess ?? false,
     proxiedTrustedEmails,
     // Read at request time; the notice is built further down.
     sharingOffDoor: (method, pathname) =>
@@ -2107,6 +2134,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
+    onBoardRoomOpen: (workspaceId, awareness) => agentSpots.restore(workspaceId, awareness),
   });
 
   /**
@@ -2159,6 +2187,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         rankOf: new Map(q.projects.map((p) => [p.workspaceId, p.rank])),
         summaryOf: (id) => boardSummaries.read(id),
         goals: planGoals(q.planWorkspaceId).map((g) => ({ id: g.id, title: g.title })),
+        ...(q.planWorkspaceId ? { planWorkspaceId: q.planWorkspaceId } : {}),
       };
     },
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
@@ -2499,13 +2528,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
   runOutputSource = libraryOutputSource;
   // The doc page's open of the file a doc holds, and what its dock offers.
-  const pageOpened = (ws: string, docId: string) => {
+  const pageOpened = (ws: string, docId: string, owner: boolean) => {
     // The project walk is paid only on a board with a run's item standing.
     const waiting = taskStore.listTasks(ws).some((t) => t.schedule?.state?.output?.item);
     const relPath = waiting ? libraryOutputSource().fileOf(ws, docId) : undefined;
     if (relPath !== undefined) noteOpened(ws, relPath);
     const readable = relPath === undefined ? undefined : itemsLinking(taskStore, ws, relPath);
-    return boardLinkedItems(ws, docId, taskStore, docStore, readable);
+    return boardLinkedItems(ws, docId, taskStore, docStore, readable, owner);
   };
 
   /** The migration verb: one board doc into its project's folder, same doc. */
@@ -2743,6 +2772,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const docRoutesCtx: DocRoutesContext = {
+    agentSpots,
+    leadWritable: (boardId, path) => {
+      const c = boardSocketRoots.containedOf(path);
+      return c !== null && boardSocketRoots.rootFor(boardId, c.root) !== null;
+    },
     boardIsShared,
     docStore,
     taskStore,
@@ -2992,6 +3026,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     coachSessionPrompt: (workspaceId, mark, cwd) => {
       coachWiring.sessionPrompt(workspaceId, mark, cwd);
     },
+    leadChatMirror: leadChat,
+    leadSessionMirror,
     readyNudger,
     j,
     safeJson,
@@ -3050,6 +3086,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
     chatAudit,
     shareLinks,
     accessProposals,
@@ -3112,9 +3149,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * Bun’s specificity matching, still orders the eight adjacencies whose
    * comments call them load-bearing.
    */
+  // Loopback TCP from a refused user (a project machine's lead) is answered
+  // here, before any check that trusts a loopback peer reads it.
+  const refuseLoopbackUid = loopbackUidDoor(opts.loopbackRefusedUids ?? [], opts.peerUid);
+
   /** The device and location a browser request's analytics rows carry, in
    *  scope for exactly as long as the request is (event-origin.ts). */
   function handleWithOrigin(req: Request): Promise<Response | undefined> {
+    const refusedCaller = refuseLoopbackUid(server.requestIP(req), server.port ?? 0);
+    if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several
     // early returns and a hoisted inner `route` declaration that a wrapping
@@ -3242,7 +3285,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // bin.ts passes the folder when `--board-socket-dir`, `CW_BOARD_SOCKET_DIR`
   // or `CW_BOARD_SOCKETS=1` says so (server-config.ts). Kept in step with the boards as they are made, archived and deleted.
   const boardSockets = opts.boardSocketDir
-    ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
+    ? openBoardSockets({
+        dir: opts.boardSocketDir,
+        handle: handleWithOrigin,
+        j,
+        // Shared only with a group to share it with: never with every user.
+        ...(opts.boardSocketShared && opts.boardSocketGroup !== undefined
+          ? { shared: { board: opts.boardSocketShared, gid: opts.boardSocketGroup } }
+          : {}),
+      })
     : null;
   const syncBoardSockets = () =>
     boardSockets?.sync(

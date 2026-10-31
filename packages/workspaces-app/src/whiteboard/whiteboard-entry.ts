@@ -117,7 +117,12 @@ async function boot(): Promise<void> {
     if (now - lastPointer < POINTER_MS) return;
     lastPointer = now;
     awareness.setLocalStateField('pointer', { x: Math.round(p.x), y: Math.round(p.y) });
+    room?.moveTo({ surface: 'whiteboard', docId, x: Math.round(p.x), y: Math.round(p.y) });
   };
+
+  // The workspace's presence room: this person's pointer is their spot, and
+  // a followed spot on this board scrolls the view to it (presence/).
+  const room = workspaceId ? await joinRoom(workspaceId, docId, user, () => canvas) : null;
 
   canvas = await mountCanvas(host, {
     initial: allSceneElements(ydoc),
@@ -138,6 +143,35 @@ async function boot(): Promise<void> {
   showPresence();
   noteCount();
   body.dataset.whiteboardReady = '1';
+  // A follow that brought this tab here shows its spot now the canvas is up.
+  room?.follower.refresh();
+}
+
+/** Join the board's presence room from this whiteboard. */
+async function joinRoom(
+  workspaceId: string,
+  docId: string,
+  user: { id: string; name: string; color: string },
+  canvas: () => CanvasHandle | null,
+) {
+  const host = document.getElementById('wb-people');
+  if (!host) return null;
+  const { joinPagePresence } = await import('../presence/page-presence.ts');
+  return joinPagePresence({
+    workspaceId,
+    user,
+    here: { surface: 'whiteboard', docId },
+    connect: (url) => connect(url),
+    origin: location,
+    host,
+    address: () => location.pathname + location.search,
+    go: (href) => location.assign(href),
+    show: (spot) => {
+      if (spot.x !== undefined && spot.y !== undefined) canvas()?.centreOn(spot.x, spot.y);
+    },
+    storage: sessionStorage,
+    inputTarget: window,
+  });
 }
 
 void boot();

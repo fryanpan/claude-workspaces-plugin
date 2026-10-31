@@ -1,5 +1,12 @@
 import type { Comment, ReviewPayload, Thread, User } from '@claude-workspaces/core';
 import { createThread } from '@claude-workspaces/core';
+import {
+  type DockItem,
+  answerHtml,
+  linkedDockItems,
+  refusalOf,
+  wireAnswer,
+} from '@claude-workspaces/core/review-dock';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { dockItems, dockRounds } from '../src/widget-dock.ts';
 import type { FeedbackWidgetEl } from '../src/widget.ts';
@@ -114,6 +121,72 @@ describe('which asks a page docks', () => {
     expect(items.map((i) => i.answered)).toEqual([false, true]);
     expect(items[1]?.review.headline).toBe('Settled already');
   });
+});
+
+describe('an owner-only ask the server linked to this page', () => {
+  // The server hands an owner-only ticket item only to the owner, so the
+  // dock takes the server's word for it rather than dropping it by flag.
+  const linked = (over: Record<string, unknown> = {}) =>
+    linkedDockItems([
+      {
+        taskId: 't-stand',
+        reviewItemId: 'r-1',
+        review: payload({ ownerOnly: true }),
+        by: 'Cartographer',
+        ts: T0,
+        ...over,
+      },
+    ]);
+
+  it('docks, where a thread carrying the same flag does not', () => {
+    expect(dockItems([], linked())).toHaveLength(1);
+    expect(
+      dockItems([thread({ comments: [comment({ review: payload({ ownerOnly: true }) })] })]),
+    ).toEqual([]);
+  });
+
+  it('answered on the board: no option to tap, and no box to type in', () => {
+    const box = document.createElement('div');
+    box.innerHTML = answerHtml(linked({ answerAt: '/workspaces/w-1?task=t-stand' })[0] as DockItem);
+    expect(box.querySelector('.cw-answer-opt')).toBeNull();
+    expect(box.querySelector('textarea')).toBeNull();
+    // CONTROL: the same item without the link draws its options.
+    box.innerHTML = answerHtml(linked()[0] as DockItem);
+    expect(box.querySelectorAll('.cw-answer-opt')).toHaveLength(2);
+  });
+});
+
+describe("a refused answer says the server's own sentence", () => {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  it('reads the sentence, and false when there is none', async () => {
+    expect(await refusalOf(json(200, { ok: true }))).toBe(true);
+    expect(
+      await refusalOf(json(403, { error: 'x', message: 'Only the owner answers this.' })),
+    ).toBe('Only the owner answers this.');
+    expect(await refusalOf(json(500, { error: 'x' }))).toBe(false);
+  });
+
+  it('shows it in place of the generic line', async () => {
+    const box = document.createElement('div');
+    box.innerHTML = `${answerHtml(linked0())}`;
+    wireAnswer(box, { send: async () => 'Only the owner answers this.', onAnswered: () => {} });
+    (box.querySelector('.cw-answer-opt') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    const err = box.querySelector('.cw-answer-err') as HTMLElement;
+    expect(err.hidden).toBe(false);
+    expect(err.textContent).toBe('Only the owner answers this.');
+  });
+
+  function linked0(): DockItem {
+    return linkedDockItems([
+      { taskId: 't-stand', reviewItemId: 'r-1', review: payload(), by: 'Cartographer', ts: T0 },
+    ])[0] as DockItem;
+  }
 });
 
 describe('the rounds of one ask', () => {

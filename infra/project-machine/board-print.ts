@@ -5,6 +5,11 @@
  * the export and one on the target after the import, and archives the source
  * only when they match. It runs on the Mac against the source and, through
  * `board-probe.ts`, on the machine against the target, both on loopback.
+ *
+ * A listed doc whose content and threads both answer 404 is a dangling id:
+ * the board names a doc the server does not have. It is fingerprinted as
+ * `<id>\tmissing`, and the export carries the id with no files, so the
+ * target names it too and the two prints still compare.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -23,6 +28,8 @@ export interface BoardPrint {
   tasks: Part;
   events: LogFingerprint;
   notes: LogFingerprint;
+  /** Listed doc ids the server has neither content nor threads for. */
+  dangling: string[];
 }
 
 export const BOARD_LOGS = ['events', 'notes'] as const;
@@ -36,13 +43,26 @@ function part(lines: string[]): Part {
 
 type Call = (path: string) => Promise<Record<string, unknown>>;
 
+/** A GET that did not answer 2xx; `status` tells a 404 from the rest. */
+export class GetFailed extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const is404 = (e: unknown): boolean => e instanceof GetFailed && e.status === 404;
+
 /** A GET on a board server over loopback, as its own machine. */
 export function loopbackGet(base: string): Call {
   const host = `localhost:${new URL(base).port || '80'}`;
   return async (path) => {
     const res = await fetch(`${base}${path}`, { headers: { host } });
     const text = await res.text();
-    if (!res.ok) throw new Error(`GET ${path} -> ${res.status}: ${text.slice(0, 200)}`);
+    if (!res.ok)
+      throw new GetFailed(res.status, `GET ${path} -> ${res.status}: ${text.slice(0, 200)}`);
     return JSON.parse(text) as Record<string, unknown>;
   };
 }
@@ -71,14 +91,31 @@ export async function boardPrint(
   }[];
   const docs: string[] = [];
   const threads: string[] = [];
+  const dangling: string[] = [];
   const docIds = [...(ws.docIds ?? []), ...listed.map((t) => `task:${t.id}`)];
   for (const docId of docIds) {
     const d = encodeURIComponent(docId);
+    let missing: unknown;
     if (!docId.startsWith('task:')) {
-      const c = await get(`/workspaces/${b}/docs/${d}/content`);
-      docs.push(`${docId}\t${hex(String(c.plainText ?? ''))}`);
+      try {
+        const c = await get(`/workspaces/${b}/docs/${d}/content`);
+        docs.push(`${docId}\t${hex(String(c.plainText ?? ''))}`);
+      } catch (e) {
+        if (!is404(e)) throw e;
+        missing = e;
+      }
     }
-    const t = (await get(`/workspaces/${b}/docs/${d}/threads`)).threads as Thread[];
+    let t: Thread[];
+    try {
+      t = (await get(`/workspaces/${b}/docs/${d}/threads`)).threads as Thread[];
+    } catch (e) {
+      if (missing === undefined || !is404(e)) throw e;
+      docs.push(`${docId}\tmissing`);
+      dangling.push(docId);
+      continue;
+    }
+    // Threads without content is a broken doc, not a dangling id.
+    if (missing !== undefined) throw missing;
     for (const th of t ?? []) {
       const words = (th.comments ?? []).map((c) => `${c.id}:${c.author}:${c.text}`).join('\n');
       threads.push(`${docId}\t${th.id}\t${th.status}\t${hex(words)}`);
@@ -98,6 +135,7 @@ export async function boardPrint(
     tasks: part(tasks),
     events: log('.events.jsonl', limits.events),
     notes: log('.agent-notes.jsonl', limits.notes),
+    dangling,
   };
 }
 

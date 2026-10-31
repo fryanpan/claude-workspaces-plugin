@@ -7,6 +7,7 @@ import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
 import { labelDirection, wireDocRename } from './doc/doc-rename.ts';
+import { setOpenThreadReader } from './doc/open-thread.ts';
 import { wireReviewComposer } from './doc/review-composer.ts';
 import { createThreadActions } from './doc/thread-actions.ts';
 import { createThreadProjection } from './doc/thread-projection.ts';
@@ -221,16 +222,22 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     toggleThreads.setAttribute('aria-pressed', 'false');
     document.getElementById('threads-pane')?.setAttribute('aria-hidden', 'true');
   }
+  /** The reader closed the drawer: the thread it had open closes with it,
+   *  so nothing (the lead chat's link included) still reads it as open. */
+  function dismissDrawer(): void {
+    closeDrawer();
+    if (threadsPanel.getActive()) threadsPanel.setActive(null);
+  }
   on(toggleThreads, 'click', () => {
     const open = !shell.classList.contains('threads-open');
-    open ? openDrawer() : closeDrawer();
+    open ? openDrawer() : dismissDrawer();
     writeDrawerPref(open);
   });
   on(closeThreads, 'click', () => {
-    closeDrawer();
+    dismissDrawer();
     writeDrawerPref(false);
   });
-  on(scrim, 'click', closeDrawer);
+  on(scrim, 'click', dismissDrawer);
 
   // Resizable side panels (desktop): the comments pane (right edge drag)
   // and the In-This-Review pane (left edge drag). Widths persist; on
@@ -770,6 +777,9 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   };
   // The router only calls scope.dispose(); make the visual teardown part of it.
   opts.scope?.onCleanup(() => chrome.destroy());
+  // The lead chat names the open thread in a message's link.
+  const dropOpenThread = setOpenThreadReader(() => threadsPanel.getActive());
+  opts.scope?.onCleanup(dropOpenThread);
   return chrome;
 }
 

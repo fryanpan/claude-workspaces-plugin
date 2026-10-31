@@ -39,7 +39,10 @@ export const INBOX_SECTION_CSS = `
 .inbox-line:hover .inbox-snooze-btn,.inbox-snooze-btn:focus-visible,.inbox-snooze-btn[aria-expanded="true"]{opacity:1}
 .inbox-snooze-btn:hover{background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
 @media (hover:none){.inbox-line-acts{display:none}}
-.inbox-row-cursor{box-shadow:inset 3px 0 0 var(--accent)}
+/* The cursor is drawn on the line and its button, which covers the row, so a
+   mark on the row itself is never seen. An open line keeps the row's tint. */
+.inbox-row-cursor:not(.inbox-row-open) .inbox-line{background:color-mix(in srgb,var(--accent) 7%,var(--bg-panel))}
+.inbox-row-cursor .inbox-line>.board-review-row{background:transparent;box-shadow:inset 3px 0 0 var(--accent)}
 .inbox-row-open{background:color-mix(in srgb,var(--accent) 9%,transparent);border-radius:var(--radius-lg)}
 .inbox-row-open .inbox-line>.board-review-row{background:transparent}
 .inbox-where{display:inline-flex;align-items:center;gap:4px;vertical-align:-2px}

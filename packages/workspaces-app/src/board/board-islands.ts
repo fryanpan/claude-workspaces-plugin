@@ -1,5 +1,4 @@
 import type { Thread, User } from '@claude-workspaces/core';
-import type { BootLocation } from '../boot-env.ts';
 /**
  * The Preact islands this page mounts ONCE, and the stable handlers they keep.
  *
@@ -23,7 +22,6 @@ import type { BootLocation } from '../boot-env.ts';
  * controller are built, and a handler is only ever called by a tap long after
  * boot has finished — which is exactly the cycle a thunk exists to resolve.
  */
-import { currentWorkspaceId, docHref } from '../doc-path.ts';
 import { type BoardState, showToast } from './board-actions.ts';
 import type { BoardTask } from './board-model.ts';
 import type { ReviewItem } from './board-review-model.ts';
@@ -43,9 +41,6 @@ export interface BoardIslandDeps {
   user: User;
   /** `getElementById`, already narrowed — `bootBoard`'s own `el`. */
   el(id: string): HTMLElement;
-  /** The address bar. Only `assign` is read — a presence chip leaves for the
-   *  doc that person is in. */
-  location: Pick<BootLocation, 'assign'>;
   /** Open the queue's item at a position, as a sitting. */
   openInQueue(item: ReviewItem, index: number): void;
   /** Open one queue item where it can be answered. */
@@ -62,8 +57,11 @@ export interface BoardIslandDeps {
    *  the panel's own Activity tab posts to. */
   commentOnActivity(taskId: string, phrase: { text: string }, text: string): Promise<Thread | null>;
   replyOnActivity(taskId: string, threadId: string, text: string): Promise<Thread | null>;
-  /** Repaint the presence strip, after a long-press changed who is followed. */
-  renderPresenceRegion(): void;
+  /** Follow a presence chip's participant, or stop with null
+   *  (`presence/follower.ts`, built by the live wiring). */
+  follow(key: string | null): void;
+  /** Go where a chip's participant is, once. */
+  jumpTo(key: string): void;
 }
 
 /**
@@ -78,7 +76,6 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
     state,
     user,
     el,
-    location,
     openInQueue,
     openReviewItem,
     openReviewThread,
@@ -87,7 +84,8 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
     openTaskDetail,
     commentOnActivity,
     replyOnActivity,
-    renderPresenceRegion,
+    follow,
+    jumpTo,
   } = deps;
 
   // The "For Your Review" pane — the first real Preact island (contract per
@@ -151,17 +149,13 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
   mountPresenceIsland(
     el('board-people'),
     {
-      onTap: (chip) => {
-        if (chip.docId) location.assign(docHref(chip.docId, currentWorkspaceId()));
-      },
+      onTap: (chip) => jumpTo(chip.key),
       onLongPress: (chip) => {
-        state.followedKey = state.followedKey === chip.key ? null : chip.key;
+        const next = state.followedKey === chip.key ? null : chip.key;
+        follow(next);
         showToast(
-          state.followedKey
-            ? `Following ${chip.label} — long-press again to stop`
-            : 'Stopped following',
+          next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
         );
-        renderPresenceRegion();
       },
       // The "+N" circle's names have to reach a touch screen, where a title
       // attribute never shows. A toast is enough: it answers "who else".

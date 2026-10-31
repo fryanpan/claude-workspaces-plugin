@@ -10,9 +10,11 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, plus cloudflared, and three users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload |
+| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and four users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
-| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so the server's user cannot read the tunnel token or the bucket credential |
+| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
+| `lead.sh` | Keeps one Claude Code session running in a tmux session named `lead`, and starts it again when it ends (below) |
+| `github-known-hosts.txt` | GitHub's SSH host keys, installed as `/etc/ssh/ssh_known_hosts` for the lead's git |
 | `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
 | `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
 
@@ -174,9 +176,105 @@ half: a project machine is deployed by `machine:deploy`, never by pulling
 itself). Then add the project's boards under the machine's origin hostname in
 the router's `BOARD_ORIGINS`.
 
-The plan's unchecked point belongs here too: whether Claude Code's Remote
-Control session runs on this machine in a long-lived terminal. That needs the
-lead's own user on the machine and is the next task, not this image.
+## The lead agent
+
+The project's lead agent is a Claude Code session on the machine, beside the
+board server. It runs only when the machine has a board for it to lead and a
+Claude Code sign-in:
+
+```bash
+bun run machine:deploy --project <project> --memory 2048 \
+  --lead-board <boardId> [--claude-account <label>] \
+  [--github-deploy-key <keychain entry>]
+```
+
+- `--lead-board` sets `CW_LEAD_BOARD`. Without a board no lead runs, and the
+  deploy sends no sign-in, though the Mac's Keychain holds one.
+- The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`, from the Keychain item
+  `claude-lead-oauth-token`, the same one the walled lead on the Mac signs in
+  from (`scripts/lead-sandbox-token.ts`): the token `claude setup-token`
+  prints, BASE64. `--claude-account <label>` reads
+  `claude-lead-oauth-token.<label>`.
+- `--github-deploy-key` names a Keychain entry holding an OpenSSH private
+  key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
+- A machine with a lead needs `--memory 2048` or more; the deploy refuses a
+  smaller one.
+- Each is set once, like every secret. A run that names a source sets that
+  secret again. `--refresh-lead` also sets the default account's sign-in
+  again, and needs `--lead-board`; a deploy key is set again only when
+  `--github-deploy-key` names it.
+
+What the lead can reach:
+
+- **Its user.** The session runs as `lead`, with an environment the
+  entrypoint builds from nothing: its sign-in, its board's socket
+  (`CW_BOARD_SOCKET`) and board (`CW_WORKSPACE_ID`), `CW_AGENT_NAME`
+  (`<project>-lead` unless `CW_LEAD_AGENT_NAME` is set), the deploy key, and
+  the updater turned off. It does not hold the server's Claude key, the
+  tunnel token or the bucket credential, and no other user's process holds
+  its sign-in or deploy key. The server's data dir is mode 700.
+- **Its board, and no other.** The server listens on one unix socket per
+  board in `/data/boards`, which is `cw:cwboard` mode 710; the group
+  `cwboard` holds `cw` and `lead` and nobody else. The lead may enter the
+  folder and may not list it. Only the lead's board's socket is the group's,
+  mode 660, and every other socket is `cw`'s, mode 600, so `cwtunnel` and
+  `cwbackup` reach none. A request
+  on that socket is held to that board (`middleware/board-socket-door.ts`),
+  which is how a walled lead on the Mac reaches its board too. The server
+  refuses every loopback TCP request from the lead's uid
+  (`CW_LOOPBACK_REFUSED_UIDS`, `middleware/loopback-uid-door.ts`), so the
+  lead is never the owner that a loopback caller otherwise is.
+- **Its repo.** `lead.sh` writes the deploy key to `~/.ssh/github_deploy_key`
+  (mode 600) and points git's `core.sshCommand` at it. GitHub's host keys are
+  pinned in the image (`/etc/ssh/ssh_known_hosts`), and an unknown host key
+  is refused. Without a deploy key the lead has no GitHub access.
+- **Its plugin.** The image's own copy (`--plugin-dir /app/packages/plugin`),
+  from the same commit as the server, so it updates with each deploy.
+- **Its files.** Its working folder is `/data/lead/work` and its transcripts
+  are in `/data/lead/claude-projects`, both on the volume. `/data/lead` is
+  `lead` mode 700, so the server cannot read it, and no doc can be bound to a
+  file there. A folder bind over the socket is refused
+  (`board-socket-lead-binds.test.ts`). The lead can still write `/tmp`, which
+  the server can read, so a person must not bind a doc or folder under `/tmp`
+  on this machine. The transcripts are not in the snapshots yet: the snapshot
+  runs as `cw`.
+- **Its memory.** The entrypoint puts the lead in a cgroup v2 group of its own
+  (`cw-lead`, `memory.max` 1280M unless `CW_LEAD_MEMORY_MAX` is set), so a
+  lead that grows is killed alone and the server keeps running. A machine
+  with no cgroup v2 memory controller logs `the lead's memory is NOT capped`.
+
+**When it ends.** `lead.sh` checks the tmux session every 5 seconds and starts
+the session again, resuming the last conversation in `/data/lead/work`
+(`claude --continue`) once one exists, so a restart or a deploy keeps the
+lead's context; the first boot starts fresh. It waits 5s, then 10, 20, 40 and 50s for ends
+in a row, so a restart comes within a minute. After six quick ends in a row
+(each under five minutes) it tries every ten minutes; a session that lasts
+five minutes resets the count. Root starts `lead.sh` itself again 10s after
+it exits, so a lead that kills its supervisor stops neither the server nor
+the machine.
+
+To look at the session (`--pty`, because tmux needs a terminal; `env -i`, so
+root's secrets stay root's):
+
+```bash
+fly ssh console --pty --app cw-<project> -C \
+  "env -i TERM=xterm-256color setpriv --reuid=lead --regid=lead --init-groups tmux attach -t lead"
+```
+
+Detach with `Ctrl-b d`; exiting Claude Code ends the session, and the
+supervisor starts another. `fly secrets set CW_LEAD_REMOTE_CONTROL=1` starts
+each session with Remote Control, named after the agent (the flag is in the
+pinned Claude Code build).
+
+Still unchecked on a real machine: whether a `setup-token` sign-in allows
+Remote Control; whether Claude Code asks anything on its first run that the
+seeded `~/.claude.json` does not answer; whether `--continue` and
+`--remote-control` work together; the session's memory; whether a Fly
+machine offers the cgroup memory controller; and the MCP relay over the
+board socket under the image's bun. Attach once after the first deploy and
+look. The session runs in Claude Code's default permission mode, so it asks
+before each tool; nobody answers unless a person attaches or uses Remote
+Control.
 
 ## GitHub events for a board here
 
@@ -254,7 +352,11 @@ machine. In order:
 
 1. Fingerprints the board on the Mac's server: each doc's text, every thread
    and comment on its docs and rows, its tasks, and the lines of its event and
-   agent-note logs (`board-print.ts`).
+   agent-note logs (`board-print.ts`). A doc in the board's `docIds` whose
+   content and threads both answer 404 is a dangling id: it is fingerprinted
+   as missing, the export carries the id with no files, and the line
+   `source:` says how many there are. A doc whose content answers 404 while
+   its threads answer stops the move.
 2. Stops, changing nothing, if the machine already holds the board.
 3. Exports it (`board-bundle.ts`) and fingerprints the source again. If the
    board changed while it was read, it stops: quiet the board's agents first.
@@ -295,6 +397,14 @@ nudge stamps (rebuilt), the owner's analytics logs, and archived docs.
 After a move the board's agent needs a board agent token minted on the
 machine, and its GitHub events need the five steps above, run for the
 machine.
+
+To reach the moved board, the agent's session also needs the project's Access
+service token. Launch it with `CW_BASE_URL` set to the machine's URL,
+`CW_ACCESS_CLIENT_ID` set to the token's client id, and
+`CW_ACCESS_SECRET_SERVICE` set to the Keychain service that holds its secret.
+The MCP child and the plugin's hooks then send both `cf-access-client-*`
+headers on their requests to that URL's origin, and to no other. The launcher
+uses the node relay, because the compiled relay cannot read Keychain.
 
 ## Bound files after the move
 

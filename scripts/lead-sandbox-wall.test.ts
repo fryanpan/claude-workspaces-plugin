@@ -21,14 +21,16 @@ import {
 } from 'node:fs';
 import { type Server, createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOARD_SERVER_PORTS, STAGING_PORTS } from '../packages/server/src/reserved-ports.ts';
 import {
   boardSocketRows,
   boardWallRows,
   connectFrom,
+  probeRuntime,
   socketConnectFrom,
+  wallRowPasses,
 } from './lead-sandbox-escapes.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
 import { boardWallRules, socketDirEnds, wallHosts } from './lead-sandbox-wall.ts';
@@ -56,6 +58,20 @@ function fixture(home: string, boardWall: unknown, boardSocketDir?: string, boar
 }
 
 const fakeMachine: Machine = { home: '/fixture/home/saltmarsh', uid: 501, realpath: (p) => p };
+
+describe('a board wall row', () => {
+  it('passes when the control times out, as an address this Mac cannot reach itself on does', () => {
+    expect(wallRowPasses('EPERM', 'timeout')).toBe(true);
+    expect(wallRowPasses('EPERM', 'connected')).toBe(true);
+    expect(wallRowPasses('EPERM', 'ECONNREFUSED')).toBe(true);
+  });
+
+  it('fails when the control is refused too, or the inside connect is not', () => {
+    expect(wallRowPasses('EPERM', 'EPERM')).toBe(false);
+    expect(wallRowPasses('timeout', 'timeout')).toBe(false);
+    expect(wallRowPasses('connected', 'connected')).toBe(false);
+  });
+});
 
 describe('the generated profile', () => {
   it("denies every board server's port, at every address, for a lead with boardWall", () => {
@@ -280,6 +296,17 @@ s.on('error', (e) => console.log(e.code));`,
     expect(at(unwalled).map((r) => r.ok)).toEqual([false, false]);
   });
 
+  it('probes with node when the check runs under bun, which answers a refusal as ECONNREFUSED', () => {
+    const underBun = probeRuntime({ ...process.versions, bun: '1.3.0' }, '/fixture/bin/bun');
+    expect(underBun).not.toBeNull();
+    expect(connectFrom(underBun ?? '', walled, project, '127.0.0.1', walledPort)).toBe('EPERM');
+    // The control: bun itself cannot tell the wall from an empty port.
+    const bun = spawnSync('/bin/sh', ['-c', 'command -v bun'], { encoding: 'utf8' }).stdout.trim();
+    if (bun !== '') {
+      expect(connectFrom(bun, walled, project, '127.0.0.1', walledPort)).toBe('ECONNREFUSED');
+    }
+  });
+
   it("connects to its own board's socket, inside the wall and without it", () => {
     expect(socketConnectFrom(node, unwalled, project, own)).toBe('connected');
     expect(socketConnectFrom(node, walled, project, own)).toBe('connected');
@@ -383,7 +410,9 @@ s.on('error', (e) => console.log(e.code));`,
     expect(existsSync(join(app, 'node_modules', '.bin', 'harbor-tool'))).toBe(true);
   });
 
-  it('still commits, adds a worktree and sets git config in its project', () => {
+  // Git settings run commands in the owner's own git, so a lead may not set
+  // them (`gitCodeRegex`): `push -u`, tracking setup and `worktree add` fail with it.
+  it('still commits, and cannot set git config or add a worktree, in its project', () => {
     const repo = join(project, 'repo');
     mkdirSync(repo);
     const git = (profile: string | null, args: string[]) =>
@@ -394,8 +423,13 @@ s.on('error', (e) => console.log(e.code));`,
     expect(git(null, ['init', '-q'])).toBe(0);
     const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
     expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
-    expect(git(walled, ['worktree', 'add', '-q', join(repo, 'wt'), '-b', 'wt'])).toBe(0);
-    expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).toBe(0);
+    // A worktree's `.git` file names its git folder, so one a lead made could
+    // point anybody's git there at a config the lead wrote.
+    for (const wt of [join(repo, '.claude', 'worktrees', 'wt'), join(repo, 'elsewhere')])
+      expect(git(walled, ['worktree', 'add', '-q', wt, '-b', basename(wt)])).not.toBe(0);
+    expect(git(null, ['worktree', 'add', '-q', join(repo, 'ctl'), '-b', 'ctl'])).toBe(0); // the control
+    expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).not.toBe(0);
+    expect(git(null, ['config', 'branch.wt.remote', 'origin'])).toBe(0); // the control
   });
 
   it('fails a check row whose path has no socket behind it, which proves nothing', () => {

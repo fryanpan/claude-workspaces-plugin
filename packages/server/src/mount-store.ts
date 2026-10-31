@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
+import type { PathGuards } from './bound-path-guard.ts';
 import { repoIdentityAt } from './doc-key.ts';
 import { findWorktreeRoot } from './doc-origin-repo.ts';
 import type { MeetingHomeChoice, MeetingRetention } from './meeting-home.ts';
@@ -15,6 +16,7 @@ import {
 import { MAX_FILES_PER_MOUNT, isMountableRelPath, isServableRelPath } from './mount-scan.ts';
 import type { RepoRegistry } from './repo-registry.ts';
 import { isWithinRoot } from './safe-path.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * Mounted folders as they exist on disk: which repo a path belongs to, what a
@@ -89,10 +91,20 @@ export class MountStore {
    *  twenty-thousand-file fixture; production passes nothing. */
   private readonly maxFilesPerMount: number;
 
-  constructor(dataDir: string, repos: RepoRegistry, opts: { maxFilesPerMount?: number } = {}) {
+  /** The bound-file guards. A folder one covers is inside a walled lead's
+   *  root, where the lead can swap a folder for a link between a check and a
+   *  serve: it is not mounted, and a mount made there before serves nothing. */
+  private readonly guards: PathGuards;
+
+  constructor(
+    dataDir: string,
+    repos: RepoRegistry,
+    opts: { maxFilesPerMount?: number; guards?: PathGuards } = {},
+  ) {
     this.registry = new MountRegistry(dataDir);
     this.repos = repos;
     this.maxFilesPerMount = opts.maxFilesPerMount ?? MAX_FILES_PER_MOUNT;
+    this.guards = opts.guards ?? boundFiles.guards;
   }
 
   /**
@@ -201,10 +213,18 @@ export class MountStore {
     if (at.relPath !== '' && !isMountableRelPath(at.relPath)) {
       return { ok: false, error: 'refused-path' };
     }
+    if (this.refuses(absPath)) return { ok: false, error: 'refused-path' };
     const { mount, created } = this.registry.mount(at.repoKey, at.relPath, at.checkoutRoot);
     this.reconciledAt.delete(at.repoKey);
     this.lastScan.delete(at.repoKey);
     return { ok: true, mount, project: at, created };
+  }
+
+  /** Whether this store refuses a folder: one inside a walled lead's root.
+   *  A route that makes a folder to mount asks first, so the refusal comes
+   *  before anything is created there. */
+  refuses(abs: string): boolean {
+    return this.guards.covers(resolvePath(abs));
   }
 
   /** Retire a mount. Soft: nothing on disk is touched, and every address the
@@ -223,7 +243,9 @@ export class MountStore {
   absOfMount(repoKey: string, mount: MountRecord): string | null {
     const root = this.checkoutRootOf(repoKey, mount);
     if (!root) return null;
-    return mount.relPath === '' ? root : join(root, mount.relPath);
+    const abs = mount.relPath === '' ? root : join(root, mount.relPath);
+    // Unseen rather than gone: the reconcile keeps its addresses.
+    return this.guards.covers(abs) ? null : abs;
   }
 
   // ---- Listing and reconciling -------------------------------------------
@@ -407,10 +429,9 @@ export class MountStore {
     const abs = join(root, relPath);
     if (!isWithinRoot(root, abs)) return { relPath, abs: null, text: null };
     try {
-      if (statSync(abs).size > MAX_CONVENTIONS_BYTES) {
-        return { relPath, abs, text: null };
-      }
-      return { relPath, abs, text: readFileSync(abs, 'utf8') };
+      // Never blocks on a FIFO, and under a walled root never follows a link.
+      const text = this.guards.readBoundedSync(abs, MAX_CONVENTIONS_BYTES);
+      return { relPath, abs, text: text === 'too-large' ? null : text };
     } catch {
       return { relPath, abs, text: null };
     }
@@ -449,6 +470,9 @@ export class MountStore {
     if (!root) return null;
     const abs = join(root, choice.relPath);
     if (!isWithinRoot(root, abs)) return null;
+    // A walled lead can swap the folder for a link; meetings file under the
+    // data dir until the wall comes down.
+    if (this.refuses(abs)) return null;
     return {
       relPath: choice.relPath,
       abs,

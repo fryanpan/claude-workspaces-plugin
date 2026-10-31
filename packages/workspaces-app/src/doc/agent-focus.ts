@@ -113,7 +113,7 @@ function caret(f: AgentFocus): HTMLElement {
 }
 
 /** Centre `el` in `scroller`, moving that scroller alone. */
-function centreIn(scroller: HTMLElement, el: HTMLElement): void {
+export function centreIn(scroller: HTMLElement, el: HTMLElement): void {
   if (!scroller.contains(el)) return;
   const top = centreScrollTop({
     elTop:

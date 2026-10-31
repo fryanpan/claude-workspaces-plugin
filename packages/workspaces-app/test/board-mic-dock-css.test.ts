@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
-import { WS, bootTestBoard, el, resetBoardServer } from './support/board-drive.ts';
 
 /**
  * The hold-to-talk mic is DOCKED in the workspace nav, not floating over the
@@ -21,20 +20,21 @@ import { WS, bootTestBoard, el, resetBoardServer } from './support/board-drive.t
  * the promise could be broken. Docking the mic makes the promise unnecessary:
  * the mic lives in the nav's own column and no page content is ever behind it.
  *
- * The rail, the 901–1100px strip and the phone's bottom bar are three
- * different layouts of the same element, and every claim below is a claim
- * about ONE of them. That is what the old text version of this file could not
+ * The rail above 1100px and the bottom bar at or under it are two different
+ * layouts of the same element (the 901–1100px band was a sticky strip at the
+ * top until Bryan, 31 Oct: "Just put it at the bottom"), and every claim
+ * below is a claim about ONE of them. That is what the old text version of this file could not
  * express: it regexed `styles.css` and `board.css` for declarations and then
  * reasoned about which `@media` block they had been found inside, which
  * passes whether or not the query matches at the width a reader is on. Here
  * the nav is built at 1180, at 1000 and at 430 and the computed value is read,
  * so the tier boundaries are measured rather than argued.
  *
- * The MARKUP half still reads `board-app.ts`: where the mic sits in the nav's
- * child order is a fact about the file that renders it. What a browser still
- * has to confirm is in the PR body: how the docked control READS.
+ * The mic itself came out on 2026-10-30 (it no longer did anything the lead
+ * chat does not); the dock now holds the lead chat's agent button, and what
+ * is left here is the dock's own placement at each width.
  */
-/** The 901–1100px band: the rail is a horizontal strip, in flow. */
+/** The 901–1100px band: the bottom bar, as on a phone. */
 const STRIP = { width: 1000, height: 800 } as const;
 
 let cleanup = () => {};
@@ -73,30 +73,15 @@ const token = (name: string, el: Element = document.documentElement) =>
 const px = (v: string) => Number.parseFloat(v);
 const z = (v: string) => Number.parseFloat(v);
 
-/** The nav, its dock, and the mic and indicator inside the dock. */
+/** The nav and its dock. */
 function nav(viewport: { width: number; height: number }, navClasses = 'board-nav') {
   setViewport(viewport);
   const el = attach(navClasses, { tag: 'nav' });
   const dock = attach('board-nav-dock', { parent: el });
-  const mic = attach('voice-mic', { tag: 'button', parent: dock });
-  const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  mic.appendChild(glyph);
   return {
     nav: styleOf(el),
     dock: styleOf(dock),
-    mic: styleOf(mic),
-    glyph: styleOf(glyph),
-    indicator: styleOf(attach('voice-indicator', { parent: dock })),
     item: styleOf(attach('board-nav-item', { tag: 'a', parent: el })),
-  };
-}
-
-/** The free-floating mic, on a shell with nothing to dock into. */
-function floatingMic(viewport: { width: number; height: number }) {
-  setViewport(viewport);
-  return {
-    mic: styleOf(attach('voice-mic', { tag: 'button' })),
-    indicator: styleOf(attach('voice-indicator')),
   };
 }
 
@@ -111,101 +96,6 @@ function overlays(viewport: { width: number; height: number }) {
   };
 }
 
-describe('the mic lives in the nav, not on top of the page', () => {
-  it('mounts the mic and its indicator inside the nav element', async () => {
-    // DRIVEN, NOT GREPPED. This used to cut `<nav id="board-nav">…</nav>` out
-    // of the concatenated boot sources with two indexOf calls and compare
-    // substring OFFSETS inside it. That is a claim about the order of
-    // characters in a template literal: anything that moves the dock at
-    // RUNTIME — a later render that reorders the rail's children, a rebuild
-    // of the nav from elsewhere — keeps every offset where it was. Boot the
-    // board and read the tree the reader gets.
-    resetBoardServer();
-    // The capture rewrites the mic's own label on an insecure origin ("Voice
-    // needs https or localhost…"), which happy-dom is by default. The board
-    // this test is about is served over https, so say so — and the fact that
-    // the label is a RUNTIME value at all is the reason reading it out of the
-    // template literal was never the same assertion.
-    const wasSecure = (globalThis as Record<string, unknown>).isSecureContext;
-    (globalThis as Record<string, unknown>).isSecureContext = true;
-    try {
-      await bootTestBoard({ url: `https://board.test/workspaces/${WS}/tasks` });
-    } finally {
-      (globalThis as Record<string, unknown>).isSecureContext = wasSecure;
-    }
-    const nav = el('board-nav');
-    // Positive control: this really is the rail, and the items it has always
-    // held are in the element being read.
-    expect(nav.querySelectorAll('.board-nav-item').length).toBeGreaterThan(1);
-    expect(nav.querySelector('#board-nav-collapse')).not.toBeNull();
-
-    const mic = nav.querySelector('#board-mic') as HTMLElement | null;
-    const indicator = nav.querySelector('#board-voice');
-    expect(mic, 'the mic is not in the nav').not.toBeNull();
-    expect(indicator, 'the indicator is not in the nav').not.toBeNull();
-    // …and in a wrapper of its own, which is what carries the divider and the
-    // gap that say "this is not one more page you can navigate to".
-    expect(mic?.closest('.board-nav-dock')).not.toBeNull();
-    expect(indicator?.closest('.board-nav-dock')).not.toBeNull();
-
-    // At the END of the rail: after every nav item and after the collapse
-    // toggle, so it reads as the rail's foot rather than as another tab.
-    // Read as document order over the live tree, not as string offsets.
-    const kids = [...nav.children];
-    const dockAt = kids.findIndex((k) => k.classList.contains('board-nav-dock'));
-    const lastNavItem = kids.map((k) => k.hasAttribute('data-nav')).lastIndexOf(true);
-    const collapseAt = kids.findIndex((k) => k.id === 'board-nav-collapse');
-    expect(dockAt, 'no dock among the nav’s children').toBeGreaterThan(-1);
-    expect(lastNavItem, 'no [data-nav] items in the rail').toBeGreaterThan(-1);
-    expect(dockAt).toBeGreaterThan(lastNavItem);
-    expect(dockAt).toBeGreaterThan(collapseAt);
-
-    // The mic keeps the hold-to-talk affordance it had as a FAB — the press is
-    // the gesture, and the label is what a screen reader gets.
-    expect(mic?.getAttribute('aria-label')).toBe('Hold to talk');
-    document.body.innerHTML = '';
-  });
-
-  it('takes the docked mic out of the viewport-fixed layer', () => {
-    const docked = nav(IPAD).mic;
-    expect(docked.position).toBe('static');
-    // The FAB's viewport offsets mean nothing in flow; leaving them set is how
-    // a later reader concludes the mic is still fixed.
-    expect(docked.left).toBe('auto');
-    expect(docked.bottom).toBe('auto');
-    // Positive control: the SAME class, undocked, is still the fixed float.
-    expect(floatingMic(IPAD).mic.position).toBe('fixed');
-  });
-
-  it('keeps the float as a fallback, for a shell with nothing to dock into', () => {
-    // `.voice-mic` is shared by the board and the /review/<docId> surface. Both
-    // dock it now — the board in its rail/bar, the doc surface at the head of the
-    // topbar's toolbar (`.doc-nav-dock`) — so the base rule's positioning is
-    // what a shell with NEITHER falls back to. Docking the base would strand
-    // that fallback in flow at the end of <body>.
-    const resting = floatingMic(IPAD);
-    expect(resting.mic.position).toBe('fixed');
-    expect(resting.mic.left).toBe('16px');
-    const restingBottom = resting.mic.bottom;
-    const restingIndicator = resting.indicator.bottom;
-
-    // It still rises with the on-screen keyboard, like every bottom-docked
-    // element on that surface — asserted by moving the inset the app
-    // publishes and watching the offset follow it.
-    publishInsets('260px');
-    expect(floatingMic(IPAD).mic.bottom).not.toBe(restingBottom);
-    expect(floatingMic(IPAD).indicator.bottom).not.toBe(restingIndicator);
-
-    // Nothing about the board's bottom bar belongs in it any more: on the only
-    // surface this rule now positions, that variable has never been defined,
-    // so publishing it must move nothing.
-    publishInsets();
-    document.documentElement.style.setProperty('--board-bottom-bar', '58px');
-    expect(floatingMic(IPAD).mic.bottom).toBe(restingBottom);
-    expect(floatingMic(IPAD).indicator.bottom).toBe(restingIndicator);
-  });
-});
-
 describe('the docked mic reads as a control, not as a nav item', () => {
   it('separates the dock from the items with a divider and a gap', () => {
     const { dock } = nav(IPAD);
@@ -216,81 +106,6 @@ describe('the docked mic reads as a control, not as a nav item', () => {
     // reads as a list separator; the gap is what sets it apart.
     expect(px(dock.paddingTop)).toBeGreaterThanOrEqual(8);
     expect(px(dock.marginTop)).toBeGreaterThanOrEqual(8);
-  });
-
-  it('gives it a filled, bordered treatment the borderless nav items do not have', () => {
-    // Nav items are borderless text rows on the rail's own panel colour. The
-    // mic keeps the round bordered button it has always been, and takes the
-    // page background so the circle is visible against the rail.
-    const { item, mic } = nav(IPAD);
-    expect(item.borderTopStyle).toBe('none');
-    expect(mic.backgroundColor).toBe(token('--bg'));
-    expect(mic.borderRadius).toBe('50%');
-    expect(px(mic.borderTopWidth)).toBe(1);
-    expect(mic.borderTopColor).toBe(token('--border'));
-  });
-
-  it('keeps both states the mic has always had', () => {
-    setViewport(IPAD);
-    const rail = attach('board-nav', { tag: 'nav' });
-    const dock = attach('board-nav-dock', { parent: rail });
-    // Recording: the same red — a token since the Open Props trial, so the
-    // board's quick mic and this dock cannot drift apart literal by literal.
-    // The docked background is written `:not(.voice-active)` so it cannot
-    // out-specify the state that matters most.
-    const active = styleOf(attach('voice-mic voice-active', { tag: 'button', parent: dock }));
-    expect(active.backgroundColor).toBe(token('--red-strong'));
-    // Insecure origin: dimmed but still PRESSABLE — the press is how the
-    // reason gets surfaced, so `disabled` would swallow the explanation.
-    const off = styleOf(attach('voice-mic voice-unavailable', { tag: 'button', parent: dock }));
-    expect(off.opacity).toBe('0.45');
-    expect(off.pointerEvents).not.toBe('none');
-  });
-
-  it('never deadens the button, only the glyph inside it', () => {
-    // `.voice-mic svg` sets `pointer-events: none` on purpose, so hit-testing
-    // over the mic keeps answering "the mic" now that the glyph is an element
-    // rather than a text node. Deadening the BUTTON is the opposite, and is
-    // what would take the press away — so the two are read together, and the
-    // glyph's own `none` is the control proving the read can see one.
-    for (const viewport of [IPAD, STRIP, PHONE]) {
-      const { mic, glyph } = nav(viewport);
-      expect(mic.pointerEvents, `the mic is deadened at ${viewport.width}px`).not.toBe('none');
-      expect(glyph.pointerEvents).toBe('none');
-    }
-  });
-
-  it('stays a 44px touch target, and a hold rather than a scroll', () => {
-    const base = floatingMic(IPAD).mic;
-    expect(px(base.width)).toBeGreaterThanOrEqual(44);
-    expect(px(base.height)).toBeGreaterThanOrEqual(44);
-    // The hold IS the gesture — a docked mic inside a scrollable rail must not
-    // start a scroll on touchmove.
-    expect(base.touchAction).toBe('none');
-    // Docking must not shrink it, at any of the three layouts.
-    for (const viewport of [IPAD, STRIP, PHONE]) {
-      const { mic } = nav(viewport);
-      expect(px(mic.width), `the dock shrank the mic at ${viewport.width}px`).toBe(px(base.width));
-      expect(px(mic.height)).toBe(px(base.height));
-    }
-  });
-
-  it('still fits, whole, in the collapsed rail', () => {
-    // The rail collapses to icons (`board-nav--collapsed`, persisted). The mic is
-    // already icon-only, so it stays exactly where it is — moving it on
-    // collapse would put the one control back to "where did it go". What the
-    // collapse has to buy is room: 44px of button inside the narrowed rail,
-    // border-box, so the rail's border and padding come out of the width.
-    const collapsed = nav(IPAD, 'board-nav board-nav--collapsed');
-    expect(collapsed.nav.boxSizing).toBe('border-box');
-    const inner =
-      px(collapsed.nav.width) -
-      px(collapsed.nav.borderRightWidth) -
-      px(collapsed.nav.paddingLeft) -
-      px(collapsed.nav.paddingRight);
-    expect(inner).toBeGreaterThanOrEqual(px(collapsed.mic.width));
-    // …and it is not hidden with the labels.
-    expect(collapsed.dock.display).not.toBe('none');
   });
 });
 
@@ -360,51 +175,58 @@ describe('the phone gets the mic in the bottom tab bar', () => {
     // z-index is enough, because the detail overlay comes later in the shell
     // markup. (What must NOT be covered is the mic — see the describe below,
     // where the overlay is kept off the bar's row entirely.)
-    const bar = z(nav(PHONE).nav.zIndex);
-    expect(bar, 'the bar lost its layer').not.toBeNaN();
-    expect(bar).toBeLessThanOrEqual(z(overlays(PHONE).detail.zIndex));
-    // And the docked mic carries no layer of its own — it rides the dock's.
-    expect(nav(PHONE).mic.zIndex).toBe('auto');
+    for (const viewport of [STRIP, PHONE]) {
+      const bar = z(nav(viewport).nav.zIndex);
+      expect(bar, `the bar lost its layer at ${viewport.width}px`).not.toBeNaN();
+      expect(bar).toBeLessThanOrEqual(z(overlays(viewport).detail.zIndex));
+      expect(bar).toBeLessThanOrEqual(z(overlays(viewport).settings.zIndex));
+    }
   });
 });
 
 /**
- * The 901–1100px band — the third thing, and the one the dock was never given.
+ * The 901–1100px band is the bottom bar too (Bryan, 31 Oct: "Just put it at
+ * the bottom").
  *
- * ≤1100px turns the rail into a horizontal strip and ≤900px pins that strip to
- * the bottom as a fixed bar. Between them the strip is neither: it sat at the
- * top of the content IN FLOW, so it scrolled away and took the mic with it.
- * Measured at 1000x800 on a 70-row board: the mic was at y=54 at the top and
- * y=-2271 at the bottom, and `elementFromPoint` over it returned nothing at
- * every scroll position past the first screen. A docked mic that is off the
- * screen keeps none of docking's promise — "a fixed location" is a location
- * you can still reach.
+ * It used to be a third layout: a strip pinned to the TOP of the content with
+ * `position: sticky`, between the rail above 1100 and the phone's fixed bar
+ * under 900. Now one block, ≤1100px, makes the nav a fixed bar along the foot
+ * of the screen, so the iPad-in-portrait and laptop-window widths get the bar
+ * a phone gets.
  */
-describe('the strip band keeps the mic on screen', () => {
-  it('pins the strip to the top of the scrollport', () => {
-    const strip = nav(STRIP).nav;
-    expect(strip.position).toBe('sticky');
-    expect(strip.top).toBe('0px');
-    // Positive control: the BASE rail rule is where this is absent, so the
-    // band is really what introduces it rather than the file having always
-    // said so.
+describe('at or under 1100px the nav is the bottom bar', () => {
+  it('fixes the nav to the bottom edge, at 1000 as at 430', () => {
+    for (const viewport of [STRIP, PHONE]) {
+      const bar = nav(viewport).nav;
+      expect(bar.position, `at ${viewport.width}px`).toBe('fixed');
+      expect(bar.top, `at ${viewport.width}px`).toBe('auto');
+      expect(bar.bottom, `at ${viewport.width}px`).toBe('0px');
+      // Opaque, or the page shows through the bar it scrolls under.
+      expect(bar.backgroundColor).toBe(token('--bg-panel'));
+    }
+    // Positive control: the rail above 1100 is not fixed.
     expect(nav(IPAD).nav.position).toBe('');
   });
 
-  it('gives the strip a containing block its sticky can travel in', () => {
-    // A grid item's containing block is its GRID AREA — the strip's own 57px
-    // row — so a sticky strip has nowhere to go by the spec. Chromium sticks
-    // it against the grid CONTAINER regardless; that is an engine reading an
-    // under-specified corner, and this band's reviewer is on Safari. A flex
-    // column makes `.board-main`'s content box the containing block, where the
-    // travel is defined.
+  it('lays the tabs out as icon over label, sharing the bar evenly', () => {
+    for (const viewport of [STRIP, PHONE]) {
+      const { item } = nav(viewport);
+      expect(item.flexDirection, `at ${viewport.width}px`).toBe('column');
+      expect(item.flexGrow, `at ${viewport.width}px`).toBe('1');
+    }
+    // Positive control: the rail's items are rows.
+    expect(nav(IPAD).item.flexDirection).not.toBe('column');
+  });
+
+  it('keeps the board in one column once the nav has left the flow', () => {
+    // A fixed nav leaves its grid track empty, and auto-placement would put
+    // the board into the rail's narrow track. A flex column has no tracks.
     setViewport(STRIP);
     const banded = styleOf(attach('board-main'));
     expect(banded.display).toBe('flex');
     expect(banded.flexDirection).toBe('column');
-    // `align-items: start` on the base rule means block-start in a grid and
-    // SHRINK-TO-FIT in a column flex container — the board would narrow to its
-    // own content instead of the page. The undo has to be written.
+    // `align-items: start` on the base rule would shrink the board to its own
+    // content in a column flex container; the undo has to be written.
     expect(banded.alignItems).toBe('stretch');
     // Positive control: the base layout really is the grid this overrides.
     setViewport(IPAD);
@@ -413,35 +235,36 @@ describe('the strip band keeps the mic on screen', () => {
     expect(base.alignItems).toBe('start');
   });
 
-  it('paints over the rows it is pinned above, and under the task panel', () => {
-    // A pinned bar with no layer is a bar the board scrolls THROUGH: rows
-    // carry absolutely positioned marks (`.board-status-select` is `inset: -6px`
-    // over its mark) and a positioned box later in tree order beats a
-    // positioned box with no layer. Measured at `z-index: auto`, the topmost
-    // element at the mic's centre came back `select.board-status-select` at
-    // three of five scroll positions — visible mic, stolen click.
-    const strip = nav(STRIP).nav;
-    expect(z(strip.zIndex), 'the pinned strip has no layer').not.toBeNaN();
-    // …and under the overlay, which is what keeps the deliberate loss below
-    // (`.board-nav-dock`'s own note) true: settings still covers the strip.
-    const over = overlays(STRIP);
-    expect(z(strip.zIndex)).toBeLessThan(z(over.detail.zIndex));
-    expect(z(strip.zIndex)).toBeLessThan(z(over.settings.zIndex));
-    // Opaque, or the page shows through the thing it is scrolling under.
-    expect(strip.backgroundColor).toBe(token('--bg'));
+  it('publishes the bar’s height, and the board’s tail clears it, at 1000 as at 430', () => {
+    document.body.className = 'board-body';
+    for (const viewport of [STRIP, PHONE]) {
+      setViewport(viewport);
+      const barHeight = token('--board-bottom-bar', document.body);
+      expect(px(barHeight), `at ${viewport.width}px`).toBeGreaterThan(0);
+      expect(styleOf(attach('', { attrs: { id: 'board-root' } })).paddingBottom).toContain(
+        barHeight,
+      );
+    }
+    // Positive control: above 1100 there is no bar and nothing to clear.
+    setViewport(IPAD);
+    expect(px(token('--board-bottom-bar', document.body))).toBe(0);
   });
+});
 
-  it('does not follow the strip onto the phone, where the bar is at the bottom', () => {
-    // Same specificity, so SOURCE ORDER is the whole guarantee: the ≤900 block
-    // has to restate every offset the sticky strip sets, and has to sit below
-    // it in the file. Reading the computed values at 430px is what proves the
-    // order held — a ≤900 block written above the ≤1100 one would leave the
-    // sticky offsets standing here.
-    const bar = nav(PHONE).nav;
-    expect(bar.position).toBe('fixed');
-    expect(bar.top).toBe('auto');
-    expect(bar.bottom).toBe('0px');
-    expect(bar.backgroundColor).toBe(token('--bg-panel'));
+describe('what sits at the foot of the screen clears the bar', () => {
+  it('lifts the toast above the bar at 1000 as at 430', () => {
+    document.body.className = 'board-body';
+    for (const viewport of [STRIP, PHONE]) {
+      setViewport(viewport);
+      const barHeight = token('--board-bottom-bar', document.body);
+      expect(px(barHeight), `at ${viewport.width}px`).toBeGreaterThan(0);
+      expect(styleOf(attach('board-toast')).bottom, `at ${viewport.width}px`).toContain(barHeight);
+    }
+    // Positive control: above 1100 the bar's height is 0, so the toast's
+    // lift is too. (The voice-connect sheet's `dvh` calc is dropped whole by
+    // happy-dom, so this file cannot read it.)
+    setViewport(IPAD);
+    expect(px(token('--board-bottom-bar', document.body))).toBe(0);
   });
 });
 
@@ -495,21 +318,7 @@ describe('the task detail never lands on top of the docked mic', () => {
   });
 });
 
-describe('the indicator follows the mic', () => {
-  it('anchors the board indicator to the dock rather than to the viewport corner', () => {
-    // `.voice-indicator` rode directly above a mic pinned at the viewport's
-    // bottom-left. On a centred 1500px board the rail's foot is nowhere near
-    // that corner, so a viewport-anchored indicator would point at the page
-    // gutter. Anchoring it to the dock makes it follow the mic at every width.
-    const { indicator, dock } = nav(IPAD);
-    expect(indicator.position).toBe('absolute');
-    expect(indicator.bottom).toContain('100%');
-    // The dock is the containing block it resolves against.
-    expect(dock.position).toBe('sticky');
-    // Positive control: undocked, the same class is anchored to the viewport.
-    expect(floatingMic(IPAD).indicator.position).toBe('fixed');
-  });
-
+describe('the nav does not clip what hangs off it', () => {
   it('is not clipped by the nav it now hangs off', () => {
     // The indicator is up to 840px wide and overflows a 170px rail by design.
     // An `overflow-x` on the nav would clip it — and would also make the nav a

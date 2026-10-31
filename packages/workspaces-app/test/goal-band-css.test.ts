@@ -57,7 +57,7 @@ const PROPS = [
   'padding-left',
   'grid-template-columns',
   'white-space',
-  '-webkit-line-clamp',
+  'line-clamp',
   'color',
   'font-size',
   'background-color',
@@ -152,7 +152,9 @@ describe('the goal band stylesheet', () => {
     const phone = band(PHONE).goalTitle;
     expect(wide['white-space']).toBe('nowrap'); // control: one ellipsized line
     expect(phone['white-space']).toBe('normal');
-    expect(phone['-webkit-line-clamp']).toBe('2');
+    // happy-dom drops the prefixed property, so the standard one beside it is
+    // what can be read here.
+    expect(phone['line-clamp']).toBe('2');
   });
 
   // The done note is the hover-free half of a done band's treatment, and it

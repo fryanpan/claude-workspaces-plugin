@@ -2,11 +2,14 @@
  * The UserPromptSubmit hook's classifier and post: a prompt is typed unless
  * it starts with a wrapper the harness injects. A typed prompt's mark carries
  * its text, reduced like a turn note; an injected or headless one carries
- * none.
+ * none, except a board channel event, which carries one reduced line for the
+ * lead chat.
  */
 import { describe, expect, it } from 'vitest';
 import {
+  CHANNEL_TEXT_CAP,
   PROMPT_TEXT_CAP,
+  channelLine,
   decidePromptMark,
   isHeadless,
   isTypedPrompt,
@@ -65,10 +68,22 @@ describe('the mark', () => {
 
   it('carries no text for an injected prompt, nor for a headless run', () => {
     const injected = decidePromptMark(
-      { prompt: '<channel source="x">Move berth 4</channel>' },
+      { prompt: '<system-reminder>Move berth 4</system-reminder>' },
       { agent: 'Harborlight lead', now: 5 },
     );
     expect(injected).toEqual({ post: { agent: 'Harborlight lead', typed: false, at: 5 } });
+    const channel = decidePromptMark(
+      { prompt: '<channel source="x">Move berth 4</channel>' },
+      { agent: 'Harborlight lead', now: 5 },
+    );
+    expect(channel).toEqual({
+      post: {
+        agent: 'Harborlight lead',
+        typed: false,
+        channel: { text: 'Move berth 4', author: 'x' },
+        at: 5,
+      },
+    });
     const headless = decidePromptMark(
       { prompt: SECRET },
       { agent: 'Harborlight lead', now: 5, headless: true },
@@ -283,5 +298,36 @@ describe('what the harness delivers into a turn', () => {
     expect(typedOf(SECRET)).toBe(true);
     expect(typedOf('Why did the <agent-message from="x"> count as typed?')).toBe(true);
     expect(typedOf('Quote <teammate-message> and <channel> in the doc')).toBe(true);
+  });
+});
+
+describe('a channel event’s line, for the lead chat', () => {
+  it('names who caused it, keeps its words and finds the queue row it delivered', () => {
+    const prompt =
+      '<channel source="claude-workspaces" workspace_id="w-harbor" event="voice.request" author="Alice">' +
+      '[voice.request] by Alice: "Is berth 4 free?" — Answer with answer_voice(workspaceId="w-harbor", queueId="vq_9fZ-2", text)' +
+      '</channel>';
+    expect(channelLine(prompt)).toEqual({
+      text: expect.stringContaining('Is berth 4 free?'),
+      author: 'Alice',
+      queueId: 'vq_9fZ-2',
+    });
+  });
+
+  it('falls back to the source, reduces a secret and caps the words', () => {
+    const line = channelLine(
+      `<channel source="github">token ghp_${'A'.repeat(36)} and ${'word '.repeat(400)}</channel>`,
+    );
+    expect(line?.author).toBe('github');
+    expect(line?.text).not.toContain('ghp_');
+    expect(line?.text.length).toBeLessThanOrEqual(CHANNEL_TEXT_CAP);
+    expect(line?.queueId).toBeUndefined();
+  });
+
+  it('has no line for any other prompt, nor for a channel with no words', () => {
+    expect(channelLine(SECRET)).toBeUndefined();
+    expect(channelLine('<system-reminder>x</system-reminder>')).toBeUndefined();
+    expect(channelLine('<channel source="x">   </channel>')).toBeUndefined();
+    expect(channelLine(42)).toBeUndefined();
   });
 });

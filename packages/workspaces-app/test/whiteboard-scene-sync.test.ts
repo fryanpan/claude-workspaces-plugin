@@ -94,6 +94,6 @@ describe('presence', () => {
     const names = presenceNames(states, 3);
     expect(names).toEqual(['Bryan', 'Riverbend', 'Harborlight']);
     expect(presenceLine(names)).toBe('Live · you and Bryan, Riverbend, Harborlight');
-    expect(presenceLine([])).toBe('Live · just you');
+    expect(presenceLine([])).toBe('Live');
   });
 });

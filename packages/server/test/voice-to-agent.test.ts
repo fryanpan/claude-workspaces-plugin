@@ -133,7 +133,10 @@ describe('a voice conversation with a named agent', () => {
     const page = await connect();
     const other = await connect();
     const reply = await say(page.ws, page.frames, 'riverbend-helper', 'how far is Saltmarsh');
-    expect(reply?.spoken).toBe('Sent to Riverbend Helper.');
+    // Nothing is said or shown for a turn that reached the agent: the turn is
+    // the message, and the agent's answer is the reply.
+    expect(reply?.spoken).toBe('');
+    expect(reply?.detail).toEqual([]);
 
     await waitFor(() => helper.voice.length === 1, { describe: 'helper got the turn' });
     const turn = helper.voice[0];
@@ -159,6 +162,9 @@ describe('a voice conversation with a named agent', () => {
     expect(page.frames.find((f) => f.route === LEAD_ANSWER_ROUTE)?.spoken).toBe(words);
     await waitFor(() => said.slice(-2).join(' ') === words, { describe: 'voice said it' });
     expect(other.frames.some((f) => f.route === LEAD_ANSWER_ROUTE)).toBe(false);
+    // Nothing on the page, in words or in voice, ever said where it was sent.
+    expect(JSON.stringify(page.frames)).not.toContain('Sent to');
+    expect(said.join(' ')).not.toContain('Sent to');
 
     // The next turn carries the conversation so far, under the same id.
     await say(page.ws, page.frames, 'riverbend-helper', 'and the return trip');

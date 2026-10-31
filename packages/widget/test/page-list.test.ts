@@ -1,3 +1,4 @@
+import { getThreads, markOrphan, setStatus } from '@claude-workspaces/core';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
@@ -117,5 +118,55 @@ describe('the page list', () => {
     renderThreadsInto(el);
     expect(rows(el, 'nospot')).toEqual(['t-new']);
     expect(rows(el, 'page')).toEqual(['t-view', 't-old']);
+  });
+});
+
+describe('the open count', () => {
+  /** The page's four threads, three of them resolved: one where its element
+   *  stands, one whose element a later round took away, one orphaned. Read on
+   *  a second visit, so each counts as new until opened. */
+  function resolvedMostly(): { el: FeedbackWidgetEl; ydoc: Y.Doc } {
+    localStorage.setItem('cfw:seen:', '{}');
+    const ydoc = new Y.Doc();
+    thread(ydoc, 't-open', on('h', `${PAGE}?all=1`), T0, 'Still open');
+    thread(ydoc, 't-done', on('h', `${PAGE}?all=1`), T0 + 1000, 'Resolved, spot stands');
+    thread(ydoc, 't-gone', on('p', `${PAGE}?all=1`), T0 + 2000, 'Resolved, spot gone');
+    thread(ydoc, 't-orphan', on('h', `${PAGE}?all=1`), T0 + 3000, 'Resolved, orphaned');
+    markOrphan(ydoc, 't-orphan');
+    for (const id of ['t-done', 't-gone', 't-orphan']) setStatus(ydoc, id, 'resolved');
+    byId('p').remove();
+    const el = widgetAt(ydoc, `${PAGE}?all=1`);
+    // Bob reads Alice's threads; a reader's own threads are never new.
+    el.user = { id: 'u-bob', name: 'Bob', kind: 'known', color: '#1a7f37' };
+    // The header the count is written into, as the widget's panel has it.
+    el.shadow.innerHTML =
+      '<div class="panel"><div class="panel-header"><span class="title"></span></div><div class="panel-threads"></div></div>';
+    el.scheduleRender = () => renderThreadsInto(el);
+    // The widget re-renders on any change to the doc's threads (`widget.ts`).
+    getThreads(ydoc).observeDeep(() => el.scheduleRender());
+    mountPageList(el);
+    return { el, ydoc };
+  }
+  const sub = (el: FeedbackWidgetEl) => el.shadow.querySelector('.cw-sub')?.textContent;
+  const chip = (el: FeedbackWidgetEl) => el.shadow.querySelector('.cw-pchip .n')?.textContent;
+
+  afterEach(() => localStorage.clear());
+
+  it('leaves out resolved threads, whether or not they still have a spot', () => {
+    const { el } = resolvedMostly();
+    expect(sub(el)).toBe('1 open on 1 page');
+    expect(chip(el)).toBe('1 open');
+    expect(rows(el, 'new')).toEqual(['t-open']);
+    expect(rows(el, 'nospot')).toEqual([]);
+  });
+
+  it('follows a resolve and a reopen made elsewhere, without a reload', () => {
+    const { el, ydoc } = resolvedMostly();
+    setStatus(ydoc, 't-open', 'resolved');
+    expect(sub(el)).toBe('');
+    expect(rows(el, 'new')).toEqual([]);
+    setStatus(ydoc, 't-gone', 'open');
+    expect(sub(el)).toBe('1 open on 1 page');
+    expect(rows(el, 'new')).toEqual(['t-gone']);
   });
 });

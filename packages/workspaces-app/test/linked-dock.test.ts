@@ -121,7 +121,7 @@ describe('the doc dock', () => {
     expect(dockHeight()).toBe('');
   });
 
-  it("makes the ask's inline links tappable, and leaves any other scheme as text", async () => {
+  it("makes the ask's inline links tappable as the Home card does, and leaves javascript: as text", async () => {
     const detail =
       'Compare the [tide notes](/workspaces/w-harbor/docs/d-tide) with the ' +
       '[harbour table](https://example.org/tides), not [this](javascript:alert) ' +
@@ -136,25 +136,45 @@ describe('the doc dock', () => {
       target: a.getAttribute('target'),
       rel: a.getAttribute('rel'),
     }));
+    // The card's renderer (`renderCommentMarkdown`) and its link rules: every
+    // link opens in a new tab, and a protocol-relative address is an outside
+    // link like any other http one.
+    const outside = { target: '_blank', rel: 'noopener noreferrer' };
     expect(links).toEqual([
       {
         text: 'tide notes',
-        href: '/workspaces/w-harbor/docs/d-tide',
-        target: '_top',
-        rel: null,
+        href: `${location.origin}/workspaces/w-harbor/docs/d-tide`,
+        ...outside,
       },
-      {
-        text: 'harbour table',
-        href: 'https://example.org/tides',
-        target: '_blank',
-        rel: 'noopener noreferrer',
-      },
+      { text: 'harbour table', href: 'https://example.org/tides', ...outside },
+      { text: 'that', href: `${location.protocol}//example.net/x`, ...outside },
     ]);
-    // The refused two read exactly as written, and the link words read as prose.
+    // The refused one reads exactly as written, and the link words read as prose.
     expect(body?.textContent).toBe(
-      'Compare the tide notes with the harbour table, not [this](javascript:alert) ' +
-        'or [that](//example.net/x).',
+      'Compare the tide notes with the harbour table, not [this](javascript:alert) or that.',
     );
+  });
+
+  it("renders the round's markdown as the Home card does: bold, a numbered list, a link", async () => {
+    const detail =
+      'The **north pier** window needs a decision.\n\n' +
+      '1. **Ten minutes.** Matches the [tide notes](/workspaces/w-harbor/docs/d-tide).\n' +
+      '2. **Fifteen minutes.** Gives the crew room.';
+    mount({ meta: {}, linkedItems: [{ ...LINKED, review: { ...ASK, detail } }] });
+    await vi.waitFor(() => expect(bar()).not.toBeNull());
+    bar()?.click();
+    const body = shadow()?.querySelector<HTMLElement>('.cw-round-body');
+    expect(body?.querySelector('p strong')?.textContent).toBe('north pier');
+    const items = Array.from(body?.querySelectorAll('ol > li') ?? []);
+    expect(items.map((li) => li.querySelector('strong')?.textContent)).toEqual([
+      'Ten minutes.',
+      'Fifteen minutes.',
+    ]);
+    const link = items[0]?.querySelector('a');
+    expect(link?.textContent).toBe('tide notes');
+    expect(link?.getAttribute('href')).toContain('/workspaces/w-harbor/docs/d-tide');
+    // Nothing of the markup is left for the reader to read past.
+    expect(body?.textContent).not.toMatch(/\*\*|\]\(|^\s*1\./m);
   });
 
   it('keeps the bar and the sheet, and says so, when the server refuses the answer', async () => {

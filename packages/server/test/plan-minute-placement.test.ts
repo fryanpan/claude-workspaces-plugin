@@ -207,14 +207,14 @@ describe('a minute in a planning meeting', () => {
         .filter((b) => b.kind !== 'heading' && b.underHeadingId === headingId(heading))
         .map((b) => b.text);
     const fromLead = () => replies().filter((f) => f.route === LEAD_ANSWER_ROUTE).length;
-    /** The owner asks, the lead takes it ("On it.") and answers with `minute`. */
+    /** The owner asks, the lead takes it (nothing said) and answers with `minute`. */
     const askAndAnswer = async (ask: string, minute: string) => {
       const before = replies().length;
       const said = fromLead();
       listen();
       speak(ask);
-      await waitFor(() => replies().length > before, { describe: `On it: ${ask}` });
-      expect(replies()[before]?.spoken).toBe('On it.');
+      await waitFor(() => replies().length > before, { describe: `taken: ${ask}` });
+      expect(replies()[before]?.spoken).toBe('');
       const queueId = handle.tasks.listQueuedVoice(boardId).at(-1)?.id ?? '';
       expect(queueId).not.toBe('');
       listen();

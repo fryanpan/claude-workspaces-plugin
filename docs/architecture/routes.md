@@ -168,6 +168,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/activity` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/agents` | GET | `routes/workspace-attachments.ts` | share-scope |  |
 | `/workspaces/:ws/agents` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
+| `/workspaces/:ws/agents/:agent/mirror` | POST | `routes/lead-mirror.ts` | trusted-local |  |
 | `/workspaces/:ws/agents/:agent/notes` | GET, POST | `routes/dispatch-and-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/agents/:agent/prompts` | POST | `routes/prompt-marks.ts` | trusted-local |  |
 | `/workspaces/:ws/agents/:agentId` | DELETE | `routes/workspace-attachments.ts` | trusted-local |  |
@@ -336,7 +337,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer/undo` | POST | `routes/task-review-answer-undo.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/grant` | POST | `routes/task-grants.ts` | trusted-local |  |
-| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info` | POST | `routes/task-review-items.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info` | POST | `routes/task-review-ask-back.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/release` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets` | POST | `routes/task-review-items.ts` | trusted-local |  |

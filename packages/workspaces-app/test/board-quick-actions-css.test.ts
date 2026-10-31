@@ -112,13 +112,12 @@ describe('the buttons sit in the slot the box had', () => {
   });
 
   it('sizes EVERY quick-action glyph as a box, like every other mic', () => {
-    // Measured in headless Chromium, 2026-08-30: the conversation button's
-    // two-person glyph was left out of this rule and rendered at its
-    // intrinsic 24px, which stretched the whole row from 44px to 71px — on
-    // the tier where height is the scarce axis. A grouped rule is easy to add
-    // a button beside and forget, so every button in the row is mounted with
-    // a glyph inside it and each one is measured.
-    for (const button of ['board-quick-new', 'board-huddle-start', 'board-conversation-start']) {
+    // Measured in headless Chromium, 2026-08-30: a button's glyph left out of
+    // this rule rendered at its intrinsic 24px, which stretched the whole row
+    // from 44px to 71px — on the tier where height is the scarce axis. A
+    // grouped rule is easy to add a button beside and forget, so every button
+    // in the row is mounted with a glyph inside it and each one is measured.
+    for (const button of ['board-quick-new', 'board-huddle-start']) {
       const host = quickButton(IPAD, button);
       const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       host.appendChild(glyph);

@@ -181,13 +181,13 @@ describe('SpokenSession, setups 1 and 2', () => {
     expect(l.closes).toBe(1);
   });
 
-  it('tap: the end of speech, at most 500 ms after the last word, sends the question on without waiting for the flush', async () => {
+  it('tap: the end of speech, at most 1 s after the last word, sends the question on without waiting for the flush', async () => {
     const l = fakeListener({ stuckClose: true });
     const v = fakeVoice();
     const h = harness({ listener: l.engine, voices: { 1: v.voice, 2: null } });
     h.send({ type: 'start', setup: 1, mode: 'tap' });
     await waitFor(() => l.opened.length === 1);
-    expect(l.opened[0]?.tuning).toEqual({ max_endpoint_delay_ms: 500 });
+    expect(l.opened[0]?.tuning).toEqual({ max_endpoint_delay_ms: 1000 });
     l.turn('where are we', true);
     // The flush never answers, and the question still reaches the answerer.
     await waitFor(() => h.types().includes('working'), { describe: 'sent to the answerer' });
@@ -345,7 +345,7 @@ describe('SpokenSession, setup 3', () => {
     const h = harness({ gemini: g.live, listener: l.engine });
     h.send({ type: 'start', setup: 3, mode: 'tap' });
     await waitFor(() => l.opened.length === 1 && g.opens.length === 1, { describe: 'both open' });
-    expect(l.opened[0]?.tuning).toEqual({ max_endpoint_delay_ms: 500 });
+    expect(l.opened[0]?.tuning).toEqual({ max_endpoint_delay_ms: 1000 });
     h.session.onAudio(new Uint8Array(1600));
     await waitFor(() => l.audio.length === 1 && g.sent.includes('audio'), {
       describe: 'both hear',

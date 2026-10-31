@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AgentSpots } from '../agent-spots.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
 import type { IdentityRecord } from '../identities.ts';
@@ -116,6 +117,11 @@ export function parseSuggestionAuthor(
 export interface DocRoutesContext {
   /** Doc store — every route here is an operation on one. */
   docStore: DocStore;
+  /** Where an agent points, in its boards' presence rooms. */
+  agentSpots: AgentSpots;
+  /** Whether `path` is under one of `boardId`'s registered roots
+   *  (`board-socket-roots.ts`), for a lead's rewrite of a bound doc. */
+  leadWritable: (boardId: string, path: string) => boolean;
   /** The board task store — doc↔board membership, and the rows a doc carries. */
   taskStore: TaskStore;
   /** The ydoc projection of the store, refreshed after writes that emit no
@@ -166,7 +172,7 @@ export interface DocRoutesContext {
    * the ticket items that link it, and the run-output items still waiting on
    * the file, each marked as one the reader can mark read.
    */
-  pageOpened: (workspaceId: string, docId: string) => LinkedDockItem[];
+  pageOpened: (workspaceId: string, docId: string, owner: boolean) => LinkedDockItem[];
   /** Decorate a doc's meta with its review URL. `precomputedHome` is the
    *  doc's board when a listing already resolved it off a shared index;
    *  `null` is a real answer (no board), `undefined` means "not supplied". */
@@ -306,6 +312,9 @@ export interface DocRouteRequest {
    *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
    *  or null/absent when neither did. */
   boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
+  /** The board this request is that board's lead on (the admission gate's
+   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
+  leadBoard?: string | null;
   /** The identity Access or the session cookie proved, or null — never a
    *  body's claim or an agent token. Read with `requestOriginFor` for owner
    *  proof (`share/owner-proof.ts`). Optional so a caller that does not pass

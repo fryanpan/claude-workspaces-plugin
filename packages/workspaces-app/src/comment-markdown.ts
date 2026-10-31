@@ -7,8 +7,10 @@
  * There is no raw-HTML passthrough, so a comment containing `<script>` is inert.
  *
  * Supported: **bold**, *italic* / _italic_, `code`, ~~strike~~,
- * [label](url) (http/https/mailto only), `-`/`*` bullet lists, `#` headings,
- * ``` / ~~~ fenced code (literal, escaped, no marks inside), and line breaks.
+ * [label](url) (http/https/mailto only), `-`/`*` bullet lists, `1.` numbered
+ * lists (keeping the number they start from), `#` headings,
+ * ``` / ~~~ fenced code (literal, escaped, no marks inside), `|` pipe tables
+ * under a `|---|` row, and line breaks.
  *
  * Plus one convenience: a BARE workspace URL (a pasted board / task / doc /
  * mockup address — see `parseWorkspaceLink` in @claude-workspaces/core) becomes a link
@@ -17,7 +19,8 @@
  * or goal. Display-only: the stored comment keeps the raw URL. An explicit
  * [label](url) keeps the author's text but a workspace target still earns the
  * chip (`data-ws-custom` is how hydration knows not to touch the words); and
- * non-workspace URLs stay plain text.
+ * non-workspace URLs stay plain text — unless the caller passes `bareLinks`,
+ * as the lead chat does, whose agent pastes PR and CI links bare.
  */
 import { parseWorkspaceLink } from '@claude-workspaces/core';
 import {
@@ -53,9 +56,14 @@ function safeHref(url: string): string | null {
   return null;
 }
 
+export interface CommentMarkdownOpts {
+  /** Link a bare http(s) URL that is not a workspace one, too. */
+  bareLinks?: boolean;
+}
+
 /** Inline marks on an ALREADY-escaped string. Order matters: code first so
  *  its contents aren't re-marked, links last so labels can carry marks. */
-function inline(escaped: string): string {
+function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
   let out = escaped;
   out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -81,7 +89,7 @@ function inline(escaped: string): string {
       `${status === undefined ? ' data-ws-pending=""' : ''}`;
     return `<a ${attrs}>${label}${status ? statusChipHtml(status) : ''}</a>`;
   });
-  out = linkifyWorkspaceUrls(out);
+  out = linkifyWorkspaceUrls(out, opts.bareLinks === true);
   return out;
 }
 
@@ -143,7 +151,7 @@ function trimUrlTail(s: string): string {
  * present were all emitted by this module, so the split is over known-safe
  * markup, and the text segments are still escape-first.
  */
-function linkifyWorkspaceUrls(html: string): string {
+function linkifyWorkspaceUrls(html: string, bareLinks: boolean): string {
   if (!/https?:\/\/|\/workspaces\//.test(html)) return html;
   let anchorDepth = 0;
   let codeDepth = 0;
@@ -162,7 +170,11 @@ function linkifyWorkspaceUrls(html: string): string {
       const tail = m.slice(trimmed.length);
       // The segment is escaped text; the URL itself needs `&` back to parse.
       const url = trimmed.replace(/&amp;/g, '&');
-      if (!isSameOriginWorkspaceUrl(url) || !parseWorkspaceLink(url)) return m;
+      if (!isSameOriginWorkspaceUrl(url) || !parseWorkspaceLink(url)) {
+        const href = bareLinks && /^https?:\/\//.test(url) ? safeHref(url) : null;
+        if (!href) return m;
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${trimmed}</a>${tail}`;
+      }
       const title = cachedLinkTitle(url);
       const status = cachedLinkStatus(url);
       if (title === undefined) sawPending = true;
@@ -204,10 +216,57 @@ function absorbHardBreaks(text: string): string {
  *  block's lines are literal — no prose rule runs on them — and escaped. */
 const FENCE_LINE = /^\s{0,3}(```|~~~)/;
 
-export function renderCommentMarkdown(text: string): string {
+/** A table's second line: `|---|:--:|`, at least one dash per cell. */
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** One pipe-table row's cells. A pipe inside backticks or after a backslash
+ *  is the cell's text, not a column break. */
+function tableCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let code = false;
+  const body = line.trim().replace(/^\|/, '');
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === '\\' && body[i + 1] === '|') {
+      cell += '|';
+      i++;
+    } else if (ch === '`') {
+      code = !code;
+      cell += ch;
+    } else if (ch === '|' && !code) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell.trim() !== '') cells.push(cell.trim());
+  return cells;
+}
+
+/** A pipe table: its header row, then every row until a line with no pipe. */
+function renderTable(rows: string[], opts: CommentMarkdownOpts): string {
+  const [head = '', ...body] = rows;
+  const cols = tableCells(head).length;
+  const row = (line: string, tag: 'th' | 'td') => {
+    const cells = tableCells(line);
+    let out = '';
+    for (let c = 0; c < cols; c++) {
+      out += `<${tag}>${inline(escapeHtml(cells[c] ?? ''), opts)}</${tag}>`;
+    }
+    return `<tr>${out}</tr>`;
+  };
+  return (
+    `<div class="cm-table-wrap"><table class="cm-table"><thead>${row(head, 'th')}</thead>` +
+    `<tbody>${body.map((l) => row(l, 'td')).join('')}</tbody></table></div>`
+  );
+}
+
+export function renderCommentMarkdown(text: string, opts: CommentMarkdownOpts = {}): string {
   const lines = absorbHardBreaks(text).replace(/\r\n/g, '\n').split('\n');
   const html: string[] = [];
-  let listOpen = false;
+  let list: 'ul' | 'ol' | null = null;
   let para: string[] = [];
   let fence: string[] | null = null;
   const flushPara = () => {
@@ -217,9 +276,9 @@ export function renderCommentMarkdown(text: string): string {
     }
   };
   const closeList = () => {
-    if (listOpen) {
-      html.push('</ul>');
-      listOpen = false;
+    if (list) {
+      html.push(`</${list}>`);
+      list = null;
     }
   };
   const closeFence = () => {
@@ -228,7 +287,8 @@ export function renderCommentMarkdown(text: string): string {
       fence = null;
     }
   };
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
     // Fenced code: a turn note is an end-of-turn message, and those carry
     // test output and diffs whose `#` and `-` lines are not headings and
     // bullets. An unterminated fence runs to the end.
@@ -250,26 +310,48 @@ export function renderCommentMarkdown(text: string): string {
     // it was rendered into — a decision body's `## Question` is a section of
     // the card, never a peer of the card's own heading. A space after the
     // hashes is required, so `#4` stays an issue number.
+    // A pipe table: a row with a pipe, then the dashed rule under it.
+    const rule = lines[i + 1] ?? '';
+    if (line.includes('|') && rule.includes('|') && TABLE_RULE.test(rule)) {
+      flushPara();
+      closeList();
+      const rows = [line];
+      i += 2;
+      while (i < lines.length && (lines[i] ?? '').includes('|') && (lines[i] ?? '').trim()) {
+        rows.push(lines[i] ?? '');
+        i++;
+      }
+      i--;
+      html.push(renderTable(rows, opts));
+      continue;
+    }
     const head = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const numbered = bullet ? null : line.match(/^\s*(\d{1,9})[.)]\s+(.*)$/);
     if (head) {
       flushPara();
       closeList();
       const level = Math.min(6, (head[1] ?? '#').length + 2);
-      html.push(`<h${level} class="cm-h">${inline(escapeHtml(head[2] ?? ''))}</h${level}>`);
-    } else if (bullet) {
+      html.push(`<h${level} class="cm-h">${inline(escapeHtml(head[2] ?? ''), opts)}</h${level}>`);
+    } else if (bullet || numbered) {
       flushPara();
-      if (!listOpen) {
-        html.push('<ul class="cm-list">');
-        listOpen = true;
+      const tag = bullet ? 'ul' : 'ol';
+      if (list !== tag) {
+        closeList();
+        // A list that starts past 1 keeps its number, so an item split from
+        // its list by a paragraph does not read as a second item one.
+        const start =
+          numbered && Number(numbered[1]) !== 1 ? ` start="${Number(numbered[1])}"` : '';
+        html.push(`<${tag} class="cm-list"${start}>`);
+        list = tag;
       }
-      html.push(`<li>${inline(escapeHtml(bullet[1] ?? ''))}</li>`);
+      html.push(`<li>${inline(escapeHtml((bullet ? bullet[1] : numbered?.[2]) ?? ''), opts)}</li>`);
     } else if (line.trim() === '') {
       flushPara();
       closeList();
     } else {
       closeList();
-      para.push(inline(escapeHtml(line)));
+      para.push(inline(escapeHtml(line), opts));
     }
   }
   closeFence();

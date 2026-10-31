@@ -7,17 +7,22 @@
  * frames, so a reconnect reads the conversation again — the frames are
  * transient (`lead-chat/lead-chat.ts` on the server) and a gap is never
  * replayed.
+ *
+ * The first read holds the latest page; `loadOlder` pages back from the
+ * oldest message shown until the server says there is nothing before it.
  */
 import {
   LEAD_CHAT_EVENT,
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
   type LeadChatFrame,
+  type LeadChatHistoryPage,
   type LeadChatMeeting,
   type LeadChatMeetingFrame,
   type LeadChatMeetingLineFrame,
   type LeadChatMessage,
   type LeadChatRead,
+  compareLeadChatEntries,
   upsertLeadChatMessage,
   upsertMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
@@ -39,6 +44,10 @@ export interface LeadChatState extends LeadChatRead {
   /** The board's meeting, live on every page (`lead-chat/meeting.ts` on the
    *  server), or null. */
   meeting: LeadChatMeeting | null;
+  /** Messages older than the first one held exist on the server. */
+  more: boolean;
+  /** A page back is on its way. */
+  loadingOlder: boolean;
 }
 
 export type MeetingAnswer =
@@ -59,6 +68,10 @@ export interface LeadChatClient {
   ): Promise<SendResult>;
   /** One verb on the board's meeting (`start`, `recording`, `line`, `join`,
    *  `end`); a meeting it answers with is applied before this resolves. */
+  /** Read the page of messages before the oldest one held, when there is
+   *  one and no read for it is already out. After a read that failed, only
+   *  a call with `retry` asks again — a scroll, never a redraw. */
+  loadOlder(opts?: { retry?: boolean }): Promise<void>;
   meeting(
     action: string,
     author: { id: string; name: string; kind?: string },
@@ -76,6 +89,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     canTalk: false,
     loaded: false,
     meeting: null,
+    more: false,
+    loadingOlder: false,
   };
   const listeners: Array<(s: LeadChatState) => void> = [];
   const changed = (): void => {
@@ -97,7 +112,19 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       for (const m of state.messages) {
         if (!messages.some((x) => x.id === m.id)) messages = upsertLeadChatMessage(messages, m);
       }
-      state = { ...read, messages, meeting: read.meeting ?? null, loaded: true };
+      // Pages already read back stay, and so does what the oldest of them
+      // said about anything before it.
+      const first = read.messages[0];
+      const held = messages[0];
+      const keepsOlder = !!first && !!held && compareLeadChatEntries(held, first) < 0;
+      state = {
+        ...read,
+        messages,
+        meeting: read.meeting ?? null,
+        loaded: true,
+        more: keepsOlder ? state.more : read.more === true,
+        loadingOlder: state.loadingOlder,
+      };
       changed();
     } catch {
       // Offline: the next reconnect reads again.
@@ -146,11 +173,42 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   });
   void load();
 
+  let olderFailed = false;
+  const loadOlder = async (opts: { retry?: boolean } = {}): Promise<void> => {
+    const oldest = state.messages[0];
+    if (!state.more || state.loadingOlder || !oldest) return;
+    if (olderFailed && !opts.retry) return;
+    state = { ...state, loadingOlder: true };
+    changed();
+    let page: LeadChatHistoryPage | null = null;
+    try {
+      const q = `beforeTs=${oldest.ts}&beforeId=${encodeURIComponent(oldest.id)}`;
+      const res = await doFetch(`${base}/lead-chat?${q}`, { credentials: 'same-origin' });
+      if (res.ok) page = (await res.json()) as LeadChatHistoryPage;
+    } catch {
+      // Offline: the next scroll to the top asks again.
+    }
+    olderFailed = page === null;
+    let messages = state.messages;
+    for (const m of page?.messages ?? []) {
+      // A copy already held came by frame, and is the newer one.
+      if (!messages.some((x) => x.id === m.id)) messages = upsertLeadChatMessage(messages, m);
+    }
+    state = {
+      ...state,
+      messages,
+      more: page ? page.more : state.more,
+      loadingOlder: false,
+    };
+    changed();
+  };
+
   return {
     state: () => state,
     onChange: (fn) => {
       listeners.push(fn);
     },
+    loadOlder,
     async send(text, author, context, via) {
       try {
         const res = await doFetch(`${base}/lead-chat`, {

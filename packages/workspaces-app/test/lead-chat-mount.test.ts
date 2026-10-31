@@ -16,7 +16,15 @@ const LEAD = { agentId: 'harborlight-lead', name: 'Harborlight Lead' };
 const ME = { id: 'known-bryan', name: 'Bryan', kind: 'known' };
 
 function fakeClient(canTalk = true) {
-  let state: LeadChatState = { lead: LEAD, messages: [], canTalk, loaded: true, meeting: null };
+  let state: LeadChatState = {
+    lead: LEAD,
+    messages: [],
+    canTalk,
+    loaded: true,
+    meeting: null,
+    more: false,
+    loadingOlder: false,
+  };
   const fns: Array<(s: LeadChatState) => void> = [];
   const sent: Array<{ text: string; via: string; context: unknown }> = [];
   let n = 0;
@@ -29,6 +37,7 @@ function fakeClient(canTalk = true) {
     onChange: (fn) => {
       fns.push(fn);
     },
+    loadOlder: async () => {},
     async send(text, author, context, via) {
       sent.push({ text, via, context });
       const m: LeadChatMessage = {
@@ -61,6 +70,8 @@ afterEach(() => {
   mounted?.destroy();
   mounted = null;
   document.body.innerHTML = '';
+  // The tab remembers an open panel across pages; each case starts closed.
+  sessionStorage.clear();
 });
 
 function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) {
@@ -82,8 +93,8 @@ function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) 
 }
 
 describe('the lead chat on a page', () => {
-  it('Chat first: a tap opens the panel at once with the cursor in the composer', async () => {
-    const { view, sent } = mount();
+  it('Chat first: a tap opens the panel at once with the cursor in the composer, listening', async () => {
+    const { view, sent, voice } = mount();
     expect(view.pane.hidden).toBe(true);
     view.button.click();
     expect(view.pane.hidden).toBe(false);
@@ -105,9 +116,38 @@ describe('the lead chat on a page', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(view.composer.value).toBe('');
     expect(view.list.textContent).toContain('what is left on the signup?');
+    await settle();
+    expect(voice.mic.starts).toBe(1);
+    expect(view.button.dataset.listening).toBe('true');
 
+    // Open, the agent button stops and starts listening and never closes.
     view.button.click();
+    expect(view.pane.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('false');
+    expect(view.button.getAttribute('aria-pressed')).toBe('false');
+    view.button.click();
+    await settle();
+    expect(view.pane.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('true');
+    expect(view.button.getAttribute('aria-pressed')).toBe('true');
+    // Close closes, and stops listening.
+    view.close.click();
     expect(view.pane.hidden).toBe(true);
+    expect(view.button.dataset.listening).toBe('false');
+  });
+
+  it('opens again on the next page of the tab when it was open, and not once it was closed', () => {
+    mount().view.button.click();
+    mounted?.destroy();
+    document.body.innerHTML = '';
+    // The next page in the same tab.
+    const next = mount();
+    expect(next.view.pane.hidden).toBe(false);
+    next.view.close.click();
+    expect(next.view.pane.hidden).toBe(true);
+    mounted?.destroy();
+    document.body.innerHTML = '';
+    expect(mount().view.pane.hidden).toBe(true);
   });
 
   it('shows the lead’s answer in the open panel the moment it arrives', () => {
@@ -156,19 +196,27 @@ describe('the lead chat on a page', () => {
     expect(view.pane.hidden).toBe(false);
     expect(view.bar.hidden).toBe(true);
     expect(voice.mic.stops).toBe(0);
-    expect(view.mic.getAttribute('aria-pressed')).toBe('true');
+    expect(view.button.dataset.listening).toBe('true');
+    // The agent button is the one listen control: its tap stops listening,
+    // and the panel stays open until Close.
+    view.button.click();
+    expect(view.pane.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('false');
+    expect(voice.mic.stops).toBe(1);
   });
 
-  it('the composer mic turns listening on and off in Chat first', async () => {
-    const { view, voice } = mount();
+  it('the chat draws no mic of its own, and names the lead agent plainly', () => {
+    const { view } = mount({ mode: 'voice' });
     view.button.click();
-    view.mic.click();
-    await settle();
-    expect(voice.mic.starts).toBe(1);
-    view.mic.click();
-    expect(voice.mic.stops).toBe(1);
-    expect(voice.socket().closed).toBe(true);
-    expect(view.pane.hidden).toBe(false);
+    view.bar.click();
+    const buttons = [...view.pane.querySelectorAll('button')];
+    const listens = buttons.filter((b) =>
+      /listen|talk|mic/i.test(`${b.getAttribute('aria-label') ?? ''} ${b.title} ${b.className}`),
+    );
+    expect(listens).toEqual([]);
+    expect(view.pane.querySelector('.lc-title h2')?.textContent).toBe('Chat with Lead Agent');
+    expect(view.composer.placeholder).toBe('Message lead agent');
+    expect(view.composer.getAttribute('aria-label')).toBe('Message lead agent');
   });
 
   it('draws no button for a reader who may not talk to the lead', () => {

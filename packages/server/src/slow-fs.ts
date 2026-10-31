@@ -36,7 +36,6 @@
  * consumed on first use, never served twice.
  */
 import type { BigIntStats } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import { GuardRefused, PathGuards, isEnoent, redactBoundPath } from './bound-path-guard.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import { stampOf } from './file-stamp.ts';
@@ -149,8 +148,9 @@ class BoundFileReader {
    */
   readonly guards = new PathGuards();
 
-  /** The poll's stat. A field only so a test can hold one pending. */
-  private statFile = (path: string): Promise<BigIntStats> => stat(path, { bigint: true });
+  /** The poll's stat, from a checked descriptor under a guard. A field only
+   *  so a test can hold one pending. */
+  private statFile = (path: string): Promise<BigIntStats> => this.guards.stat(path);
   /** Just-completed reads, waiting to be consumed by the hydrate that asked. */
   private readonly fresh = new Map<
     string,
@@ -320,6 +320,10 @@ class BoundFileReader {
     const raced = await this.race('stat', path, () => this.statFile(path));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
+      if (raced.err instanceof GuardRefused) {
+        this.noteUnusable(path, raced.err, 'read');
+        return { status: 'unavailable', reason: 'refused' };
+      }
       if (isEnoent(raced.err)) return { status: 'ok', exists: false };
       if (isDataless(raced.err)) {
         this.noteUnusable(path, raced.err, 'read');
@@ -357,7 +361,7 @@ class BoundFileReader {
 
   /** Tests only: run `statMtime`'s syscall through `fn`; no argument restores it. */
   useStatForTests(fn?: (path: string) => Promise<BigIntStats>): void {
-    this.statFile = fn ?? ((path) => stat(path, { bigint: true }));
+    this.statFile = fn ?? ((path) => this.guards.stat(path));
   }
 
   private gate(

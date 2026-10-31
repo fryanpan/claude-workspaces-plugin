@@ -26,7 +26,7 @@ import { capWords } from '../voice-status.ts';
  */
 import type { VoiceHandleResult, VoiceResult } from '../voice.ts';
 import { parseOrdinal, pickByLabel } from '../voice.ts';
-import { type AgentConversation, awayAck, sentAck } from './agent-conversation.ts';
+import { type AgentConversation, awayAck } from './agent-conversation.ts';
 import type { SpokenInterview } from './interview.ts';
 import { withNotes } from './notes.ts';
 import { shapeReply, stripWake } from './reply-shape.ts';
@@ -224,7 +224,7 @@ export class SpokenAnswerer {
     meeting = false,
   ): Promise<SpokenAnswer> {
     const transcript = stripWake(heard);
-    if (this.addressed !== undefined && !meeting) return this.toAgent(transcript, actor);
+    if (this.addressed !== undefined && !meeting) return this.toAgent(transcript, actor, context);
     const interviewed = await this.interview?.answer(transcript, context, meeting);
     if (interviewed) {
       const points = interviewed.spoken ? [{ say: interviewed.spoken }] : [];
@@ -300,24 +300,36 @@ export class SpokenAnswerer {
     });
     if (!r.ok) return plain('I can’t find this board.');
     if (r.queueId) this.onAwaiting?.(r.queueId);
+    // A live lead took it: the page shows it working and only the lead's
+    // answer is said, never "On it." (Bryan, 2026-10-31). A call with no page
+    // says the ack itself (`meeting-claude.ts`). A hand-off that was never
+    // queued has no answer coming, so it keeps its ack.
+    const shaped = shapedAnswer(r.ack, r.route, r.detail);
+    const silent = r.route === 'agent' && !!r.queueId;
     return {
-      ...shapedAnswer(r.ack, r.route, r.detail),
+      ...(silent ? { ...shaped, spoken: '', points: [] } : shaped),
       ...(r.navigate ? { navigate: r.navigate } : {}),
       ...(r.queueId ? { awaiting: r.queueId } : {}),
     };
   }
 
   /** A turn for the named agent alone (`agent-conversation.ts`). */
-  private toAgent(transcript: string, actor: VoiceActor): SpokenAnswer {
+  private toAgent(
+    transcript: string,
+    actor: VoiceActor,
+    context: VoiceContext | undefined,
+  ): SpokenAnswer {
     if (!transcript) return plain('');
     if (!this.conversation) return plain('Only the owner can talk to an agent here.');
-    const r = this.conversation.turn(transcript, actor);
+    const r = this.conversation.turn(transcript, actor, context);
     if (r.kind === 'not-attached') return plain('That agent isn’t on this board.');
     if (r.kind === 'failed') return plain('I couldn’t pass that on. Say it again.');
     this.onAwaiting?.(r.queueId, r.agentId);
+    // A turn that reached the agent is answered by the agent alone; the
+    // message shows in the chat, so nothing is said for it (Bryan, 2026-10-30).
     const live = r.kind === 'sent';
     return {
-      ...plain(live ? sentAck(r.name) : awayAck(r.name), live ? 'agent' : 'agent-queued'),
+      ...plain(live ? '' : awayAck(r.name), live ? 'agent' : 'agent-queued'),
       awaiting: r.queueId,
     };
   }
