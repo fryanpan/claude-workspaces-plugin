@@ -212,6 +212,16 @@ export type WsCtx = {
    */
   readOnly?: boolean;
   /**
+   * This socket is in the board's room for its PRESENCE only: a doc or a
+   * whiteboard page announcing where its person is, and hearing where
+   * everybody else is (`@claude-workspaces/core/workspace-presence`).
+   *
+   * Enforced in `yjs-protocol.ts`: awareness flows both ways, and no doc
+   * content flows either way — the board doc is over a megabyte, and a doc
+   * page has no use for it. Set on the board room's socket only.
+   */
+  presenceOnly?: boolean;
+  /**
    * The board widget token and page origin a tailnet widget door socket was
    * admitted with. Like `shareId`: the token is checked once at the upgrade,
    * so without this a socket outlived the token's expiry, its watermark and

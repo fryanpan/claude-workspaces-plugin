@@ -26,6 +26,8 @@ export interface CanvasHandle {
   show(elements: readonly SceneElement[]): void;
   /** Draw the other people's and agents' pointers. */
   cursors(list: readonly RemoteCursor[]): void;
+  /** Scroll the view so a canvas point sits in its middle — a followed spot. */
+  centreOn(x: number, y: number): void;
 }
 
 export interface CanvasOptions {
@@ -42,6 +44,7 @@ interface ExcalidrawApi {
   updateScene(scene: {
     elements?: readonly unknown[];
     collaborators?: Map<string, unknown>;
+    appState?: { scrollX: number; scrollY: number };
     captureUpdate?: unknown;
   }): void;
 }
@@ -78,6 +81,20 @@ export function mountCanvas(host: HTMLElement, opts: CanvasOptions): Promise<Can
               });
             }
             ready.updateScene({ collaborators, captureUpdate: CaptureUpdateAction.NEVER });
+          },
+          centreOn: (x, y) => {
+            // Excalidraw's scroll is the canvas origin's offset in view
+            // units, so the middle of the view is `size / 2zoom - scroll`.
+            const s = ready.getAppState() as unknown as {
+              width: number;
+              height: number;
+              zoom: { value: number };
+            };
+            const z = s.zoom.value || 1;
+            ready.updateScene({
+              appState: { scrollX: s.width / (2 * z) - x, scrollY: s.height / (2 * z) - y },
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
           },
         });
       },

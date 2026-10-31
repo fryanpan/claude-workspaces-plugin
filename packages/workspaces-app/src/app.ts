@@ -17,7 +17,7 @@ import { wireKeyboardInset } from './keyboard-inset.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
 import { startRedlineRequests } from './redline/redline-requests.ts';
-import { remountCurrent, startRouter } from './router.ts';
+import { navigateTo, remountCurrent, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
@@ -122,6 +122,17 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       }),
     );
   }
+  // Who else is in the workspace, and following them (presence/). Joined
+  // once the first doc is up, so its socket never stands in front of the
+  // doc's own.
+  let presence: import('./presence/page-presence.ts').PagePresence | null = null;
+  let presenceJoining = false;
+  const joinPresence = async (): Promise<void> => {
+    if (!board || presenceJoining) return;
+    presenceJoining = true;
+    presence = await joinDocPagePresence(board, user, env);
+    presence?.follower.refresh();
+  };
   return startRouter({
     user,
     // The answer is already in hand — every mount gets it as a value rather
@@ -140,8 +151,12 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       // draws its content inside its mount.
       const paintsFirst = ctx.docType === 'markdown';
       if (paintsFirst) reportLoad(ctx);
+      presence?.moveTo({ surface: 'doc', docId: ctx.docId });
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad(ctx);
+      // A follow that brought this doc here shows its spot now the doc is up.
+      presence?.follower.refresh();
+      void joinPresence();
       // The coach's card is owner-only and never the page's content, so it
       // loads after the surface rather than ahead of the doc's text.
       void import('./doc/doc-coach.ts').then(({ mountDocCoach }) => {
@@ -149,6 +164,46 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       });
     },
   });
+}
+
+/**
+ * The doc page in the workspace's presence room. Its own chunk, like the lead
+ * chat: it is never the page's content. A doc → doc follow swaps the mount in
+ * place; any other page is a load.
+ */
+async function joinDocPagePresence(
+  workspaceId: string,
+  user: User,
+  env: AppBootEnv,
+): Promise<import('./presence/page-presence.ts').PagePresence | null> {
+  const host = env.document.getElementById('doc-people');
+  if (!host) return null;
+  const [{ joinPagePresence }, docSpot, { showToast }] = await Promise.all([
+    import('./presence/page-presence.ts'),
+    import('./presence/doc-spot.ts'),
+    import('./doc/chrome-dom.ts'),
+  ]);
+  const { location } = env;
+  const docId = docIdFromPathOrNull(location.pathname);
+  const presence = joinPagePresence({
+    workspaceId,
+    user,
+    here: docId ? { surface: 'doc', docId } : { surface: 'board' },
+    connect: (url) => env.connect(url),
+    origin: location,
+    host,
+    address: () => location.pathname + location.search,
+    go: (href) => (href.includes('/docs/') ? navigateTo(href) : location.assign(href)),
+    show: docSpot.showDocSpot,
+    storage: sessionStorage,
+    inputTarget: env.window,
+    notify: showToast,
+  });
+  docSpot.onDocSpotMove((spot) => {
+    const current = docIdFromPathOrNull(location.pathname);
+    if (current) presence.moveTo({ surface: 'doc', docId: current, ...spot });
+  });
+  return presence;
 }
 
 /** The markdown surface's chunk: the editor and everything mounted with it. */

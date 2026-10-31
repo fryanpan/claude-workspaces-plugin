@@ -17,12 +17,10 @@ function islands(over: Partial<Parameters<typeof mountBoardIslands>[0]> = {}) {
   const el = mountShell();
   const state = boardState({ tasks: new Map([['t-1', task('t-1')]]) });
   const seen: string[] = [];
-  const assigned: string[] = [];
   mountBoardIslands({
     state,
     user: { id: 'u-1', name: 'Bryan', kind: 'human', color: '#000' } as never,
     el,
-    location: { assign: (u: string) => assigned.push(u) },
     openInQueue: () => seen.push('openInQueue'),
     openReviewItem: () => {
       seen.push('openReviewItem');
@@ -36,10 +34,11 @@ function islands(over: Partial<Parameters<typeof mountBoardIslands>[0]> = {}) {
     openTaskDetail: (t, tab) => seen.push(`openTaskDetail:${t.id}:${tab}`),
     commentOnActivity: async () => null,
     replyOnActivity: async () => null,
-    renderPresenceRegion: () => seen.push('renderPresenceRegion'),
+    follow: (key) => seen.push(`follow:${key}`),
+    jumpTo: (key) => seen.push(`jumpTo:${key}`),
     ...over,
   });
-  return { el, state, seen, assigned };
+  return { el, state, seen };
 }
 
 const HOSTS = [
@@ -90,6 +89,5 @@ describe('mountBoardIslands', () => {
     // temporal dead zone, so the mount must only wire them.
     const i = islands();
     expect(i.seen).toEqual([]);
-    expect(i.assigned).toEqual([]);
   });
 });

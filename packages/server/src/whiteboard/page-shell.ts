@@ -43,6 +43,7 @@ export function renderWhiteboardShell(
     <header class="wb-bar">
       <a class="back-link" href="${escape(board)}" title="Back to the board" aria-label="Back to the board">←</a>
       <span class="wb-title" id="wb-title">${escape(input.title)}</span>
+      <div id="wb-people" class="hidden"></div>
       <span class="wb-presence" id="wb-presence" aria-live="polite">Connecting…</span>
     </header>
     <main class="wb-stage" id="wb-stage"><div class="wb-loading" id="wb-loading">Loading the canvas…</div></main>

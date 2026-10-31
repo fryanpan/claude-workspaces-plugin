@@ -179,7 +179,7 @@ import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
 import { AgentCallbacks } from './spoken-reply/agent-llm.ts';
 import type { SpokenBoard } from './spoken-reply/answer.ts';
-import { interviewDocs } from './spoken-reply/interview-docs.ts';
+import { interviewDocs, voicePointer } from './spoken-reply/interview-docs.ts';
 import { INTERVIEW_TIMINGS_FILE, InterviewLog } from './spoken-reply/interview-log.ts';
 import { PlanMinutes } from './spoken-reply/plan-minutes.ts';
 import { SpokenReplyRelay } from './spoken-reply/relay.ts';
@@ -190,7 +190,7 @@ import { HTTP_IDLE_TIMEOUT_SEC, SseBus, openSseStream } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { cryptoId } from './task-fields.ts';
 import { isReservedGoalId } from './task-goals.ts';
-import { TaskProjection, taskBodyDocId } from './task-projection.ts';
+import { TaskProjection, taskBodyDocId, workspaceDocId } from './task-projection.ts';
 import {
   type RunOutputSource,
   itemsLinking,
@@ -231,6 +231,7 @@ const ANONYMOUS_ACTOR: User = {
   color: '#8a8a8a',
 };
 
+import { createAgentSpots } from './agent-spots.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import {
   HTML_SHELL_HEADERS,
@@ -1298,11 +1299,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     agentConnected: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
     ...(opts.askFeedWindowMs === undefined ? {} : { askWindowMs: opts.askFeedWindowMs }),
   });
+  // Where each agent points, in its boards' presence rooms (agent-spots.ts).
+  const agentSpots = createAgentSpots({
+    boardsForDoc: (docId) => boardsForDoc(docId),
+    boardAwareness: (workspaceId) =>
+      docStore.peek(workspaceDocId(workspaceId))?.peekAwareness() ?? null,
+    surfaceOf: (docId) => (docStore.peekMeta(docId)?.type === 'whiteboard' ? 'whiteboard' : 'doc'),
+    listening: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+  });
+  {
+    const onAgentStreams = sse.onAgentStreams;
+    sse.onAgentStreams = (channel, agentId) => {
+      onAgentStreams?.(channel, agentId);
+      if (channel.startsWith('ws~')) agentSpots.streamsChanged(channel.slice(3));
+    };
+  }
   {
     const stallDocEvent = stallWiring.onLiveDocEvent;
     onLiveDocEvent = (docId, payload) => {
       stallDocEvent(docId, payload);
       leadRanks.onDocEvent(docId, payload);
+      agentSpots.onDocEvent(docId, payload);
     };
   }
   // One queue over every board, in project order, and the ledger that records
@@ -1565,8 +1582,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     parseContext: parseVoiceContext,
     // The planning voice: a plan read at each pause, answers written in.
     interview: {
-      docs: interviewDocs(docStore, boardDocIds, meetingEars, (docId, headingId) =>
-        planMinutes.talkedAbout(docId, headingId),
+      // Its cursor is also its spot in the board's presence room.
+      docs: interviewDocs(
+        docStore,
+        boardDocIds,
+        meetingEars,
+        (docId, headingId) => planMinutes.talkedAbout(docId, headingId),
+        voicePointer(agentSpots),
       ),
       log: new InterviewLog(join(dataDir, INTERVIEW_TIMINGS_FILE)),
       ...(opts.voiceComplete ? { complete: opts.voiceComplete } : {}),
@@ -2109,6 +2131,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
+    onBoardRoomOpen: (workspaceId, awareness) => agentSpots.restore(workspaceId, awareness),
   });
 
   /**
@@ -2745,6 +2768,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const docRoutesCtx: DocRoutesContext = {
+    agentSpots,
     leadWritable: (boardId, path) => {
       const c = boardSocketRoots.containedOf(path);
       return c !== null && boardSocketRoots.rootFor(boardId, c.root) !== null;

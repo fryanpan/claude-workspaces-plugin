@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AgentSpots } from '../agent-spots.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
 import type { IdentityRecord } from '../identities.ts';
@@ -116,6 +117,8 @@ export function parseSuggestionAuthor(
 export interface DocRoutesContext {
   /** Doc store — every route here is an operation on one. */
   docStore: DocStore;
+  /** Where an agent points, in its boards' presence rooms. */
+  agentSpots: AgentSpots;
   /** Whether `path` is under one of `boardId`'s registered roots
    *  (`board-socket-roots.ts`), for a lead's rewrite of a bound doc. */
   leadWritable: (boardId: string, path: string) => boolean;

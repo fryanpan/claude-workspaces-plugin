@@ -94,7 +94,7 @@ function ensureBroadcaster(doc: LiveDoc): void {
     syncProtocol.writeUpdate(enc, update);
     const payload = encoding.toUint8Array(enc);
     for (const peer of doc.conns) {
-      if (peer === origin) continue;
+      if (peer === origin || peer.data.presenceOnly) continue;
       try {
         peer.sendBinary(payload, true);
       } catch (e) {
@@ -133,11 +133,13 @@ export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
   ensureBroadcaster(doc);
   doc.conns.add(ws);
 
-  // sync step 1 — ask the client for updates it has that we don't
+  // sync step 1 — ask the client for updates it has that we don't. A
+  // presence-only socket is asked about an empty doc, so it never offers us
+  // anything and is never told how far the board doc has got.
   {
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MSG_SYNC);
-    syncProtocol.writeSyncStep1(enc, doc.ydoc);
+    syncProtocol.writeSyncStep1(enc, ws.data.presenceOnly ? EMPTY_DOC : doc.ydoc);
     ws.sendBinary(encoding.toUint8Array(enc), true);
   }
 
@@ -160,6 +162,23 @@ export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
     }
     doc.conns.delete(ws);
   };
+}
+
+/** The doc a presence-only socket is synced against: always empty. */
+const EMPTY_DOC = new Y.Doc();
+
+/**
+ * A presence-only socket's sync frame (`WsCtx.presenceOnly`). Its step 1 is
+ * answered with an empty doc's step 2, so the client counts itself synced
+ * and holds nothing; its step 2 and updates are dropped. Nothing it says
+ * can reach the board doc, and nothing of the board doc reaches it.
+ */
+function answerPresenceOnly(ws: FeedbackWs, dec: decoding.Decoder): void {
+  if (decoding.readVarUint(dec) !== syncProtocol.messageYjsSyncStep1) return;
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_SYNC);
+  syncProtocol.writeSyncStep2(enc, EMPTY_DOC);
+  ws.sendBinary(encoding.toUint8Array(enc), true);
 }
 
 /**
@@ -204,6 +223,10 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
     const enc = encoding.createEncoder();
     switch (kind) {
       case MSG_SYNC: {
+        if (ws.data.presenceOnly) {
+          answerPresenceOnly(ws, dec);
+          return;
+        }
         if (refuseDeadState(doc, ws, data)) return;
         encoding.writeVarUint(enc, MSG_SYNC);
         if (ws.data.readOnly) {

@@ -18,15 +18,16 @@ import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connec
  * is stale now". Crossing the two would paint a peer's transition twice, from
  * two sources.
  */
-import { currentWorkspaceId, docHref } from '../doc-path.ts';
 import { staleTaskLinkStatuses } from '../link-titles.ts';
+import {
+  type FollowStorage,
+  type Follower,
+  createFollower,
+  stopOnOwnInput,
+} from '../presence/follower.ts';
 import type { BoardState } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
-import {
-  ACTIVITY_REFRESH_EVENTS,
-  type PresencePerson,
-  presenceIdentity,
-} from './board-presence-model.ts';
+import { ACTIVITY_REFRESH_EVENTS } from './board-presence-model.ts';
 import { startHomeClock } from './home-clock.ts';
 
 /** The row shape `loadDiscussion` accepts — a task or a goal, both of which
@@ -65,8 +66,6 @@ export interface BoardLiveDeps {
   renderHomeRegion: () => void;
   renderDetail: () => void;
   renderPresenceRegion: () => void;
-  /** Awareness rows as the presence strip reads them. */
-  peopleFromAwareness: () => PresencePerson[];
   loadAgents: () => Promise<void>;
   loadEvents: () => Promise<void>;
   loadHome: () => Promise<void>;
@@ -78,12 +77,15 @@ export interface BoardLiveDeps {
   membersChanged: () => void;
   /** The address bar the boot was handed. Following a person off this board
    *  leaves through it, so a test can read where the follow sent us. */
-  location: Pick<BootLocation, 'assign'>;
+  location: Pick<BootLocation, 'assign' | 'pathname' | 'search'>;
+  /** Where a follow is kept across pages; `sessionStorage` on the page. */
+  followStorage?: FollowStorage;
 }
 
 /** Returns the board's feed so the lead chat listens on it rather than
- *  opening a second connection to the same URL. */
-export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource } {
+ *  opening a second connection to the same URL, and the follower the
+ *  presence chips arm. */
+export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follower: Follower } {
   const {
     workspaceId,
     user,
@@ -100,7 +102,6 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource } {
     renderHomeRegion,
     renderDetail,
     renderPresenceRegion,
-    peopleFromAwareness,
     loadAgents,
     loadEvents,
     loadHome,
@@ -149,23 +150,29 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource } {
     surface: 'board',
     lastActive: Date.now(),
   });
-  client.awareness.on('update', () => {
-    renderPresenceRegion();
-    // Follow (§2.7): when the followed person's surface moves, ours does too.
-    // The key names the PERSON now, not one of their connections, so the
-    // follow is resolved back through awareness by identity and lands on
-    // whichever of their tabs moved most recently. That also means a follow
-    // survives the followed person reloading — under the old `p-<clientId>`
-    // key their new connection was a stranger, and the follow went quiet
-    // without ever saying so.
-    if (state.followedKey?.startsWith('p-')) {
-      const identity = state.followedKey.slice(2);
-      const [moved] = peopleFromAwareness()
-        .filter((p) => presenceIdentity(p) === identity && p.docId)
-        .sort((a, b) => b.lastActive - a.lastActive);
-      if (moved?.docId) location.assign(docHref(moved.docId, currentWorkspaceId()));
-    }
+  client.awareness.on('update', () => renderPresenceRegion());
+  // Follow (§2.7): when the followed person's or agent's spot moves, ours
+  // does too — onto any page of the workspace (`presence/follower.ts`). The
+  // key names the PARTICIPANT, not one of their connections, so a follow
+  // survives the followed person reloading. The board has no place on it to
+  // scroll to, so a spot on the board itself shows nothing.
+  const follower = createFollower({
+    room: client.awareness,
+    workspaceId,
+    here: () => ({ surface: 'board' }),
+    address: () => location.pathname + location.search,
+    go: (href) => location.assign(href),
+    show: () => {},
+    storage: deps.followStorage ?? sessionStorage,
+    onChange: (key) => {
+      state.followedKey = key;
+      renderPresenceRegion();
+    },
   });
+  state.followedKey = follower.key();
+  stopOnOwnInput(window, follower, (target) =>
+    target instanceof Element ? target.closest('#board-people') !== null : false,
+  );
   let lastActivePush = 0;
   const touch = () => {
     const now = Date.now();
@@ -317,5 +324,5 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource } {
     onStatus: streamStatus,
     onView: (view) => renderLiveStaleNotice(staleNotice, view),
   });
-  return { stream: es };
+  return { stream: es, follower };
 }
