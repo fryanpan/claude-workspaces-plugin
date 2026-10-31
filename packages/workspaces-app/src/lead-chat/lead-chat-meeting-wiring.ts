@@ -35,6 +35,8 @@ import {
   createWizard,
 } from './lead-chat-wizard.ts';
 
+/** In the tab's session storage while the chat's panel is open, so the next
+ *  page opens it again (`lead-chat-mount.ts` keeps it, meeting or not). */
 export const PANE_OPEN_KEY = 'cw.lead-chat.open';
 
 export interface LeadMeetingSeams
@@ -54,14 +56,13 @@ export interface LeadMeetingWiringOpts {
   client: LeadChatClient;
   view: LeadChatView;
   getContext?: () => VoiceContext | undefined;
-  /** Per tab: the recorder token and whether the panel was open. */
+  /** Per tab: the recorder token. */
   session: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
   seams?: LeadMeetingSeams;
   /** Something the panel draws changed. */
   changed: () => void;
   /** Open the panel, as a page that resumes a meeting does. */
   openPane: () => void;
-  paneOpen: () => boolean;
   /** A one-line notice under the chat. */
   notice: (text: string) => void;
 }
@@ -219,8 +220,6 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
     if (run.state().phase === 'tap') run.tap();
   };
   const onHide = (): void => {
-    if (client.state().meeting && opts.paneOpen()) opts.session?.setItem(PANE_OPEN_KEY, '1');
-    else opts.session?.removeItem(PANE_OPEN_KEY);
     run.release();
   };
 
@@ -229,8 +228,6 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
   view.meeting.tap.addEventListener('click', onTap);
   doc.addEventListener('click', onPageTap, true);
   win.addEventListener('pagehide', onHide);
-
-  let reopened = false;
 
   return {
     run,
@@ -253,10 +250,6 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
         // Ended, here or on another page.
         if (phase !== 'idle') run.stop();
         return;
-      }
-      if (!reopened && s.loaded) {
-        reopened = true;
-        if (opts.session?.getItem(PANE_OPEN_KEY) === '1') opts.openPane();
       }
       if (m.recorder === recorder && resumed !== m.id && phase === 'idle') {
         resumed = m.id;

@@ -148,17 +148,19 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
 
 const read = async (cdp: Cdp): Promise<Read> => (await cdp.evaluate(READ)) as Read;
 
-/** Load the page and tap the agent button open; the open list as it stands. */
+/** Load the page and tap the agent button open — unless the tab kept it
+ *  open from the page before; the open list as it stands. */
 async function openChat(cdp: Cdp, url: string): Promise<Read> {
   const loaded = cdp.once('Page.loadEventFired');
   await cdp.send('Page.navigate', { url });
   await loaded;
   const r = await until('the agent button', async () => {
     const x = await read(cdp);
-    return x.button ? x : null;
+    return x.button && (x.open || x.ids.length === 0) ? x : null;
   });
   const btn = r.button;
   if (!btn) throw new Error('no button');
+  if (r.open) return r;
   for (const type of ['mousePressed', 'mouseReleased']) {
     await cdp.send('Input.dispatchMouseEvent', {
       type,

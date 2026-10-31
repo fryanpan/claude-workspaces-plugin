@@ -468,6 +468,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/prompt-marks.ts', [
     ['trusted-local', '/workspaces/:ws/agents/:agent/prompts', 'POST'],
   ]),
+  ...family('routes/lead-mirror.ts', [
+    ['trusted-local', '/workspaces/:ws/agents/:agent/mirror', 'POST'],
+  ]),
   ...family('routes/chat-audit-routes.ts', [
     ['trusted-local', '/workspaces/:ws/chat-audit', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/chat-audit/:agent', 'GET'],

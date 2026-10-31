@@ -2,7 +2,7 @@
 /**
  * Stop hook for the claude-workspaces plugin.
  *
- * Posts the turn's closing message — reduced to ONE stripped line — to
+ * Posts the turn's closing message, reduced (`note-redact.ts`), to
  * `POST /workspaces/{id}/agents/{name}/notes` — the board from
  * `CW_WORKSPACE_ID` — where the server pins it to the agent's current task
  * on that board so the activity pane can say what each agent did lately.

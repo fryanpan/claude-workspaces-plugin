@@ -1078,6 +1078,15 @@ the message shape is `core/src/lead-chat.ts` (a new top-level core module).
 The panel draws the lead's messages with the comments' escape-first
 markdown renderer (`comment-markdown.ts`, which gains pipe tables and an
 opt-in link for a bare URL) and a person's own as plain text.
+The chat also mirrors the lead's own Claude Code session, through the
+plugin's hooks: UserPromptSubmit (a prompt typed in its terminal, or a board
+event it took, to `routes/prompt-marks.ts`), Stop (the message a turn ended
+on, to the notes route), and MessageDisplay and PostToolBatch (text it writes
+mid-turn and its tool calls, to `routes/lead-mirror.ts`, kept by
+`lead-chat/mirror.ts`). The last two post only for a session the prompts
+route has answered `lead: true`. A message to the lead goes `received` when
+the lead's MCP child acks its queue row and `done` at that session's turn
+end. Nothing mirrored is handed back to the lead or spoken.
 In the app, `workspaces-app/src/lead-chat/` (a new top-level directory) is
 the client, the shadow-DOM button, bar and panel, and the per-device Chat
 first / Voice first choice the Settings Voice row writes; the board mounts it

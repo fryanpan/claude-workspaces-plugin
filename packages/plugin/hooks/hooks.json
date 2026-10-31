@@ -68,6 +68,28 @@
           }
         ]
       }
+    ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session-mirror.ts\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session-mirror.ts\"",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
