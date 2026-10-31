@@ -6,6 +6,8 @@
  *
  * While the panel is docked, `<html data-lc-docked>` and `--lc-dock-w` say
  * so, and the board's column makes room for it (board.css, PANE LAYOUT).
+ * While it fills a narrow screen, `<html data-lc-full>` pins the board's
+ * navbar to the bottom beneath it.
  */
 import type { ModeStorage } from './lead-chat-mode.ts';
 
@@ -25,6 +27,8 @@ export interface LeadChatDock {
   width(vw: number): number;
   /** Say the panel is docked at `w` pixels, or not docked. */
   docked(w: number | null): void;
+  /** Say the panel fills the screen (at 1100px or narrower), or not. */
+  full(on: boolean): void;
   showChannel(): boolean;
   toggleChannel(): void;
 }
@@ -100,6 +104,10 @@ export function createDock(opts: {
         html.dataset.lcDocked = 'true';
         html.style.setProperty('--lc-dock-w', `${w}px`);
       }
+    },
+    full(on) {
+      if (on) html.dataset.lcFull = 'true';
+      else delete html.dataset.lcFull;
     },
     showChannel: () => show,
     toggleChannel() {

@@ -83,6 +83,20 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
     expect(wide?.afterNav).toEqual({ open: true, width: wide?.resized?.width, docked: true });
   }, 60_000);
 
+  it('fills the screen at 430 down to the navbar pinned at the bottom, and a page tap closes it', () => {
+    const f = result().widths.find((w) => w.width === 430)?.full;
+    expect(f).not.toBeNull();
+    if (!f) return;
+    expect(f.paneTop).toBe(0);
+    expect(Math.abs(f.paneBottom - f.navTop)).toBeLessThanOrEqual(1);
+    expect(Math.abs(f.navBottom - f.vh)).toBeLessThanOrEqual(1);
+    expect(f.navLeft).toBeGreaterThanOrEqual(0);
+    expect(f.navWidth).toBeLessThanOrEqual(430);
+    expect(f.agentLast).toBe(true);
+    expect(f.closedByPageTap).toBe(true);
+    expect(f.libraryCurrent).toBe('page');
+  }, 60_000);
+
   it('is a sheet, not docked, at 430', () => {
     const narrow = result().widths.find((w) => w.width === 430);
     expect(narrow?.layout.sheet).toBe(true);

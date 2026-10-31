@@ -73,7 +73,7 @@ const STATE = `(() => {
     open: !!pane && !pane.hidden && pane.getAnimations().length === 0,
     rows: sr ? sr.querySelectorAll('.lc-list > *').length : 0,
     texts: sr ? [...sr.querySelectorAll('.lc-msg .lc-msg-text')].map((x) => x.textContent) : [],
-    pane: p ? { left: p.left, right: p.right, width: p.width } : null,
+    pane: p ? { left: p.left, right: p.right, width: p.width, top: p.top, bottom: p.bottom } : null,
     docked: !!pane && pane.classList.contains('lc-dock') && document.documentElement.dataset.lcDocked === 'true',
     sheet: !!pane && pane.classList.contains('lc-sheet'),
     vw: document.documentElement.clientWidth,
@@ -86,7 +86,7 @@ interface State {
   open: boolean;
   rows: number;
   texts: string[];
-  pane: { left: number; right: number; width: number } | null;
+  pane: { left: number; right: number; width: number; top: number; bottom: number } | null;
   docked: boolean;
   sheet: boolean;
   vw: number;
@@ -351,6 +351,51 @@ async function main(): Promise<void> {
         );
       }
 
+      // Full screen at a narrow width: the pane from the top down to the
+      // navbar pinned at the bottom; a page tapped there closes the chat.
+      let full: MirrorWidthRun['full'] = null;
+      if (placed.sheet) {
+        step(`full screen and the navbar at ${width}`);
+        const geo = (await cdp.evaluate(`(() => {
+          const nav = document.querySelector('.board-nav').getBoundingClientRect();
+          const lib = document.querySelector('.board-nav-item[data-nav="library"]').getBoundingClientRect();
+          const items = [...document.querySelectorAll('.board-nav > .board-nav-item, .board-nav > .board-nav-dock')]
+            .filter((e) => e.getBoundingClientRect().width > 0)
+            .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+          const agentLast = items.at(-1)?.classList.contains('board-nav-dock') ?? false;
+          return { navTop: nav.top, navBottom: nav.bottom, navLeft: nav.left, navWidth: nav.width,
+            vh: innerHeight, agentLast, lib: { x: lib.left + lib.width / 2, y: lib.top + lib.height / 2 } };
+        })()`)) as {
+          navTop: number;
+          navBottom: number;
+          navLeft: number;
+          navWidth: number;
+          vh: number;
+          agentLast: boolean;
+          lib: { x: number; y: number };
+        };
+        await tap(cdp, geo.lib.x, geo.lib.y);
+        const closed = await until('the chat closed by a page tap', async () => {
+          const s = await state(cdp);
+          return s.open ? null : true;
+        }).catch(() => false);
+        const page = (await cdp.evaluate(
+          `document.querySelector('.board-nav-item[data-nav="library"]').getAttribute('aria-current')`,
+        )) as string | null;
+        full = {
+          paneTop: Math.round(placed.pane?.top ?? -1),
+          paneBottom: Math.round(placed.pane?.bottom ?? -1),
+          navTop: Math.round(geo.navTop),
+          navBottom: Math.round(geo.navBottom),
+          navLeft: Math.round(geo.navLeft),
+          navWidth: Math.round(geo.navWidth),
+          vh: geo.vh,
+          agentLast: geo.agentLast,
+          closedByPageTap: closed,
+          libraryCurrent: page,
+        };
+      }
+
       let resized: MirrorWidthRun['resized'] = null;
       let afterNav: MirrorWidthRun['afterNav'] = null;
       if (placed.docked && placed.grip) {
@@ -378,6 +423,7 @@ async function main(): Promise<void> {
         voice: { closedText, label, words },
         liveWithin1s,
         layout,
+        full,
         resized,
         afterNav,
       });

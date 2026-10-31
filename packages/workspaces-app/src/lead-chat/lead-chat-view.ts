@@ -13,8 +13,9 @@
  * left edge drags to resize it; the width is kept on the device. While it is
  * docked the comment widget's corner buttons step aside, and the board's own
  * column makes room (`html[data-lc-docked]`, board.css). On a narrow screen
- * it is a sheet, stopping at the board's tab bar so the button stays in
- * reach. Each entry is drawn by `lead-chat-rows.ts`; the header's toggle
+ * it fills the screen down to the board's navbar, which pins to the bottom
+ * with the agent button at its right (`html[data-lc-full]`); a page tapped
+ * there closes the chat. Each entry is drawn by `lead-chat-rows.ts`; the header's toggle
  * hides the board events the lead's session took, and that choice is kept
  * on the device too.
  *
@@ -331,10 +332,12 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     const docking = !pane.hidden && !sheet;
     // Both cover the corner, so the widget's buttons step aside under them.
     hideWidget(!pane.hidden);
+    // Full screen pins the navbar to the bottom; measure it after it moves.
+    dock.full(sheet);
     pane.classList.toggle('lc-sheet', sheet);
     pane.classList.toggle('lc-dock', docking);
     if (sheet) {
-      pane.style.cssText = `left:0;right:0;top:40px;bottom:${Math.round(vh - footTop())}px`;
+      pane.style.cssText = `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
     } else if (docking) {
       // Under the board's top bar, which keeps who is here and Settings in reach.
       const bar = doc.querySelector('.board-topbar')?.getBoundingClientRect();
@@ -344,6 +347,13 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     dock.docked(docking ? dock.width(vw) : null);
   };
 
+  // Full screen, a page in the navbar beneath closes the chat on its way.
+  const onNavTap = (e: Event): void => {
+    if (pane.hidden || !pane.classList.contains('lc-sheet')) return;
+    const item = (e.target as Element | null)?.closest?.('.board-nav-item');
+    if (item && !item.closest('.board-nav-dock')) close.click();
+  };
+  doc.addEventListener('click', onNavTap, true);
   chan.addEventListener('click', () => {
     dock.toggleChannel();
     if (last) renderAll(last);
@@ -476,6 +486,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     destroy() {
       hideWidget(false);
       dock.docked(null);
+      dock.full(false);
+      doc.removeEventListener('click', onNavTap, true);
       layer.remove();
       bRoot.replaceChildren();
     },

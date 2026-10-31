@@ -38,7 +38,7 @@ export const LAYER_STYLES = `
 .lc-bar-line b { font-weight: 600; }
 .lc-bar-line.lc-dim { color: var(--fg-muted, #57606a); }
 .lc-pane { position: fixed; z-index: 1000; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border, #d1d5da); border-radius: 14px; background: var(--bg, #fff); color: var(--fg, #1b1f23); box-shadow: 0 8px 28px rgba(0,0,0,.14); }
-.lc-pane.lc-sheet { z-index: 2147483001; border-radius: 14px 14px 0 0; }
+.lc-pane.lc-sheet { z-index: 2147483001; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
 .lc-pane.lc-sheet .lc-row-head, .lc-pane.lc-sheet .lc-chan-toggle { min-height: 44px; border-radius: 22px; }
 .lc-pane.lc-sheet .lc-row-head { border-radius: 8px; }
 .lc-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 6px 6px 6px 16px; border-bottom: 1px solid var(--border, #d1d5da); }
