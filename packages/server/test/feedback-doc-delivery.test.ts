@@ -98,6 +98,21 @@ async function rig(opts: Partial<ServerOptions> = {}): Promise<Rig> {
 const feedbackFrames = (l: FrameListener, event: string) =>
   l.frames.filter((f) => f.event === event && f.data?.docId === BOARD_FEEDBACK_DOC_ID);
 
+/** Post a board frame every page receives and wait for it; once it has
+ *  arrived, any earlier frame sent to that page has arrived too. */
+async function caughtUp(r: Rig, board: string, page: FrameListener): Promise<void> {
+  const seen = page.frames.filter((f) => f.event === 'task.created').length;
+  const res = await r.post(`/workspaces/${board}/tasks`, {
+    title: 'Chart the tide pools',
+    body: 'Agent can chart the tide pools so that the survey has a baseline.',
+    author: { id: 'agent-fixture', name: 'Fixture agent', kind: 'agent' },
+  });
+  expect(res.status).toBe(200);
+  await waitFor(() => page.frames.filter((f) => f.event === 'task.created').length > seen, {
+    describe: 'a board frame reaching the page',
+  });
+}
+
 describe('the feedback doc delivers to the Workspaces lead with no watch', () => {
   let r: Rig;
   let product = '';
@@ -139,34 +154,37 @@ describe('the feedback doc delivers to the Workspaces lead with no watch', () =>
     expect(rows.map((q) => q.agentId)).toEqual(['agent-workspaces-lead']);
     expect(frame.data?.commentQueueId).toBe(rows[0]?.id);
     // The doc is not on the board, so a page (or share visitor) holding the
-    // board's channel is not sent it. The frame is addressed, and the lead's
-    // copy above was written in the same pass a broadcast would have been.
+    // board's channel is not sent it. Checked only once the page has had a
+    // later board frame, so a leaked copy would already be in hand.
+    await pageCaughtUp(page);
     expect(page.frames.filter((f) => f.data?.docId === BOARD_FEEDBACK_DOC_ID)).toEqual([]);
   });
 
+  const pageCaughtUp = (page: FrameListener) => caughtUp(r, product, page);
+
   it('the lead is not owed a row for its own reply', async () => {
     const { threadId } = await r.widgetComment(other, 'Search misses archived tasks.');
-    const before = r.handle.tasks
-      .listQueuedComments(product)
-      .filter((q) => q.agentId === 'agent-workspaces-lead').length;
-    const reply = await r.post(
-      `/workspaces/${product}/docs/${encodeURIComponent(BOARD_FEEDBACK_DOC_ID)}/threads/${threadId}/comments`,
-      { author: { id: 'agent-workspaces-lead', name: 'Workspaces lead' }, text: 'Filed it.' },
-    );
-    expect(reply.status).toBe(200);
-    // POSITIVE CONTROL: the reply did fan out, so silence below is the author
-    // exclusion and not a reply that went nowhere.
-    const lead = await r.listen(product, 'agent-workspaces-lead');
-    await r.widgetComment(other, 'One more.');
-    await waitFor(() => feedbackFrames(lead, 'thread.created').length > 0, {
-      describe: 'a later comment still reaching the lead',
-    });
-    const after = r.handle.tasks
-      .listQueuedComments(product)
-      .filter((q) => q.agentId === 'agent-workspaces-lead');
-    // Exactly one new row: the person's "One more.", never the lead's reply.
-    expect(after.length).toBe(before + 1);
-    expect(after.some((q) => q.text === 'Filed it.')).toBe(false);
+    const leadRows = () =>
+      r.handle.tasks
+        .listQueuedComments(product)
+        .filter((q) => q.agentId === 'agent-workspaces-lead');
+    const reply = (author: { id: string; name: string }, text: string) =>
+      r.post(
+        `/workspaces/${product}/docs/${encodeURIComponent(BOARD_FEEDBACK_DOC_ID)}/threads/${threadId}/comments`,
+        { author, text },
+      );
+    // POSITIVE CONTROL: the same reply route, from the person, does queue a
+    // row for the lead. So the silence below is the author exclusion.
+    const before = leadRows().length;
+    expect((await reply(PERSON, 'Also on mobile.')).status).toBe(200);
+    expect(leadRows().length).toBe(before + 1);
+    expect(leadRows().some((q) => q.text === 'Also on mobile.')).toBe(true);
+
+    expect(
+      (await reply({ id: 'agent-workspaces-lead', name: 'Workspaces lead' }, 'Filed it.')).status,
+    ).toBe(200);
+    expect(leadRows().length).toBe(before + 1);
+    expect(leadRows().some((q) => q.text === 'Filed it.')).toBe(false);
   });
 
   it('the board the person stood on does not become the owner', () => {
@@ -174,6 +192,41 @@ describe('the feedback doc delivers to the Workspaces lead with no watch', () =>
       .listQueuedComments(other)
       .filter((q) => q.docId === BOARD_FEEDBACK_DOC_ID);
     expect(rows).toEqual([]);
+  });
+});
+
+describe('a lead that was away', () => {
+  let r: Rig;
+  let product = '';
+  let other = '';
+
+  beforeAll(async () => {
+    r = await rig();
+    product = await r.board('Workspaces', 'agent-away-lead');
+    other = await r.board('Harborlight');
+  });
+
+  afterAll(async () => {
+    await r.stop();
+  });
+
+  it('a lead that was away gets it on its next heartbeat, and the page is not told', async () => {
+    // No stream open: the comment is queued for a lead that is not live.
+    await r.widgetComment(other, 'Export drops the last column.');
+    const row = r.handle.tasks
+      .listQueuedComments(product)
+      .find((q) => q.text === 'Export drops the last column.');
+    expect(row?.agentId).toBe('agent-away-lead');
+
+    const lead = await r.listen(product, 'agent-away-lead');
+    const page = await r.listen(product);
+    const beat = await r.post(`/workspaces/${product}/agents/agent-away-lead/heartbeat`, {});
+    expect(beat.status).toBe(200);
+    await waitFor(() => lead.frames.find((f) => f.data?.commentQueueId === row?.id), {
+      describe: 'the queued feedback comment redelivered on the heartbeat',
+    });
+    await caughtUp(r, product, page);
+    expect(page.frames.filter((f) => f.data?.docId === BOARD_FEEDBACK_DOC_ID)).toEqual([]);
   });
 });
 

@@ -3,7 +3,11 @@
  * The delivery itself is `feedback-doc-delivery.test.ts`. Names are fixtures.
  */
 import { describe, expect, it } from 'bun:test';
-import { DEFAULT_FEEDBACK_BOARD, feedbackOwnerBoard } from '../src/feedback-owner.ts';
+import {
+  DEFAULT_FEEDBACK_BOARD,
+  createFeedbackOwner,
+  feedbackOwnerBoard,
+} from '../src/feedback-owner.ts';
 
 const boards = [
   { id: 'board-h', name: 'Harborlight', leadAgentId: 'agent-h' },
@@ -59,5 +63,26 @@ describe('feedbackOwnerBoard', () => {
         twins.map((b) => ({ id: b.id, name: b.name })),
       ),
     ).toBe('board-a');
+  });
+});
+
+describe('createFeedbackOwner', () => {
+  it('warns once while nothing matches, and again only after a match is lost', () => {
+    const said: string[] = [];
+    let list: { id: string; name: string }[] = [];
+    const owner = createFeedbackOwner(
+      'Saltmarsh',
+      () => list,
+      (m) => said.push(m),
+    );
+    expect(owner()).toBeNull();
+    expect(owner()).toBeNull();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('"Saltmarsh"');
+    list = [{ id: 'board-s', name: 'Saltmarsh' }];
+    expect(owner()).toBe('board-s');
+    list = [];
+    expect(owner()).toBeNull();
+    expect(said).toHaveLength(2);
   });
 });

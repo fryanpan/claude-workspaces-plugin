@@ -58,3 +58,29 @@ export function feedbackOwnerBoard(
   const named = live.filter((b) => b.name.trim().toLowerCase() === name);
   return (named.find((b) => b.leadAgentId) ?? named[0])?.id ?? null;
 }
+
+/**
+ * `feedbackOwnerBoard` over the live board list, saying so once when nothing
+ * matches. A misspelt `CW_FEEDBACK_BOARD` would otherwise put back the silent
+ * drop this module exists to remove. Warns again only after a match has been
+ * found and lost.
+ */
+export function createFeedbackOwner(
+  spec: string | undefined,
+  boards: () => readonly FeedbackBoardCandidate[],
+  warn: (message: string) => void = (m) => console.warn(m),
+): () => string | null {
+  let warned = false;
+  return () => {
+    const id = feedbackOwnerBoard(spec, boards());
+    if (id !== null) warned = false;
+    else if (!warned) {
+      warned = true;
+      const wanted = spec?.trim() || DEFAULT_FEEDBACK_BOARD;
+      warn(
+        `[feedback-owner] no live board matches "${wanted}" (${FEEDBACK_BOARD_ENV}); product feedback reaches only sessions watching the doc`,
+      );
+    }
+    return id;
+  };
+}
