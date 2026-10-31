@@ -1588,13 +1588,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     payload: WebhookPayload,
   ): string | null => {
     const rows = queueCommentRows(owner, docId, payload);
-    for (const [agentId, rowId] of rows) {
-      const frame = { ...payload, workspaceId: owner, commentQueueId: rowId };
-      sse.sendToAgent(`ws~${owner}`, agentId, frame);
-    }
+    const reached = sse.sendToAgents(`ws~${owner}`, [...rows.keys()], payload, (agentId) => ({
+      ...payload,
+      workspaceId: owner,
+      commentQueueId: rows.get(agentId),
+    }));
     markCommentRowsEmitted(owner, rows);
-    const on = sse.agentsOn(`ws~${owner}`);
-    return [...rows.keys()].some((agentId) => on.has(agentId)) ? `ws~${owner}` : null;
+    return reached.size > 0 ? `ws~${owner}` : null;
   };
 
   const onLiveDocEvent = (docId: string, payload: WebhookPayload): void => {
