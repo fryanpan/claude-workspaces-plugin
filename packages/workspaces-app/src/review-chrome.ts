@@ -7,6 +7,7 @@ import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
 import { labelDirection, wireDocRename } from './doc/doc-rename.ts';
+import { setOpenThreadReader } from './doc/open-thread.ts';
 import { wireReviewComposer } from './doc/review-composer.ts';
 import { createThreadActions } from './doc/thread-actions.ts';
 import { createThreadProjection } from './doc/thread-projection.ts';
@@ -770,6 +771,9 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   };
   // The router only calls scope.dispose(); make the visual teardown part of it.
   opts.scope?.onCleanup(() => chrome.destroy());
+  // The lead chat names the open thread in a message's link.
+  const dropOpenThread = setOpenThreadReader(() => threadsPanel.getActive());
+  opts.scope?.onCleanup(dropOpenThread);
   return chrome;
 }
 

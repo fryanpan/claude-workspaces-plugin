@@ -40,6 +40,7 @@ import { type ReviewPayload, isReviewItemOpen } from '@claude-workspaces/core';
 import type { EnvLike } from '@claude-workspaces/core/env-names';
 import { type AnswerCoverage, threadOpenParts, ticketOpenParts } from './answer-coverage.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
+import { boardHref } from './home-feed.ts';
 import { fixedHostFetch } from './outbound-fetch.ts';
 import { compareSemver } from './plugin-release.ts';
 import { answersAsPerson, isUnprovenActor } from './review-items/answer-proof.ts';
@@ -125,7 +126,35 @@ export {
 export const CHOICE_WINDOW_MS = 30_000;
 
 /** Sanitize a client-supplied context object; anything malformed → none. */
-export function parseVoiceContext(raw: unknown): VoiceContext | undefined {
+/** The params a message link may carry: the ones a board, doc or mock page
+ *  writes to name what is open on it. */
+const LINK_PARAMS = new Set(['task', 'goal', 'thread', 'item']);
+/** Longer than any id-shaped link a page builds. */
+const LINK_MAX = 600;
+
+/**
+ * The page link a message was sent from, when it is a relative path on
+ * `workspaceId`'s board and nothing else; undefined otherwise. `boardHref`
+ * is the Home feed's check (no scheme, host, backslash, whitespace or dot
+ * segment, and it must survive URL parsing unchanged); on top of it a link
+ * carries no fragment and no param but the four a page names its open thing
+ * by, so the agent's event holds a board path rather than words a client chose.
+ */
+export function messageLink(raw: unknown, workspaceId: string): string | undefined {
+  if (typeof raw !== 'string' || raw.length > LINK_MAX) return undefined;
+  const href = boardHref(raw, new Set([workspaceId]));
+  if (!href) return undefined;
+  const url = new URL(href, 'https://message-link.invalid');
+  if (url.hash) return undefined;
+  for (const name of url.searchParams.keys()) if (!LINK_PARAMS.has(name)) return undefined;
+  return href;
+}
+
+/**
+ * The page's context, lengths clamped. `link` is kept only when
+ * `workspaceId` is given and `messageLink` accepts it for that board.
+ */
+export function parseVoiceContext(raw: unknown, workspaceId?: string): VoiceContext | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
   if (r.surface !== 'board' && r.surface !== 'doc' && r.surface !== 'task') return undefined;
@@ -136,6 +165,7 @@ export function parseVoiceContext(raw: unknown): VoiceContext | undefined {
   const visibleHeading = str(r.visibleHeading, 200);
   const threadId = str(r.threadId, 300);
   const reviewItemId = str(r.reviewItemId, 300);
+  const link = workspaceId === undefined ? undefined : messageLink(r.link, workspaceId);
   return {
     surface: r.surface,
     ...(docId !== undefined ? { docId } : {}),
@@ -143,6 +173,7 @@ export function parseVoiceContext(raw: unknown): VoiceContext | undefined {
     ...(visibleHeading !== undefined ? { visibleHeading } : {}),
     ...(threadId !== undefined ? { threadId } : {}),
     ...(reviewItemId !== undefined ? { reviewItemId } : {}),
+    ...(link !== undefined ? { link } : {}),
   };
 }
 
@@ -415,6 +446,9 @@ export class VoiceRouter {
       context.docId !== undefined && this.docInWorkspace(workspaceId, context.docId)
         ? context.docId
         : undefined;
+    // Checked again here, as the ids are: a caller may hand the router a
+    // context `parseVoiceContext` never saw.
+    const link = messageLink(context.link, workspaceId);
     return {
       surface: context.surface,
       ...(docId !== undefined ? { docId } : {}),
@@ -425,6 +459,7 @@ export class VoiceRouter {
       // that passed the membership checks above (`pickReviewItem`).
       ...(context.threadId !== undefined ? { threadId: context.threadId } : {}),
       ...(context.reviewItemId !== undefined ? { reviewItemId: context.reviewItemId } : {}),
+      ...(link !== undefined ? { link } : {}),
     };
   }
 

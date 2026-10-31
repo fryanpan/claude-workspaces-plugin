@@ -470,7 +470,7 @@ export async function handleWorkspaceSettings(
     if (transcript.length === 0) return j(400, { error: 'transcript required' });
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
-    const context = parseVoiceContext(body?.context);
+    const context = parseVoiceContext(body?.context, workspaceId);
     const res = await voiceRouter.handle(workspaceId, {
       transcript,
       ...(context !== undefined ? { context } : {}),

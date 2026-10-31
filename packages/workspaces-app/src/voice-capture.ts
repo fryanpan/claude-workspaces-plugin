@@ -17,6 +17,9 @@ export interface VoiceContext {
   docId?: string;
   taskId?: string;
   visibleHeading?: string;
+  /** The page's link to the most specific thing open on it
+   *  (`lead-chat/lead-chat-link.ts`). */
+  link?: string;
 }
 
 /**

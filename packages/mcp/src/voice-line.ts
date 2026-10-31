@@ -39,7 +39,15 @@ export interface VoiceRequestPayload {
   ack?: string;
   actor?: { id?: string; name?: string };
   /** Where the speaker was standing when they said it. */
-  context?: { surface?: string; docId?: string; taskId?: string; visibleHeading?: string };
+  context?: {
+    surface?: string;
+    docId?: string;
+    taskId?: string;
+    visibleHeading?: string;
+    /** The relative board path of the most specific thing the speaker had
+     *  open, as the server accepted it for this board. */
+    link?: string;
+  };
   /** The queue row: what `answer_voice` answers. */
   queueId?: string;
   workspaceId?: string;
@@ -64,13 +72,14 @@ function truncate(s: string, n: number): string {
 }
 
 /** The anchor the utterance carried, rendered only for the parts present — a
- *  missing field drops out rather than reading as the word "undefined". */
+ *  missing field drops out rather than reading as the word "undefined". A
+ *  link stands for the surface and its ids: it names the one thing open. */
 function where(p: VoiceRequestPayload): string {
   const c = p.context;
   if (!c) return '';
-  return ` (at ${c.surface ?? '?'}${c.docId ? ` ${c.docId}` : ''}${c.taskId ? ` ${c.taskId}` : ''}${
-    c.visibleHeading ? `, near "${c.visibleHeading}"` : ''
-  })`;
+  const near = c.visibleHeading ? `, near "${c.visibleHeading}"` : '';
+  if (typeof c.link === 'string' && c.link) return ` (at ${c.link}${near})`;
+  return ` (at ${c.surface ?? '?'}${c.docId ? ` ${c.docId}` : ''}${c.taskId ? ` ${c.taskId}` : ''}${near})`;
 }
 
 /**

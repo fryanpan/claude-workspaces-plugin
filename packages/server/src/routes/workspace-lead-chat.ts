@@ -48,7 +48,7 @@ export async function handleWorkspaceLeadChat(
   }
   const author = authorFor(body?.author);
   if (!author) return ctx.j(400, { error: 'author required' });
-  const context = parseVoiceContext(body?.context);
+  const context = parseVoiceContext(body?.context, workspaceId);
   // Dictated on the page rather than typed; the lead reads it the same way.
   const via = body?.via === 'voice' ? 'voice' : 'chat';
   const res = ctx.leadChat.post(
