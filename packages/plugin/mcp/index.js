@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -14626,6 +14626,41 @@ function meetingHeardLine(p) {
 `), "the meeting")
   ].join(`
 `);
+}
+function sayRefusal(message) {
+  const m = message.match(/→ (401|403|409): (.*)$/s);
+  if (!m)
+    return null;
+  let code = "";
+  try {
+    code = String(JSON.parse(m[2] ?? "").error ?? "");
+  } catch {
+    code = "";
+  }
+  if (m[1] === "401" || code.startsWith("agent-token-")) {
+    return {
+      reason: "agent-token",
+      note: "The server refused this session’s agent token. Restart the session so it mints a new one."
+    };
+  }
+  if (code.startsWith("agent-stream-")) {
+    return {
+      reason: "not-local",
+      note: "The server takes this call only from a process on its own machine."
+    };
+  }
+  if (code === "room-first") {
+    return {
+      reason: "room-first",
+      note: "You have said ten lines in a row. Wait until someone in the room speaks."
+    };
+  }
+  if (m[1] === "409")
+    return { reason: "no-meeting", note: "No meeting is running on this board." };
+  if (code === "not-lead") {
+    return { reason: "not-lead", note: "Only the board's lead speaks in its meeting." };
+  }
+  return null;
 }
 
 // packages/mcp/src/nudge-line.ts
@@ -21499,14 +21534,10 @@ async function handleWorkspaceTool(name, a, ctx) {
           ...res.played === true ? {} : { note: "Shown in the meeting but not played: no voice here, or a bot meeting." }
         });
       } catch (e) {
-        const m = String(e).match(/→ (403|409): /);
-        if (!m)
+        const refusal = sayRefusal(String(e));
+        if (!refusal)
           throw e;
-        return ok2({
-          said: false,
-          reason: m[1] === "409" ? "no-meeting" : "not-lead",
-          note: m[1] === "409" ? "No meeting is running on this board." : "Only the board's lead speaks in its meeting."
-        });
+        return ok2({ said: false, ...refusal });
       }
     }
     case "coach_moment": {

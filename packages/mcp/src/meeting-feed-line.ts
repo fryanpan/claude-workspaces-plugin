@@ -52,3 +52,50 @@ export function meetingHeardLine(p: MeetingFeedPayload): string | null {
     quoteUntrusted(said.join('\n'), 'the meeting'),
   ].join('\n');
 }
+
+/** Why `say_in_meeting` was refused, as the agent is told it. */
+export interface SayRefusal {
+  reason: 'no-meeting' | 'room-first' | 'not-lead' | 'agent-token' | 'not-local';
+  note: string;
+}
+
+/**
+ * The server's refusal of a `say` POST, read from the client's error text
+ * (`→ <status>: <body>`), or null for any other failure, which the tool
+ * throws. The body's `error` names the reason: a 403 is not always "not the
+ * lead", and reading it as one sent a session with a bad token off to ask
+ * who holds the seat.
+ */
+export function sayRefusal(message: string): SayRefusal | null {
+  const m = message.match(/→ (401|403|409): (.*)$/s);
+  if (!m) return null;
+  let code = '';
+  try {
+    code = String((JSON.parse(m[2] ?? '') as { error?: unknown }).error ?? '');
+  } catch {
+    code = '';
+  }
+  if (m[1] === '401' || code.startsWith('agent-token-')) {
+    return {
+      reason: 'agent-token',
+      note: 'The server refused this session’s agent token. Restart the session so it mints a new one.',
+    };
+  }
+  if (code.startsWith('agent-stream-')) {
+    return {
+      reason: 'not-local',
+      note: 'The server takes this call only from a process on its own machine.',
+    };
+  }
+  if (code === 'room-first') {
+    return {
+      reason: 'room-first',
+      note: 'You have said ten lines in a row. Wait until someone in the room speaks.',
+    };
+  }
+  if (m[1] === '409') return { reason: 'no-meeting', note: 'No meeting is running on this board.' };
+  if (code === 'not-lead') {
+    return { reason: 'not-lead', note: "Only the board's lead speaks in its meeting." };
+  }
+  return null;
+}

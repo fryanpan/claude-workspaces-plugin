@@ -27,6 +27,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { declareWorkspaceLead } from '../declare-lead.ts';
+import { sayRefusal } from '../meeting-feed-line.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
 
 /** What the workspace tools read out of `mcp.ts`. */
@@ -833,16 +834,9 @@ export async function handleWorkspaceTool(
             : { note: 'Shown in the meeting but not played: no voice here, or a bot meeting.' }),
         });
       } catch (e) {
-        const m = String(e).match(/→ (403|409): /);
-        if (!m) throw e;
-        return ok({
-          said: false,
-          reason: m[1] === '409' ? 'no-meeting' : 'not-lead',
-          note:
-            m[1] === '409'
-              ? 'No meeting is running on this board.'
-              : "Only the board's lead speaks in its meeting.",
-        });
+        const refusal = sayRefusal(String(e));
+        if (!refusal) throw e;
+        return ok({ said: false, ...refusal });
       }
     }
     case 'coach_moment': {

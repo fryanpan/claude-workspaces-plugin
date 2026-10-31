@@ -20,7 +20,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MCP_ENTRY = join(HERE, '../src/mcp.ts');
 const AGENT = 'Harborlight Lead';
 
-type Recorded = { method: string; path: string; body: Record<string, unknown> };
+type Recorded = {
+  method: string;
+  path: string;
+  body: Record<string, unknown>;
+  authorization?: string;
+};
+
+/** The token the stub mints, as the server's mint route would. */
+const TOKEN = 'at1.agent-harborlight-lead.stub';
 type Reply = {
   result?: { isError?: boolean; content?: Array<{ text: string }> };
   error?: { message: string };
@@ -33,8 +41,17 @@ let nextId = 100;
 let pending = '';
 const waiters = new Map<number, (value: unknown) => void>();
 
-/** A meeting runs on `w-live` only; `w-other` has a different lead. */
+/** A meeting runs on `w-live` only; `w-other` has a different lead; the
+ *  rest refuse the way the server's agent gate and seat check do. */
 function replyFor(path: string): { status: number; body: unknown } {
+  if (/^\/api\/agents\/[^/]+\/token$/.test(path)) return { status: 200, body: { token: TOKEN } };
+  if (path.startsWith('/workspaces/w-tokenless/'))
+    return { status: 401, body: { error: 'agent-token-required' } };
+  if (path.startsWith('/workspaces/w-badtoken/'))
+    return { status: 403, body: { error: 'agent-token-mismatch' } };
+  if (path.startsWith('/workspaces/w-remote/'))
+    return { status: 403, body: { error: 'agent-stream-remote' } };
+  if (path.startsWith('/workspaces/w-full/')) return { status: 409, body: { error: 'room-first' } };
   if (path.startsWith('/workspaces/w-live/'))
     return { status: 200, body: { ok: true, played: true } };
   if (path.startsWith('/workspaces/w-quiet/'))
@@ -95,7 +112,12 @@ beforeAll(async () => {
       } catch {
         body = {};
       }
-      const rec = { method: req.method ?? '', path, body };
+      const rec: Recorded = {
+        method: req.method ?? '',
+        path,
+        body,
+        ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+      };
       if (!isBackgroundRequest(rec)) seen.push(rec);
       const reply = replyFor(path);
       res.writeHead(reply.status, { 'content-type': 'application/json' });
@@ -154,6 +176,22 @@ describe('say_in_meeting — the lead speaks into its meeting', () => {
       text: 'Who is it for?',
     });
     expect(out).toEqual({ said: true, played: true });
+    // Said as the lead, so it carries the lead's own token.
+    expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('names each refusal for what it is: token, machine, seat, or the room’s turn', async () => {
+    const reasons: Record<string, unknown> = {};
+    for (const ws of ['w-tokenless', 'w-badtoken', 'w-remote', 'w-full', 'w-other']) {
+      reasons[ws] = payload(await call('say_in_meeting', { workspaceId: ws, text: 'Hi.' })).reason;
+    }
+    expect(reasons).toEqual({
+      'w-tokenless': 'agent-token',
+      'w-badtoken': 'agent-token',
+      'w-remote': 'not-local',
+      'w-full': 'room-first',
+      'w-other': 'not-lead',
+    });
   });
 
   it('answers, rather than fails, when no meeting runs or the caller is not the lead', async () => {
