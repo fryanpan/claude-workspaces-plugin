@@ -214,22 +214,18 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     el.activeThread = t.id;
     ringed = t.id;
     seen.mark(t.id, latest(t));
-    // At once rather than smoothly; on a phone into the half the sheet
-    // leaves showing. Only once the spot has a box: a fragment move fires
-    // popstate, which renders this, before the hashchange a page shows its
-    // section on, and scrolling to a hidden element does nothing. So look
-    // each frame, for up to 1.5s, while this thread is still the open one.
+    // At once, on a phone into the half the sheet leaves showing, and once the
+    // spot has a box: popstate renders this before the hashchange a page shows
+    // its section on. Each frame for 1.5s, while this thread stays open.
     const until = performance.now() + 1500;
-    const reach = (): void => {
-      requestAnimationFrame((now) => {
-        const spot = el.threadPositions.get(t.id)?.el;
-        if (el.activeThread !== t.id) return;
-        if (!spot?.getClientRects().length) return void (now < until && reach());
-        spot.scrollIntoView({ block: narrow() ? 'start' : 'center' });
-        if (narrow()) scrollBy(0, -48);
-      });
+    const reach = (now: number): void => {
+      const spot = el.threadPositions.get(t.id)?.el;
+      if (el.activeThread !== t.id) return;
+      if (!spot?.getClientRects().length) return void (now < until && requestAnimationFrame(reach));
+      spot.scrollIntoView({ block: narrow() ? 'start' : 'center' });
+      if (narrow()) scrollBy(0, -48);
     };
-    reach();
+    requestAnimationFrame(reach);
     drawn = '';
     render();
     ring();
