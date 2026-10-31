@@ -219,3 +219,34 @@ describe('a turn addressed to this agent alone (to: set)', () => {
     expect(line).not.toContain('Earlier in this conversation');
   });
 });
+
+describe('where the message was sent from', () => {
+  const item = '/workspaces/w-1/home?item=task-review%3At-a1%3Ari-1';
+  const sent = {
+    route: 'agent',
+    to: 'harborlight-lead',
+    transcript: 'yes, ship it',
+    actor: { id: 'owner', name: 'Alice' },
+    workspaceId: 'w-1',
+    queueId: 'vt-3',
+  };
+
+  it('names the page link instead of the bare surface', () => {
+    const line = voiceRequestLine({ ...sent, context: { surface: 'board', link: item } }) as string;
+    expect(line).toContain(`(at ${item}): "yes, ship it"`);
+    expect(line).not.toContain('(at board');
+  });
+
+  it('keeps the heading beside the link, and the old anchor when there is no link', () => {
+    const doc = '/workspaces/w-1/docs/d-plan?thread=th-1';
+    expect(
+      voiceRequestLine({
+        ...sent,
+        context: { surface: 'doc', docId: 'd-plan', visibleHeading: 'Scope', link: doc },
+      }),
+    ).toContain(`(at ${doc}, near "Scope")`);
+    expect(voiceRequestLine({ ...sent, context: { surface: 'doc', docId: 'd-plan' } })).toContain(
+      '(at doc d-plan)',
+    );
+  });
+});

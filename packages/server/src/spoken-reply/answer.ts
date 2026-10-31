@@ -224,7 +224,7 @@ export class SpokenAnswerer {
     meeting = false,
   ): Promise<SpokenAnswer> {
     const transcript = stripWake(heard);
-    if (this.addressed !== undefined && !meeting) return this.toAgent(transcript, actor);
+    if (this.addressed !== undefined && !meeting) return this.toAgent(transcript, actor, context);
     const interviewed = await this.interview?.answer(transcript, context, meeting);
     if (interviewed) {
       const points = interviewed.spoken ? [{ say: interviewed.spoken }] : [];
@@ -308,10 +308,14 @@ export class SpokenAnswerer {
   }
 
   /** A turn for the named agent alone (`agent-conversation.ts`). */
-  private toAgent(transcript: string, actor: VoiceActor): SpokenAnswer {
+  private toAgent(
+    transcript: string,
+    actor: VoiceActor,
+    context: VoiceContext | undefined,
+  ): SpokenAnswer {
     if (!transcript) return plain('');
     if (!this.conversation) return plain('Only the owner can talk to an agent here.');
-    const r = this.conversation.turn(transcript, actor);
+    const r = this.conversation.turn(transcript, actor, context);
     if (r.kind === 'not-attached') return plain('That agent isn’t on this board.');
     if (r.kind === 'failed') return plain('I couldn’t pass that on. Say it again.');
     this.onAwaiting?.(r.queueId, r.agentId);

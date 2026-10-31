@@ -134,7 +134,7 @@ export class LeadChat {
     };
     if (lead) {
       const queueId = this.deps.newId();
-      const frame: AgentVoiceFrame & { context?: VoiceContext; leadChat: true } = {
+      const frame: AgentVoiceFrame & { leadChat: true } = {
         event: 'voice.request',
         workspaceId,
         route: 'agent',

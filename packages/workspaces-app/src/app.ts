@@ -10,6 +10,7 @@ import {
 import { el } from './doc/chrome-dom.ts';
 import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { wireDocSwitcher } from './doc/doc-switcher.ts';
+import { openThreadId } from './doc/open-thread.ts';
 import { paintProse } from './doc/prose-paint.ts';
 import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
@@ -117,6 +118,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
           const docId = docIdFromPathOrNull(location.pathname);
           return docId ? { surface: 'doc', docId } : undefined;
         },
+        openThread: openThreadId,
       }),
     );
   }

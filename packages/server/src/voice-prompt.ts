@@ -48,6 +48,13 @@ export interface VoiceContext {
   threadId?: string;
   /** Same, for a ticket-borne review item (a row on the task, not a thread). */
   reviewItemId?: string;
+  /**
+   * The most specific thing the speaker had open, as a relative path on this
+   * board: the review item, the doc thread, the doc, the task, the mock or
+   * app door, or the board page. Only ever set by `parseVoiceContext` after
+   * `messageLink` accepted it, so it names this board and nothing else.
+   */
+  link?: string;
 }
 
 /**

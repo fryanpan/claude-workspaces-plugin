@@ -21,6 +21,7 @@
  */
 import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
+import { messageLinkOf, withMessageLink } from './lead-chat-link.ts';
 import { type LeadMeetingSeams, wireLeadMeeting } from './lead-chat-meeting-wiring.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
 import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
@@ -34,8 +35,11 @@ import {
 export interface LeadChatMountOpts {
   workspaceId: string;
   author: { id: string; name: string; kind?: string };
-  /** Where the reader is, read at each send. */
+  /** Where the reader is, read at each send. The page's link is added to it
+   *  here, from the address (`lead-chat-link.ts`). */
   getContext?: () => VoiceContext | undefined;
+  /** The thread a doc page has open, which its address does not follow. */
+  openThread?: () => string | null;
   /** A slot in the board's dock; omitted, the button floats bottom-left. */
   dock?: HTMLElement;
   document?: Document;
@@ -137,8 +141,15 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     render();
   });
 
+  /** Where the reader is, with the link to what they have open. */
+  const context = (): VoiceContext | undefined =>
+    withMessageLink(
+      opts.getContext?.(),
+      messageLinkOf(win.location.pathname, win.location.search, opts.openThread?.()),
+    );
+
   const deliver = async (text: string, via: 'chat' | 'voice'): Promise<boolean> => {
-    const res = await client.send(text, opts.author, opts.getContext?.(), via);
+    const res = await client.send(text, opts.author, context(), via);
     ui.notice = res.ok ? '' : 'Not sent. Check the connection and try again.';
     render();
     return res.ok;
@@ -148,7 +159,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     ...opts.voice,
     workspaceId: opts.workspaceId,
     author: opts.author,
-    getContext: () => opts.getContext?.(),
+    getContext: context,
     agent: () => client.state().lead?.agentId,
     onChange: (v) => {
       heard = v;
