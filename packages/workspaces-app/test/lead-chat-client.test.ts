@@ -258,4 +258,36 @@ describe('the lead chat client', () => {
     expect(client.state().messages.map((m) => m.id)).toEqual(['a', 'c', 'e']);
     expect(client.state().more).toBe(false);
   });
+
+  it('asks again after a failed page only when told to retry', async () => {
+    const calls: string[] = [];
+    let fail = true;
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      fetch: (async (url: string) => {
+        calls.push(url);
+        if (!url.includes('beforeTs')) {
+          return new Response(
+            JSON.stringify({
+              lead: null,
+              messages: [msg('b', 'two', 2)],
+              more: true,
+              canTalk: true,
+            }),
+          );
+        }
+        if (fail) return new Response('{}', { status: 500 });
+        return new Response(JSON.stringify({ messages: [msg('a', 'one', 1)], more: false }));
+      }) as unknown as typeof fetch,
+      openStream: (u) => new FakeStream(u) as unknown as EventSource,
+    });
+    await settle();
+    await client.loadOlder();
+    await client.loadOlder();
+    expect(calls.filter((u) => u.includes('beforeTs'))).toHaveLength(1);
+    expect(client.state()).toMatchObject({ more: true, loadingOlder: false });
+    fail = false;
+    await client.loadOlder({ retry: true });
+    expect(client.state().messages.map((m) => m.id)).toEqual(['a', 'b']);
+  });
 });

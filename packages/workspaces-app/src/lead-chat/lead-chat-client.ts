@@ -69,8 +69,9 @@ export interface LeadChatClient {
   /** One verb on the board's meeting (`start`, `recording`, `line`, `join`,
    *  `end`); a meeting it answers with is applied before this resolves. */
   /** Read the page of messages before the oldest one held, when there is
-   *  one and no read for it is already out. */
-  loadOlder(): Promise<void>;
+   *  one and no read for it is already out. After a read that failed, only
+   *  a call with `retry` asks again — a scroll, never a redraw. */
+  loadOlder(opts?: { retry?: boolean }): Promise<void>;
   meeting(
     action: string,
     author: { id: string; name: string; kind?: string },
@@ -172,9 +173,11 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   });
   void load();
 
-  const loadOlder = async (): Promise<void> => {
+  let olderFailed = false;
+  const loadOlder = async (opts: { retry?: boolean } = {}): Promise<void> => {
     const oldest = state.messages[0];
     if (!state.more || state.loadingOlder || !oldest) return;
+    if (olderFailed && !opts.retry) return;
     state = { ...state, loadingOlder: true };
     changed();
     let page: LeadChatHistoryPage | null = null;
@@ -185,6 +188,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     } catch {
       // Offline: the next scroll to the top asks again.
     }
+    olderFailed = page === null;
     let messages = state.messages;
     for (const m of page?.messages ?? []) {
       // A copy already held came by frame, and is the newer one.

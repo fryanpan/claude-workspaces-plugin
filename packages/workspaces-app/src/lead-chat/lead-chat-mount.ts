@@ -123,9 +123,9 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   };
   /** Scrolled to the top of the open list, or a first page too short to
    *  scroll: read the page before, until the first message. */
-  const olderIfAtTop = (): void => {
+  const olderIfAtTop = (retry = false): void => {
     const s = client.state();
-    if (ui.open && s.more && !s.loadingOlder && view.nearTop()) void client.loadOlder();
+    if (ui.open && s.more && !s.loadingOlder && view.nearTop()) void client.loadOlder({ retry });
   };
   // Assigned below; the first renders run before the meeting is wired.
   let meet: ReturnType<typeof wireLeadMeeting> | null = null;
@@ -224,7 +224,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     else startListening();
   });
   view.send.addEventListener('click', () => void sendTyped());
-  view.list.addEventListener('scroll', olderIfAtTop, { passive: true });
+  view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {
     view.send.disabled = view.composer.value.trim() === '';
     view.composer.style.height = 'auto';
