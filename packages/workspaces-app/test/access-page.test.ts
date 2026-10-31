@@ -170,7 +170,10 @@ describe('the access page', () => {
     expect(document.querySelector('#acc-subnav a[aria-current="page"]')?.textContent).toBe(
       'Riverbend launch',
     );
-    expect(document.querySelector('.settings-back')?.textContent).toBe('Board');
+    // Reached from a board, and back still goes to the workspaces list.
+    const back = document.querySelector('.settings-back') as HTMLAnchorElement;
+    expect(back.textContent).toBe('Workspaces');
+    expect(back.getAttribute('href')).toBe('/');
     const approve = document.querySelector('[data-answer="approve"]') as HTMLElement;
     expect(approve.classList.contains('acc-wide')).toBe(true);
     expect(approve.textContent).toContain('everyone at the domain');

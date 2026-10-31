@@ -7,8 +7,9 @@
  *   /access/<boardId>  one board
  *
  * `?ws=<workspaceId>` is context, as on the prompts page: the board he came
- * from, for the back link and the rail. Below 1100px every section shows at
- * once, because there is no subnav to choose one with.
+ * from, for the rail. The back link always goes to the workspaces list.
+ * Below 1100px every section shows at once, because there is no subnav to
+ * choose one with.
  *
  * It writes through the routes that already guard each write: Approve and
  * Reject through the card's own access door, which needs the owner's own
@@ -180,10 +181,10 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
   }
 
   function chrome(): void {
-    const ws = route.workspaceId;
-    const back = ws
-      ? `<a class="settings-back" href="/workspaces/${encodeURIComponent(ws)}">${BACK}Board</a>`
-      : `<a class="settings-back" href="/">${BACK}Workspaces</a>`;
+    // Back is always the workspaces list, even when `?ws=` names a board:
+    // the page is about every board, and the list is where it is reached
+    // from (Bryan, 30 Oct).
+    const back = `<a class="settings-back" href="/">${BACK}Workspaces</a>`;
     root.innerHTML =
       '<div class="settings-shell access-shell">' +
       '<div class="settings-page">' +

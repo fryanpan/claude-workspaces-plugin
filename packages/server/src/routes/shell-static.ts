@@ -514,6 +514,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         coach,
         feedback ? feedbackWorkspaceId() : '',
         landingRemote ? landingRemote() : '',
+        ownerProven,
       ),
       { headers: HTML_SHELL_HEADERS },
     );
