@@ -274,9 +274,10 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // it costs nothing on every other surface.
       PlanPlaceholder.configure({ ydoc: opts.ydoc }),
       // `::sfworks{block="…"}` lines show the board app's live frame under
-      // them — render-time only, on a page under a board; elsewhere it installs
+      // them, and `::html{src="…"}` lines a page from the doc's own folder —
+      // render-time only, on a page under a board; elsewhere it installs
       // nothing (doc/board-embed-frames.ts).
-      boardEmbedFramesFor(workspaceIdFromPath(location.pathname)),
+      boardEmbedFramesFor(workspaceIdFromPath(location.pathname), opts.imageDocId),
       ...(opts.extraExtensions ?? []),
     ],
     onSelectionUpdate: () => opts.onSelectionChange?.(),

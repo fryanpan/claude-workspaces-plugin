@@ -200,4 +200,31 @@ describe('board embed frames', () => {
       editor.destroy();
     }
   });
+
+  it('frames a ::html{src} page from the doc folder, opaque, with no mapping needed', async () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const editor = new Editor({
+      element: el,
+      extensions: [
+        StarterKit,
+        Markdown.configure({ html: false, tightLists: true, linkify: true, breaks: false }),
+        BoardEmbedFrames.configure({
+          workspaceId: 'w-saltmarsh',
+          docId: 'd-riverbend',
+          load: async () => null,
+        }),
+      ],
+      content: 'Alice wrote this.\n\n::html{src="map/index.html"}\n\n::html{src="../up.html"}',
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const [frame, ...rest] = frames(el);
+    expect(rest).toHaveLength(0);
+    expect(frame?.getAttribute('src')).toBe(
+      '/workspaces/w-saltmarsh/docs/d-riverbend/files/map/index.html',
+    );
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame?.dataset.embedFiles).toBe('/workspaces/w-saltmarsh/docs/d-riverbend/files/');
+    editor.destroy();
+  });
 });
