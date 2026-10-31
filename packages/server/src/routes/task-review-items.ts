@@ -1,18 +1,23 @@
+/**
+ * A ticket's review items — 0..n, several possibly open at once.
+ *
+ * A decision task used to BE a decision — one `needs` flag and one embedded
+ * `options` array — so the ticket title doubled as the question and a second
+ * open question had nowhere to go. Here the question is a row with its own
+ * headline and why, and `:reviewItemId` says which one an answer lands on.
+ * The old one-decision doors stay in `task-answers.ts` for sessions on an old
+ * plugin bundle; `answerTaskReview` on the derived `r-legacy` row delegates
+ * back into `answerDecision`, so one implementation records both. The two
+ * doors that record a question rather than move the item are
+ * `task-review-ask-back.ts`.
+ */
 import {
   type Thread,
-  answerAsksBack,
   isReviewItemGated,
   isReviewItemHeld,
   latestThreadedQuestion,
 } from '@claude-workspaces/core';
-import { classifyActor } from '../actor-identity.ts';
 import { ticketOpenParts } from '../answer-coverage.ts';
-/**
- * A ticket's review items — 0..n, several possibly open at once.
- *
- * Lifted verbatim out of `createServer`'s request closure; the handlers
- * read their collaborators off `TaskRoutesContext` instead of the scope.
- */
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
@@ -26,14 +31,15 @@ import {
   SECRET_FILING_DENIAL,
   asksForGrant,
   asksForSecret,
-  refuseOwnerOnlyWrite,
 } from '../share/board-role.ts';
 import { SHARING_NOTICE_ACTOR } from '../sharing-notice.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
+import { askBackFromAnswer } from './task-review-ask-back.ts';
 import {
   type TaskRouteRequest,
   type TaskRoutesContext,
+  ownerOnlyDenial,
   taskUrlFor,
 } from './task-routes-context.ts';
 
@@ -50,51 +56,14 @@ export async function handleTaskReviewItems(
     safeJson,
     parseRevisedRange,
     announceTaskReview,
-    askBackOnItem,
     heldFields,
     judgeReviewItem,
     judgeTaskDecision,
     answerCoverage,
   } = ctx;
-  const { req, scope, visitor, authorFor, refuseCategoryAuthor, roleFor, requireOwner } = rq;
+  const { req, scope, visitor, authorFor, refuseCategoryAuthor, roleFor } = rq;
 
-  /**
-   * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
-   * on — running a command, handing over a credential — carries
-   * `review.ownerOnly`, and every write onto it is the owner's: answering it,
-   * rewording it, taking it off their queue, asking a question where the
-   * answer goes. `refuseOwnerOnlyWrite` is the one reading of that rule, and
-   * the doc-thread family calls the same function.
-   *
-   * The board comes off the SCOPE, not off the task record: the path is the
-   * argument, and `middleware/workspace-scope.ts` has already refused a task
-   * filed on a different board. Every route below matched through
-   * `matchRest(scope, …)`, which matches nothing without a scope, so the
-   * `?? ''` is a narrowing the compiler cannot see — and it fails CLOSED if
-   * that ever stops being true (see `refuseOwnerOnlyWrite`).
-   */
   const workspaceId = scope?.workspaceId ?? '';
-  const ownerOnlyDenial = (taskId: string, reviewItemId: string): Response | null => {
-    const review = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review;
-    // The host never relays one out of a mock (`mockup-linked-items.ts`);
-    // `writeViaOf` holds if it ever does.
-    return refuseOwnerOnlyWrite(review, workspaceId, requireOwner, writeViaOf(req));
-  };
-  // ── A ticket's review items: 0..n, several possibly open at once ────
-  //
-  // The two routes ABOVE are untouched and stay that way. They are the
-  // old doors, and a session running an old plugin bundle keeps calling
-  // them from a process we cannot restart — `answerTaskReview` on the
-  // derived `r-legacy` row delegates straight back into
-  // `answerDecision`, so there is exactly one implementation of
-  // "record a decision's answer" underneath both.
-  //
-  // What these add is the cardinality. A decision task used to BE a
-  // decision — one `needs` flag and one embedded `options` array — so
-  // the ticket title had to double as the question and a second open
-  // question had nowhere to go. Now the question is a row with its own
-  // headline and why, and `:reviewItemId` says which one an answer
-  // lands on.
   const taskReviewAddMatch = matchRest(scope, /^tasks\/([^/]+)\/review-items$/);
   if (taskReviewAddMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewAddMatch[1] ?? '');
@@ -190,47 +159,19 @@ export async function handleTaskReviewItems(
     // question would otherwise land on the thread of an ask they may not
     // touch, and the refusal would arrive after the board had already changed.
     {
-      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
       if (denied) return denied;
     }
-    // A question typed where the answer goes is an ASK BACK, not a
-    // decision. Recording it as the answer closed the item and left
-    // `revise` refusing it ("the answer is to the words it has"), so the
-    // only way to keep asking was a duplicate row (Bryan, 2026-08-30:
-    // "Why is this important?" stamped as a decision's answer). A
-    // person's un-tapped answer that ends asking is routed through the
-    // EXISTING more-info shape instead: the question lands as a thread
-    // on the item, the item waits on its owner, and the owner's revision
-    // re-presents it with the question quoted. A tapped option is an
-    // answer whatever its label ends in, and an agent's words never
-    // convert — agents answer, people ask.
-    if (answeredWith === undefined && classifyActor(author) === 'person' && answerAsksBack(text)) {
-      const task = taskStore.getTask(taskId);
-      if (!task) return j(404, { error: 'not-found' });
-      // The ticket's OWN decision (`r-legacy`) takes this path too —
-      // `listReviewItems` derives its row. It used to be recorded
-      // through the task-level "tell me more" with no thread, which
-      // left the decision on the queue under a question the reader
-      // had just asked; now it gets the same thread and the same
-      // waiting state as a stored item.
-      const item = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId);
-      // An unknown item falls through to the ordinary answer path below,
-      // which owns that refusal. An ANSWERED one is refused here: the
-      // fall-through would let `answerTaskReview`'s legal repeat-answer
-      // displace the standing answer with a question — a stale form
-      // racing another reader's answer would overwrite it with the exact
-      // words this conversion exists to keep out of that field (codex
-      // review). A question recorded on a closed item would also reach
-      // nobody: `reviewItemState` reads `answer` first.
-      if (item?.answer !== undefined) {
-        return j(409, {
-          error: 'answered',
-          message:
-            'this item is already answered — a question cannot displace the recorded answer; undo the answer first, or ask on the item’s thread',
-        });
-      }
-      if (item) return askBackOnItem(task, item, text, author, Boolean(visitor));
-    }
+    // A question typed where the answer goes is an ASK BACK, not a decision
+    // (`task-review-ask-back.ts`).
+    const askedBack = await askBackFromAnswer(ctx, rq, {
+      taskId,
+      reviewItemId,
+      text,
+      author,
+      answeredWith,
+    });
+    if (askedBack) return askedBack;
     const via = writeViaOf(req);
     // An item that asks several things can be answered on one of them. Such
     // an answer is recorded as PARTIAL and the item stays on the reader's
@@ -284,37 +225,6 @@ export async function handleTaskReviewItems(
       res.item.answer === undefined ? res.item.partialAnswers?.at(-1)?.open : undefined;
     return j(200, { ...res, ...(stillOpen ? { openParts: stillOpen } : {}) });
   }
-  // "Tell me more" on ONE review item — the `request_more_info` tool's
-  // door, and deliberately NOT the reader's "I have a question". It
-  // records the question with no thread, so `reviewItemState` never
-  // reads the item as `waiting` and it stays on the queue: this is the
-  // agent-side ask for context, and an agent asking must not take an
-  // item off the person's queue. A person's question goes through the
-  // threads route (a `review-item` anchor on the task doc), which is
-  // what makes the item wait on its owner.
-  const taskReviewInfoMatch = matchRest(
-    scope,
-    /^tasks\/([^/]+)\/review-items\/([^/]+)\/more-info$/,
-  );
-  if (taskReviewInfoMatch && req.method === 'POST') {
-    const taskId = decodeURIComponent(taskReviewInfoMatch[1] ?? '');
-    const reviewItemId = decodeURIComponent(taskReviewInfoMatch[2] ?? '');
-    {
-      const denied = ownerOnlyDenial(taskId, reviewItemId);
-      if (denied) return denied;
-    }
-    const body = await safeJson(req);
-    const question = typeof body?.question === 'string' ? body.question.trim() : '';
-    if (question.length === 0) return j(400, { error: 'question required' });
-    const author = authorFor(body?.author);
-    if (!author) return j(400, { error: 'author required' });
-    const res = taskStore.requestMoreInfoOnReview(taskId, reviewItemId, question, {
-      actor: author,
-    });
-    if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    taskProjection.refreshTask(res.task);
-    return j(200, res);
-  }
   /**
    * RELEASE a held review item — the reader overruling the gate.
    *
@@ -341,7 +251,7 @@ export async function handleTaskReviewItems(
     const taskId = decodeURIComponent(taskReviewReleaseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReleaseMatch[2] ?? '');
     {
-      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
       if (denied) return denied;
     }
     const body = await safeJson(req);
@@ -386,7 +296,7 @@ export async function handleTaskReviewItems(
     const taskId = decodeURIComponent(taskReviewReviseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReviseMatch[2] ?? '');
     {
-      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
       if (denied) return denied;
     }
     const body = await safeJson(req);
@@ -531,7 +441,7 @@ export async function handleTaskReviewItems(
     const taskId = decodeURIComponent(taskReviewWithdrawMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewWithdrawMatch[2] ?? '');
     {
-      const denied = ownerOnlyDenial(taskId, reviewItemId);
+      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
       if (denied) return denied;
     }
     // The sharing notice's card is the owner's one way back in while sharing

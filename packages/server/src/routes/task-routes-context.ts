@@ -11,13 +11,14 @@ import { taskDeepLink } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
+import { writeViaOf } from '../mockup-frame.ts';
 import type { PermissionGrants } from '../permission-grants.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { SecretWriter } from '../secret-store.ts';
 import type { AccessProposals } from '../share/access-proposals.ts';
-import type { BoardRole } from '../share/board-role.ts';
+import { type BoardRole, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, ParallelismCapChange, Task, TaskStore } from '../tasks.ts';
 
@@ -325,4 +326,36 @@ export function taskUrlFor(
 ): string | undefined {
   const base = isVisitor ? undefined : ctx.externalBaseUrl?.();
   return base === undefined ? undefined : `${base}${taskDeepLink(workspaceId, taskId)}`;
+}
+
+/**
+ * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
+ * on — running a command, handing over a credential — carries
+ * `review.ownerOnly`, and every write onto it is the owner's: answering it,
+ * rewording it, taking it off their queue, asking a question where the
+ * answer goes. `refuseOwnerOnlyWrite` is the one reading of that rule, and
+ * the doc-thread family calls the same function.
+ *
+ * The board comes off the SCOPE, not off the task record: the path is the
+ * argument, and `middleware/workspace-scope.ts` has already refused a task
+ * filed on a different board. Every caller matched through
+ * `matchRest(scope, …)`, which matches nothing without a scope, so the
+ * `?? ''` is a narrowing the compiler cannot see — and it fails CLOSED if
+ * that ever stops being true (see `refuseOwnerOnlyWrite`).
+ */
+export function ownerOnlyDenial(
+  ctx: Pick<TaskRoutesContext, 'taskStore'>,
+  rq: Pick<TaskRouteRequest, 'scope' | 'req' | 'requireOwner'>,
+  taskId: string,
+  reviewItemId: string,
+): Response | null {
+  const review = ctx.taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review;
+  // The host never relays one out of a mock (`mockup-linked-items.ts`);
+  // `writeViaOf` holds if it ever does.
+  return refuseOwnerOnlyWrite(
+    review,
+    rq.scope?.workspaceId ?? '',
+    rq.requireOwner,
+    writeViaOf(rq.req),
+  );
 }
