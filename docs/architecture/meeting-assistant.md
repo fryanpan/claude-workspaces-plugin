@@ -227,36 +227,63 @@ it. Only the lead: no other session on the board is woken by the room.
   `voice.meeting_started` (buffered, so a reconnect replays it), naming the
   notes doc and how to speak. Each settled line then goes to the lead in a
   `voice.meeting_heard`, batched over `LEAD_MEETING_BATCH_MS` (1s) so a
-  stretch of talk wakes the lead once per second at most, never once per line.
+  stretch of talk wakes the lead at most once per second.
   `end` flushes what is held. Lines are addressed and transient: they reach
   the lead's own stream, never a page, and are not kept in the replay buffer,
   where they would push out frames that matter more.
+- **Who is sent it.** A lead that takes the seat, attaches or restarts
+  mid-meeting gets a start of its own before its first batch. A lead whose
+  session reported a plugin older than 0.1.347 (`LEAD_MEETING_SINCE`), or
+  none, is sent neither event: its MCP has no wording for them and would wake
+  on an empty line once per batch for the whole meeting.
 - **What is left out.** A "Lead, …" line already reached the lead as a request
-  and is not sent twice; the lead's own lines are not fed back; a line resent
-  across a reconnect is not heard twice. With no lead on the board nothing is
-  sent.
+  and is not sent twice; the lead's own lines are not fed back; with no lead
+  on the board nothing is sent.
+- **Two gaps, left open.** A later correction of a turn (the transcriber
+  revising what it settled) never reaches the lead: only a turn's first
+  version is fed. And a turn resent after its batch has gone (a page
+  reconnecting) is not fed again, because the meeting already holds it, but
+  one the meeting had dropped past its 200-line window would be. Feeding
+  corrections is out of scope here.
 - **The words are data.** Anyone in the room can speak, and a bot meeting
   carries every guest on the call, so the MCP child renders the lines inside
   an untrusted quote (`meeting-feed-line.ts`). Both events ride the `voice.`
   family because `channel-gate.ts` drops every `meeting.*` event.
 - **Speaking is one call.** `say_in_meeting(workspaceId, text)` posts to
-  `POST /workspaces/<id>/lead-chat/meeting/say`, which takes the board's lead
-  only (agent token when one is sent, then the seat) and refuses with 409 when
-  no meeting is running. The line joins the meeting at a fractional turn after
-  the last one (`leadLineTurn`), marked `lead: true`, so every page shows it.
-- **Only the recording tab plays it.** That tab asks for the line voiced
-  (`voice` on the meeting route, PCM16 from the planning voice's engine) and
-  plays it (`lead-chat-meeting-voice.ts`); a watching tab only shows it, and a
-  bot meeting plays nothing because there is no room on this side. The
-  microphone keeps recording; its echo cancellation is what keeps the lead's
-  voice out of the transcript, and nothing else does.
+  `POST /workspaces/<id>/lead-chat/meeting/say` with the session's agent
+  token. The route takes the board's lead only (the token must speak for the
+  id; tokenless is refused once `requireAgentToken` is on) and refuses with
+  409 when no meeting runs. The line joins the meeting at a fractional turn
+  after the last one (`leadLineTurn`), marked `lead: true`, so every page
+  shows it. Each lead line halves the gap before the room's next turn, so
+  after ten in a row the route answers 409 `room-first` until somebody in the
+  room speaks; without the stop, about fifty would round onto the room's turn
+  and replace its line.
+- **Only a microphone meeting's recording tab plays it.** That tab asks for
+  the line voiced (`voice` on the meeting route, PCM16 from the planning
+  voice's engine) and plays it (`lead-chat-meeting-voice.ts`). A watching tab
+  only shows it. A Mac-audio meeting only shows it too: that recording takes
+  what the machine plays with echo cancellation off, so the lead's voice
+  would come straight back as the room's. A bot meeting has no room on this
+  side.
+- **The echo is dropped on the server.** The microphone's echo cancellation
+  reduces the lead's voice in the transcript and does not remove it. A room
+  line whose words equal, or are a part of (12 characters or more), a lead
+  line said in the last 30s (`echoOfLead`, `LEAD_ECHO_MS`) is neither shown
+  nor fed to the lead.
 - **Held to rare.** The start line tells the lead to speak rarely and in one
   short sentence, and to keep other questions in the lead chat until the
   meeting can tell when a speaker has finished a thought.
+- **Cost.** The batch window caps wakes at one a second, but a room settles a
+  turn every few seconds, so a lead is woken about once per settled turn:
+  several hundred times in an hour of steady talk.
 
-Proofs: `lead-meeting-feed.test.ts` (the batch window, on an injected clock),
-`lead-in-meeting.test.ts` (the real server, start then lines in order, the say
-route's refusals), `lead-in-meeting-browser.test.ts` (one tool call through the
+Proofs: `lead-meeting-feed.test.ts` (the batch window on an injected clock,
+the mid-meeting start, the old-plugin lead), `lead-meeting-echo.test.ts`
+(`echoOfLead`, the ten-line stop), `lead-in-meeting.test.ts` (the real
+server, start then lines in order, the echo dropped, the say route's
+refusals), `lead-say-auth.test.ts` (the token required),
+`lead-chat-meeting-lead-voice.test.ts` (which tab plays), `lead-in-meeting-browser.test.ts` (one tool call through the
 MCP, the line shown on two tabs and played on the recording one, at 1180x820
 and 430x932).
 

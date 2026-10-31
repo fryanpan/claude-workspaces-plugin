@@ -302,6 +302,7 @@ async function main(): Promise<void> {
       agentId: leadId,
       agentName: LEAD,
       runtime: 'claude-code-local',
+      pluginVersion: '0.1.347',
     });
     server.tasks.setLeadAgent(ws, leadId, { actor: { id: 'known-alice', name: 'Alice' } });
     const plan = join(dir, 'saltmarsh-plan.md');

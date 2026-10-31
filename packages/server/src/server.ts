@@ -1573,7 +1573,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // The board's lead in that meeting (`lead-chat/meeting-feed.ts`): the
   // start, then the room's lines batched, on the lead's own streams only.
   const leadMeetingFeed = new LeadMeetingFeed({
-    leadOf: (workspaceId) => taskStore.getWorkspace(workspaceId)?.leadAgentId ?? null,
+    leadOf: (workspaceId) => {
+      const id = taskStore.getWorkspace(workspaceId)?.leadAgentId;
+      if (!id) return null;
+      const v = taskStore.listAttachments(workspaceId).find((a) => a.agentId === id)?.pluginVersion;
+      return v === undefined ? { id } : { id, pluginVersion: v };
+    },
     send: (workspaceId, agentId, frame, transient) =>
       transient
         ? sse.sendToAgentTransient(`ws~${workspaceId}`, agentId, frame)

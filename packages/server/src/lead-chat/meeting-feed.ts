@@ -24,6 +24,15 @@
  * same reason `meeting-protocol.ts` keeps words off the doc's bus). A lead
  * that missed lines reads the meeting's doc.
  *
+ * A lead that takes the seat, attaches or restarts mid-meeting never saw the
+ * start, so the first batch for each lead id in a meeting goes after a start
+ * of its own.
+ *
+ * A lead on a plugin older than `LEAD_MEETING_SINCE` is sent neither frame:
+ * its MCP has no wording for them and renders each as an empty line, one
+ * wasted turn per batch for the whole meeting. The version is the one the
+ * session reported when it attached; none reported counts as older.
+ *
  * The lines are what anyone in the room said, and a bot meeting carries
  * every guest on the call. The MCP renders them inside an untrusted quote
  * (`meeting-feed-line.ts`): the lead reads them as what was said, never as
@@ -31,6 +40,10 @@
  * checks for the owner's proof first.
  */
 import type { TickScheduler } from '../pause-ticker.ts';
+import { compareSemver } from '../plugin-release.ts';
+
+/** The first plugin whose MCP renders these frames (`meeting-feed-line.ts`). */
+export const LEAD_MEETING_SINCE = '0.1.347';
 
 /** How long a line waits for others to ride with it. Under the 2s the lead
  *  is promised, and long enough to fold a run of short turns into one. */
@@ -59,8 +72,9 @@ export interface FeedLine {
 export type FeedFrame = { event: string } & Record<string, unknown>;
 
 export interface LeadMeetingFeedDeps {
-  /** The board's lead, or null when the seat is empty. */
-  leadOf(workspaceId: string): string | null;
+  /** The board's lead and the plugin version its session reported, or null
+   *  when the seat is empty. */
+  leadOf(workspaceId: string): { id: string; pluginVersion?: string } | null;
   /** One frame to the lead's own streams; `transient` frames are not kept
    *  for replay. How many streams took it. */
   send(workspaceId: string, agentId: string, frame: FeedFrame, transient: boolean): number;
@@ -76,15 +90,36 @@ interface Held {
 
 export class LeadMeetingFeed {
   private readonly held = new Map<string, Held>();
+  /** Per board: the meeting, and every lead id already sent its start. */
+  private readonly greeted = new Map<string, { meetingId: string; leads: Set<string> }>();
   private readonly now: () => number;
 
   constructor(private readonly deps: LeadMeetingFeedDeps) {
     this.now = deps.now ?? Date.now;
   }
 
+  /** The lead to send to: in the seat, and on a plugin that reads these. */
+  private lead(workspaceId: string): string | null {
+    const l = this.deps.leadOf(workspaceId);
+    if (!l) return null;
+    const v = l.pluginVersion;
+    return v !== undefined && compareSemver(v, LEAD_MEETING_SINCE) >= 0 ? l.id : null;
+  }
+
   started(workspaceId: string, m: FeedMeeting): void {
-    const lead = this.deps.leadOf(workspaceId);
-    if (!lead) return;
+    this.greeted.set(workspaceId, { meetingId: m.id, leads: new Set() });
+    const lead = this.lead(workspaceId);
+    if (lead) this.greet(workspaceId, lead, m);
+  }
+
+  private greet(workspaceId: string, lead: string, m: FeedMeeting): void {
+    let g = this.greeted.get(workspaceId);
+    if (!g || g.meetingId !== m.id) {
+      g = { meetingId: m.id, leads: new Set() };
+      this.greeted.set(workspaceId, g);
+    }
+    if (g.leads.has(lead)) return;
+    g.leads.add(lead);
     this.deps.send(
       workspaceId,
       lead,
@@ -118,6 +153,7 @@ export class LeadMeetingFeed {
   /** The meeting ended: what is held goes now. */
   ended(workspaceId: string): void {
     this.flush(workspaceId);
+    this.greeted.delete(workspaceId);
   }
 
   private flush(workspaceId: string): void {
@@ -125,8 +161,9 @@ export class LeadMeetingFeed {
     if (!h) return;
     this.held.delete(workspaceId);
     if (h.timer !== null) this.deps.schedule.clear(h.timer);
-    const lead = this.deps.leadOf(workspaceId);
+    const lead = this.lead(workspaceId);
     if (!lead || h.lines.length === 0) return;
+    this.greet(workspaceId, lead, h.meeting);
     for (let i = 0; i < h.lines.length; i += LINES_PER_FRAME) {
       this.deps.send(
         workspaceId,

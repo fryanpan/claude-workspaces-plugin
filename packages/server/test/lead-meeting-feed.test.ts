@@ -12,6 +12,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   LEAD_MEETING_BATCH_MS,
   LEAD_MEETING_HEARD_EVENT,
+  LEAD_MEETING_SINCE,
   LEAD_MEETING_STARTED_EVENT,
   LeadMeetingFeed,
 } from '../src/lead-chat/meeting-feed.ts';
@@ -57,10 +58,14 @@ class ClockedSends {
   }> = [];
 }
 
-function setup(lead: string | null = 'harborlight-lead') {
+type Lead = { id: string; pluginVersion?: string } | null;
+const LEAD: Lead = { id: 'harborlight-lead', pluginVersion: LEAD_MEETING_SINCE };
+
+function setup(initial: Lead = LEAD) {
   const clock = new ClockedSends();
+  const seat = { lead: initial };
   const feed = new LeadMeetingFeed({
-    leadOf: () => lead,
+    leadOf: () => seat.lead,
     send: (workspaceId, agentId, frame) => {
       clock.sent.push({ workspaceId, agentId, frame, at: clock.clock.at });
       return 1;
@@ -68,7 +73,7 @@ function setup(lead: string | null = 'harborlight-lead') {
     schedule: clock.clock,
     now: () => clock.clock.at,
   });
-  return { feed, clock: clock.clock, sent: clock.sent };
+  return { feed, clock: clock.clock, sent: clock.sent, seat };
 }
 
 describe('the lead in its meeting', () => {
@@ -120,12 +125,48 @@ describe('the lead in its meeting', () => {
 
   it('sends what is held when the meeting ends, and nothing after', () => {
     const { feed, clock, sent } = setup();
+    feed.started('w-harbor', MEETING);
     feed.heard('w-harbor', MEETING, { turn: 0, who: 'Alice', text: 'Last word.' });
     feed.ended('w-harbor');
     expect(sent.map((s) => s.frame.lines)).toEqual([
+      undefined,
       [{ turn: 0, who: 'Alice', text: 'Last word.' }],
     ]);
     clock.advance(LEAD_MEETING_BATCH_MS * 2);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('sends a start to a lead that took the seat mid-meeting, once, before its first lines', () => {
+    const { feed, clock, sent, seat } = setup();
+    feed.started('w-harbor', MEETING);
+    seat.lead = { id: 'saltmarsh-lead', pluginVersion: LEAD_MEETING_SINCE };
+    feed.heard('w-harbor', MEETING, { turn: 0, who: 'Alice', text: 'New lead now.' });
+    clock.advance(LEAD_MEETING_BATCH_MS);
+    feed.heard('w-harbor', MEETING, { turn: 1, who: 'Bob', text: 'Still here.' });
+    clock.advance(LEAD_MEETING_BATCH_MS);
+    expect(sent.map((s) => [s.agentId, s.frame.event])).toEqual([
+      ['harborlight-lead', LEAD_MEETING_STARTED_EVENT],
+      ['saltmarsh-lead', LEAD_MEETING_STARTED_EVENT],
+      ['saltmarsh-lead', LEAD_MEETING_HEARD_EVENT],
+      ['saltmarsh-lead', LEAD_MEETING_HEARD_EVENT],
+    ]);
+    expect(sent[1]?.frame).toMatchObject({ meetingId: 'lcm-1', docId: 'riverbend-sync' });
+  });
+
+  it('sends nothing to a lead whose plugin cannot render these frames', () => {
+    for (const lead of [
+      { id: 'harborlight-lead', pluginVersion: '0.1.346' },
+      { id: 'harborlight-lead' },
+    ]) {
+      const { feed, clock, sent } = setup(lead);
+      feed.started('w-harbor', MEETING);
+      feed.heard('w-harbor', MEETING, { turn: 0, who: 'Alice', text: 'Hello.' });
+      clock.advance(LEAD_MEETING_BATCH_MS);
+      feed.ended('w-harbor');
+      expect(sent, JSON.stringify(lead)).toEqual([]);
+    }
+    const { feed, sent } = setup({ id: 'harborlight-lead', pluginVersion: '0.1.400' });
+    feed.started('w-harbor', MEETING);
     expect(sent).toHaveLength(1);
   });
 
