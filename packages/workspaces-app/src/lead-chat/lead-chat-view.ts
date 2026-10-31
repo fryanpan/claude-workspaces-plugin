@@ -11,8 +11,14 @@
  *
  * The panel sits right of centre on a wide screen and is a sheet on a narrow
  * one, stopping at the board's tab bar so the button stays in reach.
+ *
+ * The lead's messages are markdown, drawn by the comments' escape-first
+ * renderer (`comment-markdown.ts`), so a tag in one is text. A person's own
+ * stay plain text. Scrolled to the top, the list asks for the page before
+ * (`nearTop`) and keeps the line the reader was on where it was.
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import { renderCommentMarkdown } from '../comment-markdown.ts';
 import {
   MEETING_STYLES,
   type MeetingView,
@@ -36,6 +42,8 @@ export const CORNER_ROOM = 72;
 const BAR_H_NARROW = 50;
 const IDLE_RUN = { phase: 'idle', note: '', partial: '' } as const;
 const PANEL_W = 440;
+/** How close to the top of the list, in pixels, asks for the page before. */
+const OLDER_AT = 80;
 
 export interface LeadChatViewModel {
   lead: LeadChatLead | null;
@@ -56,6 +64,10 @@ export interface LeadChatViewModel {
   notice: string;
   /** The board's meeting, when one runs; absent draws no meeting. */
   meeting?: MeetingViewModel;
+  /** Older messages than the first shown exist, and whether they are on
+   *  their way. */
+  more?: boolean;
+  loadingOlder?: boolean;
 }
 
 export interface LeadChatView {
@@ -73,6 +85,8 @@ export interface LeadChatView {
   /** The layer's shadow root, which the meeting wizard draws into. */
   root: ShadowRoot;
   render(m: LeadChatViewModel): void;
+  /** The open list is scrolled to its top, or too short to scroll. */
+  nearTop(): boolean;
   /** Re-measure and place the bar and the panel. */
   place(): void;
   destroy(): void;
@@ -128,6 +142,15 @@ export function statusLine(m: LeadChatViewModel): string {
     return `${lead} is working on it`;
   }
   return '';
+}
+
+/** The quiet line above the first message shown: older ones on their way,
+ *  or the conversation's start. Empty while more wait to be scrolled to. */
+export function historyLine(m: LeadChatViewModel): string {
+  if (m.messages.length === 0) return '';
+  if (m.loadingOlder) return 'Loading earlier messages…';
+  if (m.more) return '';
+  return `Start of your conversation${m.lead ? ` with ${m.lead.name}` : ''}`;
 }
 
 /** The note under one of the person's messages, when it did not simply go. */
@@ -247,8 +270,19 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     if (widget) widget.style.visibility = hide ? 'hidden' : '';
   };
 
-  let lastCount = -1;
+  let lastNewest: string | undefined;
+  let lastOldest: string | undefined;
   let wasOpen = false;
+  /** The lead's messages as drawn, by id and text: a re-render while the
+   *  mic hears a line redraws the list but parses nothing again. */
+  const drawn = new Map<string, { text: string; html: string }>();
+  const markdown = (msg: LeadChatMessage): string => {
+    const hit = drawn.get(msg.id);
+    if (hit?.text === msg.text) return hit.html;
+    const html = renderCommentMarkdown(msg.text, { bareLinks: true });
+    drawn.set(msg.id, { text: msg.text, html });
+    return html;
+  };
 
   const place = (): void => {
     const vw = doc.documentElement.clientWidth || win.innerWidth;
@@ -283,7 +317,12 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
 
   const renderList = (m: LeadChatViewModel): void => {
     const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    const prevHeight = list.scrollHeight;
+    const prevTop = list.scrollTop;
     list.replaceChildren();
+    // Always drawn above a non-empty list, one line high, so its words can
+    // change without moving the messages under it.
+    if (m.messages.length > 0) list.append(make(doc, 'p', 'lc-history', historyLine(m)));
     if (m.messages.length === 0) {
       const empty = make(
         doc,
@@ -300,20 +339,34 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       const item = make(doc, 'div', `lc-msg ${mine ? 'lc-you' : 'lc-agent'}`);
       item.dataset.messageId = msg.id;
       const name = mine ? (msg.author.id === m.meId ? 'You' : msg.author.name) : msg.author.name;
+      let body: HTMLElement;
+      if (mine) {
+        body = make(doc, 'span', 'lc-msg-text', msg.text);
+      } else {
+        body = make(doc, 'div', 'lc-msg-text lc-md');
+        body.innerHTML = markdown(msg);
+      }
       item.append(
         make(doc, 'span', 'lc-msg-who', msg.via === 'voice' ? `${name}, by voice` : name),
-        make(doc, 'span', 'lc-msg-text', msg.text),
+        body,
       );
       const note = deliveryNote(msg, m.lead);
       if (note) item.append(make(doc, 'span', 'lc-note', note));
       list.append(item);
     }
     // Follow the conversation when the reader is at its foot, or it grew
-    // while they were not looking; never pull them off a line they scrolled to.
-    if (nearBottom || lastCount !== m.messages.length || !wasOpen) {
+    // while they were not looking; never pull them off a line they scrolled
+    // to. A page read back above them grows the list upward, so the line
+    // they were reading stays where it was.
+    const newest = m.messages.at(-1)?.id;
+    const oldest = m.messages[0]?.id;
+    if (nearBottom || newest !== lastNewest || !wasOpen) {
       list.scrollTop = list.scrollHeight;
+    } else if (oldest !== lastOldest) {
+      list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
     }
-    lastCount = m.messages.length;
+    lastNewest = newest;
+    lastOldest = oldest;
   };
 
   return {
@@ -342,7 +395,6 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
         barText.append(row);
       }
       who.textContent = m.lead ? `with ${m.lead.name}` : m.loaded ? 'No lead on this board' : '';
-      if (m.open) renderList(m);
       status.textContent = statusLine(m);
       const meetingOn = !!m.meeting?.meeting;
       title.hidden = meetingOn;
@@ -360,9 +412,12 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       mic.setAttribute('aria-label', micLabel);
       mic.title = micLabel;
       send.disabled = composer.value.trim() === '';
-      wasOpen = m.open;
+      // Placed first, so the list has its height when it scrolls to its foot.
       place();
+      if (m.open) renderList(m);
+      wasOpen = m.open;
     },
+    nearTop: () => !pane.hidden && list.scrollTop < OLDER_AT,
     place,
     destroy() {
       hideWidget(false);

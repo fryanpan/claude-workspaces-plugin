@@ -47,7 +47,11 @@ export interface LeadChatLead {
 
 export interface LeadChatSnapshot {
   lead: LeadChatLead | null;
+  /** The latest `LEAD_CHAT_PAGE` messages, oldest first. */
   messages: LeadChatMessage[];
+  /** Older messages exist: page back with `LeadChatHistoryPage`. Absent
+   *  from a server built before paging, which reads as none. */
+  more?: boolean;
   /** The meeting this chat is running, or null. Absent from a server built
    *  before meetings, which reads as none. */
   meeting?: LeadChatMeeting | null;
@@ -155,6 +159,40 @@ export function addressesLead(text: string): boolean {
   return /^\s*lead\s*[,:]\s*\S/i.test(text);
 }
 
+/** How many messages one read hands a page: the first read, and each page
+ *  back through the history. */
+export const LEAD_CHAT_PAGE = 50;
+/** The most a page may ask for in one history read. */
+export const LEAD_CHAT_PAGE_MAX = 100;
+
+/**
+ * Where a page back through the history starts: the oldest entry the page
+ * already shows. Everything strictly before it in `compareLeadChatEntries`
+ * order comes next.
+ *
+ * Keyed on time and id rather than on a position in one log, so a later
+ * kind of entry kept somewhere else (the lead's own session, mirrored into
+ * the chat) can join the same list and page back in the same order.
+ */
+export interface LeadChatCursor {
+  ts: number;
+  id: string;
+}
+
+/** `GET /workspaces/<ws>/lead-chat?beforeTs=&beforeId=&limit=`: the
+ *  messages just before the cursor, oldest first, and whether there are
+ *  older ones still. */
+export interface LeadChatHistoryPage {
+  messages: LeadChatMessage[];
+  more: boolean;
+}
+
+/** The one order every list of the chat is kept in: by time, then by id so
+ *  two entries written in the same millisecond still sort one way. */
+export function compareLeadChatEntries(a: LeadChatCursor, b: LeadChatCursor): number {
+  return a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 /** `GET /workspaces/<ws>/lead-chat`: the snapshot, and whether this reader
  *  may write to the lead (the owner alone may). */
 export interface LeadChatRead extends LeadChatSnapshot {
@@ -210,6 +248,6 @@ export function upsertLeadChatMessage(
 ): LeadChatMessage[] {
   const out = list.filter((x) => x.id !== m.id);
   out.push(m);
-  out.sort((x, y) => x.ts - y.ts || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  out.sort(compareLeadChatEntries);
   return out;
 }

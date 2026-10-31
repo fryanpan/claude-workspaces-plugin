@@ -1046,9 +1046,17 @@ name (an addressed row, then one `voice.request` to the lead alone), takes the
 lead's `answer_voice` first in `routes/workspace-attachments.ts`, and writes a
 spoken turn to the lead from the converse socket into the same chat
 (`AgentConversationLog`). Every change goes to the board's pages as a
-`lead-chat.changed` frame and to no agent stream. The route is
+`lead-chat.changed` frame and to no agent stream. A page is handed the
+latest 50 messages and pages back from the oldest it shows
+(`GET …/lead-chat?beforeTs=&beforeId=`) until the first: out of the 200 the
+server holds, then off the log, up to 32 MB from its tail. The cursor is a
+time and an id, not a log position, so another kind of entry kept elsewhere
+can join the same list in the same order. The route is
 `routes/workspace-lead-chat.ts` (read by a member, written by the owner);
 the message shape is `core/src/lead-chat.ts` (a new top-level core module).
+The panel draws the lead's messages with the comments' escape-first
+markdown renderer (`comment-markdown.ts`, which gains pipe tables and an
+opt-in link for a bare URL) and a person's own as plain text.
 In the app, `workspaces-app/src/lead-chat/` (a new top-level directory) is
 the client, the shadow-DOM button, bar and panel, and the per-device Chat
 first / Voice first choice the Settings Voice row writes; the board mounts it

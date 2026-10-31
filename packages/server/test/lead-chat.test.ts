@@ -116,6 +116,7 @@ describe('the lead chat', () => {
     expect(await res.json()).toEqual({
       lead: { agentId: 'harborlight-lead', name: 'Harborlight Lead' },
       messages: [],
+      more: false,
       meeting: null,
       canTalk: true,
     });
