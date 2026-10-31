@@ -219,6 +219,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/delete_section` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/diff` | GET | `routes/doc-resource.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/files/*` | GET, HEAD | `routes/doc-files.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/find_and_replace` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/home` | GET, PUT, DELETE | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/hooks/fire` | POST | `routes/doc-resource.ts` | trusted-local |  |

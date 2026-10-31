@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampEmbedHeight,
+  docFileUrl,
   embedFrameSpec,
   embedOriginsFrom,
   embedOriginsFromJson,
   embedUrl,
   parseBoardEmbeds,
   parseEmbedDirective,
+  parseFileEmbedDirective,
 } from './board-embeds.ts';
 
 const EMBEDS = { sfworks: { appDocId: 'd-app1', pathTemplate: '{mount}/embed/bike/{block}/' } };
@@ -115,4 +117,38 @@ it('clamps a height into range', () => {
   expect(clampEmbedHeight(4500)).toBe(4500);
   expect(clampEmbedHeight(99999)).toBe(10000);
   expect(clampEmbedHeight(321.4)).toBe(321);
+});
+
+describe('parseFileEmbedDirective', () => {
+  it('reads a relative html path, with or without a leading ./', () => {
+    expect(parseFileEmbedDirective('::html{src="map/index.html"}')).toEqual({
+      src: 'map/index.html',
+      segments: ['map', 'index.html'],
+    });
+    expect(parseFileEmbedDirective('::html{src="./map.html"}')?.segments).toEqual(['map.html']);
+  });
+
+  it('refuses a path that could leave the folder, a dotfile, or anything but html', () => {
+    for (const src of [
+      '../map.html',
+      'a/../map.html',
+      '/etc/map.html',
+      'https://harborlight.example/map.html',
+      '.hidden/map.html',
+      'a//map.html',
+      'a\\map.html',
+      'map.html?x=1',
+      'map.js',
+      '',
+    ]) {
+      expect(parseFileEmbedDirective(`::html{src="${src}"}`), src).toBeNull();
+    }
+    expect(parseFileEmbedDirective('see ::html{src="map.html"}')).toBeNull();
+  });
+
+  it("builds the frame address under the doc's files route", () => {
+    expect(docFileUrl('w-1', 'd 1', ['map', 'a b.html'])).toBe(
+      '/workspaces/w-1/docs/d%201/files/map/a%20b.html',
+    );
+  });
 });
