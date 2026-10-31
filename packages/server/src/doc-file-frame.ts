@@ -16,9 +16,9 @@
  *  - no segment starts with a dot or is `node_modules`, as asked for or as
  *    resolved, so `.env`, `.git/config` and a link named `data.json` that
  *    points at `.env` are all refused;
- *  - the serving folder's listing shows it (`isListedFile`, the rule a
- *    folder's share visitors already read by): in a repository a gitignored
- *    file is refused, and outside one, so is every credential-shaped name;
+ *  - git lists it, and the file a link lands on, under the serving folder
+ *    (`doc-file-listing.ts`): a gitignored file and a credential-shaped name
+ *    are refused, and outside a git work tree nothing is listed;
  *  - its real path sits under the real path of the serving folder, judged
  *    again on the open descriptor (`landsInside`), so a link swapped in after
  *    the check reads nothing outside and nothing dot-led;
@@ -65,12 +65,12 @@
  * `Cross-Origin-Resource-Policy: same-origin`, which an opaque frame's
  * request is not; so those do not load. Write them in or relay them.
  */
-import { realpathSync, statSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { extname, join, sep } from 'node:path';
 import { GuardRefused, readBytesChecked } from './bound-path-guard.ts';
+import { isGitListed } from './doc-file-listing.ts';
 import { resolveInside } from './doc-image-store.ts';
-import { isListedFile, landsOnListed } from './fs-listing.ts';
 import { MOCK_FRAME_SANDBOX } from './mockup-frame.ts';
 import { realPathUnder } from './safe-path.ts';
 import { boundFiles } from './slow-fs.ts';
@@ -145,7 +145,6 @@ export async function readDocFile(
   const inFolder = segments.length > folder.length && folder.every((s, i) => segments[i] === s);
   if (!inFolder || hidden(segments)) return { ok: false, status: 404 };
   const root = join(dir, ...folder);
-  const clean = segments.slice(folder.length).join('/');
   let guard: ((real: string) => boolean) | null;
   try {
     guard = boundFiles.guards.landsFor(join(dir, ...segments));
@@ -158,7 +157,11 @@ export async function readDocFile(
   if (rel === null || rel === '' || hidden(rel.split('/'))) return { ok: false, status: 404 };
   // Asked again of where a link LANDS: `data.json -> notes.txt` is not JSON.
   if (docFileType(abs) !== type) return { ok: false, status: 415 };
-  if (!isListedFile(root, clean) || landsOnListed(root, clean, abs, []) !== 'ok') {
+  // Git must list both the name asked for and the file a link lands on.
+  const asked = segments.join('/');
+  const landed = [...folder, rel].join('/');
+  if (!(await isGitListed(dir, folder, asked))) return { ok: false, status: 404 };
+  if (landed !== asked && !(await isGitListed(dir, folder, landed))) {
     return { ok: false, status: 404 };
   }
   let realRoot: string;
@@ -315,69 +318,4 @@ export async function frameHtml(
     return `<style${media ? ` media="${media.replace(/"/g, '&quot;')}"` : ''}>${css}</style>`;
   });
   return prepend(out, FETCH_RELAY(base));
-}
-
-/** A built page and the files it was built from, each with the stat it had. */
-interface CachedPage {
-  deps: Array<{ abs: string; size: bigint; mtimeNs: bigint }>;
-  body: Uint8Array<ArrayBuffer>;
-}
-
-const PAGE_CACHE_MAX = 16;
-const pageCache = new Map<string, CachedPage>();
-let builds = 0;
-
-/** How many pages have been built since boot; read by the tests. */
-export const pageBuildCount = (): number => builds;
-
-function stillCurrent(entry: CachedPage): boolean {
-  for (const d of entry.deps) {
-    try {
-      const st = statSync(d.abs, { bigint: true });
-      if (st.size !== d.size || st.mtimeNs !== d.mtimeNs) return false;
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * The built page for `key` (its address and file), from the cache while the
- * page and every file written into it keep the size and mtime they had;
- * otherwise built again by `build`, which reports each file it read, and
- * calls `miss` for a file it could not, so a page whose script is not there
- * yet is built again rather than served without it once it appears.
- * Null when the page is too large.
- */
-export async function cachedPage(
-  key: string,
-  page: { abs: string; st: BigIntStats },
-  build: (
-    note: (abs: string, st: BigIntStats) => void,
-    miss: () => void,
-  ) => Promise<Uint8Array<ArrayBuffer> | null>,
-): Promise<Uint8Array<ArrayBuffer> | null> {
-  const hit = pageCache.get(key);
-  if (hit && stillCurrent(hit)) return hit.body;
-  pageCache.delete(key);
-  const deps: CachedPage['deps'] = [
-    { abs: page.abs, size: page.st.size, mtimeNs: page.st.mtimeNs },
-  ];
-  builds++;
-  let complete = true;
-  const body = await build(
-    (abs, st) => deps.push({ abs, size: st.size, mtimeNs: st.mtimeNs }),
-    () => {
-      complete = false;
-    },
-  );
-  if (body === null || !complete) return body;
-  pageCache.set(key, { deps, body });
-  while (pageCache.size > PAGE_CACHE_MAX) {
-    const oldest = pageCache.keys().next().value;
-    if (oldest === undefined) break;
-    pageCache.delete(oldest);
-  }
-  return body;
 }

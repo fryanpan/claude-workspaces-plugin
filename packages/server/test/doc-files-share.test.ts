@@ -10,6 +10,7 @@
  * every call that crossed the edge.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,13 +80,15 @@ describe('a doc folder file through a share link', () => {
       },
     });
   const filePath = (board: string, doc: string) =>
-    `/workspaces/${encodeURIComponent(board)}/docs/${doc}/files/map.html`;
+    `/workspaces/${encodeURIComponent(board)}/docs/${doc}/files/map/index.html`;
 
   const bindDoc = async (board: string, name: string) => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'doc.md'), `# ${name}\n\n::html{src="map.html"}\n`);
-    writeFileSync(join(dir, 'map.html'), `<!doctype html><h1>${name} map</h1>`);
+    spawnSync('git', ['init', '-q'], { cwd: dir });
+    mkdirSync(join(dir, 'map'));
+    writeFileSync(join(dir, 'doc.md'), `# ${name}\n\n::html{src="map/index.html"}\n`);
+    writeFileSync(join(dir, 'map', 'index.html'), `<!doctype html><h1>${name} map</h1>`);
     await postLocal(`/workspaces/${board}/docs`, {
       docId: name.toLowerCase(),
       type: 'markdown',

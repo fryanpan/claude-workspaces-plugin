@@ -113,6 +113,8 @@ async function main(): Promise<void> {
     if (built.status !== 0) throw new Error(`doc bundle build failed:\n${built.stderr}`);
     const docDir = join(dir, 'harborlight');
     mkdirSync(join(docDir, 'map', 'data'), { recursive: true });
+    // The files route serves only what git lists, so the doc sits in a work tree.
+    spawnSync('git', ['init', '-q'], { cwd: docDir });
     writeFileSync(
       join(docDir, 'ferry.md'),
       '# Harborlight ferry\n\n::html{src="map/index.html"}\n\nRiverbend notes below.\n',

@@ -11,13 +11,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import {
-  DOC_PAGE_CSP,
-  frameHtml,
-  landsInside,
-  pageBuildCount,
-  resolveRef,
-} from '../src/doc-file-frame.ts';
+import { DOC_PAGE_CSP, frameHtml, landsInside, resolveRef } from '../src/doc-file-frame.ts';
+import { LISTING_AGES, listingScanCount } from '../src/doc-file-listing.ts';
+import { PAGE_RECHECK, pageBuildCount } from '../src/doc-file-page-cache.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { tinyPng } from './tiny-png.ts';
 import { waitFor } from './wait-for.ts';
@@ -81,6 +77,23 @@ describe('GET …/docs/<id>/files/<path>', () => {
     write('config.json', '{"token":"beside the doc"}');
     write('src/config.js', 'window.config = "beside the doc";');
     write('outside.js', 'window.leaked = true;');
+    // A page at the doc's own level, and a line naming a page that is not there.
+    write('tide.md', '# Tide\n\n::html{src="index.html"}\n');
+    write('index.html', '<h1>Tide</h1>');
+    write('ghost.md', '# Ghost\n\n::html{src="ghost/index.html"}\n');
+    write('ghost/data.json', '{"ghost":true}');
+    // A page in a subfolder whose scope narrows once the doc frames it itself.
+    write('narrow.md', '# Narrow\n\n::html{src="map/index.html"}\n');
+    write('map/shared.js', 'window.shared = 1;');
+    write('map/inner/page.html', '<head><script src="../shared.js"></script></head>');
+    write('map/gen.html', '<head><script src="gen.js"></script></head>');
+    write('map/gen.js', 'window.generation = 1;');
+    // A doc folder outside any git work tree.
+    const loose = join(root, 'loose');
+    mkdirSync(join(loose, 'map'), { recursive: true });
+    writeFileSync(join(loose, 'doc.md'), '# Loose\n\n::html{src="map/index.html"}\n');
+    writeFileSync(join(loose, 'map', 'index.html'), '<h1>Loose</h1>');
+    writeFileSync(join(loose, 'map', 'app.js'), 'window.loose = true;');
     writeFileSync(join(root, 'secret.json'), '{"secret":true}');
     symlinkSync(join(root, 'secret.json'), join(docDir, 'map', 'leak.json'));
     symlinkSync(join(docDir, 'config.json'), join(docDir, 'map', 'up.json'));
@@ -94,10 +107,20 @@ describe('GET …/docs/<id>/files/<path>', () => {
       post(`/workspaces/${ws}/docs`, { docId, type: 'markdown', sourceUrl: join(docDir, file) });
     await bind('harborlight', 'doc.md');
     await bind('riverbend', 'plain.md');
+    await bind('tide', 'tide.md');
+    await bind('ghost', 'ghost.md');
+    await bind('narrow', 'narrow.md');
+    await post(`/workspaces/${ws}/docs`, {
+      docId: 'loose',
+      type: 'markdown',
+      sourceUrl: join(root, 'loose', 'doc.md'),
+    });
+    PAGE_RECHECK.ms = 0;
     await post(`/workspaces/${ws}/docs`, { docId: 'saltmarsh', type: 'dev' });
   });
 
   afterAll(async () => {
+    PAGE_RECHECK.ms = 1_000;
     await handle.stop();
     rmSync(root, { recursive: true, force: true });
   });
@@ -279,6 +302,86 @@ describe('GET …/docs/<id>/files/<path>', () => {
     await waitFor(async () => (await (await get('map/late.html', AS_FRAME)).text()).includes(b64), {
       describe: 'the page written again with the script that appeared',
     });
+  });
+
+  it('serves nothing for a page at the doc level', async () => {
+    expect((await get('map/app.js')).status).toBe(200);
+    expect((await get('index.html', AS_FRAME, 'tide')).status).toBe(404);
+    const res = await get('config.json', {}, 'tide');
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('beside the doc');
+  });
+
+  it('serves nothing for a line naming a page that is not there', async () => {
+    const res = await get('ghost/data.json', {}, 'ghost');
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('"ghost":true');
+  });
+
+  it('serves nothing from a doc folder outside a git work tree', async () => {
+    expect((await get('map/app.js')).status).toBe(200);
+    expect((await get('map/index.html', AS_FRAME, 'loose')).status).toBe(404);
+    const res = await get('map/app.js', {}, 'loose');
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('loose');
+  });
+
+  it('starts no git run for requests naming files that do not exist', async () => {
+    expect((await get('map/app.js')).status).toBe(200);
+    const saved = LISTING_AGES.missRescanMs;
+    LISTING_AGES.missRescanMs = 0;
+    try {
+      const before = listingScanCount();
+      for (let n = 0; n < 20; n++) expect((await get(`map/nope-${n}.json`)).status).toBe(404);
+      expect(listingScanCount()).toBe(before);
+    } finally {
+      LISTING_AGES.missRescanMs = saved;
+    }
+  });
+
+  it('keys a page on its decoded path: another spelling is the same page and the same relay base', async () => {
+    expect((await get('map/index.html', AS_FRAME)).status).toBe(200);
+    const built = pageBuildCount();
+    const res = await get('%6Dap/index.html', AS_FRAME);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(`var B="/workspaces/${ws}/docs/harborlight/files/map/"`);
+    expect(pageBuildCount()).toBe(built);
+  });
+
+  it("stops writing in a file once the page's folder narrows past it", async () => {
+    const shared = Buffer.from('window.shared = 1;').toString('base64');
+    const first = await get('map/inner/page.html', AS_FRAME, 'narrow');
+    expect(await first.text()).toContain(shared);
+    write(
+      'narrow.md',
+      '# Narrow\n\n::html{src="map/index.html"}\n\n::html{src="map/inner/page.html"}\n',
+    );
+    await waitFor(
+      async () => {
+        const res = await get('map/inner/page.html', AS_FRAME, 'narrow');
+        return res.status === 200 && !(await res.text()).includes(shared);
+      },
+      { describe: 'the page served without the file above its own folder' },
+    );
+  });
+
+  it('stops writing in a file once git stops listing it', async () => {
+    const gen = Buffer.from('window.generation = 1;').toString('base64');
+    expect(await (await get('map/gen.html', AS_FRAME)).text()).toContain(gen);
+    write('.gitignore', 'map/ignored.json\nmap/gen.js\n');
+    const saved = LISTING_AGES.freshMs;
+    LISTING_AGES.freshMs = 0;
+    try {
+      await waitFor(
+        async () => {
+          const res = await get('map/gen.html', AS_FRAME);
+          return res.status === 200 && !(await res.text()).includes(gen);
+        },
+        { describe: 'the page served without the file git now ignores' },
+      );
+    } finally {
+      LISTING_AGES.freshMs = saved;
+    }
   });
 });
 

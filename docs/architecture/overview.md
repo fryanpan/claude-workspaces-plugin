@@ -2168,12 +2168,14 @@ the `doc-*.ts` the diagram draws), then inserts the path it answers.
 A `::html{src="map/index.html"}` line frames a page from the same folder
 (`doc/board-embed-frames.ts`, with no board mapping): the server's
 `routes/doc-files.ts` serves the page and the scripts, styles and data in
-its folder. `doc-file-scope.ts` (a `doc-*.ts` the diagram draws) reads which
-folders the doc's current content names, so a doc with no such line serves
-nothing, and `doc-file-frame.ts` (another) holds the one reader that keeps
-every read inside that folder, writes the page's relative scripts and
-stylesheets into it, and puts first in it the relay that hands the page's
-relative `fetch` calls to the doc page.
+its folder. Four `doc-*.ts` the diagram draws hold the rest.
+`doc-file-scope.ts` reads which folders the doc's current content names, so a
+doc with no such line serves nothing. `doc-file-listing.ts` asks git, off the
+event loop, which files there may be read, so outside a work tree nothing is.
+`doc-file-frame.ts` holds the one reader that keeps every read inside that
+folder, writes the page's relative scripts and stylesheets into it, and puts
+first in it the relay that hands the page's relative `fetch` calls to the doc
+page. `doc-file-page-cache.ts` keeps built pages, bounded by bytes.
 `doc-image-retry.ts`, which that block image installs, asks again for an
 image whose file was not there yet, so it appears once the file lands without
 a reload; it changes the DOM's `src` only. `doc-image-versions.ts`, which it
