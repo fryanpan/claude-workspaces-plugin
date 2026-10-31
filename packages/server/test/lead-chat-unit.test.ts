@@ -151,6 +151,54 @@ describe('LeadChat', () => {
   });
 });
 
+describe('the mirror of the lead’s session', () => {
+  it('knows the lead by the id its name attaches under, or by the name it attached with', () => {
+    const byId = setup({ lead: 'agent-riverbend-lead' }).chat;
+    expect(byId.isLead(WS, 'Riverbend Lead')).toBe(true);
+    const byName = setup().chat;
+    expect(byName.isLead(WS, 'Riverbend')).toBe(true);
+    expect(byName.isLead(WS, 'Saltmarsh Helper')).toBe(false);
+    expect(setup({ lead: null }).chat.isLead(WS, 'Riverbend')).toBe(false);
+  });
+
+  it('never hands the lead its own mirrored rows as conversation, and sends them nowhere', () => {
+    const { chat, frames } = setup();
+    expect(chat.mirrorPrompt(WS, 'Riverbend', { typed: true, text: 'typed here' })).toBe(true);
+    chat.mirrorPrompt(WS, 'Riverbend', {
+      typed: false,
+      channel: { author: 'Alice', text: 'commented on the plan' },
+    });
+    expect(chat.mirrorTurnEnd(WS, 'Riverbend', 'Done for now.')).toBe(true);
+    expect(frames).toEqual([]);
+    chat.post(WS, BRYAN, 'next?', undefined);
+    expect(frames[0]?.conversation).toEqual([]);
+  });
+
+  it('does not show a closing message twice when it is the turn’s answer', () => {
+    const { chat, frames } = setup();
+    chat.post(WS, BRYAN, 'status?', undefined);
+    chat.answer(WS, frames[0]?.queueId ?? '', 'Two fields left.', 'riverbend-lead');
+    expect(chat.mirrorTurnEnd(WS, 'Riverbend', 'Two fields left.')).toBe(false);
+    expect(chat.mirrorTurnEnd(WS, 'Riverbend', 'Two fields left. Filed the rest.')).toBe(true);
+    expect(chat.snapshot(WS).messages.map((m) => m.text)).toEqual([
+      'status?',
+      'Two fields left.',
+      'Two fields left. Filed the rest.',
+    ]);
+  });
+
+  it('moves only a message on this board to received, and only once', () => {
+    const { chat, frames } = setup();
+    chat.post(WS, BRYAN, 'status?', undefined);
+    const queueId = frames[0]?.queueId ?? '';
+    expect(chat.received('w-other', queueId)).toBe(false);
+    expect(chat.received(WS, 'unknown')).toBe(false);
+    expect(chat.received(WS, queueId)).toBe(true);
+    expect(chat.received(WS, queueId)).toBe(false);
+    expect(chat.snapshot(WS).messages[0]?.state).toBe('received');
+  });
+});
+
 describe('LeadChatLog', () => {
   it('reads the latest line per id and skips a torn tail', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'cw-lead-chat-log-'));

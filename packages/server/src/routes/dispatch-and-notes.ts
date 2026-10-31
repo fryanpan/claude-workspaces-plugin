@@ -398,6 +398,8 @@ export async function handleDispatchAndNoteRoutes(
     if (!parsed.ok) return j(400, { error: parsed.error, message: parsed.message });
     const { note } = parsed;
     countForCoach(ctx, boardId, note, raw);
+    // The board's lead chat shows the message the lead's turn ended on.
+    if (note.kind === 'turn') ctx.leadChatMirror.mirrorTurnEnd(boardId, agent, note.text);
     if (note.taskId !== undefined) {
       // The caller named its row; a bad address is its error to hear,
       // not a silent ring drop — and a row on some other board is a bad

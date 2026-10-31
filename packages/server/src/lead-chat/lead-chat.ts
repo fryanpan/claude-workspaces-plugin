@@ -1,3 +1,4 @@
+import { agentIdForName } from '@claude-workspaces/core/identity';
 /**
  * The lead chat: what a person types to a board's lead, and what the lead
  * answers, kept per board and shown live on every page of it.
@@ -17,6 +18,16 @@
  * A page is handed the latest `LEAD_CHAT_PAGE` messages and pages back from
  * there (`page`) until the first: the latest `LEAD_CHAT_KEEP` out of memory,
  * anything older off the log.
+ *
+ * The lead's own Claude Code session is mirrored in too, so the chat shows
+ * what its terminal shows (`mirror*` below): a prompt typed there, a board
+ * event its session took as a prompt, and the message each turn ended on,
+ * posted by the plugin's UserPromptSubmit and Stop hooks to the routes they
+ * already post to. A message to the lead goes `sent` → `received` when the
+ * lead's MCP child acks its queue row (the session has it) → `done` when
+ * that session's turn ends, or `answered` when the lead answers it. Nothing
+ * mirrored is sent to the lead again or spoken: speech is `answer_voice`'s
+ * alone.
  *
  * Every change goes to the board's pages as a `lead-chat.changed` frame and
  * to no agent stream: the lead already has its own frame, and a page frame on
@@ -52,6 +63,17 @@ export interface LeadChatDeps {
   broadcast(workspaceId: string, frame: LeadChatFrame): void;
   newId(): string;
   now?: () => number;
+}
+
+/** A prompt the lead's session took, as its UserPromptSubmit hook posts it
+ *  (`routes/prompt-marks.ts`). */
+export interface MirroredPrompt {
+  typed: boolean;
+  /** A typed prompt's text, reduced by the hook. */
+  text?: string;
+  /** A board event the session took as a prompt: who caused it, one reduced
+   *  line of it, and the queue row it delivered, when it was one. */
+  channel?: { author?: string; text: string; queueId?: string };
 }
 
 export type LeadChatPost =
@@ -207,6 +229,108 @@ export class LeadChat {
     this.reply(w, text);
   }
 
+  /** The board's lead is the session `agentName` names: by the id an agent
+   *  of that name attaches under, or by the name it attached with. */
+  isLead(workspaceId: string, agentName: string): boolean {
+    const lead = this.deps.leadOf(workspaceId);
+    if (!lead) return false;
+    return agentIdForName(agentName) === lead.agentId || agentName === lead.name;
+  }
+
+  /**
+   * The lead's MCP child acked queue row `queueId`: the lead's session has
+   * the message it carried. A typed or spoken message on this board moves to
+   * `received`; anything else is not this chat's.
+   */
+  received(workspaceId: string, queueId: string): boolean {
+    this.messages(workspaceId);
+    const w = this.waiting.get(queueId) ?? this.spoken.get(queueId);
+    if (!w || w.workspaceId !== workspaceId) return false;
+    const m = this.messages(workspaceId).find((x) => x.id === w.messageId);
+    if (!m || (m.state !== 'sent' && m.state !== 'queued')) return false;
+    return this.record(workspaceId, { ...m, state: 'received', receivedAt: this.now() });
+  }
+
+  /**
+   * A prompt the lead's session took, mirrored into the chat. A prompt
+   * typed in its terminal shows as a person's message; a board event shows
+   * as a channel row — unless it is the delivery of a message already in the
+   * chat, which only moves that message to `received`. False when `agentName`
+   * is not the lead or there is nothing to show.
+   */
+  mirrorPrompt(workspaceId: string, agentName: string, p: MirroredPrompt): boolean {
+    if (!this.isLead(workspaceId, agentName)) return false;
+    if (p.typed) {
+      if (!p.text) return false;
+      return this.record(workspaceId, {
+        id: this.deps.newId(),
+        role: 'person',
+        author: { id: TERMINAL_AUTHOR_ID, name: 'Terminal' },
+        text: p.text,
+        ts: this.now(),
+        via: 'terminal',
+      });
+    }
+    const c = p.channel;
+    if (!c?.text) return false;
+    if (c.queueId) {
+      this.messages(workspaceId);
+      if (this.waiting.has(c.queueId) || this.spoken.has(c.queueId)) {
+        this.received(workspaceId, c.queueId);
+        return true;
+      }
+    }
+    return this.record(workspaceId, {
+      id: this.deps.newId(),
+      role: 'person',
+      author: { id: CHANNEL_AUTHOR_ID, name: c.author ?? 'Board' },
+      text: c.text,
+      ts: this.now(),
+      via: 'channel',
+    });
+  }
+
+  /**
+   * The message the lead's turn ended on, as its Stop hook posts it. Shown as
+   * the lead's message and never spoken. Every message the turn had taken
+   * and not answered moves to `done`. A closing message the chat already
+   * shows as this turn's answer is not shown twice.
+   *
+   * Mirrored rows are stamped with the server's clock when they arrive, not
+   * the hook's: the chat's order is the order its pages saw, and a lead on
+   * another machine has a clock of its own.
+   */
+  mirrorTurnEnd(workspaceId: string, agentName: string, text: string): boolean {
+    if (!this.isLead(workspaceId, agentName)) return false;
+    const list = this.messages(workspaceId);
+    for (const m of list) {
+      if (m.role === 'person' && m.state === 'received') {
+        this.record(workspaceId, { ...m, state: 'done' });
+      }
+    }
+    const words = text.trim();
+    if (!words) return false;
+    let lastPerson = list.length - 1;
+    while (lastPerson >= 0) {
+      const m = list[lastPerson];
+      if (m && m.role === 'person' && m.via !== 'channel') break;
+      lastPerson--;
+    }
+    const repeat = list
+      .slice(lastPerson + 1)
+      .some((m) => m.role === 'agent' && m.text.trim() === words);
+    if (repeat) return false;
+    const lead = this.deps.leadOf(workspaceId);
+    return this.record(workspaceId, {
+      id: this.deps.newId(),
+      role: 'agent',
+      author: { id: lead?.agentId ?? agentName, name: lead?.name ?? agentName },
+      text: words,
+      ts: this.now(),
+      turnEnd: true,
+    });
+  }
+
   private reply(w: Waiting, text: string): void {
     const list = this.messages(w.workspaceId);
     const asked = list.find((m) => m.id === w.messageId);
@@ -224,6 +348,7 @@ export class LeadChat {
   /** The turns before the next one, as the lead is handed them. */
   private history(workspaceId: string): ConversationTurn[] {
     return this.messages(workspaceId)
+      .filter((m) => !isMirrored(m))
       .slice(-CONVERSATION_KEEP)
       .map((m) => ({
         from: m.role === 'agent' ? 'agent' : 'owner',
@@ -266,6 +391,16 @@ export class LeadChat {
 }
 
 type StoredMessage = StoredLeadChatMessage;
+
+/** Who a mirrored terminal prompt and a mirrored board event are by. */
+export const TERMINAL_AUTHOR_ID = 'lead-terminal';
+export const CHANNEL_AUTHOR_ID = 'lead-channel';
+
+/** A row the lead's own session put here, which the lead is never handed
+ *  back as conversation. */
+function isMirrored(m: LeadChatMessage): boolean {
+  return m.via === 'terminal' || m.via === 'channel' || m.turnEnd === true;
+}
 
 /** What a page is handed: never the queue id, which only the lead answers by. */
 function publicMessage(m: StoredMessage): LeadChatMessage {

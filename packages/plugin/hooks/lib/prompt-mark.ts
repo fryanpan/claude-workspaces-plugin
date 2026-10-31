@@ -9,7 +9,11 @@ import type { SecretReader } from './access-headers.ts';
  * turn notes already carry. A typed prompt also carries its text, reduced the
  * way a turn note is (`note-redact.ts`) and capped at `PROMPT_TEXT_CAP`, so
  * the coach's digest can say what he asked (the owner, 2026-10-16). An
- * injected prompt carries no text.
+ * injected prompt carries no text, except a board channel event, which
+ * carries `channel`: who caused it, one reduced line of it, and the queue
+ * row it delivered. The board's lead chat shows those rows so a person sees
+ * what the lead received (the owner, 2026-10-31); the coach never reads
+ * them (`routes/prompt-marks.ts`).
  *
  * Headless runs are not typed. `claude -p` and the Agent SDK set
  * `CLAUDE_CODE_ENTRYPOINT` to `sdk-cli`, `sdk-ts` or `sdk-py` (read off the
@@ -74,6 +78,16 @@ export const PROMPT_TEXT_CAP = 2_000;
 /** What `CLAUDE_CODE_ENTRYPOINT` reads in a run nobody is typing into. */
 export const HEADLESS_ENTRYPOINTS: readonly string[] = ['sdk-cli', 'sdk-ts', 'sdk-py'];
 
+/** The most of a channel event's words sent; the route refuses past 1,000. */
+export const CHANNEL_TEXT_CAP = 600;
+
+/** A board event a session took as a prompt, as the lead chat shows it. */
+export interface ChannelLine {
+  text: string;
+  author?: string;
+  queueId?: string;
+}
+
 /** The wire body the prompts route accepts. Text only on a typed prompt. */
 export interface PromptMark {
   agent: string;
@@ -81,6 +95,8 @@ export interface PromptMark {
   cwd?: string;
   sessionId?: string;
   text?: string;
+  /** On an injected prompt that is a channel event only. */
+  channel?: ChannelLine;
   /** The session runs under Remote Control. */
   remote?: true;
   at: number;
@@ -107,6 +123,37 @@ export function isTypedPrompt(prompt: unknown): boolean | undefined {
   return !INJECTED_PREFIXES.some((p) => head.startsWith(p));
 }
 
+const CHANNEL_RE = /^<channel\b([^>]*)>([\s\S]*?)(?:<\/channel>|$)/;
+const QUEUE_ID_RE = /queueId="([A-Za-z0-9_~.-]{1,200})"/;
+
+function attr(attrs: string, name: string): string | undefined {
+  const m = attrs.match(new RegExp(`\\b${name}="([^"]{1,200})"`));
+  return m?.[1];
+}
+
+/**
+ * A channel event's line: its words reduced the way a turn note is, who
+ * caused it (the event's `author`, else its `source`), and the voice queue
+ * row it delivered when it was a `voice.request`. Undefined for any other
+ * prompt, or one with no words left after reduction.
+ */
+export function channelLine(prompt: unknown): ChannelLine | undefined {
+  if (typeof prompt !== 'string') return undefined;
+  const m = prompt.trimStart().match(CHANNEL_RE);
+  if (!m) return undefined;
+  const attrs = m[1] ?? '';
+  const text = fullNote((m[2] ?? '').trim(), CHANNEL_TEXT_CAP);
+  if (text === '') return undefined;
+  const raw = attr(attrs, 'author') ?? attr(attrs, 'source');
+  const author = raw ? fullNote(raw, 100) : '';
+  const queueId = (m[2] ?? '').match(QUEUE_ID_RE)?.[1];
+  return {
+    text,
+    ...(author ? { author } : {}),
+    ...(queueId ? { queueId } : {}),
+  };
+}
+
 const shortString = (v: unknown): string | undefined =>
   typeof v === 'string' && v !== '' && v.length <= SHORT_STRING_MAX ? v : undefined;
 
@@ -125,6 +172,7 @@ export function decidePromptMark(
   const cwd = shortString(p.cwd);
   const sessionId = shortString(p.session_id);
   const text = typed ? fullNote(p.prompt, PROMPT_TEXT_CAP) : '';
+  const channel = typed ? undefined : channelLine(p.prompt);
   return {
     post: {
       agent: ctx.agent,
@@ -132,6 +180,7 @@ export function decidePromptMark(
       ...(cwd !== undefined ? { cwd } : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
       ...(text !== '' ? { text } : {}),
+      ...(channel ? { channel } : {}),
       ...(ctx.remote ? { remote: true as const } : {}),
       at: ctx.now,
     },

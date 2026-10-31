@@ -21992,7 +21992,7 @@ var resolveBaseUrl2 = () => resolveBaseUrl({
   readFileSync: readDiscoveryText
 });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.344";
+var PLUGIN_VERSION = "0.1.345";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

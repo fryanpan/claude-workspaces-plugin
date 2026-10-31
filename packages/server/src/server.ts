@@ -3022,6 +3022,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     coachSessionPrompt: (workspaceId, mark, cwd) => {
       coachWiring.sessionPrompt(workspaceId, mark, cwd);
     },
+    leadChatMirror: leadChat,
     readyNudger,
     j,
     safeJson,

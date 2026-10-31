@@ -9,6 +9,7 @@ import type { DispatchReportStore } from '../dispatch-reports.ts';
 import type { DocStore } from '../doc-store.ts';
 import { taskDeepLink } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
+import type { LeadChat } from '../lead-chat/lead-chat.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PermissionGrants } from '../permission-grants.ts';
@@ -89,6 +90,9 @@ export interface TaskRoutesContext {
     },
     cwd: unknown,
   ) => void;
+  /** The board's lead chat, which mirrors the lead's own session: the
+   *  prompts it took and the message each turn ended on. */
+  leadChatMirror: Pick<LeadChat, 'mirrorPrompt' | 'mirrorTurnEnd'>;
   /** Wakes the lead when a row it owns becomes ready. */
   readyNudger: ReadyWorkNudger;
 
