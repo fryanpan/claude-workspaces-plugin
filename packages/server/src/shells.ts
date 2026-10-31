@@ -1037,6 +1037,10 @@ body{font:15px/1.55 system-ui,-apple-system,sans-serif;margin:0 auto;max-width:7
    last row so it can scroll out from under them on a phone. */
 body:has(claude-feedback-widget){padding-bottom:132px}
 h1{font-size:20px;margin:0 0 2px}
+/* The title row: the page name, and the owner's link to who has access at
+   the far end. Padded to a 36px tap target (design-mobile.md). */
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.top-link{font-size:13px;display:inline-block;padding:9px 0;flex-shrink:0}
 h2{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#57606a;margin:26px 0 8px;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
 .count{font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:#8b95a1}
 .summary{color:#6e7781;font-size:12px;margin:0 0 4px}
@@ -1159,6 +1163,9 @@ export function renderLanding(
   /** Review items on other servers (landing-remote.ts), inside the review
    *  region so the live swap redraws them with the bar. */
   remote = '',
+  /** True when the request proves the owner: the header links to `/access`,
+   *  the owner's page of who can reach every board. */
+  owner = false,
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -1204,7 +1211,9 @@ export function renderLanding(
   // `pushed` banner when a meeting is joined or left, so it never polls.
   return landingShell(
     'Workspaces',
-    `<h1>Workspaces</h1>
+    `<header class="top"><h1>Workspaces</h1>${
+      owner ? '<a class="top-link" href="/access">Who has access</a>' : ''
+    }</header>
 <meeting-banner pushed workspace-name="${escape(notesWorkspaceName)}"></meeting-banner>
 <script type="module" src="${assetHref(assets, 'landing.js')}"></script>${
       feedbackWorkspaceId
