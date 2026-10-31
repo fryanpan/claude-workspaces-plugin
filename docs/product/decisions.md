@@ -857,14 +857,14 @@ of. The step is now a verb the planner calls before writing anything —
 
 ## 2026-10-15 — A person is one spot; an agent is where it points
 
-Bryan, reviewing the whiteboard mock:
+Bryan's model, from his answer on the whiteboard mock review (15 Oct), paraphrased:
 
-> An agent is not in one place at a time. It can edit five places in a doc
-> and draw in a mockup at the same moment. So following an agent means
-> following where it chooses to point for communication, not where it is
-> editing. A person attends to one place, so a person's presence is a single
-> spot. Following either one can lead you anywhere on a page, or to other
-> pages in the workspace.
+An agent is not in one place at a time. It can edit five places in a doc
+and draw in a mockup at the same moment. So following an agent means
+following where it chooses to point for communication, not where it is
+editing. A person attends to one place, so a person's presence is a single
+spot. Following either one can lead you anywhere on a page, or to other
+pages in the workspace.
 
 What that means in the product:
 
