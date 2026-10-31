@@ -42,6 +42,11 @@ const CASES: Array<[string, string, string]> = [
   ],
   [
     'POST',
+    `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/mirror`,
+    `/workspaces/${RIVERBEND}/agents/Harborlight%20Lead/mirror`,
+  ],
+  [
+    'POST',
     `/workspaces/${HARBORLIGHT}/tasks/t-harbor/notes`,
     `/workspaces/${RIVERBEND}/tasks/t-river/notes`,
   ],

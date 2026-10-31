@@ -9,8 +9,15 @@
  * page's bottom-right corner, whose buttons belong to the comment widget and
  * the doc's mic and are never covered.
  *
- * The panel sits right of centre on a wide screen and is a sheet on a narrow
- * one, stopping at the board's tab bar so the button stays in reach.
+ * The panel docks on the right edge of a wide screen, full height, and its
+ * left edge drags to resize it; the width is kept on the device. While it is
+ * docked the comment widget's corner buttons step aside, and the board's own
+ * column makes room (`html[data-lc-docked]`, board.css). On a narrow screen
+ * it fills the screen down to the board's navbar, which pins to the bottom
+ * with the agent button at its right (`html[data-lc-full]`); a page tapped
+ * there closes the chat. Each entry is drawn by `lead-chat-rows.ts`; the header's toggle
+ * hides the board events the lead's session took, and that choice is kept
+ * on the device too.
  *
  * The lead's messages are markdown, drawn by the comments' escape-first
  * renderer (`comment-markdown.ts`), so a tag in one is text. A person's own
@@ -19,13 +26,18 @@
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { createDock } from './lead-chat-dock.ts';
 import {
   MEETING_STYLES,
   type MeetingView,
   type MeetingViewModel,
   createMeetingView,
 } from './lead-chat-meeting-view.ts';
+import type { ModeStorage } from './lead-chat-mode.ts';
+import { channelCount, drawMessage } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
+
+export { deliveryNote } from './lead-chat-rows.ts';
 
 const SPARKLE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>';
@@ -41,7 +53,6 @@ export const NARROW_MAX = 1100;
 export const CORNER_ROOM = 72;
 const BAR_H_NARROW = 50;
 const IDLE_RUN = { phase: 'idle', note: '', partial: '' } as const;
-const PANEL_W = 440;
 /** How close to the top of the list, in pixels, asks for the page before. */
 const OLDER_AT = 80;
 
@@ -98,6 +109,8 @@ export interface LeadChatViewOpts {
    *  floated at the page's foot. */
   buttonHost: HTMLElement;
   placement: 'dock' | 'float';
+  /** Where the dock's width and the board-events toggle are kept. */
+  storage?: ModeStorage | null;
 }
 
 function make<K extends keyof HTMLElementTagNameMap>(
@@ -141,6 +154,9 @@ export function statusLine(m: LeadChatViewModel): string {
   if (last?.role === 'person' && last.state === 'sent') {
     return `${lead} is working on it`;
   }
+  if (m.messages.some((x) => x.role === 'person' && x.state === 'received')) {
+    return `${lead} is working on it`;
+  }
   return '';
 }
 
@@ -151,14 +167,6 @@ export function historyLine(m: LeadChatViewModel): string {
   if (m.loadingOlder) return 'Loading earlier messages…';
   if (m.more) return '';
   return `Start of your conversation${m.lead ? ` with ${m.lead.name}` : ''}`;
-}
-
-/** The note under one of the person's messages, when it did not simply go. */
-export function deliveryNote(msg: LeadChatMessage, lead: LeadChatLead | null): string {
-  if (msg.role !== 'person') return '';
-  if (msg.state === 'queued') return `${lead?.name ?? 'Your lead'} reads it when it is back`;
-  if (msg.state === 'no-lead') return 'This board has no lead to read it';
-  return '';
 }
 
 export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
@@ -197,7 +205,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   pane.setAttribute('aria-label', 'Your agents');
   const head = make(doc, 'header', 'lc-head');
   const title = make(doc, 'div', 'lc-title');
-  const h2 = make(doc, 'h2', '', 'Your agents');
+  const h2 = make(doc, 'h2', '', 'Your agent');
   const who = make(doc, 'p');
   title.append(h2, who);
   const close = make(doc, 'button', 'lc-icon lc-close');
@@ -208,7 +216,17 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const start = make(doc, 'button', 'lc-start', 'Start a meeting');
   start.type = 'button';
   const meeting = createMeetingView(doc);
-  head.append(title, meeting.head, start, close);
+  const chan = make(doc, 'button', 'lc-chan-toggle');
+  chan.type = 'button';
+  const sw = make(doc, 'span', 'lc-sw');
+  sw.setAttribute('aria-hidden', 'true');
+  const chanCount = make(doc, 'span', 'lc-chan-count');
+  chan.append(sw, make(doc, 'span', '', 'Board events'), chanCount);
+  head.append(title, meeting.head, start, chan, close);
+  const grip = make(doc, 'button', 'lc-grip');
+  grip.type = 'button';
+  grip.setAttribute('aria-label', 'Resize the chat');
+  grip.title = 'Drag to resize';
   const list = make(doc, 'div', 'lc-list');
   list.setAttribute('role', 'log');
   list.setAttribute('aria-live', 'polite');
@@ -228,7 +246,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   compose.append(composer, mic, send);
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
-  pane.append(head, meeting.notes, list, status, compose, readonly);
+  pane.append(grip, head, meeting.notes, list, status, compose, readonly);
   root.append(style, bar, pane);
   doc.body.append(layer);
 
@@ -270,6 +288,15 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     if (widget) widget.style.visibility = hide ? 'hidden' : '';
   };
 
+  const opened = new Set<string>();
+  let last: LeadChatViewModel | null = null;
+  const dock = createDock({
+    doc,
+    grip,
+    storage: opts.storage ?? null,
+    onResize: () => place(),
+  });
+
   let lastNewest: string | undefined;
   let lastOldest: string | undefined;
   let wasOpen = false;
@@ -302,20 +329,54 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       }
     }
     const sheet = !pane.hidden && narrow();
-    hideWidget(sheet);
-    if (!pane.hidden) {
-      pane.classList.toggle('lc-sheet', sheet);
-      if (sheet) {
-        pane.style.cssText = `left:0;right:0;top:40px;bottom:${Math.round(vh - footTop())}px`;
-      } else {
-        const right = Math.round(vw - corner + 12);
-        const width = Math.min(PANEL_W, vw - right - 16);
-        pane.style.cssText = `right:${right}px;width:${width}px;top:64px;bottom:16px`;
-      }
+    const docking = !pane.hidden && !sheet;
+    // Both cover the corner, so the widget's buttons step aside under them.
+    hideWidget(!pane.hidden);
+    // Full screen pins the navbar to the bottom; measure it after it moves.
+    dock.full(sheet);
+    pane.classList.toggle('lc-sheet', sheet);
+    pane.classList.toggle('lc-dock', docking);
+    if (sheet) {
+      pane.style.cssText = `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
+    } else if (docking) {
+      // Under the board's top bar, which keeps who is here and Settings in reach.
+      const bar = doc.querySelector('.board-topbar')?.getBoundingClientRect();
+      const top = bar && bar.height > 0 && bar.bottom < vh / 3 ? Math.round(bar.bottom) : 0;
+      pane.style.cssText = `right:0;width:${dock.width(vw)}px;top:${top}px;bottom:0`;
     }
+    dock.docked(docking ? dock.width(vw) : null);
   };
 
-  const renderList = (m: LeadChatViewModel): void => {
+  // Full screen, a page in the navbar beneath closes the chat on its way.
+  const onNavTap = (e: Event): void => {
+    if (pane.hidden || !pane.classList.contains('lc-sheet')) return;
+    const item = (e.target as Element | null)?.closest?.('.board-nav-item');
+    if (item && !item.closest('.board-nav-dock')) close.click();
+  };
+  doc.addEventListener('click', onNavTap, true);
+  chan.addEventListener('click', () => {
+    dock.toggleChannel();
+    if (last) renderAll(last);
+  });
+  // A compact row or a spoken reply opens and closes in place.
+  list.addEventListener('click', (e) => {
+    const t = (e.target as Element | null)?.closest?.('[data-toggle]') as HTMLElement | null;
+    const id = t?.dataset.toggle;
+    if (!id || !last) return;
+    if (opened.has(id)) opened.delete(id);
+    else opened.add(id);
+    renderList(last, true);
+  });
+
+  const renderChannelToggle = (m: LeadChatViewModel): void => {
+    const n = channelCount(m.messages);
+    chan.hidden = n === 0;
+    chan.setAttribute('aria-pressed', String(dock.showChannel()));
+    chan.title = dock.showChannel() ? 'Hide board events' : 'Show board events';
+    chanCount.textContent = dock.showChannel() ? '' : `(${n})`;
+  };
+
+  const renderList = (m: LeadChatViewModel, keepScroll = false): void => {
     const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     const prevHeight = list.scrollHeight;
     const prevTop = list.scrollTop;
@@ -334,25 +395,22 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       );
       list.append(empty);
     }
+    const ctx = {
+      doc,
+      meId: m.meId,
+      lead: m.lead,
+      open: opened,
+      showChannel: dock.showChannel(),
+      markdown,
+      messages: m.messages,
+    };
     for (const msg of m.messages) {
-      const mine = msg.role === 'person';
-      const item = make(doc, 'div', `lc-msg ${mine ? 'lc-you' : 'lc-agent'}`);
-      item.dataset.messageId = msg.id;
-      const name = mine ? (msg.author.id === m.meId ? 'You' : msg.author.name) : msg.author.name;
-      let body: HTMLElement;
-      if (mine) {
-        body = make(doc, 'span', 'lc-msg-text', msg.text);
-      } else {
-        body = make(doc, 'div', 'lc-msg-text lc-md');
-        body.innerHTML = markdown(msg);
-      }
-      item.append(
-        make(doc, 'span', 'lc-msg-who', msg.via === 'voice' ? `${name}, by voice` : name),
-        body,
-      );
-      const note = deliveryNote(msg, m.lead);
-      if (note) item.append(make(doc, 'span', 'lc-note', note));
-      list.append(item);
+      const item = drawMessage(ctx, msg);
+      if (item) list.append(item);
+    }
+    if (keepScroll) {
+      list.scrollTop = prevTop;
+      return;
     }
     // Follow the conversation when the reader is at its foot, or it grew
     // while they were not looking; never pull them off a line they scrolled
@@ -368,6 +426,15 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     lastNewest = newest;
     lastOldest = oldest;
   };
+
+  function renderAll(m: LeadChatViewModel): void {
+    last = m;
+    renderChannelToggle(m);
+    // Placed first, so the list has its height when it scrolls to its foot.
+    place();
+    if (m.open) renderList(m);
+    wasOpen = m.open;
+  }
 
   return {
     button,
@@ -394,7 +461,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
         row.append(make(doc, 'b', '', `${line.who}: `), line.text);
         barText.append(row);
       }
-      who.textContent = m.lead ? `with ${m.lead.name}` : m.loaded ? 'No lead on this board' : '';
+      who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
       status.textContent = statusLine(m);
       const meetingOn = !!m.meeting?.meeting;
       title.hidden = meetingOn;
@@ -412,15 +479,15 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       mic.setAttribute('aria-label', micLabel);
       mic.title = micLabel;
       send.disabled = composer.value.trim() === '';
-      // Placed first, so the list has its height when it scrolls to its foot.
-      place();
-      if (m.open) renderList(m);
-      wasOpen = m.open;
+      renderAll(m);
     },
     nearTop: () => !pane.hidden && list.scrollTop < OLDER_AT,
     place,
     destroy() {
       hideWidget(false);
+      dock.docked(null);
+      dock.full(false);
+      doc.removeEventListener('click', onNavTap, true);
       layer.remove();
       bRoot.replaceChildren();
     },

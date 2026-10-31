@@ -72,6 +72,8 @@ describe('a mounted chat sends the page link', () => {
     mounted?.destroy();
     mounted = null;
     document.body.innerHTML = '';
+    // The tab remembers an open panel across pages; each case starts closed.
+    sessionStorage.clear();
     history.replaceState(null, '', '/');
   });
 
