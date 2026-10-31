@@ -515,6 +515,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         feedback ? feedbackWorkspaceId() : '',
         landingRemote ? landingRemote() : '',
         ownerProven,
+        // Never for a visitor, like the widget: the chat's own route refuses
+        // one, and an id it cannot use is a board it was not shared.
+        feedback ? (review.planWorkspaceId ?? '') : '',
       ),
       { headers: HTML_SHELL_HEADERS },
     );

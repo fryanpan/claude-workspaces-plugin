@@ -8,8 +8,20 @@ export interface Box {
   height: number;
 }
 
+/** Home (`/`) with no review item open: the chat talks to the plan board's
+ *  lead, Bryan's default. */
+export interface HomeLeadChatRun {
+  button: Box | null;
+  buttonOpen: Box | null;
+  lead: string | null;
+  /** At ≤1100px: the dock is the bottom bar's left-most entry. */
+  firstInBar: boolean;
+  liveWithin1s: boolean;
+}
+
 export interface ReviewLeadChatWidthRun {
   width: number;
+  home: HomeLeadChatRun;
   /** The board the first card is from, and the lead the chat named. */
   firstProject: string;
   firstLead: string | null;
@@ -35,4 +47,6 @@ export interface ReviewLeadChatRun {
   widths: ReviewLeadChatWidthRun[];
   /** Board name → its lead's display name, as the fixtures set them. */
   leads: Record<string, string>;
+  /** The plan board's name. */
+  planBoard: string;
 }

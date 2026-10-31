@@ -35,6 +35,8 @@ export interface LandingReview {
   summaryOf: (workspaceId: string) => string | undefined;
   /** The plan board's goals in order, which the lead's goal tags name. */
   goals?: readonly PlanGoal[];
+  /** The plan board, whose lead Home's chat talks to. */
+  planWorkspaceId?: string;
 }
 
 export const REVIEW_HREF = '/review';

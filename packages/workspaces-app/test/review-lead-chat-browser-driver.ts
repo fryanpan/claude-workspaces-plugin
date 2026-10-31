@@ -4,7 +4,9 @@
  * against a real server and the real bundles, at 1180x820 and 430x932.
  *
  * Two boards, Harborlight and Riverbend, each with its own lead and one open
- * review item. The driver opens `/review` on the first card, taps the agent
+ * review item; Harborlight is the plan board. The driver first opens Home
+ * (`/`), where no item is open, and reads that the chat there names the plan
+ * board's lead and shows its text live. Then it opens `/review` on the first card, taps the agent
  * button and reads which lead the chat names; posts a flush of text as that
  * lead and as the other board's lead, and reads which reached the open chat;
  * closes it, taps Skip, opens it again and reads the lead once more. It also
@@ -40,6 +42,9 @@ import type {
 
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
 const BOARDS = ['Harborlight', 'Riverbend'] as const;
+/** The plan board, and its lead: Bryan's default. */
+const PLAN = 'Harborlight';
+const PLAN_LEAD = 'Harborlight Lead';
 
 const step = (what: string): void => {
   process.stderr.write(`[review-lead-chat] ${what}\n`);
@@ -198,7 +203,9 @@ async function main(): Promise<void> {
       widgetDistDir: widgetDist,
       markdownAppDistDir: appDist,
       requireSignInToWrite: false,
-      spawnerAgentId: null,
+      // Harborlight's lead is the one that spawned the fleet, which makes
+      // Harborlight the plan board: Home's chat talks to its lead.
+      spawnerAgentId: 'harborlight-lead',
     });
     const server = handle;
     const base = `http://127.0.0.1:${server.port}`;
@@ -268,6 +275,13 @@ async function main(): Promise<void> {
       const cdp = await openBrowser(width, height);
       const run: ReviewLeadChatWidthRun = {
         width,
+        home: {
+          button: null,
+          buttonOpen: null,
+          lead: null,
+          firstInBar: false,
+          liveWithin1s: false,
+        },
         firstProject: first.project,
         firstLead: null,
         inDock: false,
@@ -282,6 +296,44 @@ async function main(): Promise<void> {
       };
       const boardState = await load(cdp, `${base}/workspaces/${wsOf[first.project]}`);
       run.boardButton = round(boardState?.button ?? null);
+
+      step(`Home at ${width}`);
+      const home = await load(cdp, `${base}/`);
+      if (home?.button) {
+        run.home.button = round(home.button);
+        run.home.firstInBar = (await cdp.evaluate(`(() => {
+          const items = [...document.querySelectorAll('.home-nav > *')]
+            .filter((e) => e.getBoundingClientRect().width > 0)
+            .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+          return items.length > 1 && items[0].classList.contains('board-nav-dock');
+        })()`)) as boolean;
+        const opened = await openChat(cdp, home.button, PLAN_LEAD);
+        run.home.lead = opened.who;
+        run.home.buttonOpen = round(opened.button);
+        const said = `Home at ${width}: two asks are waiting.`;
+        await flush(PLAN, said, `home-${width}`);
+        run.home.liveWithin1s = await until(
+          'the flush on Home',
+          async () => ((await state(cdp)).texts.includes(said) ? true : null),
+          1000,
+        ).catch(() => false);
+        if (shots) {
+          const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
+            data: string;
+          };
+          writeFileSync(
+            join(shots, `home-lead-chat-${width}.png`),
+            Buffer.from(png.data, 'base64'),
+          );
+        }
+        const shut = await state(cdp);
+        if (shut.button) await tap(cdp, centre(shut.button).x, centre(shut.button).y);
+        await until(
+          'the chat on Home closed',
+          async () => ((await state(cdp)).open ? null : true),
+          5000,
+        ).catch(() => null);
+      }
 
       const loaded = await load(cdp, `${base}/review?item=${encodeURIComponent(first.key)}`);
       if (loaded?.button) {
@@ -357,7 +409,7 @@ async function main(): Promise<void> {
       widths.push(run);
       cdp.close();
     }
-    const out: ReviewLeadChatRun = { widths, leads };
+    const out: ReviewLeadChatRun = { widths, leads, planBoard: PLAN };
     process.stdout.write(`\n${JSON.stringify(out)}\n`);
   } finally {
     for (const s of streams) s.close();

@@ -1,9 +1,10 @@
 /**
- * The lead chat on the cross-board review (`/review`, opened from Home), in
- * a real browser at 1180x820 and 430x932: the agent button sits in the
- * page's rail dock where a board's does, opens a chat with the lead of the
- * board the open review item is from, follows the card to the next board's
- * lead, and shows that lead's text without a reload.
+ * The lead chat on Home and on the cross-board review (`/review`, opened from
+ * Home), in a real browser at 1180x820 and 430x932. On Home, with no item
+ * open, the agent button talks to the plan board's lead. On `/review` it sits
+ * in the page's rail dock where a board's does, opens a chat with the lead of
+ * the board the open review item is from, follows the card to the next
+ * board's lead, and shows that lead's text without a reload.
  * `review-lead-chat-browser-driver.ts` does it against a real server with
  * two fixture boards; these cases assert on its JSON.
  */
@@ -41,6 +42,26 @@ describe.skipIf(CHROME === null)('the lead chat on the cross-board review', () =
       Harborlight: 'Harborlight Lead',
       Riverbend: 'Riverbend Lead',
     });
+  }, 60_000);
+
+  it('on Home, opens a chat with the plan board’s lead that shows its text live', () => {
+    const { leads, planBoard } = result();
+    for (const w of result().widths) {
+      const at = String(w.width);
+      expect(w.home.button, at).not.toBeNull();
+      expect(w.home.lead, at).toBe(leads[planBoard]);
+      expect(w.home.liveWithin1s, at).toBe(true);
+      expect(w.home.buttonOpen, at).toEqual(w.home.button);
+    }
+  }, 60_000);
+
+  it('on Home, puts the button where a board puts it: bottom left, first in the bar on a phone', () => {
+    for (const w of result().widths) {
+      const at = String(w.width);
+      expect(w.home.button, at).toEqual(w.boardButton);
+    }
+    const phone = result().widths.find((w) => w.width === 430);
+    expect(phone?.home.firstInBar).toBe(true);
   }, 60_000);
 
   it('shows the agent button in the rail dock with a review item open', () => {

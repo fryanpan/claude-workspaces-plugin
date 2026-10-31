@@ -1168,6 +1168,8 @@ export function renderLanding(
   /** True when the request proves the owner: the header links to `/access`,
    *  the owner's page of who can reach every board. */
   owner = false,
+  /** The board whose lead Home's agent button talks to, or '' for none. */
+  leadWorkspaceId = '',
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -1211,6 +1213,7 @@ export function renderLanding(
   // The bottom bar at the mobile tier (`landing-nav.ts`).
   const nav = renderLandingNav(
     landingSections({ inbox: owner && !!inbox, coach: owner && !!coach }),
+    leadWorkspaceId,
   );
   // `landing-live.ts` swaps `#landing-review` and `#landing-boards` when a
   // board changes, `#coach` and `#inbox` when theirs do, and tells the
