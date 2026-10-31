@@ -117,7 +117,7 @@ export function geminiSetup(manual: boolean): Record<string, unknown> {
         automaticActivityDetection: manual
           ? { disabled: true }
           : // Tap once and walk away: the end of speech is called early, and
-            // the page shows it working while the board answers.
+            // the slow-answer cue covers the wait for the board's answer.
             {
               endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               silenceDurationMs: GEMINI_SILENCE_MS,

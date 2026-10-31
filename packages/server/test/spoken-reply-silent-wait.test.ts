@@ -1,9 +1,9 @@
 /**
- * While the board works out an answer, nothing is said: no "On it." for a
- * request the lead took, and no "Checking the board." however long the
- * router takes (Bryan, 2026-10-31). The page is told `working`; the reply is
- * the only speech. Driven through a reply socket on a fake clock with a board
+ * A request the lead took is not acknowledged aloud: no "On it." (Bryan,
+ * 2026-10-31). The page is told `working`, and the lead's answer is the only
+ * speech for it. Driven through a reply socket on a fake clock with a board
  * whose answer the test releases, and through setup 4's custom-LLM answer.
+ * The slow-answer cue (`filler-cue.ts`) is unchanged and has its own test.
  */
 import { describe, expect, it } from 'bun:test';
 import type { SpokenServerMessage } from '@claude-workspaces/core/spoken-reply';
@@ -11,6 +11,7 @@ import { AgentCallbacks } from '../src/spoken-reply/agent-llm.ts';
 import { AgentTurns } from '../src/spoken-reply/agent-turns.ts';
 import { SpokenAnswerer, type SpokenBoard } from '../src/spoken-reply/answer.ts';
 import { createElevenLabsAgent } from '../src/spoken-reply/elevenlabs-agent.ts';
+import { FILLER_CUE_AFTER_MS } from '../src/spoken-reply/filler-cue.ts';
 import type { GateTimers } from '../src/spoken-reply/pause-gate.ts';
 import { SpokenSession } from '../src/spoken-reply/session.ts';
 import { SpokenTimings } from '../src/spoken-reply/timings.ts';
@@ -20,8 +21,6 @@ import type { VoiceHandleResult } from '../src/voice.ts';
 import { waitFor } from './wait-for.ts';
 
 const ACTOR = { id: 'known-alice', name: 'Alice', kind: 'known' };
-/** Far past any slow-answer threshold the session ever had (1.2s). */
-const LONG_WAIT_MS = 30_000;
 
 function fakeClock() {
   let now = 0;
@@ -102,37 +101,20 @@ function rig(result: (transcript: string) => VoiceHandleResult) {
   return { clock, b, said, json, ask, types: () => json.map((m) => m.type) };
 }
 
-describe('a slow answer on a reply socket', () => {
+describe('a hand-off to the lead on a reply socket', () => {
   it('a request the lead took: the page is told working, and nothing is said', async () => {
     const r = rig(() => ({ ok: true, route: 'agent', ack: 'Heard: "x". On it.', queueId: 'q-1' }));
     await r.ask('go research ferry fares to Riverbend');
-    r.clock.advance(LONG_WAIT_MS);
+    // Routed inside the cue's threshold, so the cue never fires either.
+    r.clock.advance(FILLER_CUE_AFTER_MS - 1);
     expect(r.types()).toContain('working');
-    expect(r.said).toEqual([]);
     r.b.release();
     await waitFor(() => r.types().includes('reply'));
-    r.clock.advance(LONG_WAIT_MS);
+    r.clock.advance(FILLER_CUE_AFTER_MS * 10);
     const reply = r.json.find((m) => m.type === 'reply');
     expect(reply).toMatchObject({ spoken: '', route: 'agent' });
     expect(r.said).toEqual([]);
     expect(r.types()).not.toContain('audio-start');
-  });
-
-  it('a slow fast-path answer is said alone, with no cue before it', async () => {
-    const r = rig((t) => ({ ok: true, route: 'fast-path', ack: `Answer to ${t}.` }));
-    await r.ask('give me a status update');
-    r.clock.advance(LONG_WAIT_MS);
-    expect(r.said).toEqual([]);
-    r.b.release();
-    await waitFor(() => r.types().includes('audio-end'));
-    expect(r.said).toEqual(['Answer to give me a status update.']);
-    expect(r.types().slice(r.types().indexOf('turn-end'))).toEqual([
-      'turn-end',
-      'working',
-      'reply',
-      'audio-start',
-      'audio-end',
-    ]);
   });
 });
 

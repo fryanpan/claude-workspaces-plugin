@@ -144,7 +144,7 @@ export function createSpokenReply(opts: SpokenReplyOpts): SpokenReply {
   let captureGen = 0;
   let held: Int16Array[] = [];
   let turn: Turn = newTurn();
-  /** The reply's audio stream is open. */
+  /** The reply's audio stream is open — the slow-answer cue opens it early. */
   let audioOpen = false;
 
   const sendRaw = (data: string | Int16Array): void => {

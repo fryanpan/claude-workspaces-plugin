@@ -61,6 +61,7 @@ import { type AgentTurns, agentTurnsFor } from './agent-turns.ts';
 import { type SpokenAnswer, type SpokenAnswerer, replyMessage } from './answer.ts';
 import { cutsIn, unheard } from './cut-in.ts';
 import type { ElevenLabsAgent } from './elevenlabs-agent.ts';
+import { FillerCue, cueFor } from './filler-cue.ts';
 import type { GeminiLive, GeminiLiveSession } from './gemini-live.ts';
 import { type MeetingAnswer, type MeetingRoom, SILENT, meetingAnswer } from './meeting-ask.ts';
 import { MeetingErrands, withHeld } from './meeting-errands.ts';
@@ -169,6 +170,8 @@ export class SpokenSession {
   /** A planning doc's turn ends at a confirmed pause (`pause-gate.ts`). */
   private pause: PauseGate | null = null;
   private speaking: AbortController | null = null;
+  /** The latest turn's slow-answer cue (`filler-cue.ts`), kept for its timing row. */
+  private cue: FillerCue | null = null;
 
   // Setup 3: one Gemini session per socket, reopened only if the mode changes.
   private gemini: GeminiLiveSession | null = null;
@@ -187,6 +190,7 @@ export class SpokenSession {
   private geminiEars = false;
   private early: {
     turn: number;
+    cue: FillerCue | null;
     answer: Promise<SpokenAnswer>;
   } | null = null;
 
@@ -241,6 +245,7 @@ export class SpokenSession {
           ...(msg.replyMs !== undefined ? { replyMs: msg.replyMs } : {}),
           ...(msg.audioMs !== undefined ? { audioMs: msg.audioMs } : {}),
           ...(msg.noteLeadMs !== undefined ? { noteLeadMs: msg.noteLeadMs } : {}),
+          ...(this.cue?.playedMs ? { cueMs: this.cue.playedMs } : {}),
           at: Date.now(),
         });
         this.deps.sendJson({ type: 'timings', summary: this.deps.timings.summary() });
@@ -295,6 +300,7 @@ export class SpokenSession {
       return;
     }
     this.stopSpeaking();
+    this.cue = null;
     this.dropListener();
     this.turn++;
     this.setup = msg.setup;
@@ -331,6 +337,7 @@ export class SpokenSession {
   }
 
   private stopSpeaking(): void {
+    this.cue?.cancel();
     this.speaking?.abort();
     this.speaking = null;
     if (this.setup === 4) this.agentTurns?.stop();
@@ -454,6 +461,7 @@ export class SpokenSession {
     if (saying?.asks) this.deps.answerer.withdraw();
     this.saying = null;
     this.stopSpeaking();
+    this.cue = null;
     this.deps.sendJson({ type: 'cut-in' });
     this.dropListener();
     this.turn++;
@@ -496,7 +504,7 @@ export class SpokenSession {
     }
     this.tail = null;
     const text = this.finals.join(' ').trim();
-    if (this.ears) this.saying = { turn, text: '', asks: false };
+    if (this.ears) this.saying = { turn, text: cueFor(text), asks: false };
     this.deps.sendJson({ type: 'turn-end', text });
     if (this.setup === 3) this.askEarly(text, turn);
     else await this.answerAndSay(text, turn);
@@ -506,6 +514,7 @@ export class SpokenSession {
   private say(text: string): void {
     if (this.deps.readOnly) return;
     this.stopSpeaking();
+    this.cue = null;
     this.dropListener();
     this.turn++;
     if (this.setup === 4) {
@@ -534,8 +543,7 @@ export class SpokenSession {
     const room = this.ears ? this.room : null;
     // A pause made only to say the lead's answers hears nothing to answer.
     const held = room ? this.errands.take() : [];
-    // Nothing is said while the answer is worked out: the page shows it
-    // working, and the reply is the only speech (Bryan, 2026-10-31).
+    const cue = room && !text ? null : this.armCue(voice, text, turn);
     if (text) this.deps.sendJson({ type: 'working' });
     const own: MeetingAnswer = room
       ? text || held.length === 0
@@ -558,11 +566,32 @@ export class SpokenSession {
       return;
     }
     if (this.saying?.turn === turn) {
-      this.saying = { turn, text: `${this.saying.text} ${answer.spoken}`.trim(), asks };
+      this.saying = { turn, text: `${this.saying.text} ${answer.spoken}`, asks };
     }
     this.deps.sendJson(replyMessage(answer));
-    if (!answer.spoken || !voice) return;
-    await this.speak(voice, answer, turn);
+    const opened = (await cue?.ready()) === true;
+    if (turn !== this.turn) return;
+    if (!answer.spoken || !voice) {
+      if (opened) this.deps.sendJson({ type: 'audio-end' });
+      return;
+    }
+    await this.speak(voice, answer, turn, opened);
+  }
+
+  /** Arm the slow-answer cue for the question just heard, in `voice`. */
+  private armCue(voice: SpokenVoice | null, heard: string, turn: number): FillerCue | null {
+    this.cue?.cancel();
+    this.cue = voice
+      ? new FillerCue({
+          voice,
+          heard,
+          live: () => turn === this.turn && !(this.setup === 3 && this.dropAudio),
+          sendJson: this.deps.sendJson,
+          sendAudio: this.deps.sendAudio,
+          ...(this.deps.timers ? { timers: this.deps.timers } : {}),
+        })
+      : null;
+    return this.cue;
   }
 
   /** Said unasked — a failed review write, or the lead's answer arriving
@@ -602,7 +631,12 @@ export class SpokenSession {
     void this.finishListening(this.turn);
   }
 
-  private async speak(voice: SpokenVoice, answer: SpokenAnswer, turn: number): Promise<void> {
+  private async speak(
+    voice: SpokenVoice,
+    answer: SpokenAnswer,
+    turn: number,
+    opened = false,
+  ): Promise<void> {
     const ctl = new AbortController();
     this.speaking = ctl;
     try {
@@ -613,6 +647,7 @@ export class SpokenSession {
         live: () => turn === this.turn,
         sendJson: this.deps.sendJson,
         sendAudio: this.deps.sendAudio,
+        opened,
       });
     } catch (err) {
       if (!ctl.signal.aborted) {
@@ -716,15 +751,23 @@ export class SpokenSession {
     if (!text) return;
     this.early = {
       turn,
+      cue: this.armCue(this.cueVoice(), text, turn),
       answer: this.deps.answerer.answer(text, this.actor, this.context),
     };
     this.deps.sendJson({ type: 'working' });
+  }
+
+  /** Gemini says nothing while the board answers, so the cue is said in
+   *  this server's own voice. */
+  private cueVoice(): SpokenVoice | null {
+    return this.deps.engines.voices[1] ?? this.deps.engines.voices[2];
   }
 
   private async answerGemini(id: string, request: string): Promise<void> {
     const turn = this.turn;
     const early = this.early?.turn === turn ? this.early : null;
     this.early = null;
+    let cue = early?.cue ?? null;
     let pending = early?.answer;
     if (!pending) {
       // Gemini called the question over first: Soniox's turn is moot.
@@ -732,6 +775,7 @@ export class SpokenSession {
       const text = this.heardText.trim() || request;
       this.deps.sendJson({ type: 'turn-end', text });
       const asked = this.deps.answerer.verbatim ? text : request || text;
+      cue = this.armCue(this.cueVoice(), text, turn);
       this.deps.sendJson({ type: 'working' });
       pending = this.deps.answerer.answer(asked, this.actor, this.context);
     }
@@ -745,6 +789,7 @@ export class SpokenSession {
     answer.points.forEach((p, i) => {
       if (p.note) this.deps.sendJson({ type: 'note', point: i, text: p.note });
     });
+    if (await cue?.ready()) this.audioOpen = true;
     const session = this.gemini ?? (await this.geminiOpening);
     session?.answerTool(id, { spoken: answer.spoken, asking: answer.asking });
   }

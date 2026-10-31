@@ -37,6 +37,8 @@ export interface SpokenTimingSample {
   audioMs?: number;
   /** Per noted point: note shown minus first word played, on the page. */
   noteLeadMs?: number[];
+  /** How long the slow-answer cue played before the answer (`filler-cue.ts`). */
+  cueMs?: number;
   at: number;
 }
 
@@ -92,6 +94,7 @@ export class SpokenTimings {
       sample.replyMs !== undefined ? `reply=${sample.replyMs}ms` : '',
       sample.audioMs !== undefined ? `audio=${sample.audioMs}ms` : '',
       sample.noteLeadMs?.length ? `note-lead=${sample.noteLeadMs.join(',')}ms` : '',
+      sample.cueMs !== undefined ? `cue=${sample.cueMs}ms` : '',
     ].filter((s) => s);
     this.log(
       `[spoken-reply] setup=${sample.setup} delay=${sample.delayMs}ms ${legs.join(' ')}`.trim(),
