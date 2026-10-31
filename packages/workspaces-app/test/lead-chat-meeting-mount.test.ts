@@ -154,6 +154,16 @@ describe('the lead chat meeting on a page', () => {
     expect(t.mic.opened).toBe(0);
   });
 
+  it('in a meeting the agent button only opens and closes: the room’s voice is the meeting’s', async () => {
+    const t = mount({ meeting: meetingFixture({ recorder: 'rec-elsewhere' }) });
+    await flush();
+    t.view.button.click();
+    expect(t.view.pane.hidden).toBe(false);
+    expect(t.view.button.dataset.listening).toBe('false');
+    t.view.button.click();
+    expect(t.view.pane.hidden).toBe(true);
+  });
+
   it('the recording tab resumes the same recording on its next page, with no tap', async () => {
     const t = mount({ meeting: meetingFixture({ meetingId: 'm-77' }) });
     await flush();

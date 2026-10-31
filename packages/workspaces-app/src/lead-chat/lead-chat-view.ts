@@ -449,7 +449,19 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       const out = m.open || m.barOut;
       button.setAttribute('aria-expanded', String(out));
       button.dataset.listening = String(m.listening);
-      button.title = out ? (m.listening ? 'Close and stop listening' : 'Close') : 'Ask Workspaces';
+      const meetingOn = !!m.meeting?.meeting;
+      // Open, the button starts and stops listening; the bar's tap puts it away.
+      button.title = m.open
+        ? meetingOn
+          ? 'Close'
+          : m.listening
+            ? 'Stop listening'
+            : 'Start listening'
+        : m.barOut
+          ? 'Close and stop listening'
+          : 'Ask Workspaces';
+      if (m.open && !meetingOn) button.setAttribute('aria-pressed', String(m.listening));
+      else button.removeAttribute('aria-pressed');
       bar.hidden = !m.barOut || m.open;
       pane.hidden = !m.open;
       barText.replaceChildren();
@@ -460,7 +472,6 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       }
       who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
       status.textContent = statusLine(m);
-      const meetingOn = !!m.meeting?.meeting;
       title.hidden = meetingOn;
       start.hidden = meetingOn || !m.canTalk || !m.loaded;
       meeting.render(

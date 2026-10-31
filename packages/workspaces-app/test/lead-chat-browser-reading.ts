@@ -25,6 +25,15 @@ export interface SurfaceRun {
   /** From the answer's POST to its appearing on the page. Reported, not asserted. */
   answerMs: number;
   closedAfter: boolean;
+  /** Listening from the first tap, and the chat's own listen controls then
+   *  (none: the agent button is the one). */
+  listeningOnOpen: boolean;
+  listenControls: number;
+  /** The agent button's next taps stopped and started listening with the
+   *  panel still open; Close then closed it and stopped listening. */
+  pausedOpen: boolean;
+  resumedOpen: boolean;
+  listeningAfterClose: boolean;
 }
 
 /** Voice first on the board at one width. */
@@ -52,13 +61,14 @@ export interface VoiceRun {
   answerStored: boolean;
   barGone: boolean;
   /** Listening, and the chat's controls that listen, with the bar out and
-   *  with the panel grown from it; then listening after the agent button's
-   *  tap closed the chat. */
+   *  with the panel grown from it; then after the agent button's tap in the
+   *  panel (listening stopped, panel kept), and after Close. */
   listeningOut: boolean;
   listenControlsOut: number;
   listeningInPane: boolean;
   listenControlsInPane: number;
   listeningAfter: boolean;
+  paneKept: boolean;
   paneGone: boolean;
 }
 

@@ -79,6 +79,7 @@ const READ = `(() => {
     // Read once the grow has finished: mid-grow the box is the button's.
     pane: shown(pane) && pane.getAnimations().length === 0 ? box(pane) : null,
     bar: shown(bar) ? box(bar) : null,
+    close: sr && shown(sr.querySelector('.lc-close')) ? box(sr.querySelector('.lc-close')) : null,
     barText: bar ? bar.textContent : '',
     list: sr && sr.querySelector('.lc-list') ? sr.querySelector('.lc-list').textContent : '',
     composerFocused: !!sr && sr.activeElement === sr.querySelector('textarea'),
@@ -95,6 +96,7 @@ interface Read {
   expanded: string | null;
   pane: Rect | null;
   bar: Rect | null;
+  close: Rect | null;
   barText: string;
   list: string;
   composerFocused: boolean;
@@ -309,7 +311,23 @@ async function main(): Promise<void> {
             Buffer.from(png.data, 'base64'),
           );
         }
+        // Chat first listens from the first tap; open, the agent button
+        // stops and starts listening, and only Close closes.
+        const listeningOnOpen = await until('listening from the first tap', async () => {
+          const r = (await cdp.evaluate(READ)) as Read;
+          return r.listening ? true : null;
+        }).catch(() => false);
         await tap(cdp, shown.button as Rect);
+        const paused = await until('listening stopped, panel open', async () => {
+          const r = (await cdp.evaluate(READ)) as Read;
+          return r.listening ? null : r;
+        });
+        await tap(cdp, shown.button as Rect);
+        const resumed = await until('listening again, panel open', async () => {
+          const r = (await cdp.evaluate(READ)) as Read;
+          return r.listening ? r : null;
+        });
+        await tap(cdp, resumed.close as Rect);
         const closed = await until('the panel closed', async () => {
           const r = (await cdp.evaluate(READ)) as Read;
           return r.pane ? null : r;
@@ -328,6 +346,11 @@ async function main(): Promise<void> {
           answerShown: shown.list.includes(answer),
           answerMs,
           closedAfter: closed.pane === null && closed.expanded === 'false',
+          listeningOnOpen,
+          listenControls: open.listenControls,
+          pausedOpen: paused.pane !== null,
+          resumedOpen: resumed.pane !== null,
+          listeningAfterClose: closed.listening,
         });
       }
 
@@ -409,6 +432,11 @@ async function main(): Promise<void> {
         return r.pane ? r : null;
       });
       await tap(cdp, grown.button as Rect);
+      const stopped = await until('listening stopped in the open panel', async () => {
+        const r = (await cdp.evaluate(READ)) as Read;
+        return r.listening ? null : r;
+      });
+      await tap(cdp, stopped.close as Rect);
       const off = await until('the chat closed', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
         return r.bar || r.pane ? null : r;
@@ -437,7 +465,8 @@ async function main(): Promise<void> {
         listenControlsOut: out.listenControls,
         listeningInPane: grown.listening,
         listenControlsInPane: grown.listenControls,
-        listeningAfter: off.listening,
+        listeningAfter: stopped.listening,
+        paneKept: stopped.pane !== null,
         paneGone: off.pane === null,
       });
       await cdp.evaluate(`localStorage.removeItem('cw.lead-chat.mode')`);

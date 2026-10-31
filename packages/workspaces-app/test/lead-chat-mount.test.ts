@@ -93,8 +93,8 @@ function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) 
 }
 
 describe('the lead chat on a page', () => {
-  it('Chat first: a tap opens the panel at once with the cursor in the composer', async () => {
-    const { view, sent } = mount();
+  it('Chat first: a tap opens the panel at once with the cursor in the composer, listening', async () => {
+    const { view, sent, voice } = mount();
     expect(view.pane.hidden).toBe(true);
     view.button.click();
     expect(view.pane.hidden).toBe(false);
@@ -116,9 +116,24 @@ describe('the lead chat on a page', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(view.composer.value).toBe('');
     expect(view.list.textContent).toContain('what is left on the signup?');
+    await settle();
+    expect(voice.mic.starts).toBe(1);
+    expect(view.button.dataset.listening).toBe('true');
 
+    // Open, the agent button stops and starts listening and never closes.
     view.button.click();
+    expect(view.pane.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('false');
+    expect(view.button.getAttribute('aria-pressed')).toBe('false');
+    view.button.click();
+    await settle();
+    expect(view.pane.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('true');
+    expect(view.button.getAttribute('aria-pressed')).toBe('true');
+    // Close closes, and stops listening.
+    view.close.click();
     expect(view.pane.hidden).toBe(true);
+    expect(view.button.dataset.listening).toBe('false');
   });
 
   it('opens again on the next page of the tab when it was open, and not once it was closed', () => {
@@ -128,7 +143,7 @@ describe('the lead chat on a page', () => {
     // The next page in the same tab.
     const next = mount();
     expect(next.view.pane.hidden).toBe(false);
-    next.view.button.click();
+    next.view.close.click();
     expect(next.view.pane.hidden).toBe(true);
     mounted?.destroy();
     document.body.innerHTML = '';
@@ -182,9 +197,10 @@ describe('the lead chat on a page', () => {
     expect(view.bar.hidden).toBe(true);
     expect(voice.mic.stops).toBe(0);
     expect(view.button.dataset.listening).toBe('true');
-    // The agent button is the one listen control: its tap stops listening.
+    // The agent button is the one listen control: its tap stops listening,
+    // and the panel stays open until Close.
     view.button.click();
-    expect(view.pane.hidden).toBe(true);
+    expect(view.pane.hidden).toBe(false);
     expect(view.button.dataset.listening).toBe('false');
     expect(voice.mic.stops).toBe(1);
   });
