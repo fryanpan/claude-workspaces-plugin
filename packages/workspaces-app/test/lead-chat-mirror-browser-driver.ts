@@ -274,6 +274,16 @@ async function main(): Promise<void> {
       );
 
       step(`board events toggle at ${width}`);
+      // The header holds one row: the toggle's label does not wrap, and the
+      // toggle sits level with the close button.
+      const headerOneRow = await inLayer<boolean>(
+        cdp,
+        `const t = sr.querySelector('.lc-chan-toggle'); const lab = t.children[1];` +
+          ' const lh = parseFloat(getComputedStyle(lab).lineHeight) || 1.4 * parseFloat(getComputedStyle(lab).fontSize);' +
+          ' const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; };' +
+          ` return lab.textContent === 'Board events' && lab.getBoundingClientRect().height <= lh * 1.5` +
+          ` && Math.abs(mid(t) - mid(sr.querySelector('.lc-close'))) < 8;`,
+      );
       const chanCount = `return sr.querySelectorAll('.lc-chan').length;`;
       const before = await inLayer<number>(cdp, chanCount);
       await tapIn(cdp, '.lc-chan-toggle');
@@ -364,7 +374,7 @@ async function main(): Promise<void> {
       widths.push({
         width,
         tool: { head, open, expanded },
-        channel: { before, hidden, count, after },
+        channel: { before, hidden, count, after, headerOneRow },
         voice: { closedText, label, words },
         liveWithin1s,
         layout,

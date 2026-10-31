@@ -151,7 +151,11 @@ function channelRow(ctx: RowContext, msg: LeadChatMessage): HTMLElement {
     ctx,
     msg,
     'chan',
-    { icon: '↳', label: msg.author.name, summary: msg.text.replace(/\s+/g, ' ') },
+    {
+      icon: '↳',
+      label: 'Board event',
+      summary: `${msg.author.name}: ${msg.text.replace(/\s+/g, ' ')}`,
+    },
     (b) => {
       b.append(el(ctx.doc, 'pre', '', msg.text));
     },

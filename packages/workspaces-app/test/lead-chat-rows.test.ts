@@ -114,7 +114,9 @@ describe('the lead chat’s entries', () => {
   it('hides board events behind the header’s toggle, counts them, and keeps the choice', () => {
     const storage = memory();
     const first = open(CONVO, storage);
-    expect(first.q('.lc-chan .lc-row-kind')?.textContent).toBe('Riverbend');
+    expect(first.q('.lc-chan .lc-row-kind')?.textContent).toBe('Board event');
+    expect(first.q('.lc-chan .lc-row-head')?.textContent).toContain('Riverbend:');
+    expect(first.q('.lc-chan-toggle')?.textContent).toContain('Board events');
     const toggle = first.q('.lc-chan-toggle');
     expect(toggle?.getAttribute('aria-pressed')).toBe('true');
     toggle?.click();
