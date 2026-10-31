@@ -16,6 +16,10 @@
  * `start`, so the owner can try values during a meeting; the defaults are
  * his. Turns in, one call out, and the timers through a seam so a test
  * drives a recorded turn trace on a fake clock.
+ *
+ * A tapped question off a planning doc runs the same gate with a wider
+ * reading of "not yet a sentence" (`unfinishedAsk`), so a request to the
+ * board or the lead is not sent on its opening words.
  */
 
 import { SPOKEN_PAUSE_DEFAULT, type SpokenPause } from '@claude-workspaces/core/spoken-reply';
@@ -48,6 +52,33 @@ export function midSentence(text: string): boolean {
   return DANGLING.test(t.replace(/[.!?]+$/, '').trim()) && !/[!?]$/.test(t);
 }
 
+/** "Can you", "could we": the start of an ask with nothing asked yet. */
+const OPENING_ASK = /\b(?:can|could|would|will|do|did|should)\s+(?:you|we|i)$/i;
+/** A greeting or a discourse word a spoken request opens on. */
+const OPENER = /^(?:hey|hi|hello|ok(?:ay)?|so|alright|right|um+|uh+)\b/i;
+/** Words, the opener included, that a request heard so far must pass to be
+ *  more than its opening: "Hey, in the review." is four. */
+const OPENER_WORDS = 4;
+
+/**
+ * Whether a tapped request to the board or an agent stops before the
+ * speaker has asked anything (30 Oct: four of Bryan's requests to his lead
+ * went as "Hey, can you, uh." and "Hey, in the review."). Everything
+ * `midSentence` reads as unfinished, plus a bare "can you", plus an opener
+ * and at most three more words that are not a question. A false yes costs
+ * the unfinished wait; a false no sends half a request.
+ */
+export function unfinishedAsk(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (midSentence(t)) return true;
+  if (/[?!]$/.test(t)) return false;
+  const bare = t.replace(/[.]+$/, '').trim();
+  if (OPENING_ASK.test(bare)) return true;
+  const words = bare.split(/\s+/).filter(Boolean);
+  return OPENER.test(bare) && words.length <= OPENER_WORDS;
+}
+
 export class PauseGate {
   private timer: unknown = null;
   /** Words heard so far, so a repeated partial is not news. */
@@ -59,6 +90,8 @@ export class PauseGate {
     private readonly onPause: () => void,
     private readonly timers: GateTimers = REAL_TIMERS,
     private timing: SpokenPause = SPOKEN_PAUSE_DEFAULT,
+    /** What counts as not yet a sentence; a tapped request reads more. */
+    private readonly unfinished: (text: string) => boolean = midSentence,
   ) {}
 
   /** What the listener heard: the turn so far, and whether it is final. */
@@ -68,7 +101,7 @@ export class PauseGate {
     this.last = t;
     if (news) this.called = false;
     if (!t || this.called) return;
-    const unfinished = midSentence(t);
+    const unfinished = this.unfinished(t);
     if (final && !unfinished) {
       this.cancel();
       this.call();

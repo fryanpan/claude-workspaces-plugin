@@ -10,7 +10,7 @@
  * hears and who speaks.
  *
  * Every question is tapped (Bryan, 2 Oct: holding is wrong): a tap on the
- * mic or Space starts it, the listener ends it about half a second after the
+ * mic or Space starts it, the listener ends it at most a second after the
  * last word, and a second tap ends it by hand. Frames said before the socket
  * opens are held and sent behind the `start`. Once the question reaches the
  * answerer the panel says it is being worked on until the reply arrives, so
