@@ -30,6 +30,7 @@ import {
   connectFrom,
   probeRuntime,
   socketConnectFrom,
+  wallRowPasses,
 } from './lead-sandbox-escapes.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
 import { boardWallRules, socketDirEnds, wallHosts } from './lead-sandbox-wall.ts';
@@ -57,6 +58,20 @@ function fixture(home: string, boardWall: unknown, boardSocketDir?: string, boar
 }
 
 const fakeMachine: Machine = { home: '/fixture/home/saltmarsh', uid: 501, realpath: (p) => p };
+
+describe('a board wall row', () => {
+  it('passes when the control times out, as an address this Mac cannot reach itself on does', () => {
+    expect(wallRowPasses('EPERM', 'timeout')).toBe(true);
+    expect(wallRowPasses('EPERM', 'connected')).toBe(true);
+    expect(wallRowPasses('EPERM', 'ECONNREFUSED')).toBe(true);
+  });
+
+  it('fails when the control is refused too, or the inside connect is not', () => {
+    expect(wallRowPasses('EPERM', 'EPERM')).toBe(false);
+    expect(wallRowPasses('timeout', 'timeout')).toBe(false);
+    expect(wallRowPasses('connected', 'connected')).toBe(false);
+  });
+});
 
 describe('the generated profile', () => {
   it("denies every board server's port, at every address, for a lead with boardWall", () => {
