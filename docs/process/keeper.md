@@ -73,6 +73,10 @@ handles the new tokens and agents can write a checkout. What a passing run
 prints, step by step:
 
 ```
+== Confirm the org and the account
+   Fly org:            <slug>
+   Cloudflare account: <account name>
+   Make and store tokens for these? [y/N] y
 == 1. A new Fly org token, made with your own fly login
    ok: the keeper stored fly-org-token
    ok: the keeper stored fly-org-slug
@@ -85,20 +89,28 @@ prints, step by step:
 == 4. Point the callers at http://localhost:<port>
    ok: set CW_KEEPER_URL in ~/.claude/settings.json; sessions launched from now on have it
    ok: set CW_KEEPER_URL in ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist
-   ok: restarted com.fryanpan.claude-workspaces
+   ok: restarted com.fryanpan.claude-workspaces; it runs with CW_KEEPER_URL
 == 5. Check it
    ok: /Users/cw-relay/keeper/state/credentials.json: Permission denied
    ok: the probe waits for your passkey at http://localhost:<port>/approve/<id>
    ok: withdrew the probe, so it created nothing and no tap can run it
 ```
 
+- **Confirm first:** the org slug and the Cloudflare account come from
+  stores anything running as you can write, so the command shows them and
+  makes nothing until you answer `y`. A dry run shows them without asking.
+  If you make the Cloudflare token by hand, you confirm its account after
+  you paste it.
 - **Fly:** it runs `fly tokens create org --name keeper` with your own `fly`
   login and the org slug from the Keychain, and hands the token to the
   keeper on stdin. The token is never printed, copied or written to a file.
+  If a token is made but not stored, the STOP line says how to revoke it.
 - **Cloudflare:** it asks the current token to make the new one. If the
   current token cannot make tokens, it prints the permissions to give a
   token you make in the dashboard, and waits for you to paste it (it is not
-  shown). That is the only step you might do by hand. The permissions:
+  shown). That is the only step you might do by hand. If it takes you
+  longer than sudo's timeout (5 minutes by default), you may be asked for
+  your password once more. The permissions:
   - on the account: Access: Apps and Policies Edit, Access: Apps and
     Policies Read, Access: Organizations, Identity Providers, and Groups
     Read, Access: Service Tokens Read, Cloudflare Tunnel Edit, Workers
@@ -114,7 +126,9 @@ prints, step by step:
 - **Callers:** `CW_KEEPER_URL` goes into the `env` of
   `~/.claude/settings.json`, which every Claude Code session launches with,
   and into prod's launchd job. Prod is restarted (bootout, then bootstrap)
-  so it reads the new environment; the plist's old copy is kept beside it
+  so it reads the new environment. Whether prod needs it is judged from the
+  job launchd is running, not from the file, so a run cut short after the
+  plist was written restarts prod the next time. The plist's old copy is kept beside it
   as `.bak.keeper-<time>`. Sessions already running keep the old
   environment until they restart. A later `scripts/launchd/install.sh`
   keeps the plist's `CW_KEEPER_URL` unless you set the variable yourself

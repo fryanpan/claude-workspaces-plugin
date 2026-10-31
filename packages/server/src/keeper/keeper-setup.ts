@@ -31,7 +31,13 @@ import {
 import { join } from 'node:path';
 import { SECRET_ACCOUNT, storedSecretService } from '../../../core/src/secret-name.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
-import { manualTokenSteps, mintKeeperToken, oneAccount } from './keeper-setup-cloudflare.ts';
+import {
+  type CfAccount,
+  manualTokenSteps,
+  mintKeeperToken,
+  oneAccount,
+  theOneAccount,
+} from './keeper-setup-cloudflare.ts';
 
 export { CF_TOKEN_PERMISSIONS } from './keeper-setup-cloudflare.ts';
 
@@ -51,12 +57,21 @@ export interface SetupOptions {
   fetch: typeof fetch;
   /** Read one line from the terminal without showing it. */
   readSecret: (prompt: string) => Promise<string>;
+  /** Read one line from the terminal, shown as typed. */
+  readLine: (prompt: string) => Promise<string>;
   print: (line: string) => void;
 }
 
 /** The deploy's app name for a project (`infra/project-machine/deploy-plan.ts`). */
 const PROJECT_APP = /^cw-[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const PROBE_APP = 'cw-keeper-probe';
+/** A Fly org slug; never starting with `-`, so it cannot read as a flag. */
+const FLY_SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+/** One y/N answer; anything but y or yes is no. */
+async function yes(o: SetupOptions, prompt: string): Promise<boolean> {
+  return /^\s*y(es)?\s*$/i.test(await o.readLine(prompt));
+}
 
 class Stop extends Error {}
 
@@ -105,9 +120,13 @@ async function steps(o: SetupOptions): Promise<void> {
       ],
       input,
     );
-  const importValue = (name: string, value: string) => {
+  /** `undo` says how to retire a token that was made but not stored. */
+  const importValue = (name: string, value: string, undo?: string) => {
     const r = keeper(['import', name], value);
-    if (r.status !== 0) throw new Stop(`the keeper did not store ${name}: ${r.stderr.trim()}`);
+    if (r.status !== 0)
+      throw new Stop(
+        `the keeper did not store ${name}: ${r.stderr.trim()}${undo ? `. ${undo}` : ''}`,
+      );
     ok(`the keeper stored ${name}`);
   };
   /** A Keychain entry the deploy scripts wrote, base64 on disk. */
@@ -131,14 +150,20 @@ async function steps(o: SetupOptions): Promise<void> {
   const v = spawnSync('sudo', ['-v'], { stdio: 'inherit', env: o.env });
   if (v.status !== 0) throw new Stop('sudo did not accept the password');
   const check = keeper(['check']);
-  const lines = `${check.stdout}${check.stderr}`.trim().split('\n');
+  // stdout only: a runtime warning on stderr is not the keeper's verdict.
+  const lines = check.stdout.trim().split('\n');
   const unsafe = lines.filter((l) => l.startsWith('unsafe:'));
   if (unsafe.length) {
     for (const l of unsafe) o.print(`   ${l}`);
     throw new Stop('the keeper found a path another user could change (the unsafe: lines above)');
   }
-  if (!lines.at(-1)?.startsWith('store: ok'))
-    throw new Stop(`the keeper's check did not end with store: ok; run keeper-install.sh first`);
+  if (!lines.at(-1)?.startsWith('store: ok')) {
+    const said = (check.stderr.trim() || check.stdout.trim()).split('\n').at(-1) ?? '';
+    throw new Stop(
+      `the keeper's check did not end with store: ok (${said || `exit ${check.status}`}); ` +
+        'if the keeper is not installed, run keeper-install.sh first',
+    );
+  }
   const listed = (key: string) => {
     const l = lines.find((x) => x.startsWith(`${key}: `))?.slice(key.length + 2) ?? 'none';
     return new Set(l === 'none' ? [] : l.split(' ').filter(Boolean));
@@ -150,65 +175,90 @@ async function steps(o: SetupOptions): Promise<void> {
   const url = `http://localhost:${port}`;
   ok(`the keeper's store is sound and it answers on ${url}`);
 
-  step('1. A new Fly org token, made with your own fly login');
-  // The slug is no secret: the deploy scripts keep it in the Keychain beside the old token.
+  step('Confirm the org and the account');
+  // Both come from stores anything running as you can write, so you see them
+  // before a token is made for them or stored.
   const slug = keychain('fly-org-slug');
-  if (held.has('fly-org-token')) {
-    ok('the keeper holds a Fly org token already');
-  } else {
-    const org = slug;
-    if (!org)
-      throw new Stop(
-        `the Keychain has no ${storedSecretService('fly-org-slug')}, the org the deploy scripts use`,
-      );
-    if (o.dryRun)
-      would(`run fly tokens create org --org ${org} --name keeper, and import the token`);
-    else {
-      const r = run('fly', ['tokens', 'create', 'org', '--org', org, '--name', 'keeper']);
-      if (r.status !== 0) throw new Stop(`fly tokens create failed: ${r.stderr.trim()}`);
-      // fly prints `FlyV1 fm2_…`; fly reads the token without the scheme too,
-      // and the keeper's import refuses a value holding whitespace.
-      const token = r.stdout
-        .split('\n')
-        .map((l) => l.trim().replace(/^FlyV1 /, ''))
-        .find((l) => /^fm\d_\S+$/.test(l));
-      if (!token)
-        throw new Stop(
-          'fly printed no token this recognises, so nothing was imported. ' +
-            'Revoke what it made: fly tokens list, then fly tokens revoke',
-        );
-      importValue('fly-org-token', token);
+  if (!slug)
+    throw new Stop(
+      `the Keychain has no ${storedSecretService('fly-org-slug')}, the org the deploy scripts use`,
+    );
+  if (!FLY_SLUG.test(slug)) throw new Stop(`the Keychain's Fly org slug '${slug}' is not a slug`);
+  const needFly = !held.has('fly-org-token') || !held.has('fly-org-slug');
+  const needCf = !(held.has('cloudflare-api-token') && held.has('cloudflare-account-id'));
+  let account: CfAccount | null = null;
+  let current: string | null = null;
+  if (needCf && !o.dryRun) {
+    if (held.has('cloudflare-api-token')) {
+      // An earlier run stored the token and stopped: ask through the keeper.
+      const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: { [API_HEADER]: '1' } });
+      const body = (await r.json().catch(() => ({}))) as { result?: unknown };
+      const one = theOneAccount(body.result);
+      if ('why' in one) throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
+      account = one;
+    } else {
+      current = keychain('cloudflare-api-token');
+      const one = current ? await oneAccount(o.fetch, current) : null;
+      if (one && !('why' in one)) account = one;
     }
   }
-  if (held.has('fly-org-slug')) ok('the keeper holds the Fly org slug already');
-  else if (slug) {
-    if (o.dryRun) would(`import the org slug ${slug}`);
-    else importValue('fly-org-slug', slug);
+  o.print(`   Fly org:            ${slug}`);
+  if (!needCf) o.print('   Cloudflare account: stored already');
+  else if (account) o.print(`   Cloudflare account: ${account.name}`);
+  else if (o.dryRun)
+    o.print(
+      '   Cloudflare account: read with the current token in a real run (a dry run reads none)',
+    );
+  else o.print('   Cloudflare account: the one your pasted token sees, shown before it is stored');
+  if (!needFly && !needCf) ok('nothing to make or store');
+  else if (o.dryRun) would('ask you to confirm these before anything is made or stored');
+  else if (!(await yes(o, '   Make and store tokens for these? [y/N] ')))
+    throw new Stop('you did not confirm; nothing was made or stored');
+
+  step('1. A new Fly org token, made with your own fly login');
+  if (held.has('fly-org-token')) {
+    ok('the keeper holds a Fly org token already');
+  } else if (o.dryRun) {
+    would(`run fly tokens create org --org ${slug} --name keeper, and import the token`);
+  } else {
+    const r = run('fly', ['tokens', 'create', 'org', '--org', slug, '--name', 'keeper']);
+    if (r.status !== 0) throw new Stop(`fly tokens create failed: ${r.stderr.trim()}`);
+    const revoke =
+      `Revoke the token it made: fly tokens list --org ${slug}, then ` +
+      'fly tokens revoke <id> for the one named keeper';
+    // fly prints `FlyV1 fm2_…`; fly reads the token without the scheme too,
+    // and the keeper's import refuses a value holding whitespace.
+    const token = r.stdout
+      .split('\n')
+      .map((l) => l.trim().replace(/^FlyV1 /, ''))
+      .find((l) => /^fm\d_\S+$/.test(l));
+    if (!token)
+      throw new Stop(`fly printed no token this recognises, so nothing was imported. ${revoke}`);
+    importValue('fly-org-token', token, revoke);
   }
+  if (held.has('fly-org-slug')) ok('the keeper holds the Fly org slug already');
+  else if (o.dryRun) would(`import the org slug ${slug}`);
+  else importValue('fly-org-slug', slug);
 
   step('2. A new Cloudflare token, and the one account it sees');
-  if (held.has('cloudflare-api-token') && held.has('cloudflare-account-id')) {
+  if (!needCf) {
     ok('the keeper holds a Cloudflare token and account id already');
   } else if (o.dryRun) {
     would('make a token with the current one; if it cannot, ask you to make one, with:');
     for (const l of manualTokenSteps()) o.print(`   ${l}`);
     would('import the token, and the account id Cloudflare returns for it');
   } else if (held.has('cloudflare-api-token')) {
-    // An earlier run stored the token and stopped: ask through the keeper.
-    const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: { [API_HEADER]: '1' } });
-    const body = (await r.json().catch(() => ({}))) as { result?: { id?: string }[] };
-    const ids = (body.result ?? []).map((a) => a.id).filter((id) => typeof id === 'string');
-    if (ids.length !== 1)
-      throw new Stop(`the keeper's token sees ${ids.length} accounts; it must see exactly one`);
-    importValue('cloudflare-account-id', ids[0] as string);
+    importValue('cloudflare-account-id', (account as CfAccount).id);
   } else {
-    const current = keychain('cloudflare-api-token');
+    const name = `claude-workspaces keeper ${new Date().toISOString().slice(0, 10)}`;
     const minted = current
-      ? await mintKeeperToken(o.fetch, current, new Date().toISOString().slice(0, 10))
+      ? await mintKeeperToken(o.fetch, current, name)
       : { why: 'the Keychain holds no cloudflare-api-token' };
     let token: string;
+    let remove: string;
     if ('token' in minted) {
       token = minted.token;
+      remove = `Delete the token "${name}" in the Cloudflare dashboard: My Profile > API Tokens`;
       ok('made a new Cloudflare token with the current one');
     } else {
       o.print(`   The current token cannot make tokens (${minted.why}).`);
@@ -218,15 +268,26 @@ async function steps(o: SetupOptions): Promise<void> {
       ).trim();
       if (!token || /\s/.test(token))
         throw new Stop('that was not one token; nothing was imported');
+      remove = 'Delete the token you made in the Cloudflare dashboard: My Profile > API Tokens';
     }
-    const account = await oneAccount(o.fetch, token);
-    if ('why' in account) throw new Stop(`the new token: ${account.why}; nothing was imported`);
-    importValue('cloudflare-api-token', token);
-    importValue('cloudflare-account-id', account.id);
+    const seen = await oneAccount(o.fetch, token);
+    if ('why' in seen)
+      throw new Stop(`the new token: ${seen.why}; nothing was imported. ${remove}`);
+    if (account && seen.id !== account.id)
+      throw new Stop(
+        `the new token sees a different account than the one you confirmed. ${remove}`,
+      );
+    if (!account) {
+      o.print(`   Cloudflare account: ${seen.name}`);
+      if (!(await yes(o, '   Store the token for this account? [y/N] ')))
+        throw new Stop(`you did not confirm; nothing was stored. ${remove}`);
+    }
+    importValue('cloudflare-api-token', token, remove);
+    importValue('cloudflare-account-id', seen.id);
   }
 
   step('3. Adopt the project apps made before the keeper');
-  const list = run('fly', ['apps', 'list', '--json', ...(slug ? ['--org', slug] : [])]);
+  const list = run('fly', ['apps', 'list', '--json', '--org', slug]);
   if (list.status !== 0) throw new Stop(`fly apps list failed: ${list.stderr.trim()}`);
   let apps: string[];
   try {
@@ -269,16 +330,38 @@ async function steps(o: SetupOptions): Promise<void> {
   if (!existsSync(plist)) throw new Stop(`prod's launchd job ${plist} does not exist`);
   const xml = readFileSync(plist, 'utf8');
   const have = /<key>CW_KEEPER_URL<\/key>\s*<string>([^<]*)<\/string>/.exec(xml)?.[1];
-  if (have === url) ok(`prod's launchd job sets CW_KEEPER_URL already; prod not restarted`);
-  else if (o.dryRun) would(`set CW_KEEPER_URL=${url} in ${plist}, then restart prod`);
-  else {
-    const next = withKeeperUrl(xml, url);
-    if (!next) throw new Stop(`${plist} has no EnvironmentVariables dict to add CW_KEEPER_URL to`);
-    copyFileSync(plist, `${plist}.bak.keeper-${Date.now()}`);
-    atomicWrite(plist, next);
-    ok(`set CW_KEEPER_URL in ${plist}`);
+  // Judge prod by the job launchd is running, not by the file: a restart cut
+  // short leaves the file right and prod booted out or on its old environment.
+  const running = () => {
+    const r = run('launchctl', ['print', `gui/${o.uid}/${o.label}`]);
+    if (r.status !== 0) return { loaded: false, url: undefined };
+    return { loaded: true, url: /\bCW_KEEPER_URL => (\S+)/.exec(r.stdout)?.[1] };
+  };
+  const job = running();
+  const state = !job.loaded
+    ? 'not loaded'
+    : job.url === url
+      ? 'running with it'
+      : 'running without it';
+  if (have === url && job.url === url) ok('prod runs with CW_KEEPER_URL already; not restarted');
+  else if (o.dryRun) {
+    if (have !== url) would(`set CW_KEEPER_URL=${url} in ${plist}`);
+    would(`restart prod (it is ${state})`);
+  } else {
+    if (have !== url) {
+      const next = withKeeperUrl(xml, url);
+      if (!next)
+        throw new Stop(`${plist} has no EnvironmentVariables dict to add CW_KEEPER_URL to`);
+      copyFileSync(plist, `${plist}.bak.keeper-${Date.now()}`);
+      atomicWrite(plist, next);
+      ok(`set CW_KEEPER_URL in ${plist}`);
+    }
     restartProd(o, plist);
-    ok(`restarted ${o.label}`);
+    if (running().url !== url)
+      throw new Stop(
+        `launchd does not show ${o.label} running with CW_KEEPER_URL after the restart`,
+      );
+    ok(`restarted ${o.label}; it runs with CW_KEEPER_URL`);
   }
 
   step('5. Check it');

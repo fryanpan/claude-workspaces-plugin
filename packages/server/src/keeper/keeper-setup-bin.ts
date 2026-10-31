@@ -41,16 +41,33 @@ if (!here.startsWith(releases)) {
   process.exit(2);
 }
 
-/** One line from the terminal with echo off; the value is never shown. */
-async function readSecret(prompt: string): Promise<string> {
+/**
+ * Lines from the terminal through one iterator: a second `for await` over
+ * `console` would find stdin already closed by the first one's return.
+ */
+const stdinLines = console[Symbol.asyncIterator]();
+async function readLine(prompt: string): Promise<string> {
   process.stdout.write(prompt);
+  const next = await stdinLines.next();
+  return next.done ? '' : String(next.value);
+}
+
+/** One line with echo off; the value is never shown. Echo comes back on ^C too. */
+async function readSecret(prompt: string): Promise<string> {
   const tty = { stdio: 'inherit' as const };
+  const restore = () => spawnSync('/bin/stty', ['echo'], tty);
+  const onInt = () => {
+    restore();
+    process.stdout.write('\n');
+    process.exit(130);
+  };
+  process.once('SIGINT', onInt);
   spawnSync('/bin/stty', ['-echo'], tty);
   try {
-    for await (const line of console) return line;
-    return '';
+    return await readLine(prompt);
   } finally {
-    spawnSync('/bin/stty', ['echo'], tty);
+    process.off('SIGINT', onInt);
+    restore();
     process.stdout.write('\n');
   }
 }
@@ -86,6 +103,7 @@ process.exit(
     dryRun: args.includes('--dry-run'),
     fetch: guardedFetch,
     readSecret,
+    readLine,
     print: (line) => console.log(line),
   }),
 );

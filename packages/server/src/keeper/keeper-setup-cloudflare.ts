@@ -79,19 +79,36 @@ async function cfCall(
   }
 }
 
-/** The one account the token sees. A token that sees none or several is an error. */
+export interface CfAccount {
+  id: string;
+  name: string;
+}
+
+const ACCOUNT_ID = /^[0-9a-f]{32}$/;
+
+/**
+ * The one account in a `GET /accounts` result. None, several, or an id that
+ * is not 32 hex characters is an error: the id goes into the keeper and into
+ * a token's resource name.
+ */
+export function theOneAccount(result: unknown): CfAccount | { why: string } {
+  const all = Array.isArray(result) ? (result as { id?: unknown; name?: unknown }[]) : [];
+  if (all.length !== 1)
+    return { why: `the token sees ${all.length} accounts; it must see exactly one` };
+  const { id, name } = all[0] ?? {};
+  if (typeof id !== 'string' || !ACCOUNT_ID.test(id))
+    return { why: 'Cloudflare returned an account id that is not 32 hex characters' };
+  return { id, name: typeof name === 'string' && name ? name : '(no name)' };
+}
+
+/** The one account the token sees. */
 export async function oneAccount(
   doFetch: typeof fetch,
   token: string,
-): Promise<{ id: string } | { why: string }> {
+): Promise<CfAccount | { why: string }> {
   const r = await cfCall(doFetch, token, 'GET', '/accounts');
   if (!r.ok) return { why: r.why };
-  const ids = Array.isArray(r.result)
-    ? r.result.map((a) => (a as { id?: unknown }).id).filter((id) => typeof id === 'string')
-    : [];
-  if (ids.length !== 1)
-    return { why: `the token sees ${ids.length} accounts; it must see exactly one` };
-  return { id: ids[0] as string };
+  return theOneAccount(r.result);
 }
 
 /**
@@ -102,7 +119,8 @@ export async function oneAccount(
 export async function mintKeeperToken(
   doFetch: typeof fetch,
   current: string,
-  date: string,
+  /** What the dashboard lists the new token as. */
+  name: string,
 ): Promise<{ token: string } | { why: string }> {
   const account = await oneAccount(doFetch, current);
   if ('why' in account) return account;
@@ -119,7 +137,7 @@ export async function mintKeeperToken(
     CF_TOKEN_PERMISSIONS.filter((p) => p.scope === scope).map((p) => ({ id: byName.get(p.api) }));
   const acct = `com.cloudflare.api.account.${account.id}`;
   const made = await cfCall(doFetch, current, 'POST', '/user/tokens', {
-    name: `claude-workspaces keeper ${date}`,
+    name,
     policies: [
       { effect: 'allow', resources: { [acct]: '*' }, permission_groups: ids('account') },
       {
