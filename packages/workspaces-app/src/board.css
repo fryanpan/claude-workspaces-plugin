@@ -935,9 +935,10 @@ html[data-lc-full] .board-nav {
   background: var(--bg-panel);
 }
 /* The comment widget's bubble is hidden while the chat is up, but the bar
-   keeps its clearance on a phone, where it had it already, so no tab moves
-   when the chat opens. */
-@media (max-width: 900px) {
+   keeps its clearance at every width it is a bottom bar (≤1100px, the
+   RESPONSIVE ≤1100px block), where it had it already, so no tab moves when
+   the chat opens. */
+@media (max-width: 1100px) {
   html[data-lc-full] body:has(claude-feedback-widget) .board-nav {
     padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
   }
