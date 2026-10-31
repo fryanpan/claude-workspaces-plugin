@@ -3,7 +3,11 @@
  * clock that only moves when told, and a chat client that records each
  * meeting verb and answers the way the server does. No network, no device.
  */
-import type { LeadChatMeeting, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import type {
+  LeadChatMeeting,
+  LeadChatMeetingLine,
+  LeadChatMessage,
+} from '@claude-workspaces/core/lead-chat';
 import type { LeadChatClient, LeadChatState } from '../src/lead-chat/lead-chat-client.ts';
 import type { MeetingSocket } from '../src/meeting-link.ts';
 
@@ -138,6 +142,7 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     loadingOlder: false,
   };
   const fns: Array<(s: LeadChatState) => void> = [];
+  const leadLineFns: Array<(meetingId: string, line: LeadChatMeetingLine) => void> = [];
   const calls: Array<{ action: string; body: Record<string, unknown> }> = [];
   /** What the server says of a line's ask, as it does to a caller it cannot prove. */
   const lineAnswer: { lead?: 'sign-in' } = {};
@@ -148,6 +153,9 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     state: () => state,
     onChange: (fn) => {
       fns.push(fn);
+    },
+    onLeadLine: (fn) => {
+      leadLineFns.push(fn);
     },
     loadOlder: async () => {},
     async send(text, author, _context, via) {
@@ -228,6 +236,16 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     setMeeting(next: LeadChatMeeting | null) {
       state = { ...state, meeting: next };
       changed();
+    },
+    /** A line the board's lead said, as its frame reaches this page. */
+    leadLine(meetingId: string, turn: number, text: string) {
+      const line: LeadChatMeetingLine = { turn, who: 'Harborlight Lead', text, ts: 1, lead: true };
+      const m = state.meeting;
+      if (m?.id === meetingId) {
+        state = { ...state, meeting: { ...m, lines: [...m.lines, line] } };
+        changed();
+      }
+      for (const fn of leadLineFns) fn(meetingId, line);
     },
   };
 }

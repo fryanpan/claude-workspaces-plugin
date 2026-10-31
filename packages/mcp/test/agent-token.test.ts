@@ -158,6 +158,9 @@ describe('which paths carry the bearer', () => {
     // Not a prefix match: a path that merely starts the same way is not it.
     expect(pathNeedsAgentToken('/api/agents/agent-mira/watches/extra')).toBe(false);
     expect(pathNeedsAgentToken('/workspaces/w-1/voice-queue/vq-1/answer')).toBe(true);
+    // The lead's line into a meeting is said as the lead: only its token speaks.
+    expect(pathNeedsAgentToken('/workspaces/w-1/lead-chat/meeting/say')).toBe(true);
+    expect(pathNeedsAgentToken('/workspaces/w-1/lead-chat/meeting')).toBe(false);
     expect(pathNeedsAgentToken('/workspaces/w-1/voice-queue/vq-1/ack')).toBe(false);
   });
 

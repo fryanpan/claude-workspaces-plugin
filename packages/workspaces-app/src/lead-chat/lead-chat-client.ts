@@ -19,6 +19,7 @@ import {
   type LeadChatHistoryPage,
   type LeadChatMeeting,
   type LeadChatMeetingFrame,
+  type LeadChatMeetingLine,
   type LeadChatMeetingLineFrame,
   type LeadChatMessage,
   type LeadChatRead,
@@ -60,6 +61,8 @@ export interface LeadChatClient {
   state(): LeadChatState;
   /** Called after every change, with the state as it now stands. */
   onChange(fn: (s: LeadChatState) => void): void;
+  /** Called when the lead says a line into the meeting, as it arrives. */
+  onLeadLine(fn: (meetingId: string, line: LeadChatMeetingLine) => void): void;
   send(
     text: string,
     author: { id: string; name: string; kind?: string },
@@ -93,6 +96,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     loadingOlder: false,
   };
   const listeners: Array<(s: LeadChatState) => void> = [];
+  const leadLines: Array<(meetingId: string, line: LeadChatMeetingLine) => void> = [];
   const changed = (): void => {
     for (const fn of listeners) fn(state);
   };
@@ -159,6 +163,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       if (frame.workspaceId !== opts.workspaceId || !m || m.id !== frame.meeting) return;
       state = { ...state, meeting: { ...m, lines: upsertMeetingLine(m.lines, frame.line) } };
       changed();
+      if (frame.line.lead) for (const fn of leadLines) fn(m.id, frame.line);
     } catch {
       // A frame this page cannot read changes nothing.
     }
@@ -207,6 +212,9 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     state: () => state,
     onChange: (fn) => {
       listeners.push(fn);
+    },
+    onLeadLine: (fn) => {
+      leadLines.push(fn);
     },
     loadOlder,
     async send(text, author, context, via) {

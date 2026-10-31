@@ -22,6 +22,11 @@ import type { VoiceContext } from '../voice-capture.ts';
 import type { LeadChatClient } from './lead-chat-client.ts';
 import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
 import {
+  type LeadLineVoiceOpts,
+  createLeadLineVoice,
+  leadLinePlaysHere,
+} from './lead-chat-meeting-voice.ts';
+import {
   type LeadMeetingRun,
   type LeadMeetingRunOpts,
   createLeadMeetingRun,
@@ -47,6 +52,8 @@ export interface LeadMeetingSeams
   newDoc?: (topic: string) => Promise<string | null>;
   macAudio?: boolean;
   today?: Date;
+  /** How a line the lead says is fetched and played; injected by tests. */
+  leadVoice?: Partial<Pick<LeadLineVoiceOpts, 'fetch' | 'playbackContext'>>;
 }
 
 export interface LeadMeetingWiringOpts {
@@ -136,6 +143,35 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
     },
   });
 
+  // What the lead says into the meeting, played here when this tab holds
+  // the microphone (`lead-chat-meeting-voice.ts`).
+  let playing: { meetingId: string; turn: number } | null = null;
+  /** Per meeting, the lead's lines played here to their end. */
+  const said = new Map<string, Set<number>>();
+  const leadVoice = createLeadLineVoice({
+    ...seams.leadVoice,
+    workspaceId: opts.workspaceId,
+    author,
+    onPlaying: (meetingId, turn) => {
+      playing = { meetingId, turn };
+      opts.changed();
+    },
+    onDone: (meetingId, turn, done) => {
+      if (playing?.meetingId === meetingId && playing.turn === turn) playing = null;
+      if (done) {
+        const s = said.get(meetingId) ?? new Set<number>();
+        s.add(turn);
+        said.set(meetingId, s);
+      }
+      opts.changed();
+    },
+  });
+  client.onLeadLine((meetingId, line) => {
+    const m = client.state().meeting;
+    if (!m || m.id !== meetingId || !leadLinePlaysHere(m, recorder)) return;
+    leadVoice.play(meetingId, line.turn);
+  });
+
   const failStart = (why: string): void => {
     opts.notice(
       why === 'meeting-running'
@@ -218,6 +254,7 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
   /** Any tap on the page is the gesture a waiting microphone needs. */
   const onPageTap = (): void => {
     if (run.state().phase === 'tap') run.tap();
+    leadVoice.wake();
   };
   const onHide = (): void => {
     run.release();
@@ -240,6 +277,8 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
         run: run.state(),
         recording: meeting.recorder === recorder,
         ending,
+        playing: playing?.meetingId === meeting.id ? playing.turn : null,
+        said: said.get(meeting.id) ?? new Set<number>(),
       };
     },
     sync() {
@@ -267,6 +306,7 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
       doc.removeEventListener('click', onPageTap, true);
       win.removeEventListener('pagehide', onHide);
       wizard.destroy();
+      leadVoice.stop();
       run.release();
     },
   };

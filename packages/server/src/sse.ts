@@ -595,6 +595,26 @@ export class SseBus {
   }
 
   /**
+   * One frame to one agent's own streams, kept nowhere: no id, no replay.
+   * For a word-rate frame only a live stream can use (a meeting's lines to
+   * the board's lead, `lead-chat/meeting-feed.ts`), which in the replay
+   * buffer would push out the events a reconnect needs.
+   */
+  sendToAgentTransient(docId: string, agentId: string, payload: SsePayload): number {
+    let sent = 0;
+    for (const [sink, who] of this.byDoc.get(docId) ?? []) {
+      if (who.agentId !== agentId) continue;
+      try {
+        sink.write(payload.event, payload);
+        sent += 1;
+      } catch (err) {
+        console.error('[sse] addressed transient write failed:', err);
+      }
+    }
+    return sent;
+  }
+
+  /**
    * One frame to several agents, buffered ONCE. `forAgent` gives each live
    * addressee its own copy (a comment row id); the replay buffer holds `base`,
    * for the reason `broadcast` gives. Returns the agents a copy reached.

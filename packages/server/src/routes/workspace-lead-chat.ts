@@ -19,6 +19,8 @@ import {
   type LeadChatCursor,
   addressesLead,
 } from '@claude-workspaces/core/lead-chat';
+import { SPOKEN_OUTPUT_RATE } from '@claude-workspaces/core/spoken-reply';
+import { isValidAgentId } from '../agent-watches.ts';
 import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
@@ -29,6 +31,11 @@ export async function handleWorkspaceLeadChat(
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
   const { req, pathname, scope, visitor, authorFor, requireOwner } = rq;
+  if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting\/say$/.test(pathname)) {
+    if (req.method !== 'POST') return undefined;
+    if (visitor) return ctx.j(403, { error: 'not a member route' });
+    return leadSays(ctx, req, scope.workspaceId);
+  }
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting$/.test(pathname)) {
     if (req.method !== 'POST') return undefined;
     if (visitor) return ctx.j(403, { error: 'not a member route' });
@@ -124,6 +131,8 @@ const LINE_MAX = 4000;
  *   - `line` — `{id, turn, who, text}`: one final line. A line that opens
  *     with "Lead," also goes to the lead, as a message said to it.
  *   - `join` — `{id}`: a person opened a page while it runs.
+ *   - `voice` — `{id, turn}`: the audio of a line the lead said
+ *     (`leadLineVoice`), for the page holding the microphone to play.
  *   - `end` — `{id}`.
  *
  * Every verb but `join` is the owner's, as the chat's own write is: a meeting
@@ -181,6 +190,7 @@ async function meetingAction(
       speakers,
       recorder,
     });
+    if (r.ok) ctx.leadMeetingFeed.started(workspaceId, r.meeting);
     return r.ok ? ctx.j(201, { meeting: r.meeting }) : answer(r, {});
   }
   if (!meetingId) return ctx.j(400, { error: 'id required' });
@@ -211,6 +221,8 @@ async function meetingAction(
     const source = meetings.current(workspaceId)?.source;
     const r = meetings.line(workspaceId, meetingId, { turn, who, text });
     if (!r.ok) return answer(r, {});
+    // The lead's own voice heard back: not shown, not fed, not an ask.
+    if (r.echo) return ctx.j(200, { line: r.line, echo: true });
     // The one line of the meeting the lead acts on, sent once per turn: a
     // revision of a turn the meeting already holds is not a second ask.
     let toLead: string | undefined;
@@ -225,15 +237,120 @@ async function meetingAction(
         refused = 'sign-in';
       }
     }
+    // Everything else the room says, the lead hears as the meeting goes.
+    const m = meetings.current(workspaceId);
+    if (r.fresh && !toLead && m) ctx.leadMeetingFeed.heard(workspaceId, m, r.line);
     return ctx.j(200, {
       line: r.line,
       ...(toLead ? { message: toLead } : {}),
       ...(refused ? { lead: refused } : {}),
     });
   }
+  if (action === 'voice') return leadLineVoice(ctx, rq.req, workspaceId, meetingId, body?.turn);
   if (action === 'end') {
     const r = meetings.end(workspaceId, meetingId);
+    if (r.ok) ctx.leadMeetingFeed.ended(workspaceId);
     return answer(r, {});
   }
   return ctx.j(400, { error: 'unknown action' });
+}
+
+/** The longest line the lead may say into a meeting, in characters. */
+export const LEAD_SAY_MAX = 1000;
+
+/**
+ * `POST /workspaces/<id>/lead-chat/meeting/say` — `{agentId, text}`: the
+ * board's lead speaks into the meeting its chat is running
+ * (`say_in_meeting`). The line shows on every page of the board and the page
+ * holding the microphone plays it. Only the board's lead, proved the way its
+ * own feed is (on this machine, with its token, required here even while the
+ * server's rollout flag is off), may say anything; a meeting must be running.
+ */
+async function leadSays(
+  ctx: WorkspaceRoutesContext,
+  req: Request,
+  workspaceId: string,
+): Promise<Response> {
+  const body = await ctx.safeJson(req);
+  const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
+  if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
+  // Always the token: the route is new, and every caller (`say_in_meeting`)
+  // sends one, so there is no tokenless client to carry through the rollout.
+  const allowed = ctx.authorizeAgent(req, agentId, { requireToken: true });
+  if (!allowed.ok) return ctx.j(allowed.status, allowed.body);
+  if (ctx.taskStore.getWorkspace(workspaceId)?.leadAgentId !== agentId) {
+    return ctx.j(403, { error: 'not-lead', hint: 'Only the board’s lead speaks in its meeting.' });
+  }
+  const text = typeof body?.text === 'string' ? body.text.trim().replace(/\s+/g, ' ') : '';
+  if (!text) return ctx.j(400, { error: 'text required' });
+  if (text.length > LEAD_SAY_MAX) return ctx.j(400, { error: `text over ${LEAD_SAY_MAX} chars` });
+  const who = ctx.leadChat.leadAuthor(workspaceId, agentId).name;
+  const r = ctx.leadChatMeetings.said(workspaceId, who, text);
+  if (!r.ok) {
+    if (r.error === 'no-meeting') {
+      return ctx.j(409, { error: 'no-meeting', hint: 'No meeting is running on this board.' });
+    }
+    if (r.error === 'room-first') {
+      return ctx.j(409, {
+        error: 'room-first',
+        hint: 'You have said ten lines in a row. Wait until someone in the room speaks.',
+      });
+    }
+    return ctx.j(500, { error: r.error });
+  }
+  return ctx.j(200, {
+    ok: true,
+    meetingId: r.meeting.id,
+    turn: r.line.turn,
+    // Played only from a microphone meeting's recording tab
+    // (`leadLinePlaysHere` on the page).
+    played: ctx.leadMeetingVoice !== null && r.meeting.source === 'mic',
+  });
+}
+
+/**
+ * The audio of line `turn`, which the lead said: PCM16 mono at
+ * `SPOKEN_OUTPUT_RATE`, streamed as the voice makes it. Only a lead line
+ * is voiced, so a page cannot spend the voice on arbitrary words.
+ */
+function leadLineVoice(
+  ctx: WorkspaceRoutesContext,
+  req: Request,
+  workspaceId: string,
+  meetingId: string,
+  turn: unknown,
+): Response {
+  const m = ctx.leadChatMeetings.current(workspaceId);
+  if (!m || m.id !== meetingId) return ctx.j(409, { error: 'no-meeting' });
+  const line = m.lines.find((l) => l.turn === turn && l.lead);
+  if (!line) return ctx.j(404, { error: 'no-lead-line' });
+  const voice = ctx.leadMeetingVoice;
+  if (!voice) return ctx.j(503, { error: 'no-voice' });
+  const stop = new AbortController();
+  req.signal.addEventListener('abort', () => stop.abort());
+  const stream = new ReadableStream<Uint8Array>({
+    async start(c) {
+      try {
+        await voice.speak(line.text, (pcm) => c.enqueue(pcm), stop.signal);
+      } catch (err) {
+        console.error(`[lead-chat] the lead's line was not voiced: ${String(err)}`);
+      }
+      try {
+        c.close();
+      } catch {
+        // Closed by the page going away.
+      }
+    },
+    cancel() {
+      stop.abort();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'content-type': 'audio/L16',
+      'x-sample-rate': String(SPOKEN_OUTPUT_RATE),
+      'cache-control': 'no-store',
+    },
+  });
 }

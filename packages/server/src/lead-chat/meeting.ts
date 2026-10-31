@@ -29,6 +29,7 @@ import {
   type LeadChatMeetingLineFrame,
   type LeadChatMeetingSource,
   type LeadChatNotesKind,
+  leadLineTurn,
   upsertMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
 
@@ -55,6 +56,50 @@ export function leadChatMeetingPath(dataDir: string, workspaceId: string): strin
  */
 export function leadHearsLine(source: LeadChatMeetingSource, ownerProven: boolean): boolean {
   return ownerProven && source === 'mic';
+}
+
+/** How long after the lead says a line the room's microphone may hand it
+ *  back: the voice's own length plus the transcriber settling the turn. */
+export const LEAD_ECHO_MS = 30_000;
+
+/** Lower case, letters and digits only, single spaces. */
+function spoken(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+const words = (s: string): number => s.split(' ').length;
+
+/**
+ * Whether a line heard in the room is the lead's own voice coming back
+ * through the microphone: its words equal, or are a part of, a line the lead
+ * said in the last `LEAD_ECHO_MS`. A microphone's echo cancellation reduces
+ * the played line and does not remove it; fed back, the lead would read its
+ * own words as the room's and could answer them.
+ * A part must be whole words, 12 characters or more, and at least 60% of the
+ * lead's line by word count, so a reply that picks up a few of its words ("The slipway pricing", after
+ * "Who is the slipway pricing for?") is never taken for an echo. Only a
+ * microphone meeting is checked: that is the only one that plays the line.
+ */
+export function echoOfLead(
+  lines: readonly LeadChatMeetingLine[],
+  text: string,
+  now: number,
+): boolean {
+  const heard = spoken(text);
+  if (!heard) return false;
+  return lines.some((l) => {
+    if (!l.lead || now - l.ts > LEAD_ECHO_MS) return false;
+    const said = spoken(l.text);
+    return (
+      said === heard ||
+      (heard.length >= 12 &&
+        words(heard) >= 0.6 * words(said) &&
+        ` ${said} `.includes(` ${heard} `))
+    );
+  });
 }
 
 export interface MeetingStart {
@@ -145,9 +190,15 @@ export class LeadChatMeetings {
     workspaceId: string,
     id: string,
     l: Omit<LeadChatMeetingLine, 'ts'>,
-  ): { ok: true; line: LeadChatMeetingLine; fresh: boolean } | { ok: false; error: string } {
+  ):
+    | { ok: true; line: LeadChatMeetingLine; fresh: boolean; echo?: true }
+    | { ok: false; error: string } {
     const m = this.current(workspaceId);
     if (!m || m.id !== id) return { ok: false, error: 'no-meeting' };
+    // The room's microphone heard the lead's own voice: not a line.
+    if (!l.lead && m.source === 'mic' && echoOfLead(m.lines, l.text, this.now())) {
+      return { ok: true, line: { ...l, ts: this.now() }, fresh: false, echo: true };
+    }
     const fresh = !m.lines.some((x) => x.turn === l.turn);
     const line: LeadChatMeetingLine = { ...l, ts: this.now() };
     const next = { ...m, lines: upsertMeetingLine(m.lines, line) };
@@ -160,6 +211,26 @@ export class LeadChatMeetings {
       line,
     });
     return { ok: true, line, fresh };
+  }
+
+  /**
+   * A line the board's lead says into the running meeting. It takes the turn
+   * after the last line (`leadLineTurn`), shows on every page like any line,
+   * and the page holding the microphone plays it.
+   */
+  said(
+    workspaceId: string,
+    who: string,
+    text: string,
+  ):
+    | { ok: true; meeting: LeadChatMeeting; line: LeadChatMeetingLine }
+    | { ok: false; error: string } {
+    const m = this.current(workspaceId);
+    if (!m) return { ok: false, error: 'no-meeting' };
+    const turn = leadLineTurn(m.lines);
+    if (turn === null) return { ok: false, error: 'room-first' };
+    const r = this.line(workspaceId, m.id, { turn, who, text, lead: true });
+    return r.ok ? { ok: true, meeting: m, line: r.line } : r;
   }
 
   end(workspaceId: string, id: string): MeetingChange {

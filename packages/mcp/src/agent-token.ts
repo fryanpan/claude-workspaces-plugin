@@ -72,8 +72,9 @@ export function agentTokenPath(agentId: string): string {
 /**
  * Whether a REST path is one the server asks the token for.
  *
- * The durable watch set, and the lead's spoken answer (`answer_voice`), which
- * the server says aloud on a board only for an agent proved to be on it. The
+ * The durable watch set, the lead's spoken answer (`answer_voice`), which
+ * the server says aloud on a board only for an agent proved to be on it, and
+ * the lead's line into a meeting (`say_in_meeting`), for the same reason. The
  * stream is not a REST call and asks the store directly, and the mint route
  * is fetched by the store itself. The inbox reader's post and the plan
  * lead's rank are refused without one, always.
@@ -92,6 +93,7 @@ export function pathNeedsAgentToken(path: string): boolean {
   return (
     /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) ||
     /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) ||
+    /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) ||
     path === '/inbox/rows' ||
     path === '/api/review-queue/rank'
   );

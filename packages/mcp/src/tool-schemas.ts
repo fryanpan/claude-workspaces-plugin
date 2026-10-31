@@ -445,6 +445,22 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'say_in_meeting',
+      description:
+        "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. It shows in the meeting on every page and is played aloud in the room at once, so it can talk over whoever is speaking. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running or you are not the board's lead.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board the meeting is on.' },
+          text: {
+            type: 'string',
+            description: 'What to say aloud: one short sentence, at most 1000 characters.',
+          },
+        },
+        required: ['workspaceId', 'text'],
+      },
+    },
+    {
       name: 'rank_review_item',
       description:
         "Only for the lead of the plan board (Team Lead): rank one open review item on any board against this week's goals, and file it under the goal it serves, so Bryan's Home shows your Top 10 and then his asks by goal. Ranked items come first, lowest rank first; unranked items keep the plan order. key is the queue key a workspace.new_asks line names. Send rank, goal or both; a field left out is left as it was, and null clears it. goal is a plan-board goal id, urgent, not-this-week or drop. Both stop counting when Bryan moves that task himself afterwards. Any other caller is refused (ranked:false).",

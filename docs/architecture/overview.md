@@ -384,6 +384,9 @@ events carry `taskId` and no doc, so they fell through the doc-shaped tail of
 task and no ask; the line module holds the wording and the two-part test for
 which items are ticket-borne, and the routing decision stays in
 `emitChannelMessage`.
+`meeting-feed-line.ts` is the fourth: it words the two frames that put the
+board's lead in a meeting, the start and each batch of the room's lines, the
+lines inside an untrusted quote. Pure wording again, one caller.
 
 `task-wait.ts` joins the Board group under the same `task-*.ts` glob and
 moves no boundary either. It writes one field on a task — what an agent

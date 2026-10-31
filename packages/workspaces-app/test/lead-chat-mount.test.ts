@@ -37,6 +37,7 @@ function fakeClient(canTalk = true) {
     onChange: (fn) => {
       fns.push(fn);
     },
+    onLeadLine: () => {},
     loadOlder: async () => {},
     async send(text, author, context, via) {
       sent.push({ text, via, context });

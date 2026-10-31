@@ -77,6 +77,7 @@ import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './
 import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
+import { LeadMeetingFeed } from './lead-chat/meeting-feed.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
@@ -107,6 +108,7 @@ import {
   migrateParkedRows,
 } from './park-migration.ts';
 import { parkNoteText } from './park-note.ts';
+import { realTickScheduler } from './pause-ticker.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
 import { createPromptStore } from './prompt-store.ts';
@@ -1567,6 +1569,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     broadcast: (workspaceId, frame) =>
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
     newId: () => cryptoId('lcm'),
+  });
+  // The board's lead in that meeting (`lead-chat/meeting-feed.ts`): the
+  // start, then the room's lines batched, on the lead's own streams only.
+  const leadMeetingFeed = new LeadMeetingFeed({
+    leadOf: (workspaceId) => {
+      const id = taskStore.getWorkspace(workspaceId)?.leadAgentId;
+      if (!id) return null;
+      const v = taskStore.listAttachments(workspaceId).find((a) => a.agentId === id)?.pluginVersion;
+      return v === undefined ? { id } : { id, pluginVersion: v };
+    },
+    send: (workspaceId, agentId, frame, transient) =>
+      transient
+        ? sse.sendToAgentTransient(`ws~${workspaceId}`, agentId, frame)
+        : sse.sendToAgent(`ws~${workspaceId}`, agentId, frame),
+    schedule: realTickScheduler,
   });
   const spokenEngines = opts.spokenReply ?? {
     listener: null,
@@ -3111,14 +3128,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenTimings,
     leadChat,
     leadChatMeetings,
+    leadMeetingFeed,
+    // What the lead says into a meeting is said in the board reply's voice.
+    leadMeetingVoice: spokenEngines.voices[1] ?? spokenEngines.voices[2] ?? null,
     featuresOff: opts.featuresOff ?? {},
-    authorizeAgent: (req, agentId) =>
+    authorizeAgent: (req, agentId, o) =>
       authorizeAgentCaller({
         agentId,
         req,
         address: server.requestIP(req)?.address,
         key: agentTokenKeyFor(),
-        requireToken: requireAgentToken,
+        requireToken: o?.requireToken ?? requireAgentToken,
       }),
     dataDir,
     clientReleaseRootDir,
