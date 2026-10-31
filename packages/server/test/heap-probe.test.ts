@@ -29,9 +29,9 @@ describe('HeapProbe in the block line', () => {
     const m = new LoopLagMonitor({ periodMs: 20, thresholdMs: 100, log: (l) => lines.push(l) });
     m.start();
     try {
-      // Let one on-time tick arm the sentinel, then hold the loop with a
-      // collection inside the hold.
-      await new Promise((r) => setTimeout(r, 60));
+      // Step into a later job than the one that armed the sentinel at
+      // construction, then hold the loop with a collection inside the hold.
+      await new Promise((r) => setImmediate(r));
       const until = performance.now() + 250;
       Bun.gc(true);
       while (performance.now() < until) {}
@@ -136,7 +136,7 @@ describe('HeapProbe in the block line', () => {
     heap.arm();
     // A WeakRef's target lives to the end of the job that made it, as the
     // monitor's does: the next tick is a later job.
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setImmediate(r));
     Bun.gc(true);
     expect(heap.gcSinceArm()).toBe(true);
   });
