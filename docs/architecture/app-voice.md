@@ -182,8 +182,9 @@ reconnects as after any drop.
   `listen()` with the microphone works on the frame-only hostname, where the
   frame has an origin of its own that is not the board's, and in a page the
   mock's author serves in its own tab. The board's opaque frame is what a
-  board without `CW_FRAME_ORIGIN` serves, and what a board hostname outside
-  `CW_FRAME_BOARD_HOSTS` gets. There `listen()` rejects with a message
+  board without `CW_FRAME_ORIGIN` serves, what a board hostname outside
+  `CW_FRAME_BOARD_HOSTS` gets, and what a share or collaboration visitor
+  always gets. There `listen()` rejects with a message
   naming the frame rather than the site settings (`OPAQUE_MIC_REFUSAL`,
   `widget/src/voice/voice-audio.ts`). The board's own mock address offers
   no way around it: opened at the top, it sends itself back to the board's

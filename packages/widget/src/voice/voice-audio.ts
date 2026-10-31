@@ -36,11 +36,13 @@ export interface PcmCaptureOpts {
  * The refusal in a frame with an opaque origin, which no site setting can
  * lift: Chrome refuses `getUserMedia` there whatever the frame's `allow`
  * says. A board's mock frame is one unless the board serves it on its
- * frame-only hostname (`server/src/frame-host.ts`).
+ * frame-only hostname (`server/src/frame-host.ts`), and always for a share
+ * or collaboration visitor.
  */
 export const OPAQUE_MIC_REFUSAL =
   'The microphone cannot open in this frame: it has no origin of its own. ' +
-  'It opens when the board serves its mocks on a frame hostname.';
+  'A mock’s frame has one only on a board with a frame hostname, ' +
+  'and never for a share or collaboration visitor.';
 
 /**
  * What the page says when the browser will not hand over a microphone.

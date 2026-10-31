@@ -146,6 +146,7 @@ async function main(): Promise<void> {
           };
         },
       };
+      // The frame origin names the port, so learn a free one first and reuse it.
       const probe = createServer({ port: 0, dataDir: join(dir, `${name}-probe`) });
       const port = probe.port;
       await probe.stop();
