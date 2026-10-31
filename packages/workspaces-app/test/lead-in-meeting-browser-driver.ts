@@ -254,11 +254,11 @@ async function main(): Promise<void> {
     if (built.status !== 0) throw new Error(`app build failed:\n${built.stderr}`);
 
     let turn = 0;
-    let say: ((text: string) => void) | null = null;
+    const ear: { say: ((text: string) => void) | null } = { say: null };
     const engine: TranscriptionEngine = {
       name: 'scripted',
       async open(o) {
-        say = (text) => o.onTurn({ turn: turn++, text, final: true });
+        ear.say = (text) => o.onTurn({ turn: turn++, text, final: true });
         return { send: () => {}, close: async () => {} };
       },
     };
@@ -346,7 +346,7 @@ async function main(): Promise<void> {
       });
       await tap(page, s2.go as Rect);
       await until('the meeting heading', async () => ((await read(page)).head ? true : null));
-      await until('the engine open', () => say);
+      await until('the engine open', () => ear.say);
 
       await go(watcher, at(''));
       await tap(watcher, (await read(watcher)).button as Rect);
@@ -354,7 +354,7 @@ async function main(): Promise<void> {
         (await read(watcher)).head ? true : null,
       );
       const room = `The Saltmarsh slipway needs pricing, said at ${width}.`;
-      say?.(room);
+      ear.say?.(room);
       await until('the room’s line on the recording page', async () =>
         (await read(page)).notes.includes(room) ? true : null,
       );
@@ -389,7 +389,7 @@ async function main(): Promise<void> {
       await stopBrowser(browser.proc, browser.profile);
       const held = browsers.findIndex((x) => x.proc === browser.proc);
       if (held >= 0) browsers.splice(held, 1);
-      say = null;
+      ear.say = null;
     }
     process.stdout.write(`\n${JSON.stringify({ sizes })}\n`);
   } finally {
