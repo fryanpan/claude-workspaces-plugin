@@ -905,6 +905,11 @@ body.board-body {
      topbar plus the page's own tail. */
   min-height: calc(100vh - 64px);
 }
+/* The lead chat docked on the right (`lead-chat-dock.ts`): the board's column
+   makes room, so nothing the reader was working on sits under the panel. */
+html[data-lc-docked] .board-main {
+  margin-right: var(--lc-dock-w, 0px);
+}
 /* Home showing: the board column leaves the grid and the Home section takes
    the one content track. This rule hides the COLUMN; the rows inside it are
    not rendered at all on Home (`renderBoardForPane`). It used to say the

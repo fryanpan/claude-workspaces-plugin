@@ -22,7 +22,11 @@
 import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
 import { messageLinkOf, withMessageLink } from './lead-chat-link.ts';
-import { type LeadMeetingSeams, wireLeadMeeting } from './lead-chat-meeting-wiring.ts';
+import {
+  type LeadMeetingSeams,
+  PANE_OPEN_KEY,
+  wireLeadMeeting,
+} from './lead-chat-meeting-wiring.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
 import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
 import {
@@ -86,10 +90,13 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   host.dataset.leadChat = 'button';
   if (!opts.dock) doc.body.append(host);
   host.hidden = true;
+  const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
+  const session = opts.session === undefined ? tabStorage(win) : opts.session;
   const view = createLeadChatView({
     document: doc,
     buttonHost: host,
     placement: opts.dock ? 'dock' : 'float',
+    storage,
   });
   // A floated button sits under the coach's card; this keeps the card above it.
   if (!opts.dock) doc.documentElement.style.setProperty('--lc-agent-room', '56px');
@@ -99,15 +106,33 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       workspaceId: opts.workspaceId,
       ...(opts.stream ? { stream: opts.stream } : {}),
     });
-  const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
   const reduced =
     opts.reducedMotion ?? (() => win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   const ui = { open: false, bar: false, notice: '' };
+  /** The panel stays open as the reader moves between the board's pages:
+   *  this tab remembers it was open, and the next page opens it again. */
+  const keepOpen = (open: boolean): void => {
+    try {
+      if (open) session?.setItem(PANE_OPEN_KEY, '1');
+      else session?.removeItem(PANE_OPEN_KEY);
+    } catch {
+      // Unkept, the next page opens closed.
+    }
+  };
+  let restored = false;
   let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
 
   const render = (): void => {
     const s = client.state();
+    if (!restored && s.loaded) {
+      restored = true;
+      try {
+        if (s.canTalk && session?.getItem(PANE_OPEN_KEY) === '1') ui.open = true;
+      } catch {
+        // Nothing kept.
+      }
+    }
     host.hidden = !(s.loaded && s.canTalk);
     view.render({
       lead: s.lead,
@@ -192,6 +217,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const openPane = (from: DOMRect | null, focus = true): void => {
     ui.open = true;
     ui.bar = false;
+    keepOpen(true);
     render();
     grow(from);
     if (focus) view.composer.focus();
@@ -200,6 +226,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const closeAll = (): void => {
     ui.open = false;
     ui.bar = false;
+    keepOpen(false);
     stopListening();
     render();
   };
@@ -258,13 +285,12 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     client,
     view,
     ...(opts.getContext ? { getContext: opts.getContext } : {}),
-    session: opts.session === undefined ? tabStorage(win) : opts.session,
+    session,
     ...(opts.meeting ? { seams: opts.meeting } : {}),
     changed: render,
     openPane: () => {
       if (!ui.open) openPane(null, false);
     },
-    paneOpen: () => ui.open,
     notice: (text) => {
       ui.notice = text;
       render();
