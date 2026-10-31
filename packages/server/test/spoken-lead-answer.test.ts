@@ -2,9 +2,10 @@
  * The lead's answer to a spoken request, said on the page that asked.
  *
  * "What's the status", "go research ferry fares": the router queues these for
- * the board's lead and says "On it." The lead answers with `answer_voice`,
- * which posts to `/workspaces/<ws>/voice-queue/<id>/answer`, and the socket
- * the question came from says the answer. Fake engines; nothing reaches a
+ * the board's lead and says nothing: the page shows it working. The lead
+ * answers with `answer_voice`, which posts to
+ * `/workspaces/<ws>/voice-queue/<id>/answer`, and the socket the question
+ * came from says the answer — the only words spoken for the request. Fake engines; nothing reaches a
  * vendor. Fixture names are the house ones.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -168,12 +169,17 @@ describe('the lead’s answer through the real server', () => {
 
   const queued = () => handle.tasks.listQueuedVoice(boardId).map((r) => r.id);
 
-  it('a research request is acked in two words, then the lead’s answer is said on that page', async () => {
+  it('a research request shows the page working and speaks only the lead’s answer', async () => {
     const asker = await connect();
     const other = await connect();
+    const saidBefore = said.length;
     const reply = await ask(asker.ws, asker.frames, 'go research ferry fares to Riverbend');
-    expect(reply?.spoken).toBe('On it.');
+    // No "On it.": the page is told the lead is working, and nothing is said.
+    expect(reply?.spoken).toBe('');
     expect(reply).not.toHaveProperty('awaiting');
+    const turnEnd = asker.frames.findIndex((f) => f.type === 'turn-end');
+    const replyAt = asker.frames.indexOf(reply as Frame);
+    expect(asker.frames.slice(turnEnd, replyAt).some((f) => f.type === 'working')).toBe(true);
     const queueId = queued().at(-1) ?? '';
     expect(queueId).not.toBe('');
 
@@ -189,6 +195,8 @@ describe('the lead’s answer through the real server', () => {
     const spoken = asker.frames.find((f) => f.route === LEAD_ANSWER_ROUTE);
     expect(spoken?.spoken).toBe(answer);
     await waitFor(() => said.slice(-2).join(' ') === answer, { describe: 'voice said it' });
+    // The reply is the only thing spoken for the request.
+    expect(said.slice(saidBefore).join(' ')).toBe(answer);
     // The other page on the same board is not told.
     expect(other.frames.some((f) => f.route === LEAD_ANSWER_ROUTE)).toBe(false);
     asker.ws.close();
@@ -198,7 +206,7 @@ describe('the lead’s answer through the real server', () => {
   it('a status ask goes to the live lead, and a closed page reports the answer undelivered', async () => {
     const { ws, frames } = await connect();
     const reply = await ask(ws, frames, 'what’s the status');
-    expect(reply?.spoken).toBe('On it.');
+    expect(reply?.spoken).toBe('');
     const queueId = queued().at(-1) ?? '';
     ws.close();
     const path = `/workspaces/${boardId}/voice-queue/${queueId}/answer`;

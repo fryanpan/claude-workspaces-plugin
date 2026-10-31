@@ -110,6 +110,26 @@ describe('spoken reply', () => {
     expect(h.label()).toBe('Speaking');
   });
 
+  it('a request the lead took says nothing and stays working until the lead answers', async () => {
+    const h = harness();
+    h.mic.dispatchEvent(new Event('pointerdown'));
+    h.socket.open();
+    h.socket.reply({ type: 'turn-end', text: 'go research ferry fares' });
+    h.socket.reply({ type: 'working' });
+    h.socket.reply({ type: 'reply', spoken: '', detail: [], asking: false, route: 'agent' });
+    expect(h.label()).toBe('Sent · working on it');
+    expect(h.text()).not.toContain('Didn’t catch anything.');
+    h.socket.reply({
+      type: 'reply',
+      spoken: 'Ferry fares start at twelve.',
+      detail: [],
+      asking: false,
+      route: 'lead-answer',
+    });
+    expect(h.text()).toContain('Ferry fares start at twelve.');
+    expect(h.label()).not.toBe('Sent · working on it');
+  });
+
   it('a tap just after the listener ended the question is taken as the stop it was meant to be', async () => {
     const h = harness();
     h.mic.dispatchEvent(new Event('pointerdown'));

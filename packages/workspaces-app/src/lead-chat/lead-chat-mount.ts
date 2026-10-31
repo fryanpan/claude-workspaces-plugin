@@ -2,13 +2,17 @@
  * The lead chat on a page: the agent button, its bar and its panel, wired to
  * the board's conversation with its lead (`lead-chat-client.ts`).
  *
- * What a tap on the agent button does is this device's choice
- * (`lead-chat-mode.ts`), read at the tap:
- *   - Chat first: the panel opens at once with the cursor in its composer.
+ * The agent button is the chat's one listen control (Bryan, 2026-10-31).
+ * What its first tap does is this device's choice (`lead-chat-mode.ts`),
+ * read at the tap:
+ *   - Chat first: the panel opens with the cursor in its composer, and the
+ *     page starts listening.
  *   - Voice first: the bar comes out and the page starts listening; every
  *     line heard goes to the lead as it ends.
- * While anything is out, the next tap closes it and stops listening. A tap
- * on the bar grows it into the panel.
+ * With the panel open, each tap stops or starts listening, and only the
+ * panel's Close closes it. With only the bar out, a tap puts it away and
+ * stops listening. A tap on the bar grows it into the panel. In a meeting
+ * the room's voice is the meeting's, so the button only opens and closes.
  *
  * Listening is the board mic's own path (`lead-chat-voice.ts`): the
  * microphone streams to this server over the converse socket, which hears it
@@ -231,18 +235,26 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     render();
   };
 
+  const inMeeting = (): boolean => !!client.state().meeting;
+
   const onAgent = (): void => {
+    if (ui.open && !inMeeting()) {
+      if (voice.state().phase !== 'off') stopListening();
+      else startListening();
+      return;
+    }
     if (ui.open || ui.bar) {
       closeAll();
       return;
     }
-    if (readLeadChatMode(storage) === 'voice') {
+    if (readLeadChatMode(storage) === 'voice' && !inMeeting()) {
       ui.bar = true;
       startListening();
       render();
       return;
     }
     openPane(view.button.getBoundingClientRect());
+    if (!inMeeting()) startListening();
   };
 
   const sendTyped = async (): Promise<void> => {
@@ -260,10 +272,6 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.button.addEventListener('click', onAgent);
   view.bar.addEventListener('click', () => openPane(view.bar.getBoundingClientRect()));
   view.close.addEventListener('click', closeAll);
-  view.mic.addEventListener('click', () => {
-    if (voice.state().phase !== 'off') stopListening();
-    else startListening();
-  });
   view.send.addEventListener('click', () => void sendTyped());
   view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {

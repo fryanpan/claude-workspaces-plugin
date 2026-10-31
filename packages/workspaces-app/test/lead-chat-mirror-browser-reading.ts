@@ -6,8 +6,8 @@ export interface MirrorWidthRun {
   /** The tool call's line, then its body once tapped. */
   tool: { head: string; open: string[]; expanded: string | null };
   /** Board-event rows shown, then after the toggle, then the toggle's count;
-   *  and whether the header with its toggle stays on one row. */
-  channel: { before: number; hidden: number; count: string; after: number; headerOneRow: boolean };
+   *  and whether the heading shows whole and the toggle sits level with Start a meeting. */
+  channel: { before: number; hidden: number; count: string; after: number; headerFits: boolean };
   /** The spoken reply's words before and after a tap. */
   voice: { closedText: boolean; label: string; words: string };
   /** A flush of the lead's text reached the open page within a second. */
