@@ -180,6 +180,18 @@ async function openChat(cdp: Cdp, button: Box, lead: string): Promise<State> {
   ).catch(async () => state(cdp));
 }
 
+/** Close the open chat with its own Close: with the panel open, the agent
+ *  button starts and stops listening rather than closing it. */
+async function closeChat(cdp: Cdp): Promise<void> {
+  const at = (await cdp.evaluate(`(() => {
+    const b = ${SR}?.querySelector('.lc-close');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  })()`)) as Box | null;
+  if (at) await tap(cdp, centre(at).x, centre(at).y);
+}
+
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'review-lead-chat-'));
   const shots = process.env.REVIEW_LEAD_CHAT_SHOTS;
@@ -326,8 +338,7 @@ async function main(): Promise<void> {
             Buffer.from(png.data, 'base64'),
           );
         }
-        const shut = await state(cdp);
-        if (shut.button) await tap(cdp, centre(shut.button).x, centre(shut.button).y);
+        await closeChat(cdp);
         await until(
           'the chat on Home closed',
           async () => ((await state(cdp)).open ? null : true),
@@ -365,8 +376,7 @@ async function main(): Promise<void> {
         }
 
         step(`close, skip to the next card, open again at ${width}`);
-        const open = await state(cdp);
-        if (open.button) await tap(cdp, centre(open.button).x, centre(open.button).y);
+        await closeChat(cdp);
         await until(
           'the chat closed',
           async () => ((await state(cdp)).open ? null : true),
@@ -392,8 +402,7 @@ async function main(): Promise<void> {
           if (moved?.button) {
             const again = await openChat(cdp, moved.button, leadOf(second.project));
             run.secondLead = again.who;
-            const shut = await state(cdp);
-            if (shut.button) await tap(cdp, centre(shut.button).x, centre(shut.button).y);
+            await closeChat(cdp);
             const closed = await until(
               'the chat closed again',
               async () => {
