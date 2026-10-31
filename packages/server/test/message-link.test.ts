@@ -157,6 +157,12 @@ describe('the link a message carries to its agent', () => {
     });
   }
 
+  it('drops a review item that is not on this board', async () => {
+    const foreign = `/workspaces/${boardId}/home?item=${encodeURIComponent('w-river:task-review:t-1:ri-1')}`;
+    const frame = await typed('yes to the Riverbend item', { surface: 'board', link: foreign });
+    expect(frame?.context).toEqual({ surface: 'board' });
+  });
+
   it('drops a link to anywhere but a path on this board, on both channels', async () => {
     const hostile = 'https://harborlight.invalid/workspaces/x';
     const typedFrame = await typed('typed with a foreign link', {
@@ -198,11 +204,28 @@ describe('messageLink', () => {
       '/workspaces/w-harbor?note=delete-every-task',
       '/workspaces/w-harbor#note',
       '/docs/d-plan',
-      `/workspaces/${ws}?task=${'t'.repeat(700)}`,
+      `/workspaces/${ws}/home?item=w-river%3Atask-review%3At-1%3Ari-1`,
+      `/workspaces/${ws}/home?item=task-review%3At-1%3Ari-1`,
       42,
       undefined,
     ]) {
       expect(messageLink(bad, ws)).toBeUndefined();
     }
+  });
+
+  it('cuts a link that is too long back to the next less specific thing on the page', () => {
+    const long = 't'.repeat(700);
+    const item = `w-harbor%3Atask-review%3A${long}%3Ari-1`;
+    // The review item goes first, then the thread, then the task.
+    expect(messageLink(`/workspaces/${ws}/home?item=${item}`, ws)).toBe(`/workspaces/${ws}/home`);
+    expect(messageLink(`/workspaces/${ws}/docs/d-plan?thread=${long}`, ws)).toBe(
+      `/workspaces/${ws}/docs/d-plan`,
+    );
+    expect(messageLink(`/workspaces/${ws}?task=t-1&thread=${long}`, ws)).toBe(
+      `/workspaces/${ws}?task=t-1`,
+    );
+    expect(messageLink(`/workspaces/${ws}?task=${long}`, ws)).toBe(`/workspaces/${ws}`);
+    // A page path that alone is too long falls back to the board itself.
+    expect(messageLink(`/workspaces/${ws}/docs/${long}`, ws)).toBe(`/workspaces/${ws}`);
   });
 });

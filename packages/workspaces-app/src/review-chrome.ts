@@ -222,16 +222,22 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     toggleThreads.setAttribute('aria-pressed', 'false');
     document.getElementById('threads-pane')?.setAttribute('aria-hidden', 'true');
   }
+  /** The reader closed the drawer: the thread it had open closes with it,
+   *  so nothing (the lead chat's link included) still reads it as open. */
+  function dismissDrawer(): void {
+    closeDrawer();
+    if (threadsPanel.getActive()) threadsPanel.setActive(null);
+  }
   on(toggleThreads, 'click', () => {
     const open = !shell.classList.contains('threads-open');
-    open ? openDrawer() : closeDrawer();
+    open ? openDrawer() : dismissDrawer();
     writeDrawerPref(open);
   });
   on(closeThreads, 'click', () => {
-    closeDrawer();
+    dismissDrawer();
     writeDrawerPref(false);
   });
-  on(scrim, 'click', closeDrawer);
+  on(scrim, 'click', dismissDrawer);
 
   // Resizable side panels (desktop): the comments pane (right edge drag)
   // and the In-This-Review pane (left edge drag). Widths persist; on

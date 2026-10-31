@@ -125,35 +125,54 @@ export {
  */
 export const CHOICE_WINDOW_MS = 30_000;
 
-/** Sanitize a client-supplied context object; anything malformed → none. */
 /** The params a message link may carry: the ones a board, doc or mock page
  *  writes to name what is open on it. */
 const LINK_PARAMS = new Set(['task', 'goal', 'thread', 'item']);
-/** Longer than any id-shaped link a page builds. */
+/** The longest link an agent's event carries. A longer one is cut back to
+ *  the next less specific thing on the same page rather than dropped. */
 const LINK_MAX = 600;
+/** Which param goes first when a link is too long: most specific first. */
+const LINK_TRIM = ['item', 'thread', 'task', 'goal'] as const;
 
 /**
  * The page link a message was sent from, when it is a relative path on
  * `workspaceId`'s board and nothing else; undefined otherwise. `boardHref`
  * is the Home feed's check (no scheme, host, backslash, whitespace or dot
  * segment, and it must survive URL parsing unchanged); on top of it a link
- * carries no fragment and no param but the four a page names its open thing
- * by, so the agent's event holds a board path rather than words a client chose.
+ * carries no fragment, no param but the four a page names its open thing by,
+ * and no review item key of another board, so the agent's event holds a path
+ * on this board rather than words a client chose. A link over `LINK_MAX` is
+ * cut back (`shortLink`).
  */
 export function messageLink(raw: unknown, workspaceId: string): string | undefined {
-  if (typeof raw !== 'string' || raw.length > LINK_MAX) return undefined;
+  if (typeof raw !== 'string') return undefined;
   const href = boardHref(raw, new Set([workspaceId]));
   if (!href) return undefined;
   const url = new URL(href, 'https://message-link.invalid');
   if (url.hash) return undefined;
-  for (const name of url.searchParams.keys()) if (!LINK_PARAMS.has(name)) return undefined;
-  return href;
+  for (const [name, value] of url.searchParams) {
+    if (!LINK_PARAMS.has(name)) return undefined;
+    // A review item's key leads with its board's id (`cross-review-queue.ts`).
+    if (name === 'item' && !value.startsWith(`${workspaceId}:`)) return undefined;
+  }
+  return href.length <= LINK_MAX ? href : shortLink(url, workspaceId);
 }
 
-/**
- * The page's context, lengths clamped. `link` is kept only when
- * `workspaceId` is given and `messageLink` accepts it for that board.
- */
+/** An accepted link that is too long, with the most specific param dropped
+ *  until it fits: the review item, the thread, the task or goal, and last
+ *  the page itself for the board's own root. */
+function shortLink(url: URL, workspaceId: string): string {
+  for (const name of LINK_TRIM) {
+    url.searchParams.delete(name);
+    const at = `${url.pathname}${url.search}`;
+    if (at.length <= LINK_MAX) return at;
+  }
+  return `/workspaces/${encodeURIComponent(workspaceId)}`;
+}
+
+/** Sanitize a client-supplied context object; anything malformed → none.
+ *  `link` is kept only when `workspaceId` is given and `messageLink` accepts
+ *  it for that board. */
 export function parseVoiceContext(raw: unknown, workspaceId?: string): VoiceContext | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const r = raw as Record<string, unknown>;

@@ -2,6 +2,7 @@ import { createThread, getContent } from '@claude-workspaces/core';
 import { TextRange } from '@claude-workspaces/core/anchor';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import { openThreadId } from '../src/doc/open-thread.ts';
 import { initialDrawerOpen } from '../src/doc/view-prefs.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { type ChromeOpts, mountReviewChrome } from '../src/review-chrome.ts';
@@ -351,4 +352,43 @@ describe('inline cards cover every width the balloon margin does not', () => {
   it('places none at 1400px, where the balloon margin owns the comments', () => {
     expect(mountWithThread(1400).placed()).toEqual([]);
   });
+});
+
+// The lead chat names the doc's open thread in a message's link
+// (`doc/open-thread.ts`). A drawer the reader closed shows no thread, so it
+// must not name one: every later message would link the wrong place.
+describe('the open thread the lead chat reads', () => {
+  afterEach(() => {
+    setViewportWidth(1024);
+    sessionStorage.removeItem('lf:drawer');
+  });
+
+  const closers: Array<[string, string]> = [
+    ['the close button', 'close-threads'],
+    ['the drawer toggle', 'toggle-threads'],
+    ['the scrim', 'threads-scrim'],
+  ];
+  for (const [name, id] of closers) {
+    it(`is cleared when ${name} closes the drawer`, () => {
+      setViewportWidth(1400);
+      mountChromeDom();
+      const ydoc = new Y.Doc();
+      createThread(ydoc, {
+        threadId: 't1',
+        anchor: { kind: 'element', fingerprint: 'x' as never, snippet: { text: 'the anchor' } },
+        createdBy: { id: 'u2', name: 'Bob', kind: 'known', color: '#c0392b' },
+        firstComment: { id: 'c1', text: 'Please clarify this.' },
+      });
+      const scope = new MountScope();
+      const chrome = mountReviewChrome(opts(scope, { ydoc }));
+      chrome.redrawThreads();
+      expect(shellOpen()).toBe(true);
+      chrome.threadsPanel.setActive('t1');
+      expect(openThreadId()).toBe('t1');
+      (document.getElementById(id) as HTMLElement).click();
+      expect(shellOpen()).toBe(false);
+      expect(openThreadId()).toBeNull();
+      scope.dispose();
+    });
+  }
 });
