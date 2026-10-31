@@ -84,9 +84,12 @@ describe('a mounted chat sends the page link', () => {
         messages: [],
         canTalk: true,
         loaded: true,
+        more: false,
+        loadingOlder: false,
         meeting: null,
       }),
       onChange: () => {},
+      async loadOlder() {},
       async send(text, author, context, via) {
         sent.push(context);
         const m: LeadChatMessage = {
