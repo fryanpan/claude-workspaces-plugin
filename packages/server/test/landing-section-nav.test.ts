@@ -1,6 +1,8 @@
 /**
  * Home's section bar names the sections the viewer's page carries (Bryan,
- * 31 Oct: "a navbar to go between review items, inbox, projects, coach").
+ * 31 Oct: "a navbar to go between review items, inbox, projects, coach"),
+ * drawn with the workspace navbar's markup and classes: an icon and a label
+ * per entry, so Home's bar and a workspace's read as one product.
  *
  * Through the real route: the owner signed in with the session cookie the
  * emailed-code sign-in sets, another signed-in person, and a request that
@@ -32,14 +34,22 @@ const landing = async (headers: Record<string, string> = {}) => {
   return r.text();
 };
 
-/** The bar's entries as [target id, label], and whether each target exists. */
-function navOf(html: string): Array<{ id: string; label: string; onPage: boolean }> {
-  const bar = html.match(/<nav class="home-nav"[^>]*>(.*?)<\/nav>/s)?.[1];
+/** The bar's entries as [target id, label], whether each target exists, and
+ *  whether the entry carries the workspace navbar's icon-and-label markup. */
+function navOf(html: string): Array<{ id: string; label: string; onPage: boolean; icon: boolean }> {
+  const bar = html.match(/<nav class="board-nav home-nav"[^>]*>(.*?)<\/nav>/s)?.[1];
   if (bar === undefined) throw new Error('no section bar on the page');
-  return [...bar.matchAll(/<a href="#([^"]+)">([^<]+)<\/a>/g)].map((m) => ({
+  return [
+    ...bar.matchAll(
+      /<a class="board-nav-item" href="#([^"]+)">(.*?)<span class="board-nav-label">([^<]+)<\/span><\/a>/gs,
+    ),
+  ].map((m) => ({
     id: m[1] ?? '',
-    label: m[2] ?? '',
+    label: m[3] ?? '',
     onPage: html.includes(`id="${m[1]}"`),
+    icon: /^<span class="board-nav-icon" aria-hidden="true"><svg [^>]*>.*<\/svg><\/span>$/s.test(
+      m[2] ?? '',
+    ),
   }));
 }
 
@@ -77,10 +87,10 @@ describe("Home's section bar", () => {
     const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
     const nav = navOf(await landing(owner.headers));
     expect(nav).toEqual([
-      { id: 'landing-review', label: 'Review items', onPage: true },
-      { id: 'inbox', label: 'Inbox', onPage: true },
-      { id: 'landing-boards', label: 'Projects', onPage: true },
-      { id: 'coach', label: 'Coach', onPage: true },
+      { id: 'landing-review', label: 'Review items', onPage: true, icon: true },
+      { id: 'inbox', label: 'Inbox', onPage: true, icon: true },
+      { id: 'landing-boards', label: 'Projects', onPage: true, icon: true },
+      { id: 'coach', label: 'Coach', onPage: true, icon: true },
     ]);
   });
 
@@ -94,5 +104,12 @@ describe("Home's section bar", () => {
 
   it('gives a request that proves nobody no Inbox or Coach entry', async () => {
     expect(navOf(await landing()).map((e) => e.label)).toEqual(['Review items', 'Projects']);
+  });
+
+  it('draws one bar, so the old text bar at the top is gone', async () => {
+    const html = await landing();
+    expect(html.match(/<nav /g)).toHaveLength(1);
+    // CONTROL: the one bar is the icon bar the cases above read.
+    expect(navOf(html)).toHaveLength(2);
   });
 });

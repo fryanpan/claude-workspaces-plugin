@@ -7447,32 +7447,31 @@ label.board-sched-chip:hover {
   }
 }
 
-/* ################# BOARD · RESPONSIVE ≤1100px (NAV STRIP) #################
-   The nav rail becomes a horizontal strip above the content.
+/* ################# BOARD · RESPONSIVE ≤1100px (BOTTOM BAR) #################
+   The nav rail becomes the bottom bar: icon-over-label tabs fixed along the
+   foot of the screen.
 
    A 170px rail plus its gap costs too much of the board's width at laptop-
-   window sizes, so the rail folds up into a tab strip on its own row. The
-   collapse affordance goes with it — a row of tabs has nothing to collapse.
+   window sizes, so the rail folds up into a row of tabs. It was a strip
+   pinned to the TOP of the content in the 901–1100px band and a bottom bar
+   only at ≤900, until Bryan, 31 Oct: "Just put it at the bottom". So every
+   width up to 1100 gets the phone's bar, and Home's own bottom bar
+   (`landing-nav.ts` on the server) copies it. The collapse affordance goes —
+   a row of tabs has nothing to collapse.
 
    Everything else in this file keys off 900px — the full-screen detail panel,
    the full-screen walkthrough, the badge drops, the row padding — because
    those are about a phone-shaped screen rather than about column arithmetic. */
 @media (max-width: 1100px) {
-  /* A COLUMN, not a one-track grid, and the reason is the strip's `position:
-     sticky` below. A grid item's containing block is its GRID AREA, and the
-     strip's area is its own 57px row — measured `grid-template-rows: 57px
-     2988px` on a real board — so by the spec a sticky strip has nowhere to
-     travel and pins nothing. Chromium sticks it anyway, against the grid
-     CONTAINER; that is an engine's reading of an under-specified corner, and
-     the reviewer this band exists for is on Safari. A flex column makes the
-     containing block `.board-main`'s own content box, where the travel is
-     defined rather than observed.
-     `minmax(0, 1fr)` is not lost with the grid: a block-level flex item is
-     sized from the container, so it cannot be widened by a long unbreakable
-     title the way an `auto`/`1fr` track can. `align-items` has to be restated
-     — the base rule's `start` means block-start in a grid and SHRINK-TO-FIT in
-     a column flex container, which would narrow the board to its own content
-     rather than the page. */
+  /* A COLUMN, not the rail's grid. The bar below is fixed, so it leaves the
+     flow and its grid track would sit empty while auto-placement put the
+     board into that narrow track. (The column was first written for the
+     sticky top strip this band used to have, whose travel a grid area did not
+     define.) A block-level flex item is sized from the container, so a long
+     unbreakable title cannot widen it the way an `auto`/`1fr` track can.
+     `align-items` has to be restated — the base rule's `start` means
+     block-start in a grid and SHRINK-TO-FIT in a column flex container, which
+     would narrow the board to its own content rather than the page. */
   .board-main {
     display: flex;
     flex-direction: column;
@@ -7480,57 +7479,81 @@ label.board-sched-chip:hover {
     gap: 8px;
   }
   /* Every rail declaration gets an explicit undo here — a media query adds
-     no specificity, so anything not reset keeps the rail value. */
+     no specificity, so anything not reset keeps the rail value.
+     Fixed, so the switch is under the thumb wherever the board has scrolled
+     to, and the agent button in the dock stays on screen with it. z-index
+     60: below the walkthrough/detail overlays (70) and level with
+     `.board-detail`'s 60, which comes later in the shell and so covers it —
+     an overlay that covers the board covers the pages you could go to
+     instead. The settings page's layer is above it for the same reason. */
   .board-nav {
     flex-direction: row;
     align-items: center;
     align-self: auto;
     width: auto;
-    padding: 6px 8px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    z-index: 60;
+    gap: 0;
+    background: var(--bg-panel);
     border-right: none;
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+    padding: 0 0 var(--safe-bottom);
     transition: none;
-    /* --- the strip stays on screen, which is what makes the mic's location a
-       location ---
-       In flow this strip scrolls off the top with the page: measured at
-       1000x800 on a 70-row board, the mic sat at y=54 at the top and y=-2271
-       at the bottom, and hit-testing over it returned nothing at every scroll
-       position past the first screen. That is the float era's failure
-       in reverse — not a mic on top of the wrong thing, a mic on top of
-       nothing because it is not on the screen at all. The rail (≥1101px) keeps
-       its promise with a sticky DOCK inside a full-height rail; this band has
-       no full-height column to hang one in, so the strip itself sticks.
-
-       `background` rather than the rail's `none`: a pinned bar with a
-       transparent background is a bar the page scrolls THROUGH. `var(--bg)` is
-       the page's own colour, so the strip reads as chrome rather than as a
-       panel, and it follows the colour scheme.
-
-       The layer is the load-bearing half, and it is a NARROW one. Board rows
-       carry absolutely positioned marks (`.board-status-select` is `inset: -6px`
-       over its mark), and a positioned box later in tree order paints over a
-       positioned box with no layer — so at `z-index: auto` the rows scroll
-       OVER the pinned strip and take the mic's clicks with them: measured, the
-       topmost element at the mic's centre came back
-       `select.board-status-select` at three of five scroll positions. 30 is
-       above every layer the board itself uses (the highest is 5) and below
-       `.board-detail`'s 60 and the settings popover's 65, which is the whole
-       point: the strip covers the CONTENT SCROLLING UNDER IT and covers
-       nothing else. The dock inside keeps no layer of its own — see
-       `.board-nav-dock` below, where the reasoning for that has not changed. */
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    background: var(--bg);
+  }
+  /* The feedback widget's launcher is a fixed 48px bubble in the viewport's
+     bottom-right corner (shadow DOM, maximum z-index), and this bar is fixed
+     to the same edge — at 430px the bubble sat exactly over the Activity
+     tab's centre, so the tap hit-tested to CLAUDE-FEEDBACK-WIDGET. The bar
+     cannot win a z-order contest it should not win (the bubble must stay
+     tappable), so the tabs END before the bubble's column instead: right
+     padding equal to the bubble's inset (max(18px, safe-right)) + its 48px
+     diameter + 6px slack. Gated on a widget actually being on the page — a
+     share visitor's board ships no widget (see renderBoardShell) and keeps the
+     full-width bar.
+     board-nav-widget-clearance-css.test.ts ties these numbers to the widget's
+     own fab rule, so a bigger bubble goes red rather than back over the tab. */
+  body:has(claude-feedback-widget) .board-nav {
+    padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
+  }
+  .board-nav-item {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 54px;
+    padding: 7px 4px 9px;
+    border-radius: 0;
+    font-size: 11.5px;
+  }
+  .board-nav-icon {
+    width: 18px;
+    height: 18px;
+  }
+  /* The page's own tail has to clear the 54px bar. The height is a VARIABLE
+     rather than copies of `58px` because more than one reader needs it and one
+     of them read the wrong number; it is scoped to board pages because no other
+     surface has the bar. */
+  body.board-body {
+    --board-bottom-bar: 58px;
+  }
+  #board-root {
+    padding-bottom: calc(24px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
   }
   .board-nav-collapse {
     display: none;
   }
-  /* The mic dock turns with the bar: the rail's top divider becomes a side
-     one, and `order` puts it at the head of a left-to-right strip without
-     moving it in the DOM, where it belongs AFTER the pages it is not one of.
-     Still positioned (relative, not static) — the readout is absolute against
-     it, and a static dock would silently re-anchor that to the viewport. */
+  /* The dock (the lead chat's agent button) turns with the bar: the rail's
+     top divider becomes a side one, and `order` puts it at the bar's left end
+     without moving it in the DOM, where it belongs AFTER the pages it is not
+     one of. Inset from the screen edge, and NOT `flex: 1` like the tabs
+     beside it: a 44px control that grew to a quarter of the bar would read as
+     a fifth page. Still positioned (relative, not static) — anything absolute
+     against it would otherwise re-anchor to the viewport. */
   .board-nav-dock {
     order: -1;
     position: relative;
@@ -7540,27 +7563,16 @@ label.board-sched-chip:hover {
        dock — divider and all — out of line with the tabs beside it and over
        the bar's top border. */
     bottom: auto;
-    /* The rail's layer, undone — and this is still the load-bearing line, for
-       the same reason it always was. The rail earns `z-index: 70` on one
-       premise: nothing of the page sits behind its column, so a mic painted
-       over the task overlay covers nothing. In this band the nav is a strip
-       across the top and the centred panel runs UNDER it, so the premise is
-       false and the same number reproduces the float — measured 2026-08-19 at
-       905px, the mic covered the panel whole, clipped the first characters of
-       the task title, and took the click meant for it.
-       What changed since is only where the strip is, not what is behind it:
-       the strip is `sticky` now rather than scrolling away, and it carries
-       `z-index: 30` so the ROWS stop painting over it. That number is under
-       `.board-detail`'s 60 on purpose, so the panel still covers the strip and
-       the dock inside it. Under the scrim the mic is unreachable while a task
-       is open in this band; that is a real loss and it is still the smaller
-       one. The ≤900px band keeps the capability by geometry instead — a FIXED
-       bar whose row the panel's box ends above — which is available there and
-       is not available to a strip the panel is allowed to cover. */
+    /* The rail's layer, undone. The rail earns `z-index: 70` on one premise:
+       nothing of the page sits behind its column. A fixed bar is a stacking
+       context whatever its z-index, so a layer here could not climb out of
+       it anyway; on a phone the full-screen panel ends above the bar instead
+       (`.board-detail` in the ≤900px block), and in the 901–1100px band the
+       centred panel's scrim covers the bar, dock and all. */
     z-index: auto;
     align-self: stretch;
     margin: 0;
-    padding: 0 10px 0 0;
+    padding: 0 10px;
     border-top: none;
     border-right: 1px solid var(--border);
   }
@@ -7708,72 +7720,8 @@ label.board-sched-chip:hover {
    Per design-mobile.md. Row anatomy and task titles on a narrow
    viewport are inside. */
 @media (max-width: 900px) {
-  /* Home/Board nav: the bottom bar from the approved mockup. Fixed, so the
-     switch is under the thumb wherever the board has scrolled to. z-index 60:
-     below the walkthrough/detail overlays (70), which are full-screen here
-     and are meant to cover it. */
-  .board-nav {
-    position: fixed;
-    left: 0;
-    right: 0;
-    top: auto;
-    bottom: 0;
-    z-index: 60;
-    gap: 0;
-    background: var(--bg-panel);
-    border-top: 1px solid var(--border);
-    border-bottom: none;
-    padding: 0 0 var(--safe-bottom);
-  }
-  /* The feedback widget's launcher is a fixed 48px bubble in the viewport's
-     bottom-right corner (shadow DOM, maximum z-index), and this bar is fixed
-     to the same edge — at 430px the bubble sat exactly over the Activity
-     tab's centre, so the tap hit-tested to CLAUDE-FEEDBACK-WIDGET. The bar
-     cannot win a z-order contest it should not win (the bubble must stay
-     tappable), so the tabs END before the bubble's column instead: right
-     padding equal to the bubble's inset (max(18px, safe-right)) + its 48px
-     diameter + 6px slack. Gated on a widget actually being on the page — a
-     share visitor's board ships no widget (see renderBoardShell) and keeps the
-     full-width bar. The 901–1100px band needs nothing: the strip sits at the
-     TOP of the content there and shares no edge with the bubble.
-     board-nav-widget-clearance-css.test.ts ties these numbers to the widget's
-     own fab rule, so a bigger bubble goes red rather than back over the tab. */
-  body:has(claude-feedback-widget) .board-nav {
-    padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
-  }
-  .board-nav-item {
-    flex: 1;
-    flex-direction: column;
-    justify-content: center;
-    gap: 2px;
-    min-height: 54px;
-    padding: 7px 4px 9px;
-    border-radius: 0;
-    font-size: 11.5px;
-  }
-  .board-nav-icon {
-    width: 18px;
-    height: 18px;
-  }
-  /* The mic is in the bar here, per *"in the bottom tab on mobile"* — same
-     dock, inset from the screen edge, and NOT `flex: 1` like the tabs beside
-     it: a 44px control that grows to a quarter of the bar would read as a
-     fourth page. The bar is at the bottom again, so the readout goes back
-     above it. */
-  .board-nav-dock {
-    padding: 0 10px;
-  }
-
-  /* The page's own tail has to clear the 54px bar. The height is a VARIABLE
-     rather than copies of `58px` because more than one reader needs it and one
-     of them read the wrong number; it is scoped to board pages because no other
-     surface has the bar. */
-  body.board-body {
-    --board-bottom-bar: 58px;
-  }
-  #board-root {
-    padding-bottom: calc(24px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
-  }
+  /* The nav's bottom bar is the ≤1100px block's now; this one keeps only what
+     is about a phone-shaped screen. */
   /* Deliberately NOT re-wrapping. The row stays a single grid line at every
      width: wrapping is what put the status marks at four x-positions and
      dropped titles below their own controls. A title too long for 430px

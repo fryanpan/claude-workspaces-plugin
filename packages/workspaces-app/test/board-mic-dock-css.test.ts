@@ -20,9 +20,10 @@ import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-
  * the promise could be broken. Docking the mic makes the promise unnecessary:
  * the mic lives in the nav's own column and no page content is ever behind it.
  *
- * The rail, the 901–1100px strip and the phone's bottom bar are three
- * different layouts of the same element, and every claim below is a claim
- * about ONE of them. That is what the old text version of this file could not
+ * The rail above 1100px and the bottom bar at or under it are two different
+ * layouts of the same element (the 901–1100px band was a sticky strip at the
+ * top until Bryan, 31 Oct: "Just put it at the bottom"), and every claim
+ * below is a claim about ONE of them. That is what the old text version of this file could not
  * express: it regexed `styles.css` and `board.css` for declarations and then
  * reasoned about which `@media` block they had been found inside, which
  * passes whether or not the query matches at the width a reader is on. Here
@@ -33,7 +34,7 @@ import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-
  * chat does not); the dock now holds the lead chat's agent button, and what
  * is left here is the dock's own placement at each width.
  */
-/** The 901–1100px band: the rail is a horizontal strip, in flow. */
+/** The 901–1100px band: the bottom bar, as on a phone. */
 const STRIP = { width: 1000, height: 800 } as const;
 
 let cleanup = () => {};
@@ -174,49 +175,58 @@ describe('the phone gets the mic in the bottom tab bar', () => {
     // z-index is enough, because the detail overlay comes later in the shell
     // markup. (What must NOT be covered is the mic — see the describe below,
     // where the overlay is kept off the bar's row entirely.)
-    const bar = z(nav(PHONE).nav.zIndex);
-    expect(bar, 'the bar lost its layer').not.toBeNaN();
-    expect(bar).toBeLessThanOrEqual(z(overlays(PHONE).detail.zIndex));
+    for (const viewport of [STRIP, PHONE]) {
+      const bar = z(nav(viewport).nav.zIndex);
+      expect(bar, `the bar lost its layer at ${viewport.width}px`).not.toBeNaN();
+      expect(bar).toBeLessThanOrEqual(z(overlays(viewport).detail.zIndex));
+      expect(bar).toBeLessThanOrEqual(z(overlays(viewport).settings.zIndex));
+    }
   });
 });
 
 /**
- * The 901–1100px band — the third thing, and the one the dock was never given.
+ * The 901–1100px band is the bottom bar too (Bryan, 31 Oct: "Just put it at
+ * the bottom").
  *
- * ≤1100px turns the rail into a horizontal strip and ≤900px pins that strip to
- * the bottom as a fixed bar. Between them the strip is neither: it sat at the
- * top of the content IN FLOW, so it scrolled away and took the mic with it.
- * Measured at 1000x800 on a 70-row board: the mic was at y=54 at the top and
- * y=-2271 at the bottom, and `elementFromPoint` over it returned nothing at
- * every scroll position past the first screen. A docked mic that is off the
- * screen keeps none of docking's promise — "a fixed location" is a location
- * you can still reach.
+ * It used to be a third layout: a strip pinned to the TOP of the content with
+ * `position: sticky`, between the rail above 1100 and the phone's fixed bar
+ * under 900. Now one block, ≤1100px, makes the nav a fixed bar along the foot
+ * of the screen, so the iPad-in-portrait and laptop-window widths get the bar
+ * a phone gets.
  */
-describe('the strip band keeps the mic on screen', () => {
-  it('pins the strip to the top of the scrollport', () => {
-    const strip = nav(STRIP).nav;
-    expect(strip.position).toBe('sticky');
-    expect(strip.top).toBe('0px');
-    // Positive control: the BASE rail rule is where this is absent, so the
-    // band is really what introduces it rather than the file having always
-    // said so.
+describe('at or under 1100px the nav is the bottom bar', () => {
+  it('fixes the nav to the bottom edge, at 1000 as at 430', () => {
+    for (const viewport of [STRIP, PHONE]) {
+      const bar = nav(viewport).nav;
+      expect(bar.position, `at ${viewport.width}px`).toBe('fixed');
+      expect(bar.top, `at ${viewport.width}px`).toBe('auto');
+      expect(bar.bottom, `at ${viewport.width}px`).toBe('0px');
+      // Opaque, or the page shows through the bar it scrolls under.
+      expect(bar.backgroundColor).toBe(token('--bg-panel'));
+    }
+    // Positive control: the rail above 1100 is not fixed.
     expect(nav(IPAD).nav.position).toBe('');
   });
 
-  it('gives the strip a containing block its sticky can travel in', () => {
-    // A grid item's containing block is its GRID AREA — the strip's own 57px
-    // row — so a sticky strip has nowhere to go by the spec. Chromium sticks
-    // it against the grid CONTAINER regardless; that is an engine reading an
-    // under-specified corner, and this band's reviewer is on Safari. A flex
-    // column makes `.board-main`'s content box the containing block, where the
-    // travel is defined.
+  it('lays the tabs out as icon over label, sharing the bar evenly', () => {
+    for (const viewport of [STRIP, PHONE]) {
+      const { item } = nav(viewport);
+      expect(item.flexDirection, `at ${viewport.width}px`).toBe('column');
+      expect(item.flexGrow, `at ${viewport.width}px`).toBe('1');
+    }
+    // Positive control: the rail's items are rows.
+    expect(nav(IPAD).item.flexDirection).not.toBe('column');
+  });
+
+  it('keeps the board in one column once the nav has left the flow', () => {
+    // A fixed nav leaves its grid track empty, and auto-placement would put
+    // the board into the rail's narrow track. A flex column has no tracks.
     setViewport(STRIP);
     const banded = styleOf(attach('board-main'));
     expect(banded.display).toBe('flex');
     expect(banded.flexDirection).toBe('column');
-    // `align-items: start` on the base rule means block-start in a grid and
-    // SHRINK-TO-FIT in a column flex container — the board would narrow to its
-    // own content instead of the page. The undo has to be written.
+    // `align-items: start` on the base rule would shrink the board to its own
+    // content in a column flex container; the undo has to be written.
     expect(banded.alignItems).toBe('stretch');
     // Positive control: the base layout really is the grid this overrides.
     setViewport(IPAD);
@@ -225,35 +235,19 @@ describe('the strip band keeps the mic on screen', () => {
     expect(base.alignItems).toBe('start');
   });
 
-  it('paints over the rows it is pinned above, and under the task panel', () => {
-    // A pinned bar with no layer is a bar the board scrolls THROUGH: rows
-    // carry absolutely positioned marks (`.board-status-select` is `inset: -6px`
-    // over its mark) and a positioned box later in tree order beats a
-    // positioned box with no layer. Measured at `z-index: auto`, the topmost
-    // element at the mic's centre came back `select.board-status-select` at
-    // three of five scroll positions — visible mic, stolen click.
-    const strip = nav(STRIP).nav;
-    expect(z(strip.zIndex), 'the pinned strip has no layer').not.toBeNaN();
-    // …and under the overlay, which is what keeps the deliberate loss below
-    // (`.board-nav-dock`'s own note) true: settings still covers the strip.
-    const over = overlays(STRIP);
-    expect(z(strip.zIndex)).toBeLessThan(z(over.detail.zIndex));
-    expect(z(strip.zIndex)).toBeLessThan(z(over.settings.zIndex));
-    // Opaque, or the page shows through the thing it is scrolling under.
-    expect(strip.backgroundColor).toBe(token('--bg'));
-  });
-
-  it('does not follow the strip onto the phone, where the bar is at the bottom', () => {
-    // Same specificity, so SOURCE ORDER is the whole guarantee: the ≤900 block
-    // has to restate every offset the sticky strip sets, and has to sit below
-    // it in the file. Reading the computed values at 430px is what proves the
-    // order held — a ≤900 block written above the ≤1100 one would leave the
-    // sticky offsets standing here.
-    const bar = nav(PHONE).nav;
-    expect(bar.position).toBe('fixed');
-    expect(bar.top).toBe('auto');
-    expect(bar.bottom).toBe('0px');
-    expect(bar.backgroundColor).toBe(token('--bg-panel'));
+  it('publishes the bar’s height, and the board’s tail clears it, at 1000 as at 430', () => {
+    document.body.className = 'board-body';
+    for (const viewport of [STRIP, PHONE]) {
+      setViewport(viewport);
+      const barHeight = token('--board-bottom-bar', document.body);
+      expect(px(barHeight), `at ${viewport.width}px`).toBeGreaterThan(0);
+      expect(styleOf(attach('', { attrs: { id: 'board-root' } })).paddingBottom).toContain(
+        barHeight,
+      );
+    }
+    // Positive control: above 1100 there is no bar and nothing to clear.
+    setViewport(IPAD);
+    expect(px(token('--board-bottom-bar', document.body))).toBe(0);
   });
 });
 
