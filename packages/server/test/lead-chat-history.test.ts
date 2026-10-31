@@ -206,3 +206,30 @@ describe('GET /workspaces/<id>/lead-chat history pages', () => {
     }
   });
 });
+
+describe('LeadChatLog history cache', () => {
+  it('parses the log once per version of the file, however many pages back are read', async () => {
+    const total = LEAD_CHAT_KEEP + 300;
+    const { chat, log } = board(total);
+    const { shown, pages } = await pageToFirst(chat);
+    expect(shown).toHaveLength(total);
+    expect(pages).toBeGreaterThan(2);
+    const once = log.historyBytesRead;
+    expect(once).toBeGreaterThan(0);
+    // Every page past what the server holds was served from the one read.
+    await pageToFirst(chat);
+    expect(log.historyBytesRead).toBe(once);
+  });
+
+  it('reads the log again once it has grown, and the new message is in the answer', async () => {
+    const { log } = board(10);
+    const first = await log.history(WS);
+    const afterFirst = log.historyBytesRead;
+    expect(await log.history(WS)).toBe(first);
+    expect(log.historyBytesRead).toBe(afterFirst);
+    log.append(WS, { id: 'm-new', role: 'person', author: BRYAN, text: 'Riverbend?', ts: 5000 });
+    const next = await log.history(WS);
+    expect(log.historyBytesRead).toBeGreaterThan(afterFirst);
+    expect(next?.at(-1)?.id).toBe('m-new');
+  });
+});

@@ -23,7 +23,7 @@ import {
   readSync,
   statSync,
 } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   type LeadChatMessage,
@@ -76,18 +76,48 @@ function readTail(path: string, cap: number): { text: string; whole: boolean } {
   }
 }
 
-/** `readTail` off the event loop, for the rare read back through history. */
-async function readTailAsync(path: string, cap: number): Promise<{ text: string; whole: boolean }> {
+/** `readTail` off the event loop, for the rare read back through history.
+ *  Returns the stat it read against, so a cache keyed on it matches the bytes. */
+async function readTailAsync(
+  path: string,
+  cap: number,
+): Promise<{ text: string; whole: boolean; size: number; mtimeMs: number; bytes: number }> {
   const fh = await open(path, 'r');
   try {
-    const size = (await fh.stat()).size;
-    const len = Math.min(size, cap);
+    const st = await fh.stat();
+    const len = Math.min(st.size, cap);
     const buf = Buffer.alloc(len);
-    await fh.read(buf, 0, len, size - len);
-    return { text: fromFirstLine(buf, size <= cap), whole: size <= cap };
+    await fh.read(buf, 0, len, st.size - len);
+    const whole = st.size <= cap;
+    return {
+      text: fromFirstLine(buf, whole),
+      whole,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      bytes: len,
+    };
   } finally {
     await fh.close();
   }
+}
+
+/**
+ * How long a board's parsed history stays in memory after its last page back.
+ * A reader scrolling back asks for page after page within seconds; each used to
+ * re-read and re-parse up to 32 MB (110–135 ms of synchronous parsing at the
+ * cap, measured on 165k messages). Two minutes covers a scroll; the parsed
+ * list is tens of MB at the cap, so it is not kept beyond one.
+ */
+export const LEAD_CHAT_HISTORY_IDLE_MS = 2 * 60 * 1000;
+/** How many boards' parsed histories are held at once. */
+const HISTORY_CACHE_BOARDS = 4;
+
+interface CachedHistory {
+  size: number;
+  mtimeMs: number;
+  cap: number;
+  messages: StoredLeadChatMessage[];
+  timer: ReturnType<typeof setTimeout>;
 }
 
 /** Every message in `text`, the latest line per id, in chat order. */
@@ -122,6 +152,10 @@ export interface LeadChatLoad {
 }
 
 export class LeadChatLog {
+  private readonly historyCache = new Map<string, CachedHistory>();
+  /** Bytes the history reads have taken off disk since construction. */
+  historyBytesRead = 0;
+
   constructor(
     private readonly dataDir: string,
     private readonly readCap: number = LEAD_CHAT_READ_BYTES,
@@ -157,14 +191,51 @@ export class LeadChatLog {
   async history(
     workspaceId: string,
     cap: number = LEAD_CHAT_HISTORY_BYTES,
-  ): Promise<StoredLeadChatMessage[] | null> {
+  ): Promise<readonly StoredLeadChatMessage[] | null> {
     const path = leadChatLogPath(this.dataDir, workspaceId);
     if (!path || !existsSync(path)) return [];
     try {
-      return parseLines((await readTailAsync(path, cap)).text);
+      // Parsed once per version of the file: the log is append-only, so an
+      // unchanged size and mtime is an unchanged history.
+      const st = await stat(path);
+      const hit = this.historyCache.get(workspaceId);
+      if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs && hit.cap === cap) {
+        this.keep(workspaceId, hit);
+        return hit.messages;
+      }
+      const read = await readTailAsync(path, cap);
+      this.historyBytesRead += read.bytes;
+      const messages = parseLines(read.text);
+      this.keep(workspaceId, { size: read.size, mtimeMs: read.mtimeMs, cap, messages });
+      return messages;
     } catch (err) {
       console.error(`[lead-chat] could not read ${workspaceId}'s history: ${String(err)}`);
       return null;
+    }
+  }
+
+  /** Hold a board's parsed history for another idle window. */
+  private keep(workspaceId: string, entry: Omit<CachedHistory, 'timer'>): void {
+    const old = this.historyCache.get(workspaceId);
+    if (old) clearTimeout(old.timer);
+    // Deleted and set again so the Map's order is least recently used first.
+    this.historyCache.delete(workspaceId);
+    const timer = setTimeout(
+      () => this.historyCache.delete(workspaceId),
+      LEAD_CHAT_HISTORY_IDLE_MS,
+    );
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.historyCache.set(workspaceId, {
+      size: entry.size,
+      mtimeMs: entry.mtimeMs,
+      cap: entry.cap,
+      messages: entry.messages,
+      timer,
+    });
+    for (const [id, e] of this.historyCache) {
+      if (this.historyCache.size <= HISTORY_CACHE_BOARDS) break;
+      clearTimeout(e.timer);
+      this.historyCache.delete(id);
     }
   }
 

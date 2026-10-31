@@ -43,6 +43,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { HeapProbe, heapClause } from './heap-probe.ts';
 
 /** A request the front door has admitted and not yet answered. */
 export interface InflightRequest {
@@ -232,6 +233,8 @@ export interface LoopLagMonitorOptions {
   /** The background passes seen since the previous tick. Read on EVERY tick,
    *  so a pass that ran ten minutes ago is not blamed for this block. */
   passes?: () => string[];
+  /** GC sentinel and heap walk for the report (`heap-probe.ts`); null for none. */
+  heap?: HeapProbe | null;
 }
 
 /**
@@ -296,6 +299,7 @@ export class LoopLagMonitor {
   private readonly inflight: () => InflightRequest[];
   private readonly sample: () => ProcessSample;
   private readonly passes: () => string[];
+  private readonly heap: HeapProbe | null;
   /** The counters as the previous tick read them. */
   private last: ProcessSample;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -313,6 +317,8 @@ export class LoopLagMonitor {
     this.inflight = opts.inflight ?? (() => []);
     this.sample = opts.sample ?? processSample;
     this.passes = opts.passes ?? (() => backgroundPasses.drain());
+    this.heap = opts.heap === undefined ? new HeapProbe({ now: this.now }) : opts.heap;
+    this.heap?.arm();
     this.last = this.sample();
     this.dueAt = this.now() + this.periodMs;
   }
@@ -332,9 +338,14 @@ export class LoopLagMonitor {
     const before = this.last;
     this.last = this.sample();
     const passes = this.passes();
-    if (blockedMs < this.thresholdMs) return blockedMs > 0 ? blockedMs : 0;
+    if (blockedMs < this.thresholdMs) {
+      this.heap?.arm();
+      return blockedMs > 0 ? blockedMs : 0;
+    }
     this.reported++;
-    this.log(`${this.lineFor(blockedMs, at, passes)}; ${countersLine(before, this.last)}`);
+    const heap = this.heap ? `; ${heapClause(this.heap.gcSinceArm(), this.heap.read(at))}` : '';
+    this.heap?.arm();
+    this.log(`${this.lineFor(blockedMs, at, passes)}; ${countersLine(before, this.last)}${heap}`);
     return blockedMs;
   }
 
