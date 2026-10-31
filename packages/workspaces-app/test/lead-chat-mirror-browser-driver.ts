@@ -244,6 +244,7 @@ async function main(): Promise<void> {
     const widths: MirrorWidthRun[] = [];
     for (const [width, height] of [
       [1180, 820],
+      [1000, 800],
       [430, 932],
     ] as const) {
       step(`open the chat at ${width}`);

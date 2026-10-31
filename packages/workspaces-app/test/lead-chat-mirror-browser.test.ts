@@ -1,6 +1,6 @@
 /**
  * The lead chat's mirror of the lead's session in a real browser, at
- * 1180x820 and 430x932: a tool call opens to its input and output, the
+ * 1180x820, 1000x800 and 430x932: a tool call opens to its input and output, the
  * header's toggle hides board events, a spoken reply's words open on a tap,
  * the lead's text reaches an open page within a second, and on a wide
  * screen the panel docks on the right, resizes by its edge, and is open at
@@ -36,7 +36,7 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
   }, SUITE_MS);
 
   it('runs at both sizes', () => {
-    expect(result().widths.map((w) => w.width)).toEqual([1180, 430]);
+    expect(result().widths.map((w) => w.width)).toEqual([1180, 1000, 430]);
   }, 60_000);
 
   it('shows a tool call as one line that opens to its input and output', () => {
@@ -83,19 +83,25 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
     expect(wide?.afterNav).toEqual({ open: true, width: wide?.resized?.width, docked: true });
   }, 60_000);
 
-  it('fills the screen at 430 down to the navbar pinned at the bottom, and a page tap closes it', () => {
-    const f = result().widths.find((w) => w.width === 430)?.full;
-    expect(f).not.toBeNull();
-    if (!f) return;
-    expect(f.paneTop).toBe(0);
-    expect(Math.abs(f.paneBottom - f.navTop)).toBeLessThanOrEqual(1);
-    expect(Math.abs(f.navBottom - f.vh)).toBeLessThanOrEqual(1);
-    expect(f.navLeft).toBeGreaterThanOrEqual(0);
-    expect(f.navWidth).toBeLessThanOrEqual(430);
-    expect(f.agentFirst).toBe(true);
-    expect(f.closedByPageTap).toBe(true);
-    expect(f.libraryCurrent).toBe('page');
-  }, 60_000);
+  // 1000 is the tier where the bar is a strip along the TOP until the chat
+  // opens, so only the full-screen rules put it at the bottom there.
+  it.each([1000, 430])(
+    'fills the screen at %i down to the navbar pinned at the bottom, and a page tap closes it',
+    (at) => {
+      const f = result().widths.find((w) => w.width === at)?.full;
+      expect(f).not.toBeNull();
+      if (!f) return;
+      expect(f.paneTop).toBe(0);
+      expect(Math.abs(f.paneBottom - f.navTop)).toBeLessThanOrEqual(1);
+      expect(Math.abs(f.navBottom - f.vh)).toBeLessThanOrEqual(1);
+      expect(f.navLeft).toBeGreaterThanOrEqual(0);
+      expect(f.navWidth).toBeLessThanOrEqual(at);
+      expect(f.agentFirst).toBe(true);
+      expect(f.closedByPageTap).toBe(true);
+      expect(f.libraryCurrent).toBe('page');
+    },
+    60_000,
+  );
 
   it('is a sheet, not docked, at 430', () => {
     const narrow = result().widths.find((w) => w.width === 430);
