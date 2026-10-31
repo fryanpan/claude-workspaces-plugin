@@ -2443,6 +2443,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     identities,
     notifyLanding: (part) => landingChanges.notify(part),
     requestAddress: (req) => server.requestIP(req)?.address,
+    // Forward reference: the board sockets are opened below.
+    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
     agentTokenKey: agentTokenKeyFor,
     j,
     safeJson,

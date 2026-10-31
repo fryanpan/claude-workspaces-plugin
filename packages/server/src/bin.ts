@@ -168,6 +168,7 @@ const {
   coachSummarizer,
   pluginRefresher,
   deployer,
+  gitPushCredential,
 } = deps;
 
 // A ceiling on what a hot error loop can cost this process's log.
@@ -323,6 +324,7 @@ while (!handle) {
       ...(notesComposer ? { meetingNotes: { composer: notesComposer, ...judges } } : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
+      gitPush: { credential: gitPushCredential },
       // The one construction of the real discovery reader — the seam rule
       // again, and for a machine-wide file the rule is at its most useful: a
       // test that fell through to this would be reading whichever server the

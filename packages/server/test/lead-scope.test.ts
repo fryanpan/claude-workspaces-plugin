@@ -50,6 +50,12 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${HARBORLIGHT}/tasks/t-harbor/notes`,
     `/workspaces/${RIVERBEND}/tasks/t-river/notes`,
   ],
+  ['POST', `/workspaces/${HARBORLIGHT}/git/push`, `/workspaces/${RIVERBEND}/git/push`],
+  [
+    'GET',
+    `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`,
+    `/workspaces/${RIVERBEND}/git/pushes/${'a'.repeat(24)}`,
+  ],
 ];
 
 describe('leadScopeAllows', () => {
@@ -84,6 +90,9 @@ describe('leadScopeAllows', () => {
       ['POST', `/workspaces/${HARBORLIGHT}/attachments`],
       ['POST', `/workspaces/${HARBORLIGHT}/mounts`],
       ['POST', '/api/board-tokens'],
+      ['GET', `/workspaces/${HARBORLIGHT}/git/push`],
+      ['POST', `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`],
+      ['GET', `/workspaces/${HARBORLIGHT}/git/pushes/../push`],
     ] as const)
       expect(allows(path, method), `${method} ${path}`).toBe(false);
   });

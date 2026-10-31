@@ -34,6 +34,7 @@ const deps = (): FeatureDeps => ({
   identities: { displayNameFor: () => null } as unknown as Identities,
   notifyLanding: (part) => notified.push(part),
   requestAddress: () => address,
+  boardOfSocket: () => null,
   agentTokenKey: () => 'k'.repeat(64),
   j,
   safeJson: async (req) => {

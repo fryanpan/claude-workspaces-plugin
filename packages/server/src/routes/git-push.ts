@@ -1,0 +1,119 @@
+/**
+ * A lead's push through its board server (`git-push/pusher.ts`).
+ *
+ *   POST /workspaces/<board>/git/push?repo=<owner/name>&branch=<name>[&task=<taskId>]
+ *        body: a git bundle, e.g. `git bundle create - origin/main..my-branch`
+ *   GET  /workspaces/<board>/git/pushes/<id>
+ *
+ * The same request serves a walled lead on the Mac and the `lead` user on a
+ * project machine: both reach the server through their board's own socket
+ * (`board-sockets.ts`), which names the board. From a lead's shell:
+ *
+ *   git bundle create - origin/main..my-branch | curl -sS --unix-socket "$CW_BOARD_SOCKET" \
+ *     --data-binary @- "http://board/workspaces/$CW_WORKSPACE_ID/git/push?repo=o/n&branch=my-branch"
+ *
+ * Who may call: a request on THIS board's socket, or a loopback caller with
+ * no `cf-ray` and no browser marks (an agent on this machine). Everyone else
+ * — a browser, a share or collab visitor, anything through the edge, another
+ * board's socket — is refused before the body is read. The socket path is in
+ * `middleware/lead-scope.ts`, so the socket door lets it through and no
+ * member's scope gains it.
+ */
+import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
+import type { FeatureRequest } from '../feature-module.ts';
+import { isBranchName, isRepoName } from '../git-push/policy.ts';
+import type { GitPusher } from '../git-push/pusher.ts';
+
+export interface GitPushRoutesContext {
+  pusher: GitPusher;
+  boardExists: (boardId: string) => boolean;
+  /** The board whose socket the request arrived on, or null for TCP. */
+  boardOfSocket: (req: Request) => string | null;
+  requestAddress: (req: Request) => string | undefined;
+  j: (status: number, body: unknown) => Response;
+}
+
+/** The most a bundle may weigh. */
+export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
+
+const PUSH_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,64})\/git\/push$/;
+const STATUS_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,64})\/git\/pushes\/([a-f0-9]{24})$/;
+
+export async function handleGitPushRoutes(
+  ctx: GitPushRoutesContext,
+  rq: FeatureRequest,
+): Promise<Response | null> {
+  const { req, pathname } = rq;
+  const push = PUSH_PATH.exec(pathname);
+  const status = push ? null : STATUS_PATH.exec(pathname);
+  if (!push && !status) return null;
+  const boardId = (push ?? status)?.[1] ?? '';
+  const method = req.method.toUpperCase();
+  if ((push && method !== 'POST') || (status && method !== 'GET')) {
+    return ctx.j(405, { error: 'method-not-allowed' });
+  }
+  const caller = callerOf(ctx, req, boardId);
+  if (!caller.ok) return ctx.j(403, { error: caller.error, message: caller.message });
+  if (!ctx.boardExists(boardId)) return ctx.j(404, { error: 'not-found' });
+
+  if (status) {
+    const record = ctx.pusher.get(boardId, status[2] ?? '');
+    return record ? ctx.j(200, record) : ctx.j(404, { error: 'not-found' });
+  }
+
+  const url = new URL(req.url);
+  const repo = url.searchParams.get('repo') ?? '';
+  const branch = url.searchParams.get('branch') ?? '';
+  const task = url.searchParams.get('task');
+  if (!isRepoName(repo)) return ctx.j(400, { error: 'repo must be owner/name' });
+  if (!isBranchName(branch))
+    return ctx.j(400, { error: 'branch is not a branch name git accepts' });
+  if (task !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(task)) {
+    return ctx.j(400, { error: 'task must be a task id' });
+  }
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  if (declared > MAX_BUNDLE_BYTES) return ctx.j(413, { error: 'bundle-too-large' });
+  const body = new Uint8Array(await req.arrayBuffer());
+  if (body.byteLength > MAX_BUNDLE_BYTES) return ctx.j(413, { error: 'bundle-too-large' });
+  if (body.byteLength === 0) return ctx.j(400, { error: 'the body must be a git bundle' });
+
+  const id = randomBytes(12).toString('hex');
+  writeFileSync(ctx.pusher.bundlePath(id), body, { mode: 0o600 });
+  const out = await ctx.pusher.submit({
+    id,
+    boardId,
+    repo,
+    branch,
+    ...(task ? { taskId: task } : {}),
+    requestedBy: requesterLabel(req, caller.who),
+  });
+  return ctx.j(out.status, out.record);
+}
+
+type Caller = { ok: true; who: string } | { ok: false; error: string; message: string };
+
+function callerOf(ctx: GitPushRoutesContext, req: Request, boardId: string): Caller {
+  const socketBoard = ctx.boardOfSocket(req);
+  if (socketBoard !== null) {
+    return socketBoard === boardId
+      ? { ok: true, who: `the lead of ${boardId}` }
+      : { ok: false, error: 'other-board', message: "a board's socket pushes for that board only" };
+  }
+  const refused = refuseNonLocalAgentCaller(req, ctx.requestAddress(req));
+  if (refused) {
+    return {
+      ok: false,
+      error: 'push-local-only',
+      message: "a push is asked by an agent on this server's machine, over its board's socket",
+    };
+  }
+  return { ok: true, who: 'a local agent' };
+}
+
+/** The caller's own name for itself, as plain text, shown on the approval item. */
+function requesterLabel(req: Request, fallback: string): string {
+  const named = (req.headers.get('x-cw-agent-name') ?? '').trim();
+  return /^[A-Za-z0-9 ._-]{1,60}$/.test(named) ? named : fallback;
+}

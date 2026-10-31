@@ -49,6 +49,9 @@ chmod 2750 "$OUTBOX"
 status=0
 (
   drop_secrets
+  # The server's GitHub push credential is the server's alone (lead pushes,
+  # packages/server/src/git-push/credential.ts); the snapshot needs none.
+  unset CW_GITHUB_PUSH_TOKEN
   umask 027
   run_as cw bun run "$APP/infra/project-machine/backup.ts" --out "$SNAPSHOT"
 ) || status=$?
