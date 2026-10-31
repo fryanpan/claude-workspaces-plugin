@@ -84,6 +84,12 @@ export interface ServerOptions {
   boardSocketShared?: string;
   /** The gid `boardSocketShared`'s socket is given to. This user must be a member. */
   boardSocketGroup?: number;
+  /**
+   * The board whose lead receives comments on the shared product-feedback
+   * doc, by id or by name (`CW_FEEDBACK_BOARD`). Unset, the board named
+   * `Workspaces`. See `feedback-owner.ts`.
+   */
+  feedbackBoard?: string;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,

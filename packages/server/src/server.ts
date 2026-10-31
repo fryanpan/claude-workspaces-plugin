@@ -234,6 +234,7 @@ const ANONYMOUS_ACTOR: User = {
 
 import { createAgentSpots } from './agent-spots.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
+import { feedbackOwnerBoard } from './feedback-owner.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
@@ -1141,6 +1142,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     parallelismCapView,
     capSummary,
     boardsForDoc,
+    feedbackOwnerBoard: () => feedbackOwnerBoard(opts.feedbackBoard, taskStore.listWorkspaces()),
     backTargetFor,
     reviseCallFor: (address) => reviseCallFor(address),
     releaseUnrevisedHold: (item) => releaseUnrevisedHold(item),

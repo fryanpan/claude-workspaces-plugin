@@ -273,6 +273,8 @@ export function resolveServerConfig(opts: {
   const boardSocketShared = env.CW_BOARD_SOCKET_SHARED?.trim() || undefined;
   /** `CW_BOARD_SOCKET_GROUP=<gid>`: see ServerOptions.boardSocketGroup. */
   const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
+  /** `CW_FEEDBACK_BOARD=<board id or name>`: see ServerOptions.feedbackBoard. */
+  const feedbackBoard = env.CW_FEEDBACK_BOARD?.trim() || undefined;
   /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
   const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
 
@@ -697,6 +699,7 @@ export function resolveServerConfig(opts: {
     boardSocketDir,
     boardSocketShared,
     boardSocketGroup,
+    feedbackBoard,
     accessOnlyBrowserHosts,
     loopbackSkipsAccess,
     loopbackRefusedUids,

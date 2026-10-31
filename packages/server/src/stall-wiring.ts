@@ -45,6 +45,7 @@ import { type AnsweredAsk, type Lift, liftOf } from './blockage-lift.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
+import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore } from './doc-store.ts';
 import { changedFilesInWorktree, changedFilesInWorktreeAsync } from './git-diff.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -189,6 +190,9 @@ export interface StallWiringContext {
   /** Every board a doc's discussion actually reaches —
    *  `board-membership.ts`, composed above this wiring. */
   boardsForDoc: (docId: string) => Set<string>;
+  /** The board that owns the shared product-feedback doc, if one matches
+   *  (`feedback-owner.ts`). Its lead hears that doc's comments with no watch. */
+  feedbackOwnerBoard: () => string | null;
   /** The board a doc belongs back to, for the lead-presence monitor. Same
    *  module, same reason it can be a value. */
   backTargetFor: (docId: string, attachmentId?: string) => { id: string; name: string } | null;
@@ -272,6 +276,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     parallelismCapView,
     capSummary,
     boardsForDoc,
+    feedbackOwnerBoard,
     backTargetFor,
     reviseCallFor,
   } = ctx;
@@ -1540,7 +1545,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * over REST and would otherwise never learn, while an agent has no use at
    * all for the news that it was handed something it was just handed.
    */
-  const stampReceipt = (docId: string, payload: WebhookPayload, channels: string[]): void => {
+  const stampReceipt = (
+    docId: string,
+    payload: WebhookPayload,
+    channels: string[],
+    /** Channels that count toward delivery but are not told about it. */
+    quiet: ReadonlySet<string> = new Set(),
+  ): void => {
     if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return;
     const comment = commentOfEvent(payload);
     const threadId = payload.threadId;
@@ -1554,10 +1565,36 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       { docId, threadId, commentId: comment.id, channels, at: Date.now() },
       {
         markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
-        announce: (channel, frame) =>
-          sse.broadcastTransient(channel, frame, { skipAgentStreams: true }),
+        announce: (channel, frame) => {
+          if (!quiet.has(channel)) {
+            sse.broadcastTransient(channel, frame, { skipAgentStreams: true });
+          }
+        },
       },
     );
+  };
+
+  /**
+   * The product-feedback doc's comments, to the board that owns it
+   * (`feedback-owner.ts`) when no board holds the doc. Addressed rather than
+   * broadcast: the doc is not on that board, so a page or share visitor on the
+   * board's channel must not receive it. Only the agents a row was queued for
+   * hear the frame. Answers the channel when an addressee holds it, so the
+   * receipt counts it without announcing on it; otherwise null.
+   */
+  const deliverToFeedbackOwner = (
+    owner: string,
+    docId: string,
+    payload: WebhookPayload,
+  ): string | null => {
+    const rows = queueCommentRows(owner, docId, payload);
+    for (const [agentId, rowId] of rows) {
+      const frame = { ...payload, workspaceId: owner, commentQueueId: rowId };
+      sse.sendToAgent(`ws~${owner}`, agentId, frame);
+    }
+    markCommentRowsEmitted(owner, rows);
+    const on = sse.agentsOn(`ws~${owner}`);
+    return [...rows.keys()].some((agentId) => on.has(agentId)) ? `ws~${owner}` : null;
   };
 
   const onLiveDocEvent = (docId: string, payload: WebhookPayload): void => {
@@ -1607,7 +1644,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       }
       markCommentRowsEmitted(board, rows);
     }
-    stampReceipt(docId, payload, [docId, ...boards.map((b) => `ws~${b}`)]);
+    const channels = [docId, ...boards.map((b) => `ws~${b}`)];
+    // The product-feedback doc sits on no board unless someone filed it, so
+    // its owner board's lead hears it here whether or not it watched the doc.
+    const owner = docId === BOARD_FEEDBACK_DOC_ID ? feedbackOwnerBoard() : null;
+    const quiet =
+      owner && !boards.includes(owner) ? deliverToFeedbackOwner(owner, docId, payload) : null;
+    if (quiet) stampReceipt(docId, payload, [...channels, quiet], new Set([quiet]));
+    else stampReceipt(docId, payload, channels);
   };
 
   return {
