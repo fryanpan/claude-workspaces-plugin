@@ -15,7 +15,14 @@
  * The entries are plain fragment links, so a tap scrolls with no script. The
  * bar sits outside every region `landing-live.ts` swaps, and each target
  * keeps its id across a swap.
+ *
+ * It also holds the board's dock for the lead chat's agent button, naming the
+ * board whose lead it talks to — the plan board's, Bryan's default lead —
+ * which `landing-app.ts` mounts the board's own chat into. At ≤1100px it sits
+ * at the bar's left end, as on a board; wider, the bar is not drawn but the
+ * dock is, at the bottom left where a board's rail puts the button.
  */
+import { escapeHtml } from '@claude-workspaces/core';
 
 export interface LandingSection {
   /** The id of the section on the page the entry scrolls to. */
@@ -49,14 +56,18 @@ export function landingSections(has: { inbox: boolean; coach: boolean }): Landin
   ];
 }
 
-/** The bar. Labels and ids are fixed strings, never user input. */
-export function renderLandingNav(sections: readonly LandingSection[]): string {
+/** The bar, and the lead chat's dock when `leadBoard` names a board. Labels
+ *  and ids are fixed strings, never user input; the board id is escaped. */
+export function renderLandingNav(sections: readonly LandingSection[], leadBoard = ''): string {
+  const dock = leadBoard
+    ? `<div class="board-nav-dock" role="group" aria-label="Lead chat" data-lead-board="${escapeHtml(leadBoard)}"></div>`
+    : '';
   return `<nav class="board-nav home-nav" aria-label="Sections">${sections
     .map(
       (s) =>
         `<a class="board-nav-item" href="#${s.id}"><span class="board-nav-icon" aria-hidden="true">${s.icon}</span><span class="board-nav-label">${s.label}</span></a>`,
     )
-    .join('')}</nav>`;
+    .join('')}${dock}</nav>`;
 }
 
 /**
@@ -68,9 +79,23 @@ export function renderLandingNav(sections: readonly LandingSection[]): string {
  * `--board-bottom-bar` is the board's own name for the bar's height: the
  * coach card (`coach-card.ts`, fixed bottom-left) lifts itself by it, so it
  * sits above this bar rather than over Review items and Inbox.
+ *
+ * The dock's rules are the board's too: at ≤1100px its `.board-nav-dock`
+ * block (first in the bar, 10px in, a divider on its right); wider, the
+ * button lands where a board's rail puts it at 1180x820, 30px from the left
+ * and 28px from the foot. There the coach card lifts above it by
+ * `--lc-agent-room`, as it does over a floated button, and a docked chat
+ * takes its width off the page's right as the board's column does.
  */
 export const LANDING_NAV_CSS = `
 .home-nav{display:none}
+@media (min-width:1101px){
+.home-nav:has(> .board-nav-dock){display:block}
+.home-nav > .board-nav-item{display:none}
+.home-nav > .board-nav-dock{position:fixed;left:22px;bottom:28px;z-index:60;display:flex}
+html:has(.home-nav [data-lead-chat="button"]:not([hidden])){--lc-agent-room:64px}
+html[data-lc-docked] body{margin-right:var(--lc-dock-w,0px)}
+}
 @media (max-width:1100px){
 body{--board-bottom-bar:58px;padding-bottom:calc(98px + env(safe-area-inset-bottom,0px))}
 body:has(claude-feedback-widget){padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))}
@@ -81,6 +106,7 @@ body:has(claude-feedback-widget) .home-nav{padding-right:calc(max(18px, env(safe
 .home-nav .board-nav-icon{flex:none;width:18px;height:18px}
 .home-nav .board-nav-icon svg{display:block;width:100%;height:100%}
 .home-nav .board-nav-label{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.home-nav > .board-nav-dock{order:-1;display:flex;align-items:center;align-self:stretch;padding:0 10px;border-right:1px solid #ced4da}
 #landing-review,#inbox,#landing-boards,#coach{scroll-margin-top:12px}
 }
 `;

@@ -58,6 +58,13 @@ export const NAV_COLLAPSE_HTML = `<button type="button" id="board-nav-collapse" 
           <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.collapse}</span><span class="board-nav-label">Collapse</span>
         </button>`;
 
+/** The rail's dock for the lead chat's agent button, holding `slot`. The
+ *  board puts its one slot here; the cross-board review starts it empty and
+ *  adds a slot for each board it chats with (`reviews/review-lead-chat.ts`). */
+export function navDockHtml(slot = ''): string {
+  return `<div class="board-nav-dock" role="group" aria-label="Lead chat">${slot}</div>`;
+}
+
 /**
  * Did the server say this visitor's door lists their boards at `/`? The share,
  * collaboration and main hostnames do (the member's own list); a per-share
@@ -134,11 +141,9 @@ export function buildShell(
           <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.settings}</span><span class="board-nav-label">Settings</span>
         </button>
         ${NAV_COLLAPSE_HTML}
-        <div class="board-nav-dock" role="group" aria-label="Lead chat">
-          <!-- The chat with the board's lead: its agent button, drawn into this
-               slot's shadow root by lead-chat/lead-chat-mount.ts. -->
-          <span id="board-lead-chat" hidden></span>
-        </div>
+        <!-- The chat with the board's lead: its agent button, drawn into this
+             slot's shadow root by lead-chat/lead-chat-mount.ts. -->
+        ${navDockHtml('<span id="board-lead-chat" hidden></span>')}
       </nav>
       <section id="board-home" class="board-home hidden">
         <!-- The banner again, for the pane landing links open on: the board

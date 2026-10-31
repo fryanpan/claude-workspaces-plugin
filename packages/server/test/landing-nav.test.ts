@@ -48,3 +48,50 @@ describe('renderLandingNav', () => {
     ]);
   });
 });
+
+describe('the lead chat dock on Home', () => {
+  /** The dock elements in the bar, and the board each names, read by a parser. */
+  async function docks(html: string): Promise<Array<string | null>> {
+    const found: Array<string | null> = [];
+    await new HTMLRewriter()
+      .on('nav.home-nav .board-nav-dock', {
+        element(el) {
+          found.push(el.getAttribute('data-lead-board'));
+        },
+      })
+      .transform(new Response(html))
+      .text();
+    return found;
+  }
+
+  it('names the board whose lead the chat talks to, inside the bar', async () => {
+    const html = renderLandingNav(landingSections({ inbox: false, coach: false }), 'w-harbor');
+    expect(await docks(html)).toEqual(['w-harbor']);
+    // The bar's entries are unchanged by it.
+    expect((await readLandingNav(html)).entries.map((e) => e.id)).toEqual([
+      'landing-review',
+      'landing-boards',
+    ]);
+  });
+
+  it('draws no dock with no board, and escapes the id it is given', async () => {
+    expect(await docks(renderLandingNav(landingSections({ inbox: false, coach: false })))).toEqual(
+      [],
+    );
+    // An id that tries to close the attribute stays inside it: one dock, and
+    // no element the id would have opened. (The rewriter hands back the
+    // attribute undecoded, so the count is the check.)
+    const hostile = renderLandingNav([], 'w"><script>x</script>');
+    expect(await docks(hostile)).toHaveLength(1);
+    let scripts = 0;
+    await new HTMLRewriter()
+      .on('script', {
+        element() {
+          scripts += 1;
+        },
+      })
+      .transform(new Response(hostile))
+      .text();
+    expect(scripts).toBe(0);
+  });
+});

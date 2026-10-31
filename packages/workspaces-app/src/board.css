@@ -2280,8 +2280,9 @@ html:has(.board-walk-cred-form) {
                 + the 10px margin above it                            = 73px
      Settings = Collapse's 73px + its own 36px + the rail's 2px gap   = 111px
    No `z-index`: under the task detail's scrim, like every other nav item.
-   Scoped to a rail that has the dock: the cross-board review's rail has no
-   mic, so nothing there is stuck and its toggle has nothing to clear. */
+   Scoped to a rail that has the dock. The cross-board review's rail has one
+   too (its agent button, `reviews/review-lead-chat.ts`) but no Settings, so
+   only its toggle is stuck there. */
 .board-nav:has(> .board-nav-dock) > .board-nav-settings,
 .board-nav:has(> .board-nav-dock) > .board-nav-collapse {
   position: sticky;

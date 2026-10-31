@@ -2187,6 +2187,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         rankOf: new Map(q.projects.map((p) => [p.workspaceId, p.rank])),
         summaryOf: (id) => boardSummaries.read(id),
         goals: planGoals(q.planWorkspaceId).map((g) => ({ id: g.id, title: g.title })),
+        ...(q.planWorkspaceId ? { planWorkspaceId: q.planWorkspaceId } : {}),
       };
     },
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
