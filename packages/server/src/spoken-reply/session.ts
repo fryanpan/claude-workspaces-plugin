@@ -5,7 +5,7 @@
  *
  *  - Setups 1 and 2 hear with Soniox's real-time listener. In `hold` mode the
  *    question ends when the page sends `end`; in `tap` mode it ends at the
- *    listener's own end of speech, called at most 500 ms after the last word
+ *    listener's own end of speech, called at most 1 s after the last word
  *    (`SPOKEN_TAP_TUNING`) so the speaker can tap once and walk away, unless
  *    the words so far stop on a filler or an opener ("Hey, can you, uh."),
  *    when it waits for the rest (`unfinishedAsk` in `pause-gate.ts`). On a
@@ -72,13 +72,14 @@ import type { SpokenVoice } from './tts.ts';
 
 export const SPOKEN_INPUT_RATE = 16_000;
 
-/** The listener's tuning for a board question: end of speech called as soon
- *  as Soniox allows, 500 ms after the last word at most (Bryan, 2 Oct: tap
- *  once, and the turn ends on its own about half a second after he stops).
+/** The listener's tuning for a board question: end of speech called at most
+ *  1 s after the last word (Bryan, 30 Oct: "make endpoint detection wait a
+ *  bit longer -- it's often cutting me off too soon"; it was 500 ms from his
+ *  2 Oct ask that a tapped turn end about half a second after he stops).
  *  A thinking pause after a finished-sounding sentence ends the question;
  *  one after a filler or an opener does not (`unfinishedAsk`). Level 2 is
  *  already the adapter's default. */
-export const SPOKEN_TAP_TUNING = { max_endpoint_delay_ms: 500 };
+export const SPOKEN_TAP_TUNING = { max_endpoint_delay_ms: 1000 };
 /** On a planning doc the pause gate decides, so the listener waits as long as
  *  Soniox allows and a dangling sentence is not split into two turns. */
 export const SPOKEN_PLANNING_TUNING = { max_endpoint_delay_ms: 3000 };
