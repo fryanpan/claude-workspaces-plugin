@@ -200,4 +200,72 @@ describe('board embed frames', () => {
       editor.destroy();
     }
   });
+
+  it('frames a ::html{src} page from the doc folder, opaque, with no mapping needed', async () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const editor = new Editor({
+      element: el,
+      extensions: [
+        StarterKit,
+        Markdown.configure({ html: false, tightLists: true, linkify: true, breaks: false }),
+        BoardEmbedFrames.configure({
+          workspaceId: 'w-saltmarsh',
+          docId: 'd-riverbend',
+          load: async () => null,
+        }),
+      ],
+      content: 'Alice wrote this.\n\n::html{src="map/index.html"}\n\n::html{src="../up.html"}',
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const [frame, ...rest] = frames(el);
+    expect(rest).toHaveLength(0);
+    const key = frame?.dataset.embedKey ?? '';
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
+    expect(frame?.getAttribute('src')).toBe(
+      `/workspaces/w-saltmarsh/docs/d-riverbend/files/map/index.html#cw-relay=${key}`,
+    );
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame?.dataset.embedFiles).toBe('/workspaces/w-saltmarsh/docs/d-riverbend/files/map/');
+    // A relayed ask is answered only from that frame's window with its key.
+    const own = { name: 'frame window' } as unknown as Window;
+    Object.defineProperty(frame, 'contentWindow', { value: own });
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (u: string) => {
+      calls.push(String(u));
+      return new Response('{"route":"Saltmarsh"}', {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const ask = (source: unknown, key: string, path = 'data.json') =>
+      new Promise<unknown>((resolve) => {
+        const ch = new MessageChannel();
+        ch.port1.onmessage = (e) => {
+          ch.port1.close();
+          resolve(e.data);
+        };
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: { type: 'cw-file-fetch', path, key },
+            source: source as Window,
+            ports: [ch.port2],
+          }),
+        );
+      });
+    try {
+      expect(await ask(own, 'wrong')).toEqual({ error: true });
+      expect(await ask(window, key)).toEqual({ error: true });
+      expect(await ask(own, key, '../../other/files/x.json')).toEqual({ error: true });
+      // The relay reaches the page's own folder, not the doc's folder beside it.
+      expect(await ask(own, key, '../config.json')).toEqual({ error: true });
+      expect(calls).toEqual([]);
+      const ok = (await ask(own, key)) as { status: number };
+      expect(ok.status).toBe(200);
+      expect(calls).toEqual(['/workspaces/w-saltmarsh/docs/d-riverbend/files/map/data.json']);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    editor.destroy();
+  });
 });

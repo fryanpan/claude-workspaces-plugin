@@ -405,7 +405,7 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.next', 'coverage']
  * open every file in the repo on every rescan, and a miss would still be a
  * credential leaving the box.
  */
-function isCredentialShapedName(name: string): boolean {
+export function isCredentialShapedName(name: string): boolean {
   const lower = name.toLowerCase();
   // Environment and tool credential files, including their `.env.local` /
   // `.env.production` suffixed forms.

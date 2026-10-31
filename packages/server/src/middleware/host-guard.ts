@@ -1371,6 +1371,13 @@ function docSubrouteAllowed(sub: string, method: string): boolean {
    */
   if (sub === 'assets') return method === 'POST';
   /**
+   * The files beside the doc's own file, which a `::html{src="…"}` line
+   * frames (`routes/doc-files.ts`). Reads only, on a doc already inside the
+   * shared board, by the same rule as its images: what a member reaches is
+   * what the doc displays.
+   */
+  if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
+  /**
    * Thread verbs, INCLUDING the three region-edit ones this used to exclude.
    *
    * The exclusion protected nothing it was written for: a member already has

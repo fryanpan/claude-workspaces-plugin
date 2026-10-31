@@ -14,6 +14,9 @@
  * Maps one needs. The server stores one only when the origin is on its
  * allowlist (`embedOriginsFrom`), which must never name the board's own
  * origin: a same-origin frame given `allow-same-origin` can lift its sandbox.
+ *
+ * A third kind needs no mapping: `::html{src="map/index.html"}` frames a page
+ * from the doc's own folder (`parseFileEmbedDirective`, below).
  */
 import { MOCK_FRAME_PARAM } from './page-thread-link.ts';
 
@@ -151,6 +154,64 @@ export function allowedEmbeds(embeds: BoardEmbeds, allowedOrigins: readonly stri
     out[name] = t;
   }
   return out;
+}
+
+/**
+ * A file embed: `::html{src="map/index.html"}` frames an HTML file that sits
+ * beside the doc's own bound file, named by a path relative to that file the
+ * way a relative image is. No board mapping is needed; the server serves the
+ * page and its sibling files from the doc's folder
+ * (`server/src/routes/doc-files.ts`) under the doc's own access.
+ */
+export const FILE_EMBED_NAME = 'html';
+/** The route segment a doc's folder is served under. */
+export const DOC_FILES_SEGMENT = 'files';
+const FILE_SRC_MAX = 512;
+
+/**
+ * `src` as path segments, or null unless it is a relative path to an `.html`
+ * file inside the doc's folder: no scheme, no leading `/`, no backslash, no query
+ * or fragment, and no segment that is empty, `..` or starts with a dot. A
+ * leading `./` is allowed. The server judges the path again; this only keeps
+ * the editor from building an address it would refuse.
+ */
+export function fileEmbedSegments(src: string): string[] | null {
+  if (src.length === 0 || src.length > FILE_SRC_MAX) return null;
+  if (/[\\\0?#]/.test(src) || src.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(src)) {
+    return null;
+  }
+  const segs = src.startsWith('./') ? src.slice(2).split('/') : src.split('/');
+  if (segs.some((s) => s === '' || s.startsWith('.'))) return null;
+  return /\.html$/i.test(segs[segs.length - 1] ?? '') ? segs : null;
+}
+
+/** The file directive a paragraph's whole text spells, or null. */
+export function parseFileEmbedDirective(text: string): { src: string; segments: string[] } | null {
+  const m = text.match(/^::html\{([^{}\n]*)\}$/);
+  if (!m) return null;
+  const src = (m[1] ?? '').match(/(?:^|\s)src="([^"]*)"(?:\s|$)/)?.[1];
+  const segments = src === undefined ? null : fileEmbedSegments(src);
+  return src !== undefined && segments ? { src, segments } : null;
+}
+
+/** Where a doc's folder is served: `/workspaces/<ws>/docs/<doc>/files/`. */
+export function docFilesBase(workspaceId: string, docId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/${DOC_FILES_SEGMENT}/`;
+}
+
+/**
+ * The address of the folder a framed page sits in: the one place its relay
+ * may fetch under (`server/src/doc-file-frame.ts`), never the doc's whole
+ * folder.
+ */
+export function docFileFolderBase(workspaceId: string, docId: string, segments: string[]): string {
+  const dir = segments.slice(0, -1).map((s) => encodeURIComponent(s));
+  return docFilesBase(workspaceId, docId) + dir.map((s) => `${s}/`).join('');
+}
+
+/** The frame address for a file directive's segments. */
+export function docFileUrl(workspaceId: string, docId: string, segments: string[]): string {
+  return docFilesBase(workspaceId, docId) + segments.map((s) => encodeURIComponent(s)).join('/');
 }
 
 /** The directive a paragraph's whole text spells, or null. */
