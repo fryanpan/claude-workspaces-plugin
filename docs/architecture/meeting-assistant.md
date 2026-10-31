@@ -10,6 +10,15 @@ Shipped 2026-08-28 (capture PR #408, notes PR #410). This doc is the summary
 to read before touching the subsystem — the code's own header comments carry
 the fine detail.
 
+**The doc page no longer records** (Bryan, 2026-10-30: "Record Audio has been
+replaced by the meeting mode with agent"). A meeting starts from the lead
+chat (`lead-chat/lead-chat-meeting.ts`, over `meeting-link.ts`), and its
+notes land in the doc the same way. The doc's Record Audio button, its strip,
+the start form, the transcript line, the Talk mode and the tidy-up offer were
+removed with their modules. Where a section below names one of those modules,
+it describes the server half, which is unchanged, and a client that no longer
+exists.
+
 ## Shape
 
 ```mermaid
@@ -3985,10 +3994,9 @@ spoken cues and the phrase tables behind them) ·
 late correction) + `speaker-roster.ts` (the meeting's cast) ·
 `packages/workspaces-app/src/speaker-reassign.ts` +
 `speaker-reassign-menu.ts` (correcting one mention) ·
-`packages/workspaces-app/src/meeting-strip.ts`
-(the socket state machine and the surface it drives) + `meeting-chooser.ts`
-(the start form) + `meeting-feed.ts` (the transcript line and the notes that
-stand in for it) + `meeting-menu.ts` (the running meeting's report) · `meeting-solo.ts` (who else is on the doc — the one-tap predicate) ·
+`packages/workspaces-app/src/meeting-link.ts` (the meeting socket with no
+page around it) + `lead-chat/lead-chat-meeting.ts` (the lead chat's meeting,
+its one client) ·
 `packages/workspaces-app/src/meeting-audio.ts` (capture, and the reopen that
 replaces a dead leg) + `meeting-room-audio.ts` (the room's microphone config,
 lifted out of it) + `meeting-track-watch.ts` (noticing a capture has died) +
@@ -3997,9 +4005,8 @@ client) · `recall-turns.ts` (frames → turns, naming) · `recall-status.ts` +
 `recall-webhook-auth.ts` (bot state, signatures) · `recall-meeting.ts` (the
 bot lifecycle) · `packages/core/src/meeting-bot.ts` (wire contract) ·
 `packages/workspaces-app/src/meeting-bot-client.ts` (UI) ·
-`packages/core/src/meeting-timing.ts` +
-`packages/workspaces-app/src/meeting-timing-client.ts` (the `?timing=1`
-latency measurement) · `scripts/room-labels-check.ts` +
+`packages/core/src/meeting-timing.ts` (the `?timing=1` latency
+measurement; its browser half went with the doc's recorder) · `scripts/room-labels-check.ts` +
 `room-labels-score.ts` + `ami-truth.ts` (the room measurement, its
 arithmetic, and the AMI corpus reference it scores against) ·
 `packages/server/src/notes-prompt-store.ts` (what the note-taker is told to
