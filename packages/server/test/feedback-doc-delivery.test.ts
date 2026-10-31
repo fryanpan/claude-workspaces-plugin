@@ -187,6 +187,17 @@ describe('the feedback doc delivers to the Workspaces lead with no watch', () =>
     expect(leadRows().some((q) => q.text === 'Filed it.')).toBe(false);
   });
 
+  it("the owner board's other watchers are not sent product feedback", async () => {
+    // A durable board watch is "everything on this board"; this doc is not on it.
+    r.handle.agentWatches.update('agent-board-watcher', { add: [`ws:${product}`] });
+    await r.widgetComment(other, 'Riverbend filter resets on reload.');
+    const rows = r.handle.tasks
+      .listQueuedComments(product)
+      .filter((q) => q.text === 'Riverbend filter resets on reload.');
+    // The lead is the control: the same comment did queue, just not for the watcher.
+    expect(rows.map((q) => q.agentId)).toEqual(['agent-workspaces-lead']);
+  });
+
   it('the board the person stood on does not become the owner', () => {
     const rows = r.handle.tasks
       .listQueuedComments(other)

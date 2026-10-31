@@ -912,9 +912,9 @@ scroll and DOM change rather than per frame.
 on no board, so its comments once reached only a session that had called
 `watch_doc` on it. `feedback-owner.ts`, a new top-level server module in the
 domain tier, names the board that owns it: `CW_FEEDBACK_BOARD` by id or name,
-else the board named Workspaces. When no board holds the doc,
+else the board named Workspaces. When that board does not hold the doc,
 `onLiveDocEvent` in `stall-wiring.ts` queues each comment for that board's
-lead and sends the frame to the lead's stream alone, not to the board's
+lead (and no other watcher) and sends the frame to the lead's stream alone, not to the board's
 channel, so pages and share visitors on that board are not sent it. It is a
 delivery owner only: the doc is not added to the board's `docIds`, so
 `boardsForDoc`, share scope and the board's rows are unchanged.

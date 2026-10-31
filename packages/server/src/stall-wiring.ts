@@ -1489,6 +1489,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     workspaceId: string,
     docId: string,
     payload: WebhookPayload,
+    /** The lead alone, skipping the board's durable watchers. */
+    leadOnly = false,
   ): Map<string, string> => {
     const rows = new Map<string, string>();
     // The event test stays here as well as inside `commentOfEvent` because it
@@ -1499,7 +1501,9 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return rows;
     const comment = commentOfEvent(payload);
     if (!comment) return rows;
-    const addressees = new Set<string>(agentWatches.agentsWatching(`ws:${workspaceId}`));
+    const addressees = new Set<string>(
+      leadOnly ? [] : agentWatches.agentsWatching(`ws:${workspaceId}`),
+    );
     const lead = taskStore.getWorkspace(workspaceId)?.leadAgentId;
     if (lead) addressees.add(lead);
     for (const agentId of addressees) {
@@ -1575,11 +1579,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   };
 
   /**
-   * The product-feedback doc's comments, to the board that owns it
-   * (`feedback-owner.ts`) when no board holds the doc. Addressed rather than
-   * broadcast: the doc is not on that board, so a page or share visitor on the
-   * board's channel must not receive it. Only the agents a row was queued for
-   * hear the frame. Answers the channel when an addressee holds it, so the
+   * The product-feedback doc's comments, to the lead of the board that owns
+   * it (`feedback-owner.ts`) when that board does not hold the doc. Any other
+   * board that holds it (Unfiled, say) has already had the normal fan-out
+   * above, and may have no lead. Lead only: the board's other watchers are not
+   * owed product feedback. Addressed rather than broadcast: the doc is not on
+   * that board, so a page or share visitor on the board's channel must not
+   * receive it. Answers the channel when an addressee holds it, so the
    * receipt counts it without announcing on it; otherwise null.
    */
   const deliverToFeedbackOwner = (
@@ -1587,7 +1593,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     docId: string,
     payload: WebhookPayload,
   ): string | null => {
-    const rows = queueCommentRows(owner, docId, payload);
+    const rows = queueCommentRows(owner, docId, payload, true);
     const reached = sse.sendToAgents(`ws~${owner}`, [...rows.keys()], payload, (agentId) => ({
       ...payload,
       workspaceId: owner,
@@ -1645,8 +1651,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       markCommentRowsEmitted(board, rows);
     }
     const channels = [docId, ...boards.map((b) => `ws~${b}`)];
-    // The product-feedback doc sits on no board unless someone filed it, so
-    // its owner board's lead hears it here whether or not it watched the doc.
+    // The product-feedback doc's owner board's lead hears it here whether or
+    // not it watched the doc, unless that board already holds the doc.
     const owner = docId === BOARD_FEEDBACK_DOC_ID ? feedbackOwnerBoard() : null;
     const quiet =
       owner && !boards.includes(owner) ? deliverToFeedbackOwner(owner, docId, payload) : null;
