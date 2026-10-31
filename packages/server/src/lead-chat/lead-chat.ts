@@ -317,13 +317,14 @@ export class LeadChat {
     }
     const turn = list.slice(lastPerson + 1);
     // The last message the session wrote, already streaming in: the closing
-    // message is that one, so it becomes it rather than a second row.
-    const said = turn.filter((m) => m.role === 'agent' && !m.tool).at(-1);
+    // message is that one, so it becomes it rather than a second row. A
+    // spoken reply is not the terminal's, so it never is.
+    const said = turn.filter((m) => m.role === 'agent' && !m.tool && m.via === 'terminal').at(-1);
     for (const m of turn) {
       if (m.streaming && m !== said) this.record(workspaceId, withoutStreaming(m));
     }
     const words = text.trim();
-    if (said?.via === 'terminal' && !said.turnEnd) {
+    if (said && !said.turnEnd) {
       return this.record(workspaceId, {
         ...withoutStreaming(said),
         ...(words ? { text: words } : {}),
@@ -354,6 +355,21 @@ export class LeadChat {
    * lives in memory only, so a long message costs the log one line.
    */
   showMirrored(workspaceId: string, m: LeadChatMessage, store: boolean): boolean {
+    // The hooks are async and the Stop note is not, so a message's last
+    // flush can land after its turn ended. It keeps the closing mark, and
+    // its whole text (the Stop note's is cut shorter) replaces the note's.
+    const list = this.messages(workspaceId);
+    const had = list.find((x) => x.id === m.id);
+    const closing = had?.turnEnd ? had : store && !had ? closingRowOf(list, m.text) : undefined;
+    if (closing) {
+      if (!store) return true;
+      return this.record(workspaceId, {
+        ...withoutStreaming(m),
+        id: closing.id,
+        ts: closing.ts,
+        turnEnd: true,
+      });
+    }
     if (store) return this.record(workspaceId, m);
     this.hold(workspaceId, m);
     return true;
@@ -399,13 +415,28 @@ export class LeadChat {
     return list;
   }
 
-  private record(workspaceId: string, m: StoredMessage): boolean {
+  private record(workspaceId: string, given: StoredMessage): boolean {
+    const m = this.placed(workspaceId, given);
     if (!this.deps.log.append(workspaceId, m)) return false;
     this.hold(workspaceId, m);
     return true;
   }
 
-  private hold(workspaceId: string, m: StoredMessage): void {
+  /**
+   * A row keeps the place it first took, and a new row goes after every row
+   * already here: two arriving in the same millisecond would otherwise be
+   * ordered by their random ids, and a reply could sort above its question.
+   */
+  private placed(workspaceId: string, m: StoredMessage): StoredMessage {
+    const list = this.messages(workspaceId);
+    const prev = list.find((x) => x.id === m.id);
+    if (prev) return prev.ts === m.ts ? m : { ...m, ts: prev.ts };
+    const last = list.at(-1);
+    return last && m.ts <= last.ts ? { ...m, ts: last.ts + 1 } : m;
+  }
+
+  private hold(workspaceId: string, given: StoredMessage): void {
+    const m = this.placed(workspaceId, given);
     const list = this.messages(workspaceId).filter((x) => x.id !== m.id);
     list.push(m);
     list.sort(compareLeadChatEntries);
@@ -420,6 +451,24 @@ export class LeadChat {
       message: publicMessage(m),
     });
   }
+}
+
+/** The closing row a Stop note made for this turn with these words, when
+ *  no streamed row was there to become it. One text may be cut shorter than
+ *  the other, so a prefix matches too. */
+function closingRowOf(list: readonly StoredMessage[], text: string): StoredMessage | undefined {
+  const words = text.trim();
+  if (!words) return undefined;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m) continue;
+    if (m.role === 'person' && m.via !== 'channel') return undefined;
+    if (m.role !== 'agent' || !m.turnEnd || m.via === 'terminal') continue;
+    const said = m.text.trim();
+    if (said === words || said.startsWith(words) || words.startsWith(said)) return m;
+    return undefined;
+  }
+  return undefined;
 }
 
 function withoutStreaming(m: StoredMessage): StoredMessage {

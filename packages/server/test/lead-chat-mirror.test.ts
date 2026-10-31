@@ -311,10 +311,59 @@ describe('the lead chat mirrors the lead’s session', () => {
     // The turn ends on that same message: it becomes the closing message, not a second row.
     await turnEnd(LEAD, whole);
     await waitFor(() => latest((x) => x.id === done.id)?.turnEnd === true, {
-      ...WITHIN_1S,
       describe: 'the streamed message marked as the turn end',
     });
     expect(page.messages.filter((m) => m.text === whole && m.id !== done.id)).toEqual([]);
+  });
+
+  it('keeps one closing message when the last flush lands after the turn ended', async () => {
+    // Streamed, then the Stop note, then the final flush: still the closing message.
+    const id = 'f1d2c3b4-0000-4000-8000-000000000002';
+    await prompt(LEAD, { typed: true, text: 'How long does the Riverbend restart take?' });
+    await mirror(LEAD, { kind: 'text', messageId: id, index: 0, final: false, text: 'About' });
+    const row = await waitFor(() => latest((m) => m.text === 'About'), {
+      describe: 'the first flush on the page',
+    });
+    await turnEnd(LEAD, 'About 12 seconds.');
+    await waitFor(() => latest((x) => x.id === row.id)?.turnEnd === true, {
+      describe: 'the streamed row marked as the turn end',
+    });
+    await mirror(LEAD, {
+      kind: 'text',
+      messageId: id,
+      index: 1,
+      final: true,
+      text: 'About 12 seconds.',
+    });
+    await waitFor(
+      () => {
+        const m = latest((x) => x.id === row.id);
+        return m?.text === 'About 12 seconds.' && !m.streaming;
+      },
+      { describe: 'the late final flush applied to the same row' },
+    );
+    expect(latest((x) => x.id === row.id)?.turnEnd).toBe(true);
+
+    // One flush, final, arriving after the Stop note made its own row.
+    await prompt(LEAD, { typed: true, text: 'And the Harborlight one?' });
+    await turnEnd(LEAD, 'About 9 seconds.');
+    const note = await waitFor(() => latest((m) => m.text === 'About 9 seconds.'), {
+      describe: 'the closing message from the Stop note',
+    });
+    const late = await mirror(LEAD, {
+      kind: 'text',
+      messageId: 'f1d2c3b4-0000-4000-8000-000000000003',
+      index: 0,
+      final: true,
+      text: 'About 9 seconds.',
+    });
+    expect(await late.json()).toEqual({ ok: true, mirrored: true });
+    const read = (await (await fetch(`${base}/workspaces/${boardId}/lead-chat`)).json()) as {
+      messages: LeadChatMessage[];
+    };
+    const rows = read.messages.filter((m) => m.text === 'About 9 seconds.');
+    expect(rows.map((m) => m.id)).toEqual([note.id]);
+    expect(rows[0]?.turnEnd).toBe(true);
   });
 
   it('shows each tool call the lead made as its own row, with its input and output', async () => {

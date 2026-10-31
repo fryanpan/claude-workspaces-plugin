@@ -23,7 +23,7 @@
  *
  * Never blocks and never prints: both hooks are registered `async`.
  */
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SecretReader } from './access-headers.ts';
@@ -49,6 +49,20 @@ export function mirrorDir(base = tmpdir()): string {
   return join(base, 'claude-workspaces-lead-mirror');
 }
 
+/**
+ * Make `dir` and refuse it unless this user owns it and nobody else may
+ * open it. A shared /tmp (Linux) can hold a directory of that name made by
+ * someone else, and mkdir's mode does not touch one that already exists.
+ */
+export function ownDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = statSync(dir);
+  const uid = process.getuid?.();
+  if ((uid !== undefined && st.uid !== uid) || (st.mode & 0o077) !== 0) {
+    throw new Error(`${dir} is not this user's alone`);
+  }
+}
+
 /** A session id safe to use as a file name, or undefined. */
 export function safeId(v: unknown): string | undefined {
   return typeof v === 'string' && SAFE_ID.test(v) ? v : undefined;
@@ -60,7 +74,7 @@ export function markLead(sessionId: unknown, lead: boolean, dir = mirrorDir()): 
   if (!id) return;
   try {
     if (lead) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      ownDir(dir);
       writeFileSync(join(dir, id), '', { mode: 0o600 });
     } else {
       rmSync(join(dir, id), { force: true });
@@ -75,6 +89,7 @@ export function isMarkedLead(sessionId: unknown, dir = mirrorDir()): boolean {
   const id = safeId(sessionId);
   if (!id) return false;
   try {
+    ownDir(dir);
     readFileSync(join(dir, id));
     return true;
   } catch {
@@ -116,6 +131,7 @@ export function textBody(p: Record<string, unknown>, dir = mirrorDir()): TextBod
   const parts = join(dir, `${session}.parts`, messageId);
   let whole = delta;
   try {
+    ownDir(dir);
     mkdirSync(parts, { recursive: true, mode: 0o700 });
     writeFileSync(join(parts, String(index)), delta, { mode: 0o600 });
     whole = readdirSync(parts)

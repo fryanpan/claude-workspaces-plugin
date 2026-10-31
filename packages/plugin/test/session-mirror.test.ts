@@ -4,7 +4,7 @@
  * its whole text so far, reduced like a turn note; a tool batch posts each
  * call reduced and capped; and a server that says "not the lead" stops it.
  */
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -158,5 +158,16 @@ describe('the lead marker', () => {
     markLead('../escape', true, dir);
     expect(readdirSync(dir)).toEqual([]);
     expect(isMarkedLead('../escape', dir)).toBe(false);
+  });
+
+  it('marks nothing, and reads no marker, in a directory others can open', () => {
+    markLead('s-lead', true, dir);
+    expect(isMarkedLead('s-lead', dir)).toBe(true);
+    chmodSync(dir, 0o755);
+    expect(isMarkedLead('s-lead', dir)).toBe(false);
+    markLead('s-other', true, dir);
+    expect(existsSync(join(dir, 's-other'))).toBe(false);
+    expect(decideMirror(flush(0, true, 'Plain words'), dir)).toEqual({ skip: 'not the lead' });
+    chmodSync(dir, 0o700);
   });
 });
