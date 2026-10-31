@@ -10,6 +10,7 @@ export interface VoiceFrame {
   conversationId?: string;
   conversation?: Array<{ from: string; text: string }>;
   actor?: { id?: string; name?: string };
+  context?: { surface?: string; link?: string };
 }
 
 /** An agent's own board stream, keeping every `voice.request` it is sent. */

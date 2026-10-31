@@ -15129,7 +15129,10 @@ function where(p) {
   const c = p.context;
   if (!c)
     return "";
-  return ` (at ${c.surface ?? "?"}${c.docId ? ` ${c.docId}` : ""}${c.taskId ? ` ${c.taskId}` : ""}${c.visibleHeading ? `, near "${c.visibleHeading}"` : ""})`;
+  const near = c.visibleHeading ? `, near "${c.visibleHeading}"` : "";
+  if (typeof c.link === "string" && c.link)
+    return ` (at ${c.link}${near})`;
+  return ` (at ${c.surface ?? "?"}${c.docId ? ` ${c.docId}` : ""}${c.taskId ? ` ${c.taskId}` : ""}${near})`;
 }
 function voiceRequestLine(p) {
   if (p.route === "fast-path")
@@ -21989,7 +21992,7 @@ var resolveBaseUrl2 = () => resolveBaseUrl({
   readFileSync: readDiscoveryText
 });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.343";
+var PLUGIN_VERSION = "0.1.344";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
