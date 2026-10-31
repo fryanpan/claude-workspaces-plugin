@@ -4,17 +4,30 @@
  * its whole text so far, reduced like a turn note; a tool batch posts each
  * call reduced and capped; and a server that says "not the lead" stops it.
  */
-import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runPromptHook } from '../hooks/lib/prompt-mark.ts';
 import {
+  MARKER_STALE_MS,
+  PARTS_STALE_MS,
   TOOL_OUTPUT_CAP,
   decideMirror,
   isMarkedLead,
   markLead,
+  mirrorDir,
   runMirrorHook,
+  sweepStale,
   toolsBody,
 } from '../hooks/lib/session-mirror.ts';
 
@@ -169,5 +182,46 @@ describe('the lead marker', () => {
     expect(existsSync(join(dir, 's-other'))).toBe(false);
     expect(decideMirror(flush(0, true, 'Plain words'), dir)).toEqual({ skip: 'not the lead' });
     chmodSync(dir, 0o700);
+  });
+});
+
+describe('where the mirror keeps its files', () => {
+  it('is the plugin data directory, or this user’s ~/.claude, never the tmpdir root', () => {
+    expect(mirrorDir({ CLAUDE_PLUGIN_DATA: '/data/cw' })).toBe(join('/data/cw', 'lead-mirror'));
+    const fallback = mirrorDir({});
+    expect(fallback.startsWith(homedir())).toBe(true);
+    expect(fallback.startsWith(tmpdir())).toBe(false);
+  });
+
+  it('sweeps part files and markers gone stale, and keeps fresh ones', () => {
+    const now = Date.now();
+    const at = (path: string, ageMs: number) => {
+      const t = (now - ageMs) / 1000;
+      utimesSync(path, t, t);
+    };
+    mkdirSync(join(dir, 'old.parts'));
+    mkdirSync(join(dir, 'new.parts'));
+    writeFileSync(join(dir, 'old-marker'), '');
+    writeFileSync(join(dir, 'new-marker'), '');
+    at(join(dir, 'old.parts'), PARTS_STALE_MS + 60_000);
+    at(join(dir, 'new.parts'), PARTS_STALE_MS - 60_000);
+    at(join(dir, 'old-marker'), MARKER_STALE_MS + 60_000);
+    at(join(dir, 'new-marker'), PARTS_STALE_MS + 60_000);
+    sweepStale(dir, now);
+    expect(readdirSync(dir).sort()).toEqual(['new-marker', 'new.parts']);
+  });
+
+  it('posts nothing for a subagent working under the lead’s session', () => {
+    markLead('s-lead', true, dir);
+    const batch = {
+      hook_event_name: 'PostToolBatch',
+      session_id: 's-lead',
+      agent_id: 'a-builder',
+      agent_type: 'general-purpose',
+      tool_calls: [{ tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 't1' }],
+    };
+    expect(decideMirror(batch, dir)).toEqual({ skip: 'a subagent' });
+    const { agent_id: _a, agent_type: _t, ...lead } = batch;
+    expect('post' in decideMirror(lead, dir)).toBe(true);
   });
 });

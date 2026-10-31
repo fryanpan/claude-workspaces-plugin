@@ -1,4 +1,3 @@
-import { agentIdForName } from '@claude-workspaces/core/identity';
 /**
  * The lead chat: what a person types to a board's lead, and what the lead
  * answers, kept per board and shown live on every page of it.
@@ -19,21 +18,17 @@ import { agentIdForName } from '@claude-workspaces/core/identity';
  * there (`page`) until the first: the latest `LEAD_CHAT_KEEP` out of memory,
  * anything older off the log.
  *
- * The lead's own Claude Code session is mirrored in too, so the chat shows
- * what its terminal shows (`mirror*` below): a prompt typed there, a board
- * event its session took as a prompt, and the message each turn ended on,
- * posted by the plugin's UserPromptSubmit and Stop hooks to the routes they
- * already post to; the text it writes mid-turn and its tool calls come
- * through `mirror.ts`. A message to the lead goes `sent` → `received` when the
- * lead's MCP child acks its queue row (the session has it) → `done` when
- * that session's turn ends, or `answered` when the lead answers it. Nothing
- * mirrored is sent to the lead again or spoken: speech is `answer_voice`'s
- * alone.
+ * The lead's own Claude Code session is mirrored in (`mirror*`, and
+ * `mirror.ts` for mid-turn text and tool calls) by the plugin's hooks. A
+ * message to the lead goes `sent` → `received` (its MCP child acked the row)
+ * → `done` when the turn that took it ends, or `answered`. Nothing mirrored
+ * is sent to the lead again or spoken: speech is `answer_voice`'s alone.
  *
  * Every change goes to the board's pages as a `lead-chat.changed` frame and
  * to no agent stream: the lead already has its own frame, and a page frame on
  * an agent's stream would cost that session a turn.
  */
+import { agentIdForName } from '@claude-workspaces/core/identity';
 import {
   LEAD_CHAT_EVENT,
   LEAD_CHAT_PAGE,
@@ -99,6 +94,9 @@ export class LeadChat {
   private readonly waiting = new Map<string, Waiting>();
   /** queueId → the message a spoken turn wrote, for its answer. */
   private readonly spoken = new Map<string, Waiting>();
+  /** When the lead's current turn began (its last mirrored prompt), per
+   *  board. A message received after it belongs to a later turn. */
+  private readonly turnStart = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(private readonly deps: LeadChatDeps) {
@@ -243,13 +241,13 @@ export class LeadChat {
    * the message it carried. A typed or spoken message on this board moves to
    * `received`; anything else is not this chat's.
    */
-  received(workspaceId: string, queueId: string): boolean {
+  received(workspaceId: string, queueId: string, at = this.now()): boolean {
     this.messages(workspaceId);
     const w = this.waiting.get(queueId) ?? this.spoken.get(queueId);
     if (!w || w.workspaceId !== workspaceId) return false;
     const m = this.messages(workspaceId).find((x) => x.id === w.messageId);
     if (!m || (m.state !== 'sent' && m.state !== 'queued')) return false;
-    return this.record(workspaceId, { ...m, state: 'received', receivedAt: this.now() });
+    return this.record(workspaceId, { ...m, state: 'received', receivedAt: at });
   }
 
   /**
@@ -261,6 +259,8 @@ export class LeadChat {
    */
   mirrorPrompt(workspaceId: string, agentName: string, p: MirroredPrompt): boolean {
     if (!this.isLead(workspaceId, agentName)) return false;
+    const started = this.now();
+    this.turnStart.set(workspaceId, started);
     if (p.typed) {
       if (!p.text) return false;
       return this.record(workspaceId, {
@@ -277,7 +277,7 @@ export class LeadChat {
     if (c.queueId) {
       this.messages(workspaceId);
       if (this.waiting.has(c.queueId) || this.spoken.has(c.queueId)) {
-        this.received(workspaceId, c.queueId);
+        this.received(workspaceId, c.queueId, started);
         return true;
       }
     }
@@ -304,8 +304,10 @@ export class LeadChat {
   mirrorTurnEnd(workspaceId: string, agentName: string, text: string): boolean {
     if (!this.isLead(workspaceId, agentName)) return false;
     const list = this.messages(workspaceId);
+    // Only what this turn took: a message acked mid-turn waits for the next.
+    const began = this.turnStart.get(workspaceId) ?? Number.POSITIVE_INFINITY;
     for (const m of list) {
-      if (m.role === 'person' && m.state === 'received') {
+      if (m.role === 'person' && m.state === 'received' && (m.receivedAt ?? 0) <= began) {
         this.record(workspaceId, { ...m, state: 'done' });
       }
     }
@@ -453,9 +455,7 @@ export class LeadChat {
   }
 }
 
-/** The closing row a Stop note made for this turn with these words, when
- *  no streamed row was there to become it. One text may be cut shorter than
- *  the other, so a prefix matches too. */
+/** The Stop note's closing row for these words (one may be cut shorter). */
 function closingRowOf(list: readonly StoredMessage[], text: string): StoredMessage | undefined {
   const words = text.trim();
   if (!words) return undefined;

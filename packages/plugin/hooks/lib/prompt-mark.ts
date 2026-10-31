@@ -55,7 +55,7 @@ import {
   resolveTransport,
 } from './agent-notes.ts';
 import { fullNote } from './note-redact.ts';
-import { markLead } from './session-mirror.ts';
+import { markLead, mirrorDir } from './session-mirror.ts';
 
 /** How an injected prompt begins, after leading whitespace. */
 export const INJECTED_PREFIXES: readonly string[] = [
@@ -200,7 +200,7 @@ export interface PromptHookDeps {
   joinedBoard?: boolean;
   /** The Access secret's reader; Keychain when omitted. */
   readSecret?: SecretReader;
-  /** Where the lead marker is kept (`session-mirror.ts`); tmpdir when omitted. */
+  /** Where the lead marker is kept; `mirrorDir(env)` when omitted. */
   mirrorDir?: string;
 }
 
@@ -232,7 +232,11 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
     });
     if (res.ok) {
       const answer = (await res.json().catch(() => null)) as { lead?: unknown } | null;
-      markLead(decision.post.sessionId, answer?.lead === true, deps.mirrorDir);
+      markLead(
+        decision.post.sessionId,
+        answer?.lead === true,
+        deps.mirrorDir ?? mirrorDir(deps.env),
+      );
     }
     return res.ok;
   } catch {

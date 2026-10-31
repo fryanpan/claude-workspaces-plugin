@@ -192,6 +192,11 @@ describe('the lead chat mirrors the lead’s session', () => {
       { ...WITHIN_1S, describe: 'received on the page' },
     );
     expect(typeof received.receivedAt).toBe('number');
+    // The turn that takes it starts with the channel prompt carrying it.
+    await prompt(LEAD, {
+      typed: false,
+      channel: { author: 'Bryan', text: '[voice.request] by Bryan', queueId },
+    });
     await turnEnd(LEAD, 'Not yet: the install step still takes 40s.');
     await waitFor(() => latest((x) => x.id === sent.id)?.state === 'done', {
       ...WITHIN_1S,
@@ -204,6 +209,35 @@ describe('the lead chat mirrors the lead’s session', () => {
     });
     await waitFor(() => latest((x) => x.id === sent.id)?.state === 'answered', {
       describe: 'answered',
+    });
+  });
+
+  it('marks a message taken mid-turn done at the end of the next turn, not this one', async () => {
+    await prompt(LEAD, { typed: true, text: 'Tidy the Saltmarsh docs' });
+    const before = lead.voice.length;
+    const res = await post(`/workspaces/${boardId}/lead-chat`, {
+      text: 'Also the Riverbend notes?',
+      author: BRYAN,
+    });
+    const sent = ((await res.json()) as { message: LeadChatMessage }).message;
+    await waitFor(() => lead.voice.length > before, { describe: 'the lead got it' });
+    const queueId = lead.voice.at(-1)?.queueId ?? '';
+    await post(`/workspaces/${boardId}/voice-queue/${queueId}/ack`, {});
+    await waitFor(() => latest((x) => x.id === sent.id)?.state === 'received', {
+      describe: 'received mid-turn',
+    });
+    await turnEnd(LEAD, 'Saltmarsh docs tidied.');
+    await waitFor(() => latest((m) => m.text === 'Saltmarsh docs tidied.'), {
+      describe: 'the turn ended',
+    });
+    expect(latest((x) => x.id === sent.id)?.state).toBe('received');
+    await prompt(LEAD, {
+      typed: false,
+      channel: { author: 'Bryan', text: '[voice.request] by Bryan', queueId },
+    });
+    await turnEnd(LEAD, 'Riverbend notes done too.');
+    await waitFor(() => latest((x) => x.id === sent.id)?.state === 'done', {
+      describe: 'done at the end of the turn that took it',
     });
   });
 

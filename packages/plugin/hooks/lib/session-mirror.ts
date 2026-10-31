@@ -24,7 +24,7 @@
  * Never blocks and never prints: both hooks are registered `async`.
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SecretReader } from './access-headers.ts';
 import {
@@ -44,15 +44,41 @@ export const TOOL_OUTPUT_CAP = 4_000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const CALLS_MAX = 50;
 
-/** Where markers and part files live. */
-export function mirrorDir(base = tmpdir()): string {
-  return join(base, 'claude-workspaces-lead-mirror');
+/** A part file left this long lost its final flush; a marker this long
+ *  belongs to a session that stopped prompting. */
+export const PARTS_STALE_MS = 60 * 60_000;
+export const MARKER_STALE_MS = 24 * 60 * 60_000;
+
+/**
+ * Where markers and part files live: the plugin's own data directory, which
+ * Claude Code hands every hook, or this user's ~/.claude when it does not.
+ * Never the shared tmpdir root — part files hold text not yet reduced.
+ */
+export function mirrorDir(env: EnvLike = process.env): string {
+  const data = env.CLAUDE_PLUGIN_DATA;
+  return typeof data === 'string' && data !== ''
+    ? join(data, 'lead-mirror')
+    : join(homedir(), '.claude', 'claude-workspaces', 'lead-mirror');
+}
+
+/** Remove part files and markers gone stale; at most once per prompt. */
+export function sweepStale(dir: string, now = Date.now()): void {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    try {
+      const age = now - statSync(path).mtimeMs;
+      if (age > (name.endsWith('.parts') ? PARTS_STALE_MS : MARKER_STALE_MS)) {
+        rmSync(path, { recursive: true, force: true });
+      }
+    } catch {
+      // Gone already, or another hook's: the next sweep tries again.
+    }
+  }
 }
 
 /**
  * Make `dir` and refuse it unless this user owns it and nobody else may
- * open it. A shared /tmp (Linux) can hold a directory of that name made by
- * someone else, and mkdir's mode does not touch one that already exists.
+ * open it: mkdir's mode does not touch a directory that already exists.
  */
 export function ownDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -75,6 +101,7 @@ export function markLead(sessionId: unknown, lead: boolean, dir = mirrorDir()): 
   try {
     if (lead) {
       ownDir(dir);
+      sweepStale(dir);
       writeFileSync(join(dir, id), '', { mode: 0o600 });
     } else {
       rmSync(join(dir, id), { force: true });
@@ -213,6 +240,9 @@ export function decideMirror(
   }
   const p = payload as Record<string, unknown>;
   if (!isMarkedLead(p.session_id, dir)) return { skip: 'not the lead' };
+  // A subagent's hooks carry its agent_id under the lead's session id: its
+  // work is not what the lead's terminal shows.
+  if (typeof p.agent_id === 'string' && p.agent_id !== '') return { skip: 'a subagent' };
   const body =
     p.hook_event_name === 'MessageDisplay'
       ? textBody(p, dir)
@@ -237,7 +267,7 @@ export interface MirrorHookDeps {
 export async function runMirrorHook(stdin: string, deps: MirrorHookDeps): Promise<boolean> {
   try {
     const payload = JSON.parse(stdin) as Record<string, unknown>;
-    const dir = deps.mirrorDir ?? mirrorDir();
+    const dir = deps.mirrorDir ?? mirrorDir(deps.env);
     const decision = decideMirror(payload, dir);
     if ('skip' in decision) return false;
     const agent = readAgentName(deps.env);
