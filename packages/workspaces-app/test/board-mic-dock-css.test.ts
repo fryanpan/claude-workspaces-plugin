@@ -251,6 +251,23 @@ describe('at or under 1100px the nav is the bottom bar', () => {
   });
 });
 
+describe('what sits at the foot of the screen clears the bar', () => {
+  it('lifts the toast above the bar at 1000 as at 430', () => {
+    document.body.className = 'board-body';
+    for (const viewport of [STRIP, PHONE]) {
+      setViewport(viewport);
+      const barHeight = token('--board-bottom-bar', document.body);
+      expect(px(barHeight), `at ${viewport.width}px`).toBeGreaterThan(0);
+      expect(styleOf(attach('board-toast')).bottom, `at ${viewport.width}px`).toContain(barHeight);
+    }
+    // Positive control: above 1100 the bar's height is 0, so the toast's
+    // lift is too. (The voice-connect sheet's `dvh` calc is dropped whole by
+    // happy-dom, so this file cannot read it.)
+    setViewport(IPAD);
+    expect(px(token('--board-bottom-bar', document.body))).toBe(0);
+  });
+});
+
 describe('the task detail never lands on top of the docked mic', () => {
   /**
    * Docking traded one overlap for another. `.board-detail` is `position: fixed;

@@ -65,11 +65,14 @@ export function renderLandingNav(sections: readonly LandingSection[]): string {
  * `--fg-muted` #6e7781. The widget clearance is the board's own: the comment
  * bubble's inset, its 48px and 6px of slack, so the last tab ends before it.
  * Every entry takes an equal share, so none moves or resizes.
+ * `--board-bottom-bar` is the board's own name for the bar's height: the
+ * coach card (`coach-card.ts`, fixed bottom-left) lifts itself by it, so it
+ * sits above this bar rather than over Review items and Inbox.
  */
 export const LANDING_NAV_CSS = `
 .home-nav{display:none}
 @media (max-width:1100px){
-body{padding-bottom:calc(98px + env(safe-area-inset-bottom,0px))}
+body{--board-bottom-bar:58px;padding-bottom:calc(98px + env(safe-area-inset-bottom,0px))}
 body:has(claude-feedback-widget){padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))}
 .home-nav{display:flex;flex-direction:row;align-items:center;position:fixed;left:0;right:0;top:auto;bottom:0;z-index:60;gap:0;background:#f8f9fa;border-top:1px solid #ced4da;padding:0 0 env(safe-area-inset-bottom,0px)}
 body:has(claude-feedback-widget) .home-nav{padding-right:calc(max(18px, env(safe-area-inset-right)) + 54px)}

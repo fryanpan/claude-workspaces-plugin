@@ -93,6 +93,10 @@ export interface HomeNavReading {
     boxesBefore: string[];
     boxesAfter: string[];
     taps: Tap[];
+    /** The coach card's box with a moment showing. */
+    coach: { top: number; bottom: number };
+    /** Each tab, and whether a tap at its centre reaches it. */
+    hits: Array<{ label: string; reached: boolean }>;
   };
   desktop: {
     display: string;
@@ -104,6 +108,8 @@ export interface HomeNavReading {
   };
   /** A workspace's navbar at 1000x800, and at 1180x820 as the control. */
   workspace1000: BarPlace;
+  workspace1000Coach: { top: number; bottom: number };
+  workspace1000Hits: Array<{ label: string; reached: boolean }>;
   workspace1180: BarPlace;
   errors: string[];
 }
@@ -264,6 +270,49 @@ async function main(): Promise<void> {
       sameSite: 'Lax',
     });
 
+    // The coach's card, shown for real: every page's EventSource on the
+    // coach stream is replaced before any script runs with one that hands the
+    // card a moment, so the real card in the real page draws where it draws.
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const Real = window.EventSource;
+        window.EventSource = function (url, init) {
+          if (!String(url).startsWith('/coach/stream')) return new Real(url, init);
+          const t = new EventTarget();
+          t.close = () => {};
+          setTimeout(() => {
+            const moment = { id: 'm-harbor', at: Date.now(), name: 'Coach',
+              line: 'Ship the Saltmarsh notes before lunch.', goal: 'Friday holds' };
+            t.dispatchEvent(new MessageEvent('coach', { data: JSON.stringify({ type: 'moment', moment }) }));
+          }, 50);
+          return t;
+        };
+      })()`,
+    });
+    /** The coach card's box, once it is on the page. */
+    const coachCard = () =>
+      waitFor(
+        () =>
+          ev<{ top: number; bottom: number } | null>(`(() => {
+            const c = document.querySelector('.coach-card-host')?.shadowRoot?.querySelector('.cw-coach');
+            if (!c) return null;
+            const r = c.getBoundingClientRect();
+            return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+          })()`),
+        { timeout: 15_000, describe: 'the coach card' },
+      );
+    /** Each visible tab, and whether a tap at its centre reaches it. */
+    const hits = () =>
+      ev<
+        Array<{ label: string; reached: boolean }>
+      >(`[...document.querySelectorAll('.board-nav > .board-nav-item')]
+        .filter((a) => a.getBoundingClientRect().width > 0)
+        .map((a) => {
+          const r = a.getBoundingClientRect();
+          const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return { label: a.textContent.trim(), reached: !!at && a.contains(at) };
+        })`);
+
     step('phone: 430x932, touch');
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 430,
@@ -341,6 +390,8 @@ async function main(): Promise<void> {
       });
     }
     const boxesAfter = await boxes();
+    const homeCoach = await coachCard();
+    const homeHits = await hits();
 
     step('phone: a workspace at 430x932');
     await open(board);
@@ -356,6 +407,8 @@ async function main(): Promise<void> {
     });
     await open(board);
     const workspace1000 = await place();
+    const workspace1000Coach = await coachCard();
+    const workspace1000Hits = await hits();
 
     step('desktop: 1180x820');
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -383,9 +436,23 @@ async function main(): Promise<void> {
 
     cdp.close();
     const reading: HomeNavReading = {
-      phone: { labels, icons, placeTop, placeEnd, home, workspace, boxesBefore, boxesAfter, taps },
+      phone: {
+        labels,
+        icons,
+        placeTop,
+        placeEnd,
+        home,
+        workspace,
+        boxesBefore,
+        boxesAfter,
+        taps,
+        coach: homeCoach,
+        hits: homeHits,
+      },
       desktop,
       workspace1000,
+      workspace1000Coach,
+      workspace1000Hits,
       workspace1180,
       errors,
     };

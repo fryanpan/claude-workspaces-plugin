@@ -70,8 +70,7 @@ body.board-body {
    you are, what this workspace is, who is here. The nav is NOT here — on wide
    screens it is the left rail inside `.board-main` (Bryan, 2026-08-18: "on
    desktop and laptop screens, home, tasks, etc. should be in the side drawer,
-   not top"), a strip above the content at ≤1100px, and the fixed bottom bar
-   on a phone. */
+   not top"), and the fixed bottom bar at ≤1100px. */
 .board-topbar {
   /* The settings popover anchors here: absolute against the header, so it
      hangs off the header's bottom-right. */
@@ -2219,8 +2218,8 @@ html:has(.board-walk-cred-form) {
    laptop screens, home, tasks, etc. should be in the side drawer, not top" —
    reversing the brief topbar-tabs detour), collapsible to icons via the
    button at its foot, with the choice persisted in localStorage. At ≤1100px
-   it becomes a horizontal strip above the content, and on a phone the fixed
-   bottom bar — those bands live in their media blocks below.
+   it becomes the fixed bottom bar — that band lives in its media block
+   below.
 
    The rail deliberately carries NO `overflow`. It used to clip its own x-axis
    while the width animated, which cost more than it bought: an `overflow-x`
@@ -2252,8 +2251,8 @@ html:has(.board-walk-cred-form) {
   display: none;
 }
 /* The collapse toggle sits at the rail's foot, visually quieter than the
-   nav items above it. Hidden in the strip/bottom-bar bands — a row of tabs
-   has nothing to collapse. */
+   nav items above it. Hidden in the bottom-bar band — a row of tabs has
+   nothing to collapse. */
 /* The settings seat takes the auto margin the collapse toggle used to own,
    so the pair sits at the rail's foot with the four tabs pushed clear above
    them. Quiet — the muted weight of an inactive tab — because it is not a
@@ -2300,8 +2299,8 @@ html:has(.board-walk-cred-form) {
 }
 /* The two bands hold ONE of these, never both (Bryan, 2026-09-11: on mobile
    "leave it up top right"). Above 1100 the rail has the room and the top bar
-   does not; at or below it the nav is a strip and then a bottom bar with four
-   tabs and a mic already in it, so the gear stays where a thumb has always
+   does not; at or below it the nav is a bottom bar with four tabs and the
+   agent button already in it, so the gear stays where a thumb has always
    found it. */
 /* Compound selectors, because `board.css` loads BEFORE `styles.css`: a single
    class here loses an equal-specificity tie to `.board-icon-btn`'s own
@@ -2388,8 +2387,8 @@ html:has(.board-walk-cred-form) {
      column, so a mic painted over that scrim still covers no page content,
      which is the promise docking was for.
 
-     This reaches only the RAIL. Measured 2026-08-19: in the ≤1100px band the
-     nav is a static top strip and the centred panel runs under it, so the same
+     This reaches only the RAIL. Measured 2026-08-19, when the ≤1100px band's
+     nav was a top strip with the centred panel running under it: the same
      z-index put the mic on top of the open task — at 905px it covered the
      panel whole, clipped the title's first characters, and hit-testing over
      the intersection resolved to the mic, so it took the click too. That is
@@ -2759,16 +2758,18 @@ html:has(.board-walk-cred-form) {
   font-size: 14px;
   cursor: pointer;
 }
+/* Centred in the space above the bottom bar at ≤1100px: the bar's layer is
+   60, so on a short screen this sheet's foot would sit under it. */
 .voice-connect {
   position: fixed;
-  inset: 0;
+  inset: 0 0 var(--board-bottom-bar, 0px);
   z-index: 50;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: min(480px, calc(100vw - 32px));
-  height: min(560px, calc(100dvh - 32px));
+  height: min(560px, calc(100dvh - 32px - var(--board-bottom-bar, 0px)));
   margin: auto;
   padding: 16px;
   border: 1px solid var(--border);
@@ -7339,10 +7340,11 @@ label.board-sched-chip:hover {
 .board-help-card dd {
   margin: 0;
 }
+/* Above the bottom bar at ≤1100px, which it would otherwise sit on. */
 .board-toast {
   position: fixed;
   left: 50%;
-  bottom: calc(20px + var(--safe-bottom));
+  bottom: calc(20px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
   transform: translateX(-50%);
   background: var(--fg);
   color: var(--bg);

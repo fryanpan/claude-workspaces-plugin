@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { readLandingNav } from './landing-nav-read.ts';
 import { signedInPerson } from './signed-in-person.ts';
 
 const OWNER_EMAIL = 'owner@harborlight.test';
@@ -34,23 +35,13 @@ const landing = async (headers: Record<string, string> = {}) => {
   return r.text();
 };
 
-/** The bar's entries as [target id, label], whether each target exists, and
- *  whether the entry carries the workspace navbar's icon-and-label markup. */
-function navOf(html: string): Array<{ id: string; label: string; onPage: boolean; icon: boolean }> {
-  const bar = html.match(/<nav class="board-nav home-nav"[^>]*>(.*?)<\/nav>/s)?.[1];
-  if (bar === undefined) throw new Error('no section bar on the page');
-  return [
-    ...bar.matchAll(
-      /<a class="board-nav-item" href="#([^"]+)">(.*?)<span class="board-nav-label">([^<]+)<\/span><\/a>/gs,
-    ),
-  ].map((m) => ({
-    id: m[1] ?? '',
-    label: m[3] ?? '',
-    onPage: html.includes(`id="${m[1]}"`),
-    icon: /^<span class="board-nav-icon" aria-hidden="true"><svg [^>]*>.*<\/svg><\/span>$/s.test(
-      m[2] ?? '',
-    ),
-  }));
+/** The bar's entries, and whether each target is a section on the page. */
+async function navOf(
+  html: string,
+): Promise<Array<{ id: string; label: string; onPage: boolean; icon: boolean }>> {
+  const { entries } = await readLandingNav(html);
+  if (entries.length === 0) throw new Error('no section bar on the page');
+  return entries.map((e) => ({ ...e, onPage: html.includes(`id="${e.id}"`) }));
 }
 
 beforeAll(() => {
@@ -85,7 +76,7 @@ afterAll(async () => {
 describe("Home's section bar", () => {
   it('gives the owner Review items, Inbox, Projects and Coach, each pointing at its section', async () => {
     const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
-    const nav = navOf(await landing(owner.headers));
+    const nav = await navOf(await landing(owner.headers));
     expect(nav).toEqual([
       { id: 'landing-review', label: 'Review items', onPage: true, icon: true },
       { id: 'inbox', label: 'Inbox', onPage: true, icon: true },
@@ -96,20 +87,24 @@ describe("Home's section bar", () => {
 
   it('gives another signed-in person no Inbox or Coach entry', async () => {
     const alice = signedInPerson(handle, dataDir, base, { email: 'alice@harborlight.test' });
-    expect(navOf(await landing(alice.headers)).map((e) => e.label)).toEqual([
+    expect((await navOf(await landing(alice.headers))).map((e) => e.label)).toEqual([
       'Review items',
       'Projects',
     ]);
   });
 
   it('gives a request that proves nobody no Inbox or Coach entry', async () => {
-    expect(navOf(await landing()).map((e) => e.label)).toEqual(['Review items', 'Projects']);
+    expect((await navOf(await landing())).map((e) => e.label)).toEqual([
+      'Review items',
+      'Projects',
+    ]);
   });
 
   it('draws one bar, so the old text bar at the top is gone', async () => {
     const html = await landing();
-    expect(html.match(/<nav /g)).toHaveLength(1);
+    const { navClasses, entries } = await readLandingNav(html);
+    expect(navClasses).toEqual(['board-nav home-nav']);
     // CONTROL: the one bar is the icon bar the cases above read.
-    expect(navOf(html)).toHaveLength(2);
+    expect(entries).toHaveLength(2);
   });
 });

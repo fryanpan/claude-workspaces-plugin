@@ -75,6 +75,18 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
     }
   }, 60_000);
 
+  it('a tap on every entry reaches it, with the widget and a coach card on the page', () => {
+    expect(r.phone.hits.map((h) => h.label)).toEqual([
+      'Review items',
+      'Inbox',
+      'Projects',
+      'Coach',
+    ]);
+    for (const h of r.phone.hits) expect(h.reached, h.label).toBe(true);
+    // The coach card sits above the bar, not over it.
+    expect(r.phone.coach.bottom).toBeLessThanOrEqual(r.phone.placeTop.top);
+  }, 60_000);
+
   it('no entry moves or resizes as the page scrolls under it', () => {
     expect(r.phone.boxesBefore).toHaveLength(4);
     expect(r.phone.boxesAfter).toEqual(r.phone.boxesBefore);
@@ -98,6 +110,17 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
       expect(p.position).toBe('fixed');
       expect(p.bottom).toBe(p.innerHeight);
       expect(p.top).toBeGreaterThan(p.innerHeight / 2);
+    }, 60_000);
+
+    it('at 1000 wide a tap on every tab reaches it, and the coach card sits above the bar', () => {
+      expect(r.workspace1000Hits.map((h) => h.label)).toEqual([
+        'Home',
+        'Tasks',
+        'Library',
+        'Activity',
+      ]);
+      for (const h of r.workspace1000Hits) expect(h.reached, h.label).toBe(true);
+      expect(r.workspace1000Coach.bottom).toBeLessThanOrEqual(r.workspace1000.top);
     }, 60_000);
 
     it('at 1180 wide is still the rail down the left, not a bottom bar', () => {
