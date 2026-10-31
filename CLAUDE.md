@@ -170,11 +170,11 @@ lint errors, at zero today. Per diff: `packages/plugin/**` → version bump
 The full delivery model is [docs/process/delivery.md](docs/process/delivery.md)
 — read it before answering "why doesn't my peer / my browser have this yet".
 
-- Diff touches `packages/plugin/**` → bump the patch in THREE places, same
-  value: `packages/plugin/.claude-plugin/plugin.json`,
-  `.claude-plugin/marketplace.json`, and `PLUGIN_VERSION` in
-  `packages/mcp/src/mcp.ts` (the handshake literal — the site that actually
-  drifts; asserted by launcher.test.ts only after `bun run build:mcp`).
+- Diff touches `packages/plugin/**` → bump the patch in TWO places, same
+  value: `packages/plugin/.claude-plugin/plugin.json` and
+  `.claude-plugin/marketplace.json`, then `bun run build:mcp`. The MCP
+  handshake's `PLUGIN_VERSION` is read from plugin.json and inlined into the
+  bundle by that build; launcher.test.ts asserts it through the bundle.
 - **Bump nothing when the diff touches neither `packages/plugin/**` nor
   `packages/mcp/src/**`** — a needless bump manufactures a total merge order
   across unrelated branches.
