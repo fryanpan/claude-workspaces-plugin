@@ -108,13 +108,12 @@ describe('the lead chat meeting on a page', () => {
     });
     expect(t.mic.opened).toBe(1);
     expect(t.net.last().url).toContain('/docs/d-saltmarsh/');
-    // The heading is one row; the chat's own mic steps aside.
+    // The heading is one row.
     expect(t.view.meeting.head.hidden).toBe(false);
     expect(t.view.meeting.head.textContent).toContain('Meeting');
     expect(t.view.meeting.head.textContent).toContain('End meeting');
     expect(t.view.meeting.head.textContent).toContain('AR');
     expect(t.view.start.hidden).toBe(true);
-    expect(t.view.mic.hidden).toBe(true);
     expect(t.view.meeting.notes.textContent).toContain(NOTES_EMPTY);
     expect(t.view.button.dataset.meeting).toBe('true');
   });
@@ -153,6 +152,16 @@ describe('the lead chat meeting on a page', () => {
     expect(t.view.meeting.notes.textContent).toContain('BobLead, file the ferry timetable.');
     // Another tab records it: this page opens no microphone.
     expect(t.mic.opened).toBe(0);
+  });
+
+  it('in a meeting the agent button only opens and closes: the room’s voice is the meeting’s', async () => {
+    const t = mount({ meeting: meetingFixture({ recorder: 'rec-elsewhere' }) });
+    await flush();
+    t.view.button.click();
+    expect(t.view.pane.hidden).toBe(false);
+    expect(t.view.button.dataset.listening).toBe('false');
+    t.view.button.click();
+    expect(t.view.pane.hidden).toBe(true);
   });
 
   it('the recording tab resumes the same recording on its next page, with no tap', async () => {

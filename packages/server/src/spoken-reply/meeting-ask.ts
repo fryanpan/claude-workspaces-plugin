@@ -119,10 +119,10 @@ export async function meetingAnswer(
     // No `navigate`: following it would take the page off the meeting it
     // is recording.
     const { navigate: _, ...a } = await answerer.ask(request, actor, context, turn.room.recent?.());
-    if (!a.spoken) return SILENT;
-    // Handed to the lead, "On it." is no answer: the lead's minute, if it
-    // gives one, is written when it comes (`meeting-errands.ts`).
+    // Handed to the lead, nothing is said until it answers: the lead's
+    // minute, if it gives one, is written when it comes (`meeting-errands.ts`).
     if (a.awaiting) return { ...a, asking: false, request };
+    if (!a.spoken) return SILENT;
     const minute = minuteFor(a);
     if (minute) turn.room.note(minute, request);
     return { ...meetingLine(a), asking: false };

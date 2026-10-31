@@ -179,8 +179,9 @@ describe('a minute in a mic meeting’s notes', () => {
     expect(replies()[0]?.spoken).toBe('');
     listen();
     speak(ASK);
-    await waitFor(() => replies().length === 2, { describe: 'On it' });
-    expect(replies()[1]?.spoken).toBe('On it.');
+    await waitFor(() => replies().length === 2, { describe: 'the lead takes it' });
+    // The lead took it: nothing is said until it answers.
+    expect(replies()[1]?.spoken).toBe('');
     const queueId = handle.tasks.listQueuedVoice(boardId).at(-1)?.id ?? '';
     expect(queueId).not.toBe('');
 

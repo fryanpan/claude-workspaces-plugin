@@ -279,17 +279,21 @@ async function main(): Promise<void> {
       );
 
       step(`board events toggle at ${width}`);
-      // The header holds one row: neither the title nor the toggle's label wraps, and the
-      // toggle sits level with the close button.
-      const headerOneRow = await inLayer<boolean>(
+      // The header's two rows: the heading, whole and on one line, level with
+      // the close button; then the actions, the toggle's label not wrapping
+      // and the toggle level with Start a meeting.
+      const headerFits = await inLayer<boolean>(
         cdp,
         `const t = sr.querySelector('.lc-chan-toggle'); const lab = t.children[1];` +
           ' const lh = parseFloat(getComputedStyle(lab).lineHeight) || 1.4 * parseFloat(getComputedStyle(lab).fontSize);' +
           ' const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; };' +
           ` const h2 = sr.querySelector('.lc-title h2'); const h2lh = parseFloat(getComputedStyle(h2).lineHeight);` +
+          ` const h2r = h2.getBoundingClientRect(); const room = sr.querySelector('.lc-close').getBoundingClientRect().left;` +
           ` return lab.textContent === 'Board events' && lab.getBoundingClientRect().height <= lh * 1.5` +
-          ` && h2.textContent === 'Your agent' && h2.getBoundingClientRect().height <= h2lh * 1.5` +
-          ` && Math.abs(mid(t) - mid(sr.querySelector('.lc-close'))) < 8;`,
+          ` && h2.textContent === 'Chat with Lead Agent' && h2r.height <= h2lh * 1.5` +
+          ' && h2.scrollWidth <= h2.clientWidth && h2r.right <= room' +
+          ` && Math.abs(mid(h2) - mid(sr.querySelector('.lc-close'))) < 8` +
+          ` && Math.abs(mid(t) - mid(sr.querySelector('.lc-start'))) < 8;`,
       );
       const chanCount = `return sr.querySelectorAll('.lc-chan').length;`;
       const before = await inLayer<number>(cdp, chanCount);
@@ -431,7 +435,7 @@ async function main(): Promise<void> {
       widths.push({
         width,
         tool: { head, open, expanded },
-        channel: { before, hidden, count, after, headerOneRow },
+        channel: { before, hidden, count, after, headerFits },
         voice: { closedText, label, words },
         liveWithin1s,
         layout,

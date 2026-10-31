@@ -41,8 +41,6 @@ export { deliveryNote } from './lead-chat-rows.ts';
 
 const SPARKLE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>';
-const MIC =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>';
 const CLOSE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
@@ -87,7 +85,6 @@ export interface LeadChatView {
   pane: HTMLElement;
   list: HTMLElement;
   composer: HTMLTextAreaElement;
-  mic: HTMLButtonElement;
   send: HTMLButtonElement;
   close: HTMLButtonElement;
   /** "Start a meeting", in the header while no meeting runs. */
@@ -205,7 +202,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   pane.setAttribute('aria-label', 'Your agents');
   const head = make(doc, 'header', 'lc-head');
   const title = make(doc, 'div', 'lc-title');
-  const h2 = make(doc, 'h2', '', 'Your agent');
+  const h2 = make(doc, 'h2', '', 'Chat with Lead Agent');
   const who = make(doc, 'p');
   title.append(h2, who);
   const close = make(doc, 'button', 'lc-icon lc-close');
@@ -222,7 +219,11 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   sw.setAttribute('aria-hidden', 'true');
   const chanCount = make(doc, 'span', 'lc-chan-count');
   chan.append(sw, make(doc, 'span', '', 'Board events'), chanCount);
-  head.append(title, meeting.head, start, chan, close);
+  // Two rows that keep their size: the heading, the lead's name and Close,
+  // then the header's actions. One row left the heading a few pixels.
+  const acts = make(doc, 'div', 'lc-head-acts');
+  acts.append(start, chan);
+  head.append(title, meeting.head, close, acts);
   const grip = make(doc, 'button', 'lc-grip');
   grip.type = 'button';
   grip.setAttribute('aria-label', 'Resize the chat');
@@ -234,16 +235,13 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const compose = make(doc, 'div', 'lc-compose');
   const composer = make(doc, 'textarea');
   composer.rows = 1;
-  composer.placeholder = 'Message your lead';
-  composer.setAttribute('aria-label', 'Message your lead');
+  composer.placeholder = 'Message lead agent';
+  composer.setAttribute('aria-label', 'Message lead agent');
   composer.maxLength = 4000;
-  const mic = make(doc, 'button', 'lc-icon lc-mic');
-  mic.type = 'button';
-  mic.setAttribute('aria-pressed', 'false');
-  mic.innerHTML = MIC;
   const send = make(doc, 'button', 'lc-send', 'Send');
   send.type = 'button';
-  compose.append(composer, mic, send);
+  // No mic of its own: the agent button starts and stops listening.
+  compose.append(composer, send);
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
   pane.append(grip, head, meeting.notes, list, status, compose, readonly);
@@ -442,7 +440,6 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     pane,
     list,
     composer,
-    mic,
     send,
     close,
     start,
@@ -452,7 +449,19 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       const out = m.open || m.barOut;
       button.setAttribute('aria-expanded', String(out));
       button.dataset.listening = String(m.listening);
-      button.title = out ? (m.listening ? 'Close and stop listening' : 'Close') : 'Ask Workspaces';
+      const meetingOn = !!m.meeting?.meeting;
+      // Open, the button starts and stops listening; the bar's tap puts it away.
+      button.title = m.open
+        ? meetingOn
+          ? 'Close'
+          : m.listening
+            ? 'Stop listening'
+            : 'Start listening'
+        : m.barOut
+          ? 'Close and stop listening'
+          : 'Ask Workspaces';
+      if (m.open && !meetingOn) button.setAttribute('aria-pressed', String(m.listening));
+      else button.removeAttribute('aria-pressed');
       bar.hidden = !m.barOut || m.open;
       pane.hidden = !m.open;
       barText.replaceChildren();
@@ -463,21 +472,13 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       }
       who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
       status.textContent = statusLine(m);
-      const meetingOn = !!m.meeting?.meeting;
       title.hidden = meetingOn;
       start.hidden = meetingOn || !m.canTalk || !m.loaded;
       meeting.render(
         m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false },
       );
-      // In a meeting the room's voice is the meeting's; the lead hears a
-      // line that opens with "Lead,", so the chat's own mic steps aside.
-      mic.hidden = meetingOn;
       compose.hidden = !m.canTalk;
       readonly.hidden = m.canTalk || !m.loaded;
-      mic.setAttribute('aria-pressed', String(m.listening));
-      const micLabel = m.listening ? 'Stop listening' : 'Talk to your lead';
-      mic.setAttribute('aria-label', micLabel);
-      mic.title = micLabel;
       send.disabled = composer.value.trim() === '';
       renderAll(m);
     },

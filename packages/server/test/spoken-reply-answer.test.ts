@@ -185,4 +185,39 @@ describe('SpokenAnswerer', () => {
     const r = await new SpokenAnswerer(b, 'w1').answer('  ', ACTOR, undefined);
     expect(r).toEqual({ spoken: '', points: [], detail: [], asking: false, route: 'none' });
   });
+
+  /** A board whose router hands every request to the live lead. */
+  const handedOff = (queueId?: string): SpokenBoard => ({
+    async handle(): Promise<VoiceHandleResult> {
+      return {
+        ok: true,
+        route: 'agent',
+        ack: 'Heard: "x". On it.',
+        ...(queueId ? { queueId } : {}),
+      };
+    },
+    goalStatus: () => undefined,
+    goals: () => [],
+  });
+
+  it('a request the lead took says nothing and waits on its queue row', async () => {
+    const r = await new SpokenAnswerer(handedOff('q-ferry'), 'w1').answer(
+      'go research ferry fares',
+      ACTOR,
+      undefined,
+    );
+    expect(r.spoken).toBe('');
+    expect(r.points).toEqual([]);
+    expect(r.awaiting).toBe('q-ferry');
+  });
+
+  it('a hand-off that was never queued still says its ack, so it is not dropped silently', async () => {
+    const r = await new SpokenAnswerer(handedOff(), 'w1').answer(
+      'go research ferry fares',
+      ACTOR,
+      undefined,
+    );
+    expect(r.spoken).toBe('On it.');
+    expect(r).not.toHaveProperty('awaiting');
+  });
 });

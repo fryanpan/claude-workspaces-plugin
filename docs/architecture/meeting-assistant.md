@@ -3081,8 +3081,8 @@ notes unless the answer holds a minute (below).
   unchanged.
 - **A request the lead takes** (`meeting-errands.ts`). A "Claude, …" may ask
   for anything a session can do; nothing here narrows it to lookups. When
-  the router hands it to the lead, the voice says "On it." and nothing is
-  noted yet. The page shows one steady line in the meeting bar, "Claude ·
+  the router hands it to the lead, the voice says nothing and nothing is
+  noted yet (2026-10-31: no spoken "On it."). The page shows one steady line in the meeting bar, "Claude ·
   <up to four words of the request>…", until the answer is in
   (`doing`). The lead's minute, if it gave one, is written into the notes at
   once, and its first sentence is said at the next pause, or at once when
@@ -3120,7 +3120,8 @@ notes unless the answer holds a minute (below).
   in the two minutes before, each line led by the speaker's display name,
   the request itself left out. One `LeadAnswers` is shared by the
   spoken-reply sockets and the bot, so the lead's `answer_voice` reaches
-  either through the same route. The call hears "On it.", then the lead's
+  either through the same route. A call has no page to show the lead
+  working, so it still hears "On it.", then the lead's
   first sentence once the bot is not already saying something, with its
   minute written by `minuteFor`. There is no "Claude · …" line on the page
   for a bot's request. A bot leaving drops its waits, so a later answer

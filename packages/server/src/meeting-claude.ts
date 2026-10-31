@@ -42,6 +42,7 @@ import { sentences } from './spoken-reply/reply-shape.ts';
 import type { SpokenVoice } from './spoken-reply/tts.ts';
 import type { VoiceActor } from './voice-action.ts';
 import { MEETING_HEARD_MS, meetingContext } from './voice-meeting-context.ts';
+import { AGENT_ACK } from './voice-quick.ts';
 
 /** A meeting participant, as far as this decision needs one. */
 export interface MeetingSpeaker {
@@ -254,15 +255,17 @@ export class MeetingClaude {
           asking: false,
           route: 'none',
         };
-    if (!a.spoken) return;
     if (a.awaiting) {
-      // "On it." is no answer: the lead's minute, if it gives one, is
-      // written when its answer comes.
+      // The lead took it. A call has no page to show it working, so the bot
+      // says the ack; the lead's minute, if it gives one, is written when
+      // its answer comes.
       this.awaitLead(u, call, a.awaiting, request);
-    } else {
-      const minute = minuteFor(a);
-      if (minute) this.minute(u.docId, call, minute, request);
+      await this.say(u.botId, a.spoken ? spokenLine(a) : AGENT_ACK);
+      return;
     }
+    if (!a.spoken) return;
+    const minute = minuteFor(a);
+    if (minute) this.minute(u.docId, call, minute, request);
     await this.say(u.botId, spokenLine(a));
   }
 
