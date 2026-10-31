@@ -218,17 +218,18 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     // leaves showing. Only once the spot has a box: a fragment move fires
     // popstate, which renders this, before the hashchange a page shows its
     // section on, and scrolling to a hidden element does nothing. So look
-    // each frame, for up to 60, while this thread is still the open one.
-    const reach = (n: number): void => {
-      requestAnimationFrame(() => {
+    // each frame, for up to 1.5s, while this thread is still the open one.
+    const until = performance.now() + 1500;
+    const reach = (): void => {
+      requestAnimationFrame((now) => {
         const spot = el.threadPositions.get(t.id)?.el;
         if (el.activeThread !== t.id) return;
-        if (!spot?.getClientRects().length) return void (n && reach(n - 1));
+        if (!spot?.getClientRects().length) return void (now < until && reach());
         spot.scrollIntoView({ block: narrow() ? 'start' : 'center' });
         if (narrow()) scrollBy(0, -48);
       });
     };
-    reach(60);
+    reach();
     drawn = '';
     render();
     ring();
