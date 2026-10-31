@@ -1063,10 +1063,9 @@ body.board-body {
   font-weight: 600;
 }
 /* The same stroked glyphs the rail wears, sized as boxes — decoration, not a
-   target (see `.voice-mic svg`). */
+   target. */
 .board-quick-new svg,
-.board-huddle-start svg,
-.board-conversation-start svg {
+.board-huddle-start svg {
   display: block;
   width: 15px;
   height: 15px;
@@ -2379,7 +2378,6 @@ html:has(.board-walk-cred-form) {
 /* ################# BOARD · RAIL MIC (HOLD-TO-TALK) #################
    Docked at the rail's foot.
 
-
    Bryan, 2026-08-19: *"can we make a more durable fix for the mic? Place it in
    a fixed location instead of floating. Put it in bottom left of left navbar
    in desktop views. And in the bottom tab on mobile, and give it a distinct
@@ -2438,40 +2436,7 @@ html:has(.board-walk-cred-form) {
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
-.board-nav-dock .voice-mic {
-  /* Out of the fixed layer entirely. The offsets and the z-index it needed as
-     a FAB mean nothing in flow, and leaving them set is how the next reader
-     concludes it is still floating. */
-  position: static;
-  left: auto;
-  bottom: auto;
-  z-index: auto;
-  flex: none;
-  /* A docked control casts no shadow — the shadow is what read as hovering
-     above the page. */
-  box-shadow: none;
-}
-/* Distinct from a nav item: those are borderless text rows in the rail's own
-   panel colour; this is a filled round button that contrasts with it.
-   `:not(.voice-active)` so the recording red — the state that matters most —
-   still wins from its own one-class rule. */
-.board-nav-dock .voice-mic:not(.voice-active) {
-  background: var(--bg);
-}
-.board-nav-dock .voice-mic:not(.voice-active):hover {
-  background: var(--bg-hover);
-}
-/* The dictation/ack readout rides above the mic wherever the mic is. Absolute
-   against the dock rather than fixed to the viewport corner: on a centred
-   1500px board the rail's foot is nowhere near that corner, and a readout
-   pointing at the page gutter is worse than no readout. It is wider than the
-   rail on purpose and overflows it — see the `overflow` note above. */
-.board-nav-dock .voice-indicator {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: auto;
-}
+
 /* ################# BOARD · SPOKEN REPLY PANEL #################
    Claude's spoken reply, above the rail mic (`board/spoken-reply-panel.ts`),
    as the approved mock drew it. Fixed to the viewport and placed from the
@@ -5229,7 +5194,6 @@ html:has(.board-walk-cred-form) {
    Opens instantly — §3.9. The key-fields row and the blocked note are
    part of this surface.
 
-
    TWO RULES HOLD THIS WHOLE SURFACE TOGETHER, and both were reported missing
    ("laid out by a monkey… random elements not aligned and inconsistent spacing
    and flow", 2026-08-18):
@@ -6498,7 +6462,6 @@ label.board-sched-chip:hover {
 /* ################# BOARD · TASK DECISION CARD #################
    A question, the ways to answer it, and a box.
 
-
    Reported 2026-08-18: "options crammed against their details, no spacing
    between the answer buttons, no spacing between buttons and comment text,
    nothing aligned." The task-detail copy of this card emitted classes that had
@@ -7441,7 +7404,6 @@ label.board-sched-chip:hover {
 /* ################# BOARD · RESPONSIVE ≥1660px (SPLIT PANE) #################
    The task detail is a right-hand split pane, not a modal.
 
-
    Bryan's report: "the current modal is cramped on bigger screens" — a centred
    860px card on a 1600px display leaves the board unreadable behind a dimmed
    backdrop and still gives the description a narrow column. The detail becomes
@@ -7574,7 +7536,6 @@ label.board-sched-chip:hover {
 /* ################# BOARD · RESPONSIVE ≤1100px (NAV STRIP) #################
    The nav rail becomes a horizontal strip above the content.
 
-
    A 170px rail plus its gap costs too much of the board's width at laptop-
    window sizes, so the rail folds up into a tab strip on its own row. The
    collapse affordance goes with it — a row of tabs has nothing to collapse.
@@ -7689,12 +7650,7 @@ label.board-sched-chip:hover {
     border-top: none;
     border-right: 1px solid var(--border);
   }
-  .board-nav-dock .voice-indicator {
-    /* The strip sits at the TOP of the content in this band, so the readout
-       hangs below it rather than over the header. */
-    top: calc(100% + 8px);
-    bottom: auto;
-  }
+
   .board-home {
     padding-top: 4px;
   }
@@ -7893,10 +7849,7 @@ label.board-sched-chip:hover {
   .board-nav-dock {
     padding: 0 10px;
   }
-  .board-nav-dock .voice-indicator {
-    top: auto;
-    bottom: calc(100% + 8px);
-  }
+
   /* The page's own tail has to clear the 54px bar. The height is a VARIABLE
      rather than copies of `58px` because more than one reader needs it and one
      of them read the wrong number; it is scoped to board pages because no other
