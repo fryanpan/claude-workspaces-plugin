@@ -214,14 +214,21 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     el.activeThread = t.id;
     ringed = t.id;
     seen.mark(t.id, latest(t));
-    const spot = el.threadPositions.get(t.id)?.el;
     // At once rather than smoothly; on a phone into the half the sheet
-    // leaves showing. A frame later, so a page that shows its section on the
-    // same hashchange has laid it out.
-    requestAnimationFrame(() => {
-      spot?.scrollIntoView({ block: narrow() ? 'start' : 'center' });
-      if (narrow()) scrollBy(0, -48);
-    });
+    // leaves showing. Only once the spot has a box: a fragment move fires
+    // popstate, which renders this, before the hashchange a page shows its
+    // section on, and scrolling to a hidden element does nothing. So look
+    // each frame, for up to 60, while this thread is still the open one.
+    const reach = (n: number): void => {
+      requestAnimationFrame(() => {
+        const spot = el.threadPositions.get(t.id)?.el;
+        if (el.activeThread !== t.id) return;
+        if (!spot?.getClientRects().length) return void (n && reach(n - 1));
+        spot.scrollIntoView({ block: narrow() ? 'start' : 'center' });
+        if (narrow()) scrollBy(0, -48);
+      });
+    };
+    reach(60);
     drawn = '';
     render();
     ring();
