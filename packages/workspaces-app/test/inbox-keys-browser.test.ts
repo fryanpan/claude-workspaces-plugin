@@ -45,9 +45,25 @@ describe.skipIf(CHROME === null)('Incoming Messages and the keyboard', () => {
     expect(reading.focusAtLoad).toBe('section#inbox');
   });
 
-  it('j moves to the next line and o opens it with its message', () => {
+  it('no line carries the cursor before a key, and the first j lands on the first line', () => {
+    expect(reading.cursorAtLoad).toBeNull();
+    expect(reading.firstLine).not.toBeNull();
+    expect(reading.cursorAfterJ).toBe(reading.firstLine);
+    expect(reading.cursorAfterJJ).toBe(reading.secondLine);
+  });
+
+  it('the cursor line is drawn differently from a plain one, and is wholly in view', () => {
+    // Positive control: the plain line paints its button white with no bar.
+    expect(reading.plainLook.boxShadow).toBe('none');
+    expect(reading.cursorLook.boxShadow).toContain('inset');
+    expect(reading.cursorLook.lineBackground).not.toBe(reading.plainLook.lineBackground);
+    // The bar is on the element painted at the line's edge, not under it.
+    expect(reading.cursorLook.atLeftEdge).toContain('board-review-row');
+    expect(reading.cursorInView).toBe(true);
+  });
+
+  it('a second j moves to the next line and o opens it with its message', () => {
     expect(reading.secondLine).not.toBeNull();
-    expect(reading.cursorAfterJ).toBe(reading.secondLine);
     expect(reading.openAfterO).toBe(reading.secondLine);
     expect(reading.messageAfterO).toBe('Message 2 text.');
   });

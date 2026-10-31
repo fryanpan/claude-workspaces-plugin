@@ -4,6 +4,7 @@
  * choice posts the snooze. The markup is the shape `inbox/section.ts` draws.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { INBOX_SECTION_CSS } from '../../server/src/inbox/section-css.ts';
 import { snoozeChoices, startInbox } from '../src/landing-inbox.ts';
 
 const LINE = (id: string, purpose: string) =>
@@ -72,6 +73,41 @@ describe('a tap', () => {
   });
 });
 
+describe('the cursor', () => {
+  const key = (k: string) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+  const cursorRow = () =>
+    document.querySelector<HTMLElement>('.inbox-rows > .inbox-row-cursor')?.dataset.row ?? null;
+  const bar = (row: string) => {
+    const b = document.querySelector(`[data-row="${row}"] .inbox-line > .board-review-row`);
+    return b ? getComputedStyle(b).boxShadow : null;
+  };
+
+  it('is on no line until a key, then j lands on the first line and j again on the second', () => {
+    expect(cursorRow()).toBeNull();
+    key('j');
+    expect(cursorRow()).toBe('ib-aaaaaaaaaaaa');
+    key('j');
+    expect(cursorRow()).toBe('ib-bbbbbbbbbbbb');
+    key('k');
+    expect(cursorRow()).toBe('ib-aaaaaaaaaaaa');
+  });
+
+  it('draws a bar on the line the reader sees, and none on the others', () => {
+    // The section's own stylesheet, as the front page inlines it.
+    const style = document.createElement('style');
+    style.textContent = INBOX_SECTION_CSS;
+    document.head.append(style);
+    try {
+      expect(bar('ib-aaaaaaaaaaaa')).not.toContain('inset');
+      key('j');
+      expect(bar('ib-aaaaaaaaaaaa')).toContain('inset');
+      expect(bar('ib-bbbbbbbbbbbb')).not.toContain('inset');
+    } finally {
+      style.remove();
+    }
+  });
+});
+
 describe('snooze', () => {
   it('`b` opens the modal on the cursor line, and a choice posts the snooze', async () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
@@ -97,7 +133,7 @@ describe('snooze', () => {
   it('j moves the cursor and Escape closes the modal', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j' }));
     const rows = document.querySelectorAll('.inbox-row');
-    expect(rows[1]?.classList.contains('inbox-row-cursor')).toBe(true);
+    expect(rows[0]?.classList.contains('inbox-row-cursor')).toBe(true);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(document.querySelector('.inbox-modal')).toBeNull();
@@ -175,9 +211,8 @@ describe('the key list', () => {
   it('keys other than `?` and Escape do nothing while it is open', () => {
     key('?');
     key('j');
-    expect(document.querySelectorAll('.inbox-row')[0]?.classList.contains('inbox-row-cursor')).toBe(
-      true,
-    );
+    // A j that got through would put the cursor on the first line.
+    expect(document.querySelector('.inbox-row-cursor')).toBeNull();
   });
 });
 
