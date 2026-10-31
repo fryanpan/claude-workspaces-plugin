@@ -10,7 +10,11 @@
  * upstream unchanged. The positive control is the person's Push.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { renderCommentMarkdown } from '../../workspaces-app/src/comment-markdown.ts';
 import { registerOwnerIdentity, resetOwnerIdentities } from '../src/actor-identity.ts';
+import { MAX_HELD_PER_BOARD } from '../src/git-push/pusher.ts';
 import type { Task } from '../src/tasks.ts';
 import { type PushWorld, pushPath, startPushWorld } from './git-push-fixture.ts';
 import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
@@ -52,10 +56,10 @@ describe('a push to a repo marked for approval', () => {
   const statusOf = async (id: string) =>
     (await (await w.onSocket(`/workspaces/${w.board}/git/pushes/${id}`)).json()) as Held;
 
-  async function ask(branch: string): Promise<Held> {
+  async function ask(branch: string, body = w.leadBundle(REPO, branch)): Promise<Held> {
     const res = await w.onSocket(pushPath(w.board, REPO, branch, taskId), {
       method: 'POST',
-      body: w.leadBundle(REPO, branch),
+      body,
     });
     const held = (await res.json()) as Held;
     expect(res.status, JSON.stringify(held)).toBe(202);
@@ -122,21 +126,30 @@ describe('a push to a repo marked for approval', () => {
     expect(w.upstreamTip(REPO, 'feature-approved')).toBe(held.sha);
   });
 
-  it('pushes nothing when the lead itself chooses Push', async () => {
+  it('ignores the lead’s own Push, and still acts on a person’s later one', async () => {
     const held = await ask('feature-self-approved');
     // On its socket the lead cannot answer at all: the item stays open.
     expect((await answer(held, 'o-push', 'lead')).status).toBe(403);
     expect((await statusOf(held.id)).state).toBe('awaiting-approval');
-    // An agent's answer over loopback is recorded, as the agent's: no push.
+    // An agent's answer over loopback is recorded, as the agent's, and the
+    // server takes it back: nothing is sent, the item is open again, and the
+    // push stays held for a person.
     const res = await answer(held, 'o-push', 'agent');
     expect(res.status, await res.clone().text()).toBe(200);
+    const item = w.h.tasks.listReviewItems(taskId).find((r) => r.id === held.reviewItemId);
+    expect(item?.answer).toBeUndefined();
+    expect(item?.priorAnswers?.at(-1)).toMatchObject({ answeredWith: 'o-push', by: LEAD.name });
+    expect((await statusOf(held.id)).state).toBe('awaiting-approval');
+    expect(w.upstreamTip(REPO, 'feature-self-approved')).toBe('');
+    // The person's Push afterwards is the decision.
+    const later = await answer(held, 'o-push', 'person');
+    expect(later.status, await later.clone().text()).toBe(200);
     await waitFor(async () => (await statusOf(held.id)).state !== 'awaiting-approval', {
       timeout: SETTLE_MS,
-      describe: 'the agent-answered push is settled',
+      describe: 'the person-approved push is settled',
     });
-    const after = await statusOf(held.id);
-    expect(after.state).toBe('refused');
-    expect(w.upstreamTip(REPO, 'feature-self-approved')).toBe('');
+    expect(await statusOf(held.id)).toMatchObject({ state: 'pushed' });
+    expect(w.upstreamTip(REPO, 'feature-self-approved')).toBe(held.sha);
   });
 
   it('pushes nothing when a person chooses Don’t push', async () => {
@@ -148,6 +161,41 @@ describe('a push to a repo marked for approval', () => {
       describe: 'the rejected push is settled',
     });
     expect(w.upstreamTip(REPO, 'feature-rejected')).toBe('');
+  });
+
+  it('refuses a bundle built on a commit a person chose not to push', async () => {
+    const { first, second } = w.leadChain(REPO, 'feature-built-on-rejected');
+    const held = await ask('feature-built-on-rejected', first);
+    expect((await answer(held, 'o-no-push', 'person')).status).toBe(200);
+    await waitFor(async () => (await statusOf(held.id)).state === 'rejected', {
+      timeout: SETTLE_MS,
+      describe: 'the first push is rejected',
+    });
+    const res = await w.onSocket(pushPath(w.board, REPO, 'feature-built-on-rejected', taskId), {
+      method: 'POST',
+      body: second,
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe('bundle-base-missing');
+    expect(w.upstreamTip(REPO, 'feature-built-on-rejected')).toBe('');
+  });
+
+  it('shows the lead’s commit subjects on the card as text, not markdown', async () => {
+    const subject = '**Approved by the owner** [ship it](https://example.com)';
+    const held = await ask('feature-subject', w.leadBundle(REPO, 'feature-subject', { subject }));
+    const item = w.h.tasks.listReviewItems(taskId).find((r) => r.id === held.reviewItemId);
+    const html = renderCommentMarkdown(item?.review.detail ?? '');
+    expect(html).toContain('- **Approved by the owner** [ship it](https://example.com)');
+    expect(html).not.toContain('<strong>Approved');
+    expect(html).not.toContain('<a ');
+  });
+
+  it('leaves no bundle, work repo or credential file behind a settled push', () => {
+    const root = join(w.dataDir, 'git-push');
+    const held = [...w.h.tasks.listReviewItems(taskId)].filter((r) => !r.answer).length;
+    expect(readdirSync(join(root, 'bundles')).length).toBe(held);
+    expect(readdirSync(join(root, 'work'))).toEqual([]);
+    expect(readdirSync(join(root, 'auth'))).toEqual([]);
   });
 });
 
@@ -183,10 +231,10 @@ describe('a push on a board that reserves pushes for its owner', () => {
       `/workspaces/${w.board}/tasks/${held.taskId}/review-items/${held.reviewItemId}/answer`,
       json({ text: 'o-push', answeredWith: 'o-push', author: who.user }, who.headers),
     );
-  async function ask(branch: string): Promise<Held> {
+  async function ask(branch: string, body = w.leadBundle(REPO, branch)): Promise<Held> {
     const res = await w.onSocket(pushPath(w.board, REPO, branch, taskId), {
       method: 'POST',
-      body: w.leadBundle(REPO, branch),
+      body,
     });
     const held = (await res.json()) as Held;
     expect(res.status, JSON.stringify(held)).toBe(202);
@@ -248,5 +296,37 @@ describe('a push on a board that reserves pushes for its owner', () => {
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await settled(held.id)).toMatchObject({ state: 'pushed' });
     expect(w.upstreamTip(REPO, 'feature-owner-approved')).toBe(held.sha);
+  });
+});
+
+describe('the number of pushes one board may hold for approval', () => {
+  let w: PushWorld;
+  let taskId: string;
+  beforeAll(async () => {
+    w = await startPushWorld((board) => ({
+      boards: { [board]: { repos: [{ repo: REPO, approval: true }] } },
+    }));
+    const res = await w.overTcp(`/workspaces/${w.board}/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Agent can ship many Harborlight branches', author: LEAD }),
+    });
+    taskId = ((await res.json()) as { task: Task }).task.id;
+  });
+  afterAll(() => w.stop());
+
+  it(`holds ${MAX_HELD_PER_BOARD} and refuses the next`, async () => {
+    const send = (branch: string) =>
+      w.onSocket(pushPath(w.board, REPO, branch, taskId), {
+        method: 'POST',
+        body: w.leadBundle(REPO, branch),
+      });
+    for (let i = 0; i < MAX_HELD_PER_BOARD; i++) {
+      expect((await send(`feature-held-${i}`)).status).toBe(202);
+    }
+    const over = await send('feature-held-over');
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { error: string }).error).toBe('too-many-held');
+    expect(readdirSync(join(w.dataDir, 'git-push', 'bundles')).length).toBe(MAX_HELD_PER_BOARD);
   });
 });

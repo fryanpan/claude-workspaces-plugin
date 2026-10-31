@@ -8,14 +8,16 @@
  * - Line 2: the same request over a board's own socket, as a walled lead on
  *   the Mac sends it, and on a server configured as a project machine is (the
  *   lead's uid refused on loopback TCP), where only the socket works.
- * - Line 3, the server's half: the credential reaches git only through the
- *   child's environment, never an argument, and no answer the lead can get
- *   carries it, even when upstream fails.
+ * - Line 3, the server's half: the credential is in no git call's arguments
+ *   or environment (a same-user lead can read both with `ps eww`). It reaches
+ *   git as a mode-600 file under the data dir that exists only for the call,
+ *   and no answer the lead can get carries it, even when upstream fails.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GIT_PUSH_POLICY_FILE } from '../src/git-push/policy.ts';
+import { MAX_BUNDLE_BYTES } from '../src/routes/git-push.ts';
 import { FAKE_TOKEN, type PushWorld, pushPath, startPushWorld } from './git-push-fixture.ts';
 
 const policy = (board: string) => ({
@@ -98,15 +100,85 @@ describe('a lead on the Mac pushes over its board socket', () => {
     expect(w.upstreamTip('Harborlight/notes', 'feature-force')).toBe(tip);
   });
 
-  it('never passes the credential as an argument, only in git’s environment', () => {
+  it('keeps the credential out of every git call’s arguments and environment', () => {
+    const header = Buffer.from(`x-access-token:${FAKE_TOKEN}`).toString('base64');
     const pushes = w.calls.filter((c) => c.args.includes('push'));
     expect(pushes.length).toBeGreaterThan(0);
-    for (const c of w.calls) expect(c.args.join(' ')).not.toContain(FAKE_TOKEN);
+    for (const c of w.calls) {
+      const seen = [...c.args, ...Object.entries(c.env).map(([k, v]) => `${k}=${v}`)].join('\n');
+      expect(seen).not.toContain(FAKE_TOKEN);
+      expect(seen).not.toContain(header);
+    }
     for (const c of pushes) {
       expect(c.args.some((a) => a.includes('--force') || a.startsWith('+'))).toBe(false);
-      expect(Object.values(c.env).join('\n')).toContain(
-        Buffer.from(`x-access-token:${FAKE_TOKEN}`).toString('base64'),
-      );
+    }
+    // Positive control: git was handed the credential, as a file only the
+    // server's user can read, under the data dir, gone once the call returned.
+    const forPushes = pushes.map((c) =>
+      w.authFiles.find((f) => f.path === c.env.GIT_CONFIG_GLOBAL),
+    );
+    for (const f of forPushes) {
+      expect(f?.text).toContain(`extraheader = Authorization: Basic ${header}`);
+      expect(f?.mode).toBe(0o600);
+      expect(f?.path.startsWith(w.dataDir)).toBe(true);
+      expect(existsSync(f?.path ?? '')).toBe(false);
+    }
+  });
+
+  it('lands a bundle built on a commit it pushed before', async () => {
+    const { first, second } = w.leadChain('Harborlight/notes', 'feature-chain');
+    const path = pushPath(w.board, 'Harborlight/notes', 'feature-chain');
+    expect((await w.onSocket(path, post(first))).status).toBe(200);
+    const res = await w.onSocket(path, post(second));
+    const body = (await res.json()) as { state: string; sha: string };
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.state).toBe('pushed');
+    expect(w.upstreamTip('Harborlight/notes', 'feature-chain')).toBe(body.sha);
+  });
+
+  it('stops reading a body with no length once it passes the cap', async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sent > MAX_BUNDLE_BYTES / chunk.byteLength + 8) c.close();
+        else {
+          sent++;
+          c.enqueue(chunk);
+        }
+      },
+    });
+    const res = await w.onSocket(pushPath(w.board, 'Harborlight/notes', 'feature-huge'), {
+      method: 'POST',
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(res.status).toBe(413);
+    expect(readdirSync(join(w.dataDir, 'git-push', 'bundles'))).toEqual([]);
+  });
+
+  it('refuses a bundle with two refs, a tag, or a ref named for another branch', async () => {
+    const shapes: [string, ArrayBuffer][] = [
+      [
+        'feature-two-refs',
+        w.leadBundle('Harborlight/notes', 'feature-two-refs', {
+          refs: (b) => [`origin/main..${b}`, 'HEAD'],
+        }),
+      ],
+      [
+        'feature-tagged',
+        w.leadBundle('Harborlight/notes', 'feature-tagged', {
+          tag: 'v1',
+          refs: () => ['origin/main..v1'],
+        }),
+      ],
+      ['feature-named', w.leadBundle('Harborlight/notes', 'feature-other-name')],
+    ];
+    for (const [branch, bundle] of shapes) {
+      const res = await w.onSocket(pushPath(w.board, 'Harborlight/notes', branch), post(bundle));
+      expect(res.status, branch).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('bundle-heads');
+      expect(w.upstreamTip('Harborlight/notes', branch)).toBe('');
     }
   });
 

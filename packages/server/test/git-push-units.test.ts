@@ -4,7 +4,7 @@
  * redaction every upstream error passes through.
  */
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -21,6 +21,7 @@ import {
   parsePolicy,
   ruleFor,
 } from '../src/git-push/policy.ts';
+import { runPush } from '../src/git-push/run.ts';
 
 const FAKE = 'fake-push-credential-for-tests-only';
 
@@ -139,5 +140,57 @@ describe('redaction', () => {
     expect(out).not.toContain(FAKE);
     expect(out).not.toContain(header.split(' ').pop() ?? '');
     expect(out).toContain('[credential]');
+  });
+});
+
+describe('runPush', () => {
+  const input = (root: string) => ({
+    id: 'a'.repeat(24),
+    repo: 'Harborlight/notes',
+    branch: 'feature-x',
+    bundle: join(root, 'missing.bundle'),
+  });
+
+  it('refuses with no credential, runs no git, and leaves no work repo', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'git-push-run-'));
+    const calls: string[][] = [];
+    const r = await runPush(
+      {
+        root,
+        credential: async () => null,
+        remoteUrlFor: () => 'https://example.invalid/x.git',
+        runGit: async (c) => {
+          calls.push(c.args);
+          return { code: 0, stdout: '', stderr: '' };
+        },
+      },
+      input(root),
+      true,
+    );
+    expect(r).toMatchObject({ ok: false, status: 503, error: 'no-credential' });
+    expect(calls).toEqual([]);
+    expect(existsSync(join(root, 'work', `${'a'.repeat(24)}.git`))).toBe(false);
+  });
+
+  it('removes the work repo when git throws mid-run', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'git-push-run-'));
+    let n = 0;
+    const run = runPush(
+      {
+        root,
+        credential: async () => FAKE,
+        remoteUrlFor: () => 'https://example.invalid/x.git',
+        runGit: async () => {
+          n += 1;
+          if (n > 2) throw new Error('spawn failed');
+          return { code: 0, stdout: '', stderr: '' };
+        },
+      },
+      input(root),
+      true,
+    );
+    await expect(run).rejects.toThrow('spawn failed');
+    expect(existsSync(join(root, 'work', `${'a'.repeat(24)}.git`))).toBe(false);
+    expect(existsSync(join(root, 'auth')) ? readdirSync(join(root, 'auth')) : []).toEqual([]);
   });
 });

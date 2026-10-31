@@ -7,12 +7,16 @@
  *   secret `CW_GITHUB_PUSH_TOKEN`. The entrypoint's `drop_secrets` does not
  *   name it, so it reaches the `cw` server; the lead's `only_env` list does
  *   not name it either, so the `lead` user never has it. It is taken out of
- *   this process's environment at boot, so no child the server starts
- *   inherits it. There is no Keychain there.
+ *   `process.env` at boot so no child the server starts inherits it. That
+ *   does not hide it from `ps eww`, which prints the server's environment as
+ *   it was at exec; there the `lead` user is a different uid, and `ps` shows
+ *   another uid's environment only to root. There is no Keychain there.
  * - **The Mac**: the Keychain item `cw-github-push-token`, read on the first
  *   push and kept in memory. The walled lead's Seatbelt profile denies the
- *   Keychain's services. The variable is ignored there and removed, because
- *   a same-user process can read another's starting environment (`ps eww`).
+ *   Keychain's services. The variable is ignored there and removed from
+ *   `process.env`, but that removal does not hide a value the server was
+ *   started with: a same-user lead can read it with `ps eww`. So on the Mac
+ *   the credential comes from the Keychain only, never the variable.
  *
  * Nothing here returns the value inside a message. Callers get the value or
  * null, and say "no credential" in their own words.

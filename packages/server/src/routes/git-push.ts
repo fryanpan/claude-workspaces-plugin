@@ -21,7 +21,7 @@
  * member's scope gains it.
  */
 import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { closeSync, openSync, rmSync, writeSync } from 'node:fs';
 import type { FeatureRequest } from '../feature-module.ts';
 import { isBranchName, isRepoName } from '../git-push/policy.ts';
 import type { GitPusher } from '../git-push/pusher.ts';
@@ -74,21 +74,54 @@ export async function handleGitPushRoutes(
   }
   const declared = Number(req.headers.get('content-length') ?? '0');
   if (declared > MAX_BUNDLE_BYTES) return ctx.j(413, { error: 'bundle-too-large' });
-  const body = new Uint8Array(await req.arrayBuffer());
-  if (body.byteLength > MAX_BUNDLE_BYTES) return ctx.j(413, { error: 'bundle-too-large' });
-  if (body.byteLength === 0) return ctx.j(400, { error: 'the body must be a git bundle' });
 
   const id = randomBytes(12).toString('hex');
-  writeFileSync(ctx.pusher.bundlePath(id), body, { mode: 0o600 });
-  const out = await ctx.pusher.submit({
-    id,
-    boardId,
-    repo,
-    branch,
-    ...(task ? { taskId: task } : {}),
-    requestedBy: requesterLabel(req, caller.who),
-  });
-  return ctx.j(out.status, out.record);
+  const path = ctx.pusher.bundlePath(id);
+  let kept = false;
+  try {
+    const size = await saveBody(req, path);
+    if (size === 'too-large') return ctx.j(413, { error: 'bundle-too-large' });
+    if (size === 0) return ctx.j(400, { error: 'the body must be a git bundle' });
+    const out = await ctx.pusher.submit({
+      id,
+      boardId,
+      repo,
+      branch,
+      ...(task ? { taskId: task } : {}),
+      requestedBy: requesterLabel(req, caller.who),
+    });
+    kept = true;
+    return ctx.j(out.status, out.record);
+  } finally {
+    // The pusher owns the bundle once `submit` answers; before that, a
+    // refusal or a throw leaves nothing behind. Transient, so a hard delete.
+    if (!kept) rmSync(path, { force: true });
+  }
+}
+
+/**
+ * Write the body to `path` (mode 600) as it arrives, stopping at the cap,
+ * so a chunked body with no length is never buffered whole first.
+ */
+async function saveBody(req: Request, path: string): Promise<number | 'too-large'> {
+  const fd = openSync(path, 'w', 0o600);
+  let size = 0;
+  try {
+    if (!req.body) return 0;
+    const reader = req.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return size;
+      size += value.byteLength;
+      if (size > MAX_BUNDLE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return 'too-large';
+      }
+      writeSync(fd, value);
+    }
+  } finally {
+    closeSync(fd);
+  }
 }
 
 type Caller = { ok: true; who: string } | { ok: false; error: string; message: string };

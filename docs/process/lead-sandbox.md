@@ -325,9 +325,14 @@ ask; the same request over loopback TCP is refused.
 ```
 
 No route writes it, and it is read again on every push. The server refuses
-the repo's default branch and anything that is not a fast-forward.
+the repo's default branch and anything that is not a fast-forward. Any other
+branch is allowed, including one a repo's `on: push` workflow runs for. The
+bundle must carry exactly one ref, `refs/heads/<branch>`, and build only on
+commits upstream already has.
 
-**The credential.** On the Mac, the Keychain item `cw-github-push-token`
+**The credential.** A fine-grained GitHub token with Contents read and
+write on the listed repos only, and without the Workflows permission. On the
+Mac, the Keychain item `cw-github-push-token`
 (`security add-generic-password -a "$USER" -s cw-github-push-token -w`, then
 paste the token when asked). On a project machine, the Fly secret
 `CW_GITHUB_PUSH_TOKEN`. Without one, every push is refused with 503.

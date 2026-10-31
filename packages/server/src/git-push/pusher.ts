@@ -9,25 +9,27 @@
  *  1. the repo is on the board's list (`policy.ts`);
  *  2. the host has a credential (`credential.ts`);
  *  3. upstream names a default branch, and the branch is not it;
- *  4. the bundle carries exactly one ref, the branch (or `HEAD`);
- *  5. every commit it builds on is on upstream's default branch or on
- *     upstream's copy of the branch;
+ *  4. the bundle carries exactly one ref, `refs/heads/<branch>`;
+ *  5. every commit it builds on came from upstream (`run.ts`);
  *  6. its tip descends from upstream's tip of the branch, so it is never a
  *     force-push.
  *
  * On a repo marked `approval`, the push is then held as a decision review
- * item with `step: 'push'` (owner-only when the board reserves that step).
- * It runs only when the item's answer chose Push AND carries `answeredBy`,
- * which the store writes for a person and never for an agent
- * (`review-items/approver.ts`), so the lead cannot approve its own push.
+ * item with `step: 'push'` (owner-only when the board reserves that step),
+ * at most `MAX_HELD_PER_BOARD` at a time. It runs only when the item's
+ * answer chose Push AND carries `answeredBy`, which the store writes for a
+ * person and never for an agent (`review-items/approver.ts`), so the lead
+ * cannot approve its own push. An agent's answer is taken back: the push stays
+ * held for a person.
  */
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
 import type { TaskStore } from '../tasks.ts';
 import type { PushCredential } from './credential.ts';
-import { type GitRunner, ScratchRepo, type Upstream, realGit, redact } from './git.ts';
+import { type GitRunner, realGit } from './git.ts';
 import { ruleFor } from './policy.ts';
+import { type RunResult, runPush } from './run.ts';
 
 export const PUSH_APPROVE = 'o-push';
 export const PUSH_REJECT = 'o-no-push';
@@ -85,10 +87,8 @@ export interface GitPusherOptions {
 }
 
 const MAX_RECORDS = 500;
-
-type Judged =
-  | { ok: true; sha: string; tip: string | null; subjects: string[]; upToDate: boolean }
-  | { ok: false; status: number; error: string; message: string };
+/** Pushes one board may have waiting for a person at once. */
+export const MAX_HELD_PER_BOARD = 5;
 
 export class GitPusher {
   private readonly root: string;
@@ -174,8 +174,16 @@ export class GitPusher {
         );
       }
     }
-    const judged = await this.judge(record);
-    if (!judged.ok) return this.finish(record, judged.status, judged.error, judged.message);
+    if (rule.approval && this.heldOn(input.boardId) >= MAX_HELD_PER_BOARD) {
+      return this.finish(
+        record,
+        429,
+        'too-many-held',
+        `this board already has ${MAX_HELD_PER_BOARD} pushes waiting for a person; wait for an answer first`,
+      );
+    }
+    const judged = await this.run(record, !rule.approval);
+    if (!judged.ok) return this.refuse(record, judged);
     record.sha = judged.sha;
     if (judged.upToDate) {
       record.state = 'up-to-date';
@@ -183,138 +191,65 @@ export class GitPusher {
       return this.done(record, 200);
     }
     if (rule.approval) return this.hold(record, judged);
-    return this.pushNow(record, judged.sha);
+    return this.pushed(record, judged.sha);
   }
 
-  /** Steps 2–6, under the repo's lock. */
-  private judge(record: PushRecord): Promise<Judged> {
-    return this.locked(record.repo, async (): Promise<Judged> => {
-      const token = await this.o.credential();
-      if (!token) {
-        return {
-          ok: false,
-          status: 503,
-          error: 'no-credential',
-          message: 'this server holds no GitHub credential to push with',
-        };
-      }
-      const up: Upstream = { url: this.remoteUrlFor(record.repo), token };
-      const scratch = this.scratch(record.repo);
-      if (!(await scratch.ensure())) {
-        return {
-          ok: false,
-          status: 500,
-          error: 'scratch',
-          message: 'could not prepare a repository',
-        };
-      }
-      const state = await scratch.upstreamState(up, record.branch);
-      if ('error' in state) {
-        return {
-          ok: false,
-          status: 502,
-          error: 'upstream-unreadable',
-          message: `could not read ${record.repo}: ${redact(state.error, token)}`,
-        };
-      }
-      if (state.defaultBranch === record.branch) {
-        return {
-          ok: false,
-          status: 403,
-          error: 'default-branch',
-          message: `${record.branch} is ${record.repo}'s default branch; push a feature branch and open a PR`,
-        };
-      }
-      const bundle = this.bundlePath(record.id);
-      const heads = await scratch.bundleHeads(bundle);
-      const named = heads?.length === 1 ? heads[0] : undefined;
-      const ref = named?.[1];
-      if (!named || (ref !== `refs/heads/${record.branch}` && ref !== 'HEAD')) {
-        return {
-          ok: false,
-          status: 400,
-          error: 'bundle-heads',
-          message: `the body must be a git bundle carrying one ref, refs/heads/${record.branch} or HEAD`,
-        };
-      }
-      const fetches = [scratch.fetchUpstream(up, state.defaultBranch)];
-      if (state.tip) fetches.push(scratch.fetchUpstream(up, record.branch));
-      for (const r of await Promise.all(fetches)) {
-        if (r.code !== 0) {
-          return {
-            ok: false,
-            status: 502,
-            error: 'upstream-unreadable',
-            message: `could not fetch ${record.repo}: ${redact(r.stderr.trim().slice(-300), token)}`,
-          };
-        }
-      }
-      if (!(await scratch.bundleApplies(bundle))) {
-        return {
-          ok: false,
-          status: 409,
-          error: 'bundle-base-missing',
-          message: `the bundle builds on commits ${record.repo} does not have; make it from origin/${state.defaultBranch}..${record.branch}`,
-        };
-      }
-      if (!(await scratch.fetchBundle(bundle, ref, record.id))) {
-        return {
-          ok: false,
-          status: 400,
-          error: 'bundle-unreadable',
-          message: 'could not read the bundle',
-        };
-      }
-      const sha = named[0];
-      if (state.tip === sha) return { ok: true, sha, tip: state.tip, subjects: [], upToDate: true };
-      if (state.tip && !(await scratch.isAncestor(state.tip, sha))) {
-        await scratch.dropIncoming(record.id);
-        return {
-          ok: false,
-          status: 403,
-          error: 'not-fast-forward',
-          message: `${sha.slice(0, 12)} does not descend from ${record.repo}'s ${record.branch} at ${state.tip.slice(0, 12)}; this server never force-pushes`,
-        };
-      }
-      const base = state.tip ?? `refs/up/${state.defaultBranch}`;
-      const subjects = await scratch.subjects(base, sha, 10);
-      return { ok: true, sha, tip: state.tip, subjects, upToDate: false };
-    });
+  /** Judge, and push when `push` is set, under the repo's lock. */
+  private run(record: PushRecord, push: boolean): Promise<RunResult> {
+    return this.locked(record.repo, () =>
+      runPush(
+        {
+          root: this.root,
+          credential: this.o.credential,
+          remoteUrlFor: this.remoteUrlFor,
+          runGit: this.runGit,
+        },
+        {
+          id: record.id,
+          repo: record.repo,
+          branch: record.branch,
+          bundle: this.bundlePath(record.id),
+        },
+        push,
+      ),
+    );
   }
 
-  private async pushNow(record: PushRecord, sha: string): Promise<PushOutcome> {
-    const res = await this.locked(record.repo, async () => {
-      const token = await this.o.credential();
-      if (!token) return { code: -1, stderr: 'no credential' };
-      const r = await this.scratch(record.repo).push(
-        { url: this.remoteUrlFor(record.repo), token },
-        sha,
-        record.branch,
-      );
-      await this.scratch(record.repo).dropIncoming(record.id);
-      return { code: r.code, stderr: redact(r.stderr, token) };
-    });
-    if (res.code !== 0) {
-      const why = res.stderr.trim().split('\n').slice(-2).join(' ').slice(0, 300);
-      return this.finish(record, 502, 'push-failed', `upstream refused the push: ${why}`, 'failed');
-    }
+  private refuse(record: PushRecord, r: Extract<RunResult, { ok: false }>): PushOutcome {
+    const state: PushState = r.error === 'push-failed' ? 'failed' : 'refused';
+    return this.finish(record, r.status, r.error, r.message, state);
+  }
+
+  private pushed(record: PushRecord, sha: string): PushOutcome {
     record.state = 'pushed';
     record.message = `pushed ${sha.slice(0, 12)} to ${record.repo} ${record.branch}`;
     record.error = undefined;
     return this.done(record, 200);
   }
 
-  private hold(record: PushRecord, judged: Extract<Judged, { ok: true }>): PushOutcome {
+  private heldOn(boardId: string): number {
+    let n = 0;
+    for (const r of this.records.values()) {
+      if (r.boardId === boardId && r.state === 'awaiting-approval') n++;
+    }
+    return n;
+  }
+
+  private hold(record: PushRecord, judged: Extract<RunResult, { ok: true }>): PushOutcome {
     const taskId = record.taskId ?? '';
-    const commits = judged.subjects.map((s) => `- ${oneLine(s)}`).join('\n');
+    // The lead wrote these subjects. In a fenced block they render as text,
+    // and every line starts with `- `, so none can close the fence.
+    const commits = judged.subjects.length
+      ? `Newest commits:\n\n\`\`\`text\n${judged.subjects.map((s) => `- ${oneLine(s)}`).join('\n')}\n\`\`\``
+      : '';
     const res = this.o.taskStore.addReviewItem(
       taskId,
       {
         review_type: 'decision',
         headline: `Push ${record.branch} to ${record.repo}?`,
         detail: [
-          `${record.requestedBy} asks this server to push \`${record.branch}\` to ${record.repo} at \`${judged.sha.slice(0, 12)}\`, ${judged.tip ? `on top of \`${judged.tip.slice(0, 12)}\`` : 'as a new branch'}.`,
-          commits ? `Newest commits:\n${commits}` : '',
+          `\`${record.requestedBy}\` asks this server to push \`${record.branch}\` to \`${record.repo}\` at \`${judged.sha.slice(0, 12)}\`, ${judged.tip ? `on top of \`${judged.tip.slice(0, 12)}\`` : 'as a new branch'}.`,
+          commits,
           'Only a person’s Push sends it. An agent’s answer sends nothing.',
         ]
           .filter(Boolean)
@@ -351,6 +286,22 @@ export class GitPusher {
       .find((r) => r.id === record.reviewItemId);
     const answer = item?.answer;
     if (!answer) return;
+    // An agent's answer, either way, is not a decision. The store lets only
+    // the answerer change an answer, so it is taken back in that answerer's
+    // name (it stays in `priorAnswers`): the item is open again and the push
+    // stays held for a person.
+    if (!this.byPerson(answer.answeredBy)) {
+      this.o.taskStore.undoTaskReviewAnswer(record.taskId ?? '', record.reviewItemId ?? '', {
+        actor: { id: GIT_PUSH_ACTOR.id, name: answer.by, kind: 'agent' },
+      });
+      this.o.taskStore.appendNote(record.taskId ?? '', {
+        kind: 'status',
+        text: `Push ${record.branch} to ${record.repo}: ${answer.by} answered for an agent, so nothing was sent; it waits for a person.`,
+        agent: GIT_PUSH_ACTOR.name,
+        ts: this.now(),
+      });
+      return;
+    }
     if (answer.answeredWith === PUSH_REJECT) {
       this.finish(record, 200, 'rejected', `${answer.by} chose not to push`, 'rejected');
       this.note(record);
@@ -363,12 +314,12 @@ export class GitPusher {
       return;
     }
     record.updatedAt = this.now();
-    const judged = await this.judge(record);
-    if (!judged.ok) this.finish(record, judged.status, judged.error, judged.message);
+    const judged = await this.run(record, true);
+    if (!judged.ok) this.refuse(record, judged);
     else if (judged.upToDate) {
       record.state = 'up-to-date';
       this.done(record, 200);
-    } else await this.pushNow(record, judged.sha);
+    } else this.pushed(record, judged.sha);
     this.note(record);
   }
 
@@ -384,15 +335,18 @@ export class GitPusher {
   ): string | null {
     if (answer.answeredWith !== PUSH_APPROVE) return 'the answer did not choose Push';
     const who = answer.answeredBy;
-    if (!who || classifyActor({ id: who.id, kind: 'person' }) !== 'person') {
-      return 'the item was answered by an agent, not a person';
-    }
+    if (!who || !this.byPerson(who)) return 'the item was answered by an agent, not a person';
     const role = this.o.personRoleOn(record.boardId, who);
     if (role === null) return 'the person who answered is not a member of this board';
     if (role !== 'owner' && this.o.taskStore.requireOwnerFor(record.boardId).includes('push')) {
       return "this board reserves pushes for its owner's approval";
     }
     return null;
+  }
+
+  /** `answeredBy` is written only for a proven person; an agent id never counts. */
+  private byPerson(who: { id: string } | undefined): who is { id: string; email?: string } {
+    return !!who && classifyActor({ id: who.id, kind: 'person' }) === 'person';
   }
 
   private note(record: PushRecord): void {
@@ -427,10 +381,6 @@ export class GitPusher {
     return { status, record };
   }
 
-  private scratch(repo: string): ScratchRepo {
-    return new ScratchRepo(join(this.root, 'repos', `${repo.replace('/', '__')}.git`), this.runGit);
-  }
-
   private locked<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.locks.get(key) ?? Promise.resolve();
     const next = prev.then(fn, fn);
@@ -453,7 +403,13 @@ export class GitPusher {
   }
 
   private save(): void {
-    const rows = [...this.records.values()].sort((a, b) => a.at - b.at).slice(-MAX_RECORDS);
+    const all = [...this.records.values()].sort((a, b) => a.at - b.at);
+    // A record pruned off the end takes its bundle with it, held or not.
+    for (const old of all.slice(0, Math.max(0, all.length - MAX_RECORDS))) {
+      rmSync(this.bundlePath(old.id), { force: true });
+      this.records.delete(old.id);
+    }
+    const rows = all.slice(-MAX_RECORDS);
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, JSON.stringify(rows), { mode: 0o600 });
     renameSync(tmp, this.file);

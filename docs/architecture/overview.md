@@ -2610,9 +2610,11 @@ board's own socket to `POST /workspaces/<board>/git/push?repo&branch[&task]`
 it against the board's list in `<dataDir>/git-push.json` (`policy.ts`; no
 route writes it), reads upstream's default branch and the branch's tip,
 refuses the default branch and any tip that does not descend from upstream's,
-and pushes from a bare repository the server owns (`git.ts`) with the
-credential in git's environment (`credential.ts`: a Fly secret on a project
-server, a Keychain item on the Mac). On a repo marked `approval` it files a
+and pushes from a work repository made for that push, which borrows only
+upstream's objects from a mirror (`run.ts`, `git.ts`). git reads the
+credential from a mode-600 file for each call, never its arguments or
+environment (`credential.ts`: a Fly secret on a project server, a Keychain
+item on the Mac). On a repo marked `approval` it files a
 decision item with `step: 'push'` and pushes only when a person's answer
 chose Push and that person is a member of the board. Only the board's
 socket may ask; loopback TCP is refused. Tests: `git-push-route.test.ts`, `git-push-approval.test.ts`,

@@ -1,16 +1,20 @@
 /**
- * The git the push runs, in a bare repository the server owns, one per
- * upstream repo (`<dataDir>/git-push/repos/`). Nothing here runs git in a
+ * The git the push runs, in bare repositories the server owns under
+ * `<dataDir>/git-push/` (`run.ts` says which). Nothing here runs git in a
  * folder a lead can write: the lead's commits arrive as a bundle, which git
  * reads as objects and refs only.
  *
  * Every call takes `git-hardening.ts`'s arguments and environment (no system
  * or global config, no inherited `GIT_*`), and the calls that reach upstream
- * allow one protocol, the remote's own. The credential goes to git as an
- * `http.<url>.extraheader` setting in the child's environment, never as an
- * argument: any user on the machine can read any process's arguments.
+ * allow one protocol, the remote's own. The credential is in neither git's
+ * arguments nor its environment: on the Mac a walled lead runs as the same
+ * user and `ps eww` prints both for every process. It goes in a mode-600
+ * config file under the data dir, which the lead cannot read, named by
+ * `GIT_CONFIG_GLOBAL` for that one call and removed when it returns.
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { hardenedGitArgs, hardenedGitEnv } from '../git-hardening.ts';
 
 export interface GitCall {
@@ -71,35 +75,58 @@ function schemeOf(url: string): string | null {
   return m ? (m[1] ?? null) : null;
 }
 
+/** A git config file that sends `upstream`'s credential to its URL only. */
+function authConfig(upstream: Upstream): string {
+  const url = upstream.url.replace(/[\\"]/g, '\\$&');
+  return `[http "${url}"]\n\textraheader = ${basicAuthHeader(upstream.token)}\n`;
+}
+
 export class ScratchRepo {
+  /**
+   * @param authDir where a call that reaches upstream writes its credential
+   *   file: under the data dir, mode 700, never readable by a lead.
+   */
   constructor(
     readonly gitDir: string,
     private readonly run: GitRunner,
+    private readonly authDir: string,
   ) {}
 
-  private env(upstream?: Upstream): Record<string, string> {
+  private env(authFile?: string): Record<string, string> {
     const env = hardenedGitEnv();
     env.GIT_TERMINAL_PROMPT = '0';
-    if (upstream) {
-      env.GIT_CONFIG_COUNT = '1';
-      env.GIT_CONFIG_KEY_0 = `http.${upstream.url}.extraheader`;
-      env.GIT_CONFIG_VALUE_0 = basicAuthHeader(upstream.token);
-    }
+    if (authFile) env.GIT_CONFIG_GLOBAL = authFile;
     return env;
   }
 
   /** git with this repo, hardened; `upstream` adds the credential and one protocol. */
   async git(args: string[], upstream?: Upstream): Promise<GitResult> {
-    const proto: string[] = [];
-    if (upstream) {
-      const scheme = schemeOf(upstream.url);
-      if (!scheme) return { code: 128, stdout: '', stderr: 'remote scheme not allowed' };
-      proto.push('-c', 'protocol.allow=never', '-c', `protocol.${scheme}.allow=always`);
+    if (!upstream) {
+      return this.run({
+        args: hardenedGitArgs([`--git-dir=${this.gitDir}`, ...args]),
+        env: this.env(),
+      });
     }
-    return this.run({
-      args: hardenedGitArgs([...proto, `--git-dir=${this.gitDir}`, ...args]),
-      env: this.env(upstream),
-    });
+    const scheme = schemeOf(upstream.url);
+    if (!scheme) return { code: 128, stdout: '', stderr: 'remote scheme not allowed' };
+    mkdirSync(this.authDir, { recursive: true, mode: 0o700 });
+    const authFile = join(this.authDir, `${randomBytes(12).toString('hex')}.gitconfig`);
+    writeFileSync(authFile, authConfig(upstream), { mode: 0o600 });
+    try {
+      return await this.run({
+        args: hardenedGitArgs([
+          '-c',
+          'protocol.allow=never',
+          '-c',
+          `protocol.${scheme}.allow=always`,
+          `--git-dir=${this.gitDir}`,
+          ...args,
+        ]),
+        env: this.env(authFile),
+      });
+    } finally {
+      rmSync(authFile, { force: true });
+    }
   }
 
   async ensure(): Promise<boolean> {
@@ -110,6 +137,20 @@ export class ScratchRepo {
       env: this.env(),
     });
     return r.code === 0;
+  }
+
+  /** Read objects from `other` too, so a fetch here finds what it holds. */
+  borrowObjectsFrom(other: ScratchRepo): void {
+    const info = join(this.gitDir, 'objects', 'info');
+    mkdirSync(info, { recursive: true });
+    writeFileSync(join(info, 'alternates'), `${join(other.gitDir, 'objects')}\n`);
+  }
+
+  /** The sha `ref` names here, or null. */
+  async revParse(ref: string): Promise<string | null> {
+    const r = await this.git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+    const sha = r.stdout.trim();
+    return r.code === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   }
 
   /**
@@ -153,7 +194,7 @@ export class ScratchRepo {
     return out;
   }
 
-  /** Whether every commit the bundle builds on is already here. */
+  /** Whether every commit the bundle builds on is already here (or borrowed). */
   async bundleApplies(bundle: string): Promise<boolean> {
     return (await this.git(['bundle', 'verify', '--quiet', bundle])).code === 0;
   }
@@ -188,10 +229,6 @@ export class ScratchRepo {
       ['push', '--porcelain', '--no-verify', upstream.url, `${sha}:refs/heads/${branch}`],
       upstream,
     );
-  }
-
-  async dropIncoming(id: string): Promise<void> {
-    await this.git(['update-ref', '-d', `refs/incoming/${id}`]);
   }
 }
 
