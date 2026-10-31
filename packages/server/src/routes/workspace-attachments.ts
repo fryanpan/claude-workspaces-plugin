@@ -26,6 +26,7 @@ import { attachNotes } from '../attach-notes.ts';
 import { localDay } from '../chat-audit.ts';
 import { clientReleaseStatus } from '../client-release.ts';
 import { commentIdOfReplay, recordDelivery } from '../comment-receipt.ts';
+import { BOARD_FEEDBACK_DOC_ID } from '../doc-ids.ts';
 import {
   agentsBehind,
   checkableAttachments,
@@ -78,6 +79,7 @@ export async function handleWorkspaceAttachments(
     spokenRelay,
     leadChat,
     authorizeAgent,
+    boardsForDoc,
   } = ctx;
   const { req, pathname, visitor } = rq;
   // --- REST: agent attachments (§4) ---
@@ -296,12 +298,16 @@ export async function handleWorkspaceAttachments(
       // `queueCommentRows`), so a hand-over here needs no author test.
       const commentId = sent > 0 ? commentIdOfReplay(q.payload) : undefined;
       if (commentId !== undefined && q.threadId !== undefined) {
+        // The feedback doc reaches its owner board's lead without being on
+        // that board (`feedback-owner.ts`), so that board's pages are not told.
+        const quietBoard =
+          q.docId === BOARD_FEEDBACK_DOC_ID && !boardsForDoc(q.docId).has(workspaceId);
         recordDelivery(
           {
             docId: q.docId,
             threadId: q.threadId,
             commentId,
-            channels: [q.docId, `ws~${workspaceId}`],
+            channels: quietBoard ? [q.docId] : [q.docId, `ws~${workspaceId}`],
             at: Date.now(),
           },
           {

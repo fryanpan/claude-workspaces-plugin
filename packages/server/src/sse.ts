@@ -37,11 +37,18 @@ type SsePayload = { event: string };
 export const REPLAY_MAX_EVENTS = 200;
 export const REPLAY_MAX_AGE_MS = 10 * 60_000;
 
-/** `toAgent` marks an addressed frame (`sendToAgent`): buffered alongside
- *  broadcasts in the same id namespace, but replayed ONLY to the stream that
- *  names that agent — everyone else's catch-up filters it out, exactly as
- *  their live feed never carried it. */
-type BufferedEvent = { id: string; at: number; payload: SsePayload; toAgent?: string };
+/** `toAgents` marks an addressed frame (`sendToAgent`, `sendToAgents`):
+ *  buffered alongside broadcasts in the same id namespace, but replayed ONLY
+ *  to a stream that names one of those agents — everyone else's catch-up
+ *  filters it out, exactly as their live feed never carried it. One entry per
+ *  frame, however many addressees: two entries sharing an id would make a
+ *  reconnect anchor on the first and replay the second to its own addressee. */
+type BufferedEvent = {
+  id: string;
+  at: number;
+  payload: SsePayload;
+  toAgents?: readonly string[];
+};
 
 /**
  * One channel's completeness marks, split by AUDIENCE.
@@ -356,13 +363,18 @@ export class SseBus {
     return sent;
   }
 
-  private buffer(docId: string, id: string, payload: SsePayload, toAgent?: string): void {
+  private buffer(
+    docId: string,
+    id: string,
+    payload: SsePayload,
+    toAgents?: readonly string[],
+  ): void {
     let buf = this.replay.get(docId);
     if (!buf) {
       buf = [];
       this.replay.set(docId, buf);
     }
-    buf.push({ id, at: this.now(), payload, ...(toAgent !== undefined ? { toAgent } : {}) });
+    buf.push({ id, at: this.now(), payload, ...(toAgents !== undefined ? { toAgents } : {}) });
     // Outside the buffer and outside its pruning: this is what lets a cursor
     // at the end of a quiet channel still be recognised as up to date. Split
     // by audience — a broadcast everyone saw retires the addressed marks it
@@ -373,11 +385,11 @@ export class SseBus {
       marks = { addressedAfter: new Map() };
       this.channelMarks.set(docId, marks);
     }
-    if (toAgent === undefined) {
+    if (toAgents === undefined) {
       marks.broadcast = id;
       marks.addressedAfter.clear();
     } else {
-      marks.addressedAfter.set(toAgent, id);
+      for (const agentId of toAgents) marks.addressedAfter.set(agentId, id);
     }
     this.prune(docId);
     // Idle channels never get touched by their own appends, so a cheap
@@ -452,7 +464,10 @@ export class SseBus {
           ok: true,
           events: buf
             .slice(idx + 1)
-            .filter((e) => e.toAgent === undefined || e.toAgent === agentId),
+            .filter(
+              (e) =>
+                e.toAgents === undefined || (agentId !== undefined && e.toAgents.includes(agentId)),
+            ),
         };
       }
     }
@@ -563,7 +578,7 @@ export class SseBus {
   sendToAgent(docId: string, agentId: string, payload: SsePayload): number {
     const maybeEid = (payload as { eid?: unknown }).eid;
     const id = typeof maybeEid === 'string' && maybeEid.length > 0 ? maybeEid : newEventId();
-    this.buffer(docId, id, payload, agentId);
+    this.buffer(docId, id, payload, [agentId]);
     const set = this.byDoc.get(docId);
     if (!set) return 0;
     let sent = 0;
@@ -577,6 +592,35 @@ export class SseBus {
       }
     }
     return sent;
+  }
+
+  /**
+   * One frame to several agents, buffered ONCE. `forAgent` gives each live
+   * addressee its own copy (a comment row id); the replay buffer holds `base`,
+   * for the reason `broadcast` gives. Returns the agents a copy reached.
+   */
+  sendToAgents(
+    docId: string,
+    agentIds: readonly string[],
+    base: SsePayload,
+    forAgent: (agentId: string) => SsePayload,
+  ): Set<string> {
+    const reached = new Set<string>();
+    if (agentIds.length === 0) return reached;
+    const maybeEid = (base as { eid?: unknown }).eid;
+    const id = typeof maybeEid === 'string' && maybeEid.length > 0 ? maybeEid : newEventId();
+    this.buffer(docId, id, base, [...agentIds]);
+    for (const [sink, who] of this.byDoc.get(docId) ?? []) {
+      if (who.agentId === undefined || !agentIds.includes(who.agentId)) continue;
+      try {
+        const p = forAgent(who.agentId);
+        sink.write(p.event, p, id);
+        reached.add(who.agentId);
+      } catch (err) {
+        console.error('[sse] addressed write failed:', err);
+      }
+    }
+    return reached;
   }
 
   /** Close every stream a given share opened. Returns how many. */
