@@ -12,7 +12,7 @@
  * composers). This file imports from them; none imports back.
  */
 import { renderCommentMarkdown } from '../comment-markdown.ts';
-import { PENCIL_ICON, PLUS_ICON } from '../icons.ts';
+import { PENCIL_ICON, PLUS_ICON, SPEECH_ICON } from '../icons.ts';
 import {
   type BoardGoal,
   type BoardSection,
@@ -453,7 +453,8 @@ export function renderArchivedList(
 // ── Quick actions: the two ways work starts ───────────────────────────────
 
 /**
- * "New task" and "Make a plan", in the slot the quick-add box had.
+ * "New task", "Make a plan" and "Have a meeting", in the slot the quick-add
+ * box had.
  *
  * Bryan, 2026-08-29: *"From board, have a quick flow to create a new task
  * (replace current text box) that creates an empty item in the usual task
@@ -464,8 +465,9 @@ export function renderArchivedList(
  * Renamed from "Start a planning huddle" with the round-4 entry mock (Bryan,
  * 2026-09-01): the old label named the mechanism; this one names what you
  * leave with. Words only — routes, params and class names keep the huddle
- * name. A third button, "Have a meeting", went on 2026-10-30 with the doc's
- * own recorder; a meeting starts from the lead chat now.
+ * name. The third, "Have a meeting", started the doc's own recorder until
+ * 2026-10-30, when that recorder went; it now opens the lead chat's Start a
+ * meeting wizard, so the board keeps one tap into a meeting.
  *
  * A mount, not a render, like the box it replaced: the board repaints on
  * every ydoc change, and a button rebuilt while its request is out would come
@@ -479,6 +481,9 @@ export interface QuickActionHandlers {
   /** Resolves when the huddle doc exists and the page is leaving, or when the
    *  start was refused — which gives the button back as the retry. */
   onStartHuddle: () => Promise<boolean>;
+  /** Opens the lead chat's Start a meeting wizard. Writes nothing itself:
+   *  the wizard's own Start meeting is the write. */
+  onStartMeeting: () => Promise<boolean>;
   /** Whether the server will accept writes from this browser. Absent means
    *  yes, so every caller that predates the sign-in gate is unchanged. */
   canWrite?: boolean;
@@ -510,13 +515,19 @@ export function renderQuickActions(container: HTMLElement, handlers: QuickAction
   huddle.className = 'board-btn board-huddle-start';
   huddle.innerHTML = `${PENCIL_ICON}<span>Make a plan</span>`;
   hold(huddle, handlers.onStartHuddle);
-  row.append(newTask, huddle);
+  const meeting = document.createElement('button');
+  meeting.type = 'button';
+  meeting.className = 'board-btn board-conversation-start';
+  meeting.innerHTML = `${SPEECH_ICON}<span>Have a meeting</span>`;
+  hold(meeting, handlers.onStartMeeting);
+  row.append(newTask, huddle, meeting);
   // Error prevention rather than error recovery, matching the doc surface's
   // edit toggle: a signed-out reader is told these are unavailable instead of
   // pressing one and receiving a refusal. Disabled, not hidden — a control
-  // that vanishes teaches nothing about why.
+  // that vanishes teaches nothing about why. A meeting writes notes and
+  // starts on the server, so it is gated with them.
   if (handlers.canWrite === false) {
-    for (const button of [newTask, huddle]) {
+    for (const button of [newTask, huddle, meeting]) {
       button.disabled = true;
       button.title = 'Sign in to add to this board';
       button.setAttribute('aria-label', 'Sign in to add to this board');

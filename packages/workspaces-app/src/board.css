@@ -1065,7 +1065,8 @@ body.board-body {
 /* The same stroked glyphs the rail wears, sized as boxes — decoration, not a
    target. */
 .board-quick-new svg,
-.board-huddle-start svg {
+.board-huddle-start svg,
+.board-conversation-start svg {
   display: block;
   width: 15px;
   height: 15px;

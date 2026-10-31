@@ -59,6 +59,9 @@ export interface LeadChatMountOpts {
 
 export interface LeadChatMount {
   view: LeadChatView;
+  /** Open the pane on the Start a meeting wizard — the board's "Have a
+   *  meeting". With a meeting already running, only the pane opens. */
+  startMeeting(): void;
   destroy(): void;
 }
 
@@ -253,6 +256,10 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
 
   return {
     view,
+    startMeeting() {
+      if (!ui.open) openPane(view.button.getBoundingClientRect(), false);
+      if (!client.state().meeting) meet?.wizard.show();
+    },
     destroy() {
       meet?.destroy();
       voice.destroy();

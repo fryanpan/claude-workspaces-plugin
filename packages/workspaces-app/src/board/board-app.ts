@@ -24,7 +24,7 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
-import { mountLeadChat } from '../lead-chat/lead-chat-mount.ts';
+import { type LeadChatMount, mountLeadChat } from '../lead-chat/lead-chat-mount.ts';
 import { createPromptsApi } from '../settings/prompts-api.ts';
 import {
   fetchWriteAccess,
@@ -650,6 +650,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   let autoWalkTick: (() => void) | null = null;
   /** Assigned when settings is wired, below the live wiring. */
   let membersChanged: (() => void) | null = null;
+  /** The lead chat, mounted below; "Have a meeting" opens its wizard. */
+  let leadChat: LeadChatMount | null = null;
 
   // Which halves of the queue have landed. The armed walk opens only once
   // both are in (or the deadline passes): a walk opened on the review-items
@@ -668,6 +670,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderQuickActions(el('board-quick'), {
       onNewTask: () => newTask(),
       onStartHuddle: () => startHuddle('plan'),
+      onStartMeeting: () => {
+        leadChat?.startMeeting();
+        return Promise.resolve(true);
+      },
       // The board's create buttons are the doc surface's edit toggle: a
       // control that cannot work should say so before it is pressed, not
       // after. The rest of the board's writes still fail loudly through
@@ -856,7 +862,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   }));
 
   // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
-  mountLeadChat({
+  leadChat = mountLeadChat({
     workspaceId,
     author,
     dock: el('board-lead-chat'),
