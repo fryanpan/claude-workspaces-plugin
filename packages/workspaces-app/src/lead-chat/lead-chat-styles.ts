@@ -43,7 +43,7 @@ export const LAYER_STYLES = `
 .lc-pane.lc-sheet .lc-row-head { border-radius: 8px; }
 .lc-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 6px 6px 6px 16px; border-bottom: 1px solid var(--border, #d1d5da); }
 .lc-title { flex: 1; min-width: 0; }
-.lc-title h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 650; }
+.lc-title h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lc-title p { margin: 0; font-size: 12.5px; line-height: 16px; color: var(--fg-muted, #57606a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lc-icon { flex: none; width: 44px; height: 44px; margin: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 50%; background: none; color: var(--fg-muted, #57606a); cursor: pointer; }
 .lc-icon:hover { background: var(--bg-hover, #f6f8fa); color: var(--fg, #1b1f23); }

@@ -274,14 +274,16 @@ async function main(): Promise<void> {
       );
 
       step(`board events toggle at ${width}`);
-      // The header holds one row: the toggle's label does not wrap, and the
+      // The header holds one row: neither the title nor the toggle's label wraps, and the
       // toggle sits level with the close button.
       const headerOneRow = await inLayer<boolean>(
         cdp,
         `const t = sr.querySelector('.lc-chan-toggle'); const lab = t.children[1];` +
           ' const lh = parseFloat(getComputedStyle(lab).lineHeight) || 1.4 * parseFloat(getComputedStyle(lab).fontSize);' +
           ' const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; };' +
+          ` const h2 = sr.querySelector('.lc-title h2'); const h2lh = parseFloat(getComputedStyle(h2).lineHeight);` +
           ` return lab.textContent === 'Board events' && lab.getBoundingClientRect().height <= lh * 1.5` +
+          ` && h2.textContent === 'Your agent' && h2.getBoundingClientRect().height <= h2lh * 1.5` +
           ` && Math.abs(mid(t) - mid(sr.querySelector('.lc-close'))) < 8;`,
       );
       const chanCount = `return sr.querySelectorAll('.lc-chan').length;`;
@@ -362,16 +364,16 @@ async function main(): Promise<void> {
           const items = [...document.querySelectorAll('.board-nav > .board-nav-item, .board-nav > .board-nav-dock')]
             .filter((e) => e.getBoundingClientRect().width > 0)
             .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-          const agentLast = items.at(-1)?.classList.contains('board-nav-dock') ?? false;
+          const agentFirst = items[0]?.classList.contains('board-nav-dock') ?? false;
           return { navTop: nav.top, navBottom: nav.bottom, navLeft: nav.left, navWidth: nav.width,
-            vh: innerHeight, agentLast, lib: { x: lib.left + lib.width / 2, y: lib.top + lib.height / 2 } };
+            vh: innerHeight, agentFirst, lib: { x: lib.left + lib.width / 2, y: lib.top + lib.height / 2 } };
         })()`)) as {
           navTop: number;
           navBottom: number;
           navLeft: number;
           navWidth: number;
           vh: number;
-          agentLast: boolean;
+          agentFirst: boolean;
           lib: { x: number; y: number };
         };
         await tap(cdp, geo.lib.x, geo.lib.y);
@@ -390,7 +392,7 @@ async function main(): Promise<void> {
           navLeft: Math.round(geo.navLeft),
           navWidth: Math.round(geo.navWidth),
           vh: geo.vh,
-          agentLast: geo.agentLast,
+          agentFirst: geo.agentFirst,
           closedByPageTap: closed,
           libraryCurrent: page,
         };

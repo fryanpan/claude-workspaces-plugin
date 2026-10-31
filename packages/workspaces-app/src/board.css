@@ -911,11 +911,11 @@ html[data-lc-docked] .board-main {
   margin-right: var(--lc-dock-w, 0px);
 }
 /* The lead chat filling a screen 1100px or narrower (`lead-chat-dock.ts`):
-   the navbar pins to the bottom as icon-and-label tabs, the agent button at
-   its right, so a page is one tap away and the chat stops at the bar's top.
-   Above every layer the board uses; the chat's sheet ends where this begins.
-   The comment widget steps aside while the chat is up, so its clearance
-   goes too. */
+   the navbar pins to the bottom as icon-and-label tabs, so a page is one tap
+   away and the chat stops at the bar's top. The agent button keeps the
+   bar's left end, where a phone's bar already has it, so it does not move
+   when the chat opens.
+   Above every layer the board uses; the chat's sheet ends where this begins. */
 html[data-lc-full] .board-nav {
   position: fixed;
   left: 0;
@@ -933,6 +933,14 @@ html[data-lc-full] .board-nav {
   border-top: 1px solid var(--border);
   border-bottom: none;
   background: var(--bg-panel);
+}
+/* The comment widget's bubble is hidden while the chat is up, but the bar
+   keeps its clearance on a phone, where it had it already, so no tab moves
+   when the chat opens. */
+@media (max-width: 900px) {
+  html[data-lc-full] body:has(claude-feedback-widget) .board-nav {
+    padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
+  }
 }
 html[data-lc-full] .board-nav-item {
   flex: 1 1 0;
@@ -953,12 +961,11 @@ html[data-lc-full] .board-nav-collapse {
   display: none;
 }
 html[data-lc-full] .board-nav-dock {
-  order: 99;
+  order: -1;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   padding: 0 10px;
-  border: none;
 }
 /* Home showing: the board column leaves the grid and the Home section takes
    the one content track. This rule hides the COLUMN; the rows inside it are

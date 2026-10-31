@@ -92,7 +92,7 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
     expect(Math.abs(f.navBottom - f.vh)).toBeLessThanOrEqual(1);
     expect(f.navLeft).toBeGreaterThanOrEqual(0);
     expect(f.navWidth).toBeLessThanOrEqual(430);
-    expect(f.agentLast).toBe(true);
+    expect(f.agentFirst).toBe(true);
     expect(f.closedByPageTap).toBe(true);
     expect(f.libraryCurrent).toBe('page');
   }, 60_000);

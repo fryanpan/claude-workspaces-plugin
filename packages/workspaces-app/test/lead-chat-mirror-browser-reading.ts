@@ -24,8 +24,8 @@ export interface MirrorWidthRun {
     navLeft: number;
     navWidth: number;
     vh: number;
-    /** The agent button is the navbar's rightmost item. */
-    agentLast: boolean;
+    /** The agent button keeps the bar's left end, as on a phone's bar. */
+    agentFirst: boolean;
     closedByPageTap: boolean;
     libraryCurrent: string | null;
   } | null;

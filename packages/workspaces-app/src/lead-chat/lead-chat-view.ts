@@ -205,7 +205,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   pane.setAttribute('aria-label', 'Your agents');
   const head = make(doc, 'header', 'lc-head');
   const title = make(doc, 'div', 'lc-title');
-  const h2 = make(doc, 'h2', '', 'Your agents');
+  const h2 = make(doc, 'h2', '', 'Your agent');
   const who = make(doc, 'p');
   title.append(h2, who);
   const close = make(doc, 'button', 'lc-icon lc-close');
@@ -461,7 +461,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
         row.append(make(doc, 'b', '', `${line.who}: `), line.text);
         barText.append(row);
       }
-      who.textContent = m.lead ? `with ${m.lead.name}` : m.loaded ? 'No lead on this board' : '';
+      who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
       status.textContent = statusLine(m);
       const meetingOn = !!m.meeting?.meeting;
       title.hidden = meetingOn;
