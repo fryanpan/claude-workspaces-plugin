@@ -36,9 +36,12 @@
  *   1. NOTES ACCUMULATE. More than one tick writes, and the earlier note is
  *      still there when the later one lands. The reported symptom was a
  *      single line replaced by each new topic.
- *   2. (Retired 2026-10-30.) Words the note-taker had finished with had to
- *      leave the doc's live transcript. No page mounts that transcript now,
- *      so there is nothing to read.
+ *   2. WHAT IS SAID SHOWS LIVE. The lead chat's meeting view lists the
+ *      meeting's lines as they settle, with their count, while the meeting
+ *      runs. Until 2026-10-30 this read the doc's own live transcript, which
+ *      went with the doc's Record Audio; the words the note-taker had
+ *      finished with had to leave it. The lead chat's list keeps every line,
+ *      so only the showing half is still a thing to check.
  *   3. THE MEETING REPORTS ITSELF. The `[meeting-notes] … ticks over … turns`
  *      line prints when the recording stops. Its absence was the only trace
  *      the production meeting left, and an absence is not something the
@@ -321,9 +324,25 @@ const NEXT = `(() => { const n = ${LAYER}.querySelector('[data-wiz="next"]'); re
 
 /**
  * Wait until `el` (an expression naming one element) is drawn, then tap its
- * centre with a real mouse press, as a person's finger lands.
+ * centre with a real mouse press, as a person's finger lands. With `then`, tap
+ * again until that expression reads true: the pane grows in over 200ms, and a
+ * tap measured mid-growth can land beside the button.
  */
-async function tapIn(cdp: Cdp, el: string, ms: number, what: string): Promise<void> {
+async function tapIn(cdp: Cdp, el: string, ms: number, what: string, then?: string): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    await tapOnce(cdp, el, Math.max(0, deadline - Date.now()), what);
+    if (then === undefined) return;
+    const retap = Date.now() + 1_000;
+    while (Date.now() < retap) {
+      if (await cdp.evaluate(then)) return;
+      await sleep(100);
+    }
+    if (Date.now() > deadline) throw new Error(`timed out after ${ms}ms: ${what} did nothing`);
+  }
+}
+
+async function tapOnce(cdp: Cdp, el: string, ms: number, what: string): Promise<void> {
   const box = `(() => { const e = ${el}; if (!e || e.hidden) return null;
     const r = e.getBoundingClientRect();
     return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`;
@@ -468,8 +487,16 @@ async function run(o: Options): Promise<number> {
     await until(cdp, `!!document.querySelector(${js(EDITOR_SELECTOR)})`, 20_000, 'the editor');
     // The agent button, Start a meeting, the wizard (this doc is picked on
     // the doc's own page), Start meeting — a person's taps, not a URL flag.
-    await tapIn(cdp, BUTTON, 20_000, 'the agent button');
-    await tapIn(cdp, `${LAYER}.querySelector('.lc-start')`, SETTLE_MS, 'Start a meeting');
+    const drawn = (sel: string): string =>
+      `(() => { const e = ${LAYER}.querySelector(${js(sel)}); return !!e && !e.hidden && e.getBoundingClientRect().width > 0; })()`;
+    await tapIn(cdp, BUTTON, 20_000, 'the agent button', drawn('.lc-start'));
+    await tapIn(
+      cdp,
+      `${LAYER}.querySelector('.lc-start')`,
+      SETTLE_MS,
+      'Start a meeting',
+      drawn('.lc-wiz'),
+    );
     await tapIn(cdp, NEXT, SETTLE_MS, "the wizard's Next, its docs read");
     await tapIn(cdp, `${LAYER}.querySelector('[data-wiz="start"]')`, SETTLE_MS, 'Start meeting');
 
@@ -538,6 +565,17 @@ async function run(o: Options): Promise<number> {
       );
     }
 
+    // 2. WHAT IS SAID SHOWS LIVE, in the lead chat's meeting view, with the
+    //    count beside it, before the meeting ends.
+    await until(
+      cdp,
+      `(() => { const t = ${LAYER}.querySelector('.lc-notes-list')?.textContent ?? '';
+         const n = Number.parseInt(${LAYER}.querySelector('.lc-notes-n')?.textContent ?? '', 10);
+         return t.includes(${js(FIRST_TURN)}) && n >= 1; })()`,
+      SETTLE_MS,
+      `the first thing said (${JSON.stringify(FIRST_TURN)}) in the lead chat's live lines`,
+    );
+
     // 3. THE MEETING REPORTS ITSELF, through the lead chat's End meeting
     //    rather than by dropping the socket.
     await tapIn(cdp, `${LAYER}.querySelector('.lc-end')`, SETTLE_MS, 'End meeting');
@@ -569,7 +607,7 @@ async function run(o: Options): Promise<number> {
 
     const line = printed.find((l) => summary.test(l)) ?? '';
     log(
-      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, ${items} note lines, no blank bullet, the first thing said is in them, and the meeting named itself.`,
+      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, the lead chat showed what was said live, ${items} note lines, no blank bullet, the first thing said is in them, and the meeting named itself.`,
     );
     log(`   ${line.trim()}`);
     return 0;
