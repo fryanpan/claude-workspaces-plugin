@@ -313,7 +313,8 @@ The answer is the push's record: `pushed`, `up-to-date`, `refused` with an
 `error` and a `message`, or `awaiting-approval`. Read it again with
 `GET /workspaces/<board>/git/pushes/<id>`. A repo marked for approval also
 needs `&task=<taskId>`: the server files a review item on that task, and
-pushes when a person chooses Push.
+pushes when a person on the board chooses Push. Only the board's socket may
+ask; the same request over loopback TCP is refused.
 
 **Which repos.** `<dataDir>/git-push.json`, edited on the machine:
 

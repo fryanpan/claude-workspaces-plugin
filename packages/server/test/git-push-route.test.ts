@@ -22,7 +22,7 @@ const policy = (board: string) => ({
   boards: { [board]: { repos: [{ repo: 'Harborlight/notes' }] } },
 });
 
-const post = (body: Uint8Array) => ({ method: 'POST', body });
+const post = (body: ArrayBuffer) => ({ method: 'POST', body });
 
 describe('a lead on the Mac pushes over its board socket', () => {
   let w: PushWorld;
@@ -110,7 +110,7 @@ describe('a lead on the Mac pushes over its board socket', () => {
     }
   });
 
-  it('refuses another board’s path on this socket, and a browser over TCP', async () => {
+  it('refuses another board’s path on this socket, and every TCP caller', async () => {
     const other = await w.overTcp('/workspaces', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -129,6 +129,13 @@ describe('a lead on the Mac pushes over its board socket', () => {
     });
     // Refused before the route: a browser write with no sign-in is 401.
     expect([401, 403]).toContain(browser.status);
+    // An agent on this machine over loopback TCP names a board it has no socket for.
+    const loopback = await w.overTcp(
+      pushPath(w.board, 'Harborlight/notes', 'feature-cross'),
+      post(bundle),
+    );
+    expect(loopback.status).toBe(403);
+    expect(((await loopback.json()) as { error: string }).error).toBe('push-socket-only');
     const edge = await w.overTcp(pushPath(w.board, 'Harborlight/notes', 'feature-cross'), {
       ...post(bundle),
       headers: { 'cf-ray': 'test' },

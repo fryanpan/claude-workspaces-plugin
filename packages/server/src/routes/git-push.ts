@@ -12,16 +12,16 @@
  *   git bundle create - origin/main..my-branch | curl -sS --unix-socket "$CW_BOARD_SOCKET" \
  *     --data-binary @- "http://board/workspaces/$CW_WORKSPACE_ID/git/push?repo=o/n&branch=my-branch"
  *
- * Who may call: a request on THIS board's socket, or a loopback caller with
- * no `cf-ray` and no browser marks (an agent on this machine). Everyone else
- * — a browser, a share or collab visitor, anything through the edge, another
- * board's socket — is refused before the body is read. The socket path is in
+ * Who may call: a request on THIS board's own socket, and nothing else. The
+ * socket is what names the board. Loopback TCP is refused too: on the Mac
+ * every session can reach it, so it would let any session push for any board
+ * by naming it. A browser, a share or collab visitor, the edge and another
+ * board's socket are refused before the body is read. The socket path is in
  * `middleware/lead-scope.ts`, so the socket door lets it through and no
  * member's scope gains it.
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
 import type { FeatureRequest } from '../feature-module.ts';
 import { isBranchName, isRepoName } from '../git-push/policy.ts';
 import type { GitPusher } from '../git-push/pusher.ts';
@@ -31,7 +31,6 @@ export interface GitPushRoutesContext {
   boardExists: (boardId: string) => boolean;
   /** The board whose socket the request arrived on, or null for TCP. */
   boardOfSocket: (req: Request) => string | null;
-  requestAddress: (req: Request) => string | undefined;
   j: (status: number, body: unknown) => Response;
 }
 
@@ -96,20 +95,16 @@ type Caller = { ok: true; who: string } | { ok: false; error: string; message: s
 
 function callerOf(ctx: GitPushRoutesContext, req: Request, boardId: string): Caller {
   const socketBoard = ctx.boardOfSocket(req);
-  if (socketBoard !== null) {
-    return socketBoard === boardId
-      ? { ok: true, who: `the lead of ${boardId}` }
-      : { ok: false, error: 'other-board', message: "a board's socket pushes for that board only" };
-  }
-  const refused = refuseNonLocalAgentCaller(req, ctx.requestAddress(req));
-  if (refused) {
+  if (socketBoard === null) {
     return {
       ok: false,
-      error: 'push-local-only',
-      message: "a push is asked by an agent on this server's machine, over its board's socket",
+      error: 'push-socket-only',
+      message: "a push is asked over the board's own socket, which is what names the board",
     };
   }
-  return { ok: true, who: 'a local agent' };
+  return socketBoard === boardId
+    ? { ok: true, who: `the lead of ${boardId}` }
+    : { ok: false, error: 'other-board', message: "a board's socket pushes for that board only" };
 }
 
 /** The caller's own name for itself, as plain text, shown on the approval item. */

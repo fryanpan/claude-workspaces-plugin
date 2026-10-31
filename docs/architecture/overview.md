@@ -2614,7 +2614,8 @@ and pushes from a bare repository the server owns (`git.ts`) with the
 credential in git's environment (`credential.ts`: a Fly secret on a project
 server, a Keychain item on the Mac). On a repo marked `approval` it files a
 decision item with `step: 'push'` and pushes only when a person's answer
-chose Push. Tests: `git-push-route.test.ts`, `git-push-approval.test.ts`,
+chose Push and that person is a member of the board. Only the board's
+socket may ask; loopback TCP is refused. Tests: `git-push-route.test.ts`, `git-push-approval.test.ts`,
 `git-push-units.test.ts`.
 
 **Incoming Messages** is a section on the landing page that lists the

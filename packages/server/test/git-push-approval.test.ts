@@ -10,6 +10,7 @@
  * upstream unchanged. The positive control is the person's Push.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { registerOwnerIdentity, resetOwnerIdentities } from '../src/actor-identity.ts';
 import type { Task } from '../src/tasks.ts';
 import { type PushWorld, pushPath, startPushWorld } from './git-push-fixture.ts';
 import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
@@ -71,7 +72,10 @@ describe('a push to a repo marked for approval', () => {
     );
     taskId = ((await res.json()) as { task: Task }).task.id;
   });
-  afterAll(() => w.stop());
+  afterAll(async () => {
+    await w.stop();
+    resetOwnerIdentities();
+  });
 
   it('refuses without a task to file the approval on', async () => {
     const res = await w.onSocket(pushPath(w.board, REPO, 'feature-no-task'), {
@@ -80,6 +84,23 @@ describe('a push to a repo marked for approval', () => {
     });
     expect(res.status).toBe(400);
     expect(w.upstreamTip(REPO, 'feature-no-task')).toBe('');
+  });
+
+  // Before Alice is the board's owner: a signed-in person who is on no
+  // board's list. Her Push is a person's, and still approves nothing here.
+  it('pushes nothing when a signed-in person who is not on the board chooses Push', async () => {
+    const held = await ask('feature-stranger');
+    const res = await answer(held, 'o-push', 'person');
+    expect(res.status, await res.clone().text()).toBe(200);
+    await waitFor(async () => (await statusOf(held.id)).state !== 'awaiting-approval', {
+      timeout: 4000,
+      describe: 'the non-member push is settled',
+    });
+    const after = (await statusOf(held.id)) as Held & { message: string };
+    expect(after.state).toBe('refused');
+    expect(after.message).toContain('not a member');
+    expect(w.upstreamTip(REPO, 'feature-stranger')).toBe('');
+    registerOwnerIdentity(person.user.id);
   });
 
   it('files a review item and pushes nothing until a person chooses Push', async () => {

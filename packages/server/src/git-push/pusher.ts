@@ -23,6 +23,7 @@
  */
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { classifyActor } from '../actor-identity.ts';
 import type { TaskStore } from '../tasks.ts';
 import type { PushCredential } from './credential.ts';
 import { type GitRunner, ScratchRepo, type Upstream, realGit, redact } from './git.ts';
@@ -72,6 +73,11 @@ export interface GitPusherOptions {
   dataDir: string;
   taskStore: TaskStore;
   credential: PushCredential;
+  /** What a person may do on a board, or null for a non-member (`FeatureDeps`). */
+  personRoleOn: (
+    boardId: string,
+    person: { id: string; email?: string },
+  ) => 'owner' | 'member' | null;
   /** Upstream's URL for `owner/name`. Tests point it at a local bare repo. */
   remoteUrlFor?: (repo: string) => string;
   runGit?: GitRunner;
@@ -350,13 +356,9 @@ export class GitPusher {
       this.note(record);
       return;
     }
-    if (answer.answeredWith !== PUSH_APPROVE || !answer.answeredBy) {
-      this.finish(
-        record,
-        403,
-        'not-approved',
-        'the item was answered without a person choosing Push; nothing was sent — ask again',
-      );
+    const refusal = this.approvalRefusal(record, answer);
+    if (refusal) {
+      this.finish(record, 403, 'not-approved', `${refusal}; nothing was sent — ask again`);
       this.note(record);
       return;
     }
@@ -368,6 +370,29 @@ export class GitPusher {
       this.done(record, 200);
     } else await this.pushNow(record, judged.sha);
     this.note(record);
+  }
+
+  /**
+   * Why this answer does not approve the push, or null when it does. It must
+   * choose Push, carry `answeredBy` (written only for a person proved by
+   * their own sign-in), name no agent id, and come from a human member of
+   * the push's board — its owner when the board reserves the `push` step.
+   */
+  private approvalRefusal(
+    record: PushRecord,
+    answer: { answeredWith?: string; answeredBy?: { id: string; email?: string } },
+  ): string | null {
+    if (answer.answeredWith !== PUSH_APPROVE) return 'the answer did not choose Push';
+    const who = answer.answeredBy;
+    if (!who || classifyActor({ id: who.id, kind: 'person' }) !== 'person') {
+      return 'the item was answered by an agent, not a person';
+    }
+    const role = this.o.personRoleOn(record.boardId, who);
+    if (role === null) return 'the person who answered is not a member of this board';
+    if (role !== 'owner' && this.o.taskStore.requireOwnerFor(record.boardId).includes('push')) {
+      return "this board reserves pushes for its owner's approval";
+    }
+    return null;
   }
 
   private note(record: PushRecord): void {

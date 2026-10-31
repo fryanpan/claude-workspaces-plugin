@@ -2445,6 +2445,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
+    personRoleOn: (workspaceId, person) => {
+      if (ownerIdentityIds().includes(person.id)) return 'owner';
+      if (!person.email) return null;
+      if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
+      return shareLinks.roleOf(workspaceId, person.email);
+    },
     agentTokenKey: agentTokenKeyFor,
     j,
     safeJson,

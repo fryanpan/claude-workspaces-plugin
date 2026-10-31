@@ -51,7 +51,7 @@ export interface PushWorld {
     repo: string,
     branch: string,
     opts?: { from?: string; rewrite?: boolean },
-  ) => Uint8Array;
+  ) => ArrayBuffer;
   onSocket: (path: string, init?: RequestInit, board?: string) => Promise<Response>;
   overTcp: (path: string, init?: RequestInit) => Promise<Response>;
   stop: () => Promise<void>;
@@ -135,7 +135,8 @@ export async function startPushWorld(
       git(clone, 'commit', '--quiet', '-m', `Change ${n} from the Riverbend lead`);
       const file = join(work, `${n}.bundle`);
       git(clone, 'bundle', 'create', '--quiet', file, `origin/main..${branch}`);
-      return new Uint8Array(readFileSync(file));
+      const b = readFileSync(file);
+      return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
     },
     onSocket: (path, init = {}, which = board) =>
       fetch(`http://board${path}`, {
