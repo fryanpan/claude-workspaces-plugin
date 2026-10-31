@@ -28,12 +28,10 @@ export interface SpeakPointsDeps {
   live(): boolean;
   sendJson(msg: SpokenServerMessage): void;
   sendAudio(pcm: Uint8Array): void;
-  /** A cue already opened the audio stream (`filler-cue.ts`): continue it. */
-  opened?: boolean;
 }
 
 export async function speakPoints(d: SpeakPointsDeps): Promise<void> {
-  let started = d.opened === true;
+  let started = false;
   const on = (): boolean => !d.signal.aborted && d.live();
   try {
     for (let i = 0; i < d.points.length; i++) {
