@@ -12,7 +12,7 @@
  * composers). This file imports from them; none imports back.
  */
 import { renderCommentMarkdown } from '../comment-markdown.ts';
-import { PENCIL_ICON, PLUS_ICON, SPEECH_ICON } from '../icons.ts';
+import { PENCIL_ICON, PLUS_ICON } from '../icons.ts';
 import {
   type BoardGoal,
   type BoardSection,
@@ -453,28 +453,19 @@ export function renderArchivedList(
 // ── Quick actions: the two ways work starts ───────────────────────────────
 
 /**
- * "New task", "Make a plan" and "Have a meeting", in the slot the
- * quick-add box had.
+ * "New task" and "Make a plan", in the slot the quick-add box had.
  *
  * Bryan, 2026-08-29: *"From board, have a quick flow to create a new task
  * (replace current text box) that creates an empty item in the usual task
  * detail view. And have another button to start a planning huddle."* Neither
  * asks anything first: the task is an empty row the panel opens on with the
- * title ready to type, and the live doc is one the editor opens with the mic
- * already asked for.
+ * title ready to type, and the plan is a new doc the editor opens on.
  *
- * Renamed twice. First from "Start a planning huddle" / "Record a
- * conversation" with the round-4 entry mock (Bryan, 2026-09-01): the old
- * labels named the mechanism; these name what you leave with. Then the second
- * button became "Have a meeting" (Bryan, 2026-09-02: *"Drop it from the UI.
- * We can have plans and meeting notes. And change the button to 'Have a
- * meeting'."*). Words only — routes, params and class names keep the huddle
- * name until the naming pass.
- *
- * The third is the same huddle for a room rather than for one person, and it
- * is what an in-person conversation has instead of a platform to join: the
- * press IS the announcement, and it is the only thing that turns on the
- * diarization a solo session does not pay for.
+ * Renamed from "Start a planning huddle" with the round-4 entry mock (Bryan,
+ * 2026-09-01): the old label named the mechanism; this one names what you
+ * leave with. Words only — routes, params and class names keep the huddle
+ * name. A third button, "Have a meeting", went on 2026-10-30 with the doc's
+ * own recorder; a meeting starts from the lead chat now.
  *
  * A mount, not a render, like the box it replaced: the board repaints on
  * every ydoc change, and a button rebuilt while its request is out would come
@@ -488,16 +479,6 @@ export interface QuickActionHandlers {
   /** Resolves when the huddle doc exists and the page is leaving, or when the
    *  start was refused — which gives the button back as the retry. */
   onStartHuddle: () => Promise<boolean>;
-  /**
-   * The same huddle, listening for a room instead of for one person.
-   *
-   * It is a SECOND BUTTON rather than a setting on the first because
-   * nothing announces an in-person conversation — there is no meeting
-   * platform to notice, no invite, no join — so the press has to be the
-   * thing that says it. One action, from the Board, with the mic already
-   * asked for and diarization already on.
-   */
-  onStartConversation: () => Promise<boolean>;
   /** Whether the server will accept writes from this browser. Absent means
    *  yes, so every caller that predates the sign-in gate is unchanged. */
   canWrite?: boolean;
@@ -529,19 +510,13 @@ export function renderQuickActions(container: HTMLElement, handlers: QuickAction
   huddle.className = 'board-btn board-huddle-start';
   huddle.innerHTML = `${PENCIL_ICON}<span>Make a plan</span>`;
   hold(huddle, handlers.onStartHuddle);
-  const conversation = document.createElement('button');
-  conversation.type = 'button';
-  conversation.className = 'board-btn board-conversation-start';
-  conversation.innerHTML = `${SPEECH_ICON}<span>Have a meeting</span>`;
-  hold(conversation, handlers.onStartConversation);
-  row.append(newTask, huddle, conversation);
+  row.append(newTask, huddle);
   // Error prevention rather than error recovery, matching the doc surface's
   // edit toggle: a signed-out reader is told these are unavailable instead of
   // pressing one and receiving a refusal. Disabled, not hidden — a control
-  // that vanishes teaches nothing about why. The conversation button creates
-  // a doc exactly as the huddle does, so it is gated with them.
+  // that vanishes teaches nothing about why.
   if (handlers.canWrite === false) {
-    for (const button of [newTask, huddle, conversation]) {
+    for (const button of [newTask, huddle]) {
       button.disabled = true;
       button.title = 'Sign in to add to this board';
       button.setAttribute('aria-label', 'Sign in to add to this board');

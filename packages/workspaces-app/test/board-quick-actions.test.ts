@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type DetailHandlers } from '../src/board/board-detail-render.ts';
 import { type BoardTask, CHORES_ID } from '../src/board/board-model.ts';
 import { renderQuickActions } from '../src/board/board-render.ts';
-import { HUDDLE_MODE_PARAM } from '../src/huddle-entry.ts';
 import {
   type Booted,
   WS,
@@ -18,18 +17,16 @@ import {
 import { disposeTaskDetail, renderTaskDetail } from './support/task-detail.ts';
 
 /**
- * The Board's quick-add text box is gone; in its slot are the three ways work
+ * The Board's quick-add text box is gone; in its slot are the two ways work
  * starts (Bryan, 2026-08-29: *"From board, have a quick flow to create a new
  * task (replace current text box) that creates an empty item in the usual
  * task detail view. And have another button to start a planning huddle."*).
  *
  * "New task" files an EMPTY row and opens the real panel with the title in
  * edit mode, so the first thing typed is the title. "Start a planning huddle"
- * creates the huddle doc and leaves for the editor with the mic flag. "Record
- * a conversation" is the same huddle for a room: it is a second BUTTON
- * because nothing announces an in-person conversation, so the press has to
- * be the announcement. None of them asks anything first. All fixtures
- * synthetic.
+ * creates the plan doc and leaves for the editor. ("Have a meeting" came out
+ * on 2026-10-30 with the doc's Record Audio; a meeting starts from the lead
+ * chat.) Neither asks anything first. All fixtures synthetic.
  */
 
 const NOW = 1_700_000_000_000;
@@ -81,29 +78,26 @@ const pending = () => {
 };
 
 describe('renderQuickActions — the buttons in the quick-add slot', () => {
-  it('mounts New task (primary), the huddle and the conversation, and no text box', () => {
+  it('mounts New task (primary) and the huddle, and no text box', () => {
     renderQuickActions(root, {
       onNewTask: () => Promise.resolve(true),
       onStartHuddle: () => Promise.resolve(true),
-      onStartConversation: () => Promise.resolve(true),
     });
     const wrap = root.querySelector('.board-quick-actions');
     expect(wrap).not.toBeNull();
     const buttons = Array.from(root.querySelectorAll('button'));
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(2);
     const newTask = root.querySelector('.board-quick-new') as HTMLButtonElement;
     const huddle = root.querySelector('.board-huddle-start') as HTMLButtonElement;
     expect(newTask.textContent).toContain('New task');
     expect(newTask.classList.contains('board-btn-primary')).toBe(true);
     // Round-4 mock (Bryan, 2026-09-01): verb-first, outcome-named — you
-    // leave with a plan doc, or with notes. The second became "Have a
-    // meeting" on 2026-09-02. The renames touch these entry buttons only;
-    // routes, params and class names keep the huddle name.
+    // leave with a plan doc. The rename touches the entry button only; the
+    // route and class name keep the huddle name.
     expect(huddle.textContent).toContain('Make a plan');
     expect(huddle.classList.contains('board-btn')).toBe(true);
-    const conversation = root.querySelector('.board-conversation-start') as HTMLButtonElement;
-    expect(conversation.textContent).toContain('Have a meeting');
-    expect(conversation.type).toBe('button');
+    // "Have a meeting" is gone with the doc's Record Audio.
+    expect(root.querySelector('.board-conversation-start')).toBeNull();
     // Not a submit: there is no form here to submit, and a stray Enter must
     // not file anything.
     expect(newTask.type).toBe('button');
@@ -117,17 +111,16 @@ describe('renderQuickActions — the buttons in the quick-add slot', () => {
   it('disables all of them when the server will not accept writes from this browser', () => {
     // Error prevention, matching the doc surface's edit toggle: a signed-out
     // reader is told these are unavailable rather than pressing one and
-    // receiving a refusal. Every one of them creates something on the board,
-    // so none is exempt — the conversation button included.
+    // receiving a refusal. Both create something on the board, so neither is
+    // exempt.
     const onNewTask = vi.fn(() => Promise.resolve(true));
     renderQuickActions(root, {
       onNewTask,
       onStartHuddle: () => Promise.resolve(true),
-      onStartConversation: () => Promise.resolve(true),
       canWrite: false,
     });
     const buttons = Array.from(root.querySelectorAll('button'));
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(2);
     for (const b of buttons) {
       expect(b.disabled).toBe(true);
       // Says why. A disabled control with no explanation is a dead end.
@@ -145,7 +138,6 @@ describe('renderQuickActions — the buttons in the quick-add slot', () => {
     renderQuickActions(root, {
       onNewTask: () => Promise.resolve(true),
       onStartHuddle: () => Promise.resolve(true),
-      onStartConversation: () => Promise.resolve(true),
     });
     for (const b of Array.from(root.querySelectorAll('button'))) {
       expect(b.disabled).toBe(false);
@@ -156,8 +148,7 @@ describe('renderQuickActions — the buttons in the quick-add slot', () => {
     const newTask = pending();
     const onNewTask = vi.fn(() => newTask.promise);
     const onStartHuddle = vi.fn(() => Promise.resolve(true));
-    const onStartConversation = vi.fn(() => Promise.resolve(true));
-    renderQuickActions(root, { onNewTask, onStartHuddle, onStartConversation });
+    renderQuickActions(root, { onNewTask, onStartHuddle });
     const btn = root.querySelector('.board-quick-new') as HTMLButtonElement;
     btn.click();
     expect(onNewTask).toHaveBeenCalledTimes(1);
@@ -175,14 +166,11 @@ describe('renderQuickActions — the buttons in the quick-add slot', () => {
     const huddle = pending();
     const onNewTask = vi.fn(() => Promise.resolve(true));
     const onStartHuddle = vi.fn(() => huddle.promise);
-    const onStartConversation = vi.fn(() => Promise.resolve(true));
-    renderQuickActions(root, { onNewTask, onStartHuddle, onStartConversation });
+    renderQuickActions(root, { onNewTask, onStartHuddle });
     const btn = root.querySelector('.board-huddle-start') as HTMLButtonElement;
     btn.click();
     expect(onStartHuddle).toHaveBeenCalledTimes(1);
     expect(onNewTask).not.toHaveBeenCalled();
-    // The two mic buttons are two routes, not one with a modifier.
-    expect(onStartConversation).not.toHaveBeenCalled();
     expect(btn.disabled).toBe(true);
     huddle.release(false);
     await Promise.resolve();
@@ -191,31 +179,14 @@ describe('renderQuickActions — the buttons in the quick-add slot', () => {
     expect(btn.disabled).toBe(false);
   });
 
-  it('the conversation press is its own route, held while the call is out', async () => {
-    const conversation = pending();
-    const onNewTask = vi.fn(() => Promise.resolve(true));
-    const onStartHuddle = vi.fn(() => Promise.resolve(true));
-    const onStartConversation = vi.fn(() => conversation.promise);
-    renderQuickActions(root, { onNewTask, onStartHuddle, onStartConversation });
-    const btn = root.querySelector('.board-conversation-start') as HTMLButtonElement;
-    btn.click();
-    expect(onStartConversation).toHaveBeenCalledTimes(1);
-    expect(onStartHuddle).not.toHaveBeenCalled();
-    expect(btn.disabled).toBe(true);
-    conversation.release(false);
-    await Promise.resolve();
-    expect(btn.disabled).toBe(false);
-  });
-
   it('mounts once — a board repaint does not stack a second set', () => {
     const h = {
       onNewTask: () => Promise.resolve(true),
       onStartHuddle: () => Promise.resolve(true),
-      onStartConversation: () => Promise.resolve(true),
     };
     renderQuickActions(root, h);
     renderQuickActions(root, h);
-    expect(root.querySelectorAll('button')).toHaveLength(3);
+    expect(root.querySelectorAll('button')).toHaveLength(2);
   });
 });
 
@@ -282,7 +253,7 @@ describe('the panel opens an untitled task with the title ready to type', () => 
  *
  * DRIVEN, NOT GREPPED. This used to read the seventeen boot modules as one
  * string, cut `newTask` and `startHuddle` out of `board-actions.ts` with a
- * regex, and match `untitled: true`, `location.assign(`, `HUDDLE_MODE_PARAM`
+ * regex, and match `untitled: true`, `location.assign(`, the mode parameter
  * and `'.board-quick-new'` inside them. Every one of those is a claim about
  * how the verb is WRITTEN, and the two that matter most are ABSENCES —
  * `not.toContain('assignee')` over a function body, which any rename or any
@@ -292,7 +263,7 @@ describe('the panel opens an untitled task with the title ready to type', () => 
  *
  * The buttons above are the island's own unit tests. These are the wiring.
  */
-describe('board-app wires the three buttons to their routes', () => {
+describe('board-app wires the two buttons to their routes', () => {
   const NEW_ID = 't-new';
 
   beforeEach(() => {
@@ -329,12 +300,12 @@ describe('board-app wires the three buttons to their routes', () => {
   const quick = (cls: string) =>
     document.querySelector(`.board-quick-actions .${cls}`) as HTMLButtonElement;
 
-  it('mounts the three buttons into the quick slot and no text box', async () => {
+  it('mounts the two buttons into the quick slot and no text box', async () => {
     await bootTestBoard({ tasks: [boardRow('t-1')] });
     const slot = el('board-quick');
     expect(slot.querySelector('.board-quick-new'), 'no New task button').not.toBeNull();
     expect(slot.querySelector('.board-huddle-start'), 'no Make a plan button').not.toBeNull();
-    expect(slot.querySelector('.board-conversation-start'), 'no meeting button').not.toBeNull();
+    expect(slot.querySelector('.board-conversation-start'), 'a meeting button').toBeNull();
     // The box it replaced: an input in the slot is the thing that went away.
     expect(slot.querySelector('input')).toBeNull();
     expect(slot.querySelector('.board-quick-input')).toBeNull();
@@ -378,32 +349,18 @@ describe('board-app wires the three buttons to their routes', () => {
     await closeDetailPanel(board);
   });
 
-  it('Make a plan posts a plan huddle and leaves with the mic flag and the mode', async () => {
+  it('Make a plan posts a plan huddle and leaves for the doc it made', async () => {
     const board = await bootTestBoard({ tasks: [boardRow('t-1')] });
     const went = await navigatingPress(board, 'board-huddle-start');
-    expect((posted(`/workspaces/${WS}/huddles`)?.body as { kind?: string })?.kind).toBe('plan');
     // The KIND rides the request body — the server seeds a plan doc with the
-    // Goal heading — and the MODE rides the address, because the press on
-    // THIS page is the only thing that knows whether anyone else is in the
-    // room and the editor that opens the mic is a different page.
+    // Goal heading.
+    expect((posted(`/workspaces/${WS}/huddles`)?.body as { kind?: string })?.kind).toBe('plan');
     expect(went, 'the press never left the board').toHaveLength(1);
     const left = new URL(went[0] as string, 'https://board.test');
     expect(left.pathname).toBe(`/workspaces/${WS}/docs/d-huddle`);
-    expect(left.searchParams.get('huddle')).toBe('1');
-    expect(left.searchParams.get(HUDDLE_MODE_PARAM)).toBe('solo');
-  });
-
-  it('Have a meeting is the same route with the other kind and the other mode', async () => {
-    const board = await bootTestBoard({ tasks: [boardRow('t-1')] });
-    const went = await navigatingPress(board, 'board-conversation-start');
-    expect((posted(`/workspaces/${WS}/huddles`)?.body as { kind?: string })?.kind).toBe(
-      'discussion',
-    );
-    expect(went, 'the press never left the board').toHaveLength(1);
-    const left = new URL(went[0] as string, 'https://board.test');
-    expect(left.pathname).toBe(`/workspaces/${WS}/docs/d-huddle`);
-    expect(left.searchParams.get('huddle')).toBe('1');
-    expect(left.searchParams.get(HUDDLE_MODE_PARAM)).toBe('conversation');
+    // Nothing on the address asks the doc to open a microphone: the doc has
+    // none to open.
+    expect(left.search).toBe('');
   });
 
   it('the c shortcut presses New task now that there is no box to focus', async () => {

@@ -1,9 +1,4 @@
-import {
-  type CaptureMode,
-  type HuddleKind,
-  type User,
-  parseWorkspaceLink,
-} from '@claude-workspaces/core';
+import { type HuddleKind, type User, parseWorkspaceLink } from '@claude-workspaces/core';
 import type { BootLocation } from '../boot-env.ts';
 /**
  * Every REST write the board performs, and the working state they mutate.
@@ -24,7 +19,6 @@ import type { BootLocation } from '../boot-env.ts';
  * one of them — a write that lands, or a one-line report that it did not.
  */
 import { api } from '../doc-path.ts';
-import { HUDDLE_MODE_PARAM } from '../huddle-entry.ts';
 import type { RelatedEntry, TaskDiscussion } from './board-detail-render.ts';
 import {
   type BoardSection,
@@ -853,17 +847,11 @@ export function createBoardActions(deps: BoardActionDeps) {
   }
 
   /**
-   * The Board's two huddle buttons: ONE call makes the huddle doc on this
-   * board, and the page leaves for it at once with the flag the editor reads
-   * to start the meeting assistant without a press. The click here is the
-   * person's gesture; `huddle-entry.ts` is the other half.
-   *
-   * "Make a plan" and "Have a meeting" are the same route and the same
-   * file; `kind` tells the server which doc to seed (a plan opens under a
-   * `# Goal` heading) and `mode` rides the address for the mic. Solo asks
-   * for no speaker labels and pays for none.
+   * The Board's "Make a plan": ONE call makes the plan doc on this board, and
+   * the page leaves for it at once. `kind` tells the server which doc to seed
+   * (a plan opens under a `# Goal` heading).
    */
-  async function startHuddle(kind: HuddleKind, mode: CaptureMode): Promise<boolean> {
+  async function startHuddle(kind: HuddleKind): Promise<boolean> {
     const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/huddles`, 'POST', {
       kind,
     });
@@ -874,10 +862,7 @@ export function createBoardActions(deps: BoardActionDeps) {
       showToast(why);
       return false;
     }
-    // The mode rides the address beside the start flag: this press is the
-    // only thing that knows whether anyone else is in the room, and the
-    // editor that opens the mic is a different page.
-    location.assign(`${url}?huddle=1&${HUDDLE_MODE_PARAM}=${mode}`);
+    location.assign(url);
     return true;
   }
 

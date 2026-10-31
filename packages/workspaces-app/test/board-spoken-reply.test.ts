@@ -1,16 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { wireBoardVoice } from '../src/board/board-voice.ts';
 import { frameRms, pcm16ToFloat } from '../src/board/spoken-reply-audio.ts';
 import { LATE_STOP_MS, SETUP_KEY } from '../src/board/spoken-reply-client.ts';
-import { boardState, mountShell, task } from './support/board-region-harness.ts';
-import {
-  FakeSocket,
-  fakePlayback,
-  spokenHarness as harness,
-} from './support/spoken-reply-harness.ts';
+import { spokenHarness as harness } from './support/spoken-reply-harness.ts';
 
 /**
- * The board mic's spoken reply, driven end to end on the page with the
+ * The spoken reply client (`board/spoken-reply-client.ts`, which the voice
+ * page mounts), driven end to end on the page with the
  * server, the microphone and the speaker replaced (`support/spoken-reply-harness.ts`).
  */
 
@@ -321,83 +316,5 @@ describe('spoken-reply audio helpers', () => {
     expect(frameRms(new Int16Array([16384, -16384]))).toBeCloseTo(0.5);
     const f = pcm16ToFloat(new Uint8Array([0x00, 0x40, 0x00, 0xc0, 0x01]));
     expect([...f]).toEqual([0.5, -0.5]);
-  });
-});
-
-describe('wireBoardVoice with the spoken reply', () => {
-  function mount(setups: number[], held: Record<string, string> = {}, off?: string) {
-    const el = mountShell();
-    const opened: FakeSocket[] = [];
-    const fetched: string[] = [];
-    vi.stubGlobal('fetch', (url: string) => {
-      fetched.push(url);
-      return Promise.resolve(
-        new Response(JSON.stringify({ setups, held, timings: {}, ...(off ? { off } : {}) }), {
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
-    });
-    wireBoardVoice({
-      state: boardState({ tasks: new Map([['t-1', task('t-1')]]) }),
-      author: { id: 'u-1', name: 'Alice', kind: 'known' },
-      workspaceId: 'w-1',
-      document,
-      location: { origin: 'http://board.test', pathname: '/workspaces/w-1', assign: () => {} },
-      el,
-      renderDetail: () => {},
-      spoken: {
-        host: 'board.test',
-        protocol: 'http:',
-        openSocket: (u) => {
-          const s = new FakeSocket();
-          (s as unknown as { url: string }).url = u;
-          opened.push(s);
-          return s;
-        },
-        startCapture: async () => ({ ok: true, capture: { stop: () => {} } }),
-        playbackContext: () => fakePlayback().ctx,
-      },
-    });
-    return { el, opened, fetched };
-  }
-
-  it('swaps in the spoken mic when the server names a setup', async () => {
-    const m = mount([1]);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(m.fetched).toEqual(['/workspaces/w-1/voice/timings']);
-    m.el('board-mic').dispatchEvent(new Event('pointerdown'));
-    expect(document.getElementById('vr-panel')?.classList.contains('hidden')).toBe(false);
-    expect((m.opened[0] as unknown as { url: string }).url).toBe(
-      'ws://board.test/workspaces/w-1/voice/converse',
-    );
-  });
-
-  it('mounts the spoken mic for a held setup alone, so the panel can say why', async () => {
-    const line = 'Setup 2 waits on turning off ElevenLabs training.';
-    const m = mount([], { '2': line });
-    await vi.advanceTimersByTimeAsync(0);
-    m.el('board-mic').dispatchEvent(new Event('pointerdown'));
-    expect(document.querySelector('#vr-panel .vr-body')?.textContent).toBe(line);
-    expect(m.opened).toEqual([]);
-  });
-
-  it('says on the plain mic that spoken replies are off by this server’s profile', async () => {
-    const off = 'Spoken replies are off on this server.';
-    const m = mount([], {}, off);
-    await vi.advanceTimersByTimeAsync(0);
-    const mic = m.el('board-mic');
-    expect(mic.title).toContain(off);
-    expect(mic.getAttribute('aria-description')).toBe(off);
-    mic.dispatchEvent(new Event('pointerdown'));
-    expect(document.getElementById('vr-panel')).toBeNull();
-    expect(m.opened).toEqual([]);
-  });
-
-  it('keeps the plain mic when the server can speak no setup', async () => {
-    const m = mount([]);
-    await vi.advanceTimersByTimeAsync(0);
-    m.el('board-mic').dispatchEvent(new Event('pointerdown'));
-    expect(document.getElementById('vr-panel')).toBeNull();
-    expect(m.opened).toEqual([]);
   });
 });

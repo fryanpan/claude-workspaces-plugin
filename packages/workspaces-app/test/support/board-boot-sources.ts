@@ -30,6 +30,5 @@ export const BOARD_BOOT_SOURCES = [
   'board-projection',
   'board-deep-links',
   'board-load-report',
-  'board-voice',
   'board-shortcuts',
 ] as const;

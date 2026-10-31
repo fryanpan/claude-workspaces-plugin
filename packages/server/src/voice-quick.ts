@@ -77,9 +77,9 @@ export const FEEDBACK_SAVED_ACK = 'Thanks, feedback saved.';
 export const FEEDBACK_ASK = 'What’s the feedback?';
 
 /**
- * Where a start lands: the board itself, with the kind in the query. Only the
- * board mic's navigation reads it (`board-voice.ts` calls the same start the
- * buttons call), so a pasted link starts nothing.
+ * Where a start lands: the board itself, with the kind in the query. The board
+ * mic was the one reader, and it was removed on 2026-10-30, so today the
+ * board ignores the query and a pasted link starts nothing.
  */
 export function startPath(workspaceId: string, start: StartKind): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}?start=${start}`;

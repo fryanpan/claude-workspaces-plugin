@@ -78,7 +78,6 @@ import {
   resourceOf,
   taskShareUrl,
 } from './board-url.ts';
-import { wireBoardVoice } from './board-voice.ts';
 import { createBoardWalkthrough } from './board-walkthrough.ts';
 import { mountIslandProbe } from './island-probe.tsx';
 import { createLibraryPage } from './library-page.ts';
@@ -668,8 +667,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     // call, so a board repaint cannot rebuild a button mid-request.
     renderQuickActions(el('board-quick'), {
       onNewTask: () => newTask(),
-      onStartHuddle: () => startHuddle('plan', 'solo'),
-      onStartConversation: () => startHuddle('discussion', 'conversation'),
+      onStartHuddle: () => startHuddle('plan'),
       // The board's create buttons are the doc surface's edit toggle: a
       // control that cannot work should say so before it is pressed, not
       // after. The rest of the board's writes still fail loudly through
@@ -857,25 +855,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     href: () => location.href,
   }));
 
-  // Where an utterance lands: the open panel, or the row the keyboard is on.
-  // `board-voice.ts` — one capture per page, because Space is a singleton.
-  wireBoardVoice({
-    state,
-    author,
-    workspaceId,
-    document,
-    location,
-    el,
-    renderDetail,
-    start: (kind) =>
-      void startHuddle(
-        kind === 'plan' ? 'plan' : 'discussion',
-        kind === 'plan' ? 'solo' : 'conversation',
-      ),
-    // Swaps in the spoken reply when the server can speak one.
-    spoken: {},
-  });
-  // The chat with the board's lead, its button beside the mic (`lead-chat/`).
+  // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
   mountLeadChat({
     workspaceId,
     author,
