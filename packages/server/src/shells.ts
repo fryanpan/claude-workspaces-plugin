@@ -36,6 +36,7 @@ import {
 import { type BrowserSentryConfig, sentryHeadTags } from './browser-sentry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore, WorkspaceDirNode, WorkspaceFileNode } from './doc-store.ts';
+import { LANDING_NAV_CSS, landingSections, renderLandingNav } from './landing-nav.ts';
 import { LANDING_REMOTE_CSS } from './landing-remote.ts';
 import {
   LANDING_REVIEW_CSS,
@@ -1041,15 +1042,6 @@ h1{font-size:20px;margin:0 0 2px}
    the far end. Padded to a 36px tap target (design-mobile.md). */
 .top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .top-link{font-size:13px;display:inline-block;padding:9px 0;flex-shrink:0}
-/* The section bar: mobile tier only (design-mobile.md, <=1100px). It stays
-   at the top while the page scrolls; every entry takes an equal share, so
-   none moves or resizes, and a section lands below the bar, not under it. */
-.home-nav{display:none}
-@media (max-width:1100px){
-.home-nav{display:flex;position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #eef0f2;margin:6px -14px 0;padding:0 8px}
-.home-nav a{flex:1 1 0;min-width:0;text-align:center;font-size:13px;font-weight:500;padding:12px 2px;min-height:44px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#landing-review,#inbox,#landing-boards,#coach{scroll-margin-top:56px}
-}
 h2{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#57606a;margin:26px 0 8px;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
 .count{font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:#8b95a1}
 .summary{color:#6e7781;font-size:12px;margin:0 0 4px}
@@ -1104,6 +1096,7 @@ function landingShell(
   body: string,
   sentry: BrowserSentryConfig | null,
   assets: AssetManifest = {},
+  pageCss = '',
 ): string {
   const sentryTags = sentryHeadTags(sentry, 'landing', assets);
   const sentryMeta = sentryTags ? `\n${sentryTags}` : '';
@@ -1114,7 +1107,7 @@ function landingShell(
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#2e7dd7">${sentryMeta}
-<style>${LANDING_CSS}${LANDING_REVIEW_CSS}${LANDING_REMOTE_CSS}</style>
+<style>${LANDING_CSS}${LANDING_REVIEW_CSS}${LANDING_REMOTE_CSS}${pageCss}</style>
 ${body}
 <footer>POST /workspaces/&lt;ws&gt;/docs · /widget.iife.js · /demos/mockup</footer>`;
 }
@@ -1215,20 +1208,10 @@ export function renderLanding(
       ? ''
       : `<details class="fold"><summary>Attachments by project <span class="count">${model.projects.length}</span></summary>
 <ul>${model.projects.map(renderLandingProjectLink).join('')}</ul></details>`;
-  // The mobile section bar (Bryan, 31 Oct: "a navbar to go between review
-  // items, inbox, projects, coach"). Plain fragment links, so a tap scrolls
-  // with no script; it sits outside every region `landing-live.ts` swaps, and
-  // each target keeps its id across a swap. Inbox and Coach are the owner's
-  // sections, so each has an entry only when the owner's page carries it.
-  const sections: Array<[string, string]> = [
-    ['landing-review', 'Review items'],
-    ...(owner && inbox ? [['inbox', 'Inbox'] as [string, string]] : []),
-    ['landing-boards', 'Projects'],
-    ...(owner && coach ? [['coach', 'Coach'] as [string, string]] : []),
-  ];
-  const nav = `<nav class="home-nav" aria-label="Sections">${sections
-    .map(([id, label]) => `<a href="#${id}">${label}</a>`)
-    .join('')}</nav>`;
+  // The bottom bar at the mobile tier (`landing-nav.ts`).
+  const nav = renderLandingNav(
+    landingSections({ inbox: owner && !!inbox, coach: owner && !!coach }),
+  );
   // `landing-live.ts` swaps `#landing-review` and `#landing-boards` when a
   // board changes, `#coach` and `#inbox` when theirs do, and tells the
   // `pushed` banner when a meeting is joined or left, so it never polls.
@@ -1237,7 +1220,6 @@ export function renderLanding(
     `<header class="top"><h1>Workspaces</h1>${
       owner ? '<a class="top-link" href="/access">Who has access</a>' : ''
     }</header>
-${nav}
 <meeting-banner pushed workspace-name="${escape(notesWorkspaceName)}"></meeting-banner>
 <script type="module" src="${assetHref(assets, 'landing.js')}"></script>${
       feedbackWorkspaceId
@@ -1251,9 +1233,11 @@ ${inbox}
 <div id="landing-boards">${active}
 ${inactive}
 ${retired}
-${projects}</div>`,
+${projects}</div>
+${nav}`,
     sentry,
     assets,
+    LANDING_NAV_CSS,
   );
 }
 

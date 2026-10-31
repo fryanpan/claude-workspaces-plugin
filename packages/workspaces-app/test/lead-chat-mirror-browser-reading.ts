@@ -28,6 +28,10 @@ export interface MirrorWidthRun {
     agentFirst: boolean;
     closedByPageTap: boolean;
     libraryCurrent: string | null;
+    /** Each visible tab's and the agent button's box ("nav left,top,width,
+     *  height") with the chat closed, then open: equal when nothing moved. */
+    tabsClosed: string[];
+    tabsOpen: string[];
   } | null;
   /** After dragging the docked panel's edge, and after loading the page again. */
   resized: { width: number } | null;
