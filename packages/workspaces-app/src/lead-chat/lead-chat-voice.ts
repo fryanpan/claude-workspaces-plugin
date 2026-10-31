@@ -254,6 +254,14 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         set({ phase: 'working' });
         return;
       case 'reply':
+        // The lead took the question: its answer comes later, as a reply of
+        // its own. Listening now would open the server's listener, and the
+        // server does not speak an answer over an open listener, so the
+        // answer would arrive as text only.
+        if (!m.spoken && m.route === 'agent') {
+          set({ phase: 'working' });
+          return;
+        }
         // Nothing heard: listen again rather than wait on a voice.
         if (!m.spoken) again();
         return;

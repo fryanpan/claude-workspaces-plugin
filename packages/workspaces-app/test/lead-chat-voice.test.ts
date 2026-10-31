@@ -90,6 +90,37 @@ describe('the lead chat voice', () => {
     expect([mic.starts, mic.stops]).toEqual([1, 0]);
   });
 
+  it('waits for the lead’s answer, without listening, after the lead takes the question', async () => {
+    const { voice, socket, speak } = make();
+    voice.start();
+    await settle();
+    const ws = socket();
+    ws.open();
+    ws.serve({ type: 'turn-end', text: 'what is next' });
+    // The router hands it to the lead and says nothing yet.
+    ws.serve({ type: 'reply', spoken: '', detail: [], asking: false, route: 'agent' });
+    await settle();
+    expect(voice.state().phase).toBe('working');
+    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(1);
+    speak();
+    expect(ws.frames()).toBe(0);
+    // The lead's answer arrives later, and is said.
+    ws.serve({
+      type: 'reply',
+      spoken: 'The ferry task.',
+      detail: [],
+      asking: false,
+      route: 'lead-answer',
+    });
+    ws.serve({ type: 'audio-start', sampleRate: 24_000 });
+    expect(voice.state().phase).toBe('speaking');
+    ws.serve({ type: 'audio-end' });
+    await settle();
+    await settle();
+    expect(voice.state().phase).toBe('listening');
+    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(2);
+  });
+
   it('a stop while listening drops the question with its socket', async () => {
     const { voice, socket, mic } = make();
     voice.start();
