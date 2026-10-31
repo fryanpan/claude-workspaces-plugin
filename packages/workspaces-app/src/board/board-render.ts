@@ -450,7 +450,7 @@ export function renderArchivedList(
   container.append(list);
 }
 
-// ── Quick actions: the two ways work starts ───────────────────────────────
+// ── Quick actions: the three ways work starts ─────────────────────────────
 
 /**
  * "New task", "Make a plan" and "Have a meeting", in the slot the quick-add
