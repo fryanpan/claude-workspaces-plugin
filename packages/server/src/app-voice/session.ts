@@ -9,7 +9,7 @@
  *    `tone` from Soniox's tag list; anything else is refused before the
  *    engine is asked. The ElevenLabs voice ignores both.
  *  - `listen` opens the spoken reply's listener with its tap tuning, so the
- *    listener's own end of speech, at most 500 ms after the last word, ends
+ *    listener's own end of speech, at most 1 s after the last word, ends
  *    each turn. Every frame is sent as `heard`, and a final one is followed
  *    by `turn-end`. The listener stays open for the next turn. Words heard
  *    while `speak` is still sending, which are not its own echo, stop it

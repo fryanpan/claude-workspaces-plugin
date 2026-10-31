@@ -447,7 +447,9 @@ export function startInbox(): void {
   const s = section();
   if (!s) return;
   Object.assign(state, { open: null, expanded: false, folds: new Set() });
-  state.cursor = openRows()[0]?.dataset.row ?? null;
+  // No cursor until the first j/k, so the first j lands on the first line.
+  // A key that acts on a line with no cursor acts on the first (onKey).
+  state.cursor = null;
   applyView();
   if (!document.activeElement || document.activeElement === document.body) takeFocus();
   if (listening) return;
