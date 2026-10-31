@@ -12,8 +12,8 @@ import type { TaskReviewItem, User } from '@claude-workspaces/core';
 import { askBackFromAnswer, handleTaskReviewMoreInfo } from '../src/routes/task-review-ask-back.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from '../src/routes/task-routes-context.ts';
 
-const PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'person', color: '#336699' };
-const AGENT: User = { id: 'agent-riverbend', name: 'Riverbend', kind: 'agent', color: '#888888' };
+const PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#336699' };
+const AGENT: User = { id: 'agent-riverbend', name: 'Riverbend', kind: 'known', color: '#888888' };
 const BOARD = 'w-harbor';
 const TASK = 't-saltmarsh';
 const ITEM = 'r-one';
