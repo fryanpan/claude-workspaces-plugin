@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -1852,6 +1852,15 @@ outages were legible only as a 404 that took 56 seconds — the block itself was
 recorded nowhere, and whether a stall was a synchronous pass or the OS
 descheduling the process could not be told apart. A stall with nothing in
 flight is that second thing, and the line says so.
+
+`heap-probe.ts` joins Ops beside it and moves no boundary; only
+`event-loop.ts` imports it. A block over a second also says whether a garbage
+collection ran during it (a `WeakRef` sentinel re-armed every tick, because
+JavaScriptCore exposes no GC timings) and, at most once a minute and only when
+the last measured rate predicts under 300 ms, the heap's size, object count and
+ten commonest types. It was added after eight CPU-bound 2–3 s blocks on
+2026-10-31 that a 1,000-task fixture could not reproduce, so the next one has to
+say for itself whether it was the collector or JavaScript.
 
 `memory-log.ts` and `memory-footprint.ts` join Ops and move no boundary. They
 write the `[doc-store] mem` line: the footprint macOS counts, read every 30
