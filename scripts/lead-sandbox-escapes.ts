@@ -262,9 +262,20 @@ export function connectFrom(
 }
 
 /**
+ * A wall row passes when the connect inside answers `EPERM` and the control
+ * got past the sandbox: `connected`, `ECONNREFUSED`, or `timeout`. A timeout
+ * is the network's answer, not the sandbox's: this Mac's own Tailscale IPv6
+ * address times out with no sandbox at all (measured 30 Oct), so a control
+ * that times out still shows the `EPERM` came from the wall.
+ */
+export function wallRowPasses(inside: string, control: string): boolean {
+  return inside === 'EPERM' && ['connected', 'ECONNREFUSED', 'timeout'].includes(control);
+}
+
+/**
  * The board wall (`lead-sandbox-wall.ts`): a connect to each port at each
- * address must answer `EPERM` inside the profile, and `connected` or
- * `ECONNREFUSED` inside `unwalled`, the same lead's profile with the wall
+ * address must answer `EPERM` inside the profile, and anything but `EPERM`
+ * that a connect can answer (`wallRowPasses`) inside `unwalled`, the same lead's profile with the wall
  * left out (the control).
  * Nothing is sent: a connect that lands is closed at once.
  */
@@ -281,7 +292,7 @@ export function boardWallRows(
       const inside = connectFrom(runtime, profile, cwd, host, port);
       const control = connectFrom(runtime, unwalled, cwd, host, port);
       return {
-        ok: inside === 'EPERM' && (control === 'connected' || control === 'ECONNREFUSED'),
+        ok: wallRowPasses(inside, control),
         says: `board wall: ${host} port ${port} answers ${control} without the wall (the control), ${inside} inside (must be EPERM)`,
       };
     }),
