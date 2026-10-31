@@ -56,7 +56,7 @@ flowchart TB
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
@@ -2601,6 +2601,24 @@ with the text quoted (`github-event-line.ts`). Pages never receive it. Tests:
 `github-relay-two-servers.test.ts` (two real servers and a stand-in broker,
 restarted), `github-hub-routes.test.ts`, `github-hub.test.ts`,
 `github-relay-units.test.ts`.
+
+**A lead pushes a branch through its board server.** A sandboxed lead,
+walled on the Mac or the `lead` user on a project machine, holds no GitHub
+credential. It makes a git bundle of its branch and posts it over its
+board's own socket to `POST /workspaces/<board>/git/push?repo&branch[&task]`
+(`routes/git-push.ts`, a registered feature). `git-push/pusher.ts` judges
+it against the board's list in `<dataDir>/git-push.json` (`policy.ts`; no
+route writes it), reads upstream's default branch and the branch's tip,
+refuses the default branch and any tip that does not descend from upstream's,
+and pushes from a work repository made for that push, which borrows only
+upstream's objects from a mirror (`run.ts`, `git.ts`). git reads the
+credential from a mode-600 file for each call, never its arguments or
+environment (`credential.ts`: a Fly secret on a project server, a Keychain
+item on the Mac). On a repo marked `approval` it files a
+decision item with `step: 'push'` and pushes only when a person's answer
+chose Push and that person is a member of the board. Only the board's
+socket may ask; loopback TCP is refused. Tests: `git-push-route.test.ts`, `git-push-approval.test.ts`,
+`git-push-units.test.ts`.
 
 **Incoming Messages** is a section on the landing page that lists the
 message threads an inbox reader agent judged worth Bryan's time. It is not a

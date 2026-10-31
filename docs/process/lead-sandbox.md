@@ -295,6 +295,50 @@ is missing, refuses the launch and names the item, for an `allowKeychain`
 lead too. The dry run prints the account and item each lead resolves to,
 never the token, and `--check --turn` runs each lead's turn as that account.
 
+## A lead pushes through its board server
+
+A lead holds no GitHub credential. It sends its branch to its board server
+as a git bundle, over its board's own socket, and the server pushes it. The
+same request works for a walled lead on the Mac and for the `lead` user on a
+project machine:
+
+```bash
+git fetch origin
+git bundle create - origin/main..my-branch | curl -sS --unix-socket "$CW_BOARD_SOCKET" \
+  --data-binary @- \
+  "http://board/workspaces/$CW_WORKSPACE_ID/git/push?repo=<owner>/<name>&branch=my-branch"
+```
+
+The answer is the push's record: `pushed`, `up-to-date`, `refused` with an
+`error` and a `message`, or `awaiting-approval`. Read it again with
+`GET /workspaces/<board>/git/pushes/<id>`. A repo marked for approval also
+needs `&task=<taskId>`: the server files a review item on that task, and
+pushes when a person on the board chooses Push. Only the board's socket may
+ask; the same request over loopback TCP is refused.
+
+**Which repos.** `<dataDir>/git-push.json`, edited on the machine:
+
+```json
+{ "boards": { "<boardId>": { "repos": [
+  { "repo": "<owner>/<name>" },
+  { "repo": "<owner>/<other>", "approval": true } ] } } }
+```
+
+No route writes it, and it is read again on every push. The server refuses
+the repo's default branch and anything that is not a fast-forward. Any other
+branch is allowed, including one a repo's `on: push` workflow runs for. The
+bundle must carry exactly one ref, `refs/heads/<branch>`, and build only on
+commits upstream already has.
+
+**The credential.** A fine-grained GitHub token with Contents read and
+write on the listed repos only, and without the Workflows permission. On the
+Mac, the Keychain item `cw-github-push-token`
+(`security add-generic-password -a "$USER" -s cw-github-push-token -w`, then
+paste the token when asked). On a project machine, the Fly secret
+`CW_GITHUB_PUSH_TOKEN`. Without one, every push is refused with 503.
+Mechanics and limits: [security.md](../architecture/security.md), "A sandboxed
+lead pushes through its board server".
+
 ## GitHub through the proxy
 
 A lead whose entry names repos fetches and pushes them through

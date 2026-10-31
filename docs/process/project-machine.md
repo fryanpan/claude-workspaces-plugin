@@ -276,6 +276,13 @@ look. The session runs in Claude Code's default permission mode, so it asks
 before each tool; nobody answers unless a person attaches or uses Remote
 Control.
 
+## Pushing a branch from the lead
+
+The lead pushes through the server, which holds the GitHub credential as
+the Fly secret `CW_GITHUB_PUSH_TOKEN` and the board's repo list in
+`/data/cw/git-push.json`. The request and the file are in
+[lead-sandbox.md](lead-sandbox.md), "A lead pushes through its board server".
+
 ## GitHub events for a board here
 
 A board on this machine holds no GitHub token. It keeps a list of the events

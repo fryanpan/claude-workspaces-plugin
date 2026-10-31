@@ -24,6 +24,17 @@ export interface FeatureDeps {
   notifyLanding: (part: LandingPart) => void;
   /** The peer address a request arrived from, when Bun knows it. */
   requestAddress: (req: Request) => string | undefined;
+  /** The board whose own socket a request arrived on, or null for TCP. */
+  boardOfSocket: (req: Request) => string | null;
+  /**
+   * What a PERSON may do on a board: 'owner' for the owner's identity or an
+   * operator address, the share row's role for a member's proven address,
+   * null for anyone else. Never asked of an agent.
+   */
+  personRoleOn: (
+    workspaceId: string,
+    person: { id: string; email?: string },
+  ) => 'owner' | 'member' | null;
   /** The key an agent-stream token is checked against. */
   agentTokenKey: () => string;
   j: (status: number, body: unknown) => Response;

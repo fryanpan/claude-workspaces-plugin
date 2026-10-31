@@ -24,6 +24,8 @@ import type { CoachSummarizer } from './coach/summary.ts';
 import type { Deployer } from './deploy.ts';
 import type { WatchFactory } from './dispatch-registry.ts';
 import type { EffortEstimator } from './effort-estimator.ts';
+import type { PushCredential } from './git-push/credential.ts';
+import type { GitRunner } from './git-push/git.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
 import type { FetchLike, HomeRemotesConfig } from './home-remotes.ts';
 import type { ReplyTransport } from './inbox/send-transport.ts';
@@ -292,6 +294,17 @@ export interface ServerOptions {
    * this one writes to a git checkout.
    */
   deployer?: Deployer;
+  /**
+   * A lead's push through this server (`git-push/`, `routes/git-push.ts`).
+   * `credential` is the one the boot read (`server-deps.ts`); unset refuses
+   * every push. `remoteUrlFor` and `runGit` exist for tests, which point
+   * upstream at a local bare repo.
+   */
+  gitPush?: {
+    credential: PushCredential;
+    remoteUrlFor?: (repo: string) => string;
+    runGit?: GitRunner;
+  };
   /**
    * Reads the machine-wide discovery slot — the file every local MCP client
    * resolves this server through — for the `liveness` field on

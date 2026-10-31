@@ -231,6 +231,32 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(seeded.projects[`${volume}/lead/work`].hasTrustDialogAccepted).toBe(true);
   }, 30_000);
 
+  // A lead pushes through the server, which holds the
+  // GitHub credential. Different users cannot read each other's
+  // environments (/proc/<pid>/environ is the owner's), so the lead cannot
+  // read a value only the server's process holds.
+  it('gives the GitHub push credential to the server and never to the lead', async () => {
+    const PUSH = 'push-credential-saltmarsh';
+    const { log } = leadMachine({ CW_GITHUB_PUSH_TOKEN: PUSH });
+    await waitFor(
+      () =>
+        find(readRecords(log).recs, 'claude').length > 0 &&
+        find(readRecords(log).recs, 'bun').length > 0,
+      { timeout: 20_000, describe: 'the lead and the server to start' },
+    );
+    const { recs, setprivArgv } = readRecords(log);
+    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    // POSITIVE CONTROL: the recorder sees the credential where it belongs.
+    expect(server?.uid).toBe('cw');
+    expect(server?.env.get('CW_GITHUB_PUSH_TOKEN')).toBe(PUSH);
+    const holders = recs.filter((r) => [...r.env.values()].some((v) => v.includes(PUSH)));
+    expect(holders).toEqual([server]);
+    expect(find(recs, 'claude').every((r) => r.uid === 'lead')).toBe(true);
+    expect([...recs.map((r) => r.argv), ...setprivArgv].filter((a) => a.includes(PUSH))).toEqual(
+      [],
+    );
+  }, 30_000);
+
   it('starts no lead when the machine has no sign-in for one, or no board', async () => {
     for (const env of [{}, { CLAUDE_CODE_OAUTH_TOKEN: LEAD_TOKEN }] as Record<string, string>[]) {
       const { bin, log, volume } = stubs(scratch, '0');

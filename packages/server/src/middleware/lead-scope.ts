@@ -24,7 +24,11 @@
  *   MessageDisplay and PostToolBatch hooks, and `post_status`'s untargeted
  *   form;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
- *   of that board.
+ *   of that board;
+ * - `POST /workspaces/<board>/git/push` and `GET …/git/pushes/<id>` — a push
+ *   of a bundle the lead made, through the server's credential, to a repo on
+ *   that board's list (`routes/git-push.ts`). The lead sends objects, never
+ *   a path, so the server reads nothing the lead can write.
  *
  * The bind and the rewrite have the server act on a file tree the lead
  * controls. That is safe because every read, listing and write under a
@@ -59,6 +63,8 @@ export function leadScopeAllows(
   if (!match || decoded(match[1] ?? '') !== boardId) return false;
   const rest = match[2] ?? '';
   if (rest === 'docs') return m === 'GET';
+  if (rest === 'git/push') return m === 'POST';
+  if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
   if (parts.length !== 3 || m !== 'POST') return false;
   const [collection, id = '', verb] = parts;

@@ -22,6 +22,7 @@ import { describeClaudeKey } from './claude-key-source.ts';
 import { haikuCoachSummarizer } from './coach/summary.ts';
 import { createDeployer } from './deploy.ts';
 import { effortEstimateEnabled, haikuEffortEstimator } from './effort-estimator.ts';
+import { pushCredentialFor } from './git-push/credential.ts';
 import {
   GOOGLE_OAUTH_KEYCHAIN_SERVICE,
   createGoogleOauthApp,
@@ -78,6 +79,9 @@ export function createServerDeps(
   // below nor a child it spawns can find one (`project-profile.ts`). On the
   // Mac this removes nothing and prints nothing.
   const removed = scrubForeignCredentials(process.env);
+  // Read, and taken out of the environment, before anything spawns: the
+  // GitHub credential a lead's push uses (`git-push/credential.ts`).
+  const gitPushCredential = pushCredentialFor(process.env);
   const ghHosts = ghHostsPath(process.env, homedir());
   for (const line of describeProjectServer(
     process.env,
@@ -451,6 +455,7 @@ export function createServerDeps(
     coachSummarizer,
     pluginRefresher,
     deployer,
+    gitPushCredential,
   };
 }
 
