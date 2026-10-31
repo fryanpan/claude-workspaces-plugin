@@ -39,7 +39,9 @@ export type LeadChatState = 'sent' | 'queued' | 'received' | 'done' | 'answered'
  *   mirrored the same way. Its `author` names who caused it.
  *
  * The last two are the mirror (`server/src/lead-chat/mirror.ts`): nothing in
- * them is sent to the lead again, and nothing in them is spoken.
+ * them is sent to the lead again, and nothing in them is spoken. An agent's
+ * message `via: 'terminal'` is the lead's session talking: text it wrote
+ * mid-turn, or a tool call it made.
  */
 export type LeadChatVia = 'chat' | 'voice' | 'terminal' | 'channel';
 
@@ -63,7 +65,27 @@ export interface LeadChatMessage {
   /** On a person's message in `received`: when the lead's session took it,
    *  so a page can count how long it has been working. */
   receivedAt?: number;
+  /** On an agent's message: a tool call the lead's session made, mirrored by
+   *  its PostToolBatch hook. `text` is the call in one line. */
+  tool?: LeadChatToolCall;
+  /** On an agent's message: its session is still writing it, so its text
+   *  grows. Kept out of the log until it is whole. */
+  streaming?: true;
 }
+
+/** A tool call as the lead's terminal shows it, reduced by the hook the way
+ *  a turn note is and capped. */
+export interface LeadChatToolCall {
+  name: string;
+  input: string;
+  output?: string;
+  /** The call failed. */
+  failed?: true;
+}
+
+/** The most of a tool call's input and output a message carries. */
+export const LEAD_CHAT_TOOL_INPUT_MAX = 2000;
+export const LEAD_CHAT_TOOL_OUTPUT_MAX = 4000;
 
 export interface LeadChatLead {
   agentId: string;
@@ -254,6 +276,7 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
   const replyTo = str(m.replyTo, 200);
   const receivedAt =
     typeof m.receivedAt === 'number' && Number.isFinite(m.receivedAt) ? m.receivedAt : undefined;
+  const tool = parseToolCall(m.tool);
   return {
     id,
     role: m.role,
@@ -265,6 +288,23 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
     ...(replyTo ? { replyTo } : {}),
     ...(m.turnEnd === true ? { turnEnd: true as const } : {}),
     ...(receivedAt !== undefined ? { receivedAt } : {}),
+    ...(tool ? { tool } : {}),
+    ...(m.streaming === true ? { streaming: true as const } : {}),
+  };
+}
+
+function parseToolCall(raw: unknown): LeadChatToolCall | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const t = raw as Record<string, unknown>;
+  const name = str(t.name, 200);
+  const input = typeof t.input === 'string' && t.input.length <= LEAD_CHAT_TOOL_INPUT_MAX;
+  if (!name || !input) return null;
+  const output = str(t.output, LEAD_CHAT_TOOL_OUTPUT_MAX);
+  return {
+    name,
+    input: t.input as string,
+    ...(output ? { output } : {}),
+    ...(t.failed === true ? { failed: true as const } : {}),
   };
 }
 

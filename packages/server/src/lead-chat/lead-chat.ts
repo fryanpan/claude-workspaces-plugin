@@ -23,7 +23,8 @@ import { agentIdForName } from '@claude-workspaces/core/identity';
  * what its terminal shows (`mirror*` below): a prompt typed there, a board
  * event its session took as a prompt, and the message each turn ended on,
  * posted by the plugin's UserPromptSubmit and Stop hooks to the routes they
- * already post to. A message to the lead goes `sent` → `received` when the
+ * already post to; the text it writes mid-turn and its tool calls come
+ * through `mirror.ts`. A message to the lead goes `sent` → `received` when the
  * lead's MCP child acks its queue row (the session has it) → `done` when
  * that session's turn ends, or `answered` when the lead answers it. Nothing
  * mirrored is sent to the lead again or spoken: speech is `answer_voice`'s
@@ -308,27 +309,54 @@ export class LeadChat {
         this.record(workspaceId, { ...m, state: 'done' });
       }
     }
-    const words = text.trim();
-    if (!words) return false;
     let lastPerson = list.length - 1;
     while (lastPerson >= 0) {
       const m = list[lastPerson];
       if (m && m.role === 'person' && m.via !== 'channel') break;
       lastPerson--;
     }
-    const repeat = list
-      .slice(lastPerson + 1)
-      .some((m) => m.role === 'agent' && m.text.trim() === words);
-    if (repeat) return false;
-    const lead = this.deps.leadOf(workspaceId);
+    const turn = list.slice(lastPerson + 1);
+    // The last message the session wrote, already streaming in: the closing
+    // message is that one, so it becomes it rather than a second row.
+    const said = turn.filter((m) => m.role === 'agent' && !m.tool).at(-1);
+    for (const m of turn) {
+      if (m.streaming && m !== said) this.record(workspaceId, withoutStreaming(m));
+    }
+    const words = text.trim();
+    if (said?.via === 'terminal' && !said.turnEnd) {
+      return this.record(workspaceId, {
+        ...withoutStreaming(said),
+        ...(words ? { text: words } : {}),
+        turnEnd: true,
+      });
+    }
+    if (!words) return false;
+    if (turn.some((m) => m.role === 'agent' && m.text.trim() === words)) return false;
     return this.record(workspaceId, {
       id: this.deps.newId(),
       role: 'agent',
-      author: { id: lead?.agentId ?? agentName, name: lead?.name ?? agentName },
+      author: this.leadAuthor(workspaceId, agentName),
       text: words,
       ts: this.now(),
       turnEnd: true,
     });
+  }
+
+  /** The lead, as the author of a row its session wrote. */
+  leadAuthor(workspaceId: string, agentName: string): { id: string; name: string } {
+    const lead = this.deps.leadOf(workspaceId);
+    return { id: lead?.agentId ?? agentName, name: lead?.name ?? agentName };
+  }
+
+  /**
+   * A row of the lead's session (`mirror.ts`), shown on every page now and
+   * written to the log once it is whole (`store`). A row still streaming
+   * lives in memory only, so a long message costs the log one line.
+   */
+  showMirrored(workspaceId: string, m: LeadChatMessage, store: boolean): boolean {
+    if (store) return this.record(workspaceId, m);
+    this.hold(workspaceId, m);
+    return true;
   }
 
   private reply(w: Waiting, text: string): void {
@@ -373,6 +401,11 @@ export class LeadChat {
 
   private record(workspaceId: string, m: StoredMessage): boolean {
     if (!this.deps.log.append(workspaceId, m)) return false;
+    this.hold(workspaceId, m);
+    return true;
+  }
+
+  private hold(workspaceId: string, m: StoredMessage): void {
     const list = this.messages(workspaceId).filter((x) => x.id !== m.id);
     list.push(m);
     list.sort(compareLeadChatEntries);
@@ -386,8 +419,12 @@ export class LeadChat {
       workspaceId,
       message: publicMessage(m),
     });
-    return true;
   }
+}
+
+function withoutStreaming(m: StoredMessage): StoredMessage {
+  const { streaming: _streaming, ...rest } = m;
+  return rest;
 }
 
 type StoredMessage = StoredLeadChatMessage;

@@ -13,7 +13,9 @@ import type { SecretReader } from './access-headers.ts';
  * carries `channel`: who caused it, one reduced line of it, and the queue
  * row it delivered. The board's lead chat shows those rows so a person sees
  * what the lead received (the owner, 2026-10-31); the coach never reads
- * them (`routes/prompt-marks.ts`).
+ * them (`routes/prompt-marks.ts`). The route's answer says whether this
+ * session is the board's lead, and the hook keeps a marker for the session
+ * while it is, so the session-mirror hooks know to post (`session-mirror.ts`).
  *
  * Headless runs are not typed. `claude -p` and the Agent SDK set
  * `CLAUDE_CODE_ENTRYPOINT` to `sdk-cli`, `sdk-ts` or `sdk-py` (read off the
@@ -53,6 +55,7 @@ import {
   resolveTransport,
 } from './agent-notes.ts';
 import { fullNote } from './note-redact.ts';
+import { markLead } from './session-mirror.ts';
 
 /** How an injected prompt begins, after leading whitespace. */
 export const INJECTED_PREFIXES: readonly string[] = [
@@ -197,6 +200,8 @@ export interface PromptHookDeps {
   joinedBoard?: boolean;
   /** The Access secret's reader; Keychain when omitted. */
   readSecret?: SecretReader;
+  /** Where the lead marker is kept (`session-mirror.ts`); tmpdir when omitted. */
+  mirrorDir?: string;
 }
 
 /** Read stdin, decide, post. Answers whether a mark was delivered; never throws. */
@@ -225,6 +230,10 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
       body: JSON.stringify(decision.post),
       signal: AbortSignal.timeout(POST_TIMEOUT_MS),
     });
+    if (res.ok) {
+      const answer = (await res.json().catch(() => null)) as { lead?: unknown } | null;
+      markLead(decision.post.sessionId, answer?.lead === true, deps.mirrorDir);
+    }
     return res.ok;
   } catch {
     return false;

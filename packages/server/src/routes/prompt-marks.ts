@@ -11,7 +11,8 @@
  * as a prompt, one line of it reduced by the hook, who caused it, and the
  * queue row it delivered. Only the lead chat reads it — it mirrors the
  * board's lead's session (`lead-chat/lead-chat.ts`, `mirrorPrompt`), which
- * also shows a typed prompt's text. The coach never sees a channel line: it
+ * also shows a typed prompt's text. The answer says `lead: true` when the
+ * session is the board's lead. The coach never sees a channel line: it
  * counts a person's typed time, and an injected prompt's words stay out of
  * its digest.
  *
@@ -121,5 +122,13 @@ export async function handlePromptMarkRoute(
     ...(text !== undefined && raw.typed ? { text } : {}),
     ...(channel && !raw.typed ? { channel } : {}),
   });
-  return j(202, { ok: true, ...(mirrored ? { mirrored: true } : {}) });
+  // `lead` tells the hook to keep mirroring this session's text and tool
+  // calls (`plugin/hooks/lib/session-mirror.ts`), even on a prompt that
+  // showed nothing.
+  const lead = mirrored || ctx.leadChatMirror.isLead(boardId, agent);
+  return j(202, {
+    ok: true,
+    ...(mirrored ? { mirrored: true } : {}),
+    ...(lead ? { lead: true } : {}),
+  });
 }

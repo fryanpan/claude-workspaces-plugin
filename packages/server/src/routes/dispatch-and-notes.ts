@@ -18,6 +18,7 @@ import { recordDispatchRequested } from '../dispatch-request-event.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { filingStateFor } from '../unfiled-ask-filing.ts';
 import { judgeTurnNote } from '../unfiled-ask.ts';
+import { handleLeadMirrorRoute } from './lead-mirror.ts';
 import { handlePromptMarkRoute } from './prompt-marks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -126,6 +127,8 @@ export async function handleDispatchAndNoteRoutes(
   const noteVisitor = visitor && rq.leadBoard !== rq.scope?.workspaceId ? visitor : null;
   const promptMark = await handlePromptMarkRoute(ctx, rq);
   if (promptMark) return promptMark;
+  const leadMirror = await handleLeadMirrorRoute(ctx, rq);
+  if (leadMirror) return leadMirror;
   // --- REST: builder dispatches ---
   // The lead's statement that a builder is working a task in a private
   // worktree, so the stall loop can read worktree churn as the row

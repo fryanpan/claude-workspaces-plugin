@@ -111,8 +111,9 @@ describe('the lead chat mirrors the lead’s session', () => {
   it('shows a prompt typed in the lead’s terminal on an open page, and no other session’s', async () => {
     const other = await prompt(HELPER, { typed: true, text: 'a helper’s own prompt' });
     expect(other.status).toBe(202);
+    expect(await other.json()).toEqual({ ok: true });
     const res = await prompt(LEAD, { typed: true, text: 'Check the Saltmarsh deploy' });
-    expect(await res.json()).toEqual({ ok: true, mirrored: true });
+    expect(await res.json()).toEqual({ ok: true, mirrored: true, lead: true });
     const shown = await waitFor(() => latest((m) => m.text === 'Check the Saltmarsh deploy'), {
       ...WITHIN_1S,
       describe: 'the typed prompt on the page',
@@ -134,9 +135,10 @@ describe('the lead chat mirrors the lead’s session', () => {
     });
     expect(row.author.name).toBe('Riverbend');
     expect(row.text).toBe('replied on Deploy plan: the install takes 40s');
-    // An injected prompt with no channel line shows nothing.
+    // An injected prompt with no channel line shows nothing, and still says
+    // the session is the lead, so its hook keeps mirroring.
     const bare = await prompt(LEAD, { typed: false });
-    expect(await bare.json()).toEqual({ ok: true });
+    expect(await bare.json()).toEqual({ ok: true, lead: true });
   });
 
   it('refuses a channel line it cannot vouch for', async () => {
@@ -264,6 +266,94 @@ describe('the lead chat mirrors the lead’s session', () => {
     });
     await waitFor(() => said.join(' ').includes('Two tasks.'), { describe: 'the answer said' });
     socket.ws.close();
+  });
+
+  const mirror = (name: string, body: Record<string, unknown>) =>
+    post(agentPath(name, 'mirror'), body);
+
+  it('streams text the lead writes mid-turn into an open page, and keeps it once it is whole', async () => {
+    const id = 'f1d2c3b4-0000-4000-8000-000000000001';
+    const first = await mirror(LEAD, {
+      kind: 'text',
+      messageId: id,
+      index: 0,
+      final: false,
+      text: 'Reading the Saltmarsh deploy log.',
+    });
+    expect(await first.json()).toEqual({ ok: true, mirrored: true });
+    const growing = await waitFor(
+      () => latest((m) => m.text === 'Reading the Saltmarsh deploy log.'),
+      {
+        ...WITHIN_1S,
+        describe: 'the first flush on the page',
+      },
+    );
+    expect(growing.role).toBe('agent');
+    expect(growing.via).toBe('terminal');
+    expect(growing.streaming).toBe(true);
+    const whole = 'Reading the Saltmarsh deploy log.\nThe install step takes 40s.';
+    await mirror(LEAD, { kind: 'text', messageId: id, index: 2, final: true, text: whole });
+    // A flush that lands late is dropped, not shown over the newer text.
+    await mirror(LEAD, { kind: 'text', messageId: id, index: 1, final: false, text: 'stale' });
+    const done = await waitFor(
+      () => {
+        const m = latest((x) => x.id === growing.id);
+        return m?.text === whole && !m.streaming ? m : undefined;
+      },
+      { ...WITHIN_1S, describe: 'the whole message, no longer streaming' },
+    );
+    expect(page.messages.filter((m) => m.id === done.id).at(-1)?.text).toBe(whole);
+    // Kept: a page opened now reads it.
+    const read = (await (await fetch(`${base}/workspaces/${boardId}/lead-chat`)).json()) as {
+      messages: LeadChatMessage[];
+    };
+    expect(read.messages.find((m) => m.id === done.id)?.text).toBe(whole);
+    // The turn ends on that same message: it becomes the closing message, not a second row.
+    await turnEnd(LEAD, whole);
+    await waitFor(() => latest((x) => x.id === done.id)?.turnEnd === true, {
+      ...WITHIN_1S,
+      describe: 'the streamed message marked as the turn end',
+    });
+    expect(page.messages.filter((m) => m.text === whole && m.id !== done.id)).toEqual([]);
+  });
+
+  it('shows each tool call the lead made as its own row, with its input and output', async () => {
+    const res = await mirror(LEAD, {
+      kind: 'tools',
+      calls: [
+        { name: 'Bash', input: 'git status', output: 'nothing to commit' },
+        { name: 'Read', input: 'docs/plan.md', output: 'no such file', failed: true },
+      ],
+    });
+    expect(await res.json()).toEqual({ ok: true, mirrored: true });
+    const bash = await waitFor(() => latest((m) => m.tool?.name === 'Bash'), {
+      ...WITHIN_1S,
+      describe: 'the Bash call on the page',
+    });
+    expect(bash.text).toBe('Bash: git status');
+    expect(bash.tool).toEqual({ name: 'Bash', input: 'git status', output: 'nothing to commit' });
+    const read = await waitFor(() => latest((m) => m.tool?.name === 'Read'), {
+      describe: 'the Read call on the page',
+    });
+    expect(read.tool?.failed).toBe(true);
+  });
+
+  it('mirrors no other session’s text or tools, and refuses a body it cannot bound', async () => {
+    const helper = await mirror(HELPER, {
+      kind: 'tools',
+      calls: [{ name: 'Bash', input: 'helper-only command' }],
+    });
+    expect(await helper.json()).toEqual({ ok: true });
+    const bad = [
+      { kind: 'text', messageId: '../x', index: 0, final: true, text: 'x' },
+      { kind: 'text', messageId: 'a', index: -1, final: true, text: 'x' },
+      { kind: 'text', messageId: 'a', index: 0, final: true, text: 'x'.repeat(8001) },
+      { kind: 'tools', calls: [] },
+      { kind: 'tools', calls: [{ name: 'Bash', input: 'x'.repeat(2001) }] },
+      { kind: 'other' },
+    ];
+    for (const body of bad) expect((await mirror(LEAD, body)).status).toBe(400);
+    expect(page.messages.some((m) => m.text.includes('helper-only command'))).toBe(false);
   });
 
   async function converse() {
