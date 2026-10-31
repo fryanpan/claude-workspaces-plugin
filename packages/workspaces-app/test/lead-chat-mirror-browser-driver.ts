@@ -251,6 +251,10 @@ async function main(): Promise<void> {
       const cdp = await openBrowser(width, height);
       const first = await load(cdp, boardUrl);
       if (!first.button) throw new Error('no button');
+      // The bar's tabs with the chat closed, to compare with it open.
+      const tabsClosed = (await cdp.evaluate(
+        `[...document.querySelectorAll('.board-nav > .board-nav-item, .board-nav > .board-nav-dock')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => { const r = e.getBoundingClientRect(); return (e.dataset.nav ?? 'agent') + ' ' + [r.left, r.top, r.width, r.height].map(Math.round).join(','); })`,
+      )) as string[];
       await tap(cdp, first.button.x, first.button.y);
       await until('the panel open with rows', async () => {
         const s = await state(cdp);
@@ -359,6 +363,9 @@ async function main(): Promise<void> {
       let full: MirrorWidthRun['full'] = null;
       if (placed.sheet) {
         step(`full screen and the navbar at ${width}`);
+        const tabsOpen = (await cdp.evaluate(
+          `[...document.querySelectorAll('.board-nav > .board-nav-item, .board-nav > .board-nav-dock')].filter((e) => e.getBoundingClientRect().width > 0).map((e) => { const r = e.getBoundingClientRect(); return (e.dataset.nav ?? 'agent') + ' ' + [r.left, r.top, r.width, r.height].map(Math.round).join(','); })`,
+        )) as string[];
         const geo = (await cdp.evaluate(`(() => {
           const nav = document.querySelector('.board-nav').getBoundingClientRect();
           const lib = document.querySelector('.board-nav-item[data-nav="library"]').getBoundingClientRect();
@@ -396,6 +403,8 @@ async function main(): Promise<void> {
           agentFirst: geo.agentFirst,
           closedByPageTap: closed,
           libraryCurrent: page,
+          tabsClosed,
+          tabsOpen,
         };
       }
 
