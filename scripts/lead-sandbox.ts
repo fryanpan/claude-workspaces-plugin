@@ -66,6 +66,7 @@ import {
   escapeRows,
   installRow,
   keychainRow,
+  probeRuntime,
 } from './lead-sandbox-escapes.ts';
 import { gitHooksPath, hooksPathRefusal } from './lead-sandbox-git.ts';
 import {
@@ -167,10 +168,16 @@ function wallRows(
   const dir = config.boardSocketDir ?? defaultBoardSocketDir(machine.uid);
   const own = join(dir, `${lead.boardId}.sock`);
   const others = otherSockets(dir, own);
+  const node = probeRuntime();
+  if (node === null) {
+    return [
+      { ok: false, says: 'board wall: no node on PATH to probe with (bun cannot tell a refusal)' },
+    ];
+  }
   try {
     return [
-      ...boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces())),
-      ...boardSocketRows(profile, unwalled, cwd, own, others),
+      ...boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces()), undefined, node),
+      ...boardSocketRows(profile, unwalled, cwd, own, others, node),
       ...(others.length === 0
         ? [{ ok: false, says: `board socket: no other board's socket in ${dir} to try` }]
         : []),
