@@ -412,7 +412,10 @@ export function createSpokenReply(opts: SpokenReplyOpts): SpokenReply {
           ...(m.choices ? { choices: m.choices } : {}),
           ...(m.points ? { points: m.points } : {}),
         });
-        if (!m.spoken) {
+        if (!m.spoken && m.route === 'agent') {
+          // The lead took it: nothing is said until its answer comes back.
+          panel.setState('working');
+        } else if (!m.spoken) {
           panel.note('Didn’t catch anything.');
           panel.setState('done');
         } else if (audioOpen) {
