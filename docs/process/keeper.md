@@ -116,7 +116,9 @@ prints, step by step:
   and into prod's launchd job. Prod is restarted (bootout, then bootstrap)
   so it reads the new environment; the plist's old copy is kept beside it
   as `.bak.keeper-<time>`. Sessions already running keep the old
-  environment until they restart.
+  environment until they restart. A later `scripts/launchd/install.sh`
+  keeps the plist's `CW_KEEPER_URL` unless you set the variable yourself
+  (`CW_KEEPER_URL=` clears it).
 - **The check:** the probe asks the keeper for `fly apps create
   cw-keeper-probe`, prints the approval link, and withdraws the request, so
   nothing is created and no tap can run it later.
