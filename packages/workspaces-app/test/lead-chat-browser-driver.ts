@@ -82,6 +82,9 @@ const READ = `(() => {
     barText: bar ? bar.textContent : '',
     list: sr && sr.querySelector('.lc-list') ? sr.querySelector('.lc-list').textContent : '',
     composerFocused: !!sr && sr.activeElement === sr.querySelector('textarea'),
+    listening: btn ? btn.dataset.listening === 'true' : false,
+    // Every control on screen in the chat that would start or stop listening.
+    listenControls: sr ? [...sr.querySelectorAll('button')].filter((x) => shown(x) && /listen|talk|mic/i.test((x.getAttribute('aria-label') || '') + ' ' + (x.title || '') + ' ' + x.className)).length : 0,
     viewport: { width: document.documentElement.clientWidth, height: innerHeight, inner: innerWidth, scale: visualViewport ? visualViewport.scale : 1 },
   };
 })()`;
@@ -95,6 +98,8 @@ interface Read {
   barText: string;
   list: string;
   composerFocused: boolean;
+  listening: boolean;
+  listenControls: number;
   viewport: { width: number; height: number; inner?: number; scale?: number };
 }
 
@@ -396,10 +401,17 @@ async function main(): Promise<void> {
           Buffer.from(png.data, 'base64'),
         );
       }
-      await tap(cdp, out.button as Rect);
-      const off = await until('the bar back in', async () => {
+      // The bar grows into the panel, still listening; the agent button is
+      // the one listen control, and its tap stops listening and closes.
+      await tap(cdp, out.bar as Rect);
+      const grown = await until('the panel open from the bar', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
-        return r.bar ? null : r;
+        return r.pane ? r : null;
+      });
+      await tap(cdp, grown.button as Rect);
+      const off = await until('the chat closed', async () => {
+        const r = (await cdp.evaluate(READ)) as Read;
+        return r.bar || r.pane ? null : r;
       });
       const snap = (await (await fetch(`${base}/workspaces/${ws}/lead-chat`)).json()) as {
         messages: Array<{ text: string; via?: string; role: string }>;
@@ -421,6 +433,12 @@ async function main(): Promise<void> {
         answerInBar: answered.barText.includes(reply),
         answerStored: snap.messages.some((m) => m.role === 'agent' && m.text === reply),
         barGone: off.bar === null,
+        listeningOut: out.listening,
+        listenControlsOut: out.listenControls,
+        listeningInPane: grown.listening,
+        listenControlsInPane: grown.listenControls,
+        listeningAfter: off.listening,
+        paneGone: off.pane === null,
       });
       await cdp.evaluate(`localStorage.removeItem('cw.lead-chat.mode')`);
       cdp.close();

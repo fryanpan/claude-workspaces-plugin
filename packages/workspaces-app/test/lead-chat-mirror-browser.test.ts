@@ -56,7 +56,7 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
       expect(w.channel.hidden, at).toBe(0);
       expect(w.channel.count, at).toBe('(1)');
       expect(w.channel.after, at).toBe(1);
-      expect(w.channel.headerOneRow, at).toBe(true);
+      expect(w.channel.headerFits, at).toBe(true);
     }
   }, 60_000);
 

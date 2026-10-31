@@ -110,4 +110,16 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
       expect(v.barGone, at).toBe(true);
     }
   });
+
+  it('Voice first: the agent button is the one listen control; the chat draws no mic of its own', () => {
+    for (const v of result().voice) {
+      const at = String(v.width);
+      expect(v.listeningOut, at).toBe(true);
+      expect(v.listenControlsOut, at).toBe(0);
+      expect(v.listeningInPane, at).toBe(true);
+      expect(v.listenControlsInPane, at).toBe(0);
+      expect(v.listeningAfter, at).toBe(false);
+      expect(v.paneGone, at).toBe(true);
+    }
+  });
 });

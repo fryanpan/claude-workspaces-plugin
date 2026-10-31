@@ -108,13 +108,12 @@ describe('the lead chat meeting on a page', () => {
     });
     expect(t.mic.opened).toBe(1);
     expect(t.net.last().url).toContain('/docs/d-saltmarsh/');
-    // The heading is one row; the chat's own mic steps aside.
+    // The heading is one row.
     expect(t.view.meeting.head.hidden).toBe(false);
     expect(t.view.meeting.head.textContent).toContain('Meeting');
     expect(t.view.meeting.head.textContent).toContain('End meeting');
     expect(t.view.meeting.head.textContent).toContain('AR');
     expect(t.view.start.hidden).toBe(true);
-    expect(t.view.mic.hidden).toBe(true);
     expect(t.view.meeting.notes.textContent).toContain(NOTES_EMPTY);
     expect(t.view.button.dataset.meeting).toBe('true');
   });

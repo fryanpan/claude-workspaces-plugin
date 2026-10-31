@@ -181,19 +181,26 @@ describe('the lead chat on a page', () => {
     expect(view.pane.hidden).toBe(false);
     expect(view.bar.hidden).toBe(true);
     expect(voice.mic.stops).toBe(0);
-    expect(view.mic.getAttribute('aria-pressed')).toBe('true');
+    expect(view.button.dataset.listening).toBe('true');
+    // The agent button is the one listen control: its tap stops listening.
+    view.button.click();
+    expect(view.pane.hidden).toBe(true);
+    expect(view.button.dataset.listening).toBe('false');
+    expect(voice.mic.stops).toBe(1);
   });
 
-  it('the composer mic turns listening on and off in Chat first', async () => {
-    const { view, voice } = mount();
+  it('the chat draws no mic of its own, and names the lead agent plainly', () => {
+    const { view } = mount({ mode: 'voice' });
     view.button.click();
-    view.mic.click();
-    await settle();
-    expect(voice.mic.starts).toBe(1);
-    view.mic.click();
-    expect(voice.mic.stops).toBe(1);
-    expect(voice.socket().closed).toBe(true);
-    expect(view.pane.hidden).toBe(false);
+    view.bar.click();
+    const buttons = [...view.pane.querySelectorAll('button')];
+    const listens = buttons.filter((b) =>
+      /listen|talk|mic/i.test(`${b.getAttribute('aria-label') ?? ''} ${b.title} ${b.className}`),
+    );
+    expect(listens).toEqual([]);
+    expect(view.pane.querySelector('.lc-title h2')?.textContent).toBe('Chat with Lead Agent');
+    expect(view.composer.placeholder).toBe('Message lead agent');
+    expect(view.composer.getAttribute('aria-label')).toBe('Message lead agent');
   });
 
   it('draws no button for a reader who may not talk to the lead', () => {

@@ -51,6 +51,15 @@ export interface VoiceRun {
   /** And kept in the chat as the lead's message. */
   answerStored: boolean;
   barGone: boolean;
+  /** Listening, and the chat's controls that listen, with the bar out and
+   *  with the panel grown from it; then listening after the agent button's
+   *  tap closed the chat. */
+  listeningOut: boolean;
+  listenControlsOut: number;
+  listeningInPane: boolean;
+  listenControlsInPane: number;
+  listeningAfter: boolean;
+  paneGone: boolean;
 }
 
 export interface LeadChatRun {

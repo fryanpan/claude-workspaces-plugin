@@ -7,7 +7,7 @@ export interface MirrorWidthRun {
   tool: { head: string; open: string[]; expanded: string | null };
   /** Board-event rows shown, then after the toggle, then the toggle's count;
    *  and whether the header with its toggle stays on one row. */
-  channel: { before: number; hidden: number; count: string; after: number; headerOneRow: boolean };
+  channel: { before: number; hidden: number; count: string; after: number; headerFits: boolean };
   /** The spoken reply's words before and after a tap. */
   voice: { closedText: boolean; label: string; words: string };
   /** A flush of the lead's text reached the open page within a second. */

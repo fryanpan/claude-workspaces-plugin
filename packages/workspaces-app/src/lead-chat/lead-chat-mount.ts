@@ -260,10 +260,6 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.button.addEventListener('click', onAgent);
   view.bar.addEventListener('click', () => openPane(view.bar.getBoundingClientRect()));
   view.close.addEventListener('click', closeAll);
-  view.mic.addEventListener('click', () => {
-    if (voice.state().phase !== 'off') stopListening();
-    else startListening();
-  });
   view.send.addEventListener('click', () => void sendTyped());
   view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {
