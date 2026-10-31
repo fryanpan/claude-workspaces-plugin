@@ -2165,6 +2165,13 @@ from the doc's own folder (`routes/doc-assets.ts`) while the node, and so the
 pasted, dropped or picked image file to that route's POST, which stores it in
 `images/` beside the `.md` through the server's `doc-image-store.ts` (one of
 the `doc-*.ts` the diagram draws), then inserts the path it answers.
+A `::html{src="map/index.html"}` line frames a page from the same folder
+(`doc/board-embed-frames.ts`, with no board mapping): the server's
+`routes/doc-files.ts` serves the page and its scripts, styles, data, images
+and fonts, and `doc-file-frame.ts` (another `doc-*.ts` the diagram draws)
+holds the one reader that keeps every read inside the folder, writes the
+page's relative scripts and stylesheets into it, and puts first in it the
+relay that hands the page's relative `fetch` calls to the doc page.
 `doc-image-retry.ts`, which that block image installs, asks again for an
 image whose file was not there yet, so it appears once the file lands without
 a reload; it changes the DOM's `src` only. `doc-image-versions.ts`, which it
