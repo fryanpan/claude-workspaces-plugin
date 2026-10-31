@@ -14,6 +14,7 @@ import {
   type LeadChatHistoryPage,
   type LeadChatMessage,
   type LeadChatRead,
+  compareLeadChatEntries,
 } from '@claude-workspaces/core/lead-chat';
 import { LeadChat } from '../src/lead-chat/lead-chat.ts';
 import { LEAD_CHAT_KEEP, LeadChatLog } from '../src/lead-chat/log.ts';
@@ -177,12 +178,18 @@ describe('GET /workspaces/<id>/lead-chat history pages', () => {
     const page = (await res.json()) as LeadChatHistoryPage;
     expect(page.more).toBe(false);
     // Posted back to back, several share a millisecond and sort by id among
-    // themselves; which ten is the point, not their order within one.
-    expect(page.messages.map((m) => m.text).sort()).toEqual(
-      Array.from({ length: 10 }, (_, i) => `question ${i}`).sort(),
+    // themselves, so which message lands either side of the cut is not
+    // fixed. What is: the page is the ten before the first one shown, and
+    // the two together are every message once.
+    expect(page.messages).toHaveLength(10);
+    for (const m of page.messages) {
+      expect(compareLeadChatEntries(m, cursorOf(first))).toBeLessThan(0);
+    }
+    const all = [...page.messages, ...read.messages].map((m) => m.text);
+    expect(new Set(all).size).toBe(LEAD_CHAT_PAGE + 10);
+    expect(all.sort()).toEqual(
+      Array.from({ length: LEAD_CHAT_PAGE + 10 }, (_, i) => `question ${i}`).sort(),
     );
-    const shown = new Set(read.messages.map((m) => m.id));
-    for (const m of page.messages) expect(shown.has(m.id)).toBe(false);
   });
 
   it('refuses a page whose cursor or limit is not one', async () => {
