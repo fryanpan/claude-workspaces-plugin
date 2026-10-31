@@ -7,8 +7,9 @@
  *   /access/<boardId>  one board
  *
  * `?ws=<workspaceId>` is context, as on the prompts page: the board he came
- * from, for the rail. The back link always goes to the workspaces list. Below 1100px every section shows at
- * once, because there is no subnav to choose one with.
+ * from, for the rail. The back link always goes to the workspaces list.
+ * Below 1100px every section shows at once, because there is no subnav to
+ * choose one with.
  *
  * It writes through the routes that already guard each write: Approve and
  * Reject through the card's own access door, which needs the owner's own
