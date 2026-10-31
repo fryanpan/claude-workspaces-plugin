@@ -32,10 +32,24 @@ export interface PcmCaptureOpts {
   createPump?: AudioPumpFactory;
 }
 
-/** What the page says when the browser will not hand over a microphone. */
-export function micRefusal(err: unknown): string {
+/**
+ * The refusal in a frame with an opaque origin, which no site setting can
+ * lift: Chrome refuses `getUserMedia` there whatever the frame's `allow`
+ * says. A board's mock frame is one unless the board serves it on its
+ * frame-only hostname (`server/src/frame-host.ts`).
+ */
+export const OPAQUE_MIC_REFUSAL =
+  'The microphone cannot open in this frame: it has no origin of its own. ' +
+  'It opens when the board serves its mocks on a frame hostname.';
+
+/**
+ * What the page says when the browser will not hand over a microphone.
+ * `origin` is the page's own, the string `null` for an opaque one.
+ */
+export function micRefusal(err: unknown, origin?: string): string {
   const name = (err as { name?: string } | null)?.name;
   if (name === 'NotAllowedError' || name === 'SecurityError') {
+    if (origin === 'null') return OPAQUE_MIC_REFUSAL;
     return 'The microphone is blocked for this page. Allow it in the browser’s site settings.';
   }
   if (name === 'NotFoundError') return 'No microphone was found.';
@@ -93,7 +107,7 @@ export async function startPcmCapture(opts: PcmCaptureOpts): Promise<PcmCaptureS
       },
     });
   } catch (err) {
-    return refuse(micRefusal(err));
+    return refuse(micRefusal(err, self.origin));
   }
   let pump: Awaited<ReturnType<AudioPumpFactory>>;
   try {
