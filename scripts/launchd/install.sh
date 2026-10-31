@@ -122,6 +122,27 @@ if [ -n "${ACCESS_TUNNEL_HOSTS}" ] && { [ -z "${ACCESS_TEAM_DOMAIN}" ] || [ -z "
     exit 1
 fi
 
+# The keeper's address (docs/process/keeper.md), baked in like the rest. Unset
+# here, the installed plist's value is kept: keeper-setup.ts wrote it there,
+# and after the old Keychain token is retired a reinstall that dropped it
+# would break sharing with nothing saying why. CW_KEEPER_URL= (empty) clears it.
+if [ -n "${CW_KEEPER_URL+set}" ]; then
+    KEEPER_URL="${CW_KEEPER_URL}"
+elif [ -f "${PLIST_DEST}" ]; then
+    KEEPER_URL="$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:CW_KEEPER_URL' "${PLIST_DEST}" 2>/dev/null || true)"
+else
+    KEEPER_URL=""
+fi
+# Empty, or http://localhost: and digits: the value goes through sed into XML below.
+if [ -n "${KEEPER_URL}" ]; then
+    KEEPER_PORT="${KEEPER_URL#http://localhost:}"
+    case "${KEEPER_PORT}" in
+        "${KEEPER_URL}"|""|*[!0-9]*)
+            echo "error: CW_KEEPER_URL must be http://localhost:<port>, not '${KEEPER_URL}'." >&2
+            exit 1 ;;
+    esac
+fi
+
 # The operator's OWN public hostnames: through the tunnel, behind an Access
 # application, and then the whole product — not the share surface. A third
 # list, separate from TRUSTED_HOSTS and from the collaboration list above,
@@ -170,6 +191,7 @@ echo "[install] owner:    $([ -n "${OWNER_EMAIL}" ] && echo 'email set' || echo 
 echo "[install] sharing:  ${SHARE_PUBLIC_HOSTNAME:-<link mode off>}"
 echo "[install] collab:   ${ACCESS_TUNNEL_HOSTS:-<off>}"
 echo "[install] operator: ${PROXIED_TRUSTED_HOSTS:-<off>}"
+echo "[install] keeper:   ${KEEPER_URL:-<off>}"
 
 DOMAIN="gui/$(id -u)"
 
@@ -237,6 +259,7 @@ sed \
     -e "s|{{PROXIED_TRUSTED_EMAILS}}|${PROXIED_TRUSTED_EMAILS}|g" \
     -e "s|{{ACCESS_TEAM_DOMAIN}}|${ACCESS_TEAM_DOMAIN}|g" \
     -e "s|{{ACCESS_AUD}}|${ACCESS_AUD}|g" \
+    -e "s|{{KEEPER_URL}}|${KEEPER_URL}|g" \
     "${TEMPLATE}" > "${PLIST_DEST}"
 
 if ! bootstrap_with_retry "${DOMAIN}" "${PLIST_DEST}"; then

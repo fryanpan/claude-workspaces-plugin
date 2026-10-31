@@ -6,7 +6,7 @@
  *   bun packages/server/src/keeper/keeper-bin.ts import <name>  store one credential, read from stdin
  *   bun packages/server/src/keeper/keeper-bin.ts enroll         print a one-time passkey registration link
  *   bun packages/server/src/keeper/keeper-bin.ts adopt <app>    let routine calls reach a Fly app made before the keeper
- *   bun packages/server/src/keeper/keeper-bin.ts check          the start guard and the store check, nothing else
+ *   bun packages/server/src/keeper/keeper-bin.ts check          the start guard and the store check, and the names of what it holds
  *   bun packages/server/src/keeper/keeper-bin.ts port           print the keeper's port, choosing it at random the first time
  *   bun packages/server/src/keeper/keeper-bin.ts plist port|keeper  print one of the two LaunchDaemons
  *   bun packages/server/src/keeper/keeper-bin.ts clear-alarm    let approvals run again after a service-worker alarm
@@ -78,6 +78,19 @@ if (command === 'check') {
     const saved = store.port();
     if (saved !== null) console.log(`port: ${saved}`);
     if (alarm) console.log(`alarm: ${alarm.reason} at ${new Date(alarm.at).toISOString()}`);
+    // Names only, never a value: `keeper-setup.ts` reads these to skip what is done.
+    const { cloudflare: cf, fly } = store.credentials();
+    const held = CREDENTIAL_NAMES.filter(
+      (n) =>
+        ({
+          'cloudflare-api-token': cf?.apiToken,
+          'cloudflare-account-id': cf?.accountId,
+          'fly-org-token': fly?.orgToken,
+          'fly-org-slug': fly?.orgSlug,
+        })[n],
+    );
+    console.log(`credentials: ${held.join(' ') || 'none'}`);
+    console.log(`apps: ${store.apps().join(' ') || 'none'}`);
     console.log(`store: ok, ${store.passkeys().length} passkeys, ${store.apps().length} apps`);
   }
   process.exit(problems.length || 'error' in store ? 1 : 0);

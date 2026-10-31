@@ -1,7 +1,8 @@
 #!/bin/zsh -f
-# Install or update the keeper: sections 1 to 3 of docs/process/keeper.md as
-# one script. Every step checks what is already there and skips or repairs
-# it, so after a crash or a fix you run it again from the top.
+# Install or update the keeper and finish its setup: sections 1 to 4 of
+# docs/process/keeper.md as one script. Every step checks what is already
+# there and skips or repairs it, so after a crash or a fix you run it again
+# from the top. Step 10 is keeper-setup-bin.ts, from the release it installs.
 #
 # Run it as yourself, never as root, from GitHub rather than from a checkout
 # (agents can write the checkout), in a shell that reads no startup files:
@@ -222,7 +223,13 @@ else
   print -r -- "   It works once, for 15 minutes. If it lapses, run this script again for a new one."
 fi
 
+step "10. Tokens, callers and the check"
+# Run as you, from the release just installed rather than from any checkout:
+# keeper-setup-bin.ts refuses anywhere else. It reuses the sudo above, so it
+# asks for no second password, and skips each step a run already did.
+( cd "$K/app" && "$K/bin/bun" packages/server/src/keeper/keeper-setup-bin.ts ) \
+  || stop "the setup stopped at the STOP: line above"
+
 step "Done"
-print -r -- "   The keeper runs $SHA on http://localhost:$PORT."
-print -r -- "   Still yours, from docs/process/keeper.md: section 4 (new Fly and Cloudflare tokens, imported),"
-print -r -- "   5 (CW_KEEPER_URL=http://localhost:$PORT for the deploy scripts and prod), 6 (prove it) and 7 (retire the old tokens)."
+print -r -- "   The keeper runs $SHA on http://localhost:$PORT, holds the new tokens, and prod uses it."
+print -r -- "   Still yours, from docs/process/keeper.md: section 5 (retire the old tokens)."

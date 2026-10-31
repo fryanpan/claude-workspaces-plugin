@@ -15,6 +15,7 @@ under "The keeper holds the Mac's Cloudflare and Fly credentials". The code is
 in `packages/server/src/keeper/`.
 
 You run every step on this page, because each one needs your admin password.
+Sections 1 to 4 are one command.
 If an agent could install or update the keeper, it could replace it.
 `cw-relay` must already exist ([mac-lead-users.md](mac-lead-users.md)).
 
@@ -36,7 +37,8 @@ Run this in Terminal, with `<sha>` replaced by the merge commit you mean to ship
   problem and run it again.
 
 When it finishes, the keeper is running under launchd on
-`http://localhost:<port>`, and the script prints the port.
+`http://localhost:<port>`, holds new tokens, and prod uses it: the script's
+last step does sections 2 to 4.
 
 **The first time:**
 
@@ -52,45 +54,92 @@ The passkey is tied to `localhost`, so you approve on this Mac, not on the iPad.
 uninstall. While it is loaded, no other process can serve the keeper's address.
 If it ever is unloaded, clear `localhost`'s site data again.
 
-## 2. Give it new tokens
+## 2. to 4. Tokens, callers and the check: the same command
 
-An agent may already have read the tokens in your Keychain, so make new ones
-rather than moving the old ones.
+The install command's last step, `10. Tokens, callers and the check`, runs
+`packages/server/src/keeper/keeper-setup-bin.ts` from the release it just
+installed, as you. It reuses the install's `sudo`, so the whole run asks for
+your admin password once. A second run skips each step already done, and
+always runs the check again.
 
-```bash
-kb() { /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR=/Users/cw-relay/keeper/state \
-  /Users/cw-relay/keeper/bin/bun /Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts "$@"; }
-# Fly: in your own terminal, run `fly tokens create org --name keeper` and copy the token. Then:
-pbpaste | kb import fly-org-token
-printf %s "<org slug>" | kb import fly-org-slug
-# Cloudflare: create a token with the current one's permissions, copy it, then:
-pbpaste | kb import cloudflare-api-token
-printf %s "<account id>" | kb import cloudflare-account-id
-pbcopy < /dev/null
-# Once for each project app made before the keeper:
-kb adopt cw-<project>
-```
-
-## 3. Point the callers at it
-
-- **Deploy scripts:** set `CW_KEEPER_URL=http://localhost:<port>` in the
-  environment the fleet's sessions launch with.
-- **The board server:** add the same variable to prod's launchd environment,
-  then restart prod.
-- **`wrangler deploy`:** run `wrangler login` once as yourself.
-- **A named tunnel's token:** the keeper can't set one yet, so set up a
-  project's named tunnel before step 5.
-
-## 4. Check it
+To see what it would do without changing anything, or reading a token:
 
 ```bash
-cat /Users/cw-relay/keeper/state/credentials.json   # must fail: Permission denied
-curl -s -H 'x-cw-keeper: 1' -H 'content-type: application/json' \
-  -d '{"args":["apps","create","cw-keeper-probe"]}' http://localhost:<port>/v1/fly
+cd /Users/cw-relay/keeper/app && /Users/cw-relay/keeper/bin/bun packages/server/src/keeper/keeper-setup-bin.ts --dry-run
 ```
 
-The second command must print an approval link and create nothing. Open the
-link and press **Deny**.
+It refuses to run from anywhere but the keeper's release, because it
+handles the new tokens and agents can write a checkout. What a passing run
+prints, step by step:
+
+```
+== Confirm the org and the account
+   Fly org:            <slug>
+   Cloudflare account: <account name>
+   Make and store tokens for these? [y/N] y
+== 1. A new Fly org token, made with your own fly login
+   ok: the keeper stored fly-org-token
+   ok: the keeper stored fly-org-slug
+== 2. A new Cloudflare token, and the one account it sees
+   ok: made a new Cloudflare token with the current one
+   ok: the keeper stored cloudflare-api-token
+   ok: the keeper stored cloudflare-account-id
+== 3. Adopt the project apps made before the keeper
+   ok: adopted cw-<project>
+== 4. Point the callers at http://localhost:<port>
+   ok: set CW_KEEPER_URL in ~/.claude/settings.json; sessions launched from now on have it
+   ok: set CW_KEEPER_URL in ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist
+   ok: restarted com.fryanpan.claude-workspaces; it runs with CW_KEEPER_URL
+== 5. Check it
+   ok: /Users/cw-relay/keeper/state/credentials.json: Permission denied
+   ok: the probe waits for your passkey at http://localhost:<port>/approve/<id>
+   ok: withdrew the probe, so it created nothing and no tap can run it
+```
+
+- **Confirm first:** the org slug and the Cloudflare account come from
+  stores anything running as you can write, so the command shows them and
+  makes nothing until you answer `y`. A dry run shows them without asking.
+  If you make the Cloudflare token by hand, you confirm its account after
+  you paste it.
+- **Fly:** it runs `fly tokens create org --name keeper` with your own `fly`
+  login and the org slug from the Keychain, and hands the token to the
+  keeper on stdin. The token is never printed, copied or written to a file.
+  If a token is made but not stored, the STOP line says how to revoke it.
+- **Cloudflare:** it asks the current token to make the new one. If the
+  current token cannot make tokens, it prints the permissions to give a
+  token you make in the dashboard, and waits for you to paste it (it is not
+  shown). That is the only step you might do by hand. If it takes you
+  longer than sudo's timeout (5 minutes by default), you may be asked for
+  your password once more. The permissions:
+  - on the account: Access: Apps and Policies Edit, Access: Apps and
+    Policies Read, Access: Organizations, Identity Providers, and Groups
+    Read, Access: Service Tokens Read, Cloudflare Tunnel Edit, Workers
+    Scripts Edit;
+  - on all zones of the account: Zone Read, DNS Edit, SSL and Certificates
+    Read, Workers Routes Edit;
+  - no API Tokens permission.
+
+  The account id is the one account the new token sees. It goes to the
+  keeper and nowhere else.
+- **Project apps:** every Fly app named `cw-<project>`, the deploy's name
+  for a project, is adopted, so starting and stopping it needs no passkey.
+- **Callers:** `CW_KEEPER_URL` goes into the `env` of
+  `~/.claude/settings.json`, which every Claude Code session launches with,
+  and into prod's launchd job. Prod is restarted (bootout, then bootstrap)
+  so it reads the new environment. Whether prod needs it is judged from the
+  job launchd is running, not from the file, so a run cut short after the
+  plist was written restarts prod the next time. The plist's old copy is kept beside it
+  as `.bak.keeper-<time>`. Sessions already running keep the old
+  environment until they restart. A later `scripts/launchd/install.sh`
+  keeps the plist's `CW_KEEPER_URL` unless you set the variable yourself
+  (`CW_KEEPER_URL=` clears it).
+- **The check:** the probe asks the keeper for `fly apps create
+  cw-keeper-probe`, prints the approval link, and withdraws the request, so
+  nothing is created and no tap can run it later.
+
+Two callers are not covered: `wrangler deploy` needs `wrangler login` once,
+as yourself; and the keeper can't set a named tunnel's token yet, so set up
+a project's named tunnel before section 5.
 
 ## 5. Retire the old tokens
 
