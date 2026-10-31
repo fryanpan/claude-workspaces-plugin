@@ -38,7 +38,12 @@
  * which fetches it with the reader's session and passes back the status, type
  * and bytes (`workspaces-app/src/doc/board-embed-frames.ts`). The doc page
  * fetches only under this doc's folder address, so the relay reaches nothing
- * the frame's own address could not.
+ * the frame's own address could not. It also answers only an ask carrying the
+ * key it put in the frame address's fragment (`#cw-relay=`), which the relay
+ * reads and removes before any of the page's own scripts run: a link in the
+ * page that navigates the frame to another site leaves that site in the same
+ * window, sandboxed and with the same opaque origin, and the key is what it
+ * does not have. A fragment is never sent in a request or a Referer.
  *
  * Not covered: an `<img>`, a CSS `url()` or a module's own `import` loads
  * from the frame directly, so it works off the tunnel (this machine, the
@@ -149,6 +154,8 @@ export function resolveRef(pageDir: string[], ref: string): string[] | null {
 const FETCH_RELAY = (base: string): string =>
   `(function(){var B=${JSON.stringify(base).replace(/</g, '\\u003c')};` +
   'var F=window.fetch&&window.fetch.bind(window);if(!F||window.parent===window)return;' +
+  'var K=(location.hash.match(/[#&]cw-relay=([A-Za-z0-9-]+)/)||[])[1]||"";' +
+  'if(K){try{history.replaceState(history.state,"",location.pathname+location.search)}catch(e){}}' +
   'function rel(i){try{var r=typeof i==="string"?i:i instanceof URL?i.href:i&&i.url;' +
   'var u=new URL(r,location.href);if(u.host!==location.host||u.pathname.indexOf(B)!==0)return null;' +
   'return u.pathname.slice(B.length)+u.search}catch(e){return null}}' +
@@ -158,7 +165,7 @@ const FETCH_RELAY = (base: string): string =>
   'var d=e.data;c.port1.close();if(!d||d.error){no(new TypeError("Failed to fetch"));return}' +
   'var empty=d.status===204||d.status===304;ok(new Response(empty?null:d.body,' +
   '{status:d.status,headers:{"content-type":d.type||""}}))};' +
-  'window.parent.postMessage({type:"cw-file-fetch",path:p},"*",[c.port2])})}})();';
+  'window.parent.postMessage({type:"cw-file-fetch",path:p,key:K},"*",[c.port2])})}})();';
 
 const ATTR = (name: string) =>
   new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i');

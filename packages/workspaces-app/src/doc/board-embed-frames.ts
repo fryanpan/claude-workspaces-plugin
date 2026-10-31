@@ -36,7 +36,8 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
  * with no board mapping. Its frame is opaque like an app door's. The page's
  * relative `fetch` calls come here (`server/src/doc-file-frame.ts` installs
  * the relay inside it): a `cw-file-fetch` message from that frame's own
- * window, naming a path, is fetched under that doc's folder address and
+ * window, carrying the key this page put in the frame's fragment and
+ * naming a path, is fetched under that doc's folder address and
  * nowhere else, with this page's session, and the status, type and bytes go
  * back on the message's port. Nothing else of this page reaches the frame.
  *
@@ -90,9 +91,18 @@ function frameEl(
   frame.setAttribute('loading', 'lazy');
   frame.setAttribute('title', block);
   frame.dataset.embedBlock = block;
-  if (filesBase) frame.dataset.embedFiles = filesBase;
+  let src = url;
+  if (filesBase) {
+    // The relay's key (`server/src/doc-file-frame.ts`): only the page this
+    // frame was opened at reads it, so a site the frame is navigated to
+    // later cannot ask this page for the doc's files.
+    const key = crypto.randomUUID();
+    frame.dataset.embedFiles = filesBase;
+    frame.dataset.embedKey = key;
+    src = `${url}#cw-relay=${key}`;
+  }
   frame.style.height = `${DEFAULT_HEIGHT}px`;
-  frame.src = url;
+  frame.src = src;
   // Inactive, the frame takes no pointer events, so a wheel or a swipe over
   // it scrolls the doc; a tap anywhere on it hands it the pointer.
   const hint = document.createElement('button');
@@ -266,13 +276,13 @@ const FILE_PATH_MAX = 2048;
  */
 function relayFileFetch(root: HTMLElement, ev: MessageEvent): void {
   const port = ev.ports[0];
-  const path = (ev.data as { path?: unknown }).path;
+  const { path, key } = ev.data as { path?: unknown; key?: unknown };
   if (!port) return;
   const fail = (): void => port.postMessage({ error: true });
   const frame = [...root.querySelectorAll<HTMLIFrameElement>('iframe[data-embed-files]')].find(
     (f) => ev.source !== null && f.contentWindow === ev.source,
   );
-  const base = frame?.dataset.embedFiles;
+  const base = frame && key === frame.dataset.embedKey ? frame.dataset.embedFiles : undefined;
   let target: URL | null = null;
   if (base && typeof path === 'string' && path.length <= FILE_PATH_MAX) {
     try {

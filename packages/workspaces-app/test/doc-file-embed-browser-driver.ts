@@ -44,6 +44,7 @@ export interface FileEmbedReading {
     fetchError: string | null;
     origin: string;
     parentReadable: boolean;
+    hash: string;
   } | null;
 }
 
@@ -92,6 +93,7 @@ window.harborlightScript = true;
     fetchError,
     origin: String(self.origin),
     parentReadable,
+    hash: location.hash,
   }, '*');
 })();`;
 

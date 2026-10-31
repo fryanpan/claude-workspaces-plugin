@@ -37,7 +37,7 @@ describe.skipIf(CHROME === null)('a doc frames an HTML file from its own folder'
   it(
     'draws an opaque frame at the doc folder address',
     () => {
-      expect(r.frameSrc).toMatch(/\/docs\/[^/]+\/files\/map\/index\.html$/);
+      expect(r.frameSrc).toMatch(/\/docs\/[^/]+\/files\/map\/index\.html#cw-relay=[0-9a-f-]{36}$/);
       expect(r.sandbox).toBe('allow-scripts');
     },
     CASE_MS,
@@ -66,6 +66,8 @@ describe.skipIf(CHROME === null)('a doc frames an HTML file from its own folder'
     () => {
       expect(r.report?.origin).toBe('null');
       expect(r.report?.parentReadable).toBe(false);
+      // The relay's key left the address before the page's own script ran.
+      expect(r.report?.hash).toBe('');
     },
     CASE_MS,
   );
