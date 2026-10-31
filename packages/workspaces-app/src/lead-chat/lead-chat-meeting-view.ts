@@ -46,6 +46,9 @@ export interface MeetingViewModel {
   recording: boolean;
   /** End meeting has been pressed and is waiting on the server. */
   ending: boolean;
+  /** Lines the lead said that this page is playing, or has played. */
+  playing?: number | null;
+  said?: ReadonlySet<number>;
 }
 
 export interface MeetingView {
@@ -143,6 +146,11 @@ export function createMeetingView(doc: Document): MeetingView {
       for (const l of meeting.lines) {
         const row = el('div', 'lc-line');
         row.dataset.turn = String(l.turn);
+        if (l.lead) {
+          row.dataset.lead = '1';
+          if (m.playing === l.turn) row.dataset.said = 'playing';
+          else if (m.said?.has(l.turn)) row.dataset.said = 'said';
+        }
         row.append(el('b', '', l.who), l.text);
         list.append(row);
       }

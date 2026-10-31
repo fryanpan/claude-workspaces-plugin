@@ -149,6 +149,7 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     onChange: (fn) => {
       fns.push(fn);
     },
+    onLeadLine: () => {},
     loadOlder: async () => {},
     async send(text, author, _context, via) {
       const m: LeadChatMessage = {

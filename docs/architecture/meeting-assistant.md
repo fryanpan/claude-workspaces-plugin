@@ -218,6 +218,48 @@ strip so both drive one copy.
 - **"No notes" is `notes: false` on `start`.** The relay opens no notes
   pipeline and no handoff; the transcript is still kept, in a doc of its own.
 
+### The board's lead sits in the meeting (`lead-chat/meeting-feed.ts`, 2026-10-31)
+
+The board's lead hears the meeting while it happens and can say one line into
+it. Only the lead: no other session on the board is woken by the room.
+
+- **Start, then the room's lines.** `start` sends the lead one
+  `voice.meeting_started` (buffered, so a reconnect replays it), naming the
+  notes doc and how to speak. Each settled line then goes to the lead in a
+  `voice.meeting_heard`, batched over `LEAD_MEETING_BATCH_MS` (1s) so a
+  stretch of talk wakes the lead once per second at most, never once per line.
+  `end` flushes what is held. Lines are addressed and transient: they reach
+  the lead's own stream, never a page, and are not kept in the replay buffer,
+  where they would push out frames that matter more.
+- **What is left out.** A "Lead, …" line already reached the lead as a request
+  and is not sent twice; the lead's own lines are not fed back; a line resent
+  across a reconnect is not heard twice. With no lead on the board nothing is
+  sent.
+- **The words are data.** Anyone in the room can speak, and a bot meeting
+  carries every guest on the call, so the MCP child renders the lines inside
+  an untrusted quote (`meeting-feed-line.ts`). Both events ride the `voice.`
+  family because `channel-gate.ts` drops every `meeting.*` event.
+- **Speaking is one call.** `say_in_meeting(workspaceId, text)` posts to
+  `POST /workspaces/<id>/lead-chat/meeting/say`, which takes the board's lead
+  only (agent token when one is sent, then the seat) and refuses with 409 when
+  no meeting is running. The line joins the meeting at a fractional turn after
+  the last one (`leadLineTurn`), marked `lead: true`, so every page shows it.
+- **Only the recording tab plays it.** That tab asks for the line voiced
+  (`voice` on the meeting route, PCM16 from the planning voice's engine) and
+  plays it (`lead-chat-meeting-voice.ts`); a watching tab only shows it, and a
+  bot meeting plays nothing because there is no room on this side. The
+  microphone keeps recording; its echo cancellation is what keeps the lead's
+  voice out of the transcript, and nothing else does.
+- **Held to rare.** The start line tells the lead to speak rarely and in one
+  short sentence, and to keep other questions in the lead chat until the
+  meeting can tell when a speaker has finished a thought.
+
+Proofs: `lead-meeting-feed.test.ts` (the batch window, on an injected clock),
+`lead-in-meeting.test.ts` (the real server, start then lines in order, the say
+route's refusals), `lead-in-meeting-browser.test.ts` (one tool call through the
+MCP, the line shown on two tabs and played on the recording one, at 1180x820
+and 430x932).
+
 ### Why a meeting socket closed (2026-09-15)
 
 A meeting that dropped its socket five times left nothing in the server log

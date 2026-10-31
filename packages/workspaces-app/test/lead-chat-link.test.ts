@@ -90,6 +90,7 @@ describe('a mounted chat sends the page link', () => {
         loadingOlder: false,
         meeting: null,
       }),
+      onLeadLine: () => {},
       onChange: () => {},
       async loadOlder() {},
       async send(text, author, context, via) {

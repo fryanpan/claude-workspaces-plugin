@@ -21,6 +21,7 @@ import { systemAudioOffered } from '../meeting-source.ts';
 import type { VoiceContext } from '../voice-capture.ts';
 import type { LeadChatClient } from './lead-chat-client.ts';
 import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
+import { type LeadLineVoiceOpts, createLeadLineVoice } from './lead-chat-meeting-voice.ts';
 import {
   type LeadMeetingRun,
   type LeadMeetingRunOpts,
@@ -47,6 +48,8 @@ export interface LeadMeetingSeams
   newDoc?: (topic: string) => Promise<string | null>;
   macAudio?: boolean;
   today?: Date;
+  /** How a line the lead says is fetched and played; injected by tests. */
+  leadVoice?: Partial<Pick<LeadLineVoiceOpts, 'fetch' | 'playbackContext'>>;
 }
 
 export interface LeadMeetingWiringOpts {
@@ -136,6 +139,30 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
     },
   });
 
+  // What the lead says into the meeting, played here when this tab holds
+  // the microphone (`lead-chat-meeting-voice.ts`).
+  let playing: number | null = null;
+  const said = new Set<number>();
+  const leadVoice = createLeadLineVoice({
+    ...seams.leadVoice,
+    workspaceId: opts.workspaceId,
+    author,
+    onPlaying: (turn) => {
+      playing = turn;
+      opts.changed();
+    },
+    onDone: (turn, done) => {
+      if (playing === turn) playing = null;
+      if (done) said.add(turn);
+      opts.changed();
+    },
+  });
+  client.onLeadLine((meetingId, line) => {
+    const m = client.state().meeting;
+    if (!m || m.id !== meetingId || m.recorder !== recorder || m.source === 'bot') return;
+    leadVoice.play(meetingId, line.turn);
+  });
+
   const failStart = (why: string): void => {
     opts.notice(
       why === 'meeting-running'
@@ -218,6 +245,7 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
   /** Any tap on the page is the gesture a waiting microphone needs. */
   const onPageTap = (): void => {
     if (run.state().phase === 'tap') run.tap();
+    leadVoice.wake();
   };
   const onHide = (): void => {
     run.release();
@@ -240,6 +268,8 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
         run: run.state(),
         recording: meeting.recorder === recorder,
         ending,
+        playing,
+        said,
       };
     },
     sync() {
@@ -267,6 +297,7 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
       doc.removeEventListener('click', onPageTap, true);
       win.removeEventListener('pagehide', onHide);
       wizard.destroy();
+      leadVoice.stop();
       run.release();
     },
   };
