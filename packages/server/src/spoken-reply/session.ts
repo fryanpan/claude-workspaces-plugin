@@ -6,7 +6,9 @@
  *  - Setups 1 and 2 hear with Soniox's real-time listener. In `hold` mode the
  *    question ends when the page sends `end`; in `tap` mode it ends at the
  *    listener's own end of speech, called at most 500 ms after the last word
- *    (`SPOKEN_TAP_TUNING`) so the speaker can tap once and walk away. On a
+ *    (`SPOKEN_TAP_TUNING`) so the speaker can tap once and walk away, unless
+ *    the words so far stop on a filler or an opener ("Hey, can you, uh."),
+ *    when it waits for the rest (`unfinishedAsk` in `pause-gate.ts`). On a
  *    doc on this board the end of speech must also hold as a pause
  *    (`pause-gate.ts`), because the planning voice asks its questions only
  *    there, so that path keeps the latest end of speech Soniox allows. The
@@ -63,7 +65,7 @@ import { FillerCue, cueFor } from './filler-cue.ts';
 import type { GeminiLive, GeminiLiveSession } from './gemini-live.ts';
 import { type MeetingAnswer, type MeetingRoom, SILENT, meetingAnswer } from './meeting-ask.ts';
 import { MeetingErrands, withHeld } from './meeting-errands.ts';
-import { type GateTimers, PauseGate } from './pause-gate.ts';
+import { type GateTimers, PauseGate, unfinishedAsk } from './pause-gate.ts';
 import { speakPoints } from './speak-points.ts';
 import type { SpokenTimings } from './timings.ts';
 import type { SpokenVoice } from './tts.ts';
@@ -73,8 +75,9 @@ export const SPOKEN_INPUT_RATE = 16_000;
 /** The listener's tuning for a board question: end of speech called as soon
  *  as Soniox allows, 500 ms after the last word at most (Bryan, 2 Oct: tap
  *  once, and the turn ends on its own about half a second after he stops).
- *  A three-second thinking pause now ends the question; that is the trade.
- *  Level 2 is already the adapter's default. */
+ *  A thinking pause after a finished-sounding sentence ends the question;
+ *  one after a filler or an opener does not (`unfinishedAsk`). Level 2 is
+ *  already the adapter's default. */
 export const SPOKEN_TAP_TUNING = { max_endpoint_delay_ms: 500 };
 /** On a planning doc the pause gate decides, so the listener waits as long as
  *  Soniox allows and a dangling sentence is not split into two turns. */
@@ -369,24 +372,37 @@ export class SpokenSession {
       return;
     }
     const turn = this.turn;
-    if (this.ears || (this.mode === 'tap' && this.deps.answerer.converses(this.context))) {
+    const planning =
+      this.ears || (this.mode === 'tap' && this.deps.answerer.converses(this.context));
+    if (planning) {
       this.pause = new PauseGate(
         () => void this.finishListening(turn),
         this.deps.timers,
         this.pauseTiming,
+      );
+    } else if (this.mode === 'tap') {
+      // A tapped question ends at the end of a thought: a finished sentence
+      // at the listener's end of speech, as fast as before; one that stops on
+      // a filler or an opener waits for the rest (`unfinishedAsk`). Every
+      // word is final when it ends there, so the flush is skipped.
+      this.pause = new PauseGate(
+        () => void this.finishListening(turn, this.tail === null),
+        this.deps.timers,
+        this.pauseTiming,
+        unfinishedAsk,
       );
     }
     const opening = listener
       .open({
         sampleRate: SPOKEN_INPUT_RATE,
         detectSpeakers: false,
-        tuning: this.pause ? SPOKEN_PLANNING_TUNING : SPOKEN_TAP_TUNING,
+        tuning: planning ? SPOKEN_PLANNING_TUNING : SPOKEN_TAP_TUNING,
         onTurn: (frame) => {
           if (turn !== this.turn) return;
           const t = this.fresh(frame);
           if (!t) return;
           if (this.finishing && this.ears) this.cutIn(t);
-          else this.hear(t, turn);
+          else this.hear(t);
         },
         onError: (message) => {
           if (turn === this.turn) this.deps.sendJson({ type: 'error', message });
@@ -424,14 +440,13 @@ export class SpokenSession {
     return text ? { ...t, text } : null;
   }
 
-  private hear(t: EngineTurn, turn: number): void {
+  private hear(t: EngineTurn): void {
     this.tail = t.final ? null : t;
     if (t.final) this.finals.push(t.text);
     if (t.final && t.stream !== 'system') this.own.push(t.text);
     const text = [...this.finals, ...(t.final ? [] : [t.text])].join(' ').trim();
     if (text) this.deps.sendJson({ type: 'heard', text });
-    if (this.pause) this.pause.heard(text, t.final);
-    else if (t.final && this.mode === 'tap') void this.finishListening(turn, true);
+    this.pause?.heard(text, t.final);
   }
 
   /** The meeting went on after the pause: unless it is the voice heard back,
@@ -450,7 +465,7 @@ export class SpokenSession {
     this.dropListener();
     this.turn++;
     this.startListening();
-    this.hear(t, this.turn);
+    this.hear(t);
   }
 
   private meetingListener(): TranscriptionEngine | null {
