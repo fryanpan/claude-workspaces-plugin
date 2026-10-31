@@ -19,9 +19,10 @@
  *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
  *   board must be the lead's, the folder one of the roots registered for it
  *   (`board-socket-roots.ts`), and a board create is refused;
- * - `POST /workspaces/<board>/agents/<agent>/notes` and `…/prompts` — the
- *   plugin's Stop, PermissionDenied and UserPromptSubmit hooks, and
- *   `post_status`'s untargeted form;
+ * - `POST /workspaces/<board>/agents/<agent>/notes`, `…/prompts` and
+ *   `…/mirror` — the plugin's Stop, PermissionDenied, UserPromptSubmit,
+ *   MessageDisplay and PostToolBatch hooks, and `post_status`'s untargeted
+ *   form;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
  *   of that board.
  *
@@ -43,6 +44,8 @@ type WorkspacesOf = (id: string) => string[];
 
 const FOLDER_BIND_PATH = '/workspaces';
 const BOARD_PATH = /^\/workspaces\/([^/]+)\/(.+)$/;
+/** What a lead's hooks post about its own session. */
+const AGENT_VERBS: readonly string[] = ['notes', 'prompts', 'mirror'];
 
 export function leadScopeAllows(
   pathname: string,
@@ -62,7 +65,7 @@ export function leadScopeAllows(
   if (collection === 'docs' && verb === 'content') return onBoard(workspacesOf, id, boardId);
   if (collection === 'tasks' && verb === 'notes')
     return onBoard(workspacesOf, `task:${id}`, boardId);
-  if (collection === 'agents') return (verb === 'notes' || verb === 'prompts') && id !== '';
+  if (collection === 'agents') return AGENT_VERBS.includes(verb ?? '') && id !== '';
   return false;
 }
 

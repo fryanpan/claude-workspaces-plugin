@@ -70,6 +70,8 @@ afterEach(() => {
   mounted?.destroy();
   mounted = null;
   document.body.innerHTML = '';
+  // The tab remembers an open panel across pages; each case starts closed.
+  sessionStorage.clear();
 });
 
 function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) {
@@ -117,6 +119,20 @@ describe('the lead chat on a page', () => {
 
     view.button.click();
     expect(view.pane.hidden).toBe(true);
+  });
+
+  it('opens again on the next page of the tab when it was open, and not once it was closed', () => {
+    mount().view.button.click();
+    mounted?.destroy();
+    document.body.innerHTML = '';
+    // The next page in the same tab.
+    const next = mount();
+    expect(next.view.pane.hidden).toBe(false);
+    next.view.button.click();
+    expect(next.view.pane.hidden).toBe(true);
+    mounted?.destroy();
+    document.body.innerHTML = '';
+    expect(mount().view.pane.hidden).toBe(true);
   });
 
   it('shows the lead’s answer in the open panel the moment it arrives', () => {

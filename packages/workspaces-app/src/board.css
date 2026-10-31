@@ -905,6 +905,68 @@ body.board-body {
      topbar plus the page's own tail. */
   min-height: calc(100vh - 64px);
 }
+/* The lead chat docked on the right (`lead-chat-dock.ts`): the board's column
+   makes room, so nothing the reader was working on sits under the panel. */
+html[data-lc-docked] .board-main {
+  margin-right: var(--lc-dock-w, 0px);
+}
+/* The lead chat filling a screen 1100px or narrower (`lead-chat-dock.ts`):
+   the navbar pins to the bottom as icon-and-label tabs, so a page is one tap
+   away and the chat stops at the bar's top. The agent button keeps the
+   bar's left end, where a phone's bar already has it, so it does not move
+   when the chat opens.
+   Above every layer the board uses; the chat's sheet ends where this begins. */
+html[data-lc-full] .board-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  z-index: 2147483002;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: auto;
+  max-width: 100vw;
+  gap: 0;
+  padding: 0 0 var(--safe-bottom, 0px);
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  background: var(--bg-panel);
+}
+/* The comment widget's bubble is hidden while the chat is up, but the bar
+   keeps its clearance on a phone, where it had it already, so no tab moves
+   when the chat opens. */
+@media (max-width: 900px) {
+  html[data-lc-full] body:has(claude-feedback-widget) .board-nav {
+    padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
+  }
+}
+html[data-lc-full] .board-nav-item {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 54px;
+  padding: 7px 4px 9px;
+  border-radius: 0;
+  font-size: 11.5px;
+}
+html[data-lc-full] .board-nav-label {
+  display: block;
+}
+html[data-lc-full] .board-nav-settings,
+html[data-lc-full] .board-nav-collapse {
+  display: none;
+}
+html[data-lc-full] .board-nav-dock {
+  order: -1;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
 /* Home showing: the board column leaves the grid and the Home section takes
    the one content track. This rule hides the COLUMN; the rows inside it are
    not rendered at all on Home (`renderBoardForPane`). It used to say the

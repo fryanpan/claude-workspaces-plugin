@@ -78,6 +78,7 @@ import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
+import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -1555,6 +1556,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
     newId: () => cryptoId('lc'),
   });
+  // What the lead's session writes mid-turn and the tools it calls.
+  const leadSessionMirror = new LeadSessionMirror(leadChat, () => cryptoId('lc'));
   // The meeting a board's lead chat runs (`lead-chat/meeting.ts`), on the
   // same page-only channel.
   const leadChatMeetings = new LeadChatMeetings({
@@ -3022,6 +3025,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     coachSessionPrompt: (workspaceId, mark, cwd) => {
       coachWiring.sessionPrompt(workspaceId, mark, cwd);
     },
+    leadChatMirror: leadChat,
+    leadSessionMirror,
     readyNudger,
     j,
     safeJson,

@@ -85,7 +85,7 @@ flowchart TB
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
 | `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
-| `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in three places; see CLAUDE.md. No compiled binary is ever committed. |
+| `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
 **A traced request is named by its route, and the table of routes is
 checked.** Both sides send Sentry events, and neither may send a raw path: a
@@ -1078,6 +1078,15 @@ the message shape is `core/src/lead-chat.ts` (a new top-level core module).
 The panel draws the lead's messages with the comments' escape-first
 markdown renderer (`comment-markdown.ts`, which gains pipe tables and an
 opt-in link for a bare URL) and a person's own as plain text.
+The chat also mirrors the lead's own Claude Code session, through the
+plugin's hooks: UserPromptSubmit (a prompt typed in its terminal, or a board
+event it took, to `routes/prompt-marks.ts`), Stop (the message a turn ended
+on, to the notes route), and MessageDisplay and PostToolBatch (text it writes
+mid-turn and its tool calls, to `routes/lead-mirror.ts`, kept by
+`lead-chat/mirror.ts`). The last two post only for a session the prompts
+route has answered `lead: true`. A message to the lead goes `received` when
+the lead's MCP child acks its queue row and `done` at that session's turn
+end. Nothing mirrored is handed back to the lead or spoken.
 In the app, `workspaces-app/src/lead-chat/` (a new top-level directory) is
 the client, the shadow-DOM button, bar and panel, and the per-device Chat
 first / Voice first choice the Settings Voice row writes; the board mounts it

@@ -18,6 +18,7 @@ import { recordDispatchRequested } from '../dispatch-request-event.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { filingStateFor } from '../unfiled-ask-filing.ts';
 import { judgeTurnNote } from '../unfiled-ask.ts';
+import { handleLeadMirrorRoute } from './lead-mirror.ts';
 import { handlePromptMarkRoute } from './prompt-marks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -126,6 +127,8 @@ export async function handleDispatchAndNoteRoutes(
   const noteVisitor = visitor && rq.leadBoard !== rq.scope?.workspaceId ? visitor : null;
   const promptMark = await handlePromptMarkRoute(ctx, rq);
   if (promptMark) return promptMark;
+  const leadMirror = await handleLeadMirrorRoute(ctx, rq);
+  if (leadMirror) return leadMirror;
   // --- REST: builder dispatches ---
   // The lead's statement that a builder is working a task in a private
   // worktree, so the stall loop can read worktree churn as the row
@@ -398,6 +401,8 @@ export async function handleDispatchAndNoteRoutes(
     if (!parsed.ok) return j(400, { error: parsed.error, message: parsed.message });
     const { note } = parsed;
     countForCoach(ctx, boardId, note, raw);
+    // The board's lead chat shows the message the lead's turn ended on.
+    if (note.kind === 'turn') ctx.leadChatMirror.mirrorTurnEnd(boardId, agent, note.text);
     if (note.taskId !== undefined) {
       // The caller named its row; a bad address is its error to hear,
       // not a silent ring drop — and a row on some other board is a bad
