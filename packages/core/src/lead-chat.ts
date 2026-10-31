@@ -123,6 +123,9 @@ export interface LeadChatMeetingLine {
   who: string;
   text: string;
   ts: number;
+  /** Said by the board's lead (`say_in_meeting`), not heard from the room.
+   *  The page holding the microphone plays it aloud. */
+  lead?: true;
 }
 
 /**
@@ -191,6 +194,17 @@ export function upsertMeetingLine(
   out.push(line);
   out.sort((a, b) => a.turn - b.turn);
   return out.slice(-LEAD_CHAT_MEETING_LINES);
+}
+
+/**
+ * The turn a line the lead says takes: just after the last line, and still
+ * before the room's next turn, which is the next whole number. Each further
+ * lead line halves the gap that is left, so it never reaches that number.
+ */
+export function leadLineTurn(lines: readonly LeadChatMeetingLine[]): number {
+  const top = lines.reduce((m, l) => Math.max(m, l.turn), -1);
+  const whole = Math.floor(top);
+  return whole + (top - whole + 1) / 2;
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   type LeadChatMeetingLineFrame,
   type LeadChatMeetingSource,
   type LeadChatNotesKind,
+  leadLineTurn,
   upsertMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
 
@@ -160,6 +161,25 @@ export class LeadChatMeetings {
       line,
     });
     return { ok: true, line, fresh };
+  }
+
+  /**
+   * A line the board's lead says into the running meeting. It takes the turn
+   * after the last line (`leadLineTurn`), shows on every page like any line,
+   * and the page holding the microphone plays it.
+   */
+  said(
+    workspaceId: string,
+    who: string,
+    text: string,
+  ):
+    | { ok: true; meeting: LeadChatMeeting; line: LeadChatMeetingLine }
+    | { ok: false; error: string } {
+    const m = this.current(workspaceId);
+    if (!m) return { ok: false, error: 'no-meeting' };
+    const turn = leadLineTurn(m.lines);
+    const r = this.line(workspaceId, m.id, { turn, who, text, lead: true });
+    return r.ok ? { ok: true, meeting: m, line: r.line } : r;
   }
 
   end(workspaceId: string, id: string): MeetingChange {

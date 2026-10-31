@@ -9,6 +9,7 @@ import type { HomeBriefStore } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { LeadChat } from '../lead-chat/lead-chat.ts';
+import type { LeadMeetingFeed } from '../lead-chat/meeting-feed.ts';
 import type { LeadChatMeetings } from '../lead-chat/meeting.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -23,6 +24,7 @@ import type { ShareLinks } from '../share/share-links.ts';
 import type { SlowLoadAlarm } from '../slow-load-alarm.ts';
 import type { SpokenReplyRelay } from '../spoken-reply/relay.ts';
 import type { SpokenTimings } from '../spoken-reply/timings.ts';
+import type { SpokenVoice } from '../spoken-reply/tts.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
@@ -70,6 +72,11 @@ export interface WorkspaceRoutesContext {
   leadChat: LeadChat;
   /** The meeting each board's lead chat is running. */
   leadChatMeetings: LeadChatMeetings;
+  /** The board's lead in that meeting: its start and the room's lines. */
+  leadMeetingFeed: LeadMeetingFeed;
+  /** The voice a line the lead says into a meeting is played in, or null
+   *  when this server has none (the line still shows). */
+  leadMeetingVoice: SpokenVoice | null;
   /** What the pages say about features this server's profile turned off. */
   featuresOff: FeaturesOff;
   /** Whether this request speaks for `agentId`: on this machine, with its
