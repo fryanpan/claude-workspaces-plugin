@@ -44,7 +44,11 @@ beforeEach(() => {
  */
 function joinBoard(board: Booted, user: { id: string; name: string }) {
   const peer = new Awareness(new Y.Doc());
-  return async function movesTo(where: { surface: string; docId?: string }): Promise<void> {
+  return async function movesTo(where: {
+    surface: string;
+    docId?: string;
+    spot?: Record<string, unknown>;
+  }): Promise<void> {
     peer.setLocalState({ user, lastActive: Date.now(), ...where });
     applyAwarenessUpdate(
       board.sockets.first().awareness,
@@ -67,20 +71,20 @@ function circleFor(name: string): HTMLButtonElement {
 describe('following a person off the board', () => {
   it('a long-press on their circle sends this browser after them', async () => {
     const board = await bootTestBoard();
-    const zoe = joinBoard(board, { id: 'u-zoe', name: 'Zoe Vance' });
+    const peer = joinBoard(board, { id: 'u-peer', name: 'Alice' });
     // She is on the board, not in a doc: there is nowhere to follow her TO
     // yet, so nothing that happens next can be a jump that was already due.
-    await zoe({ surface: 'board' });
+    await peer({ surface: 'board' });
 
-    const circle = circleFor('Zoe Vance');
+    const circle = circleFor('Alice');
     await longPress(board, circle);
 
     // Arming a follow is not itself a navigation — and the strip says so.
     expect(board.location.navigations).toEqual([]);
-    expect(circleFor('Zoe Vance').classList.contains('board-following')).toBe(true);
+    expect(circleFor('Alice').classList.contains('board-following')).toBe(true);
 
     // She opens a doc. The follow is what takes this browser with her.
-    await zoe({ surface: 'doc', docId: 'kitchen-notes' });
+    await peer({ surface: 'doc', docId: 'kitchen-notes' });
 
     expect(board.location.navigations).toEqual([`/workspaces/${WS}/docs/kitchen-notes`]);
   });
@@ -90,34 +94,64 @@ describe('following a person off the board', () => {
     // and the only difference is how long the finger stayed down. Without it
     // "it navigated" is satisfied by any touch on the circle at all.
     const board = await bootTestBoard();
-    const zoe = joinBoard(board, { id: 'u-zoe', name: 'Zoe Vance' });
-    await zoe({ surface: 'board' });
+    const peer = joinBoard(board, { id: 'u-peer', name: 'Alice' });
+    await peer({ surface: 'board' });
 
     // A tap, in milliseconds: well under the board's 550ms threshold. A
     // literal rather than `LONG_PRESS_MS - 50`, so that a threshold moved
     // down under this number fails the control loudly instead of asking the
     // clock to run backwards.
-    await longPress(board, circleFor('Zoe Vance'), 100);
-    expect(circleFor('Zoe Vance').classList.contains('board-following')).toBe(false);
+    await longPress(board, circleFor('Alice'), 100);
+    expect(circleFor('Alice').classList.contains('board-following')).toBe(false);
 
-    await zoe({ surface: 'doc', docId: 'kitchen-notes' });
+    await peer({ surface: 'doc', docId: 'kitchen-notes' });
     expect(board.location.navigations).toEqual([]);
   });
 
   it('a second long-press stops following, and her next move is hers alone', async () => {
     const board = await bootTestBoard();
-    const zoe = joinBoard(board, { id: 'u-zoe', name: 'Zoe Vance' });
-    await zoe({ surface: 'board' });
+    const peer = joinBoard(board, { id: 'u-peer', name: 'Alice' });
+    await peer({ surface: 'board' });
 
-    await longPress(board, circleFor('Zoe Vance'));
-    await zoe({ surface: 'doc', docId: 'kitchen-notes' });
+    await longPress(board, circleFor('Alice'));
+    await peer({ surface: 'doc', docId: 'kitchen-notes' });
     expect(board.location.navigations).toEqual([`/workspaces/${WS}/docs/kitchen-notes`]);
 
-    await longPress(board, circleFor('Zoe Vance'));
-    expect(circleFor('Zoe Vance').classList.contains('board-following')).toBe(false);
+    await longPress(board, circleFor('Alice'));
+    expect(circleFor('Alice').classList.contains('board-following')).toBe(false);
 
-    await zoe({ surface: 'doc', docId: 'hob-spec' });
+    await peer({ surface: 'doc', docId: 'hob-spec' });
     // Still just the one: the second press unfollowed her.
     expect(board.location.navigations).toEqual([`/workspaces/${WS}/docs/kitchen-notes`]);
+  });
+
+  it('follows her onto a whiteboard, the page her spot names', async () => {
+    const board = await bootTestBoard();
+    const peer = joinBoard(board, { id: 'u-peer', name: 'Alice' });
+    await peer({ surface: 'board' });
+    await longPress(board, circleFor('Alice'));
+
+    // A whiteboard page announces its person's spot, as presence/page-presence does.
+    await peer({
+      surface: 'whiteboard',
+      docId: 'wb-galley',
+      spot: { surface: 'whiteboard', docId: 'wb-galley', x: 12, y: 34 },
+    });
+    expect(board.location.navigations).toEqual([`/workspaces/${WS}/whiteboards/wb-galley`]);
+  });
+
+  it('stops following the moment the reader taps the board themselves', async () => {
+    const board = await bootTestBoard();
+    const peer = joinBoard(board, { id: 'u-peer', name: 'Alice' });
+    await peer({ surface: 'board' });
+    await longPress(board, circleFor('Alice'));
+    expect(circleFor('Alice').classList.contains('board-following')).toBe(true);
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await settle();
+    expect(circleFor('Alice').classList.contains('board-following')).toBe(false);
+
+    await peer({ surface: 'doc', docId: 'kitchen-notes' });
+    expect(board.location.navigations).toEqual([]);
   });
 });

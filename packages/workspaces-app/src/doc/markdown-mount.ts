@@ -12,6 +12,7 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
 import type { MountContext } from '../mount-context.ts';
+import { wireDocSpot } from '../presence/doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type ReviewChrome, mountReviewChrome } from '../review-chrome.ts';
 import { navigateTo } from '../router.ts';
@@ -32,6 +33,7 @@ import { mountDocSaveState } from './doc-save-state.ts';
 import { mountDocSetNav } from './doc-set-nav.ts';
 import { mountDocSpeakerMenu } from './doc-speaker-menu.ts';
 import { createNotesLinkRefs } from './notes-link-refs.ts';
+import { openThreadId } from './open-thread.ts';
 
 /** Per-document mount for the markdown (Tiptap) surface.
  *
@@ -210,6 +212,15 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
     // The agent's cursor (`agent-focus.ts`).
     wireAgentFocus({ editor, presence: awareness, scroller: editorMount, scope });
   }
+  // Where the person here is reading, for the workspace's presence room.
+  wireDocSpot({
+    docId,
+    editor,
+    scroller: editorMount,
+    openThread: openThreadId,
+    revealThread: (id) => reviewChrome.revealThread(id),
+    scope,
+  });
 
   mountDocSpeakerMenu({
     docId,

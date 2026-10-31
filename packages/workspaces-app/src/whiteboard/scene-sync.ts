@@ -163,8 +163,12 @@ export function presenceNames(states: PresenceStates, selfClientId: number): str
   return [...people, ...agents];
 }
 
-/** The header's presence line. */
+/**
+ * The header's presence line: who is on this canvas. It says nothing when
+ * nobody else is, because the chips beside it name who is elsewhere in the
+ * workspace, and "just you" beside two chips reads as a contradiction.
+ */
 export function presenceLine(names: readonly string[]): string {
-  if (names.length === 0) return 'Live · just you';
+  if (names.length === 0) return 'Live';
   return `Live · you and ${names.join(', ')}`;
 }

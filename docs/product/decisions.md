@@ -854,3 +854,28 @@ of. The step is now a verb the planner calls before writing anything —
   reader here is choosing a way forward, not judging five rows.
 - **The step lives in the lead skill** because the verbs it ends in —
   `set_goal_list`, `rename_goal`, `link_refs` on a band — are the lead's.
+
+## 2026-10-15 — A person is one spot; an agent is where it points
+
+Bryan, reviewing the whiteboard mock:
+
+> An agent is not in one place at a time. It can edit five places in a doc
+> and draw in a mockup at the same moment. So following an agent means
+> following where it chooses to point for communication, not where it is
+> editing. A person attends to one place, so a person's presence is a single
+> spot. Following either one can lead you anywhere on a page, or to other
+> pages in the workspace.
+
+What that means in the product:
+
+- **A person's presence is one spot on one page.** With several tabs open,
+  it is the spot in the tab they used last. On a doc it is the block they are
+  reading or the thread they have open; on a whiteboard it is their pointer.
+- **An agent's presence is the spot it points at with a verb.** Today that is
+  a comment it writes (`create_thread`, `post_reply`), a whiteboard
+  `point`, or the planning voice's cursor on the words it is asking about.
+  Its edits draw nothing anywhere.
+- **Following moves your view to that spot within a second**, onto another
+  page of the workspace when that is where the spot is. A long-press on a
+  presence circle starts or stops it, on the board, a doc or a whiteboard.
+  It stops the moment you scroll, type or tap the page yourself.

@@ -98,6 +98,13 @@ export async function handleWhiteboardRoutes(
   const written = drawShapes(doc.ydoc, parsed.shapes, mode, actor);
   if (pointer !== undefined) {
     setAgentPointer(doc.awareness, actor.id, pointer ? { ...pointer, label: actor.name } : null);
+    // The same point, in the workspace's presence room, so a follower on
+    // another page comes here. A drawing without `point` moves neither.
+    ctx.agentSpots.point(
+      docId,
+      actor.id,
+      pointer ? { surface: 'whiteboard', docId, ...pointer, name: actor.name } : null,
+    );
   }
   const { count } = readScene(doc.ydoc);
   return j(200, { docId, written, count });

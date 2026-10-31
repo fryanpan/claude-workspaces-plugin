@@ -73,6 +73,7 @@
     "./task-schedule": "./src/task-schedule.ts",
     "./task-wire": "./src/task-wire.ts",
     "./whiteboard-scene": "./src/whiteboard-scene.ts",
+    "./workspace-presence": "./src/workspace-presence.ts",
     "./word-count": "./src/word-count.ts"
   },
   "dependencies": {

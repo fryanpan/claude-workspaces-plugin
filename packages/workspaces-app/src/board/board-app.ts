@@ -314,7 +314,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     state,
     user,
     el,
-    location,
     openInQueue: (item, index) => openInQueue(item, index),
     openReviewItem: (item) => openReviewItem(item),
     openReviewThread: (item) => openReviewThread(item),
@@ -323,7 +322,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     openTaskDetail: (task, tab) => openTaskDetail(task, tab),
     commentOnActivity: (taskId, phrase, text) => commentOnActivity(taskId, phrase, text),
     replyOnActivity: (taskId, threadId, text) => replyOnActivity(taskId, threadId, text),
-    renderPresenceRegion: () => renderPresenceRegion(),
+    follow: (key) => live.follower.follow(key),
+    jumpTo: (key) => live.follower.jump(key),
   });
 
   // The board had no reading of its own connection at all, in any viewport —
@@ -661,8 +661,13 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   const walkSources: WalkSources = { reviewItems: false, projection: false };
 
   // ── The chrome cluster ──────────────────────────────────────────────────
-  const { peopleFromAwareness, renderPresenceRegion, renderMe, renderSettingsPanel } =
-    createBoardChromeRegion({ state, user, el, awareness: client.awareness, location });
+  const { renderPresenceRegion, renderMe, renderSettingsPanel } = createBoardChromeRegion({
+    state,
+    user,
+    el,
+    awareness: client.awareness,
+    location,
+  });
 
   function renderAll(): void {
     // Mounted, not rendered: `renderQuickActions` is a no-op after the first
@@ -761,7 +766,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderHomeRegion,
     renderDetail,
     renderPresenceRegion,
-    peopleFromAwareness,
     loadAgents,
     loadEvents,
     loadHome,

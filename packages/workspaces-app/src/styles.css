@@ -2322,6 +2322,98 @@ body.composer-open #editor > .ProseMirror ::selection {
   margin-left: 4px;
 }
 
+/* ================= PRESENCE CIRCLES =================
+   Who is in the workspace, drawn the same way on every page that shows it:
+   the board's top-right cluster, a doc's toolbar, a whiteboard's header
+   (presence/page-presence.ts). Here because all three pages reach it; the
+   long-form chip and the drift notes stay in board.css. */
+/* --- presence strip (§2.7) --- */
+.board-presence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 0;
+}
+/* The presence island owns a wrapper of its own inside the strip — Preact
+   must never share a container with vanilla code. `display: contents` keeps
+   that wrapper out of layout entirely, so the circles and the drift notes stay
+   DIRECT flex items of `.board-presence`: the gap, the nowrap fit at 430px, and
+   the `flex: 1 0 100%` that gives a notice its own line are all written
+   against that relationship. Without this the whole strip would collapse into
+   a single flex item. */
+.board-presence > [data-preact-island] {
+  display: contents;
+}
+/* The presence strip, re-fitted for a 36px-tall slot: one line, no wrap.
+   Two classes, so these beat the base `.board-presence` wherever it sits in the
+   file — a later equal-specificity rule would otherwise win. No max-width or
+   overflow clip any more: the renderer clamps to at most four circles
+   (3 + "+N"), so the worst case is ~124px and nothing is silently cut. */
+.board-presence.board-people {
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 0;
+}
+/* Circle profile buttons (Bryan, 2026-08-18: "show smaller circle profile
+   buttons for each active user instead of the long form"). Initials in the
+   circle, the full name/where/liveness line in the title + aria-label. The
+   liveness classes from the long-form strip still apply — they are bare
+   class selectors, so `board-presence-unresponsive` keeps its yellow border
+   and `board-following` its accent ring. There is no faded state left: a
+   circle is drawn only for an agent that is listening, so every circle here
+   means present and an absent session is simply not drawn. */
+.board-presence-circle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-hover);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 28px is the ASKED-FOR visual size and sits under the 36px tap-target floor,
+   so the hit area is extended invisibly back to 36px. */
+.board-presence-circle::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+/* Agents are rounded squares, people are circles — the glance-level cue the
+   long form's 🤖 prefix used to carry. The words are still in the title. */
+.board-presence-circle.board-presence-agent {
+  border-radius: 9px;
+}
+.board-presence-circle.board-presence-more {
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+}
+/* Present but wedged: the process is up and on the wire, and the model has
+   made no call for half an hour. Worth a ring — it is the fault a reader most
+   wants to catch — and NOT worth a fade, because the session is there. */
+.board-presence-unresponsive {
+  border-color: var(--yellow);
+}
+/* The fade that used to live here is gone, and its absence is the feature.
+   Every circle in the strip now stands for an agent holding its event stream
+   (`agent-listening.ts`), so there is no longer a "might be there" to draw:
+   an absent session has no circle at all. A dimmed one said maybe, and maybe
+   is what sent Bryan to chat to ask whether anybody was listening — which is
+   the question this strip exists to answer without him asking. */
+.board-following {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 /* ================= TOAST ================= */
 
 #toast {

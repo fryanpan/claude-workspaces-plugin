@@ -549,12 +549,17 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           docStore.list().some((m) => m.workspaceId === boardRoom.workspaceId);
         if (!roomExists) return j(404, { error: 'workspace not found' });
         const roomReadOnly = requireSignInToWrite && provedNobody();
+        // `?presence=1`: a doc or whiteboard page joining the room to say
+        // where its person is. Same gate as the board's own socket; it is
+        // handed the room's presence and none of the board's content.
+        const presenceOnly = url.searchParams.get('presence') === '1';
         const upgraded = server.upgrade(req, {
           data: {
             docId: `ws:${boardRoom.workspaceId}`,
             ...(visitorShareId ? { shareId: visitorShareId } : {}),
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
+            ...(presenceOnly ? { presenceOnly: true } : {}),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

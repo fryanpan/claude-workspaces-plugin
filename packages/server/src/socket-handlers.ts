@@ -35,6 +35,7 @@ import type { User, WriteVia } from '@claude-workspaces/core';
  * the synchronous shape of this handler is this file's.
  */
 import type { WebSocketHandler } from 'bun';
+import type { Awareness } from 'y-protocols/awareness';
 import type { AppVoiceRelay } from './app-voice/relay.ts';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { SocketEditor } from './edit-sessions.ts';
@@ -59,6 +60,8 @@ export interface SocketHandlersContext {
   spokenRelay: SpokenReplyRelay;
   /** A mock's or app's own voice sessions, keyed by socket. */
   appVoiceRelay: AppVoiceRelay;
+  /** A board room opened: where its agents last pointed (`agent-spots.ts`). */
+  onBoardRoomOpen?: (workspaceId: string, awareness: Awareness) => void;
 }
 
 /**
@@ -91,6 +94,7 @@ export type UpgradeData = {
   shareId?: string;
   shareMember?: string;
   readOnly?: boolean;
+  presenceOnly?: boolean;
   widgetDoorGrant?: { token: string; origin: string };
   editor?: SocketEditor;
   /** A voice socket's proven speaker, and its mark when a mock relayed it —
@@ -166,6 +170,9 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (!doc) {
         ws.close(1008, 'no doc');
         return;
+      }
+      if (typed.data.docId.startsWith('ws:')) {
+        ctx.onBoardRoomOpen?.(typed.data.docId.slice(3), doc.awareness);
       }
       onOpen(doc, typed);
       docStore.notePageOpened(doc);
