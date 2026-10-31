@@ -14,13 +14,19 @@
  * board's asks move (`review-live.ts`), so an ask filed or answered elsewhere
  * shows within a second without moving the card the reader is on. The rail
  * beside the card is the board's, and goes to the pages of the project the
- * card is from.
+ * card is from; its dock holds the chat with that project's lead
+ * (`review-lead-chat.ts`).
  */
 import type { ReviewSize } from '@claude-workspaces/core';
 import { type BoardNav, navPath } from '../board/board-presence-model.ts';
 import { createBoardReviewController } from '../board/board-review-controller.ts';
 import { type ReviewItem, advanceWalk } from '../board/board-review-model.ts';
-import { NAV_COLLAPSE_HTML, navRailItemsHtml, wireNavCollapse } from '../board/board-shell.ts';
+import {
+  NAV_COLLAPSE_HTML,
+  navDockHtml,
+  navRailItemsHtml,
+  wireNavCollapse,
+} from '../board/board-shell.ts';
 import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-island.tsx';
 import { browserStorage } from '../boot-env.ts';
 import { mountCoachCard } from '../coach-card.ts';
@@ -40,13 +46,19 @@ import {
   startKey,
   walkChrome,
 } from './cross-walk-model.ts';
+import type { ReviewLeadChat } from './review-lead-chat.ts';
 import { mergeLiveQueue, startReviewLive } from './review-live.ts';
+
+/** The plan board, as the last queue read named it: whose lead the chat
+ *  talks to when no card is on screen. */
+let planBoard: string | null = null;
 
 async function fetchQueue(): Promise<CrossEntry[] | null> {
   try {
     const res = await fetch('/api/review-queue');
     if (!res.ok) return null;
-    const body = (await res.json()) as { items?: CrossReviewRow[] };
+    const body = (await res.json()) as { items?: CrossReviewRow[]; planWorkspaceId?: string };
+    planBoard = body.planWorkspaceId ?? null;
     const now = Date.now();
     return (body.items ?? []).flatMap((row) => {
       const entry = crossEntry(row, now);
@@ -208,7 +220,7 @@ async function boot(): Promise<void> {
   const rail = document.getElementById('board-nav');
   let railWorkspace: string | null = null;
   if (rail) {
-    rail.innerHTML = navRailItemsHtml() + NAV_COLLAPSE_HTML;
+    rail.innerHTML = navRailItemsHtml() + NAV_COLLAPSE_HTML + navDockHtml();
     wireNavCollapse(document, localStorage);
     for (const btn of rail.querySelectorAll<HTMLButtonElement>('.board-nav-item[data-nav]')) {
       btn.addEventListener('click', () => {
@@ -216,6 +228,16 @@ async function boot(): Promise<void> {
       });
     }
   }
+
+  // The chat with the card's lead. Its own chunk, after the first card,
+  // because it is never the page's content; until it loads, the board it
+  // should talk to is kept and handed over when it does.
+  let chat: ReviewLeadChat | null = null;
+  let chatEntry: CrossEntry | null = null;
+  const aimChat = (entry: CrossEntry | null): void => {
+    chatEntry = entry;
+    chat?.aim(entry, planBoard);
+  };
 
   /** Answering moves on: the write, the re-read, then the aim at the card
    *  that was next when the answer was sent. */
@@ -245,6 +267,7 @@ async function boot(): Promise<void> {
     const next = visible[index + 1] ?? null;
     walk.walkKey = current?.item.key ?? null;
     railWorkspace = current?.workspaceId ?? null;
+    aimChat(current);
     for (const btn of rail?.querySelectorAll<HTMLButtonElement>('[data-nav]') ?? []) {
       btn.disabled = railWorkspace === null;
     }
@@ -303,6 +326,13 @@ async function boot(): Promise<void> {
   render();
   if (firstQueue !== null) loadReport.contentShown();
   startReviewLive(liveReread);
+  const dock = rail?.querySelector<HTMLElement>('.board-nav-dock');
+  if (dock) {
+    void import('./review-lead-chat.ts').then((m) => {
+      chat = m.createReviewLeadChat({ dock, author });
+      aimChat(chatEntry);
+    });
+  }
 }
 
 void boot();
