@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { eventPath, typingInPath } from '../src/keyboard-target.ts';
-import { errorCodeOf, recognitionErrorMessage } from '../src/voice-capture.ts';
+import { recognitionErrorMessage } from '../src/voice-capture.ts';
 
 describe('typingInPath', () => {
   // The bug this exists for: a keydown inside the feedback widget's shadow
@@ -90,13 +90,6 @@ describe('eventPath', () => {
 });
 
 describe('recognition errors are named, not swallowed', () => {
-  it('reads the error code off the event, and only a real string counts', () => {
-    expect(errorCodeOf({ error: 'not-allowed' })).toBe('not-allowed');
-    expect(errorCodeOf({})).toBeNull();
-    expect(errorCodeOf(null)).toBeNull();
-    expect(errorCodeOf({ error: '' })).toBeNull();
-  });
-
   it('explains a refused mic instead of blaming silence', () => {
     // "Voice is just broken" was a refusal reported as silence. The INSECURE
     // ORIGIN half of that now never reaches here — `insecureOriginMessage`

@@ -7,9 +7,8 @@
  *      this Mac's audio, or a bot sent into a Zoom or Google Meet call) and
  *      the speakers (just me, or several voices with labels).
  *
- * Every billed choice is made here, before anything records, for the reason
- * the doc's own start chooser gives (`meeting-chooser.ts`): a transcription
- * session's configuration is fixed once it opens. The chat panel has no
+ * Every billed choice is made here, before anything records, because a
+ * transcription session's configuration is fixed once it opens. The chat panel has no
  * settings of its own.
  *
  * Escape, Cancel and a tap on the scrim close it with nothing started. Drawn

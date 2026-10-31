@@ -13,7 +13,8 @@
  *
  * So this is the whole path, once, cheaply:
  *
- *   real headless Chrome → the built client → the real audio socket →
+ *   real headless Chrome → the lead chat's Start a meeting → the built
+ *   client → the real audio socket →
  *   the real transcription seam → the real notes pipeline → the real doc
  *
  * with two things faked, and only two: the microphone (Chrome's own fake
@@ -26,16 +27,21 @@
  * convenience (Bryan, 2026-09-11): a gate that costs money per run is a gate
  * somebody eventually takes out of `verify`. This one costs a browser launch.
  *
- * WHAT IT ASSERTS — the three things the meeting got wrong:
+ * The meeting starts the way a person starts one now (2026-10-30, when the
+ * doc's own Record Audio went): the agent button, Start a meeting, the
+ * wizard with this doc picked, Start meeting, and End meeting to stop.
+ *
+ * WHAT IT ASSERTS — the things the meeting got wrong:
  *
  *   1. NOTES ACCUMULATE. More than one tick writes, and the earlier note is
  *      still there when the later one lands. The reported symptom was a
  *      single line replaced by each new topic.
- *   2. WORDS THE NOTE-TAKER IS FINISHED WITH LEAVE THE LIVE TRANSCRIPT. One
- *      tick here composes nothing, which is an ordinary thing for a tick of
- *      filler to do. Its words must go. Before the fix in this branch they
- *      stayed on screen for the rest of the meeting, which is the half of the
- *      report this check reproduces: it FAILS on the base commit here.
+ *   2. WHAT IS SAID SHOWS LIVE. The lead chat's meeting view lists the
+ *      meeting's lines as they settle, with their count, while the meeting
+ *      runs. Until 2026-10-30 this read the doc's own live transcript, which
+ *      went with the doc's Record Audio; the words the note-taker had
+ *      finished with had to leave it. The lead chat's list keeps every line,
+ *      so only the showing half is still a thing to check.
  *   3. THE MEETING REPORTS ITSELF. The `[meeting-notes] … ticks over … turns`
  *      line prints when the recording stops. Its absence was the only trace
  *      the production meeting left, and an absence is not something the
@@ -186,11 +192,6 @@ const QUIET_MS = 400;
  */
 const BLANK_BULLET_CALL = 1;
 
-/** Which composer call answers with nothing — see assertion 2. Not the call
- *  above, and not the one after it: the blank-bullet tick's words carry into
- *  the next call, which has to be one that writes them. */
-const EMPTY_TICK_CALL = 3;
-
 /** How long a browser-side condition may take before it is a failure. */
 const SETTLE_MS = 8_000;
 /** What the stub namer calls the meeting (assertion 5). */
@@ -241,14 +242,8 @@ interface Composed {
 }
 
 /**
- * The note-taker: the server's own deterministic stub, answering with nothing
- * on one call.
- *
- * A tick that composes nothing is ORDINARY — a tick of "right, yes, okay" has
- * nothing to write up — and the server marks its turns composed and never
- * looks at them again. That is what makes those words the ones the live
- * transcript used to keep forever, so the check needs one on purpose rather
- * than hoping the script produces one.
+ * The note-taker: the server's own deterministic stub, after one blank-bullet
+ * answer on the first call (assertion 4).
  */
 function scriptedComposer(seen: Composed[]): NotesComposer {
   const stub = createStubNotesComposer();
@@ -267,7 +262,7 @@ function scriptedComposer(seen: Composed[]): NotesComposer {
           },
         ];
       }
-      const edits = call === EMPTY_TICK_CALL ? [] : await stub.compose(input);
+      const edits = await stub.compose(input);
       seen.push({ said, kind: edits.length > 0 ? 'wrote' : 'empty' });
       return edits;
     },
@@ -285,9 +280,8 @@ async function postJson(url: string, body: unknown): Promise<Record<string, unkn
 }
 
 /**
- * A board and a meeting to hold, seeded over the real routes — the call the
- * Board's "Have a meeting" makes, so the doc is a huddle titled "Meeting"
- * exactly as a person's is.
+ * A board and a doc to hold the meeting in, seeded over the real routes. The
+ * huddle route makes a doc titled "Meeting", the default assertion 5 renames.
  */
 async function seedDoc(base: string): Promise<{ ws: string; docId: string }> {
   const board = (await postJson(`${base}/workspaces`, {
@@ -321,6 +315,48 @@ async function untilHere(pred: () => boolean, ms: number, what: string): Promise
 }
 
 const js = (v: unknown): string => JSON.stringify(v);
+
+/** The lead chat's agent button and its panel, through their shadow roots. */
+const BUTTON = `document.querySelector('[data-lead-chat="button"]')?.shadowRoot?.querySelector('button')`;
+const LAYER = `document.querySelector('[data-lead-chat="layer"]')?.shadowRoot?`;
+/** Next is drawn disabled until the wizard has read the board's docs. */
+const NEXT = `(() => { const n = ${LAYER}.querySelector('[data-wiz="next"]'); return n && !n.disabled ? n : null; })()`;
+
+/**
+ * Wait until `el` (an expression naming one element) is drawn, then tap its
+ * centre with a real mouse press, as a person's finger lands. With `then`, tap
+ * again until that expression reads true: the pane grows in over 200ms, and a
+ * tap measured mid-growth can land beside the button.
+ */
+async function tapIn(cdp: Cdp, el: string, ms: number, what: string, then?: string): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    await tapOnce(cdp, el, Math.max(0, deadline - Date.now()), what);
+    if (then === undefined) return;
+    const retap = Date.now() + 1_000;
+    while (Date.now() < retap) {
+      if (await cdp.evaluate(then)) return;
+      await sleep(100);
+    }
+    if (Date.now() > deadline) throw new Error(`timed out after ${ms}ms: ${what} did nothing`);
+  }
+}
+
+async function tapOnce(cdp: Cdp, el: string, ms: number, what: string): Promise<void> {
+  const box = `(() => { const e = ${el}; if (!e || e.hidden) return null;
+    const r = e.getBoundingClientRect();
+    return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`;
+  const deadline = Date.now() + ms;
+  let at = (await cdp.evaluate(box)) as { x: number; y: number } | null;
+  while (!at) {
+    if (Date.now() > deadline) throw new Error(`timed out after ${ms}ms waiting for ${what}`);
+    await sleep(100);
+    at = (await cdp.evaluate(box)) as { x: number; y: number } | null;
+  }
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await cdp.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+  }
+}
 
 async function run(o: Options): Promise<number> {
   const chrome = resolveChromeBin(undefined);
@@ -410,10 +446,7 @@ async function run(o: Options): Promise<number> {
     });
     const base = `http://127.0.0.1:${server.port}`;
     const { ws, docId } = await seedDoc(base);
-    // `?huddle=1&mode=solo` is the address the Board writes when somebody
-    // presses "Have a meeting", and the editor starts the capture on load —
-    // so the meeting begins the way a person's does, with no synthetic click.
-    const pageUrl = `${base}/workspaces/${ws}/docs/${docId}?huddle=1&mode=solo`;
+    const pageUrl = `${base}/workspaces/${ws}/docs/${docId}`;
     log(`opening ${pageUrl}`);
 
     browser = await launchChrome(
@@ -452,7 +485,20 @@ async function run(o: Options): Promise<number> {
     if (nav.errorText) throw new Error(`navigation failed: ${nav.errorText}`);
     await withTimeout(loaded, 30_000, 'page load');
     await until(cdp, `!!document.querySelector(${js(EDITOR_SELECTOR)})`, 20_000, 'the editor');
-    await until(cdp, `!!document.querySelector('.meeting-record-dot')`, 20_000, 'the strip');
+    // The agent button, Start a meeting, the wizard (this doc is picked on
+    // the doc's own page), Start meeting — a person's taps, not a URL flag.
+    const drawn = (sel: string): string =>
+      `(() => { const e = ${LAYER}.querySelector(${js(sel)}); return !!e && !e.hidden && e.getBoundingClientRect().width > 0; })()`;
+    await tapIn(cdp, BUTTON, 20_000, 'the agent button', drawn('.lc-start'));
+    await tapIn(
+      cdp,
+      `${LAYER}.querySelector('.lc-start')`,
+      SETTLE_MS,
+      'Start a meeting',
+      drawn('.lc-wiz'),
+    );
+    await tapIn(cdp, NEXT, SETTLE_MS, "the wizard's Next, its docs read");
+    await tapIn(cdp, `${LAYER}.querySelector('[data-wiz="start"]')`, SETTLE_MS, 'Start meeting');
 
     // 4a. THE FIRST THING SAID SURVIVES THE TICK THAT OPENED THE SECTION
     //     WITH A BLANK. That tick put no words in the doc, so the pipeline
@@ -474,20 +520,13 @@ async function run(o: Options): Promise<number> {
       );
     }
 
-    // The meeting runs until the script has been spoken and the ticks it
-    // needs have composed: two that wrote and the one that answered with
-    // nothing.
+    // The meeting runs until two ticks have written.
     await untilHere(
-      () =>
-        composed.filter((c) => c.kind === 'wrote').length >= 2 &&
-        composed.some((c) => c.kind === 'empty'),
+      () => composed.filter((c) => c.kind === 'wrote').length >= 2,
       MEETING_MS,
       `ticks (saw ${composed.length}: ${composed.map((c) => c.kind).join(', ')})`,
     );
     const wrote = composed.filter((c) => c.kind === 'wrote');
-    const empty = composed.find((c) => c.kind === 'empty');
-    if (!empty)
-      throw new Error('no tick composed nothing, so the live-transcript half is untested');
 
     // 4b. AND IT IS IN THE NOTES, with no blank line left behind it. The two
     //     halves of the report: the sentence that went missing, and the
@@ -526,27 +565,20 @@ async function run(o: Options): Promise<number> {
       );
     }
 
-    // 2. WORDS THE NOTE-TAKER IS FINISHED WITH LEAVE. The empty tick's turns
-    //    are composed as far as the server is concerned and will never be
-    //    looked at again, so the live transcript must give them up.
+    // 2. WHAT IS SAID SHOWS LIVE, in the lead chat's meeting view, with the
+    //    count beside it, before the meeting ends.
     await until(
       cdp,
-      `(() => { const t = document.querySelector('.live-zone .lz-lines')?.textContent ?? '';
-         return ${js(empty.said)}.every((s) => !t.includes(s)); })()`,
+      `(() => { const t = ${LAYER}.querySelector('.lc-notes-list')?.textContent ?? '';
+         const n = Number.parseInt(${LAYER}.querySelector('.lc-notes-n')?.textContent ?? '', 10);
+         return t.includes(${js(FIRST_TURN)}) && n >= 1; })()`,
       SETTLE_MS,
-      "the empty tick's words to leave the live transcript",
+      `the first thing said (${JSON.stringify(FIRST_TURN)}) in the lead chat's live lines`,
     );
 
-    // 3. THE MEETING REPORTS ITSELF, through the real stop the strip's menu
-    //    offers rather than by dropping the socket.
-    await cdp.evaluate(`document.querySelector('.meeting-record')?.click(), 1`);
-    await until(
-      cdp,
-      `!!document.querySelector('.meeting-stop-cta')`,
-      SETTLE_MS,
-      'the stop control',
-    );
-    await cdp.evaluate(`document.querySelector('.meeting-stop-cta')?.click(), 1`);
+    // 3. THE MEETING REPORTS ITSELF, through the lead chat's End meeting
+    //    rather than by dropping the socket.
+    await tapIn(cdp, `${LAYER}.querySelector('.lc-end')`, SETTLE_MS, 'End meeting');
     const summary = /\[meeting-notes\].*meeting.*: \d+ ticks? over \d+ settled turns?/;
     await untilHere(
       () => printed.some((l) => summary.test(l)),
@@ -575,7 +607,7 @@ async function run(o: Options): Promise<number> {
 
     const line = printed.find((l) => summary.test(l)) ?? '';
     log(
-      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, one composed nothing and its words left, ${items} note lines, no blank bullet, the first thing said is in them, and the meeting named itself.`,
+      `✅ a whole meeting left usable notes: ${wrote.length} ticks wrote, the lead chat showed what was said live, ${items} note lines, no blank bullet, the first thing said is in them, and the meeting named itself.`,
     );
     log(`   ${line.trim()}`);
     return 0;

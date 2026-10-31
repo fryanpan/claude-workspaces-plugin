@@ -24,7 +24,7 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
-import { mountLeadChat } from '../lead-chat/lead-chat-mount.ts';
+import { type LeadChatMount, mountLeadChat } from '../lead-chat/lead-chat-mount.ts';
 import { createPromptsApi } from '../settings/prompts-api.ts';
 import {
   fetchWriteAccess,
@@ -78,7 +78,6 @@ import {
   resourceOf,
   taskShareUrl,
 } from './board-url.ts';
-import { wireBoardVoice } from './board-voice.ts';
 import { createBoardWalkthrough } from './board-walkthrough.ts';
 import { mountIslandProbe } from './island-probe.tsx';
 import { createLibraryPage } from './library-page.ts';
@@ -651,6 +650,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   let autoWalkTick: (() => void) | null = null;
   /** Assigned when settings is wired, below the live wiring. */
   let membersChanged: (() => void) | null = null;
+  /** The lead chat, mounted below; "Have a meeting" opens its wizard. */
+  let leadChat: LeadChatMount | null = null;
 
   // Which halves of the queue have landed. The armed walk opens only once
   // both are in (or the deadline passes): a walk opened on the review-items
@@ -668,8 +669,11 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     // call, so a board repaint cannot rebuild a button mid-request.
     renderQuickActions(el('board-quick'), {
       onNewTask: () => newTask(),
-      onStartHuddle: () => startHuddle('plan', 'solo'),
-      onStartConversation: () => startHuddle('discussion', 'conversation'),
+      onStartHuddle: () => startHuddle('plan'),
+      onStartMeeting: () => {
+        leadChat?.startMeeting();
+        return Promise.resolve(true);
+      },
       // The board's create buttons are the doc surface's edit toggle: a
       // control that cannot work should say so before it is pressed, not
       // after. The rest of the board's writes still fail loudly through
@@ -857,26 +861,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     href: () => location.href,
   }));
 
-  // Where an utterance lands: the open panel, or the row the keyboard is on.
-  // `board-voice.ts` — one capture per page, because Space is a singleton.
-  wireBoardVoice({
-    state,
-    author,
-    workspaceId,
-    document,
-    location,
-    el,
-    renderDetail,
-    start: (kind) =>
-      void startHuddle(
-        kind === 'plan' ? 'plan' : 'discussion',
-        kind === 'plan' ? 'solo' : 'conversation',
-      ),
-    // Swaps in the spoken reply when the server can speak one.
-    spoken: {},
-  });
-  // The chat with the board's lead, its button beside the mic (`lead-chat/`).
-  mountLeadChat({
+  // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
+  leadChat = mountLeadChat({
     workspaceId,
     author,
     dock: el('board-lead-chat'),

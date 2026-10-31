@@ -962,11 +962,11 @@ reply's voice, and turns the answer into an edit of the same note, so the
 page re-anchors or rewrites the thread it already made rather than adding
 one.
 
-**The board mic's spoken reply.** Holding the board mic can get a spoken
+**The spoken reply.** A held mic can get a spoken
 answer rather than a line of text: Claude writes a short overview into a
 panel above the mic and says its first two sentences, or asks one question
-and waits. The words come from the board mic's own router (`voice.ts`), so
-fast paths and the hand-off to the lead behave exactly as on the plain mic;
+and waits. The words come from the voice router (`voice.ts`), so
+fast paths and the hand-off to the lead behave exactly as on a plain mic;
 what varies is who hears and who speaks, and four setups sit behind one
 switch so they can be compared on the same board — Soniox alone, Soniox with
 ElevenLabs Flash, Gemini Live, and ElevenLabs Agents, which also takes the
@@ -975,8 +975,10 @@ turns. The wire is `core/spoken-reply.ts`
 On the page, `board/spoken-reply-client.ts` owns the socket and the turn,
 `spoken-reply-panel.ts` the panel's markup and states, `spoken-reply-audio.ts`
 the capture and the player, and `spoken-reply-tap.ts` the taps; all four sit
-inside `board/`, and `board-voice.ts` mounts them in place of the plain
-capture only when `GET /workspaces/<ws>/voice/timings` names a setup. On the
+inside `board/`. The voice page (`voice-page/`) mounts them, and the lead
+chat's voice reuses the socket. The board's own mic, which mounted them on
+the board when `GET /workspaces/<ws>/voice/timings` named a setup, was
+removed on 2026-10-30. On the
 server, `routes/upgrade-stream.ts` hands `WS /workspaces/<ws>/voice/converse`
 to `spoken-reply/` (a new top-level server directory): `relay.ts` keeps one
 `session.ts` per socket, `answer.ts` cuts the router's answer into a spoken and
@@ -1011,9 +1013,10 @@ The read-back, the yes and the one-utterance undo window are
 `spoken-reply/confirm.ts`, kept apart so a doc follow-up can reuse it;
 `review-words.ts` holds the words it listens for, and `review-speakable.ts`
 the rule for which items stay on the queue for the screen. The server never
-writes the answer itself: the reply carries a `decide`, and
-`board/spoken-review-decide.ts` posts it to the route the answer card and its
-Undo already use. The request is built in `core/spoken-review.ts` (a new
+writes the answer itself: the reply carries a `decide`, and the page's
+`onDecide` posts it to the route the answer card and its Undo already use.
+The board mic was the one page that passed an `onDecide`, so since it went
+(2026-10-30) a spoken decision is answered as not recorded. The request is built in `core/spoken-review.ts` (a new
 top-level core module), so the card and the voice queue share one builder. A
 ticket's review item gained the undo it lacked:
 `routes/task-review-answer-undo.ts` over `review-items/undo-answer.ts`.
@@ -1051,7 +1054,7 @@ the client, the shadow-DOM button, bar and panel, and the per-device Chat
 first / Voice first choice the Settings Voice row writes; the board mounts it
 in its nav dock, the doc page floats it bottom-left, and the mock host loads
 `lead-chat-page.ts` as its own `/app/lead-chat.js`. Its voice
-(`lead-chat-voice.ts`) is the board mic's path: the mic streams over
+(`lead-chat-voice.ts`) is the spoken reply's path: the mic streams over
 `WS /workspaces/<ws>/voice/converse` with the lead named in `start`, so the
 audio reaches only this server and the listener it already uses. There is no
 browser speech recognition, because Chrome's sends the audio to Google.
@@ -1066,9 +1069,9 @@ written whole on every change and sent to the board's pages as
 line that opens with "Lead," goes to the lead as a voice turn, once per turn.
 The recording itself is the doc meeting every other surface runs. In the
 app, `meeting-link.ts` (a new top-level module, lifted out of
-`meeting-strip.ts`) is the meeting socket, its held-audio bank and its resume
-backoff with no page around it; the strip and `lead-chat/lead-chat-meeting.ts`
-both drive it. A page move is a reconnect: the next page of the recording tab
+the doc page's retired `meeting-strip.ts`) is the meeting socket, its
+held-audio bank and its resume backoff with no page around it;
+`lead-chat/lead-chat-meeting.ts` drives it. A page move is a reconnect: the next page of the recording tab
 resumes with `resume: <meetingId>`. `core/src/board-nav.ts` (a new top-level
 core module) names the board's four pages and their glyphs, so the mock host
 (`mockup-frame.ts`), which loads no app bundle, draws the same rail as the
@@ -1090,11 +1093,10 @@ other socket kinds. Inside the opaque frame, the socket goes through the host
 page's relay, like the widget's own sockets. The design is
 [app-voice](app-voice.md).
 
-**The planning voice** rides the same socket, and is always on in a doc:
-nobody says "interview me" any more (it still works). The doc's Talk button
-(`doc/doc-interview.ts`, its markup in `doc-interview-view.ts`; mounted with
-the voice mic by `doc/doc-voice-mount.ts`) opens the spoken-reply socket with
-`{ surface: 'doc', docId }` as each turn's context. On a doc on the socket's
+**The planning voice** rides the same socket. The doc's Talk button, which
+opened it with `{ surface: 'doc', docId }` as each turn's context, was removed
+with the doc's voice mic on 2026-10-30; the server half below is unchanged
+and answers any client that opens the socket that way. On a doc on the socket's
 board the session ends each turn only at a confirmed pause
 (`spoken-reply/pause-gate.ts`: the listener's endpoint, then a quiet window
 that is longer after a turn ending mid-sentence), and every turn is
@@ -1628,8 +1630,8 @@ WHAT A TIDY-UP DID, IN THE WORDS A PERSON READS, is
 no new box: it takes the cleanup route's reply and answers with a headline,
 the rules that dropped edits grouped with a count each, a recovery line and
 whether another press could answer differently. It sits in `core` because
-three surfaces ask the same question about one pass — the offer dialog
-(`workspaces-app/meeting-cleanup-offer.ts`), `meeting:rerun`'s report file,
+three surfaces asked the same question about one pass — the offer dialog
+(the doc's retired `meeting-cleanup-offer.ts`), `meeting:rerun`'s report file,
 and the server's own log line — and a pass that changed nothing has to read
 the same way in all of them. The reasons it groups are the gate's own
 (`notes-cleanup-scope.ts`), carried out of the route on `refusals` /
@@ -2080,37 +2082,16 @@ for the same reason — the zone is back on the 500-line bar — and holds one
 decision that is not the zone's: a speaker pill is a rename BUTTON where
 somebody handed in a way to record a name and the plain span it always was
 where nobody did. Nothing but the zone imports it either, today; the strip's
-own pill (`meeting-feed.ts`) is the obvious second caller. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `meeting-reconnect.ts` joins the same family one tier below the strip and changes no layer either: it is the policy a dropped audio socket is retried under — how long to wait, when to stop waiting, and the two sentences the strip shows while it happens — with no DOM, no socket and no timer in it, so `meeting-strip.ts` owns the doing and this owns the deciding. Three modules join that family for the capture that dies while the meeting is still running, and they split noticing from deciding for the same reason: `meeting-track-watch.ts` is the noticing — it watches a capture's tracks on the audio graph's own block clock and reports the first loss once, with no DOM, no timer and no policy in it, because a `MediaStreamAudioSourceNode` downstream of a dead track keeps delivering silence and nothing else in the capture path was listening. `meeting-stream-health.ts` is the deciding: which streams can be reopened without a person (a microphone can, the Mac's audio cannot — the share picker is a modal no page may open by itself), what the strip says while one is gone, and what the button is called where only a press will do. Both are pure, so the strip owns every side effect. `meeting-room-audio.ts` changes none of the picture: it is the room-processing constants and constraint builders lifted out of `meeting-audio.ts`, which sits on the 500-line bar, and `meeting-audio.ts` re-exports them so no caller moved. `meeting-record-face.ts` joins the same family one tier below the strip and changes no layer: it is the vocabulary the Record button wears — which word stands for each source and each voice count, what the control reads in each state, and the full list of faces the hidden sizer reserves the button's one width from. Pure, with no DOM and no state in it, because the two facts it names are the two that decide what is recorded and what is billed, and a button that got them wrong is how a paused meeting came back solo on 16 September. `meeting-transcript-panel.ts` joins the same family in the view tier and
-changes none of the picture either: it is the Transcript fold the start panel
-grows once a meeting has ended, split out of `meeting-chooser.ts` — which sits
-on the 500-line bar — because that panel is where every billed choice for the
-NEXT recording is made and this is a report on the last one. It reads the
-meetings route the cast list already reads, at the tap rather than at mount.
-`meeting-notetaker.ts` joins the same view tier for the same reason and
-changes no layer: it is the Note-taker fold in that panel — which of the three
-note-takers this doc's minutes are written by — split out of
-`meeting-chooser.ts` because that file sits on the 500-line bar and this is a
-section with its own state and no dependency on the rest of the form. It is
-also the client half of the `notes-method` route, so a switch made while a
-meeting is running goes over the meeting socket and one made at rest goes over
-HTTP.
-`meeting-cleanup-offer.ts` joins the same view tier and changes no layer: it
-is the one button a finished recording leaves at the end of the prose, asking
-whether to read the notes once more, plus the POST that press makes. It is
-the client half of `notes-cleanup-pass.ts` on the server, and it is separate
-from the strip because the strip is chrome for a meeting that is HAPPENING
-and this exists only once one has stopped.
-`meeting-tidy-line.ts` joins that view tier beside it and changes no layer
-either: it is the SAME offer for the ending nobody was present for. A
-recording that timed itself out for silence raises no dialog — there is
-nobody there to answer one — so the tidy-up becomes a control on the strip's
-idle line, beside the sentence saying the recording is over. It holds the
-request and the small state machine that turns a reply into a label; the
-strip draws it and owns every side effect. What the reply MEANS it does not
-decide — `readCleanupReply` in `packages/core` does, for this line and for
-the dialog both, so the two surfaces cannot name one reply differently. The
-line takes that report's headline and its `retry`, and leaves the grouped
-per-edit reasons to the dialog, which has a card where this has one row.
+own pill (`meeting-feed.ts`) is the obvious second caller. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `meeting-reconnect.ts` joins the same family one tier below the strip and changes no layer either: it is the policy a dropped audio socket is retried under — how long to wait, when to stop waiting, and the two sentences the strip shows while it happens — with no DOM, no socket and no timer in it, so `meeting-strip.ts` owns the doing and this owns the deciding. Three modules join that family for the capture that dies while the meeting is still running, and they split noticing from deciding for the same reason: `meeting-track-watch.ts` is the noticing — it watches a capture's tracks on the audio graph's own block clock and reports the first loss once, with no DOM, no timer and no policy in it, because a `MediaStreamAudioSourceNode` downstream of a dead track keeps delivering silence and nothing else in the capture path was listening. `meeting-stream-health.ts` is the deciding: which streams can be reopened without a person (a microphone can, the Mac's audio cannot — the share picker is a modal no page may open by itself), what the strip says while one is gone, and what the button is called where only a press will do. Both are pure, so the strip owns every side effect. `meeting-room-audio.ts` changes none of the picture: it is the room-processing constants and constraint builders lifted out of `meeting-audio.ts`, which sits on the 500-line bar, and `meeting-audio.ts` re-exports them so no caller moved. The doc page's own recorder went on 2026-10-30 (Bryan: "Record Audio has
+been replaced by the meeting mode with agent"), and with it the strip and the
+view modules that hung off it: `meeting-strip.ts`, `meeting-chooser.ts`,
+`meeting-advanced.ts`, `meeting-feed.ts`, `meeting-menu.ts`,
+`meeting-notetaker.ts`, `meeting-transcript-panel.ts`,
+`meeting-record-face.ts`, `meeting-solo.ts`, `meeting-timing-client.ts`,
+`meeting-cleanup-offer.ts` and `meeting-tidy-line.ts`. What this paragraph
+still names is what the lead chat's meeting runs on. `meeting-live-zone.ts`,
+`meeting-live-hold.ts` and `meeting-speaker-pill.ts` are still in the tree
+with their tests, but no page mounts them any more.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing

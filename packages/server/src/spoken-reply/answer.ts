@@ -26,7 +26,7 @@ import { capWords } from '../voice-status.ts';
  */
 import type { VoiceHandleResult, VoiceResult } from '../voice.ts';
 import { parseOrdinal, pickByLabel } from '../voice.ts';
-import { type AgentConversation, awayAck, sentAck } from './agent-conversation.ts';
+import { type AgentConversation, awayAck } from './agent-conversation.ts';
 import type { SpokenInterview } from './interview.ts';
 import { withNotes } from './notes.ts';
 import { shapeReply, stripWake } from './reply-shape.ts';
@@ -315,9 +315,11 @@ export class SpokenAnswerer {
     if (r.kind === 'not-attached') return plain('That agent isn’t on this board.');
     if (r.kind === 'failed') return plain('I couldn’t pass that on. Say it again.');
     this.onAwaiting?.(r.queueId, r.agentId);
+    // A turn that reached the agent is answered by the agent alone; the
+    // message shows in the chat, so nothing is said for it (Bryan, 2026-10-30).
     const live = r.kind === 'sent';
     return {
-      ...plain(live ? sentAck(r.name) : awayAck(r.name), live ? 'agent' : 'agent-queued'),
+      ...plain(live ? '' : awayAck(r.name), live ? 'agent' : 'agent-queued'),
       awaiting: r.queueId,
     };
   }

@@ -180,28 +180,3 @@ export function meetingPlatformOf(rawUrl: string): MeetingPlatform | null {
   if (endsWith('teams.microsoft.com') || endsWith('teams.live.com')) return 'teams';
   return null;
 }
-
-/** One line a person can read for each state. Shared so the strip and any
- *  agent-facing tool describe a bot the same way. */
-export function describeBotState(state: MeetingBotState): string {
-  switch (state) {
-    case 'requested':
-      return 'Bot requested';
-    case 'joining':
-      return 'Joining the call';
-    case 'waiting_room':
-      return 'Waiting to be let in';
-    case 'in_call':
-      return 'In the call, not recording yet';
-    case 'awaiting_permission':
-      return 'Waiting for the host to allow recording';
-    case 'permission_denied':
-      return 'The host declined recording';
-    case 'recording':
-      return 'Recording';
-    case 'left':
-      return 'The bot has left';
-    case 'failed':
-      return 'The bot could not join';
-  }
-}

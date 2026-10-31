@@ -1,77 +1,15 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  ENGINE_PARAM,
-  HUDDLE_MODE_PARAM,
-  HUDDLE_START_PARAM,
-  ROOM_MIC_PARAM,
-  ROOM_SPEAKERS_PARAM,
   applyHuddleCrumb,
   applyReadingCrumb,
-  huddleCaptureMode,
-  huddleEngine,
-  huddleRoomAudio,
-  huddleRoomSpeakers,
   resetReadingCrumbForTest,
-  wantsHuddleStart,
-  withoutHuddleStart,
 } from '../src/huddle-entry.ts';
 
 /**
- * How the editor knows it was opened BY the Board's "Make a plan" / "Have a
- * meeting" button — the one moment the mic should start without a press. The
- * button's click is the person's gesture; a full navigation does not carry it
- * into the editor, so the flag rides the URL and the editor honours it once.
- *
  * The kind word in the crumb — "Plan" or "Meeting notes" — is a fact about
  * the DOC (its meta), not about how it was opened: it shows on every later
  * visit too. All fixtures synthetic.
  */
-
-describe('wantsHuddleStart', () => {
-  it('is true only for the flag the Board sets', () => {
-    expect(wantsHuddleStart(`?${HUDDLE_START_PARAM}=1`)).toBe(true);
-    expect(wantsHuddleStart('?thread=t-abc1&huddle=1')).toBe(true);
-    expect(wantsHuddleStart('')).toBe(false);
-    expect(wantsHuddleStart('?huddle=0')).toBe(false);
-    expect(wantsHuddleStart('?thread=t-abc1')).toBe(false);
-  });
-});
-
-describe('huddleCaptureMode', () => {
-  it('is solo unless the Board said this one is a conversation', () => {
-    expect(huddleCaptureMode(`?huddle=1&${HUDDLE_MODE_PARAM}=conversation`)).toBe('conversation');
-    expect(huddleCaptureMode('?huddle=1&mode=solo')).toBe('solo');
-    // Anything unreadable is solo, not a guess that spends: the mode buys
-    // diarization, and the fallback should be the one that buys nothing.
-    expect(huddleCaptureMode('?huddle=1&mode=room')).toBe('solo');
-    expect(huddleCaptureMode('?huddle=1')).toBe('solo');
-    expect(huddleCaptureMode('')).toBe('solo');
-  });
-});
-
-describe('withoutHuddleStart', () => {
-  it('drops the flag and keeps everything else in the address', () => {
-    expect(withoutHuddleStart('/workspaces/w-abc1/docs/d-abc1?huddle=1&thread=t-abc1#x')).toBe(
-      '/workspaces/w-abc1/docs/d-abc1?thread=t-abc1#x',
-    );
-    // The mode is the other half of the same one-shot gesture: left behind,
-    // a reload would be a conversation nobody asked for.
-    expect(
-      withoutHuddleStart('/workspaces/w-abc1/docs/d-abc1?huddle=1&mode=conversation&thread=t-abc1'),
-    ).toBe('/workspaces/w-abc1/docs/d-abc1?thread=t-abc1');
-    expect(withoutHuddleStart('/workspaces/w-abc1/docs/d-abc1?huddle=1')).toBe(
-      '/workspaces/w-abc1/docs/d-abc1',
-    );
-  });
-
-  it('leaves an address without the flag alone', () => {
-    expect(withoutHuddleStart('/workspaces/w-abc1/docs/d-abc1?thread=t-abc1')).toBe(
-      '/workspaces/w-abc1/docs/d-abc1?thread=t-abc1',
-    );
-  });
-});
 
 describe('applyHuddleCrumb', () => {
   afterEach(() => {
@@ -140,83 +78,5 @@ describe('applyHuddleCrumb', () => {
     const label = crumb();
     applyHuddleCrumb(document, false);
     expect(label.textContent).toBe('Editing:');
-  });
-});
-
-/**
- * The mount that reads the flag is pinned by source text. It is not part of
- * the boot sequence app-boot.test.ts drives — `mountMarkdown` runs per doc,
- * not per page — so there is nothing here to call.
- *
- * Two files since the meeting surface moved out: doc/markdown-mount.ts
- * decides that a huddle started here, and doc/doc-meeting-mount.ts is what
- * acts on it. Read separately rather than concatenated, so each assertion
- * below still names the file that has to keep its half of the bargain.
- */
-describe('the markdown mount honours the flag once', () => {
-  const APP = readFileSync(resolve(import.meta.dirname, '../src/doc/markdown-mount.ts'), 'utf8');
-  const DIR = import.meta.dirname;
-  const MOUNT = readFileSync(resolve(DIR, '../src/doc/doc-meeting-mount.ts'), 'utf8');
-
-  it('hands the strip an autoStart read from the address, then clears the flag', () => {
-    const at = MOUNT.indexOf('mountMeetingStrip({');
-    expect(at, 'the strip mount went missing').toBeGreaterThan(0);
-    const call = MOUNT.slice(at, MOUNT.indexOf('})', at));
-    expect(call).toContain('autoStart:');
-    // And what it listens for, from the same address.
-    expect(call).toContain('mode:');
-    // The flag is read where the mount is decided, and acted on where it runs.
-    expect(APP).toContain('wantsHuddleStart(location.search)');
-    expect(MOUNT).toContain('huddleCaptureMode(location.search)');
-    // A reload, or Back into this entry later, must not restart the mic.
-    expect(MOUNT).toContain('withoutHuddleStart(');
-    expect(MOUNT).toMatch(/history\.replaceState\([^)]*withoutHuddleStart/);
-  });
-});
-
-describe('the room knobs on the address', () => {
-  it('reads how many people are in the room, clamped, and nothing when unsaid', () => {
-    expect(huddleRoomSpeakers(`?${ROOM_SPEAKERS_PARAM}=3`)).toBe(3);
-    expect(huddleRoomSpeakers(`?${ROOM_SPEAKERS_PARAM}=99`)).toBe(10);
-    expect(huddleRoomSpeakers('?huddle=1')).toBeUndefined();
-    expect(huddleRoomSpeakers(`?${ROOM_SPEAKERS_PARAM}=some`)).toBeUndefined();
-  });
-
-  it('reads which microphone processors to ask for', () => {
-    expect(huddleRoomAudio(`?${ROOM_MIC_PARAM}=ec0-ns0-agc0`)).toEqual({
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-    });
-    expect(huddleRoomAudio('?huddle=1')).toBeUndefined();
-  });
-
-  it('reads which transcription engine to open, and nothing for an unknown one', () => {
-    expect(huddleEngine(`?${ENGINE_PARAM}=soniox`)).toBe('soniox');
-    expect(huddleEngine(`?${ENGINE_PARAM}=assemblyai`)).toBe('assemblyai');
-    // Absent or unreadable says nothing: the server's default is decided on
-    // the server, and a typo must not route a recording anywhere.
-    expect(huddleEngine('?huddle=1')).toBeUndefined();
-    expect(huddleEngine(`?${ENGINE_PARAM}=whisper`)).toBeUndefined();
-  });
-
-  it('keeps the engine when the one-shot huddle flags are taken back off the address', () => {
-    // A preference like the room knobs below: a reload must open the same
-    // engine, or the comparison Bryan is running resets itself mid-trial.
-    const kept = withoutHuddleStart(`/review/d1?huddle=1&${ENGINE_PARAM}=soniox`);
-    expect(huddleEngine(kept.slice(kept.indexOf('?')))).toBe('soniox');
-    expect(wantsHuddleStart(kept.slice(kept.indexOf('?')))).toBe(false);
-  });
-
-  it('keeps both when the one-shot huddle flags are taken back off the address', () => {
-    // They are facts about the ROOM, not about the press: a reload of this
-    // address must record the same way, or the measurement compares two
-    // different setups and calls the difference diarization.
-    const kept = withoutHuddleStart(
-      `/review/d1?huddle=1&${HUDDLE_MODE_PARAM}=conversation&${ROOM_SPEAKERS_PARAM}=3&${ROOM_MIC_PARAM}=ec0-ns0-agc0`,
-    );
-    expect(huddleRoomSpeakers(kept.slice(kept.indexOf('?')))).toBe(3);
-    expect(huddleRoomAudio(kept.slice(kept.indexOf('?')))).toBeTruthy();
-    expect(wantsHuddleStart(kept.slice(kept.indexOf('?')))).toBe(false);
   });
 });

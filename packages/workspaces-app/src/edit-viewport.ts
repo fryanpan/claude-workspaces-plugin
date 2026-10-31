@@ -18,7 +18,7 @@
  *    socket and any in-progress capture never learn this happened, which is
  *    what keeps a live huddle recording through an edit. It is also why the
  *    yield is NOT `root.hidden` — that attribute already means "no meeting
- *    surface is available here" (meeting-strip.ts), and overloading it would
+ *    surface is available here", and overloading it would
  *    make a yielded strip indistinguishable from an unavailable one, with the
  *    strip's own availability logic free to un-yield it at any moment.
  *

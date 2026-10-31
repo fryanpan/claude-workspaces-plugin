@@ -9,9 +9,9 @@ import { attach, installSheets, styleOf } from './css-harness.ts';
  * Read off the PARSED stylesheets the pages load — the CSSOM the browser
  * builds, walked rule by rule, including rules inside `@media` — rather than
  * off their text, so a keyframe renamed or moved into a media block is still
- * found. The one infinite animation allowed is the spinner that runs while a
- * voice note the reader sent is on its way; it is also the positive control
- * that proves the walk sees infinite animations at all.
+ * found. No rule on these pages animates forever. The positive control is a
+ * probe sheet the test installs beside them, which proves the walk sees a
+ * keyframe and an infinite animation at all.
  */
 
 /** The attention motion the calm sweep removed. Any of these back is a regression. */
@@ -24,8 +24,16 @@ const REMOVED_KEYFRAMES = [
   'cw-inline-flash',
 ];
 
-/** Selectors allowed an infinite animation: a spinner for work the reader started. */
-const SPINNERS = ['.voice-spinner'];
+/** A sheet the pages never load, holding one looping rule for the walk to find. */
+const PROBE_CSS =
+  '@keyframes calm-probe-spin { to { transform: rotate(360deg); } } .calm-probe { animation: calm-probe-spin 1s linear infinite; }';
+
+function installProbe(): () => void {
+  const el = document.createElement('style');
+  el.textContent = PROBE_CSS;
+  document.head.append(el);
+  return () => el.remove();
+}
 
 interface Walked {
   keyframes: string[];
@@ -56,27 +64,32 @@ function walkAll(): Walked {
 }
 
 let uninstall: (() => void) | null = null;
+let unprobe: (() => void) | null = null;
 afterEach(() => {
   uninstall?.();
   uninstall = null;
+  unprobe?.();
+  unprobe = null;
   document.body.innerHTML = '';
 });
 
 describe('calm by default — the app stylesheets', () => {
   it('bring back none of the removed attention keyframes', () => {
     uninstall = installSheets('tokens.css', 'styles.css', 'doc.css', 'board.css', 'settings.css');
+    unprobe = installProbe();
     const { keyframes } = walkAll();
-    // Control: the walk reads keyframes at all (the spinner's).
-    expect(keyframes).toContain('voice-spin');
+    // Control: the walk reads keyframes at all (the probe's).
+    expect(keyframes).toContain('calm-probe-spin');
     for (const name of REMOVED_KEYFRAMES) expect(keyframes, name).not.toContain(name);
   });
 
-  it('loop nothing forever except a spinner for work the reader started', () => {
+  it('loop nothing forever', () => {
     uninstall = installSheets('tokens.css', 'styles.css', 'doc.css', 'board.css', 'settings.css');
+    unprobe = installProbe();
     const { infinite } = walkAll();
-    // Control: the spinner is seen, so an empty remainder is a real result.
-    expect(infinite).toEqual(expect.arrayContaining(SPINNERS));
-    expect(infinite.filter((sel) => !SPINNERS.includes(sel))).toEqual([]);
+    // Control: the probe is seen, so an empty remainder is a real result.
+    expect(infinite).toContain('.calm-probe');
+    expect(infinite.filter((sel) => sel !== '.calm-probe')).toEqual([]);
   });
 
   it('paints a pending summary and a corrected word with no animation', () => {
@@ -85,8 +98,9 @@ describe('calm by default — the app stylesheets', () => {
     expect(styleOf(attach('w is-fixed', { tag: 'span', parent: line })).animation).toBe('');
     expect(styleOf(attach('thread-discussion pending')).animation).toBe('');
     expect(styleOf(attach('doc-heading-title is-arriving', { tag: 'h1' })).animation).toBe('');
-    // Control: the spinner, reached through the same harness, does animate.
-    expect(styleOf(attach('voice-spinner')).animation).toContain('voice-spin');
+    // Control: the probe, reached through the same harness, does animate.
+    unprobe = installProbe();
+    expect(styleOf(attach('calm-probe')).animation).toContain('calm-probe-spin');
   });
 
   it('draws no count badge on a topbar button', () => {

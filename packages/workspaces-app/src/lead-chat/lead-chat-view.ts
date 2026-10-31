@@ -221,10 +221,10 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     return Math.min(nav, button.getBoundingClientRect().top - 8);
   };
   /** The left edge of the buttons already in the bottom-right corner — the
-   *  comment widget's and the doc's mic — which nothing here may cover; on
-   *  one row only, when given. */
+   *  comment widget's — which nothing here may cover; on one row only, when
+   *  given. */
   const cornerLeft = (vw: number, vh: number, row?: { top: number; bottom: number }): number => {
-    const els: Element[] = [...doc.querySelectorAll('.doc-voice-mic')];
+    const els: Element[] = [];
     const widget = doc.querySelector('claude-feedback-widget');
     if (widget?.shadowRoot) els.push(...widget.shadowRoot.querySelectorAll('button'));
     // Unmeasured, the default room — except on a row the caller names, where

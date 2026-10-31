@@ -79,7 +79,7 @@ export interface SpokenReplyOpts {
   agent?: () => string | undefined;
   onNavigate(url: string): void;
   /** Write a review decision the server read back and heard confirmed, and
-   *  say whether it landed (`spoken-review-decide.ts`). */
+   *  say whether it landed. */
   onDecide?: (d: SpokenDecide) => Promise<boolean>;
   openSocket?: (url: string) => SpokenSocket;
   startCapture?: (opts: SpokenCaptureOpts) => Promise<SpokenCaptureStart>;

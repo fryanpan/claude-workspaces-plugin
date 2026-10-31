@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHORES_ID, unplacedNotice } from '../src/board/board-model.ts';
-import { SPACE_HOLD_ARM_MS } from '../src/voice-capture.ts';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
 import { NOW, WS, boardRow, bootTestBoard, el, resetBoardServer } from './support/board-drive.ts';
 
@@ -195,91 +194,6 @@ describe('settings page + presence visibility', () => {
       // assertion is not reading an element no rule reaches.
       expect(strip.display, `nothing styles the strip at ${width}px`).not.toBe('');
     }
-  });
-});
-
-/**
- * One Space press starts ONE recognizer.
- *
- * The board used to mount two voice captures on one page. Space is a
- * singleton gesture: if both bind it, one press starts both recognizers and
- * each finalizes its own transcript — the utterance goes to the agent AND
- * into the capture box, and nothing errors.
- *
- * DRIVEN, NOT GREPPED. This used to concatenate the seventeen boot modules,
- * strip the comment lines and COUNT `createVoiceCapture({` in the result. A
- * count over a fixed list of files can only see a second mount if it happens
- * to be in one of them: a capture mounted from `board-live-wiring.ts`, from
- * the doc surface, or from anything else the list does not name reads as one.
- * The failure is silent in the browser too — so install a recognizer that
- * counts itself, boot the board, and hold Space.
- */
-describe('board-app voice wiring', () => {
-  /** A SpeechRecognition that records every start instead of opening a mic. */
-  class CountingRecognition {
-    static started: CountingRecognition[] = [];
-    continuous = false;
-    interimResults = false;
-    lang = '';
-    onresult: ((ev: unknown) => void) | null = null;
-    onend: (() => void) | null = null;
-    onerror: ((ev: unknown) => void) | null = null;
-    start(): void {
-      CountingRecognition.started.push(this);
-    }
-    stop(): void {}
-  }
-
-  /** Hold Space on the page for longer than the arm delay. */
-  async function holdSpace(): Promise<void> {
-    vi.useFakeTimers();
-    try {
-      document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
-      await vi.advanceTimersByTimeAsync(SPACE_HOLD_ARM_MS + 50);
-    } finally {
-      vi.useRealTimers();
-    }
-  }
-
-  let wasSecure: unknown;
-  beforeEach(() => {
-    (globalThis as Record<string, unknown>).SpeechRecognition = CountingRecognition;
-    // The capture refuses to arm on an insecure origin, and says so on the
-    // button — a real gate, and one happy-dom leaves false.
-    wasSecure = (globalThis as Record<string, unknown>).isSecureContext;
-    (globalThis as Record<string, unknown>).isSecureContext = true;
-    CountingRecognition.started = [];
-    resetBoardServer();
-  });
-  afterEach(() => {
-    (globalThis as Record<string, unknown>).SpeechRecognition = undefined;
-    (globalThis as Record<string, unknown>).isSecureContext = wasSecure;
-    document.body.innerHTML = '';
-  });
-
-  it('one press, one recognizer — and the board carries one mic to press', async () => {
-    await bootTestBoard({
-      url: `https://board.test/workspaces/${WS}/tasks`,
-      tasks: [boardRow('t-1')],
-    });
-    // Positive control: the press really armed something. Without it, "not
-    // two" is satisfied by a board whose mic never binds Space at all.
-    await holdSpace();
-    expect(CountingRecognition.started.length, 'the hold armed no recognizer').toBe(1);
-    // And exactly one button to press: a second capture is a second mic.
-    expect(document.querySelectorAll('.voice-mic')).toHaveLength(1);
-  });
-
-  it('a second press does not stack a second recognizer while the first is live', async () => {
-    // The same singleton rule inside one capture: the auto-repeat of a held
-    // key, and a second key going down, are the hold that is already running.
-    await bootTestBoard({
-      url: `https://board.test/workspaces/${WS}/tasks`,
-      tasks: [boardRow('t-1')],
-    });
-    await holdSpace();
-    await holdSpace();
-    expect(CountingRecognition.started.length).toBe(1);
   });
 });
 

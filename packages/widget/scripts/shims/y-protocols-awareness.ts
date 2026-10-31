@@ -4,7 +4,8 @@
  * PRESENCE IS NOT A THING THE WIDGET HAS. It draws pins, a panel, a popover
  * and the review dock, and it reads `client.awareness` nowhere — measured by
  * searching `packages/widget/src` for it. The two surfaces in the app that DO
- * render presence (`board-chrome-region.ts`, `meeting-solo.ts`) both skip an
+ * rendered presence (`board-chrome-region.ts`, and the doc's retired
+ * `meeting-solo.ts`) both skip an
  * entry whose state carries no `user.name`, and a widget's state is `{}`, so a
  * widget has never appeared to a single reader.
  *
