@@ -6,8 +6,9 @@
  *
  * `deployProject` runs here end to end against stand-ins: `fly` and
  * `security` on PATH are scripts that answer from files in a temp folder and
- * record every call, and Cloudflare (and the bucket's lifecycle read) is a
- * loopback server. Nothing reaches Fly, Cloudflare, Tigris or the Keychain.
+ * record every call, the Terraform outputs are a fixture, and the bucket's
+ * lifecycle read is a loopback server. Nothing reaches Fly, Cloudflare,
+ * Tigris, the state bucket or the Keychain.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -22,7 +23,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
+import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import {
   type Action,
   LEAD_SECRETS,
@@ -44,8 +45,6 @@ const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
 }).stdout.trim();
 const cfg = projectConfig({ project: 'riverbend', imageLabel: HEAD });
 
-const ACCOUNT = 'c'.repeat(32);
-const TOKEN = 'cfat-fixture-Riverbend-0001';
 const AUD = 'aud-fixture-riverbend-5f2c9e';
 const TEAM = 'harborlight.cloudflareaccess.com';
 const HOST = 'riverbend-workspaces.harborlight.test';
@@ -60,18 +59,28 @@ const kc = join(tmp, 'keychain');
 const state = join(tmp, 'fly');
 const flyCalls = join(tmp, 'fly-calls');
 const imported = join(tmp, 'fly-imported');
-const accessConfig = join(tmp, 'access.local.json');
+const securityCalls = join(tmp, 'security-calls');
 
-/** Cloudflare's Access, and the bucket's lifecycle read, on loopback. */
-const cloudflare = {
-  apps: [] as Array<{ id: string; name: string; aud?: string }>,
-  requests: [] as string[],
-};
+/** The outputs after Terraform made Riverbend's Access application. */
+const outputs = (): TfOutputs => ({
+  access: {
+    riverbend: { aud: AUD, hosts: [HOST, ALT_HOST] },
+    saltmarsh: { aud: 'aud-saltmarsh', hosts: ['saltmarsh-workspaces.harborlight.test'] },
+  },
+  accessTeamDomain: TEAM,
+  tunnels: {},
+  tunnelTokens: {},
+});
+
+/** The bucket's lifecycle read, on loopback. */
 let server: ReturnType<typeof Bun.serve>;
-const ok = (result: unknown) =>
-  Response.json({ success: true, errors: [], result, result_info: { total_pages: 1 } });
 
-const saved = { path: process.env.PATH, keeper: process.env.CW_KEEPER_URL };
+const saved = {
+  path: process.env.PATH,
+  keeper: process.env.CW_KEEPER_URL,
+  fromEnv: process.env.CW_SECRETS_FROM_ENV,
+  owner: process.env.CW_SECRET_CW_BOARD_OWNER_EMAIL,
+};
 
 beforeAll(() => {
   server = Bun.serve({
@@ -79,18 +88,8 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     fetch(req) {
       const url = new URL(req.url);
-      cloudflare.requests.push(`${req.method} ${url.pathname}`);
       if (url.pathname === `/${cfg.bucket}`) return new Response(lifecycleXml('snapshots/', 30));
-      if (req.headers.get('authorization') !== `Bearer ${TOKEN}`) {
-        return Response.json({ success: false, errors: [{ code: 10000 }] }, { status: 403 });
-      }
-      const base = '/client/v4/accounts';
-      if (req.method === 'GET' && url.pathname === base) return ok([{ id: ACCOUNT, name: 'h' }]);
-      if (req.method === 'GET' && url.pathname === `${base}/${ACCOUNT}/access/apps`)
-        return ok(cloudflare.apps);
-      if (req.method === 'GET' && url.pathname === `${base}/${ACCOUNT}/access/organizations`)
-        return ok({ auth_domain: TEAM, name: 'harborlight' });
-      return Response.json({ success: false, errors: [{ code: 7003 }] }, { status: 404 });
+      return new Response('not found', { status: 404 });
     },
   });
   mkdirSync(bin);
@@ -101,6 +100,7 @@ beforeAll(() => {
   writeFileSync(
     join(bin, 'security'),
     `#!/bin/sh
+echo "$*" >> "${securityCalls}"
 svc=""; want=0; prev=""
 for a in "$@"; do
   [ "$prev" = "-s" ] && svc="$a"
@@ -136,6 +136,13 @@ exit 0
 afterAll(() => {
   process.env.PATH = saved.path;
   if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
+  for (const [name, value] of [
+    ['CW_SECRETS_FROM_ENV', saved.fromEnv],
+    ['CW_SECRET_CW_BOARD_OWNER_EMAIL', saved.owner],
+  ] as const) {
+    if (value === undefined) Reflect.deleteProperty(process.env, name);
+    else process.env[name] = value;
+  }
   server.stop(true);
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -177,20 +184,9 @@ beforeEach(() => {
       },
     ]),
   );
-  writeFileSync(
-    accessConfig,
-    JSON.stringify({
-      projects: {
-        riverbend: { hosts: [HOST, ALT_HOST], emails: [OWNER] },
-        saltmarsh: { hosts: ['saltmarsh-workspaces.harborlight.test'] },
-      },
-    }),
-  );
-  cloudflare.apps = [
-    { id: 'app-s', name: 'board saltmarsh', aud: 'aud-saltmarsh' },
-    { id: 'app-r', name: 'board riverbend', aud: AUD },
-  ];
-  cloudflare.requests = [];
+  rmSync(securityCalls, { force: true });
+  Reflect.deleteProperty(process.env, 'CW_SECRETS_FROM_ENV');
+  Reflect.deleteProperty(process.env, 'CW_SECRET_CW_BOARD_OWNER_EMAIL');
   rmSync(flyCalls, { force: true });
   rmSync(imported, { force: true });
   output = [];
@@ -207,11 +203,8 @@ afterEach(() => {
   for (const s of spies.splice(0)) s.mockRestore();
 });
 
-const run = (dryRun: boolean, path = accessConfig) =>
-  deployProject(cfg, dryRun, undefined, {
-    accessConfig: path,
-    cloudflare: () => cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
-  });
+const run = (dryRun: boolean, outs: () => TfOutputs = outputs) =>
+  deployProject(cfg, dryRun, { outputs: outs });
 
 const ALL = [
   'CW_OWNER_EMAIL',
@@ -229,11 +222,9 @@ describe('machine:deploy sets the project settings', () => {
     const text = output.join('\n');
     for (const name of ALL) expect(text).toContain(name);
     expect(text).toContain('Keychain cw-board-owner-email');
-    expect(text).toContain('Access application "board riverbend"');
-    expect(text).toContain('access.local.json');
-    for (const value of [OWNER, AUD, TEAM, TOKEN, HOST]) expect(text).not.toContain(value);
+    expect(text).toContain('Terraform output access, board riverbend');
+    for (const value of [OWNER, AUD, TEAM, HOST]) expect(text).not.toContain(value);
     expect(flyCallLines().some((l) => l.startsWith('secrets import'))).toBe(false);
-    expect(cloudflare.requests.every((r) => r.startsWith('GET '))).toBe(true);
   });
 
   it('a run puts each value on stdin, never in an argument or the output', async () => {
@@ -281,23 +272,13 @@ describe('machine:deploy sets the project settings', () => {
     deployProject(
       projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
       false,
-      undefined,
-      {
-        accessConfig,
-        cloudflare: () =>
-          cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
-      },
+      { outputs },
     );
   const dry = (input: Partial<Parameters<typeof projectConfig>[0]> = {}) =>
     deployProject(
       projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
       true,
-      undefined,
-      {
-        accessConfig,
-        cloudflare: () =>
-          cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
-      },
+      { outputs },
     );
   const secretsSet = (actions: Action[]) =>
     actions.find((a) => a.kind === 'set-secrets')?.names ?? [];
@@ -400,30 +381,27 @@ describe('machine:deploy sets the project settings', () => {
   });
 
   it('skips the Access settings, and says so, when the project has no Access application', async () => {
-    cloudflare.apps = cloudflare.apps.filter((a) => a.name !== 'board riverbend');
-    const actions = await run(true);
+    const actions = await run(true, () => ({ ...outputs(), access: {} }));
     expect(actions).toEqual([
-      { kind: 'set-secrets', names: ['CW_OWNER_EMAIL', 'CW_PUBLIC_BASE_URL'] },
+      { kind: 'set-secrets', names: ['CW_OWNER_EMAIL'] },
       { kind: 'deploy' },
     ]);
-    expect(output.join('\n')).toContain('no Access application "board riverbend"');
+    expect(output.join('\n')).toContain(
+      'the Terraform state has no Access application for riverbend',
+    );
   });
 
-  it('asks Cloudflare nothing for a project access.local.json does not list', async () => {
-    writeFileSync(
-      accessConfig,
-      JSON.stringify({ projects: { saltmarsh: { hosts: ['s.harborlight.test'] } } }),
+  it('skips them, saying why, when the Terraform outputs cannot be read', async () => {
+    const actions = await run(true, () => {
+      throw new Error('terraform init for prod exited 1');
+    });
+    expect(actions).toEqual([
+      { kind: 'set-secrets', names: ['CW_OWNER_EMAIL'] },
+      { kind: 'deploy' },
+    ]);
+    expect(output.join('\n')).toContain(
+      'could not read the Terraform outputs (terraform init for prod exited 1)',
     );
-    expect(await run(true)).toEqual([
-      { kind: 'set-secrets', names: ['CW_OWNER_EMAIL'] },
-      { kind: 'deploy' },
-    ]);
-    expect(await run(true, join(tmp, 'missing.json'))).toEqual([
-      { kind: 'set-secrets', names: ['CW_OWNER_EMAIL'] },
-      { kind: 'deploy' },
-    ]);
-    expect(cloudflare.requests.filter((r) => r.includes('/client/v4/'))).toEqual([]);
-    expect(output.join('\n')).toContain('no project riverbend');
   });
 
   it('leaves the owner address unset, and says so, when the Keychain has none', async () => {
@@ -433,10 +411,22 @@ describe('machine:deploy sets the project settings', () => {
     expect(output.join('\n')).toContain('the Keychain has no cw-board-owner-email');
   });
 
-  it('stops before any change when two applications share the project name', async () => {
-    cloudflare.apps.push({ id: 'app-r2', name: 'board riverbend', aud: 'aud-other' });
-    await expect(run(false)).rejects.toThrow('two Access applications');
-    expect(flyCallLines().some((l) => l.startsWith('secrets import'))).toBe(false);
+  it('off the Mac, updates a machine the Mac made with secrets from the environment alone', async () => {
+    process.env.CW_SECRETS_FROM_ENV = '1';
+    process.env.CW_SECRET_CW_BOARD_OWNER_EMAIL = OWNER;
+    // The backup secrets are set on Fly, so the Mac made their Keychain entries.
+    flySecrets(requiredSecrets('quick'));
+    await run(false);
+    expect(readFileSync(imported, 'utf8').split('\n')[0]).toBe(`CW_OWNER_EMAIL=${OWNER}`);
+    expect(existsSync(securityCalls)).toBe(false);
+  });
+
+  it('off the Mac, refuses a machine the Mac never made, before any change', async () => {
+    process.env.CW_SECRETS_FROM_ENV = '1';
+    flySecrets([]);
+    await expect(run(false)).rejects.toThrow('only a deploy on the Mac makes');
+    expect(flyCallLines().some((l) => /^(secrets import|deploy|apps create)/.test(l))).toBe(false);
+    expect(existsSync(securityCalls)).toBe(false);
   });
 });
 

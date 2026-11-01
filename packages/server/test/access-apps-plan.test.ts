@@ -1,11 +1,11 @@
 /**
  * `access.local.json` (infra/access-apps/access-plan.ts): which config it
- * accepts, and the per-host audiences it hands each server. The applications
- * and policies made from it are the OpenTofu config's (infra/cloudflare), and
- * what a plan builds is asserted in infra/cloudflare/tests.
+ * accepts. The applications and policies made from it are the Terraform
+ * config's (infra/cloudflare), and what a plan builds is asserted in
+ * infra/cloudflare/deploys/prod/tests.
  */
 import { describe, expect, it } from 'bun:test';
-import { hostAudiencesFor, parseAccessConfig } from '../../../infra/access-apps/access-plan.ts';
+import { parseAccessConfig } from '../../../infra/access-apps/access-plan.ts';
 
 const ONE = 'workspaces.harborlight.test';
 const RIVER = `riverbend.${ONE}`;
@@ -38,16 +38,5 @@ describe('parseAccessConfig', () => {
     expect(() => cfg({ riverbend: { hosts: [RIVER] } }, { sessionDuration: '1 week' })).toThrow(
       /hours/,
     );
-  });
-});
-
-describe('hostAudiencesFor', () => {
-  it("maps every host of a server's projects to its own application's audience", () => {
-    const c = cfg({ riverbend: { hosts: [RIVER] }, saltmarsh: { hosts: [SALT, `board.${SALT}`] } });
-    expect(hostAudiencesFor(c, ['saltmarsh'], (l) => `aud-${l}`)).toEqual({
-      [SALT]: 'aud-saltmarsh',
-      [`board.${SALT}`]: 'aud-saltmarsh',
-    });
-    expect(() => hostAudiencesFor(c, ['harborlight'], (l) => l)).toThrow(/no project/);
   });
 });

@@ -118,7 +118,7 @@ export const MEMBERS: Member[] = [
   },
   {
     id: 'check:cloudflare-tf',
-    title: 'the Cloudflare OpenTofu config is formatted, valid and plans as its tests say',
+    title: 'the Cloudflare Terraform config is formatted, valid and plans as its tests say',
     argv: ['check:cloudflare-tf'],
     ci: 'check:cloudflare-tf',
   },

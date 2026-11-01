@@ -4,14 +4,19 @@
 # hostname resolves through a proxied AAAA record to `100::`, the documented
 # placeholder for a name only a Worker answers. The Worker has no workers.dev
 # address and no preview URLs, so it answers only on its routes, behind Access.
+#
+# Routes are keyed by project label, and the one address's board paths by
+# BOARD_PATHS_KEY, so a resource address never carries a hostname.
 
 locals {
-  router_patterns = concat(
-    [for host in values(var.project_hosts) : "${host}/*"],
-    var.bind_board_paths ? ["${var.one_address}/workspaces/*"] : [],
+  board_paths_key = "one-address/workspaces"
+
+  routes = merge(
+    { for label, host in var.project_hosts : label => "${host}/*" },
+    var.bind_board_paths ? { (local.board_paths_key) = "${var.one_address}/workspaces/*" } : {},
   )
 
-  router_bindings = concat(
+  bindings = concat(
     [
       { name = "ONE_ADDRESS", type = "plain_text", text = var.one_address },
       { name = "PROJECT_ORIGINS", type = "plain_text", text = jsonencode(var.project_origins) },
@@ -23,28 +28,28 @@ locals {
   )
 }
 
-resource "cloudflare_workers_script" "board_router" {
+resource "cloudflare_workers_script" "router" {
   account_id         = var.account_id
-  script_name        = "board-router"
+  script_name        = var.script_name
   main_module        = "worker.js"
-  content            = file("${path.module}/../board-router-worker/worker.js")
-  compatibility_date = "2026-08-01"
-  bindings           = local.router_bindings
+  content            = file(var.worker_source)
+  compatibility_date = var.compatibility_date
+  bindings           = local.bindings
   observability      = { enabled = false }
 }
 
-resource "cloudflare_workers_script_subdomain" "board_router" {
+resource "cloudflare_workers_script_subdomain" "router" {
   account_id       = var.account_id
-  script_name      = cloudflare_workers_script.board_router.script_name
+  script_name      = cloudflare_workers_script.router.script_name
   enabled          = false
   previews_enabled = false
 }
 
-resource "cloudflare_workers_route" "board_router" {
-  for_each = toset(local.router_patterns)
+resource "cloudflare_workers_route" "router" {
+  for_each = local.routes
   zone_id  = var.zone_id
   pattern  = each.value
-  script   = cloudflare_workers_script.board_router.script_name
+  script   = cloudflare_workers_script.router.script_name
 }
 
 resource "cloudflare_dns_record" "project_host" {
@@ -55,5 +60,5 @@ resource "cloudflare_dns_record" "project_host" {
   content  = "100::"
   proxied  = true
   ttl      = 1
-  comment  = "A project's own hostname, answered by the board-router Worker"
+  comment  = "A project's own hostname, answered by the ${var.script_name} Worker"
 }

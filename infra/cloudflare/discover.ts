@@ -1,10 +1,11 @@
 /**
  * The variables only the account knows, read before every plan: the zone and
  * account ids, each service token's id, and the id of every live resource the
- * config names, so OpenTofu adopts it (`imports.tf`) instead of making a
- * second one. Reads only; it sends no write.
+ * config names, so Terraform adopts it (`deploys/prod/imports.tf`) instead of
+ * making a second one. Reads only; it sends no write. Names come from the
+ * deployment's `terraform.tfvars`, so staging looks for its own.
  *
- * It also refuses, before tofu runs, the cases the old deploy scripts
+ * It also refuses, before terraform runs, the cases the old deploy scripts
  * refused, because a plan would otherwise repoint or shadow something this
  * config did not make:
  *
@@ -24,14 +25,17 @@
  * `packages/server/test/cloudflare-tf-discover.test.ts`.
  */
 import type { CloudflareApi } from '../project-machine/cloudflare.ts';
-import type { StaticVars } from './vars.ts';
+import type { EnvNames, StaticVars } from './vars.ts';
 
 export interface Imports {
   access_apps: Record<string, string>;
   access_people_policies: Record<string, string>;
   access_token_policies: Record<string, string>;
   scripts: Record<string, string>;
+  /** Board router routes, keyed as `modules/router-worker` keys them. */
   routes: Record<string, string>;
+  /** Share-link routes, keyed as `modules/stack` keys them. */
+  share_routes: Record<string, string>;
   dns_records: Record<string, string>;
   tunnels: Record<string, string>;
 }
@@ -73,12 +77,22 @@ interface DnsRecord {
   proxied: boolean;
 }
 
-/** The route patterns `board-router.tf` binds. */
-export function routerPatterns(v: StaticVars): string[] {
-  return [
-    ...Object.values(v.project_hosts).map((h) => `${h}/*`),
-    ...(v.bind_board_paths ? [`${v.one_address}/workspaces/*`] : []),
-  ];
+/** The board router's routes, keyed as `modules/router-worker/main.tf` keys them. */
+export function routerRoutes(v: StaticVars): Record<string, string> {
+  const routes: Record<string, string> = {};
+  for (const [label, host] of Object.entries(v.project_hosts)) routes[label] = `${host}/*`;
+  if (v.bind_board_paths) routes['one-address/workspaces'] = `${v.one_address}/workspaces/*`;
+  return routes;
+}
+
+/** The share-link routes, keyed by host without the zone, as `modules/stack/main.tf` does. */
+export function shareRoutes(v: StaticVars): Record<string, string> {
+  const routes: Record<string, string> = {};
+  for (const p of v.share_link_routes) {
+    const host = p.slice(0, -'/share/*'.length);
+    routes[host.endsWith(`.${v.zone}`) ? host.slice(0, -(v.zone.length + 1)) : host] = p;
+  }
+  return routes;
 }
 
 /** The hostnames an Access application covers, scheme, path and wildcard stripped. */
@@ -111,7 +125,11 @@ function one<T extends { id: string }>(all: T[], what: string, refusals: string[
   return all.length === 1 ? all[0] : undefined;
 }
 
-export async function discover(api: CloudflareApi, v: StaticVars): Promise<Discovery> {
+export async function discover(
+  api: CloudflareApi,
+  v: StaticVars,
+  names: EnvNames,
+): Promise<Discovery> {
   const refusals: string[] = [];
   const zones = await api<Array<{ id: string; account: { id: string } }>>(
     'GET',
@@ -127,6 +145,7 @@ export async function discover(api: CloudflareApi, v: StaticVars): Promise<Disco
     access_token_policies: {},
     scripts: {},
     routes: {},
+    share_routes: {},
     dns_records: {},
     tunnels: {},
   };
@@ -162,16 +181,17 @@ export async function discover(api: CloudflareApi, v: StaticVars): Promise<Disco
 
   // Access applications and policies.
   const apps = await api.all<AccessApp>(`${A}/access/apps`);
-  const owned = new Map(Object.keys(v.access_projects).map((l) => [`board ${l}`, l]));
+  const appName = (label: string) => `${names.name_prefix}board ${label}`;
+  const owned = new Map(Object.keys(v.access_projects).map((l) => [appName(l), l]));
   for (const [label, p] of Object.entries(v.access_projects)) {
     const app = one(
-      apps.filter((a) => a.name === `board ${label}`),
-      `applications named "board ${label}"`,
+      apps.filter((a) => a.name === appName(label)),
+      `applications named "${appName(label)}"`,
       refusals,
     );
     if (app && app.type !== 'self_hosted') {
       refusals.push(
-        `the application "board ${label}" is ${app.type ?? 'of no type'}, not self_hosted`,
+        `the application "${appName(label)}" is ${app.type ?? 'of no type'}, not self_hosted`,
       );
     } else if (app) imports.access_apps[label] = app.id;
     for (const host of p.hosts) {
@@ -201,7 +221,7 @@ export async function discover(api: CloudflareApi, v: StaticVars): Promise<Disco
     const policies = await api.all<Named>(`${A}/access/policies`);
     const adopt = (labels: string[], suffix: string, into: Record<string, string>) => {
       for (const label of labels) {
-        const name = `${label} ${suffix}`;
+        const name = `${names.name_prefix}${label} ${suffix}`;
         const found = one(
           policies.filter((p) => p.name === name),
           `policies named "${name}"`,
@@ -225,10 +245,9 @@ export async function discover(api: CloudflareApi, v: StaticVars): Promise<Disco
   }
 
   // Workers and their routes.
-  const scriptNames = [
-    'board-router',
-    ...(v.share_link_routes.length > 0 ? ['share-link-gate'] : []),
-  ];
+  const router = names.router_script_name;
+  const share = names.share_link_script_name;
+  const scriptNames = [router, ...(v.share_link_routes.length > 0 ? [share] : [])];
   const scripts = await api<Array<{ id: string }>>('GET', `${A}/workers/scripts`);
   for (const name of scriptNames)
     if (scripts.some((s) => s.id === name)) imports.scripts[name] = name;
@@ -236,20 +255,22 @@ export async function discover(api: CloudflareApi, v: StaticVars): Promise<Disco
     'GET',
     `${Z}/workers/routes`,
   );
-  const want = new Map<string, string>([
-    ...routerPatterns(v).map((p): [string, string] => [p, 'board-router']),
-    ...v.share_link_routes.map((p): [string, string] => [p, 'share-link-gate']),
-  ]);
-  for (const [pattern, script] of want) {
-    const found = one(
-      routes.filter((r) => r.pattern === pattern),
-      `routes for ${pattern}`,
-      refusals,
-    );
-    if (!found) continue;
-    if (found.script && found.script !== script) {
-      refusals.push(`the route ${pattern} is bound to the Worker ${found.script}, not ${script}`);
-    } else imports.routes[pattern] = found.id;
+  const want: Array<[Record<string, string>, string, Record<string, string>]> = [
+    [routerRoutes(v), router, imports.routes],
+    [shareRoutes(v), share, imports.share_routes],
+  ];
+  for (const [keyed, script, into] of want) {
+    for (const [key, pattern] of Object.entries(keyed)) {
+      const found = one(
+        routes.filter((r) => r.pattern === pattern),
+        `routes for ${pattern}`,
+        refusals,
+      );
+      if (!found) continue;
+      if (found.script && found.script !== script) {
+        refusals.push(`the route ${pattern} is bound to the Worker ${found.script}, not ${script}`);
+      } else into[key] = found.id;
+    }
   }
 
   // Project hostnames, then each machine's tunnel and its origin record.

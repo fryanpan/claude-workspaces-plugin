@@ -1,23 +1,32 @@
 /**
- * `bun run cf:plan` / `cf:apply` (infra/cloudflare/run.ts, vars.ts, tofu.ts)
- * with fake config files, a fake Keychain, a fake account and a fake tofu:
- * which variables it assembles, where the token goes, and what it refuses
- * before tofu runs. Nothing here reads the Keychain or calls Cloudflare.
+ * `bun run cf:plan` / `cf:apply` (infra/cloudflare/run.ts, vars.ts,
+ * terraform.ts) with fake configs, a fake Keychain, a fake account and a fake
+ * terraform: which variables it assembles, where each credential goes, what
+ * CI prints, and what it refuses before terraform runs. Nothing here reads
+ * the Keychain or calls Cloudflare.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type WrapperIo, runWrapper } from '../../../infra/cloudflare/run.ts';
-import { spawnTofu } from '../../../infra/cloudflare/tofu.ts';
+import {
+  type WrapperIo,
+  type WrapperOptions,
+  configReader,
+  runWrapper,
+} from '../../../infra/cloudflare/run.ts';
+import { spawnTerraform } from '../../../infra/cloudflare/terraform.ts';
 import { CONFIG_PATHS, staticVars } from '../../../infra/cloudflare/vars.ts';
 import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 
 const ZONE = 'harborlight.test';
 const ACCOUNT = 'a'.repeat(32);
 const ZONE_ID = 'f'.repeat(32);
-/** A stand-in token: what the test looks for anywhere it must not be. */
+/** Stand-in credentials: what the test looks for anywhere they must not be. */
 const TOKEN = 'fixture-token-Riverbend-0000000000';
+const R2_ID = 'fixture-r2-id-riverbend';
+const R2_SECRET = 'fixture-r2-secret-Riverbend-0000';
+const P = CONFIG_PATHS.prod;
 
 const router = {
   zone: ZONE,
@@ -39,14 +48,25 @@ routes = [
   { pattern = "share.${ZONE}/share/*", zone_name = "${ZONE}" },
 ]
 `;
+const names = (env: string) =>
+  [
+    '# committed per deployment',
+    `name_prefix            = "${env === 'prod' ? '' : 'staging '}"`,
+    `router_script_name     = "${env === 'prod' ? 'board-router' : 'board-router-staging'}"`,
+    'share_link_script_name = "share-link-gate"',
+    '',
+  ].join('\n');
 
 const files =
   (over: Record<string, string | null> = {}) =>
   (rel: string): string | null => {
     const all: Record<string, string | null> = {
-      [CONFIG_PATHS.router]: JSON.stringify(router),
-      [CONFIG_PATHS.access]: JSON.stringify(access),
-      [CONFIG_PATHS.shareLink]: null,
+      [P.router]: JSON.stringify(router),
+      [P.access]: JSON.stringify(access),
+      [P.shareLink]: null,
+      [CONFIG_PATHS.staging.router]: JSON.stringify(router),
+      'infra/cloudflare/deploys/prod/terraform.tfvars': names('prod'),
+      'infra/cloudflare/deploys/staging/terraform.tfvars': names('staging'),
       ...over,
     };
     return all[rel] ?? null;
@@ -77,30 +97,28 @@ describe('staticVars', () => {
   });
 
   it('reads the share-link routes from wrangler.local.toml when it exists', () => {
-    expect(staticVars(files({ [CONFIG_PATHS.shareLink]: shareToml })).share_link_routes).toEqual([
+    expect(staticVars(files({ [P.shareLink]: shareToml })).share_link_routes).toEqual([
       `share.${ZONE}/share/*`,
     ]);
   });
 
   it('refuses the committed placeholder routes, and a route in another zone', () => {
     const placeholder = shareToml.replace(`share.${ZONE}`, '<public-hostname>');
-    expect(() => staticVars(files({ [CONFIG_PATHS.shareLink]: placeholder }))).toThrow(
-      '<host>/share/*',
-    );
+    expect(() => staticVars(files({ [P.shareLink]: placeholder }))).toThrow('<host>/share/*');
     const elsewhere = shareToml.replaceAll(ZONE, 'saltmarsh.test');
-    expect(() => staticVars(files({ [CONFIG_PATHS.shareLink]: elsewhere }))).toThrow(
+    expect(() => staticVars(files({ [P.shareLink]: elsewhere }))).toThrow(
       'outside router.local.json',
     );
   });
 
   it('needs router.local.json, and manages no Access application without access.local.json', () => {
-    expect(() => staticVars(files({ [CONFIG_PATHS.router]: null }))).toThrow('missing');
-    expect(staticVars(files({ [CONFIG_PATHS.access]: null })).access_projects).toEqual({});
+    expect(() => staticVars(files({ [P.router]: null }))).toThrow('missing');
+    expect(staticVars(files({ [P.access]: null })).access_projects).toEqual({});
   });
 
   it("refuses an Access application over a tunnel's origin", () => {
     const bad = { projects: { riverbend: { hosts: [`riverbend-origin.${ZONE}`] } } };
-    expect(() => staticVars(files({ [CONFIG_PATHS.access]: JSON.stringify(bad) }))).toThrow(
+    expect(() => staticVars(files({ [P.access]: JSON.stringify(bad) }))).toThrow(
       "is a tunnel's origin",
     );
   });
@@ -124,25 +142,67 @@ function fakeApi(): CloudflareApi {
   return api;
 }
 
+/** `terraform show -json` of a plan that imports one application and adds one route. */
+const SHOWN = JSON.stringify({
+  resource_changes: [
+    {
+      address:
+        'module.stack.module.access.cloudflare_zero_trust_access_application.project["riverbend"]',
+      mode: 'managed',
+      change: {
+        actions: ['no-op'],
+        importing: { id: 'x' },
+        after: { domain: `riverbend-workspaces.${ZONE}` },
+      },
+    },
+    {
+      address: 'module.stack.module.router.cloudflare_workers_route.router["riverbend"]',
+      mode: 'managed',
+      change: { actions: ['create'], after: { pattern: `riverbend-workspaces.${ZONE}/*` } },
+    },
+  ],
+});
+
+interface Call {
+  args: string[];
+  env: Record<string, string>;
+  capture: boolean;
+}
+
 interface Recorded {
   io: WrapperIo;
-  tofuCalls: Array<{ args: string[]; env: Record<string, string> }>;
-  vars: string[];
+  calls: Call[];
+  state: Record<string, string>;
   out: string[];
   err: string[];
 }
 
+const KEYCHAIN: Record<string, string> = {
+  'cloudflare-api-token': TOKEN,
+  'cloudflare-r2-tfstate': JSON.stringify({ accessKeyId: R2_ID, secretAccessKey: R2_SECRET }),
+};
+
 function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
-  const r: Recorded = { tofuCalls: [], vars: [], out: [], err: [], io: undefined as never };
+  const r: Recorded = { calls: [], state: {}, out: [], err: [], io: undefined as never };
   r.io = {
     read: files(),
-    token: () => TOKEN,
+    env: {},
+    keychainHas: (n) => n in KEYCHAIN,
+    keychainRead: (n) => KEYCHAIN[n] ?? '',
     api: () => fakeApi(),
-    writeVars: (json) => r.vars.push(json),
-    tofu: (args, env) => {
-      r.tofuCalls.push({ args, env });
-      const isOutput = args[0] === 'output';
-      return { status: 0, stdout: isOutput ? JSON.stringify({ riverbend: 'aud-riverbend' }) : '' };
+    writeState: (name, content) => {
+      r.state[name] = content;
+      return `/state/${name}`;
+    },
+    statePath: (name) => `/state/${name}`,
+    terraform: (args, env, capture = false) => {
+      r.calls.push({ args, env, capture });
+      if (args[0] === 'show') return { status: 0, stdout: SHOWN };
+      if (args[0] === 'output') {
+        const a = { riverbend: { aud: 'aud-riverbend', hosts: [`riverbend-workspaces.${ZONE}`] } };
+        return { status: 0, stdout: JSON.stringify(a) };
+      }
+      return { status: 0, stdout: '' };
     },
     out: (s) => r.out.push(s),
     err: (s) => r.err.push(s),
@@ -151,92 +211,159 @@ function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
   return r;
 }
 
+const PROD: WrapperOptions = { env: 'prod', ci: false };
+const CREDS = {
+  CLOUDFLARE_API_TOKEN: TOKEN,
+  AWS_ACCESS_KEY_ID: R2_ID,
+  AWS_SECRET_ACCESS_KEY: R2_SECRET,
+};
+
+/** Every credential value, anywhere it must not appear. */
+function leaks(r: Recorded): string[] {
+  const where = [
+    ...r.calls.map((c) => c.args.join(' ')),
+    ...Object.values(r.state),
+    ...r.out,
+    ...r.err,
+  ].join('\n');
+  return [TOKEN, R2_ID, R2_SECRET].filter((v) => where.includes(v));
+}
+
 describe('runWrapper', () => {
-  it('plans with the assembled variables, the token in tofu’s environment only', async () => {
+  it('plans prod against its own state key, the credentials in terraform’s environment only', async () => {
     const r = fakeIo();
-    expect(await runWrapper('plan', r.io)).toBe(0);
-    expect(r.tofuCalls.map((c) => c.args[0])).toEqual(['init', 'plan']);
-    for (const c of r.tofuCalls) {
-      expect(c.env).toEqual({ CLOUDFLARE_API_TOKEN: TOKEN });
-      expect(c.args.join(' ')).not.toContain(TOKEN);
-    }
-    const written = JSON.parse(r.vars[0] ?? '{}');
+    expect(await runWrapper('plan', PROD, r.io)).toBe(0);
+    expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan']);
+    for (const c of r.calls) expect(c.env).toEqual(CREDS);
+    expect(r.calls[0]?.args).toContain('-backend-config=/state/backend.hcl');
+    expect(r.state['backend.hcl']).toContain('key       = "cloudflare/prod.tfstate"');
+    expect(r.state['backend.hcl']).toContain(`https://${ACCOUNT}.r2.cloudflarestorage.com`);
+    const written = JSON.parse(r.state['run.tfvars.json'] ?? '{}');
     expect(written.account_id).toBe(ACCOUNT);
     expect(written.zone_id).toBe(ZONE_ID);
     expect(Object.keys(written.tunnels)).toEqual(['riverbend']);
-    expect(r.vars.join()).not.toContain(TOKEN);
-    expect([...r.out, ...r.err].join()).not.toContain(TOKEN);
+    expect(Object.keys(written.imports)).toContain('share_routes');
+    expect(leaks(r)).toEqual([]);
   });
 
-  it('prints each server’s audience settings after an apply, never the token', async () => {
+  it('plans staging from its own configs and key, and adopts nothing there', async () => {
     const r = fakeIo();
-    expect(await runWrapper('apply', r.io)).toBe(0);
-    expect(r.tofuCalls.map((c) => c.args[0])).toEqual(['init', 'apply', 'output']);
-    expect(r.tofuCalls[2]?.env).toEqual({});
+    expect(await runWrapper('plan', { env: 'staging', ci: false }, r.io)).toBe(0);
+    expect(r.state['backend.hcl']).toContain('key       = "cloudflare/staging.tfstate"');
+    expect(JSON.parse(r.state['run.tfvars.json'] ?? '{}').imports).toBeUndefined();
+  });
+
+  it('takes CI’s credentials from the environment and never asks the Keychain', async () => {
+    const asked: string[] = [];
+    const r = fakeIo({
+      env: {
+        CLOUDFLARE_API_TOKEN: TOKEN,
+        AWS_ACCESS_KEY_ID: R2_ID,
+        AWS_SECRET_ACCESS_KEY: R2_SECRET,
+      },
+      keychainHas: (n) => {
+        asked.push(n);
+        return false;
+      },
+    });
+    expect(await runWrapper('plan', PROD, r.io)).toBe(0);
+    expect(asked).toEqual([]);
+    expect(r.calls[0]?.env).toEqual(CREDS);
+  });
+
+  it('in CI saves the plan, prints only its summary, and applies exactly that plan', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cf-summary-'));
+    const summaryFile = join(dir, 'summary.md');
+    const r = fakeIo({ env: { CF_PLAN_SUMMARY: summaryFile } });
+    expect(await runWrapper('apply', { env: 'prod', ci: true }, r.io)).toBe(0);
+    expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan', 'show', 'apply']);
+    expect(r.calls.every((c) => c.capture)).toBe(true);
+    expect(r.calls[1]?.args).toContain('-out=/state/plan.tfplan');
+    expect(r.calls[3]?.args).toEqual(['apply', '-input=false', '/state/plan.tfplan']);
+    const summary = readFileSync(summaryFile, 'utf8');
+    expect(summary).toContain('1 to import, 1 to add, 0 to change, 0 to replace, 0 to destroy');
+    expect(summary).toContain('cloudflare_workers_route.router["riverbend"]');
+    // The summary is public in CI: it names addresses, never a hostname.
+    expect([summary, ...r.out].join()).not.toContain(ZONE);
+    expect(leaks(r)).toEqual([]);
+  });
+
+  it('prints each server’s audience settings after a local apply', async () => {
+    const r = fakeIo();
+    expect(await runWrapper('apply', PROD, r.io)).toBe(0);
+    expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'apply', 'output']);
     expect(r.out).toEqual([
       'riverbend: CF_ACCESS_AUD=aud-riverbend\n',
       `riverbend: CF_ACCESS_HOST_AUDS='{"riverbend-workspaces.${ZONE}":"aud-riverbend"}'\n`,
     ]);
   });
 
-  it('runs no tofu and writes nothing when the Keychain has no token', async () => {
-    const r = fakeIo({
-      token: () => {
-        throw new Error('the Keychain has no cloudflare-api-token; nothing was changed');
-      },
-    });
-    expect(await runWrapper('apply', r.io)).toBe(1);
-    expect(r.tofuCalls).toEqual([]);
-    expect(r.vars).toEqual([]);
-    expect(r.err.join()).toContain('cloudflare-api-token');
+  it('runs no terraform and writes nothing when no token is set anywhere', async () => {
+    const r = fakeIo({ keychainHas: () => false });
+    expect(await runWrapper('apply', PROD, r.io)).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.state).toEqual({});
+    expect(r.err.join()).toContain('CLOUDFLARE_API_TOKEN');
   });
 
-  it('runs no tofu when the account holds something in the way', async () => {
-    const r = fakeIo({
-      read: files({
-        [CONFIG_PATHS.router]: JSON.stringify({
-          ...router,
-          zone: 'saltmarsh.test',
-          oneAddress: 'workspaces.saltmarsh.test',
-          projects: {},
-        }),
-      }),
-    });
+  it('runs no terraform when the account holds something in the way', async () => {
+    const other = {
+      ...router,
+      zone: 'saltmarsh.test',
+      oneAddress: 'workspaces.saltmarsh.test',
+      projects: {},
+    };
+    const r = fakeIo({ read: files({ [P.router]: JSON.stringify(other) }) });
     r.io.api = () => {
       const api = (async () => []) as unknown as CloudflareApi;
       api.all = async () => [];
       return api;
     };
-    expect(await runWrapper('plan', r.io)).toBe(1);
-    expect(r.tofuCalls).toEqual([]);
+    expect(await runWrapper('plan', PROD, r.io)).toBe(1);
+    expect(r.calls).toEqual([]);
     expect(r.err.join()).toContain('no zone named saltmarsh.test');
   });
 
-  it('stops when tofu init fails, before any plan', async () => {
-    const r = fakeIo({ tofu: (args) => ({ status: args[0] === 'init' ? 1 : 0, stdout: '' }) });
-    expect(await runWrapper('plan', r.io)).toBe(1);
-    expect(r.err.join()).toContain('tofu init exited 1');
+  it('stops when terraform init fails, before any plan', async () => {
+    const r = fakeIo({ terraform: (args) => ({ status: args[0] === 'init' ? 1 : 0, stdout: '' }) });
+    expect(await runWrapper('plan', PROD, r.io)).toBe(1);
+    expect(r.err.join()).toContain('terraform init exited 1');
   });
 });
 
-describe('spawnTofu', () => {
+describe('configReader', () => {
+  it('takes a config from its CI stand-in before its file', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'cf-repo-'));
+    const read = configReader({ CF_ACCESS_CONFIG: '{"from":"env"}' }, repo);
+    expect(read(P.access)).toBe('{"from":"env"}');
+    expect(read(P.router)).toBeNull();
+  });
+});
+
+describe('spawnTerraform', () => {
   const savedPath = process.env.PATH;
   afterEach(() => {
     process.env.PATH = savedPath;
   });
 
-  it('runs tofu under umask 077 with the token in its environment, and locks the state down', () => {
-    const bin = mkdtempSync(join(tmpdir(), 'fake-tofu-'));
+  it('runs terraform under umask 077 with the token in its environment, and locks the state down', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'fake-terraform-'));
     const state = mkdtempSync(join(tmpdir(), 'fake-state-'));
-    const loose = join(state, 'terraform.tfstate');
+    const loose = join(state, 'run.tfvars.json');
     writeFileSync(loose, '{}', { mode: 0o644 });
     writeFileSync(
-      join(bin, 'tofu'),
+      join(bin, 'terraform'),
       '#!/bin/sh\nprintf "umask=%s args=%s token=%s" "$(umask)" "$*" "${CLOUDFLARE_API_TOKEN:+set}"\n',
     );
-    chmodSync(join(bin, 'tofu'), 0o755);
+    chmodSync(join(bin, 'terraform'), 0o755);
     process.env.PATH = `${bin}:${savedPath}`;
-    const r = spawnTofu(['plan', '-input=false'], { CLOUDFLARE_API_TOKEN: TOKEN }, true, state);
+    const r = spawnTerraform(
+      state,
+      ['plan', '-input=false'],
+      { CLOUDFLARE_API_TOKEN: TOKEN },
+      true,
+      state,
+    );
     expect(r).toEqual({ status: 0, stdout: 'umask=0077 args=plan -input=false token=set' });
     expect(statSync(loose).mode & 0o777).toBe(0o600);
     expect(statSync(state).mode & 0o777).toBe(0o700);

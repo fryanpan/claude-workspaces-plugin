@@ -1,12 +1,12 @@
 /**
  * `infra/cloudflare/discover.ts` against a fake account: which live resources
- * a plan adopts by name, and what it refuses before tofu runs. The answers
+ * a plan adopts by name, and what it refuses before terraform runs. The answers
  * have the shapes Cloudflare's API documents, with invented ids. Nothing here
  * calls Cloudflare.
  */
 import { describe, expect, it } from 'bun:test';
 import { discover } from '../../../infra/cloudflare/discover.ts';
-import type { StaticVars } from '../../../infra/cloudflare/vars.ts';
+import type { EnvNames, StaticVars } from '../../../infra/cloudflare/vars.ts';
 import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 
 const ZONE = 'harborlight.test';
@@ -16,6 +16,12 @@ const TUNNEL_ID = '11111111-2222-4333-8444-555555555555';
 const RIVER_HOST = `riverbend-workspaces.${ZONE}`;
 const RIVER_ORIGIN = `riverbend-origin.${ZONE}`;
 const MAC_ORIGIN = `mac-origin.${ZONE}`;
+
+const PROD: EnvNames = {
+  name_prefix: '',
+  router_script_name: 'board-router',
+  share_link_script_name: 'share-link-gate',
+};
 
 const vars = (over: Partial<StaticVars> = {}): StaticVars => ({
   zone: ZONE,
@@ -125,14 +131,14 @@ function fakeApi(acct: Account): { api: CloudflareApi; writes: string[] } {
 }
 
 const refusalsOf = async (acct: Account, v = vars()) => {
-  const r = await discover(fakeApi(acct).api, v);
+  const r = await discover(fakeApi(acct).api, v, PROD);
   return r.ok ? [] : r.refusals;
 };
 
 describe('discover', () => {
-  it('adopts nothing in a fresh account, and reads the ids tofu needs', async () => {
+  it('adopts nothing in a fresh account, and reads the ids terraform needs', async () => {
     const { api, writes } = fakeApi(fresh());
-    const r = await discover(api, vars());
+    const r = await discover(api, vars(), PROD);
     expect(r).toEqual({
       ok: true,
       vars: {
@@ -145,6 +151,7 @@ describe('discover', () => {
           access_token_policies: {},
           scripts: {},
           routes: {},
+          share_routes: {},
           dns_records: {},
           tunnels: {},
         },
@@ -154,16 +161,34 @@ describe('discover', () => {
   });
 
   it('adopts every live resource the config names, so a plan creates no second copy', async () => {
-    const r = await discover(fakeApi(applied()).api, vars());
+    const r = await discover(fakeApi(applied()).api, vars(), PROD);
     expect(r.ok ? r.vars.imports : null).toEqual({
       access_apps: { riverbend: 'app-1' },
       access_people_policies: { riverbend: 'pol-people' },
       access_token_policies: { riverbend: 'pol-tokens' },
       scripts: { 'board-router': 'board-router' },
-      routes: { [`${RIVER_HOST}/*`]: 'route-1' },
+      routes: { riverbend: 'route-1' },
+      share_routes: {},
       dns_records: { [RIVER_HOST]: 'rec-host', [RIVER_ORIGIN]: 'rec-origin' },
       tunnels: { riverbend: TUNNEL_ID },
     });
+  });
+
+  it('never adopts prod into staging, and refuses staging on prod’s hostnames', async () => {
+    const staging: EnvNames = {
+      name_prefix: 'staging ',
+      router_script_name: 'board-router-staging',
+      share_link_script_name: 'share-link-gate-staging',
+    };
+    const r = await discover(fakeApi(applied()).api, vars(), staging);
+    expect(r.ok).toBe(false);
+    const refusals = r.ok ? [] : r.refusals;
+    expect(refusals).toContainEqual(
+      expect.stringContaining('covered by the application "board riverbend"'),
+    );
+    expect(refusals).toContainEqual(
+      expect.stringContaining('bound to the Worker board-router, not board-router-staging'),
+    );
   });
 
   it('refuses a project host an application the config does not own covers', async () => {

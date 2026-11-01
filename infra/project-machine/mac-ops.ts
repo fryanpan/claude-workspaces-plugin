@@ -2,6 +2,13 @@
  * The Mac side of the deploy scripts: the Keychain, and `fly` run with the
  * org token in its environment.
  *
+ * Off the Mac (CI, `.github/workflows/cloudflare.yml`) every Keychain entry
+ * can be handed in instead as the environment variable `secretEnvName(entry)`
+ * (`fly-org-slug` -> CW_SECRET_FLY_ORG_SLUG), plain rather than base64, and
+ * the org token as FLY_API_TOKEN. With CW_SECRETS_FROM_ENV=1 the Keychain is
+ * never asked at all, and no entry can be made, so a project's first deploy,
+ * which makes its backup key and bucket credential, has to run on the Mac.
+ *
  * Every value read from the Keychain goes into a child's environment or
  * stdin and nowhere else: never an argument (`ps` shows arguments to every
  * user), never a log line, never a file. Values are stored base64-encoded on
@@ -19,7 +26,21 @@ import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/sec
 import { keeperFetch } from '../../packages/server/src/keeper/keeper-client.ts';
 import { type CloudflareApi, cloudflareApi } from './cloudflare.ts';
 
+/** The environment variable that stands in for the Keychain entry `name`. */
+export const secretEnvName = (name: string): string =>
+  `CW_SECRET_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+
+/** Whether this run takes its secrets from the environment only (CI). */
+export const secretsFromEnv = (): boolean => process.env.CW_SECRETS_FROM_ENV === '1';
+
+function fromEnv(name: string): string | undefined {
+  const v = process.env[secretEnvName(name)];
+  return v !== undefined && v !== '' ? v : undefined;
+}
+
 export function keychainHas(name: string): boolean {
+  if (fromEnv(name) !== undefined) return true;
+  if (secretsFromEnv()) return false;
   const r = spawnSync(
     'security',
     ['find-generic-password', '-a', SECRET_ACCOUNT, '-s', storedSecretService(name)],
@@ -29,6 +50,9 @@ export function keychainHas(name: string): boolean {
 }
 
 export function keychainRead(name: string): string {
+  const v = fromEnv(name);
+  if (v !== undefined) return v;
+  if (secretsFromEnv()) throw new Error(`${secretEnvName(name)} is not set`);
   const r = spawnSync(
     'security',
     ['find-generic-password', '-a', SECRET_ACCOUNT, '-s', storedSecretService(name), '-w'],
@@ -40,6 +64,9 @@ export function keychainRead(name: string): string {
 
 /** Store a NEW entry. Refuses to replace one, because an entry may guard snapshots. */
 export function keychainCreate(name: string, value: string): void {
+  if (secretsFromEnv()) {
+    throw new Error(`${name} can only be made in the Mac's Keychain; run this deploy on the Mac`);
+  }
   if (keychainHas(name)) throw new Error(`Keychain already has ${name}; not replacing it`);
   const line = secretAddCommandLine(name, Buffer.from(value, 'utf8').toString('base64'));
   const r = spawnSync('security', ['-i'], {
@@ -52,9 +79,9 @@ export function keychainCreate(name: string, value: string): void {
 }
 
 /**
- * The Cloudflare API token, for `cf:plan` / `cf:apply` and the
- * API calls of a run without the keeper. Every read of it is this one
- * function. Held in memory only.
+ * The Cloudflare API token, for a deploy script's API calls without the
+ * keeper. `cf:plan` reads it through `infra/cloudflare/credentials.ts`.
+ * Held in memory only.
  */
 export function cloudflareApiToken(): string {
   const entry = 'cloudflare-api-token';
@@ -149,6 +176,12 @@ export interface RunResult {
 
 let flyToken: string | undefined;
 
+/** The org token: FLY_API_TOKEN when the environment has it (CI), else the Keychain's. */
+function orgToken(): string {
+  const env = process.env.FLY_API_TOKEN?.trim();
+  return env ? env : keychainRead('fly-org-token').trim();
+}
+
 const KEEPER_FLY_CLI = join(import.meta.dir, '../../packages/server/src/keeper/keeper-fly-cli.ts');
 
 /**
@@ -173,7 +206,7 @@ const viaKeeper = (): boolean => Boolean(process.env.CW_KEEPER_URL?.trim());
 /** Run `fly` with the org token in its environment. Output is returned, not shown. */
 export function fly(args: string[], opts: { input?: string; quiet?: boolean } = {}): RunResult {
   if (viaKeeper()) return keeperFlySync(args, opts.input);
-  flyToken ??= keychainRead('fly-org-token').trim();
+  flyToken ??= orgToken();
   const r = spawnSync('fly', args, {
     encoding: 'utf8',
     input: opts.input,
@@ -209,7 +242,7 @@ export function flyLive(args: string[]): void {
     if (r.status !== 0) throw new Error(`fly ${args.slice(0, 2).join(' ')} exited ${r.status}`);
     return;
   }
-  flyToken ??= keychainRead('fly-org-token').trim();
+  flyToken ??= orgToken();
   const r = spawnSync('fly', args, {
     stdio: 'inherit',
     env: { ...process.env, FLY_API_TOKEN: flyToken },

@@ -1,24 +1,20 @@
-# Every value below is assembled by `infra/cloudflare/vars.ts` (from the
-# gitignored local configs) and `discover.ts` (ids read from the account).
-# None has a default that names a real account, zone or person.
-
 variable "account_id" {
-  description = "The account that owns the zone. Read from the zone at plan time."
+  description = "The account that owns the zone."
   type        = string
 }
 
 variable "zone_id" {
-  description = "The zone every hostname lives in. Read by name at plan time."
+  description = "The zone every hostname lives in."
   type        = string
 }
 
 variable "zone" {
-  description = "The zone's name, router.local.json `zone`."
+  description = "The zone's name."
   type        = string
 }
 
 variable "one_address" {
-  description = "router.local.json `oneAddress`: one level under the zone."
+  description = "The one address: one level under the zone."
   type        = string
 }
 
@@ -69,7 +65,7 @@ variable "access_session_duration" {
 }
 
 variable "access_projects" {
-  description = "Project label -> who its Access application admits (access.local.json)."
+  description = "Project label -> the hostnames its Access application covers and who it admits."
   type = map(object({
     hosts          = list(string)
     emails         = list(string)
@@ -91,24 +87,17 @@ variable "share_link_routes" {
   default     = []
 }
 
-variable "imports" {
-  description = "Ids of live resources to adopt, found by name in the account (discover.ts)."
-  type = object({
-    access_apps            = map(string)
-    access_people_policies = map(string)
-    access_token_policies  = map(string)
-    scripts                = map(string)
-    routes                 = map(string)
-    dns_records            = map(string)
-    tunnels                = map(string)
-  })
-  default = {
-    access_apps            = {}
-    access_people_policies = {}
-    access_token_policies  = {}
-    scripts                = {}
-    routes                 = {}
-    dns_records            = {}
-    tunnels                = {}
-  }
+variable "name_prefix" {
+  description = "Put before every Access name, so environments sharing an account do not collide."
+  type        = string
+}
+
+variable "router_script_name" {
+  description = "The board router Worker's name."
+  type        = string
+}
+
+variable "share_link_script_name" {
+  description = "The share-link Worker's name."
+  type        = string
 }

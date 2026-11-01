@@ -1,8 +1,7 @@
 /**
  * `router.local.json`, read and checked: the zone, the one address and the
  * routing tables the board router Worker carries. `infra/cloudflare/vars.ts`
- * turns it into the OpenTofu config's variables, and `machine:deploy` reads
- * the zone and one address from it. Nothing here talks to Cloudflare.
+ * turns it into the Terraform config's variables. Nothing here talks to Cloudflare.
  * Tested by `packages/server/test/board-router-config.test.ts`.
  */
 import { parseBoardOrigins, parseProjectOrigins, projectHost, projectOfHost } from './worker.js';
@@ -105,9 +104,4 @@ export function parseRouterConfig(raw: string): RouterConfig {
     bindBoardPaths,
     ...(oneAddressOrigin ? { oneAddressOrigin } : {}),
   };
-}
-
-/** Every origin hostname the config sends requests to, once each. */
-export function originsOf(cfg: RouterConfig): string[] {
-  return [...new Set([...Object.values(cfg.projects), ...Object.keys(cfg.boards)])].sort();
 }

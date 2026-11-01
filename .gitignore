@@ -72,12 +72,14 @@ infra/share-link-worker/wrangler.local.toml
 infra/board-router-worker/router.local.json
 infra/access-apps/access.local.json
 
-# OpenTofu: local state and the tfvars the wrapper writes (both mode 600,
-# real hostnames and ids), and tofu's working directories. The lock file is
-# committed.
+# Terraform: the tfvars, -backend-config file and saved plans the wrapper
+# writes (mode 600; real hostnames and ids), each root's working directory,
+# and staging's local configs. State itself is remote. Lock files are committed.
 infra/cloudflare/state/
-infra/cloudflare/.terraform/
+infra/cloudflare/**/.terraform/
 infra/cloudflare/.terraform-check/
+infra/cloudflare/deploys/*/*.local.json
+infra/cloudflare/deploys/*/*.local.toml
 *.tfstate
 *.tfstate.backup
 *.tfplan

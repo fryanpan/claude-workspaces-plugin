@@ -64,7 +64,7 @@ export interface ConfigInput {
   refreshLead?: boolean;
 }
 
-const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
+export const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const ACCOUNT_LABEL = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const KEYCHAIN_ENTRY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;

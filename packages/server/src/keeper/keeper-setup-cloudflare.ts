@@ -10,9 +10,9 @@
  * anyway, and a token that cannot make tokens cannot be turned into a wider
  * one.
  *
- * Making this token is the one Cloudflare change that is not in the OpenTofu
+ * Making this token is the one Cloudflare change that is not in the Terraform
  * config, on purpose. A `cloudflare_api_token` resource keeps the token's
- * value in the state file, which this user, and so every agent, can read;
+ * value in the state, which this user, and so every agent, can read;
  * the keeper exists so that no file they can read holds it. The person's
  * confirmation in `keeper-setup.ts` stays the gate.
  */

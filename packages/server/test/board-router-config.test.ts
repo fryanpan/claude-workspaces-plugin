@@ -1,7 +1,7 @@
 /**
  * `router.local.json` (infra/board-router-worker/router-config.ts): which
  * config it accepts and the project hostnames it derives. What Cloudflare is
- * made from it is the OpenTofu config's (infra/cloudflare/tests).
+ * made from it is the Terraform config's (infra/cloudflare/deploys/prod/tests).
  */
 import { describe, expect, it } from 'bun:test';
 import {

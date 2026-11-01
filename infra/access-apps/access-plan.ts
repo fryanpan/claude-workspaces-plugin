@@ -1,8 +1,8 @@
 /**
  * `access.local.json`: which Cloudflare Access application each project
  * needs and who it admits. Pure: nothing here talks to Cloudflare.
- * `infra/cloudflare/vars.ts` turns it into the OpenTofu config's variables,
- * and `infra/cloudflare/access.tf` makes the applications.
+ * `infra/cloudflare/vars.ts` turns it into the Terraform config's variables,
+ * and `infra/cloudflare/modules/access` makes the applications.
  *
  * One application per project, each over that project's own hostnames, so
  * each issues stamps with an audience of its own and a stamp minted for one
@@ -97,24 +97,4 @@ export function parseAccessConfig(raw: string): AccessConfig {
     projects[label] = { hosts, emails, emailDomains, serviceTokens };
   }
   return { sessionDuration, projects };
-}
-
-/**
- * `CF_ACCESS_HOST_AUDS` for one server, once the deploy has read back each
- * application's audience: every host of the projects that server runs,
- * mapped to its own application's audience.
- */
-export function hostAudiencesFor(
-  cfg: AccessConfig,
-  labels: string[],
-  audienceOf: (label: string) => string,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const label of labels) {
-    const p = cfg.projects[label];
-    if (!p) throw new Error(`no project ${label}`);
-    const aud = audienceOf(label);
-    for (const h of p.hosts) out[h] = aud;
-  }
-  return out;
 }
