@@ -134,8 +134,8 @@ const BUTTON = `(() => {
 })()`;
 
 /** The centre of an element inside the chat's shadow root, or null when it
- *  is not drawn. It is scrolled into view, and then to 20px short of the
- *  list's foot when it stays in view there: inside the 40px in which the
+ *  is not drawn. It is scrolled into view, and then to a few px short of
+ *  the list's foot when it stays in view there: inside the 40px in which the
  *  chat follows the conversation down, where a redraw that pulled the list
  *  to its foot would move the link out from under the press. */
 const centreOf = (selector: string): string => `(() => {
@@ -148,11 +148,14 @@ const centreOf = (selector: string): string => `(() => {
   const list = sr.querySelector('.lc-list');
   const box = list.getBoundingClientRect();
   const was = list.scrollTop;
-  const shy = list.scrollHeight - list.clientHeight - 20;
-  if (shy > 0) {
-    list.scrollTop = shy;
+  const foot = list.scrollHeight - list.clientHeight;
+  // The first offset inside the follow window that keeps the link in view.
+  for (const off of [20, 10, 30, 5, 35, 2, 38]) {
+    if (foot - off <= 0) continue;
+    list.scrollTop = foot - off;
     const s = el.getBoundingClientRect();
-    if (s.top < box.top || s.bottom > box.bottom) list.scrollTop = was;
+    if (s.top >= box.top && s.bottom <= box.bottom) break;
+    list.scrollTop = was;
   }
   const r = el.getBoundingClientRect();
   if (r.width === 0) return null;
