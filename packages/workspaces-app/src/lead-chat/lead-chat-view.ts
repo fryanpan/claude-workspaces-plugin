@@ -34,6 +34,7 @@ import {
   createMeetingView,
 } from './lead-chat-meeting-view.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
+import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
 import { channelCount, drawMessage } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 
@@ -301,6 +302,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   /** The lead's messages as drawn, by id and text: a re-render while the
    *  mic hears a line redraws the list but parses nothing again. */
   const drawn = new Map<string, { text: string; html: string }>();
+  const drawnRows = new Map<string, DrawnRow>();
   const markdown = (msg: LeadChatMessage): string => {
     const hit = drawn.get(msg.id);
     if (hit?.text === msg.text) return hit.html;
@@ -378,20 +380,17 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     const prevHeight = list.scrollHeight;
     const prevTop = list.scrollTop;
-    list.replaceChildren();
+    // Each row drawn fresh; `patchRows` keeps the node of one that did not
+    // change, so a link under a press is still there for its release.
+    const rows: Array<[string, Element]> = [];
     // Always drawn above a non-empty list, one line high, so its words can
     // change without moving the messages under it.
-    if (m.messages.length > 0) list.append(make(doc, 'p', 'lc-history', historyLine(m)));
+    if (m.messages.length > 0) rows.push(['history', make(doc, 'p', 'lc-history', historyLine(m))]);
     if (m.messages.length === 0) {
-      const empty = make(
-        doc,
-        'p',
-        'lc-empty',
-        m.lead
-          ? `Ask ${m.lead.name} anything about this board. It sees the page you are on.`
-          : 'This board has no lead yet. Set one in Settings, and it reads what you write here.',
-      );
-      list.append(empty);
+      const empty = m.lead
+        ? `Ask ${m.lead.name} anything about this board. It sees the page you are on.`
+        : 'This board has no lead yet. Set one in Settings, and it reads what you write here.';
+      rows.push(['empty', make(doc, 'p', 'lc-empty', empty)]);
     }
     const ctx = {
       doc,
@@ -404,19 +403,21 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     };
     for (const msg of m.messages) {
       const item = drawMessage(ctx, msg);
-      if (item) list.append(item);
+      if (item) rows.push([`m:${msg.id}`, item]);
     }
+    patchRows(list, rows, drawnRows);
     if (keepScroll) {
       list.scrollTop = prevTop;
       return;
     }
-    // Follow the conversation when the reader is at its foot, or it grew
-    // while they were not looking; never pull them off a line they scrolled
-    // to. A page read back above them grows the list upward, so the line
-    // they were reading stays where it was.
+    // Follow the conversation when it grows at the reader's foot, or while
+    // they were not looking; a redraw that grew nothing moves nothing, so a
+    // link they are reaching for stays put. A page read back above them grows
+    // the list upward, so the line they were reading stays where it was.
     const newest = m.messages.at(-1)?.id;
     const oldest = m.messages[0]?.id;
-    if (nearBottom || newest !== lastNewest || !wasOpen) {
+    const grew = list.scrollHeight !== prevHeight;
+    if ((nearBottom && grew) || newest !== lastNewest || !wasOpen) {
       list.scrollTop = list.scrollHeight;
     } else if (oldest !== lastOldest) {
       list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
