@@ -10,7 +10,9 @@
       "**/data-staging",
       "**/.bun-cache",
       "packages/plugin/mcp",
-      "**/.coverage"
+      "**/.coverage",
+      "**/.terraform",
+      "**/.terraform-check"
     ]
   },
   "organizeImports": {
