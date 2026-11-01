@@ -21,7 +21,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ProjectConfig, newestSnapshot, projectConfig } from './deploy-plan.ts';
-import { bucketAdmin, machines } from './deploy.ts';
+import { bucketAdmin } from './deploy-secrets.ts';
+import { machines } from './deploy.ts';
 import { flyOk, keeperStage, keychainRead, onMachine } from './mac-ops.ts';
 import { restoreSnapshot } from './snapshot.ts';
 

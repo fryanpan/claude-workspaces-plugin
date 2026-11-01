@@ -137,9 +137,15 @@ prints, step by step:
   cw-keeper-probe`, prints the approval link, and withdraws the request, so
   nothing is created and no tap can run it later.
 
-Two callers are not covered: `wrangler deploy` needs `wrangler login` once,
-as yourself; and the keeper can't set a named tunnel's token yet, so set up
-a project's named tunnel before section 5.
+One caller is not covered. `bun run cf:plan` and `cf:apply`
+(`infra/cloudflare/`) read the Keychain's `cloudflare-api-token` themselves,
+because the Terraform provider cannot send the keeper's request header; once
+section 5 deletes that entry they stop, saying no token is set, until a token
+for them is stored there again. Applying is CI's job
+(`.github/workflows/cloudflare.yml`), so the Mac needs that token only for a
+local plan. `machine:deploy` reads the Access settings from `terraform
+output`. It reads a named tunnel's token from the API with the Keychain's
+token, which the keeper refuses because the answer is a credential.
 
 ## 5. Retire the old tokens
 
@@ -166,6 +172,7 @@ A browser showed the keeper signs of a service worker on its address.
 - **Your admin password.** Anyone who has it, or who reaches an open `sudo`
   session, can read the tokens.
 - **Four credentials it doesn't hold:** each project's Tigris admin key and
-  backup identity, Home's feed tokens, and wrangler's login.
+  backup identity, Home's feed tokens, and the Keychain Cloudflare token
+  `cf:apply` reads, if you keep one.
 - **Its `bun` and `fly`:** they are copies of yours, so an agent that had
   already replaced those binaries would have them copied in.

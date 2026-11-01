@@ -92,6 +92,15 @@ jobs:
         run: bun run test:audit
       - name: Leak gate can still see
         run: bun run check:scrub-gate
+      # The Cloudflare Terraform config (infra/cloudflare): fmt, validate
+      # every environment, and the plan tests against a mock provider. No
+      # token is configured here; cloudflare.yml plans and applies.
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Cloudflare Terraform config is valid
+        run: bun run check:cloudflare-tf
       # Every file over 500 lines must have a written verdict in
       # docs/architecture/exceptions.md. The gate does not judge the verdict —
       # a queued `Split` passes. What it stops is a NEW god file arriving with

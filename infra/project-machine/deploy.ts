@@ -4,9 +4,9 @@
  *
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
- *       [--router-config <path>] [--access-config <path>]
  *       [--lead-board <boardId>] [--claude-account <label>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
+ *       [--refresh-tunnel-token] [--tf-env prod|staging]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -30,30 +30,39 @@
  *   Each is set once, like every secret, except that a run naming its source
  *   sets it again, and `--refresh-lead` sets all three again
  *   the owner's address, the public address and the Access settings
- *   (`settings.ts`), from the Keychain, `access.local.json` and Cloudflare;
- *   each one whose source is missing is skipped with a line saying why
+ *   (`settings.ts`), from the Keychain and the Terraform outputs; each one
+ *   whose source is missing is skipped with a line saying why
  *
- * With `--tunnel named` it first sets up the project's Cloudflare tunnel
- * `cw-<name>`, its ingress and its origin hostname (`tunnel.ts`), then gives
- * the machine the tunnel's token as CLOUDFLARE_TUNNEL_TOKEN.
+ * With `--tunnel named` it gives the machine the token of the tunnel
+ * `cw-<name>` as CLOUDFLARE_TUNNEL_TOKEN. Terraform makes the tunnel, its
+ * ingress and its origin hostname (`infra/cloudflare/modules/tunnel`). This
+ * reads the tunnel's id from `terraform output` and, only when the secret is
+ * to be set, its token from Cloudflare's API (`tunnel-plan.ts`); the token is
+ * kept out of the state. A tunnel Terraform remade has a new token:
+ * `--refresh-tunnel-token` sets it again.
+ *
+ * In CI (`.github/workflows/cloudflare.yml`) it runs with CW_SECRETS_FROM_ENV=1
+ * and every Keychain entry handed in as an environment variable
+ * (`mac-ops.ts`). There it only updates a machine the Mac already made: a
+ * run that would make an app, a volume or a credential is refused.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
- * credential comes out of the Keychain into a child's environment or stdin.
+ * credential comes out of the Keychain (or, in CI, the environment) into a
+ * child's environment or stdin.
  * Why Tigris: README.md.
  */
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { CloudflareApi } from './cloudflare.ts';
+import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
+import { type TfEnv, isEnv } from '../cloudflare/terraform.ts';
 import {
   type Action,
-  type BucketCredential,
   LEAD_BOARD_SECRET,
   LEAD_DEPLOY_KEY_SECRET,
   LEAD_TOKEN_SECRET,
-  ORG_KEY_SECRET,
   type ObservedMachine,
   type ProjectConfig,
   type TunnelMode,
@@ -66,6 +75,7 @@ import {
   renderFlyToml,
   writeOnlyPolicy,
 } from './deploy-plan.ts';
+import { bucketAdmin, secretValue } from './deploy-secrets.ts';
 import {
   cloudflareClient,
   fly,
@@ -75,9 +85,10 @@ import {
   keychainCreate,
   keychainHas,
   keychainRead,
+  secretsFromEnv,
 } from './mac-ops.ts';
 import { type Setting, readSettings } from './settings.ts';
-import { generateSnapshotKeys, recipientOf } from './snapshot.ts';
+import { generateSnapshotKeys } from './snapshot.ts';
 import {
   attachPolicy,
   createAccessKey,
@@ -85,14 +96,16 @@ import {
   hasLifecycle,
   setLifecycle,
 } from './tigris.ts';
-import { TUNNEL_TOKEN_SECRET } from './tunnel-plan.ts';
-import { type NamedTunnel, prepareTunnel, routerNames } from './tunnel.ts';
+import {
+  type AppliedTunnel,
+  TUNNEL_TOKEN_SECRET,
+  appliedTunnel,
+  readTunnelToken,
+} from './tunnel-plan.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
 const KEEP_DAYS = 30;
-const ROUTER_CONFIG = join(REPO, 'infra', 'board-router-worker', 'router.local.json');
-const ACCESS_CONFIG = join(REPO, 'infra', 'access-apps', 'access.local.json');
 
 function arg(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -136,9 +149,12 @@ export function machines(app: string): ObservedMachine[] {
   }));
 }
 
-export function bucketAdmin(cfg: ProjectConfig): BucketCredential {
-  return JSON.parse(keychainRead(cfg.keychain.bucketAdmin)) as BucketCredential;
-}
+/** The Fly secret each made-once Keychain entry was the source of. */
+const madeFrom = (cfg: ProjectConfig): Record<string, string> => ({
+  [cfg.keychain.identity]: 'BACKUP_RECIPIENT',
+  [cfg.keychain.bucketAdmin]: 'BACKUP_S3_ENDPOINT',
+  [cfg.keychain.writer]: 'BACKUP_S3_ACCESS_KEY_ID',
+});
 
 async function observe(cfg: ProjectConfig) {
   const app = flyJson<Named[]>(['apps', 'list']).some((a) => nameOf(a) === cfg.app);
@@ -147,74 +163,24 @@ async function observe(cfg: ProjectConfig) {
         (v) => v.name === cfg.volumeName && v.region === cfg.region && v.state !== 'destroyed',
       ).length
     : 0;
-  const keychain = new Set(
-    Object.values(cfg.keychain).filter((n): n is string => n !== undefined && keychainHas(n)),
-  );
-  const lifecycle = keychain.has(cfg.keychain.bucketAdmin)
-    ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
-    : false;
   const secrets = new Set(
     app ? flyJson<Named[]>(['secrets', 'list', '--app', cfg.app]).map(nameOf) : [],
   );
+  // Off the Mac, a made-once entry counts as made when the secret it was the
+  // source of is set: the Mac made it, and CI never needs its value.
+  const made = madeFrom(cfg);
+  const inferred = (n: string) => secretsFromEnv() && secrets.has(made[n] ?? '');
+  const keychain = new Set(
+    Object.values(cfg.keychain).filter(
+      (n): n is string => n !== undefined && (keychainHas(n) || inferred(n)),
+    ),
+  );
+  // The lifecycle rule is read with the bucket's admin credential, which CI
+  // does not hold; the Mac set the rule when it made the bucket.
+  const lifecycle = keychainHas(cfg.keychain.bucketAdmin)
+    ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
+    : inferred(cfg.keychain.bucketAdmin);
   return { app, volumes, keychain, lifecycle, secrets, machines: app ? machines(cfg.app) : [] };
-}
-
-function secretValue(cfg: ProjectConfig, name: string): string {
-  switch (name) {
-    case 'BACKUP_RECIPIENT':
-      return recipientOf(keychainRead(cfg.keychain.identity));
-    case 'BACKUP_S3_ENDPOINT':
-      return bucketAdmin(cfg).endpoint;
-    case 'BACKUP_S3_BUCKET':
-      return cfg.bucket;
-    case 'BACKUP_S3_ACCESS_KEY_ID':
-      return (JSON.parse(keychainRead(cfg.keychain.writer)) as { accessKeyId: string }).accessKeyId;
-    case 'BACKUP_S3_SECRET_ACCESS_KEY':
-      return (JSON.parse(keychainRead(cfg.keychain.writer)) as { secretAccessKey: string })
-        .secretAccessKey;
-    case 'CW_TUNNEL_MODE':
-      return cfg.tunnel;
-    case ORG_KEY_SECRET:
-      return keychainRead(cfg.keychain.orgKey).trim();
-    case LEAD_TOKEN_SECRET:
-      return leadToken(cfg);
-    case LEAD_BOARD_SECRET:
-      if (cfg.leadBoard === undefined) throw new Error(`no source for secret ${name}`);
-      return cfg.leadBoard;
-    case LEAD_DEPLOY_KEY_SECRET:
-      return deployKey(cfg);
-    default:
-      throw new Error(`no source for secret ${name}`);
-  }
-}
-
-/**
- * The lead's token, as one line `fly secrets import` can carry. The error
- * names the entry, never any part of the value.
- */
-function leadToken(cfg: ProjectConfig): string {
-  const token = keychainRead(cfg.keychain.leadToken).trim();
-  if (!/^[\x21-\x7e]+$/.test(token))
-    throw new Error(
-      `the Keychain entry ${cfg.keychain.leadToken} does not hold a token from \`claude setup-token\` (one line, no spaces)`,
-    );
-  return token;
-}
-
-/**
- * The deploy key, BASE64 so it is one line. The error names the entry, never
- * any part of the value.
- */
-function deployKey(cfg: ProjectConfig): string {
-  const entry = cfg.keychain.deployKey ?? '';
-  const key = keychainRead(entry).trim();
-  if (
-    !/^-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n-]+\n-----END OPENSSH PRIVATE KEY-----$/.test(
-      key,
-    )
-  )
-    throw new Error(`the Keychain entry ${entry} does not hold an OpenSSH private key`);
-  return Buffer.from(`${key}\n`).toString('base64');
 }
 
 function deploy(cfg: ProjectConfig): void {
@@ -256,18 +222,18 @@ function deploy(cfg: ProjectConfig): void {
 }
 
 interface RunContext {
-  org: string;
+  /** The Fly org, read only by the steps that make something. */
+  org: () => string;
   /** The per-project settings this run found a source for, by name. */
   settings: ReadonlyMap<string, Setting>;
   /** The tunnel token, when this run has a named tunnel. */
-  tunnelToken?: () => Promise<string>;
+  tunnelToken?: () => string;
 }
 
 async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void> {
-  const { org } = ctx;
   switch (a.kind) {
     case 'create-app':
-      flyOk(['apps', 'create', cfg.app, '--org', org, '--network', cfg.network]);
+      flyOk(['apps', 'create', cfg.app, '--org', ctx.org(), '--network', cfg.network]);
       return;
     case 'create-volume':
       flyOk([
@@ -289,7 +255,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
     case 'create-bucket': {
       // Not flyOk: this command's output holds the admin credential, so
       // on failure only its error stream is shown.
-      const r = fly(['storage', 'create', '--org', org, '--name', cfg.bucket, '--yes']);
+      const r = fly(['storage', 'create', '--org', ctx.org(), '--name', cfg.bucket, '--yes']);
       if (r.status !== 0) throw new Error(`fly storage create failed: ${r.stderr.trim()}`);
       keychainCreate(cfg.keychain.bucketAdmin, JSON.stringify(parseStorageCreate(r.stdout)));
       return;
@@ -318,7 +284,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
         } else if (n !== TUNNEL_TOKEN_SECRET) {
           lines.push(`${n}=${secretValue(cfg, n)}`);
         } else if (ctx.tunnelToken) {
-          lines.push(`${n}=${await ctx.tunnelToken()}`);
+          lines.push(`${n}=${ctx.tunnelToken()}`);
         } else {
           throw new Error(`no source for secret ${n}`);
         }
@@ -352,43 +318,56 @@ function describe(a: Action): string {
 }
 
 export interface DeployOptions {
-  /** `access.local.json`, which names the project's hosts. */
-  accessConfig?: string;
-  /** The Cloudflare API the settings are read through; a test's stand-in. */
-  cloudflare?: () => CloudflareApi;
+  /** The Terraform outputs; a test's stand-in. Default: `readOutputs(tfEnv)`. */
+  outputs?: () => TfOutputs;
+  /** Which Terraform environment's outputs to read. Default prod. */
+  tfEnv?: TfEnv;
+  /** Set CLOUDFLARE_TUNNEL_TOKEN again, after Terraform remade the tunnel. */
+  refreshTunnelToken?: boolean;
+  /** Reads a tunnel's token; a test's stand-in. Default: Cloudflare's API. */
+  tunnelToken?: (t: AppliedTunnel) => Promise<string>;
 }
+
+/** The keeper refuses this read, because its answer is a credential. */
+async function apiTunnelToken(t: AppliedTunnel): Promise<string> {
+  if (process.env.CW_KEEPER_URL?.trim()) {
+    throw new Error(
+      "the keeper does not hand out a tunnel's token, so a named tunnel's token cannot be set through it (docs/process/keeper.md)",
+    );
+  }
+  return readTunnelToken(cloudflareClient('machine:deploy (named tunnel)'), t);
+}
+
+/** The steps that make an app, a volume or a credential: the Mac's alone. */
+const MAKES = new Set([
+  'create-app',
+  'create-volume',
+  'make-backup-key',
+  'create-bucket',
+  'make-writer-key',
+]);
 
 export async function deployProject(
   cfg: ProjectConfig,
   dryRun: boolean,
-  routerConfig = ROUTER_CONFIG,
   opts: DeployOptions = {},
 ): Promise<Action[]> {
-  // Cloudflare is read first: a named tunnel that cannot be set up, or
-  // Access settings that cannot be read, stop the run before Fly is touched.
-  const tunnel: NamedTunnel | undefined =
-    cfg.tunnel === 'named' ? await prepareTunnel(cfg, routerConfig) : undefined;
-  const found = await readSettings(cfg.project, {
-    accessConfigPath: opts.accessConfig ?? ACCESS_CONFIG,
-    cloudflare: opts.cloudflare ?? (() => cloudflareClient('machine:deploy (Access settings)')),
-    keychainHas,
-    keychainRead,
-  });
+  let cached: TfOutputs | undefined;
+  const outputs = () => {
+    cached ??= (opts.outputs ?? (() => readOutputs(opts.tfEnv ?? 'prod')))();
+    return cached;
+  };
+  // The outputs are read first: a named tunnel Terraform has not made stops
+  // the run before Fly is touched.
+  const tunnel: AppliedTunnel | undefined =
+    cfg.tunnel === 'named' ? appliedTunnel(outputs(), cfg) : undefined;
+  const found = readSettings(cfg.project, { outputs, keychainHas, keychainRead });
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
-  const org = keychainRead('fly-org-slug').trim();
-  // A new tunnel has a new token, so an existing secret holds the old one.
-  const refresh = tunnel?.actions.some((a) => a.kind === 'create-tunnel')
-    ? [TUNNEL_TOKEN_SECRET]
-    : [];
+  // A remade tunnel has a new token, so an existing secret holds the old one.
+  const refresh = tunnel && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
   const observed = await observe(cfg);
   const actions = plan(cfg, observed, refresh, [...settings.keys()]);
-  if (tunnel) {
-    console.log(
-      tunnel.actions.length === 0
-        ? `[deploy] tunnel ${tunnel.names.tunnel} and ${tunnel.names.origin}: nothing to do`
-        : `[deploy] tunnel ${tunnel.names.tunnel}: ${tunnel.actions.map((a) => a.kind).join(', ')}`,
-    );
-  }
+  if (tunnel) console.log(`[deploy] tunnel ${tunnel.name} is ${tunnel.id}, from Terraform`);
   console.log(
     actions.length === 0
       ? `[deploy] ${cfg.app} is up to date at ${cfg.imageLabel.slice(0, 9)}: nothing to do`
@@ -425,11 +404,20 @@ export async function deployProject(
     console.log(
       `[deploy] not set: ${LEAD_DEPLOY_KEY_SECRET}: the Keychain has no ${cfg.keychain.deployKey}`,
     );
+  const makes = actions.filter((a) => MAKES.has(a.kind)).map((a) => a.kind);
+  if (secretsFromEnv() && makes.length > 0) {
+    throw new Error(
+      `${cfg.app} needs ${makes.join(', ')}, which only a deploy on the Mac makes; run bun run machine:deploy --project ${cfg.project} there first`,
+    );
+  }
   if (dryRun) return actions;
-  const ctx: RunContext = { org, settings };
-  if (tunnel) {
-    const id = await tunnel.apply();
-    ctx.tunnelToken = () => tunnel.token(id);
+  const ctx: RunContext = { org: () => keychainRead('fly-org-slug').trim(), settings };
+  const needsToken = actions.some(
+    (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
+  );
+  if (tunnel && needsToken) {
+    const token = await (opts.tunnelToken ?? apiTunnelToken)(tunnel);
+    ctx.tunnelToken = () => token;
   }
   for (const a of actions) {
     console.log(`[deploy] ${describe(a)}`);
@@ -473,17 +461,12 @@ async function main(): Promise<void> {
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),
   });
-  const routerConfig = arg(args, 'router-config') ?? ROUTER_CONFIG;
-  const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig, {
-    accessConfig: arg(args, 'access-config') ?? ACCESS_CONFIG,
+  const tfEnv = arg(args, 'tf-env') ?? 'prod';
+  if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);
+  const done = await deployProject(cfg, args.includes('--dry-run'), {
+    tfEnv,
+    refreshTunnelToken: args.includes('--refresh-tunnel-token'),
   });
-  if (cfg.tunnel === 'named') {
-    const names = routerNames(cfg, routerConfig);
-    console.log(`[deploy] origin hostname: ${names.origin}`);
-    console.log(
-      `[deploy] to route ${names.publicHost}, add "${cfg.project}": "${names.origin}" to the router's projects and run bun run router:deploy`,
-    );
-  }
   if (args.includes('--dry-run')) return;
   const state = machines(cfg.app).map(
     (m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)} ${m.memoryMb}MB`,

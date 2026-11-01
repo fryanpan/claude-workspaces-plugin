@@ -11,22 +11,32 @@ signature + expiry on every `/share/*` request and re-checks the share
 registry (so early revocation works even against a validly signed URL). The
 Worker exists to keep guessing traffic and dead links off the tunnel.
 
-## Deploying — a manual step for Bryan
+## Deploying
 
-**Deploying this Worker and setting its secret are manual Cloudflare-account
-steps. Agents never write to Cloudflare.**
+The Worker and its routes are part of the Terraform config in
+`../cloudflare/` (`modules/share-link`). The committed `wrangler.toml` carries
+placeholder hostnames; copy it to `wrangler.local.toml` (gitignored) and fill
+in the routes. The config manages this Worker only once that file lists
+routes, each a `<host>/share/*` pattern in `router.local.json`'s zone:
 
-1. Create a Worker from `worker.js` (dashboard paste or `wrangler deploy`).
-2. Add a route binding it to `<publicHostname>/share/*` on the zone the
-   tunnel serves (the hostname in the server's share config).
-3. Set the HMAC key as a Worker **secret** named `SHARE_LINK_KEY`. The key is
-   the content of `share-url.key` in the server's data directory (the server
-   generates it, mode 600, on the first signed link it mints). Pipe it in
-   without printing it:
+```sh
+bun run cf:plan
+bun run cf:apply
+```
 
-   ```bash
-   wrangler secret put SHARE_LINK_KEY < /path/to/data/share-url.key
-   ```
+The config leaves the Worker's workers.dev setting as it finds it. Its HMAC key is the one step outside
+the config, so the key never enters the Terraform state: set it as a Worker
+**secret** named `SHARE_LINK_KEY`, once, after the first apply. The key is
+the content of `share-url.key` in the server's data directory (the server
+generates it, mode 600, on the first signed link it mints). Pipe it in
+without printing it:
+
+```sh
+npx wrangler secret put SHARE_LINK_KEY -c wrangler.local.toml < /path/to/data/share-url.key
+```
+
+An apply keeps that secret (`keep_bindings`), so it is set once, not after
+every apply.
 
 The verification convention (shared with `packages/server/src/share/url-signing.ts`):
 HMAC-SHA256 over the string `<id>.<exp>`, keyed by the UTF-8 bytes of the key
@@ -37,17 +47,6 @@ cross-verifies server-minted signatures against this Worker's verify function.
 With no `SHARE_LINK_KEY` configured the Worker fails closed: every
 `/share/*` request 404s. If share links stop working at the edge but redeem
 fine over the tailnet, check the secret before anything else.
-
-## Deploying
-
-The committed `wrangler.toml` carries placeholder hostnames — the real ones
-stay out of the public repo. Copy it to `wrangler.local.toml` (gitignored),
-fill in the routes, and deploy with that file:
-
-```sh
-npx wrangler deploy -c wrangler.local.toml
-npx wrangler secret put SHARE_LINK_KEY -c wrangler.local.toml < ../../data/share-url.key
-```
 
 ## Hygiene
 

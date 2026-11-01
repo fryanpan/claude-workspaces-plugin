@@ -62,7 +62,7 @@ adds; a project without one runs with Claude off.
 
 ```bash
 bun run machine:deploy --project <project> [--memory 512] [--volume-gb 1] [--region sjc]
-    [--tunnel quick|named] [--router-config <path>] [--dry-run]
+    [--tunnel quick|named] [--tf-env prod|staging] [--dry-run]
 ```
 
 It reads what exists and does only what is missing:
@@ -97,21 +97,20 @@ project's own hostname:
 | Setting | From |
 | --- | --- |
 | `CW_OWNER_EMAIL` | the Keychain's `cw-board-owner-email` |
-| `CW_PUBLIC_BASE_URL` | `https://` and the project's first host in `infra/access-apps/access.local.json` |
+| `CW_PUBLIC_BASE_URL` | `https://` and the project's first Access host |
 | `CF_ACCESS_TEAM_DOMAIN` | the account's Access organization (`auth_domain`) |
 | `CF_ACCESS_AUD` | the Access application `board <project>` |
 | `CF_ACCESS_HOST_AUDS` | each of the project's hosts, to that audience |
 | `CW_PROXIED_TRUSTED_HOSTS` | the project's hosts |
 
-The account is the one the Cloudflare token sees; a token that sees more than
-one stops the run. The token needs Access: Apps and Policies Read and Access:
-Organizations, Identity Providers, and Groups Read on the account. Through
-the keeper both reads run without a passkey. `--access-config <path>` reads another file in place of
-`access.local.json`. A project that file does not list gets only the owner
-address. A project whose Access application does not exist yet (`bun run
-access:apply --apply` makes it) gets the owner and the public address, and
-the run says which settings it left unset; it does not fail. Two applications
-of the name stop the run before anything changes.
+Every row but the first comes from the Terraform outputs
+(`infra/cloudflare/outputs.ts`, `terraform output` against the prod state, or
+the environment `--tf-env` names), so deploy reads no Cloudflare API for
+them; it needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
+or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
+application in the state yet (`bun run cf:apply` makes it) gets only the
+owner address, and the run says which settings it left unset; it does not
+fail. Nor does a state it cannot read: it says why and skips the same rows.
 
 Not set by deploy: `CW_PROXIED_TRUSTED_EMAILS`, which defaults to
 `CW_OWNER_EMAIL`, and the share settings (`CF_ACCESS_SHARE_AUD`,
@@ -131,37 +130,69 @@ machine start, with no Cloudflare account. Its visitors carry `cf-ray` and no
 Access identity, so the server answers them `403 unknown_host` on every
 path. It proves the machine can be reached; it is not a way in.
 
-`--tunnel named` is the production path. Before it touches Fly, the deploy
-reads Cloudflare and does only what is missing there:
+`--tunnel named` is the production path. `machine:deploy` makes no
+Cloudflare call; Terraform (`infra/cloudflare/README.md`, applied by CI on
+main or `bun run cf:apply`) makes the tunnel, for every project in `router.local.json` whose origin is
+`<project>-origin.<zone>`. So the order is: add
+`"<project>": "<project>-origin.<zone>"` to the router's `projects`, run
+`bun run cf:plan`, read it, run `bun run cf:apply`, then `machine:deploy
+--tunnel named`. The apply makes:
 
 1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a
-   file on the machine. The zone and its account come from the zone lookup
-   of `router.local.json`'s `zone`.
+   file on the machine.
 2. The tunnel's ingress: the project's own hostname,
    `<project>-<first label of the one address>.<zone>` (so
    `riverbend-workspaces.<zone>` beside `workspaces.<zone>`), to
    `http://localhost:8787`, and a 404 for every other hostname. That is the
    Host header the router Worker sends.
 3. The origin hostname `<project>-origin.<zone>`: a proxied CNAME to
-   `<tunnel id>.cfargotunnel.com`.
-4. The tunnel's token, read from Cloudflare into memory and set as the
-   machine's `CLOUDFLARE_TUNNEL_TOKEN` through `fly secrets import` on stdin.
-   A run that creates the tunnel sets it again, since the old value belongs
-   to a tunnel that no longer exists. A machine that ran a quick tunnel loses
-   its `CW_TUNNEL_MODE` secret, so it starts the named one.
+   `<tunnel id>.cfargotunnel.com`, and the project hostname's record and
+   route for the router Worker.
 
-It stops, having changed nothing anywhere, when it finds two live tunnels of
-the name, a tunnel configured from a file, a record at the origin hostname
-that is not a proxied CNAME to this tunnel, or an Access application covering
-the origin hostname. It never repoints or deletes what it finds. The last
-lines name the origin hostname and the entry to add to the router's
-`projects` before `bun run router:deploy`.
+Before terraform runs, the wrapper stops, having changed nothing, when it finds two
+live tunnels of the name, a tunnel configured from a file, a record at the
+origin hostname that is not a proxied CNAME to this tunnel, or an Access
+application covering the origin hostname.
 
-The Cloudflare token needs, on top of what `router:deploy` uses: Cloudflare
-Tunnel Edit and Access: Apps and Policies Read on the account, and DNS Edit on
-the zone. What stays a person's step: the project's Access application on its
-own hostname (`bun run access:apply --apply`) and the router entry. The
-server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
+`machine:deploy` then reads the tunnel's account and id from `terraform
+output`, refusing with the origin to give it when the state has none. When
+the machine's `CLOUDFLARE_TUNNEL_TOKEN` is missing or `--refresh-tunnel-token`
+asks for it, it reads the token from Cloudflare's API
+(`cfd_tunnel/<id>/token`, with the Keychain's `cloudflare-api-token`, or
+`CLOUDFLARE_API_TOKEN` when set) and sets it through `fly secrets import` on
+stdin. The token is never in the Terraform state, and the keeper refuses
+this read, because its answer is a credential. A tunnel Terraform remade has a new token: pass
+`--refresh-tunnel-token` to set it again. A machine that ran a quick tunnel
+loses its `CW_TUNNEL_MODE` secret, so it starts the named one.
+
+### Deploying from CI
+
+After each Cloudflare apply on main, `.github/workflows/cloudflare.yml` runs
+`machine:deploy` for every machine listed in
+`infra/project-machine/machines.json` (`machines.ts`). There it runs with
+`CW_SECRETS_FROM_ENV=1`: each Keychain entry it reads is an environment
+variable instead (`CW_SECRET_<ENTRY>`, upper case, `-` as `_`, plain text),
+the Fly org token is `FLY_API_TOKEN`, and the `security` command is never
+run. Only these are needed for a machine that already runs:
+
+| Mac source | In CI |
+| --- | --- |
+| Keychain `fly-org-token` | `FLY_API_TOKEN` |
+| Keychain `cloudflare-api-token` (a tunnel token read only) | `CLOUDFLARE_API_TOKEN` |
+| Keychain `cw-board-owner-email` | `CW_SECRET_CW_BOARD_OWNER_EMAIL` |
+| Keychain `cloudflare-r2-tfstate` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `state/prod/backend.hcl` from the last `cf:plan` | `CLOUDFLARE_ACCOUNT_ID` (and `CF_TFSTATE_BUCKET`) |
+
+The backup identity, the bucket's admin credential and the writer credential
+stay on the Mac. CI counts each as made when the Fly secret it was the source
+of is set, never reads its value, and assumes the expiry rule the Mac set with
+the bucket. So CI updates a machine the Mac made and refuses, before any
+change, one it did not: a new project's first deploy runs on the Mac. The
+org's Claude key, the lead's sign-in and its deploy key are set once by the
+Mac and left alone by CI, unless their `CW_SECRET_*` variable is given. The
+keeper (`CW_KEEPER_URL`) is not used in CI.
+
+The server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
 ("The owner and Access settings", above).
 
 ### Checking it

@@ -7,54 +7,38 @@ front of the host a request arrived on. So a stamp one project's server
 received cannot be replayed to another project's server: it carries the wrong
 audience there.
 
-## Not deployed
+## Making them
 
-Nothing here has been sent to Cloudflare yet. `access-plan.ts` builds the
-request bodies and `apply.ts` sends them. The config takes each project's
-hostnames as written rather than deriving them. A project's own hostname is
+`bun run cf:plan` and `bun run cf:apply` (`../cloudflare/README.md`) make
+every application this file describes, with the rest of the account's
+Cloudflare configuration. The config takes each project's hostnames as
+written rather than deriving them. A project's own hostname is
 `<project>-<first label of the one address>.<zone>`, one level under the zone
 (`riverbend-workspaces.<zone>`; board router README), so that is the host to
 list.
 
-```bash
-bun run access:plan            # reads access.local.json beside this file (gitignored)
-bun run access:plan <path>     # or any other file
-```
+Per project, the Terraform config (`../cloudflare/modules/access`) makes:
 
-It prints one `POST /accounts/<account>/access/apps` body per project.
+1. the application `board <project>`, `self_hosted`, over the project's
+   hosts, adopting the live one of that name if it exists;
+2. a reusable `allow` policy `<project> people` for the emails and domains,
+   and a `non_identity` policy `<project> service tokens`, each service token
+   named here resolved to its id by name.
 
-## Applying it
-
-```bash
-CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… bun run access:apply            # dry run
-CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… bun run access:apply --apply    # writes
-```
-
-The token and account id come from the environment only, under wrangler's
-names. The token needs Access: Apps and Policies Edit and Access: Service
-Tokens Read on the account. Per project, `apply.ts`:
-
-1. looks up each named service token's id and replaces every
-   `{"service_token_name": …}` with `{"service_token": {"token_id": …}}`;
-2. creates the application, or updates the one with the same `name`
-   (`board <project>`), keeping the id of each policy whose name matches;
-3. reads back its `aud` and prints that server's `CF_ACCESS_AUD` and
-   `CF_ACCESS_HOST_AUDS` (`hostAudiencesFor`).
-
-A dry run, the default, does every read and prints `create`, `update (<the
-fields that differ>)` or `unchanged` per project. A second `--apply` with no
-config change sends no write. It refuses, before any write and with a nonzero
-exit:
+After a local apply the wrapper prints each server's `CF_ACCESS_AUD` and
+`CF_ACCESS_HOST_AUDS`; `machine:deploy` reads them from `terraform output`.
+Before terraform runs it refuses, with
+nothing changed:
 
 - a project host equal to, or under, a hostname that an application the config
   does not own covers (a wildcard counts as its base name). Prod's sign-in
   application is never changed or shadowed;
 - a service token name that matches no token, or more than one;
-- an application named `board <project>` that is not `self_hosted`, or two of
-  them.
+- an application named `board <project>` that is not `self_hosted`, or two
+  of them.
 
-It never deletes. Whether Cloudflare's PUT keeps a policy by the `id` sent
-with it is untested against the real account.
+Removing a project from this file removes its application at the next apply;
+the plan shows it as a destroy first.
 
 ## The config
 
@@ -106,8 +90,8 @@ by hand.
 - A domain policy admitting a member of the domain and refusing an outsider.
 - The service tokens working per application.
 
-Tests: `packages/server/test/access-apps-plan.test.ts` (this plan),
-`packages/server/test/access-apps-apply.test.ts` (the apply, against a fake
-Cloudflare) and
+Tests: `packages/server/test/access-apps-plan.test.ts` (this file's
+parser), `../cloudflare/deploys/prod/tests/plan.tftest.hcl` (what a plan makes from it),
+`packages/server/test/cloudflare-tf-discover.test.ts` (the refusals) and
 `packages/server/test/access-per-project.test.ts` (two servers, the router, and
 stamps from three applications).

@@ -357,10 +357,10 @@ const ID = '[A-Za-z0-9-]+';
 
 /**
  * The reads the keeper's callers make, which run without a tap: the share
- * module's (`share/cf-api.ts`), the named tunnel's
- * (`infra/project-machine/tunnel.ts`), the deploy's Access settings
- * (`infra/project-machine/settings.ts`) and the router deploy's
- * (`infra/board-router-worker/deploy.ts`). None answers with a credential.
+ * module's (`share/cf-api.ts`), and the tunnel, Access and zone reads the
+ * retired project-machine and router deploys made (`infra/cloudflare/`
+ * replaced them and reads with the Keychain's token, not through here). None
+ * answers with a credential.
  * Every other read is held, because some Cloudflare reads do.
  */
 const ROUTINE_GETS: readonly RegExp[] = [

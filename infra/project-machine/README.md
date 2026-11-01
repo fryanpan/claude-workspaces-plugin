@@ -7,7 +7,7 @@ scripts that stand it up. How to run them is
 
 | Script | Run where | What it does |
 | --- | --- | --- |
-| `bun run machine:deploy --project <name>` | the Mac | Creates or updates the app, volume, backup keys, bucket, write-only credential, secrets (the owner and Access settings among them, `settings.ts`) and machine, and with `--tunnel named` the Cloudflare tunnel, its ingress and its origin hostname (`tunnel.ts`). A second run changes nothing |
+| `bun run machine:deploy --project <name>` | the Mac | Creates or updates the app, volume, backup keys, bucket, write-only credential, secrets (the owner and Access settings among them, `settings.ts`) and machine, and with `--tunnel named` the machine's tunnel token, read from the API by the tunnel id in `terraform output` (`tunnel-plan.ts`). A second run changes nothing |
 | `bun run machine:restore --project <name>` | the Mac | Puts the newest snapshot back onto the machine; the old data dir is moved aside |
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
 | `entrypoint.sh`, `run-as.sh` | the machine | The process tree, supervised as root: the server as `cw`, cloudflared as `cwtunnel`, the lead agent as `lead`, so no child's user holds another's secrets |
@@ -51,10 +51,10 @@ overwrite case ever matters more than one bill.
 `packages/server/test/project-machine-deploy.test.ts` holds the deploy's
 decisions: names, which steps a run plans for each state, the fly.toml it
 writes, and how it reads Fly's and Tigris's output. No test calls Fly.
-`project-machine-tunnel.test.ts` holds the named tunnel's decisions
-(`tunnel-plan.ts`): which Cloudflare steps a run plans for each state, what
-stops it, the bodies it sends, and how it reads Cloudflare's answers, from
-recorded response shapes. No test calls Cloudflare.
+`project-machine-tunnel.test.ts` holds the named tunnel's readers
+(`tunnel-plan.ts`): how the tunnel Terraform made, and its token, are read
+from the Terraform outputs. The tunnel itself is
+`infra/cloudflare/`'s, tested there. No test calls Cloudflare.
 `project-machine-restore.test.ts` builds a data dir through a real server,
 with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
@@ -65,5 +65,5 @@ byte and reads the board back from a second server.
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
 program, and checks which user each child runs as and which secrets it holds. The image, the Fly deploy and the Tigris calls are proved by
-`machine:drill`, not by a test; the Cloudflare calls by a real
-`--tunnel named` deploy.
+`machine:drill`, not by a test; the Cloudflare configuration by
+`bun run cf:plan` against the real account.
