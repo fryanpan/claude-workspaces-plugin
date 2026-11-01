@@ -1,5 +1,5 @@
 /**
- * Home's bottom bar: Review items, Inbox, Projects and Coach, at the widths a
+ * Home's bottom bar: Review, Inbox, Projects and Coach, at the widths a
  * workspace's navbar is a bottom bar (≤1100px). Bryan, 31 Oct: "From home can
  * you give me on mobile a navbar to go between review items, inbox, projects,
  * coach".
@@ -49,7 +49,7 @@ const ICONS = {
  */
 export function landingSections(has: { inbox: boolean; coach: boolean }): LandingSection[] {
   return [
-    { id: 'landing-review', label: 'Review items', icon: ICONS.review },
+    { id: 'landing-review', label: 'Review', icon: ICONS.review },
     ...(has.inbox ? [{ id: 'inbox', label: 'Inbox', icon: ICONS.inbox }] : []),
     { id: 'landing-boards', label: 'Projects', icon: ICONS.projects },
     ...(has.coach ? [{ id: 'coach', label: 'Coach', icon: ICONS.coach }] : []),

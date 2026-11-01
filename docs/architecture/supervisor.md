@@ -211,7 +211,9 @@ Two neighbouring mechanisms are often confused with this one and are not it:
   handles that, with its own damper: a child that dies within 30s of starting
   makes the supervisor hold 20s before exiting, so launchd's 10s
   `ThrottleInterval` does not turn a young crash into a hot loop of client
-  builds and hydrations.
+  builds and hydrations. A deploy restart takes this path too: the server
+  exits 75 (`deploy-restart.ts`), the supervisor exits 1 without the hold,
+  and KeepAlive relaunches it.
 - **`GET /api/deploy`'s verdict is about the last deploy, not about liveness.**
   It reads `healthy` straight through an outage. Peers read it as liveness
   twice on 16 September. The probe uses that route because it is cheap to

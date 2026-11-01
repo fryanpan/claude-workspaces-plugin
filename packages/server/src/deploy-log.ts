@@ -306,7 +306,7 @@ export function expireDeployVerification(
 
 /**
  * The boot watchdog, as a DETACHED process — its own process group, stdio
- * closed, unref'd — because `launchctl kickstart -k` is about to kill this
+ * closed, unref'd — because the deploy restart is about to end this
  * process and everything that dies with it. All it can do is expire a still
  * `pending` record into `boot-failed` (see `deploy-verify.ts`); the healthy
  * verdict belongs to the restarted server alone.

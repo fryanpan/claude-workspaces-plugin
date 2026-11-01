@@ -39,7 +39,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
   }, SUITE_MS);
 
   it('at 430 wide shows Review items, Inbox, Projects and Coach, each with an icon', () => {
-    expect(r.phone.labels).toEqual(['Review items', 'Inbox', 'Projects', 'Coach']);
+    expect(r.phone.labels).toEqual(['Review', 'Inbox', 'Projects', 'Coach']);
     expect(r.phone.icons).toEqual([true, true, true, true]);
   }, 60_000);
 
@@ -60,12 +60,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
   }, 60_000);
 
   it('tapping each entry brings its section into view, above the bar', () => {
-    expect(r.phone.taps.map((t) => t.label)).toEqual([
-      'Projects',
-      'Coach',
-      'Inbox',
-      'Review items',
-    ]);
+    expect(r.phone.taps.map((t) => t.label)).toEqual(['Projects', 'Coach', 'Inbox', 'Review']);
     for (const t of r.phone.taps) {
       // CONTROL: the section started out of view, so a landing is the tap's.
       expect(t.before < 0 || t.before >= t.innerHeight / 2, t.label).toBe(true);
@@ -76,12 +71,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
   }, 60_000);
 
   it('a tap on every entry reaches it, with the widget and a coach card on the page', () => {
-    expect(r.phone.hits.map((h) => h.label)).toEqual([
-      'Review items',
-      'Inbox',
-      'Projects',
-      'Coach',
-    ]);
+    expect(r.phone.hits.map((h) => h.label)).toEqual(['Review', 'Inbox', 'Projects', 'Coach']);
     for (const h of r.phone.hits) expect(h.reached, h.label).toBe(true);
     // The coach card sits above the bar, not over it.
     expect(r.phone.coach.bottom).toBeLessThanOrEqual(r.phone.placeTop.top);
