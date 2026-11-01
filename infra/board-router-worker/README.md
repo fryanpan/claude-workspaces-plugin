@@ -132,7 +132,7 @@ bun run cf:plan    # reads Cloudflare, shows what would change
 bun run cf:apply   # shows the plan again and asks before changing anything
 ```
 
-The Worker, its routes and its records are part of the one OpenTofu config
+The Worker, its routes and its records are part of the Terraform config
 in `../cloudflare/` (its README). It reads `router.local.json` beside this
 file (gitignored; the real hostnames stay out of the public repo):
 
@@ -155,7 +155,7 @@ per project, because a DNS wildcard covers whole labels only), and a route
 for each. A project added to `projects` adds a record and a route at the next
 apply; one removed is removed.
 
-Before tofu runs, the wrapper stops, changing nothing, when an origin of the
+Before terraform runs, the wrapper stops, changing nothing, when an origin of the
 Mac's has no proxied record, when no certificate covers a project hostname,
 or when a route the config names is bound to another Worker.
 
@@ -230,4 +230,4 @@ hostnames, cookies, today's board paths, `ONE_ADDRESS_ORIGIN`),
 `access-per-project.test.ts` (three Access applications over two servers), `board-router-worker.test.ts` (board routing),
 `board-router-two-servers.test.ts` (two real servers),
 `board-router-config.test.ts` (`router.local.json`) and
-`../cloudflare/tests/plan.tftest.hcl` (what is deployed from it).
+`../cloudflare/deploys/prod/tests/plan.tftest.hcl` (what is deployed from it).

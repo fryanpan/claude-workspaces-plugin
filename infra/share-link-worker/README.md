@@ -13,8 +13,8 @@ Worker exists to keep guessing traffic and dead links off the tunnel.
 
 ## Deploying
 
-The Worker and its routes are part of the one OpenTofu config in
-`../cloudflare/` (`share-link.tf`). The committed `wrangler.toml` carries
+The Worker and its routes are part of the Terraform config in
+`../cloudflare/` (`modules/share-link`). The committed `wrangler.toml` carries
 placeholder hostnames; copy it to `wrangler.local.toml` (gitignored) and fill
 in the routes. The config manages this Worker only once that file lists
 routes, each a `<host>/share/*` pattern in `router.local.json`'s zone:
@@ -24,8 +24,8 @@ bun run cf:plan
 bun run cf:apply
 ```
 
-The Worker has no workers.dev address. Its HMAC key is the one step outside
-the config, so the key never enters the OpenTofu state: set it as a Worker
+The config leaves the Worker's workers.dev setting as it finds it. Its HMAC key is the one step outside
+the config, so the key never enters the Terraform state: set it as a Worker
 **secret** named `SHARE_LINK_KEY`, once, after the first apply. The key is
 the content of `share-url.key` in the server's data directory (the server
 generates it, mode 600, on the first signed link it mints). Pipe it in

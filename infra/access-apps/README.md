@@ -17,7 +17,7 @@ written rather than deriving them. A project's own hostname is
 (`riverbend-workspaces.<zone>`; board router README), so that is the host to
 list.
 
-Per project, the OpenTofu config (`../cloudflare/access.tf`) makes:
+Per project, the Terraform config (`../cloudflare/modules/access`) makes:
 
 1. the application `board <project>`, `self_hosted`, over the project's
    hosts, adopting the live one of that name if it exists;
@@ -25,8 +25,9 @@ Per project, the OpenTofu config (`../cloudflare/access.tf`) makes:
    and a `non_identity` policy `<project> service tokens`, each service token
    named here resolved to its id by name.
 
-After an apply the wrapper prints each server's `CF_ACCESS_AUD` and
-`CF_ACCESS_HOST_AUDS` (`hostAudiencesFor`). Before tofu runs it refuses, with
+After a local apply the wrapper prints each server's `CF_ACCESS_AUD` and
+`CF_ACCESS_HOST_AUDS`; `machine:deploy` reads them from `terraform output`.
+Before terraform runs it refuses, with
 nothing changed:
 
 - a project host equal to, or under, a hostname that an application the config
@@ -90,7 +91,7 @@ by hand.
 - The service tokens working per application.
 
 Tests: `packages/server/test/access-apps-plan.test.ts` (this file's
-parser), `../cloudflare/tests/plan.tftest.hcl` (what a plan makes from it),
+parser), `../cloudflare/deploys/prod/tests/plan.tftest.hcl` (what a plan makes from it),
 `packages/server/test/cloudflare-tf-discover.test.ts` (the refusals) and
 `packages/server/test/access-per-project.test.ts` (two servers, the router, and
 stamps from three applications).
