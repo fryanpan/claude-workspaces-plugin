@@ -17,6 +17,7 @@
  * because a region can only reach what its deps object names.
  */
 import type { FeedbackClient, User } from '@claude-workspaces/core';
+import { estimatesShown } from '@claude-workspaces/core/show-estimates';
 import type { BootHistory, BootLocation, BootStorage, BootWindow } from '../boot-env.ts';
 import { mountCoachCard } from '../coach-card.ts';
 import { renderConnectionBanner, watchConnection } from '../connection-state.ts';
@@ -650,6 +651,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   let autoWalkTick: (() => void) | null = null;
   /** Assigned when settings is wired, below the live wiring. */
   let membersChanged: (() => void) | null = null;
+  /** Also assigned there: repaint the Show estimates row. */
+  let estimatesChanged: (() => void) | null = null;
   /** The lead chat, mounted below; "Have a meeting" opens its wizard. */
   let leadChat: LeadChatMount | null = null;
 
@@ -775,6 +778,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       if (state.nav === 'library') void library.refresh();
     },
     membersChanged: () => membersChanged?.(),
+    estimatesChanged: () => estimatesChanged?.(),
     location,
   });
 
@@ -847,7 +851,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // whose nav has just gone — the subnav is drawn on one band and the row
   // list on the other.
   narrowBand?.addEventListener('change', () => settingsView.bandChanged());
-  ({ membersChanged } = wireBoardSettingsPanel({
+  ({ membersChanged, estimatesChanged } = wireBoardSettingsPanel({
     document,
     el,
     workspaceId,
@@ -863,6 +867,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderSettingsPanel,
     onOpen: () => settingsView.open(),
     href: () => location.href,
+    estimatesShown: () => estimatesShown(state.info),
   }));
 
   // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).

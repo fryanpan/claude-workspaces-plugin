@@ -98,6 +98,7 @@ function page(band: Viewport): Page {
     renderSettingsPanel: render,
     onOpen: () => view.open(),
     href: () => `/workspaces/${WS}`,
+    estimatesShown: () => false,
   });
   render();
   return {

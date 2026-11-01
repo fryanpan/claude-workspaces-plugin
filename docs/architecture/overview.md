@@ -2202,7 +2202,9 @@ selection spanning blocks right after a tap on a comment, which is how a
 select-all reached from a comment wiped a doc; the second puts up an Undo
 toast after one local edit removes most of the doc. `core` is three tiers: wire types, the document model (`prose-*.ts`,
 `anchor/**`, `redline.ts`), then the rules both sides must compute identically
-(`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`, and
+(`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`, `show-estimates.ts` —
+whether a board shows its estimates at all, off unless it says `true`, read by
+the settings route and the board page alike — and
 `note-suggestion.ts`, which is how a note's written "did you mean this row?"
 is spelled — server writes it, browser reads it back, one definition so the
 two cannot drift into a suggestion nobody can accept). The `review-item*.ts`

@@ -1,4 +1,5 @@
 import { connect } from '@claude-workspaces/core';
+import { estimatesShown } from '@claude-workspaces/core/show-estimates';
 import type { BootLocation } from '../boot-env.ts';
 import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
 /**
@@ -75,6 +76,8 @@ export interface BoardLiveDeps {
   libraryChanged: () => void;
   /** The members list's re-read, a thunk: settings is wired after this. */
   membersChanged: () => void;
+  /** The Show estimates row's repaint, a thunk for the same reason. */
+  estimatesChanged: () => void;
   /** The address bar the boot was handed. Following a person off this board
    *  leaves through it, so a test can read where the follow sent us. */
   location: Pick<BootLocation, 'assign' | 'pathname' | 'search'>;
@@ -109,6 +112,7 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     loadDiscussion,
     libraryChanged,
     membersChanged,
+    estimatesChanged,
     location,
   } = deps;
 
@@ -125,6 +129,11 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     repaintGuard.schedule(repaintQueueRegions);
     autoWalkTick();
   });
+  // Show estimates travels on the workspace map too. A flip repaints the open
+  // task panel (its Hands-on and Wall clock fields) and the settings row; the
+  // board's goal strips repaint with the region below either way.
+  let shownBefore = estimatesShown(state.info);
+  let estimatesFlipped = false;
   const repaintWorkspaceRegions = (): void => {
     renderLead();
     renderBoardRegion();
@@ -132,10 +141,15 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     // Goal facts (title, status, owner, due) travel on the WORKSPACE map,
     // not the tasks map — an open goal panel repaints here or shows a peer's
     // rename never.
-    if (state.detailGoalId) renderDetail();
+    if (state.detailGoalId || (estimatesFlipped && state.detailTaskId)) renderDetail();
+    if (estimatesFlipped) estimatesChanged();
+    estimatesFlipped = false;
   };
   wsMap.observeDeep(() => {
     readProjection();
+    const shown = estimatesShown(state.info);
+    if (shown !== shownBefore) estimatesFlipped = true;
+    shownBefore = shown;
     repaintGuard.schedule(repaintWorkspaceRegions);
   });
 

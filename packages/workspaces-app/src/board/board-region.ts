@@ -22,6 +22,7 @@
  * pane performs no writes of its own — it hands the island a gesture and the
  * verb decides.
  */
+import { estimatesShown } from '@claude-workspaces/core/show-estimates';
 import { type BoardActions, type BoardState, showToast } from './board-actions.ts';
 import { renderBoardAgents } from './board-agents-list.ts';
 import { type BoardHandlers, boardData } from './board-island.tsx';
@@ -31,7 +32,7 @@ import {
   type ReorderTarget,
   archivedGoals,
   archivedTasks,
-  boardSectionsWithEffort,
+  boardSectionsForReader,
   goalSection,
 } from './board-model.ts';
 import type { BoardNav } from './board-presence-model.ts';
@@ -241,7 +242,13 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
     // the board is open, and a picker built from a stale list offers agents
     // who have left.
     boardData.value = {
-      sections: boardSectionsWithEffort(state.info?.goals ?? [], taskList(), filters, filters.now),
+      sections: boardSectionsForReader(
+        state.info?.goals ?? [],
+        taskList(),
+        filters,
+        filters.now,
+        estimatesShown(state.info),
+      ),
       pane: state.pane,
       showArchived,
       knownAgentIds: knownAgentIds(),

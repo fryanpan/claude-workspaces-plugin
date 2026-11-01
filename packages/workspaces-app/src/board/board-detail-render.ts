@@ -919,6 +919,8 @@ export function detailFields(
   calibration?: EffortCalibration,
   /** The band the ticket renders under — see `effortCellText`. */
   calibrationGoal?: string,
+  /** Whether the board shows estimates. Off draws neither effort field. */
+  showEstimates = true,
 ): HTMLElement {
   const dl = document.createElement('dl');
   dl.className = 'board-detail-fields';
@@ -1075,7 +1077,7 @@ export function detailFields(
   // with other top level fields. And if I click on one show the detailed
   // estimation computation."* (Bryan, 2026-08-30.) It replaced one prose
   // field that spent a whole row on the calibration sentence.
-  const effort = effortFields(task, calibration, calibrationGoal);
+  const effort = showEstimates ? effortFields(task, calibration, calibrationGoal) : null;
   if (effort) {
     cell('Hands-on', effort.handsOn);
     cell('Wall clock', effort.wallClock);

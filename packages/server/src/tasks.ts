@@ -9,6 +9,7 @@ import type { BoardEmbeds } from '@claude-workspaces/core/board-embeds';
 import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
 import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import type { ReviewRefusalKind } from '@claude-workspaces/core/review-refusal';
+import { estimatesShown } from '@claude-workspaces/core/show-estimates';
 import type {
   ArtifactCheck,
   GoalListEntry,
@@ -441,6 +442,13 @@ export interface BoardWorkspace {
    * on the visitor allowlist).
    */
   notesHome?: WorkspaceNotesHome;
+  /**
+   * Whether people reading this board see its effort estimates — the goal
+   * strip and a task's Hands-on / Wall clock (Bryan, 1 Nov). Absent is OFF,
+   * so every board that predates the setting hides them. Stored only when on;
+   * `estimatesShown` in `@claude-workspaces/core/show-estimates` is the reader.
+   */
+  showEstimates?: true;
   createdAt: number;
 }
 
@@ -3161,6 +3169,31 @@ export class TaskStore {
     state.workspace.notesHome = home;
     this.scheduleSave(workspaceId);
     return { ok: true, workspace: state.workspace, ...(home ? { notesHome: home } : {}) };
+  }
+
+  /** Whether this board shows its estimates. False for a board that never
+   *  set it, and for one that does not exist. */
+  showEstimates(workspaceId: string): boolean {
+    return estimatesShown(this.workspaces.get(workspaceId)?.workspace);
+  }
+
+  /**
+   * Turn this board's estimates on or off for everyone reading it. A settings
+   * write, not a board event: the caller re-projects the board doc, which is
+   * how every open page learns of it. Off clears the field rather than storing
+   * `false`, so an off board reads exactly like one that never set it.
+   */
+  setShowEstimates(
+    workspaceId: string,
+    show: boolean,
+    _opts: { actor: { id: string; name: string; kind?: string } },
+  ): { ok: true; showEstimates: boolean } | { ok: false; error: 'workspace-not-found' } {
+    const state = this.workspaces.get(workspaceId);
+    if (!state) return { ok: false, error: 'workspace-not-found' };
+    if (show) state.workspace.showEstimates = true;
+    else state.workspace.showEstimates = undefined;
+    this.scheduleSave(workspaceId);
+    return { ok: true, showEstimates: show };
   }
 
   /**
