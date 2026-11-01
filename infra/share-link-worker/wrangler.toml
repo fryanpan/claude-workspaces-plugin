@@ -1,7 +1,8 @@
-# Deploy config for the share-link edge Worker (see README.md).
-# `npx wrangler deploy` from this directory creates/updates the Worker AND
-# binds the routes below. The secret is set separately, never in this file:
-#   npx wrangler secret put SHARE_LINK_KEY < ../../data/share-url.key
+# The share-link edge Worker's routes (see README.md). Copy this file to
+# wrangler.local.toml (gitignored) with the real hostnames: `bun run cf:apply`
+# (infra/cloudflare) reads the routes from there and deploys the Worker. The
+# secret is set separately, never in this file:
+#   npx wrangler secret put SHARE_LINK_KEY -c wrangler.local.toml < ../../data/share-url.key
 name = "share-link-gate"
 main = "worker.js"
 compatibility_date = "2026-08-01"

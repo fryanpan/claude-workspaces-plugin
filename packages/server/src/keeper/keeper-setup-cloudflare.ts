@@ -2,13 +2,19 @@
  * The Cloudflare half of `keeper-setup.ts`: the permissions the keeper's
  * token needs, making that token with the current one, and the account id.
  *
- * The list is the union of what the callers through the keeper use:
- * sharing (Access applications), `machine:deploy` (the Access reads and the
- * named tunnel, `docs/process/project-machine.md`), `router:deploy` (zone,
- * DNS, certificates, routes, `infra/board-router-worker/README.md`) and
- * `access:apply` (`infra/access-apps/README.md`). The new token gets no
- * API Tokens permission: the keeper refuses every token write anyway, and a
- * token that cannot make tokens cannot be turned into a wider one.
+ * The list is the union of what the callers through the keeper used:
+ * sharing (Access applications), `machine:deploy` (the Access reads,
+ * `docs/process/project-machine.md`), and the router deploy and
+ * `access:apply`, which `infra/cloudflare/` has since replaced. The new token
+ * gets no API Tokens permission: the keeper refuses every token write
+ * anyway, and a token that cannot make tokens cannot be turned into a wider
+ * one.
+ *
+ * Making this token is the one Cloudflare change that is not in the OpenTofu
+ * config, on purpose. A `cloudflare_api_token` resource keeps the token's
+ * value in the state file, which this user, and so every agent, can read;
+ * the keeper exists so that no file they can read holds it. The person's
+ * confirmation in `keeper-setup.ts` stays the gate.
  */
 
 const CF_API = 'https://api.cloudflare.com/client/v4';

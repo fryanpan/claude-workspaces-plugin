@@ -109,7 +109,7 @@ Organizations, Identity Providers, and Groups Read on the account. Through
 the keeper both reads run without a passkey. `--access-config <path>` reads another file in place of
 `access.local.json`. A project that file does not list gets only the owner
 address. A project whose Access application does not exist yet (`bun run
-access:apply --apply` makes it) gets the owner and the public address, and
+cf:apply` makes it) gets the owner and the public address, and
 the run says which settings it left unset; it does not fail. Two applications
 of the name stop the run before anything changes.
 
@@ -131,37 +131,41 @@ machine start, with no Cloudflare account. Its visitors carry `cf-ray` and no
 Access identity, so the server answers them `403 unknown_host` on every
 path. It proves the machine can be reached; it is not a way in.
 
-`--tunnel named` is the production path. Before it touches Fly, the deploy
-reads Cloudflare and does only what is missing there:
+`--tunnel named` is the production path. `machine:deploy` changes no
+Cloudflare configuration; `bun run cf:apply` (`infra/cloudflare/README.md`)
+does, for every project in `router.local.json` whose origin is
+`<project>-origin.<zone>`. So the order is: add
+`"<project>": "<project>-origin.<zone>"` to the router's `projects`, run
+`bun run cf:plan`, read it, run `bun run cf:apply`, then `machine:deploy
+--tunnel named`. The apply makes:
 
 1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a
-   file on the machine. The zone and its account come from the zone lookup
-   of `router.local.json`'s `zone`.
+   file on the machine.
 2. The tunnel's ingress: the project's own hostname,
    `<project>-<first label of the one address>.<zone>` (so
    `riverbend-workspaces.<zone>` beside `workspaces.<zone>`), to
    `http://localhost:8787`, and a 404 for every other hostname. That is the
    Host header the router Worker sends.
 3. The origin hostname `<project>-origin.<zone>`: a proxied CNAME to
-   `<tunnel id>.cfargotunnel.com`.
-4. The tunnel's token, read from Cloudflare into memory and set as the
-   machine's `CLOUDFLARE_TUNNEL_TOKEN` through `fly secrets import` on stdin.
-   A run that creates the tunnel sets it again, since the old value belongs
-   to a tunnel that no longer exists. A machine that ran a quick tunnel loses
-   its `CW_TUNNEL_MODE` secret, so it starts the named one.
+   `<tunnel id>.cfargotunnel.com`, and the project hostname's record and
+   route for the router Worker.
 
-It stops, having changed nothing anywhere, when it finds two live tunnels of
-the name, a tunnel configured from a file, a record at the origin hostname
-that is not a proxied CNAME to this tunnel, or an Access application covering
-the origin hostname. It never repoints or deletes what it finds. The last
-lines name the origin hostname and the entry to add to the router's
-`projects` before `bun run router:deploy`.
+Before tofu runs, the wrapper stops, having changed nothing, when it finds two
+live tunnels of the name, a tunnel configured from a file, a record at the
+origin hostname that is not a proxied CNAME to this tunnel, or an Access
+application covering the origin hostname.
 
-The Cloudflare token needs, on top of what `router:deploy` uses: Cloudflare
-Tunnel Edit and Access: Apps and Policies Read on the account, and DNS Edit on
-the zone. What stays a person's step: the project's Access application on its
-own hostname (`bun run access:apply --apply`) and the router entry. The
-server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
+`machine:deploy` then reads the tunnel's id from the OpenTofu state, refusing
+with the entry to add when the state has none, reads the tunnel's token from
+Cloudflare into memory, and sets it as the machine's
+`CLOUDFLARE_TUNNEL_TOKEN` through `fly secrets import` on stdin. A tunnel
+remade by `cf:apply` has a new token: pass `--refresh-tunnel-token` to set it
+again. A machine that ran a quick tunnel loses its `CW_TUNNEL_MODE` secret,
+so it starts the named one.
+
+`machine:deploy`'s Cloudflare reads need Access: Apps and Policies Read and
+Cloudflare Tunnel Read on the account; what `cf:apply` needs is in its README.
+The server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
 ("The owner and Access settings", above).
 
 ### Checking it

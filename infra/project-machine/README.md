@@ -51,10 +51,10 @@ overwrite case ever matters more than one bill.
 `packages/server/test/project-machine-deploy.test.ts` holds the deploy's
 decisions: names, which steps a run plans for each state, the fly.toml it
 writes, and how it reads Fly's and Tigris's output. No test calls Fly.
-`project-machine-tunnel.test.ts` holds the named tunnel's decisions
-(`tunnel-plan.ts`): which Cloudflare steps a run plans for each state, what
-stops it, the bodies it sends, and how it reads Cloudflare's answers, from
-recorded response shapes. No test calls Cloudflare.
+`project-machine-tunnel.test.ts` holds the named tunnel's readers
+(`tunnel-plan.ts`, `tunnel.ts`): the names, how the tunnel `cf:apply` made is
+read from the OpenTofu state, and the token answer. The tunnel itself is
+`infra/cloudflare/`'s, tested there. No test calls Cloudflare.
 `project-machine-restore.test.ts` builds a data dir through a real server,
 with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
@@ -65,5 +65,5 @@ byte and reads the board back from a second server.
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
 program, and checks which user each child runs as and which secrets it holds. The image, the Fly deploy and the Tigris calls are proved by
-`machine:drill`, not by a test; the Cloudflare calls by a real
-`--tunnel named` deploy.
+`machine:drill`, not by a test; the Cloudflare configuration by
+`bun run cf:plan` against the real account.
