@@ -35,10 +35,11 @@
  *
  * With `--tunnel named` it gives the machine the token of the tunnel
  * `cw-<name>` as CLOUDFLARE_TUNNEL_TOKEN. Terraform makes the tunnel, its
- * ingress and its origin hostname (`infra/cloudflare/modules/tunnel`), and
- * this reads the tunnel and its token from `terraform output`
- * (`tunnel-plan.ts`): it makes no Cloudflare call. A tunnel Terraform remade
- * has a new token: `--refresh-tunnel-token` sets it again.
+ * ingress and its origin hostname (`infra/cloudflare/modules/tunnel`). This
+ * reads the tunnel's id from `terraform output` and, only when the secret is
+ * to be set, its token from Cloudflare's API (`tunnel-plan.ts`); the token is
+ * kept out of the state. A tunnel Terraform remade has a new token:
+ * `--refresh-tunnel-token` sets it again.
  *
  * In CI (`.github/workflows/cloudflare.yml`) it runs with CW_SECRETS_FROM_ENV=1
  * and every Keychain entry handed in as an environment variable
@@ -76,6 +77,7 @@ import {
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
 import {
+  cloudflareClient,
   fly,
   flyJson,
   flyLive,
@@ -94,7 +96,12 @@ import {
   hasLifecycle,
   setLifecycle,
 } from './tigris.ts';
-import { type AppliedTunnel, TUNNEL_TOKEN_SECRET, appliedTunnel } from './tunnel-plan.ts';
+import {
+  type AppliedTunnel,
+  TUNNEL_TOKEN_SECRET,
+  appliedTunnel,
+  readTunnelToken,
+} from './tunnel-plan.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
@@ -317,6 +324,18 @@ export interface DeployOptions {
   tfEnv?: TfEnv;
   /** Set CLOUDFLARE_TUNNEL_TOKEN again, after Terraform remade the tunnel. */
   refreshTunnelToken?: boolean;
+  /** Reads a tunnel's token; a test's stand-in. Default: Cloudflare's API. */
+  tunnelToken?: (t: AppliedTunnel) => Promise<string>;
+}
+
+/** The keeper refuses this read, because its answer is a credential. */
+async function apiTunnelToken(t: AppliedTunnel): Promise<string> {
+  if (process.env.CW_KEEPER_URL?.trim()) {
+    throw new Error(
+      "the keeper does not hand out a tunnel's token, so a named tunnel's token cannot be set through it (docs/process/keeper.md)",
+    );
+  }
+  return readTunnelToken(cloudflareClient('machine:deploy (named tunnel)'), t);
 }
 
 /** The steps that make an app, a volume or a credential: the Mac's alone. */
@@ -393,7 +412,13 @@ export async function deployProject(
   }
   if (dryRun) return actions;
   const ctx: RunContext = { org: () => keychainRead('fly-org-slug').trim(), settings };
-  if (tunnel) ctx.tunnelToken = () => tunnel.token();
+  const needsToken = actions.some(
+    (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
+  );
+  if (tunnel && needsToken) {
+    const token = await (opts.tunnelToken ?? apiTunnelToken)(tunnel);
+    ctx.tunnelToken = () => token;
+  }
   for (const a of actions) {
     console.log(`[deploy] ${describe(a)}`);
     await act(cfg, a, ctx);

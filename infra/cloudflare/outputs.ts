@@ -1,8 +1,9 @@
 /**
  * An environment's Terraform outputs, for `machine:deploy`: each project's
  * Access audience and hostnames, the Access team domain, and each project
- * machine's tunnel with its token. `machine:deploy` takes everything it needs
- * from Cloudflare from here and makes no Cloudflare call of its own.
+ * machine's tunnel (account and tunnel id, names). No output is a
+ * credential: `machine:deploy` reads a tunnel's token from the API with the
+ * id it finds here.
  *
  * Reading them needs only the state bucket's credential (`credentials.ts`),
  * never the API token. The -backend-config file is the one `cf:plan` last
@@ -26,6 +27,7 @@ export interface AccessOutput {
 }
 
 export interface TunnelOutput {
+  account_id: string;
   id: string;
   name: string;
   origin: string;
@@ -36,8 +38,6 @@ export interface TfOutputs {
   access: Record<string, AccessOutput>;
   accessTeamDomain: string | null;
   tunnels: Record<string, TunnelOutput>;
-  /** Credentials: held in memory, never printed. */
-  tunnelTokens: Record<string, string>;
 }
 
 type Raw = Record<string, { value?: unknown } | undefined>;
@@ -61,20 +61,15 @@ export function parseOutputs(json: string): TfOutputs {
   const tunnels: Record<string, TunnelOutput> = {};
   for (const [label, v] of Object.entries(record(raw.tunnels?.value))) {
     const t = record(v);
-    if ([t.id, t.name, t.origin, t.public_host].every((x) => typeof x === 'string')) {
+    if ([t.account_id, t.id, t.name, t.origin, t.public_host].every((x) => typeof x === 'string')) {
       tunnels[label] = t as unknown as TunnelOutput;
     }
-  }
-  const tunnelTokens: Record<string, string> = {};
-  for (const [label, v] of Object.entries(record(raw.tunnel_tokens?.value))) {
-    if (typeof v === 'string') tunnelTokens[label] = v;
   }
   const team = raw.access_team_domain?.value;
   return {
     access,
     accessTeamDomain: typeof team === 'string' && team !== '' ? team : null,
     tunnels,
-    tunnelTokens,
   };
 }
 

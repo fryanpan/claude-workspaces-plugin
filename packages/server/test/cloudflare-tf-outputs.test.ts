@@ -133,6 +133,7 @@ const OUTPUT = {
   tunnels: {
     value: {
       riverbend: {
+        account_id: 'f'.repeat(32),
         id: '11111111-2222-4333-8444-555555555555',
         name: 'cw-riverbend',
         origin: 'riverbend-origin.harborlight.test',
@@ -141,21 +142,18 @@ const OUTPUT = {
       saltmarsh: { id: 7 },
     },
   },
-  tunnel_tokens: { value: { riverbend: `tok${'x'.repeat(40)}`, saltmarsh: null } },
 };
 
 describe('the outputs machine:deploy reads', () => {
   it('keeps only well-formed entries', () => {
     const o = parseOutputs(JSON.stringify(OUTPUT));
     expect(Object.keys(o.tunnels)).toEqual(['riverbend']);
-    expect(Object.keys(o.tunnelTokens)).toEqual(['riverbend']);
     expect(o.access.riverbend?.aud).toBe('aud-r');
     expect(o.accessTeamDomain).toBe('harborlight.cloudflareaccess.com');
     expect(parseOutputs('{}')).toEqual({
       access: {},
       accessTeamDomain: null,
       tunnels: {},
-      tunnelTokens: {},
     });
   });
 

@@ -165,8 +165,11 @@ jobs:
     env:
       # machine:deploy takes every Keychain entry from the environment here
       # (infra/project-machine/mac-ops.ts) and only updates machines the Mac
-      # made; it reads the tunnel and Access values from `terraform output`.
+      # made. It reads the tunnel id and Access values from `terraform
+      # output`, and a tunnel's token from the API (never from the state),
+      # only when that secret is to be set.
       CW_SECRETS_FROM_ENV: '1'
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       CW_SECRET_CW_BOARD_OWNER_EMAIL: ${{ secrets.CW_BOARD_OWNER_EMAIL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

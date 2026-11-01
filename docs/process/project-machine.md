@@ -105,8 +105,8 @@ project's own hostname:
 
 Every row but the first comes from the Terraform outputs
 (`infra/cloudflare/outputs.ts`, `terraform output` against the prod state, or
-the environment `--tf-env` names), so deploy makes no Cloudflare call; it
-needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
+the environment `--tf-env` names), so deploy reads no Cloudflare API for
+them; it needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
 or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
 application in the state yet (`bun run cf:apply` makes it) gets only the
 owner address, and the run says which settings it left unset; it does not
@@ -154,10 +154,14 @@ live tunnels of the name, a tunnel configured from a file, a record at the
 origin hostname that is not a proxied CNAME to this tunnel, or an Access
 application covering the origin hostname.
 
-`machine:deploy` then reads the tunnel and its token from `terraform output`,
-refusing with the origin to give it when the state has none, and sets the
-token as the machine's `CLOUDFLARE_TUNNEL_TOKEN` through `fly secrets import`
-on stdin. A tunnel Terraform remade has a new token: pass
+`machine:deploy` then reads the tunnel's account and id from `terraform
+output`, refusing with the origin to give it when the state has none. When
+the machine's `CLOUDFLARE_TUNNEL_TOKEN` is missing or `--refresh-tunnel-token`
+asks for it, it reads the token from Cloudflare's API
+(`cfd_tunnel/<id>/token`, with the Keychain's `cloudflare-api-token`, or
+`CLOUDFLARE_API_TOKEN` when set) and sets it through `fly secrets import` on
+stdin. The token is never in the Terraform state, and the keeper refuses
+this read, because its answer is a credential. A tunnel Terraform remade has a new token: pass
 `--refresh-tunnel-token` to set it again. A machine that ran a quick tunnel
 loses its `CW_TUNNEL_MODE` secret, so it starts the named one.
 
@@ -174,6 +178,7 @@ run. Only these are needed for a machine that already runs:
 | Mac source | In CI |
 | --- | --- |
 | Keychain `fly-org-token` | `FLY_API_TOKEN` |
+| Keychain `cloudflare-api-token` (a tunnel token read only) | `CLOUDFLARE_API_TOKEN` |
 | Keychain `cw-board-owner-email` | `CW_SECRET_CW_BOARD_OWNER_EMAIL` |
 | Keychain `cloudflare-r2-tfstate` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `state/prod/backend.hcl` from the last `cf:plan` | `CLOUDFLARE_ACCOUNT_ID` (and `CF_TFSTATE_BUCKET`) |

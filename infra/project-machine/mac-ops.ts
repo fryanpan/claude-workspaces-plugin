@@ -80,10 +80,13 @@ export function keychainCreate(name: string, value: string): void {
 
 /**
  * The Cloudflare API token, for a deploy script's API calls without the
- * keeper. `cf:plan` reads it through `infra/cloudflare/credentials.ts`.
+ * keeper: CLOUDFLARE_API_TOKEN when set (CI), else the Keychain. `cf:plan`
+ * reads it through `infra/cloudflare/credentials.ts`.
  * Held in memory only.
  */
 export function cloudflareApiToken(): string {
+  const env = process.env.CLOUDFLARE_API_TOKEN?.trim();
+  if (env) return env;
   const entry = 'cloudflare-api-token';
   if (!keychainHas(entry)) throw new Error(`the Keychain has no ${entry}; nothing was changed`);
   return keychainRead(entry).trim();

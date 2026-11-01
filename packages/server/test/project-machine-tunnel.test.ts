@@ -1,7 +1,7 @@
 /**
  * The named tunnel as `machine:deploy` reads it (`infra/project-machine/tunnel-plan.ts`):
- * how it takes the tunnel Terraform made, and its token, out of the
- * outputs, and the machine plan for a named tunnel. Which tunnels and records
+ * how it takes the tunnel Terraform made out of the outputs, reads its token
+ * from the API, and the machine plan for a named tunnel. Which tunnels and records
  * exist is the Terraform config's (`infra/cloudflare/deploys/prod/tests`) and
  * `cloudflare-tf-discover.test.ts`'s. Nothing here calls Cloudflare or Fly.
  */
@@ -13,11 +13,16 @@ import {
   projectConfig,
   requiredSecrets,
 } from '../../../infra/project-machine/deploy-plan.ts';
-import { appliedTunnel, parseTunnelToken } from '../../../infra/project-machine/tunnel-plan.ts';
+import {
+  appliedTunnel,
+  parseTunnelToken,
+  readTunnelToken,
+} from '../../../infra/project-machine/tunnel-plan.ts';
 
 const SHA = 'a'.repeat(40);
 const cfg = projectConfig({ project: 'riverbend', imageLabel: SHA, tunnel: 'named' });
 const TUNNEL_ID = '11111111-2222-4333-8444-555555555555';
+const ACCOUNT = 'a'.repeat(32);
 const TUNNEL_TOKEN = `fixture${'t'.repeat(40)}`;
 
 /** The outputs after Terraform made Riverbend's tunnel. */
@@ -29,6 +34,7 @@ const outputs = (over: Partial<TfOutputs['tunnels'][string]> | null = {}): TfOut
       ? {}
       : {
           riverbend: {
+            account_id: ACCOUNT,
             id: TUNNEL_ID,
             name: 'cw-riverbend',
             origin: 'riverbend-origin.harborlight.test',
@@ -36,19 +42,18 @@ const outputs = (over: Partial<TfOutputs['tunnels'][string]> | null = {}): TfOut
             ...over,
           },
         },
-  tunnelTokens: over === null ? {} : { riverbend: TUNNEL_TOKEN },
 });
 
 describe('the tunnel Terraform made', () => {
-  it('is read from the outputs by project, with its token', () => {
+  it('is read from the outputs by project, with its account', () => {
     const t = appliedTunnel(outputs(), cfg);
-    expect([t.id, t.name, t.origin, t.publicHost]).toEqual([
+    expect([t.accountId, t.id, t.name, t.origin, t.publicHost]).toEqual([
+      ACCOUNT,
       TUNNEL_ID,
       'cw-riverbend',
       'riverbend-origin.harborlight.test',
       'riverbend-workspaces.harborlight.test',
     ]);
-    expect(t.token()).toBe(TUNNEL_TOKEN);
   });
 
   it('is refused, naming the origin to give it, when the state has none', () => {
@@ -69,9 +74,21 @@ describe('the tunnel Terraform made', () => {
     expect(() => appliedTunnel(outputs({ id: '' }), cfg)).toThrow('has no id yet');
   });
 
-  it('refuses a missing token at the moment it is needed, without quoting anything', () => {
-    const t = appliedTunnel({ ...outputs(), tunnelTokens: {} }, cfg);
-    expect(() => t.token()).toThrow('no token for the tunnel');
+  it('is refused when the state names no account', () => {
+    expect(() => appliedTunnel(outputs({ account_id: '' }), cfg)).toThrow('names no account');
+  });
+
+  it("has its token read from the API by the state's ids, never from the state", async () => {
+    const calls: string[] = [];
+    const api = Object.assign(
+      async <T>(method: string, path: string): Promise<T> => {
+        calls.push(`${method} ${path}`);
+        return TUNNEL_TOKEN as T;
+      },
+      { all: async <T>(): Promise<T[]> => [] },
+    );
+    expect(await readTunnelToken(api, appliedTunnel(outputs(), cfg))).toBe(TUNNEL_TOKEN);
+    expect(calls).toEqual([`GET /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL_ID}/token`]);
   });
 });
 
@@ -80,7 +97,7 @@ describe('reading answers', () => {
     const token = `fixture${'x'.repeat(40)}`;
     expect(parseTunnelToken(token)).toBe(token);
     for (const bad of [null, '', { token }, 'short', `${token} ${token}`]) {
-      expect(() => parseTunnelToken(bad)).toThrow('no token for the tunnel');
+      expect(() => parseTunnelToken(bad)).toThrow('without a token');
     }
   });
 

@@ -158,17 +158,20 @@ needs; the bucket, key and endpoint come from `state/<env>/backend.hcl`, which
 the wrapper writes. `use_lockfile` takes a lock object beside the state for
 each apply, so the Mac and CI cannot apply at once.
 
-The state holds hostnames, ids, the Access email lists, and each project
-machine's tunnel token (`modules/tunnel`: `machine:deploy` reads the token
-from `terraform output tunnel_tokens`, which is sensitive). Anyone who can
-read the bucket can read those tokens, so the bucket's R2 tokens are its only
-credentials and the read-only pair is used wherever a write is not needed.
+The state holds hostnames, ids and the Access email lists. It holds no
+credential:
+- No tunnel token. `machine:deploy` reads a tunnel's token from the API with the id in `terraform output tunnels`. Every same-repo pull request's plan holds the read-only state key, and that key must not unlock a token.
+- No tunnel secret. `tunnel_secret` is left unset, so Cloudflare generates it and the provider stores none; `config_src = "cloudflare"` keeps the ingress in Cloudflare.
+- No share-link key. The `SHARE_LINK_KEY` binding is kept by `keep_bindings` and never declared.
+- The Access applications are `self_hosted`, so the one computed secret the provider has (`saas_app.client_secret`) stays empty.
+
+The router Worker's plain-text vars are hostname tables, not secrets.
 
 ## The token's permissions
 
 On the account: Access: Apps and Policies Edit, Access: Service Tokens Read,
-Access: Organizations Read, Cloudflare Tunnel Edit (the tunnel token read
-needs it), Workers Scripts Edit. On the zone: Zone Read, DNS Edit, SSL and
+Access: Organizations Read, Cloudflare Tunnel Edit (`machine:deploy`'s
+tunnel token read needs it; the `deploy-machines` job uses this token), Workers Scripts Edit. On the zone: Zone Read, DNS Edit, SSL and
 Certificates Read, Workers Routes Edit. The plan token has the Read form of
 each.
 
@@ -181,9 +184,10 @@ Keychain entry it would read is an environment variable instead
 (`fly-org-slug` becomes `CW_SECRET_FLY_ORG_SLUG`), the org token is
 `FLY_API_TOKEN`, and no Keychain entry can be made. So CI only updates a
 machine the Mac already made; a run that would make an app, a volume or a
-credential is refused before any change. The tunnel, its token and the Access
-settings come from `terraform output` (`outputs.ts`), so `machine:deploy`
-makes no Cloudflare call.
+credential is refused before any change. The tunnel's id and the Access settings
+come from `terraform output` (`outputs.ts`). The tunnel's token is read from
+Cloudflare's API with `CLOUDFLARE_API_TOKEN`, only when the machine's secret
+is to be set.
 
 ## Tests
 

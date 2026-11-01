@@ -143,8 +143,9 @@ because the Terraform provider cannot send the keeper's request header; once
 section 5 deletes that entry they stop, saying no token is set, until a token
 for them is stored there again. Applying is CI's job
 (`.github/workflows/cloudflare.yml`), so the Mac needs that token only for a
-local plan. `machine:deploy` makes no Cloudflare call: it reads the tunnel
-token and the Access settings from `terraform output`.
+local plan. `machine:deploy` reads the Access settings from `terraform
+output`. It reads a named tunnel's token from the API with the Keychain's
+token, which the keeper refuses because the answer is a credential.
 
 ## 5. Retire the old tokens
 

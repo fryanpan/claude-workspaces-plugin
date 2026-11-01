@@ -10,5 +10,5 @@ Share-link routes are keyed by host without the zone.
 
 Inputs: every value a deployment varies, all without defaults that name a real
 account, zone, host or person (see `variables.tf`). Outputs: `access`,
-`access_team_domain`, `tunnels`, `tunnel_tokens` (sensitive),
+`access_team_domain`, `tunnels`,
 `router_routes`, `share_link_routes`.

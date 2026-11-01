@@ -69,7 +69,6 @@ const outputs = (): TfOutputs => ({
   },
   accessTeamDomain: TEAM,
   tunnels: {},
-  tunnelTokens: {},
 });
 
 /** The bucket's lifecycle read, on loopback. */
@@ -427,6 +426,48 @@ describe('machine:deploy sets the project settings', () => {
     await expect(run(false)).rejects.toThrow('only a deploy on the Mac makes');
     expect(flyCallLines().some((l) => /^(secrets import|deploy|apps create)/.test(l))).toBe(false);
     expect(existsSync(securityCalls)).toBe(false);
+  });
+});
+
+describe('machine:deploy with a named tunnel', () => {
+  const named = projectConfig({ project: 'riverbend', imageLabel: HEAD, tunnel: 'named' });
+  const TUNNEL_TOKEN = `fixture-tunnel-${'t'.repeat(40)}`;
+  const tunnelOutputs = (): TfOutputs => ({
+    ...outputs(),
+    tunnels: {
+      riverbend: {
+        account_id: 'f'.repeat(32),
+        id: '11111111-2222-4333-8444-555555555555',
+        name: named.app,
+        origin: 'riverbend-origin.harborlight.test',
+        public_host: HOST,
+      },
+    },
+  });
+  const deployNamed = (asked: string[]) =>
+    deployProject(named, false, {
+      outputs: tunnelOutputs,
+      tunnelToken: async (t) => {
+        asked.push(`${t.accountId}/${t.id}`);
+        return TUNNEL_TOKEN;
+      },
+    });
+
+  it('reads the token from the API by the output id, onto stdin only, when the secret is missing', async () => {
+    flySecrets(requiredSecrets('named').filter((n) => n !== 'CLOUDFLARE_TUNNEL_TOKEN'));
+    const asked: string[] = [];
+    await deployNamed(asked);
+    expect(asked).toEqual([`${'f'.repeat(32)}/11111111-2222-4333-8444-555555555555`]);
+    expect(readFileSync(imported, 'utf8')).toContain(`CLOUDFLARE_TUNNEL_TOKEN=${TUNNEL_TOKEN}\n`);
+    expect(output.join('\n')).not.toContain(TUNNEL_TOKEN);
+    expect(flyCallLines().join('\n')).not.toContain(TUNNEL_TOKEN);
+  });
+
+  it('reads no token when the secret is already set', async () => {
+    flySecrets(requiredSecrets('named'));
+    const asked: string[] = [];
+    await deployNamed(asked);
+    expect(asked).toEqual([]);
   });
 });
 
