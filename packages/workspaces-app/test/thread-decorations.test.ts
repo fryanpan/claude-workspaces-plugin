@@ -1,4 +1,5 @@
 import { Editor } from '@tiptap/core';
+import { Slice } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
@@ -283,6 +284,74 @@ describe('the pending comment range', () => {
       ranges: [{ id: 't1', from: 1, to: 6, status: 'open' }],
     });
     expect(pending(editor)).toBe('brave');
+    editor.destroy();
+  });
+});
+
+/**
+ * A remote update reaches the editor as ONE step replacing the whole document
+ * (`y-prosemirror`'s `_typeChanged`). Mapped through that step's own map every
+ * position goes to one end of the doc, so the highlight collapsed and the
+ * in-flow card left the document for that view update — taking the caret out
+ * of the reply box the reader was typing in.
+ */
+describe('a remote update that replaces the whole document', () => {
+  const CONTENT = '<p>Hello brave world</p><p>Second paragraph here</p>';
+
+  /** What `_typeChanged` dispatches: the new document as one whole replace. */
+  function remoteReplace(editor: Editor, html: string): void {
+    const incoming = mount(html);
+    const { state } = editor;
+    // Rebuilt in this editor's schema: a node from another editor's schema
+    // is not one ProseMirror will place.
+    const doc = state.schema.nodeFromJSON(incoming.state.doc.toJSON());
+    incoming.destroy();
+    editor.view.dispatch(state.tr.replace(0, state.doc.content.size, new Slice(doc.content, 0, 0)));
+    expect(editor.state.doc.childCount).toBe(doc.childCount);
+  }
+
+  function mountWithCard(): { editor: Editor; el: HTMLElement } {
+    const editor = mount(CONTENT);
+    const el = document.createElement('div');
+    el.className = 'thread';
+    el.setAttribute('data-thread-id', 't1');
+    setThreadDecorations(editor.view, {
+      ranges: [{ id: 't1', from: 7, to: 12, status: 'open' }],
+      inlineCards: [{ id: 't1', el }],
+    });
+    return { editor, el };
+  }
+
+  it('keeps the highlight on its words when blocks land above them', () => {
+    const { editor } = mountWithCard();
+    remoteReplace(editor, `<p>Harborlight pilots board.</p><h2>Rota</h2>${CONTENT}`);
+    expect(highlighted(editor, 't1')).toBe('brave');
+    editor.destroy();
+  });
+
+  it('keeps the highlight when the commented paragraph changes around it', () => {
+    const { editor } = mountWithCard();
+    remoteReplace(editor, '<p>Hello brave world, Riverbend.</p><p>Second paragraph here</p>');
+    expect(highlighted(editor, 't1')).toBe('brave');
+    editor.destroy();
+  });
+
+  it('keeps the card in the document through the update, under its block', () => {
+    // ProseMirror may still MOVE the card's element while it re-lays the
+    // blocks out (`keepComposerFocusThroughEdits` answers that half); what
+    // this plugin owes is that the card is still one of the update's
+    // decorations, so the update ends with it in place.
+    const { editor, el } = mountWithCard();
+    remoteReplace(editor, `<p>Harborlight pilots board.</p>${CONTENT}`);
+    expect(el.isConnected).toBe(true);
+    expect(el.previousElementSibling?.textContent).toBe('Hello brave world');
+    editor.destroy();
+  });
+
+  it('maps through a replace that changed nothing', () => {
+    const { editor } = mountWithCard();
+    remoteReplace(editor, CONTENT);
+    expect(highlighted(editor, 't1')).toBe('brave');
     editor.destroy();
   });
 });
