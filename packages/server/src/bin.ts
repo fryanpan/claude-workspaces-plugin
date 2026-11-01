@@ -6,6 +6,7 @@ import { readDiscovery } from '@claude-workspaces/core/discovery-file';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
+import { shutdownExitCode } from './deploy-restart.ts';
 import { homeRemotesFromEnv } from './home-remotes.ts';
 import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
@@ -509,6 +510,8 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     if (pluginRefreshTimer) clearInterval(pluginRefreshTimer);
     await handle.stop();
     await flushServerSentry();
-    process.exit(0);
+    // Non-zero after a deploy asked for a restart, so the supervisor exits
+    // non-zero and launchd relaunches it; 0 for any other stop.
+    process.exit(shutdownExitCode());
   });
 }

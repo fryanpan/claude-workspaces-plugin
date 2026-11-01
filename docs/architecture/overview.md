@@ -1951,6 +1951,13 @@ verb and `scripts/serve.ts` run one copy: the verb installs before the restart
 it schedules, and the supervisor installs before it builds or boots, which
 covers the manual pull-and-kickstart fallback the verb never sees.
 
+`deploy-restart.ts` joins Ops beside it and moves no boundary; the `deploy*.ts`
+glob draws it. It is how the deploy verb restarts the server: a graceful
+shutdown that exits 75, which `scripts/serve.ts` turns into its own non-zero
+exit, so launchd's KeepAlive relaunches the job. It replaced a `launchctl
+kickstart -k`, after which the supervisor exited 0 and stayed down whenever
+launchd did not complete the kickstart.
+
 `supervisor-reap.ts` joins Ops beside them and moves no boundary. It is the
 SIGTERM-then-SIGKILL sequence `scripts/serve.ts` runs on its children before it
 exits, moved out of the script so a test can drive it, and it imports nothing

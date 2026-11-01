@@ -46,6 +46,7 @@ import {
   installBeforeBoot,
   supervisorInstallGate,
 } from '../packages/server/src/dependency-install.ts';
+import { DEPLOY_RESTART_EXIT_CODE } from '../packages/server/src/deploy-restart.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
 import { resolveStartContract } from '../packages/server/src/start-contract.ts';
 
@@ -432,9 +433,11 @@ process.on('exit', () => {
 const FAST_CRASH_MS = 30_000;
 const FAST_CRASH_HOLD_MS = 20_000;
 const spawnedAt = Date.now();
-server.on('exit', () => {
+server.on('exit', (code) => {
   const uptimeMs = Date.now() - spawnedAt;
-  if (cleaningUp || uptimeMs >= FAST_CRASH_MS) {
+  // A deploy restart is the server asking to be relaunched, not a crash: no
+  // hold, whatever its age (deploy-restart.ts).
+  if (cleaningUp || code === DEPLOY_RESTART_EXIT_CODE || uptimeMs >= FAST_CRASH_MS) {
     cleanup(1);
     return;
   }
