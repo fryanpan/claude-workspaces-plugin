@@ -53,6 +53,8 @@ export interface LinkTap {
   opened: string[];
   /** The board tab's URL after the tap. */
   pageUrl: string;
+  /** How far above the list's foot it was scrolled when pressed, in px. */
+  offFoot: number;
 }
 
 export interface LinksWidthRun {
@@ -131,8 +133,11 @@ const BUTTON = `(() => {
   return r && r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
 })()`;
 
-/** The centre of an element inside the chat's shadow root, scrolled into
- *  view first, or null when it is not drawn. */
+/** The centre of an element inside the chat's shadow root, or null when it
+ *  is not drawn. It is scrolled into view, and then to 20px short of the
+ *  list's foot when it stays in view there: inside the 40px in which the
+ *  chat follows the conversation down, where a redraw that pulled the list
+ *  to its foot would move the link out from under the press. */
 const centreOf = (selector: string): string => `(() => {
   const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
   const pane = sr && sr.querySelector('.lc-pane');
@@ -140,9 +145,19 @@ const centreOf = (selector: string): string => `(() => {
   const el = sr.querySelector(${JSON.stringify(selector)});
   if (!el) return null;
   el.scrollIntoView({ block: 'center' });
+  const list = sr.querySelector('.lc-list');
+  const box = list.getBoundingClientRect();
+  const was = list.scrollTop;
+  const shy = list.scrollHeight - list.clientHeight - 20;
+  if (shy > 0) {
+    list.scrollTop = shy;
+    const s = el.getBoundingClientRect();
+    if (s.top < box.top || s.bottom > box.bottom) list.scrollTop = was;
+  }
   const r = el.getBoundingClientRect();
   if (r.width === 0) return null;
-  return { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2, href: el.getAttribute('href') };
+  const offFoot = Math.round(list.scrollHeight - list.clientHeight - list.scrollTop);
+  return { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2, href: el.getAttribute('href'), offFoot };
 })()`;
 
 type Mouse = 'mousePressed' | 'mouseReleased';
@@ -302,10 +317,11 @@ async function main(): Promise<void> {
             x: number;
             y: number;
             href: string | null;
+            offFoot: number;
           } | null;
         }).catch(() => null);
         if (!link) {
-          taps.push({ name, href: null, opened: [], pageUrl: homeUrl });
+          taps.push({ name, href: null, opened: [], pageUrl: homeUrl, offFoot: -1 });
           continue;
         }
         const before = new Set((await tabs(port)).map((t) => t.id));
@@ -340,7 +356,7 @@ async function main(): Promise<void> {
         for (const t of await tabs(port)) {
           if (!before.has(t.id)) await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`);
         }
-        taps.push({ name, href: link.href, ...landed });
+        taps.push({ name, href: link.href, offFoot: link.offFoot, ...landed });
       }
       widths.push({ width, docPath, taps });
       cdp.close();

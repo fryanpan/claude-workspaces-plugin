@@ -1,7 +1,7 @@
 /**
  * A link in the lead's reply opens its doc when tapped, even when the chat
  * redraws under the finger — which it does on every word the listener hears
- * while voice is on (Bryan, 1 Nov: "Your links don't work in chat in
+ * while voice is on, and on every frame about a message (Bryan, 1 Nov: "Your links don't work in chat in
  * board"). Absolute and root-relative links, in a spoken reply and a typed
  * one, on a board's Home at 1180x820 and 430x932.
  * `lead-chat-links-browser-driver.ts` does the tapping against a real server;
@@ -54,6 +54,16 @@ describe.skipIf(CHROME === null)('a link in the lead’s reply, tapped', () => {
       for (const t of w.taps) {
         expect(t.href && new URL(t.href).pathname, `${w.width} ${t.name}`).toBe(w.docPath);
       }
+    }
+  }, 60_000);
+
+  it('presses some links just short of the list’s foot, where the chat follows the conversation down', () => {
+    // CONTROL: the hard case is exercised. A redraw there that pulled the
+    // list to its foot would move the link out from under the press.
+    for (const w of result().widths) {
+      expect(w.taps.filter((t) => t.offFoot === 20).length, String(w.width)).toBeGreaterThanOrEqual(
+        2,
+      );
     }
   }, 60_000);
 
