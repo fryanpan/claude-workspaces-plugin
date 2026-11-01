@@ -14,6 +14,7 @@
  * the modal, or the desktop drawer), and only this module knows all four.
  */
 import { suggestOps } from '@claude-workspaces/core';
+import type { Node as ProseNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import { balloonMarginVisible } from '../card-placement.ts';
 import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
@@ -49,40 +50,47 @@ export interface DocMarginHandle {
 }
 
 /**
- * Names a top-level block of the prose by where it sits in the shared Yjs
- * document — a relative position on its first character — so the reading
- * hold can find the block's element after a remote update has rebuilt the
- * view around it (`reading-hold.ts`, `BlockLocator`). Anything that is not a
- * top-level node of the prose (an in-flow card, the live zone, a widget) is
+ * Names a top-level block of the prose by its ProseMirror node, so the
+ * reading hold can find the block's element after a remote update has
+ * rewritten the view around it (`reading-hold.ts`, `BlockLocator`). The sync
+ * plugin hands back the SAME node object for every block the update did not
+ * touch, so the node is the line; a block the update rewrote is a new node,
+ * is not found, and the hold rides the next line it was holding. Anything
+ * that is not a top-level node of the prose (an in-flow card, a widget) is
  * not named and is held by its element.
  */
 function proseBlockLocator(editor: EditorHandle): BlockLocator {
   const view = editor.editor.view;
+  /** Where each top-level node of one document starts, built once per
+   *  document: the hold asks after every mutation, for up to four lines. */
+  let index: { doc: ProseNode; at: Map<ProseNode, number> } | null = null;
+  const offsetOf = (node: ProseNode): number | undefined => {
+    const doc = view.state.doc;
+    if (index?.doc !== doc) {
+      const at = new Map<ProseNode, number>();
+      doc.forEach((child, offset) => at.set(child, offset));
+      index = { doc, at };
+    }
+    return index.at.get(node);
+  };
   return {
     mark: (el) => {
       if (el.parentElement !== view.dom) return null;
       try {
-        const inside = view.posAtDOM(el, 0);
-        // The element of the node starting just before `inside`: a widget's
-        // element answers a position too, and is not a block of the doc.
-        if (view.nodeDOM(inside - 1) !== el) return null;
-        const end = Math.min(inside + 1, view.state.doc.content.size);
-        return editor.rangeRel(inside, end);
+        const before = view.posAtDOM(el, 0) - 1;
+        // A widget's element answers a position too: only the element of the
+        // node that starts there is a block of the doc.
+        if (view.nodeDOM(before) !== el) return null;
+        return view.state.doc.nodeAt(before);
       } catch {
         return null;
       }
     },
     find: (mark) => {
-      const rel = mark as { start: Uint8Array; end: Uint8Array };
-      const range = editor.resolveRel(rel.start, rel.end);
-      if (!range) return null;
-      try {
-        let node: Node | null = view.domAtPos(range.from).node;
-        while (node && node.parentNode !== view.dom) node = node.parentNode;
-        return node instanceof Element ? node : null;
-      } catch {
-        return null;
-      }
+      const offset = offsetOf(mark as ProseNode);
+      if (offset === undefined) return null;
+      const dom = view.nodeDOM(offset);
+      return dom instanceof Element ? dom : null;
     },
   };
 }

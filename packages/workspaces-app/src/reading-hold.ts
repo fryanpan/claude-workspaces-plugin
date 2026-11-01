@@ -52,8 +52,9 @@ import type { MountScope } from './mount-scope.ts';
  * blocks inserted above a reader typing a comment: the held element, now
  * showing another paragraph, read -216px, so the hold scrolled the wrong way
  * and the commented words ended 488px below where they had been. A locator
- * that names the line by where it sits in the shared document finds the
- * element showing it now.
+ * names the line by something that survives the rewrite — the doc uses the
+ * block's ProseMirror node (`doc-margin.ts`) — and finds the element showing
+ * it now.
  */
 export interface BlockLocator {
   /** A name for the line `el` shows, or null when it is not one the locator
