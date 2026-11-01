@@ -22,6 +22,7 @@ import type { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { BlockIdentity } from './block-identity.ts';
 import { CommentDeleteGuard } from './comment-delete-guard.ts';
+import { keepComposerFocusThroughEdits } from './composer-keep.ts';
 import { docAssetsBase, docImageExtension } from './doc-image-src.ts';
 import { docImagePaste, pickDocImages } from './doc-image-upload.ts';
 import { workspaceIdFromPath } from './doc-path.ts';
@@ -357,6 +358,7 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     window.open(href, '_blank', 'noopener,noreferrer');
   };
   editor.view.dom.addEventListener('click', onLinkClick);
+  keepComposerFocusThroughEdits(editor);
 
   function syncState() {
     return ySyncPluginKey.getState(editor.state);

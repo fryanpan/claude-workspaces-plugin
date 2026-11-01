@@ -19,7 +19,7 @@ import { balloonMarginVisible } from '../card-placement.ts';
 import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
-import { mountReadingHold } from '../reading-hold.ts';
+import { type BlockLocator, mountReadingHold } from '../reading-hold.ts';
 import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-margin.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
@@ -48,6 +48,45 @@ export interface DocMarginHandle {
   scheduleRelayout: () => void;
 }
 
+/**
+ * Names a top-level block of the prose by where it sits in the shared Yjs
+ * document — a relative position on its first character — so the reading
+ * hold can find the block's element after a remote update has rebuilt the
+ * view around it (`reading-hold.ts`, `BlockLocator`). Anything that is not a
+ * top-level node of the prose (an in-flow card, the live zone, a widget) is
+ * not named and is held by its element.
+ */
+function proseBlockLocator(editor: EditorHandle): BlockLocator {
+  const view = editor.editor.view;
+  return {
+    mark: (el) => {
+      if (el.parentElement !== view.dom) return null;
+      try {
+        const inside = view.posAtDOM(el, 0);
+        // The element of the node starting just before `inside`: a widget's
+        // element answers a position too, and is not a block of the doc.
+        if (view.nodeDOM(inside - 1) !== el) return null;
+        const end = Math.min(inside + 1, view.state.doc.content.size);
+        return editor.rangeRel(inside, end);
+      } catch {
+        return null;
+      }
+    },
+    find: (mark) => {
+      const rel = mark as { start: Uint8Array; end: Uint8Array };
+      const range = editor.resolveRel(rel.start, rel.end);
+      if (!range) return null;
+      try {
+        let node: Node | null = view.domAtPos(range.from).node;
+        while (node && node.parentNode !== view.dom) node = node.parentNode;
+        return node instanceof Element ? node : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   const { docId, ydoc, scope, editor, editorMount, chrome } = opts;
 
@@ -56,7 +95,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // note landing above the fold moves the text the cards are drawn against,
   // and moving the pane by the same amount is what leaves the reader where
   // they were.
-  mountReadingHold({ scroller: editorMount, scope });
+  mountReadingHold({ scroller: editorMount, scope, locator: proseBlockLocator(editor) });
 
   // The balloon margin: plain markdown docs get comment balloons only (no
   // git base, so no deletions) — reuses the same mount as the redline
