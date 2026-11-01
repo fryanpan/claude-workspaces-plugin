@@ -1,0 +1,190 @@
+# Cloudflare's configuration, deployed by Terraform (infra/cloudflare/README.md).
+#
+#   pull request  fmt, validate and the plan tests; then a plan for prod,
+#                 summarised on the PR. Skipped, not failed, when the plan
+#                 secrets are absent (a fork's PR, or before they are set).
+#   push to main  the same check, then apply to prod in the GitHub Environment
+#                 `cloudflare-prod`, then `machine:deploy` for every project
+#                 machine in infra/project-machine/machines.json.
+#
+# The repo is public, so these logs are too. terraform's own output is not
+# printed: a plan is reported as resource addresses and verbs only
+# (infra/cloudflare/plan-summary.ts), and addresses carry no hostname.
+#
+# Secrets, by name (README.md, "CI"). The same names are set twice: the
+# repository's copies are read-only and are what a pull request's plan gets;
+# the `cloudflare-prod` environment's copies (deployments from main only)
+# can write, and GitHub gives an environment secret precedence over a
+# repository secret of the same name in the jobs that use the environment.
+#   CLOUDFLARE_API_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   both
+#   CF_ROUTER_CONFIG, CF_ACCESS_CONFIG, CF_SHARE_LINK_CONFIG       repository
+#   CLOUDFLARE_ACCOUNT_ID, FLY_API_TOKEN, CW_BOARD_OWNER_EMAIL     cloudflare-prod
+# Variable (optional): CF_TFSTATE_BUCKET, default claude-workspaces-tfstate.
+#
+# This file is outside `bun run verify:parity`, which reads ci.yml only: its
+# one gate, check:cloudflare-tf, is also a step of ci.yml's gates job.
+
+name: cloudflare
+
+on:
+  pull_request:
+    paths:
+      - infra/cloudflare/**
+      - infra/board-router-worker/worker.js
+      - infra/share-link-worker/worker.js
+      - .github/workflows/cloudflare.yml
+  push:
+    branches: [main]
+    paths:
+      - infra/cloudflare/**
+      - infra/board-router-worker/worker.js
+      - infra/share-link-worker/worker.js
+      - .github/workflows/cloudflare.yml
+
+permissions: {}
+
+env:
+  TF_IN_AUTOMATION: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Formatted, valid, and the plan tests pass
+        run: bun run check:cloudflare-tf
+
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    # The S3 backend reads the R2 key pair under the AWS names.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
+      CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
+      CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
+      CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+    steps:
+      - name: Plan secrets are present
+        id: secrets
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$CF_ROUTER_CONFIG" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No plan: the plan secrets are not available to this run (a fork's pull request, or not set yet)."
+          fi
+      - if: steps.secrets.outputs.present == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - if: steps.secrets.outputs.present == 'true'
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - if: steps.secrets.outputs.present == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.secrets.outputs.present == 'true'
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Plan prod
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          CF_PLAN_SUMMARY: ${{ runner.temp }}/plan.md
+        run: bun infra/cloudflare/run.ts plan prod --ci
+      - name: Post the plan summary
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/plan.md"
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    environment: cloudflare-prod
+    concurrency:
+      group: cloudflare-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    # The S3 backend reads the R2 key pair under the AWS names.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
+      CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
+      CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
+      CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Apply prod
+        run: bun infra/cloudflare/run.ts apply prod --ci
+
+  deploy-machines:
+    needs: apply
+    runs-on: ubuntu-latest
+    environment: cloudflare-prod
+    concurrency:
+      group: fly-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      # machine:deploy takes every Keychain entry from the environment here
+      # (infra/project-machine/mac-ops.ts) and only updates machines the Mac
+      # made; it reads the tunnel and Access values from `terraform output`.
+      CW_SECRETS_FROM_ENV: '1'
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      CW_SECRET_CW_BOARD_OWNER_EMAIL: ${{ secrets.CW_BOARD_OWNER_EMAIL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      - name: Deploy each project machine
+        run: bun infra/project-machine/machines.ts deploy --ref "$GITHUB_SHA"
