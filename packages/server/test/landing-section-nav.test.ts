@@ -78,7 +78,7 @@ describe("Home's section bar", () => {
     const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
     const nav = await navOf(await landing(owner.headers));
     expect(nav).toEqual([
-      { id: 'landing-review', label: 'Review items', onPage: true, icon: true },
+      { id: 'landing-review', label: 'Review', onPage: true, icon: true },
       { id: 'inbox', label: 'Inbox', onPage: true, icon: true },
       { id: 'landing-boards', label: 'Projects', onPage: true, icon: true },
       { id: 'coach', label: 'Coach', onPage: true, icon: true },
@@ -88,16 +88,13 @@ describe("Home's section bar", () => {
   it('gives another signed-in person no Inbox or Coach entry', async () => {
     const alice = signedInPerson(handle, dataDir, base, { email: 'alice@harborlight.test' });
     expect((await navOf(await landing(alice.headers))).map((e) => e.label)).toEqual([
-      'Review items',
+      'Review',
       'Projects',
     ]);
   });
 
   it('gives a request that proves nobody no Inbox or Coach entry', async () => {
-    expect((await navOf(await landing())).map((e) => e.label)).toEqual([
-      'Review items',
-      'Projects',
-    ]);
+    expect((await navOf(await landing())).map((e) => e.label)).toEqual(['Review', 'Projects']);
   });
 
   it('draws one bar, so the old text bar at the top is gone', async () => {

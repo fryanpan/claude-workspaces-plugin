@@ -350,7 +350,7 @@ async function main(): Promise<void> {
       ['Projects', 'top'],
       ['Coach', 'bottom'],
       ['Inbox', 'bottom'],
-      ['Review items', 'bottom'],
+      ['Review', 'bottom'],
     ] as const) {
       const sel = await ev<string>(
         `[...document.querySelectorAll('.home-nav .board-nav-item')].find((a) => a.textContent.trim() === ${JSON.stringify(label)})?.getAttribute('href') ?? ''`,
