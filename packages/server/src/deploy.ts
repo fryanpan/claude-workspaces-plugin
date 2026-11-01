@@ -78,8 +78,6 @@
  *   verdict; a pending record past its deadline reads as failed even if the
  *   watchdog never got to write.
  */
-import { execFile } from 'node:child_process';
-import { userInfo } from 'node:os';
 import { PROD_SERVICE_LABEL } from './claude-key-source.ts';
 import { clientReleaseStatus } from './client-release.ts';
 import { type InstallRunner, spawnBunInstall } from './dependency-install.ts';
@@ -95,6 +93,7 @@ import {
   spawnDeployVerifier,
   writeDeployLog,
 } from './deploy-log.ts';
+import { selfRestart } from './deploy-restart.ts';
 import {
   type DeploySource,
   type GitRunner,
@@ -102,8 +101,8 @@ import {
   readDeploySource,
 } from './deploy-source.ts';
 
-/** The launchd job this machine supervises the server with. Restarting it is
- *  what re-runs `scripts/serve.ts --no-watch`, which rebuilds the browser
+/** The launchd job this machine supervises the server with. A deploy
+ *  restarts it by exiting non-zero (`deploy-restart.ts`), which re-runs `scripts/serve.ts --no-watch`, which rebuilds the browser
  *  bundles and publishes them as the client release the fleet loads. */
 export const LAUNCHD_LABEL = PROD_SERVICE_LABEL;
 
@@ -111,10 +110,6 @@ export const LAUNCHD_LABEL = PROD_SERVICE_LABEL;
  *  that says "restarting" reaches the caller before the process it came
  *  from goes away. */
 export const RESTART_DELAY_MS = 1500;
-
-/** Ceiling on any single git invocation. A hung fetch must not hold the
- *  single-flight slot open forever. */
-const GIT_TIMEOUT_MS = 120_000;
 
 /** How long a busy bound document is given to finish before the deploy
  *  refuses over it. The write-back debounce is ~800ms (`doc-store.ts`), so this
@@ -687,41 +682,6 @@ function spawnGit(cwd: string): GitRunner {
 }
 
 /**
- * Restart the launchd job, a moment from now.
- *
- * `kickstart -k` is the supported way to force-restart a supervised service
- * (`load`/`unload` are deprecated on macOS 11+). No shell: a fixed argv
- * array, for the same reason the plugin refresher uses one — on this machine
- * a shell would resolve `claude` to a function, and the general rule is that
- * nothing a caller sends should ever reach a process.
- *
- * The delay exists so the HTTP response announcing the restart is flushed
- * before the process serving it is killed. Nothing awaits this: the restart
- * ends the reporter.
- */
-export function launchctlRestart(label: string = LAUNCHD_LABEL, delayMs = RESTART_DELAY_MS) {
-  return () => {
-    const target = `gui/${userInfo().uid}/${label}`;
-    const timer = setTimeout(() => {
-      if (process.platform !== 'darwin') {
-        console.error(`[deploy] no launchd on ${process.platform}; restart ${target} skipped`);
-        return;
-      }
-      console.log(`[deploy] restarting ${target}`);
-      execFile(
-        '/bin/launchctl',
-        ['kickstart', '-k', target],
-        { timeout: GIT_TIMEOUT_MS },
-        (err) => {
-          if (err) console.error(`[deploy] launchctl kickstart failed: ${err.message}`);
-        },
-      );
-    }, delayMs);
-    timer.unref?.();
-  };
-}
-
-/**
  * A reader for what the SERVED client was built from, or null when this
  * deployment does not publish one.
  *
@@ -758,7 +718,7 @@ export function createDeployer(opts: {
 }): Deployer {
   const git = spawnGit(opts.repoRoot);
   const logFile = deployLogPath(opts.dataDir);
-  const realRestart = opts.restart ?? launchctlRestart();
+  const realRestart = opts.restart ?? selfRestart(RESTART_DELAY_MS);
   // The watchdog rides the restart: they are scheduled together because the
   // restart is the event whose outcome needs watching, and the process
   // requesting it will not survive to ask.
