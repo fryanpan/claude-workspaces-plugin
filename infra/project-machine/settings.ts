@@ -109,7 +109,7 @@ export async function readSettings(project: string, src: SettingsSources): Promi
   );
   if (apps.length === 0) {
     skipped.push(
-      `${ACCESS_NAMES}: Cloudflare has no Access application "${name}" yet (bun run access:apply --apply)`,
+      `${ACCESS_NAMES}: Cloudflare has no Access application "${name}" yet (bun run cf:apply)`,
     );
     return { settings, skipped };
   }

@@ -1,7 +1,8 @@
 /**
- * The Cloudflare Access applications one-per-project needs, as the request
- * bodies a deploy would send. Pure: nothing here talks to Cloudflare, and
- * nothing in the repo sends these yet (README.md, "Not deployed").
+ * `access.local.json`: which Cloudflare Access application each project
+ * needs and who it admits. Pure: nothing here talks to Cloudflare.
+ * `infra/cloudflare/vars.ts` turns it into the OpenTofu config's variables,
+ * and `infra/cloudflare/access.tf` makes the applications.
  *
  * One application per project, each over that project's own hostnames, so
  * each issues stamps with an audience of its own and a stamp minted for one
@@ -28,32 +29,6 @@ export interface AccessConfig {
   sessionDuration: string;
   /** Project label -> its access. The label only names the application. */
   projects: Record<string, ProjectAccess>;
-}
-
-/** An `include` rule, in the shape Cloudflare's Access API takes. */
-export type IncludeRule =
-  | { email: { email: string } }
-  | { email_domain: { domain: string } }
-  /** Resolved to `{ service_token: { token_id } }` at deploy, by name. */
-  | { service_token_name: string };
-
-export interface AccessPolicy {
-  name: string;
-  decision: 'allow' | 'non_identity';
-  include: IncludeRule[];
-}
-
-/** The body of `POST /accounts/<account>/access/apps` for one project. */
-export interface AccessAppBody {
-  name: string;
-  type: 'self_hosted';
-  domain: string;
-  self_hosted_domains: string[];
-  session_duration: string;
-  app_launcher_visible: false;
-  http_only_cookie_attribute: true;
-  same_site_cookie_attribute: 'lax';
-  policies: AccessPolicy[];
 }
 
 const HOSTNAME =
@@ -122,43 +97,6 @@ export function parseAccessConfig(raw: string): AccessConfig {
     projects[label] = { hosts, emails, emailDomains, serviceTokens };
   }
   return { sessionDuration, projects };
-}
-
-/**
- * One application per project. People and whole domains share one `allow`
- * policy (Access ORs an `include` list); the service tokens get a
- * `non_identity` policy of their own, which admits a token and never a
- * person. A project with nobody listed gets no `allow` policy, so its
- * application admits no person at all rather than everyone.
- */
-export function accessApps(cfg: AccessConfig): AccessAppBody[] {
-  return Object.entries(cfg.projects).map(([label, p]) => {
-    const people: IncludeRule[] = [
-      ...p.emails.map((email) => ({ email: { email } })),
-      ...p.emailDomains.map((domain) => ({ email_domain: { domain } })),
-    ];
-    const policies: AccessPolicy[] = [];
-    if (people.length > 0)
-      policies.push({ name: `${label} people`, decision: 'allow', include: people });
-    if (p.serviceTokens.length > 0) {
-      policies.push({
-        name: `${label} service tokens`,
-        decision: 'non_identity',
-        include: p.serviceTokens.map((name) => ({ service_token_name: name })),
-      });
-    }
-    return {
-      name: `board ${label}`,
-      type: 'self_hosted',
-      domain: p.hosts[0] as string,
-      self_hosted_domains: p.hosts,
-      session_duration: cfg.sessionDuration,
-      app_launcher_visible: false,
-      http_only_cookie_attribute: true,
-      same_site_cookie_attribute: 'lax',
-      policies,
-    };
-  });
 }
 
 /**

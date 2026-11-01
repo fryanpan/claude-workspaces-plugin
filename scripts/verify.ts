@@ -117,6 +117,12 @@ export const MEMBERS: Member[] = [
     ci: 'check:plugin-version',
   },
   {
+    id: 'check:cloudflare-tf',
+    title: 'the Cloudflare OpenTofu config is formatted, valid and plans as its tests say',
+    argv: ['check:cloudflare-tf'],
+    ci: 'check:cloudflare-tf',
+  },
+  {
     id: 'test:audit',
     title: 'the mechanical half of testing-standards.md',
     argv: ['test:audit'],

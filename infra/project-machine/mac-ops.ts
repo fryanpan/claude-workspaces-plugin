@@ -52,7 +52,7 @@ export function keychainCreate(name: string, value: string): void {
 }
 
 /**
- * The Cloudflare API token, for `router:deploy`'s `wrangler deploy` and the
+ * The Cloudflare API token, for `cf:plan` / `cf:apply` and the
  * API calls of a run without the keeper. Every read of it is this one
  * function. Held in memory only.
  */

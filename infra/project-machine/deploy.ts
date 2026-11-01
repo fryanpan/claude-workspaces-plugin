@@ -7,6 +7,7 @@
  *       [--router-config <path>] [--access-config <path>]
  *       [--lead-board <boardId>] [--claude-account <label>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
+       [--refresh-tunnel-token]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -33,9 +34,11 @@
  *   (`settings.ts`), from the Keychain, `access.local.json` and Cloudflare;
  *   each one whose source is missing is skipped with a line saying why
  *
- * With `--tunnel named` it first sets up the project's Cloudflare tunnel
- * `cw-<name>`, its ingress and its origin hostname (`tunnel.ts`), then gives
- * the machine the tunnel's token as CLOUDFLARE_TUNNEL_TOKEN.
+ * With `--tunnel named` it gives the machine the token of the tunnel
+ * `cw-<name>` as CLOUDFLARE_TUNNEL_TOKEN. `bun run cf:apply` makes the
+ * tunnel, its ingress and its origin hostname (`tunnel.ts`); this changes no
+ * Cloudflare configuration. A tunnel remade by cf:apply has a new token:
+ * `--refresh-tunnel-token` sets it again.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
@@ -86,7 +89,7 @@ import {
   setLifecycle,
 } from './tigris.ts';
 import { TUNNEL_TOKEN_SECRET } from './tunnel-plan.ts';
-import { type NamedTunnel, prepareTunnel, routerNames } from './tunnel.ts';
+import { type NamedTunnel, namedTunnel } from './tunnel.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
@@ -356,6 +359,8 @@ export interface DeployOptions {
   accessConfig?: string;
   /** The Cloudflare API the settings are read through; a test's stand-in. */
   cloudflare?: () => CloudflareApi;
+  /** Set CLOUDFLARE_TUNNEL_TOKEN again, after cf:apply remade the tunnel. */
+  refreshTunnelToken?: boolean;
 }
 
 export async function deployProject(
@@ -364,10 +369,10 @@ export async function deployProject(
   routerConfig = ROUTER_CONFIG,
   opts: DeployOptions = {},
 ): Promise<Action[]> {
-  // Cloudflare is read first: a named tunnel that cannot be set up, or
+  // Cloudflare is read first: a named tunnel cf:apply has not made, or
   // Access settings that cannot be read, stop the run before Fly is touched.
   const tunnel: NamedTunnel | undefined =
-    cfg.tunnel === 'named' ? await prepareTunnel(cfg, routerConfig) : undefined;
+    cfg.tunnel === 'named' ? namedTunnel(cfg, routerConfig) : undefined;
   const found = await readSettings(cfg.project, {
     accessConfigPath: opts.accessConfig ?? ACCESS_CONFIG,
     cloudflare: opts.cloudflare ?? (() => cloudflareClient('machine:deploy (Access settings)')),
@@ -376,19 +381,11 @@ export async function deployProject(
   });
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
   const org = keychainRead('fly-org-slug').trim();
-  // A new tunnel has a new token, so an existing secret holds the old one.
-  const refresh = tunnel?.actions.some((a) => a.kind === 'create-tunnel')
-    ? [TUNNEL_TOKEN_SECRET]
-    : [];
+  // A remade tunnel has a new token, so an existing secret holds the old one.
+  const refresh = tunnel && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
   const observed = await observe(cfg);
   const actions = plan(cfg, observed, refresh, [...settings.keys()]);
-  if (tunnel) {
-    console.log(
-      tunnel.actions.length === 0
-        ? `[deploy] tunnel ${tunnel.names.tunnel} and ${tunnel.names.origin}: nothing to do`
-        : `[deploy] tunnel ${tunnel.names.tunnel}: ${tunnel.actions.map((a) => a.kind).join(', ')}`,
-    );
-  }
+  if (tunnel) console.log(`[deploy] tunnel ${tunnel.names.tunnel} is ${tunnel.id}, from cf:apply`);
   console.log(
     actions.length === 0
       ? `[deploy] ${cfg.app} is up to date at ${cfg.imageLabel.slice(0, 9)}: nothing to do`
@@ -427,10 +424,7 @@ export async function deployProject(
     );
   if (dryRun) return actions;
   const ctx: RunContext = { org, settings };
-  if (tunnel) {
-    const id = await tunnel.apply();
-    ctx.tunnelToken = () => tunnel.token(id);
-  }
+  if (tunnel) ctx.tunnelToken = () => tunnel.token();
   for (const a of actions) {
     console.log(`[deploy] ${describe(a)}`);
     await act(cfg, a, ctx);
@@ -476,14 +470,8 @@ async function main(): Promise<void> {
   const routerConfig = arg(args, 'router-config') ?? ROUTER_CONFIG;
   const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig, {
     accessConfig: arg(args, 'access-config') ?? ACCESS_CONFIG,
+    refreshTunnelToken: args.includes('--refresh-tunnel-token'),
   });
-  if (cfg.tunnel === 'named') {
-    const names = routerNames(cfg, routerConfig);
-    console.log(`[deploy] origin hostname: ${names.origin}`);
-    console.log(
-      `[deploy] to route ${names.publicHost}, add "${cfg.project}": "${names.origin}" to the router's projects and run bun run router:deploy`,
-    );
-  }
   if (args.includes('--dry-run')) return;
   const state = machines(cfg.app).map(
     (m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)} ${m.memoryMb}MB`,

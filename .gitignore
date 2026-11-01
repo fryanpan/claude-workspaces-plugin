@@ -72,6 +72,16 @@ infra/share-link-worker/wrangler.local.toml
 infra/board-router-worker/router.local.json
 infra/access-apps/access.local.json
 
+# OpenTofu: local state and the tfvars the wrapper writes (both mode 600,
+# real hostnames and ids), and tofu's working directories. The lock file is
+# committed.
+infra/cloudflare/state/
+infra/cloudflare/.terraform/
+infra/cloudflare/.terraform-check/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
 # Coverage output — `bun run coverage` rewrites it every run.
 .coverage/
 coverage/

@@ -92,6 +92,14 @@ jobs:
         run: bun run test:audit
       - name: Leak gate can still see
         run: bun run check:scrub-gate
+      # The Cloudflare OpenTofu config (infra/cloudflare): fmt, validate, and
+      # its plan tests against a mock provider. No token is configured here.
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - name: Cloudflare OpenTofu config is valid
+        run: bun run check:cloudflare-tf
       # Every file over 500 lines must have a written verdict in
       # docs/architecture/exceptions.md. The gate does not judge the verdict —
       # a queued `Split` passes. What it stops is a NEW god file arriving with
