@@ -125,3 +125,75 @@ describe('the hold watches the blocks a tick rewrites', () => {
     expect(pane().style.overflowAnchor).toBe('');
   });
 });
+
+/**
+ * WHICH LINE THE HOLD FOLLOWS when the editor reuses elements.
+ *
+ * A remote update replaces the whole ProseMirror document and the view keeps
+ * its DOM by rewriting elements in place: after blocks land above the reader,
+ * the `<p>` that showed their line can show another one, on the same pixel.
+ * Holding the element held nothing. These cases stand in a layout — each
+ * block's top is its `data-y` minus the pane's scroll — because happy-dom
+ * lays nothing out; the same thing in a real browser is
+ * `comment-focus-remote-edit-browser.test.ts`.
+ */
+describe('the hold follows the line, not the element showing it', () => {
+  const LINE_PX = 50;
+
+  function layout(): void {
+    document.body.innerHTML = `<div id="pane"><div id="prose">${['a', 'b', 'c', 'd', 'e', 'f']
+      .map((line, i) => `<p data-line="${line}" data-y="${1000 + i * LINE_PX}">${line}</p>`)
+      .join('')}</div></div>`;
+    const scroller = pane();
+    let top = 1000;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    scroller.getBoundingClientRect = () => new DOMRect(0, 0, 400, 500);
+    for (const p of Array.from(scroller.querySelectorAll<HTMLElement>('p'))) {
+      p.getBoundingClientRect = () => new DOMRect(0, Number(p.dataset.y) - top, 400, LINE_PX);
+    }
+  }
+
+  /** What the editor does with an insert of two lines above: every element
+   *  stays where it was and shows the line two before it. */
+  function insertTwoAbove(): void {
+    const ps = Array.from(pane().querySelectorAll<HTMLElement>('p'));
+    const lines = ['new1', 'new2', ...ps.map((p) => p.dataset.line as string)];
+    ps.forEach((p, i) => {
+      p.dataset.line = lines[i];
+      p.textContent = lines[i] ?? '';
+    });
+  }
+
+  const byLine = {
+    mark: (el: Element) => (el as HTMLElement).dataset.line ?? null,
+    find: (mark: unknown) =>
+      pane().querySelector(`p[data-line="${String(mark)}"]`) as Element | null,
+  };
+
+  it('scrolls by what landed above when the elements were reused', async () => {
+    layout();
+    const scope = new MountScope();
+    mountReadingHold({ scroller: pane(), scope, locator: byLine });
+    insertTwoAbove();
+    // Line `a` is now shown two elements down: the reader's words moved 100px.
+    await vi.waitFor(() => expect(pane().scrollTop).toBe(1000 + 2 * LINE_PX));
+    scope.dispose();
+  });
+
+  it('holds nothing without a locator — the element it held did not move', async () => {
+    // The control: the same rewrite, held by element as before the locator.
+    layout();
+    const scope = new MountScope();
+    mountReadingHold({ scroller: pane(), scope });
+    insertTwoAbove();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane().scrollTop).toBe(1000);
+    scope.dispose();
+  });
+});

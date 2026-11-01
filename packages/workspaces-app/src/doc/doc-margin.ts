@@ -14,12 +14,13 @@
  * the modal, or the desktop drawer), and only this module knows all four.
  */
 import { suggestOps } from '@claude-workspaces/core';
+import type { Node as ProseNode } from '@tiptap/pm/model';
 import type * as Y from 'yjs';
 import { balloonMarginVisible } from '../card-placement.ts';
 import { type CommentHintsHandle, mountCommentHints } from '../comment-hints.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
-import { mountReadingHold } from '../reading-hold.ts';
+import { type BlockLocator, mountReadingHold } from '../reading-hold.ts';
 import { type RecentNoteCardsHandle, mountRecentNoteCards } from '../recent-note-cards.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from '../redline/markup-margin.ts';
 import type { ReviewChrome } from '../review-chrome.ts';
@@ -48,6 +49,52 @@ export interface DocMarginHandle {
   scheduleRelayout: () => void;
 }
 
+/**
+ * Names a top-level block of the prose by its ProseMirror node, so the
+ * reading hold can find the block's element after a remote update has
+ * rewritten the view around it (`reading-hold.ts`, `BlockLocator`). The sync
+ * plugin hands back the SAME node object for every block the update did not
+ * touch, so the node is the line; a block the update rewrote is a new node,
+ * is not found, and the hold rides the next line it was holding. Anything
+ * that is not a top-level node of the prose (an in-flow card, a widget) is
+ * not named and is held by its element.
+ */
+function proseBlockLocator(editor: EditorHandle): BlockLocator {
+  const view = editor.editor.view;
+  /** Where each top-level node of one document starts, built once per
+   *  document: the hold asks after every mutation, for up to four lines. */
+  let index: { doc: ProseNode; at: Map<ProseNode, number> } | null = null;
+  const offsetOf = (node: ProseNode): number | undefined => {
+    const doc = view.state.doc;
+    if (index?.doc !== doc) {
+      const at = new Map<ProseNode, number>();
+      doc.forEach((child, offset) => at.set(child, offset));
+      index = { doc, at };
+    }
+    return index.at.get(node);
+  };
+  return {
+    mark: (el) => {
+      if (el.parentElement !== view.dom) return null;
+      try {
+        const before = view.posAtDOM(el, 0) - 1;
+        // A widget's element answers a position too: only the element of the
+        // node that starts there is a block of the doc.
+        if (view.nodeDOM(before) !== el) return null;
+        return view.state.doc.nodeAt(before);
+      } catch {
+        return null;
+      }
+    },
+    find: (mark) => {
+      const offset = offsetOf(mark as ProseNode);
+      if (offset === undefined) return null;
+      const dom = view.nodeDOM(offset);
+      return dom instanceof Element ? dom : null;
+    },
+  };
+}
+
 export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   const { docId, ydoc, scope, editor, editorMount, chrome } = opts;
 
@@ -56,7 +103,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // note landing above the fold moves the text the cards are drawn against,
   // and moving the pane by the same amount is what leaves the reader where
   // they were.
-  mountReadingHold({ scroller: editorMount, scope });
+  mountReadingHold({ scroller: editorMount, scope, locator: proseBlockLocator(editor) });
 
   // The balloon margin: plain markdown docs get comment balloons only (no
   // git base, so no deletions) — reuses the same mount as the redline

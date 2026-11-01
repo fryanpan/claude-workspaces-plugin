@@ -15,6 +15,7 @@
  * this rebuild's to move, and stays where the reader put it.
  */
 
+import type { Editor } from '@tiptap/core';
 import {
   type ComposerSelection,
   composerSelection,
@@ -89,6 +90,38 @@ export function restoreComposerFocus(root: ParentNode, kept: KeptComposerFocus):
   if (kept.start != null && kept.end != null) {
     ta.setSelectionRange(kept.start, kept.end, kept.dir);
   }
+}
+
+/**
+ * Keep the caret in an in-flow card's reply box while the document it sits
+ * in changes under it.
+ *
+ * The card below 1100px is a widget INSIDE the prose (`thread-decorations.ts`),
+ * so ProseMirror's renderer owns where its element sits. A remote edit arrives
+ * as a replace of the whole document, and the view keeps its DOM by updating
+ * elements in place rather than inserting new ones, so the element that shows
+ * the commented paragraph after an edit above it is a different, later
+ * element. The card has to follow it, and ProseMirror moves the card by taking
+ * it out of the document and putting it back. Taking out a focused element
+ * drops focus to `body`: the reader's next words went nowhere, and the ones
+ * after that into the doc (an agent editing while Bryan typed, 2026-11-01).
+ *
+ * Nothing on our side can stop that move — it is the renderer's — so the box
+ * that held the caret before a document change gets it back, with its
+ * selection, in the same task, before anything paints or reads focus.
+ */
+export function keepComposerFocusThroughEdits(editor: Editor): void {
+  let kept: KeptComposerFocus | null = null;
+  editor.on('beforeTransaction', ({ transaction }) => {
+    kept = transaction.docChanged ? keptComposerFocus(editor.view.dom) : null;
+  });
+  editor.on('transaction', () => {
+    const was = kept;
+    kept = null;
+    if (!was) return;
+    if (keptComposerFocus(editor.view.dom)?.threadId === was.threadId) return;
+    restoreComposerFocus(editor.view.dom, was);
+  });
 }
 
 /**

@@ -41,6 +41,29 @@
  */
 import type { MountScope } from './mount-scope.ts';
 
+/**
+ * Names the line a block shows, so the hold can find that line again after
+ * the element showing it changed.
+ *
+ * An element is not a line. A remote update replaces the whole ProseMirror
+ * document, and the view keeps its DOM by updating elements IN PLACE: the
+ * `<p>` that held paragraph 14 can come out of the update holding paragraph
+ * 11, still connected, still on the same pixel. Measured at 1180x820 with
+ * blocks inserted above a reader typing a comment: the held element, now
+ * showing another paragraph, read -216px, so the hold scrolled the wrong way
+ * and the commented words ended 488px below where they had been. A locator
+ * names the line by something that survives the rewrite — the doc uses the
+ * block's ProseMirror node (`doc-margin.ts`) — and finds the element showing
+ * it now.
+ */
+export interface BlockLocator {
+  /** A name for the line `el` shows, or null when it is not one the locator
+   *  knows — that block is then held by its element, as before. */
+  mark: (el: Element) => unknown;
+  /** The element showing the named line now, or null when it is gone. */
+  find: (mark: unknown) => Element | null;
+}
+
 export interface ReadingHold {
   /** The block whose screen position is being held, or null when the pane has
    *  nothing laid out. Exposed so a probe can name the line it measured. */
@@ -53,8 +76,12 @@ export interface ReadingHold {
 /** Below this a correction is noise — sub-pixel layout, not a moved line. */
 const EPSILON_PX = 0.5;
 
-export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScope }): ReadingHold {
-  const { scroller, scope } = opts;
+export function mountReadingHold(opts: {
+  scroller: HTMLElement;
+  scope: MountScope;
+  locator?: BlockLocator;
+}): ReadingHold {
+  const { scroller, scope, locator } = opts;
   // We are the hold; the browser must not also be one. See the header.
   const priorAnchor = scroller.style.overflowAnchor;
   scroller.style.overflowAnchor = 'none';
@@ -76,7 +103,7 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
    * blocks that begin on screen, and the correction rides the first of them
    * still in the document.
    */
-  const held: Array<{ el: Element; y: number }> = [];
+  const held: Array<{ el: Element; y: number; mark: unknown }> = [];
   const UNDERSTUDIES = 4;
   /** The offset the pane was at when that reading was taken. */
   let refScrollTop = 0;
@@ -124,14 +151,26 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
         straddler ??= block;
         continue;
       }
-      held.push({ el: block, y: r.top - top });
+      held.push({ el: block, y: r.top - top, mark: locator?.mark(block) ?? null });
       if (held.length >= UNDERSTUDIES) return;
     }
     if (held.length > 0) return;
     // Nothing begins on screen — one block taller than the pane fills it. Its
     // box is all there is to hold.
     if (!straddler) return;
-    held.push({ el: straddler, y: straddler.getBoundingClientRect().top - top });
+    held.push({
+      el: straddler,
+      y: straddler.getBoundingClientRect().top - top,
+      mark: locator?.mark(straddler) ?? null,
+    });
+  }
+
+  /** The element showing a held line now: found by its name where it has
+   *  one, otherwise the element it was read from, while that is still in the
+   *  document. */
+  function current(h: { el: Element; mark: unknown }): Element | null {
+    if (h.mark !== null && locator) return locator.find(h.mark);
+    return h.el.isConnected ? h.el : null;
   }
 
   /**
@@ -160,7 +199,14 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     // The reader's own line where it survived the tick, and the line under it
     // where it did not. A block the tick replaced is gone from the document
     // by the time this runs, and its understudy moved by the same growth.
-    const live = held.find((h) => h.el.isConnected && h.el.getBoundingClientRect().height > 0);
+    let live: { el: Element; y: number } | null = null;
+    for (const h of held) {
+      const el = current(h);
+      if (el && el.getBoundingClientRect().height > 0) {
+        live = { el, y: h.y };
+        break;
+      }
+    }
     if (!live) {
       repick();
       return;
@@ -197,12 +243,14 @@ export function mountReadingHold(opts: { scroller: HTMLElement; scope: MountScop
     // against a reading from before this correction.
     const top = paneTop();
     for (let i = held.length - 1; i >= 0; i--) {
-      const h = held[i] as { el: Element; y: number };
-      if (!h.el.isConnected) {
+      const h = held[i] as { el: Element; y: number; mark: unknown };
+      const el = current(h);
+      if (!el) {
         held.splice(i, 1);
         continue;
       }
-      h.y = h.el.getBoundingClientRect().top - top;
+      h.el = el;
+      h.y = el.getBoundingClientRect().top - top;
     }
   }
 

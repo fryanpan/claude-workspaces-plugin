@@ -2,6 +2,7 @@ import { Extension } from '@tiptap/core';
 import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
+import { type Mappable, ReplaceStep, StepMap } from '@tiptap/pm/transform';
 import type { EditorView } from '@tiptap/pm/view';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
@@ -107,6 +108,41 @@ function afterBlockAt(doc: ProseNode, pos: number): number {
   return $p.depth >= 1 ? $p.after(1) : clamped;
 }
 
+/**
+ * How positions move through `tr`, read off what the change DID rather than
+ * how it was written.
+ *
+ * A remote update reaches the editor as one step that replaces the whole
+ * document (`y-prosemirror`'s `_typeChanged`), and that step's own map sends
+ * every position to one end of the doc or the other. Mapped through it, every
+ * highlight collapses to zero width and is dropped, and each in-flow card goes
+ * with its highlight — for the one view update between the remote step and the
+ * re-read of the anchors that follows it. That one update is enough to take a
+ * card out of the document: the reply box inside it loses the caret, the iPad
+ * keyboard goes down, and the reader's next words land in the doc (an agent
+ * editing while Bryan typed a reply, 2026-11-01).
+ *
+ * So a whole-document replace is mapped through the span that actually
+ * differs between the two documents, which is exactly what a step written for
+ * the change would have said. Every other transaction keeps its own mapping:
+ * a local keystroke's map is precise about which side of an edge it landed,
+ * and a diff of two documents cannot be.
+ */
+export function effectiveMapping(tr: Transaction): Mappable {
+  const step = tr.steps.length === 1 ? tr.steps[0] : undefined;
+  if (!(step instanceof ReplaceStep)) return tr.mapping;
+  if (step.from !== 0 || step.to !== tr.before.content.size) return tr.mapping;
+  const before = tr.before.content;
+  const after = tr.doc.content;
+  const start = before.findDiffStart(after);
+  if (start === null) return StepMap.empty;
+  const end = before.findDiffEnd(after) ?? { a: before.size, b: after.size };
+  // Repeated content lets the two scans cross (`aa` → `aaa`): push both ends
+  // out by the overlap so the span is never negative.
+  const overlap = Math.max(0, start - Math.min(end.a, end.b));
+  return new StepMap([start, end.a + overlap - start, end.b + overlap - start]);
+}
+
 function buildDecos(
   doc: ProseNode,
   ranges: ThreadRange[],
@@ -185,17 +221,18 @@ export const ThreadDecorations = Extension.create({
             // assoc: `from` +1 and `to` -1 so text typed exactly at either
             // edge falls OUTSIDE the highlight (it keeps covering the words
             // the comment was left on), while typing INSIDE grows it.
+            const mapping = tr.docChanged ? effectiveMapping(tr) : tr.mapping;
             if (tr.docChanged && ranges.length > 0) {
               ranges = ranges.map((r) => ({
                 ...r,
-                from: tr.mapping.map(r.from, 1),
-                to: tr.mapping.map(r.to, -1),
+                from: mapping.map(r.from, 1),
+                to: mapping.map(r.to, -1),
               }));
             }
             if (tr.docChanged && pending) {
               pending = {
-                from: tr.mapping.map(pending.from, 1),
-                to: tr.mapping.map(pending.to, -1),
+                from: mapping.map(pending.from, 1),
+                to: mapping.map(pending.to, -1),
               };
             }
             if (meta) {
