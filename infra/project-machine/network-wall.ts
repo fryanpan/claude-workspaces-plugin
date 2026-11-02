@@ -84,6 +84,19 @@ function placed(run: FlyRunner, a: WallApp): Placed {
   return { machine: m.id, sixpn: m.private_ip };
 }
 
+/** Whether the app exists; unknown counts as yes, so a leftover is never missed. */
+function stillThere(run: FlyRunner, a: WallApp): boolean {
+  try {
+    const r = run(flyArgs.listApps());
+    if (r.status !== 0) return true;
+    return (JSON.parse(r.stdout || '[]') as Array<{ Name?: string; name?: string }>).some(
+      (x) => nameOf(x) === a.app,
+    );
+  } catch {
+    return true;
+  }
+}
+
 export async function runNetworkWall(opts: WallOptions): Promise<WallResult> {
   const log = opts.log ?? console.log;
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
@@ -106,8 +119,9 @@ export async function runNetworkWall(opts: WallOptions): Promise<WallResult> {
       );
     }
     for (const a of WALL_APPS) {
-      ok(opts.run, flyArgs.createApp(a, opts.org));
+      // Counted before the call: a create that fails can still leave the app.
       created.push(a);
+      ok(opts.run, flyArgs.createApp(a, opts.org));
       ok(opts.run, flyArgs.runMachine(a, opts.region, opts.probeFile));
     }
     const at = new Map<WallKey, Placed>(WALL_APPS.map((a) => [a.key, placed(opts.run, a)]));
@@ -139,7 +153,7 @@ export async function runNetworkWall(opts: WallOptions): Promise<WallResult> {
         // Counted below as left over.
       }
       if (destroyed) log(`[network-wall] destroyed ${a.app}`);
-      else leftOver.push(a.app);
+      else if (stillThere(opts.run, a)) leftOver.push(a.app);
     }
   }
   const v = verdict(rows, PROBES.length, leftOver);

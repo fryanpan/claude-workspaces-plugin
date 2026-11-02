@@ -173,6 +173,39 @@ describe('the network wall check', () => {
     expect(f.calls.some((c) => c[2] === 'cw-walltest-harborlight-peer')).toBe(false);
   });
 
+  it('destroys an app whose create failed after Fly made it', async () => {
+    const f = fakeFly();
+    const base = f.run;
+    const run: FlyRunner = (args) => {
+      const r = base(args);
+      // Fly made the app, then the command failed.
+      return args[1] === 'create' && args[2] === 'cw-walltest-riverbend'
+        ? { status: 1, stdout: '', stderr: 'fixture timeout' }
+        : r;
+    };
+    const r = await runNetworkWall({ ...opts(f), run });
+    expect(r.verdict.ok).toBe(false);
+    expect(f.apps.size).toBe(0);
+    expect(r.verdict.reasons).toEqual([
+      'stopped: fly apps create cw-walltest-riverbend failed: fixture timeout',
+      `only 0 of ${PROBES.length} probes ran`,
+    ]);
+  });
+
+  it('does not report an app as left over when its destroy failed because it never existed', async () => {
+    const f = fakeFly({
+      fail: (args) => args[1] === 'create' && args[2] === 'cw-walltest-riverbend',
+    });
+    const base = f.run;
+    const run: FlyRunner = (args) =>
+      args[1] === 'destroy' && args[2] === 'cw-walltest-riverbend'
+        ? { status: 1, stdout: '', stderr: 'no such app' }
+        : base(args);
+    const r = await runNetworkWall({ ...opts(f), run });
+    expect(r.verdict.reasons.some((x) => x.includes('was not destroyed'))).toBe(false);
+    expect(f.apps.size).toBe(0);
+  });
+
   it('keeps destroying when one destroy fails, and names what was left', async () => {
     const f = fakeFly({
       fail: (args) => args[1] === 'destroy' && args[2] === 'cw-walltest-riverbend',
