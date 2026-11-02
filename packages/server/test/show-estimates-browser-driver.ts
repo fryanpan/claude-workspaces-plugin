@@ -281,11 +281,12 @@ async function main(): Promise<void> {
     const off = await readAll(false);
 
     step('two tabs: settings in one, the board in the other');
-    // The other tab reaches the server as `localhost`. Chrome holds six
-    // HTTP/1.1 connections per host, and two open boards' streams fill them,
-    // so on one host the settings page's members read queues behind them —
-    // a fact about this loopback test, not about a page served over HTTP/2.
-    const otherBase = `http://localhost:${handle.port}/workspaces/${ws}`;
+    // The other tab reaches the server over IPv6 loopback, a second host to
+    // Chrome. Chrome holds six HTTP/1.1 connections per host, and two open
+    // boards' streams fill them, so on one host the settings page's members
+    // read queues behind them — a fact about this loopback test, not about a
+    // page served over HTTP/2.
+    const otherBase = `http://[::1]:${handle.port}/workspaces/${ws}`;
     await go(tabB, otherBase, 'ipad', GOAL_TITLE);
     await go(tabA, boardUrl, 'ipad', GOAL_TITLE);
     const toggleExpr = `(() => { const t = document.getElementById('board-show-estimates');
