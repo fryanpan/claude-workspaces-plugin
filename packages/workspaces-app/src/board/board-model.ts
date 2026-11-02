@@ -468,6 +468,9 @@ export interface BoardWorkspaceInfo {
   retiredAt?: number;
   /** What the person who retired it said, shown on the badge's tooltip. */
   retiredReason?: string;
+  /** Whether this board shows its estimates. Absent is off — read it through
+   *  `estimatesShown` (`@claude-workspaces/core/show-estimates`). */
+  showEstimates?: true;
   createdAt: number;
 }
 
@@ -1054,6 +1057,24 @@ export function boardSectionsWithEffort(
     if (summary) section.effort = summary;
   }
   return sections;
+}
+
+/**
+ * The bands this reader sees: with each goal's effort strip when the board
+ * shows estimates, and without any when it does not (Bryan, 1 Nov: "hide all
+ * estimation stuff on all screens behind that setting"). Off skips the rollup
+ * altogether rather than computing a strip nobody draws.
+ */
+export function boardSectionsForReader(
+  goals: BoardGoal[],
+  tasks: BoardTask[],
+  f: BoardFilters,
+  now: number,
+  showEstimates: boolean,
+): BoardSection[] {
+  return showEstimates
+    ? boardSectionsWithEffort(goals, tasks, f, now)
+    : boardSections(goals, tasks, f);
 }
 
 // ── Per-goal effort: the header bar, what is left, and when it lands ───────

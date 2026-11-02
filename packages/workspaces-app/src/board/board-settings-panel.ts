@@ -28,6 +28,7 @@ import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
 import { mountReviewCriteria } from './review-criteria.ts';
+import { mountShowEstimates } from './show-estimates.ts';
 
 /** Everything the settings panel needs from `bootBoard`, and nothing else. */
 export interface BoardSettingsPanelDeps {
@@ -60,6 +61,8 @@ export interface BoardSettingsPanelDeps {
   onOpen(): void;
   /** The address the share button copies. */
   href(): string;
+  /** Whether the board shows estimates, as the board doc says now. */
+  estimatesShown(): boolean;
 }
 
 /**
@@ -72,6 +75,8 @@ export interface BoardSettingsPanelDeps {
 export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   /** Access changed elsewhere: redraw the members list if settings is open. */
   membersChanged(): void;
+  /** The board doc moved: repaint the Show estimates row from it. */
+  estimatesChanged(): void;
 } {
   const { document, el, workspaceId, author, user, fetchJson, send, showToast } = deps;
   /**
@@ -187,6 +192,23 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     toast: showToast,
   });
 
+  // Whether everyone here sees estimates. Unlike the rows above it is painted
+  // from the board doc rather than read on open, so it follows a change made
+  // on another page while this one is showing (`show-estimates.ts`).
+  const showEstimates = mountShowEstimates({
+    toggle: document.getElementById('board-show-estimates') as HTMLInputElement,
+    canEdit: () => canEdit,
+    write: async (show) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/settings`, 'PUT', {
+        showEstimates: show,
+        author,
+      });
+      return res.ok;
+    },
+    toast: showToast,
+  });
+  showEstimates.paint(deps.estimatesShown());
+
   // Who can reach this board, and at what level. Read on every open like the
   // two above, and for a sharper reason: the list is what a person checks
   // BEFORE deciding something is safe to put here, so a stale one is worse
@@ -251,6 +273,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     el('board-prompts-row').classList.toggle('hidden', !canEdit);
     reviewCriteria.applyLevel();
     parallelismCap.applyLevel();
+    showEstimates.applyLevel();
   }
   // Before anything is read, and before the panel is ever on screen.
   applyLevel();
@@ -325,5 +348,6 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     membersChanged: () => {
       if (deps.isOpen()) void members.changed();
     },
+    estimatesChanged: () => showEstimates.paint(deps.estimatesShown()),
   };
 }

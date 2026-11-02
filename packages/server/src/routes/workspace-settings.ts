@@ -1,12 +1,13 @@
 import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
 import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-judge-prompt';
+import { parseShowEstimates } from '@claude-workspaces/core/show-estimates';
 /**
  * The board's own fields: its goal, its retirement, its parallelism cap, its settings, its name, its lead and its voice.
  *
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
-import { canonicalRepoRoot, normalizeDocOriginRepo } from '../doc-origin-repo.ts';
+import { parseNotesHome } from '../doc-origin-repo.ts';
 import { type BoardPromptField, boardPromptBeforeMarkdown } from '../prompt-markdown-migration.ts';
 import { PROMPT_MAX_CHARS } from '../prompt-store.ts';
 import { markUnprovenActor, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
@@ -220,11 +221,8 @@ export async function handleWorkspaceSettings(
         hasReviewCriteria = true;
         reviewCriteriaValue = typeof raw === 'string' ? raw : undefined;
       }
-      // Same merge contract as the prompt fields: named-and-null
-      // clears, absent leaves it. The shape borrows a doc origin repo's
-      // validation (`dir` is a relPath with the same traversal rules)
-      // and additionally insists repoRoot is a checkout NOW — a typo'd
-      // path stored here would park every note the board ever derives.
+      // Same merge contract as the prompt fields: named-and-null clears,
+      // absent leaves it. Validated by `parseNotesHome` (doc-origin-repo.ts).
       let hasNotesHome = false;
       let notesHomeValue: WorkspaceNotesHome | undefined;
       /**
@@ -249,37 +247,9 @@ export async function handleWorkspaceSettings(
         });
       }
       if (body && Object.hasOwn(body, 'notesHome')) {
-        const raw = body.notesHome as {
-          repoRoot?: unknown;
-          branch?: unknown;
-          dir?: unknown;
-        } | null;
-        if (raw !== null) {
-          const norm = normalizeDocOriginRepo({
-            repoRoot: raw?.repoRoot,
-            branch: raw?.branch,
-            relPath: raw?.dir,
-          });
-          if (!norm.ok) {
-            return j(400, {
-              error: `notesHome must be { repoRoot, branch, dir } or null to clear: ${norm.error.replace('relPath', 'dir')}`,
-            });
-          }
-          // Store the MAIN checkout's root, not the caller's spelling:
-          // a notes home declared from a linked worktree must survive
-          // that worktree's removal (canonicalRepoRoot in doc-origin-repo.ts).
-          const canonRoot = canonicalRepoRoot(norm.home.repoRoot);
-          if (canonRoot === null) {
-            return j(400, {
-              error: `notesHome.repoRoot ${norm.home.repoRoot} is not a git checkout`,
-            });
-          }
-          notesHomeValue = {
-            repoRoot: canonRoot,
-            branch: norm.home.branch,
-            dir: norm.home.relPath,
-          };
-        }
+        const parsed = parseNotesHome(body.notesHome);
+        if (!parsed.ok) return j(400, { error: parsed.error });
+        notesHomeValue = parsed.home;
         hasNotesHome = true;
       }
       let hasEffortPrompt = false;
@@ -322,6 +292,14 @@ export async function handleWorkspaceSettings(
         hasParallelismCap = true;
         parallelismCapValue = typeof raw === 'number' ? raw : undefined;
       }
+      // Whether readers see estimates (core/show-estimates.ts): true, false,
+      // or null for the default, which is off.
+      let showEstimates: boolean | undefined;
+      if (body && Object.hasOwn(body, 'showEstimates')) {
+        const parsed = parseShowEstimates(body.showEstimates);
+        if (!parsed.ok) return j(400, { error: parsed.error });
+        showEstimates = parsed.value;
+      }
       // The steps only the owner approves (`review-items/owner-steps.ts`).
       // The owner's own browser alone: dropping one lets anyone approve it.
       let ownerSteps: string[] | undefined;
@@ -354,6 +332,12 @@ export async function handleWorkspaceSettings(
       if (hasNotesHome) {
         const res = taskStore.setNotesHome(workspaceId, notesHomeValue, { actor: author });
         if (!res.ok) return j(404, res);
+      }
+      if (showEstimates !== undefined) {
+        const res = taskStore.setShowEstimates(workspaceId, showEstimates, { actor: author });
+        if (!res.ok) return j(404, res);
+        // Every open page reads it off the board doc, so the doc must move.
+        taskProjection.ensureWorkspace(workspaceId);
       }
       if (hasReviewCriteria || hasEffortPrompt) ctx.onBoardPromptsChanged?.(workspaceId);
     }
@@ -404,6 +388,7 @@ export async function handleWorkspaceSettings(
       },
       dispatchesInUse: capView.inUse,
       requireOwnerFor: taskStore.requireOwnerFor(workspaceId),
+      showEstimates: taskStore.showEstimates(workspaceId),
       // Withheld from a member, for the reason the refusal above gives: it is
       // `repoRoot` on the owner's machine. Everything else on this route
       // describes the board, so a member reads all of it.

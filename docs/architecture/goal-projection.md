@@ -209,6 +209,32 @@ the calibrator counts — so three of those would have calibrated it. This is
 the visible cost of changing the question, which the module has always paid
 deliberately rather than carrying a stale answer forward.
 
+## Nothing shows until the board turns it on
+
+Every readout in this file sits behind one per-board setting, **Show
+estimates**, which is **off** on every board until its owner turns it on in
+the board's settings (Bryan, 1 Nov: *"Not been useful so far … default to
+having the setting off on all boards and hide all estimation stuff on all
+screens behind that setting"*). Off, the goal strip is not drawn at all —
+not the remainder, the progress bar, the date or "not scored yet" — and a
+task's panel has no Hands-on or Wall clock field.
+
+- **Absent is off.** `BoardWorkspace.showEstimates` is stored only when true,
+  and the board doc carries the key only then, so every board that predates
+  the setting reads as off. `core/src/show-estimates.ts` is the one reader.
+- **Only the display.** The scorer keeps scoring and agents still read the
+  numbers, so turning it on shows current estimates rather than starting from
+  nothing.
+- **Live.** It rides the board doc's `workspace` map, so a flip on one page
+  reaches every open page without a reload. The settings row is painted from
+  the doc too, not from a read made when settings opened.
+- **The owner's.** `PUT /workspaces/<id>/settings {showEstimates}` sits behind
+  the same `requireOwner` as the rest of that route.
+
+The cross-board review page's size bar (`review-sizes.ts`) is not behind it:
+it spans boards, has its own browser flag that is off by default, and shows
+sizes, never times.
+
 ## What a reader is owed
 
 Every absence is a different sentence, and none of them is a zero.

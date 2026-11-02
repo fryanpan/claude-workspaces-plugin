@@ -93,6 +93,7 @@ function panel(role: 'owner' | 'member' = 'owner'): Panel {
       el('board-settings-panel').classList.toggle('hidden', !open);
     },
     href: () => `/workspaces/${WS}`,
+    estimatesShown: () => false,
   });
   const click = () =>
     el('board-settings').dispatchEvent(new MouseEvent('click', { bubbles: true }));

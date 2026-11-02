@@ -119,6 +119,8 @@ export function createBoardProjection(deps: BoardProjectionDeps): BoardProjectio
         ...(wsMap.get('retiredReason')
           ? { retiredReason: String(wsMap.get('retiredReason')) }
           : {}),
+        // Present only when on; the server removes the key to turn it off.
+        ...(wsMap.get('showEstimates') === true ? { showEstimates: true as const } : {}),
         createdAt: Number(wsMap.get('createdAt') ?? 0),
       };
     }

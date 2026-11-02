@@ -119,6 +119,16 @@ export function buildSettingsView(): string {
               <label class="board-settings-row" for="board-done-filter">Show done tasks from
                 <select id="board-done-filter" class="board-select" aria-label="Done task visibility"></select>
               </label>
+              <!-- Whether everyone on this board sees its effort estimates (Bryan,
+                   1 Nov: "a setting to hide all the estimations"). Off on every
+                   board until its owner turns it on; the box follows the board
+                   doc, so a change elsewhere shows here (show-estimates.ts). -->
+              <label class="board-settings-row board-settings-row--push" for="board-show-estimates">
+                <span class="board-settings-label">Show estimates
+                  <small class="board-settings-note">Time and finish-date estimates on goals and tasks, for everyone on this board.</small>
+                </span>
+                <input type="checkbox" id="board-show-estimates" class="board-check" />
+              </label>
               <!-- Who can sign in to this board: exact addresses and @domains, and
                    the people each let in (Bryan, 29 Oct: "share a board with named
                    emails or a whole domain, and only he can change who is in").

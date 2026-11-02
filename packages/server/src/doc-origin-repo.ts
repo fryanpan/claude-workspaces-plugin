@@ -281,3 +281,40 @@ export function normalizeDocOriginRepo(
     home: { repoRoot: resolvePath(repoRoot), branch: branch.trim(), relPath },
   };
 }
+
+/**
+ * A board's notes home as the settings route receives it: `{ repoRoot,
+ * branch, dir }`, or `null` to clear. Borrows a doc origin repo's validation
+ * (`dir` is a relPath with the same traversal rules) and additionally insists
+ * `repoRoot` is a checkout NOW — a typo'd path stored here would park every
+ * note the board ever derives. Stores the MAIN checkout's root, not the
+ * caller's spelling, so a notes home declared from a linked worktree survives
+ * that worktree's removal.
+ */
+export function parseNotesHome(
+  raw: unknown,
+):
+  | { ok: true; home: { repoRoot: string; branch: string; dir: string } | undefined }
+  | { ok: false; error: string } {
+  if (raw === null) return { ok: true, home: undefined };
+  const r = raw as { repoRoot?: unknown; branch?: unknown; dir?: unknown } | undefined;
+  const norm = normalizeDocOriginRepo({
+    repoRoot: r?.repoRoot,
+    branch: r?.branch,
+    relPath: r?.dir,
+  });
+  if (!norm.ok) {
+    return {
+      ok: false,
+      error: `notesHome must be { repoRoot, branch, dir } or null to clear: ${norm.error.replace('relPath', 'dir')}`,
+    };
+  }
+  const canonRoot = canonicalRepoRoot(norm.home.repoRoot);
+  if (canonRoot === null) {
+    return { ok: false, error: `notesHome.repoRoot ${norm.home.repoRoot} is not a git checkout` };
+  }
+  return {
+    ok: true,
+    home: { repoRoot: canonRoot, branch: norm.home.branch, dir: norm.home.relPath },
+  };
+}

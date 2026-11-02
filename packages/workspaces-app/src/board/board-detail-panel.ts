@@ -32,6 +32,7 @@
  * is that the panel can no longer reach anything NOT on it.
  */
 import type { FeedbackClient, User } from '@claude-workspaces/core';
+import { estimatesShown } from '@claude-workspaces/core/show-estimates';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type BoardActions, type BoardState, showToast } from './board-actions.ts';
 import type { TaskDiscussion } from './board-detail-render.ts';
@@ -465,7 +466,12 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
       // of everything that has closed. Unfiltered for the same reason the goal
       // rollup is — a correction that moved when the reader changed tabs would
       // be a correction about the reader.
-      calibration: task ? boardCalibration(state.info?.goals ?? [], taskList()) : undefined,
+      // Off, there is no estimate to scale, so nothing is computed.
+      showEstimates: estimatesShown(state.info),
+      calibration:
+        task && estimatesShown(state.info)
+          ? boardCalibration(state.info?.goals ?? [], taskList())
+          : undefined,
       // The band the row renders under, which is the key its correction was
       // filed under. A ticket whose goal id matches no band shows Backlog's
       // arithmetic, exactly as it shows under Backlog on the board.

@@ -131,6 +131,10 @@ export interface TaskDetailView {
   /** The band the open ticket renders under — the key its correction was
    *  filed under. See `effortCellText`. */
   calibrationGoal?: string;
+  /** Whether the board shows estimates. Off, the panel draws no Hands-on or
+   *  Wall clock field at all (`@claude-workspaces/core/show-estimates`).
+   *  Absent is off, like the board setting it carries. */
+  showEstimates?: boolean;
 }
 
 /** A closed panel answers nothing, which is what the signal holds until the
@@ -1180,8 +1184,9 @@ function TaskDetailPanel(props: {
   initialTab?: DetailTab;
   calibration?: EffortCalibration;
   calibrationGoal?: string;
+  showEstimates: boolean;
 }) {
-  const { host, task, discussion, handlers, calibration, calibrationGoal } = props;
+  const { host, task, discussion, handlers, calibration, calibrationGoal, showEstimates } = props;
   const now = handlers.now ?? Date.now();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
@@ -1230,7 +1235,7 @@ function TaskDetailPanel(props: {
   });
 
   useFill(fieldsRef as RefObject<HTMLElement>, () => [
-    ...detailFields(task, handlers, calibration, calibrationGoal).childNodes,
+    ...detailFields(task, handlers, calibration, calibrationGoal, showEstimates).childNodes,
   ]);
 
   // The Related Links section: title-only links to every doc this row ties
@@ -1616,7 +1621,8 @@ function TaskDetailPanel(props: {
  * panel are siblings under different subtrees.
  */
 function TaskDetail(props: { host: HTMLElement }) {
-  const { task, discussion, handlers, tab, calibration, calibrationGoal } = taskDetailData.value;
+  const { task, discussion, handlers, tab, calibration, calibrationGoal, showEstimates } =
+    taskDetailData.value;
   const { host } = props;
   useLayoutEffect(() => {
     host.classList.toggle('hidden', task === null);
@@ -1651,6 +1657,7 @@ function TaskDetail(props: { host: HTMLElement }) {
       initialTab={tab}
       calibration={calibration}
       calibrationGoal={calibrationGoal}
+      showEstimates={showEstimates === true}
     />
   );
 }

@@ -459,6 +459,7 @@ export function projectWorkspaceFields(
     | 'leadAgentSince'
     | 'retiredAt'
     | 'retiredReason'
+    | 'showEstimates'
   >,
   goalMeta: Map<string, Record<string, unknown>>,
 ): Record<string, unknown> {
@@ -482,6 +483,10 @@ export function projectWorkspaceFields(
     // without anything having to clear it.
     ...(ws.retiredAt !== undefined ? { retiredAt: ws.retiredAt } : {}),
     ...(ws.retiredReason !== undefined ? { retiredReason: ws.retiredReason } : {}),
+    // Whether readers see estimates. Present only when on, for the same
+    // reason: turning it off removes the key, and every open page reads the
+    // absence as off (`@claude-workspaces/core/show-estimates`).
+    ...(ws.showEstimates === true ? { showEstimates: true } : {}),
     createdAt: ws.createdAt,
   };
 }
