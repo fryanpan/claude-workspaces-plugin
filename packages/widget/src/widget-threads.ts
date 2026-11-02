@@ -343,25 +343,11 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     // other. Without the catch it left an unhandled rejection and a popover
     // still holding the words with nothing said about them — the same shape
     // as a reply never sent. The note stands until the reply goes.
-    let posted = false;
-    try {
-      posted = await el.postReply(t.id, text);
-    } catch {}
-    if (!posted) {
-      // Into this thread's popover as it stands now: a redraw while it
-      // posted may have replaced this one.
-      const live =
-        pop.isConnected || el.activeThread !== t.id
-          ? pop
-          : (el.shadow.querySelector<HTMLElement>('.thread-popover') ?? pop);
-      const box = live.querySelector('textarea') as HTMLTextAreaElement;
-      if (!box.value) box.value = text;
-      const note = composerNote(live, 'Not sent — tap Reply to retry.');
-      // Whatever they type next is not what failed, so the note goes with it.
-      box.addEventListener('input', () => note.remove(), { once: true });
-      return;
-    }
-    pop.remove();
+    if (await el.postReply(t.id, text).catch(() => false)) return pop.remove();
+    ta.value = text;
+    const note = composerNote(pop, 'Not sent — tap Reply to retry.');
+    // Whatever they type next is not what failed, so the note goes with it.
+    ta.oninput = () => note.remove();
   };
   pop.querySelector('.submit')?.addEventListener('click', send);
   // The rule the new-comment box keeps: Enter sends, Shift+Enter is a line.
