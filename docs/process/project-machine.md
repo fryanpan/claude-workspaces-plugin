@@ -521,6 +521,83 @@ The logs are compared on the lines the backup held, since a running server
 may append to them. It prints `PASS` only when all four match and none was
 empty.
 
+## Checking the walls
+
+Two checks show that one project cannot reach another. Both print a table
+and exit 1 unless every row passes, and both take `--dry-run`, which prints
+what they would run and runs nothing.
+
+### The network wall
+
+```bash
+bun run machine:network-wall --dry-run
+bun run machine:network-wall [--region sjc]
+```
+
+This shows two Fly private networks unable to reach each other. It makes
+three throwaway apps, each with one `shared-cpu-1x` machine of 256 MB running
+a small listener on port 8797:
+
+| App | Network |
+| --- | --- |
+| `cw-walltest-harborlight` | `cw-walltest-harborlight` |
+| `cw-walltest-riverbend` | `cw-walltest-riverbend` |
+| `cw-walltest-harborlight-peer` | `cw-walltest-harborlight` |
+
+The first two are set up the way `machine:deploy` sets up two projects. Each
+machine probes the other in both directions, by `<app>.internal` and by 6PN
+address, and every probe must be refused, time out or fail to resolve. The
+control runs first: each machine reaches its own listener, and the peer, a
+second app on Harborlight's network, reaches Harborlight by name and by
+address. A failed control fails the run before any wall probe is read, so a
+probe that cannot connect to anything cannot pass as a wall holding. A
+listener answers with a banner, so a probe counts as connected only when it
+reached this check's own listener.
+
+Every app the run made is destroyed at the end, also when a step fails. If
+apps from an earlier run still exist, it refuses to start and names the
+`fly apps destroy` commands; it does not destroy apps it did not make. A
+destroy that fails also fails the run, and the run names what is left.
+`fly` runs with the org token the way `machine:deploy` runs it. A dry run
+reads neither the token nor the org.
+
+### The daily wall report
+
+```bash
+bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--dry-run]
+```
+
+The daily prod check runs this. It reports two things.
+
+**Cross-project refusals**, in the terms of
+`packages/server/test/cross-server-walls.test.ts`. On each project machine,
+`wall-probe.ts mint` signs one value of each signed type that has an expiry
+(`wt2`, `ft1`, `fc1`, the app voice token) with that server's key. Then
+every machine gives its verdict on every machine's values. The control is
+the issuing server accepting its own values. Every other server must refuse
+each one with `bad_signature`, which means its key differs. Each value
+expired an hour before it was made and names a board, doc and person that do
+not exist, so nothing carried between machines is a credential. Each value
+is checked at a time inside its window, so the signature check is the only
+check it reaches. The types that never expire (`at1`, `at2`, `gp1`, `vk1`,
+the session cookie) are not minted, because a minted one would be a live
+credential. Their keys are derived from the same key file. The probe reads
+the key file and never writes it.
+
+**Cloudflare's config**, per project, from `terraform output` (the state
+bucket's credential only). Each project must have its own Access application
+with an audience no other project has, and hosts no other project's
+application lists. Its tunnel must be `cw-<project>` with its own origin, and
+the tunnel's public host must be one its own application gates. Its board
+router route must point at a host its own application gates. The Access
+team domain must be set. Audiences are compared and never printed.
+
+The projects are `--projects`, or else every project the outputs give a
+tunnel. With fewer than two project machines there is no pair to compare,
+and the report fails and says so. It reaches each machine over
+`fly ssh console`, so a machine must run an image built from a commit that
+has `wall-probe.ts`.
+
 ## Cost
 
 By Fly's price list (October 2026, cheapest regions; `sjc` may cost a little

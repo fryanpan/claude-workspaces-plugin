@@ -154,7 +154,20 @@ describe('the outputs machine:deploy reads', () => {
       access: {},
       accessTeamDomain: null,
       tunnels: {},
+      routerRoutes: {},
     });
+  });
+
+  it('reads the router route for each project host, and drops a malformed one', () => {
+    const o = parseOutputs(
+      JSON.stringify({
+        ...OUTPUT,
+        router_routes: {
+          value: { riverbend: 'riverbend-workspaces.harborlight.test/*', saltmarsh: 7 },
+        },
+      }),
+    );
+    expect(o.routerRoutes).toEqual({ riverbend: 'riverbend-workspaces.harborlight.test/*' });
   });
 
   function io(over: Partial<OutputIo> = {}) {

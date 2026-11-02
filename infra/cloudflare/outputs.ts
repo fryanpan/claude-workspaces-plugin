@@ -1,7 +1,8 @@
 /**
  * An environment's Terraform outputs, for `machine:deploy`: each project's
- * Access audience and hostnames, the Access team domain, and each project
- * machine's tunnel (account and tunnel id, names). No output is a
+ * Access audience and hostnames, the Access team domain, each project
+ * machine's tunnel (account and tunnel id, names), and the board router's
+ * route per project host (read by `machine:wall-report`). No output is a
  * credential: `machine:deploy` reads a tunnel's token from the API with the
  * id it finds here.
  *
@@ -38,6 +39,8 @@ export interface TfOutputs {
   access: Record<string, AccessOutput>;
   accessTeamDomain: string | null;
   tunnels: Record<string, TunnelOutput>;
+  /** Project label -> the board router Worker's route pattern for its host. */
+  routerRoutes?: Record<string, string>;
 }
 
 type Raw = Record<string, { value?: unknown } | undefined>;
@@ -65,11 +68,16 @@ export function parseOutputs(json: string): TfOutputs {
       tunnels[label] = t as unknown as TunnelOutput;
     }
   }
+  const routerRoutes: Record<string, string> = {};
+  for (const [label, v] of Object.entries(record(raw.router_routes?.value))) {
+    if (typeof v === 'string') routerRoutes[label] = v;
+  }
   const team = raw.access_team_domain?.value;
   return {
     access,
     accessTeamDomain: typeof team === 'string' && team !== '' ? team : null,
     tunnels,
+    routerRoutes,
   };
 }
 

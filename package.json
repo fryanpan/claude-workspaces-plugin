@@ -11,6 +11,8 @@
     "machine:deploy": "bun run infra/project-machine/deploy.ts",
     "machine:restore": "bun run infra/project-machine/restore-machine.ts",
     "machine:drill": "bun run infra/project-machine/drill.ts",
+    "machine:network-wall": "bun run infra/project-machine/network-wall.ts",
+    "machine:wall-report": "bun run infra/project-machine/wall-report.ts",
     "machine:move-board": "bun run infra/project-machine/move-board.ts",
     "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",
