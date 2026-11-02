@@ -17,7 +17,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
  *
  * The fact decoration SAYS WHERE THE WORDS ARE; it does not say to draw a
  * line under them. At rest only an "Unconfirmed" note's fact carries one, and
- * lighting the rest is `footnote-notes.ts`, which adds `cw-fn-fact-on` to the
+ * lighting the rest is `footnote-notes.ts`, whose stylesheet names the
  * one note the reader is pointing at — a doc with a note on every sentence
  * came out with every line underlined when this decoration was the underline.
  * That is why `data-cw-fn-for` is on the span: it is how the other module

@@ -51,7 +51,17 @@ import { noteParts } from './note-links.ts';
  * rest now except an UNCONFIRMED note's dotted line, which is the certainty
  * signal and is rare; pointing at a caption or a superscript — or tabbing
  * into a caption's link — lights that one note's fact and no other. That is
- * `relight` below, and the classes it writes are the ones `doc.css` draws.
+ * `relight` below, which writes a stylesheet rather than touching the prose.
+ *
+ * A MARGIN NOTE IS ONE LINE UNTIL ASKED (Bryan, 2026-11-02: "way too cramped
+ * on the right margin because of how many there are"). A caption at full
+ * length runs to three or four lines, and a doc with a source on every
+ * paragraph stacks them into a column taller than the prose it annotates.
+ * So every caption is drawn as its number and one truncated line, and a tap
+ * on that line or on the superscript in the text opens THAT note in full.
+ * One open at a time: a tap on another opens it and closes the first, a
+ * second tap on the same one closes it. The column restacks around the open
+ * note; with none open, every caption is one line and none moves.
  */
 
 export interface FootnoteNotesOptions {
@@ -181,6 +191,9 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   /** The words the open card is showing, so a refresh can tell whether the
    *  number still means the note the reader tapped. */
   let openNote = '';
+  /** The margin caption drawn in full, and its words, for the same reason. */
+  let expandedN: string | null = null;
+  let expandedNote = '';
 
   scope.onCleanup(() => {
     sources.remove();
@@ -198,7 +211,27 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     scope.listen(el, 'mouseleave', () => hover(null));
     scope.listen(el, 'focusin', () => hover(n));
     scope.listen(el, 'focusout', () => hover(null));
+    scope.listen(el, 'click', (ev) => {
+      const open = expandedN === n;
+      // A link in an open caption is followed; in a one-line caption the tap
+      // is a request to read the whole note first.
+      if (open && (ev.target as HTMLElement | null)?.closest?.('a')) return;
+      ev.preventDefault();
+      expand(open ? null : n);
+    });
     return el;
+  }
+
+  /** Draw caption `n` in full and every other caption as one line. */
+  function expand(n: string | null): void {
+    if (expandedN === n) return;
+    expandedN = n;
+    expandedNote = n === null ? '' : (cards.get(n)?.note ?? '');
+    for (const [key, { card }] of cards) {
+      card.el.classList.toggle('cw-fn-note-open', key === n);
+      card.el.setAttribute('aria-expanded', String(key === n));
+    }
+    onChange();
   }
 
   function cardFor(f: FoundNote): NoteCard {
@@ -209,6 +242,8 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     }
     const el = held?.card.el ?? noteEl(f.n);
     el.className = f.unsure ? 'cw-fn-note cw-fn-note-unsure' : 'cw-fn-note';
+    el.classList.toggle('cw-fn-note-open', expandedN === f.n);
+    el.setAttribute('aria-expanded', String(expandedN === f.n));
     drawNote(el, f.note);
     const card: NoteCard = {
       key: `fn:${f.n}`,
@@ -255,31 +290,49 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     relight();
   }
 
+  /** The rules that light one note's spans in the prose — see `relight`. */
+  const litSheet = document.createElement('style');
+  container.appendChild(litSheet);
+  scope.onCleanup(() => litSheet.remove());
+
   /**
    * Light exactly one note — the one being pointed at, or the one whose card
    * is open — and nothing else.
    *
    * Nothing is lit at rest, so the prose reads as prose; this is the whole of
-   * "which words is that note about". The decoration plugin replaces both
-   * spans on every rebuild, so the classes are put back by QUERY rather than
-   * through a remembered element: a run split by another mark renders as two
-   * spans carrying the same number, and both halves are the same note.
+   * "which words is that note about".
+   *
+   * NOTHING IS WRITTEN INTO THE PROSE (Bryan, 2026-11-02: "as I move my cursor
+   * over the body text, raw citation details expand and shift everything
+   * around -- don't shift the body text please!"). This used to add a class
+   * to the superscript and the fact spans. Those spans belong to the editor,
+   * and the editor treats any change to them that it did not make as an edit
+   * to read back: measured in Chrome, every hover replaced the spans with new
+   * ones, so a moving pointer redrew the paragraphs under it. So the lighting
+   * is a stylesheet this module owns, outside the editor, naming the lit
+   * number; a rebuilt span is lit by the same rule with nothing put back.
+   * The caption is this module's own element, so it still takes a class.
    */
   function relight(): void {
-    for (const el of prose.querySelectorAll('.cw-fn-on, .cw-fn-fact-on')) {
-      el.classList.remove('cw-fn-on', 'cw-fn-fact-on');
-    }
     for (const { card } of cards.values()) card.el.classList.remove('cw-fn-note-on');
     const n = hoverN ?? openN;
-    if (n === null) return;
+    if (n === null) {
+      litSheet.textContent = '';
+      delete container.dataset.cwFnLit;
+      return;
+    }
     cards.get(n)?.card.el.classList.add('cw-fn-note-on');
+    container.dataset.cwFnLit = n;
     const id = CSS.escape(n);
-    for (const el of prose.querySelectorAll(`.cw-fn[data-cw-fn="${id}"]`)) {
-      el.classList.add('cw-fn-on');
-    }
-    for (const el of prose.querySelectorAll(`.cw-fn-fact[data-cw-fn-for="${id}"]`)) {
-      el.classList.add('cw-fn-fact-on');
-    }
+    // The superscript takes the shade the caption's number takes, and the
+    // fact a hairline plus the same tint, so the words and the number read as
+    // one thing. The unconfirmed rule comes last so a dotted fact stays
+    // DOTTED when it lights up rather than changing stroke under the pointer.
+    litSheet.textContent = [
+      `.cw-fn[data-cw-fn="${id}"]::after{background:var(--bg-hover);border-radius:3px}`,
+      `.cw-fn-fact[data-cw-fn-for="${id}"]{border-bottom:1px solid var(--border-strong);background:var(--bg-hover)}`,
+      `.cw-fn-fact-unsure[data-cw-fn-for="${id}"]{border-bottom-style:dotted}`,
+    ].join('\n');
   }
 
   /**
@@ -311,6 +364,12 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       held.card.el.remove();
       cards.delete(n);
     }
+    // The open caption is re-decided for the reason the card below is: a
+    // number that now names different words closes rather than swapping.
+    if (expandedN !== null) {
+      const still = notes.find((f) => f.n === expandedN);
+      if (!still || still.note !== expandedNote) expandedN = null;
+    }
     for (const f of notes) cardFor(f);
     // The open card has to be re-decided, not left standing. Its span was
     // just replaced, the paragraph under it may have moved, and the NUMBER is
@@ -331,17 +390,22 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
         placePop(still.anchor);
       }
     }
-    // Whatever the card did, the spans under the lit note are new elements
-    // and carry none of the classes the old ones did.
     relight();
     onChange();
   }
 
   scope.listen(prose, 'click', (ev) => {
     const target = (ev.target as HTMLElement | null)?.closest?.('.cw-fn') as HTMLElement | null;
-    // The margin already shows every note; a tap there would open a second
-    // copy of what the reader is looking at.
-    if (!target || marginVisible()) {
+    // With a margin, the superscript opens its caption there in full rather
+    // than a second copy of the note under the line; a tap elsewhere in the
+    // prose closes the open caption.
+    if (marginVisible()) {
+      closePop();
+      const n = target?.dataset.cwFn ?? null;
+      expand(n === null || n === expandedN ? null : n);
+      return;
+    }
+    if (!target) {
       closePop();
       return;
     }

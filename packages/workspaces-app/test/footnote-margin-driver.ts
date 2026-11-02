@@ -18,6 +18,12 @@ import { mountDocMargin } from '../src/doc/doc-margin.ts';
 import { createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { mountReviewChrome } from '../src/review-chrome.ts';
+import {
+  type CompactReading,
+  type HoverReading,
+  compactReading,
+  hoverReading,
+} from './footnote-margin-taps.ts';
 
 /** See `ScrollReading.vanished`. */
 const ROOM_PX = 60;
@@ -77,6 +83,15 @@ export interface FootnoteProbe {
   scrolling: ScrollReading[];
   /** After the column has had its debounce at each step. */
   settled: ScrollReading[];
+  /** The pointer passing over the body text and its superscripts. */
+  hover: HoverReading;
+  /** The one-line captions and the taps that open them; null without a
+   *  margin. */
+  compact: CompactReading | null;
+  /** The phone popover's height after the tap on note 3, against its own
+   *  line height — the note is still drawn in full there. */
+  popHeight: number | null;
+  popLineHeight: number | null;
 }
 
 /** A source note in the shape the research notes carry: a link, a page range
@@ -188,7 +203,11 @@ function read(editorEl: HTMLElement, proseEl: HTMLElement): ScrollReading {
   };
 }
 
-async function probe(): Promise<string> {
+/** The fixture, mounted as the review page mounts it, and nothing measured. */
+async function mountFixture(): Promise<{
+  editorEl: HTMLElement;
+  editor: ReturnType<typeof createEditor>;
+}> {
   const editorEl = document.getElementById('editor') as HTMLElement;
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(fixtureMarkdown()));
@@ -210,6 +229,11 @@ async function probe(): Promise<string> {
   await frame();
   await sleep(300);
   await frame();
+  return { editorEl, editor };
+}
+
+async function probe(): Promise<string> {
+  const { editorEl, editor } = await mountFixture();
 
   // Each card carries the number of the run it belongs to, which is how a
   // reading pairs the two.
@@ -234,6 +258,8 @@ async function probe(): Promise<string> {
   const lift = numberLift(first);
   const numberColour = getComputedStyle(first, '::after').color;
   const textColour = getComputedStyle(first.parentElement as HTMLElement).color;
+
+  const hover = await hoverReading(editor);
 
   const max = editorEl.scrollHeight - editorEl.clientHeight;
   const hold = (window as { footnoteHold?: string }).footnoteHold;
@@ -285,9 +311,13 @@ async function probe(): Promise<string> {
   await sleep(250);
   await frame();
 
+  const compact = balloonMarginVisible() ? await compactReading(cards) : null;
+
   // Where there is no margin, the tapped number opens a card that starts with
   // the same number. Tap the third, and leave it open for the screenshot.
   let popNumber: string | null = null;
+  let popHeight: number | null = null;
+  let popLineHeight: number | null = null;
   const third = runs.find((r) => r.dataset.cwFn === '3');
   if (!balloonMarginVisible() && third) {
     third.scrollIntoView({ block: 'center' });
@@ -296,6 +326,8 @@ async function probe(): Promise<string> {
     await frame();
     const pop = document.querySelector<HTMLElement>('.cw-fn-pop');
     popNumber = pop ? drawn(pop, '::before') : null;
+    popHeight = pop?.offsetHeight ?? null;
+    popLineHeight = pop ? Number.parseFloat(getComputedStyle(pop).lineHeight) : null;
   }
 
   const out: FootnoteProbe = {
@@ -312,6 +344,10 @@ async function probe(): Promise<string> {
     clientHeight: editorEl.clientHeight,
     scrolling,
     settled,
+    compact,
+    hover,
+    popHeight,
+    popLineHeight,
   };
   return JSON.stringify(out);
 }
@@ -349,6 +385,10 @@ function numberLift(run: HTMLElement): number | null {
 declare global {
   interface Window {
     footnoteMarginProbe: () => Promise<string>;
+    footnoteMarginMount: () => Promise<void>;
   }
 }
 window.footnoteMarginProbe = probe;
+window.footnoteMarginMount = async () => {
+  await mountFixture();
+};
