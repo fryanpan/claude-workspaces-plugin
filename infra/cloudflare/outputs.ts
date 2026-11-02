@@ -112,7 +112,7 @@ export function readOutputs(tfEnv: TfEnv, io: OutputIo = realOutputIo(tfEnv)): T
   return parseOutputs(out.stdout || '{}');
 }
 
-function realOutputIo(tfEnv: TfEnv): OutputIo {
+export function realOutputIo(tfEnv: TfEnv): OutputIo {
   const dir = stateDir(tfEnv);
   return {
     env: process.env,

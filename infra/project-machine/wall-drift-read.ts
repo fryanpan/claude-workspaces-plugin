@@ -2,7 +2,7 @@
  * Reads what the drift checks judge (`wall-drift.ts`), for `wall-report.ts`.
  * Every read is a read: `fly apps|ips|machine list`, `fly ssh console`
  * running `wall-probe.ts machine`, GitHub's deploy-key list, the tunnel's
- * configuration from Cloudflare's API, the deploy's settings
+ * configuration from Cloudflare's API (read-only token, `readOnlyCloudflare`), the deploy's settings
  * (`settings.ts`, Keychain and Terraform outputs), the router config, and a
  * Cloudflare plan that holds no lock and applies nothing.
  */
@@ -13,7 +13,8 @@ import { realIo, runWrapper } from '../cloudflare/run.ts';
 import { configReader } from '../cloudflare/run.ts';
 import type { TfEnv } from '../cloudflare/terraform.ts';
 import { CONFIG_PATHS, type StaticVars, staticVars } from '../cloudflare/vars.ts';
-import { cloudflareClient, flyJson, keychainHas, keychainRead, onMachine } from './mac-ops.ts';
+import { cloudflareApi } from './cloudflare.ts';
+import { flyJson, keychainHas, keychainRead, onMachine } from './mac-ops.ts';
 import type { MachineFacts } from './machine-facts.ts';
 import { readSettings } from './settings.ts';
 import {
@@ -97,7 +98,47 @@ export async function driftRows(
   return rows;
 }
 
-export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs): DriftIo {
+/**
+ * The daily report's Cloudflare credentials: a read-only API token and the
+ * state bucket's read-only key, the same pair CI's pull request plans hold
+ * (infra/cloudflare/README.md, "CI"). There is no fallback to the apply
+ * token or the read-write state key: a missing entry stops the report.
+ */
+export const READ_TOKEN_ENTRY = 'cloudflare-api-token-read';
+export const READ_STATE_ENTRY = 'cloudflare-r2-tfstate-read';
+
+export interface ReadOnlyCloudflare {
+  token: string;
+  /** The state bucket's read-only key, as terraform's S3 backend reads it. */
+  state: { AWS_ACCESS_KEY_ID: string; AWS_SECRET_ACCESS_KEY: string };
+}
+
+export function readOnlyCloudflare(src: {
+  keychainHas: (name: string) => boolean;
+  keychainRead: (name: string) => string;
+}): ReadOnlyCloudflare {
+  for (const entry of [READ_TOKEN_ENTRY, READ_STATE_ENTRY])
+    if (!src.keychainHas(entry))
+      throw new Error(
+        `the Keychain has no ${entry}; the wall report reads Cloudflare with read-only credentials only`,
+      );
+  let pair: { accessKeyId?: unknown; secretAccessKey?: unknown } = {};
+  try {
+    pair = JSON.parse(src.keychainRead(READ_STATE_ENTRY));
+  } catch {
+    // Refused below.
+  }
+  if (typeof pair.accessKeyId !== 'string' || typeof pair.secretAccessKey !== 'string')
+    throw new Error(
+      `the Keychain entry ${READ_STATE_ENTRY} has no accessKeyId and secretAccessKey`,
+    );
+  return {
+    token: src.keychainRead(READ_TOKEN_ENTRY).trim(),
+    state: { AWS_ACCESS_KEY_ID: pair.accessKeyId, AWS_SECRET_ACCESS_KEY: pair.secretAccessKey },
+  };
+}
+
+export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs, ro: ReadOnlyCloudflare): DriftIo {
   return {
     fly: (args) => flyJson(args),
     exec: onMachine,
@@ -113,8 +154,7 @@ export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs): DriftIo {
     },
     ingress: async (t) => {
       try {
-        const api = cloudflareClient('machine:wall-report (tunnel ingress)');
-        const res = await api<{ config?: Ingress }>(
+        const res = await cloudflareApi(ro.token)<{ config?: Ingress }>(
           'GET',
           `/accounts/${t.account_id}/cfd_tunnel/${t.id}/configurations`,
         );
@@ -133,7 +173,13 @@ export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs): DriftIo {
       const status = await runWrapper(
         'plan',
         { env: tfEnv, ci: true },
-        { ...realIo(tfEnv), out: (s) => (out += s), err: (s) => process.stderr.write(s) },
+        {
+          ...realIo(tfEnv),
+          // tfCredentials takes these before any Keychain entry.
+          env: { ...process.env, CLOUDFLARE_API_TOKEN: ro.token, ...ro.state },
+          out: (s) => (out += s),
+          err: (s) => process.stderr.write(s),
+        },
       );
       return { status, summary: out };
     },

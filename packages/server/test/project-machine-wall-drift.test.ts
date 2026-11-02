@@ -13,7 +13,13 @@ import {
   githubRepos,
   readFacts,
 } from '../../../infra/project-machine/machine-facts.ts';
-import { type DriftIo, driftRows } from '../../../infra/project-machine/wall-drift-read.ts';
+import {
+  type DriftIo,
+  READ_STATE_ENTRY,
+  READ_TOKEN_ENTRY,
+  driftRows,
+  readOnlyCloudflare,
+} from '../../../infra/project-machine/wall-drift-read.ts';
 import {
   deployKeyRows,
   flyRows,
@@ -368,5 +374,42 @@ describe('the reads behind them', () => {
       'router and Access config: could not be read: router.local.json is missing',
       'Cloudflare drifted from the config: change `module.stack.module.tunnel.y`',
     ]);
+  });
+});
+
+describe('the Cloudflare credentials the report reads with', () => {
+  const kc = (entries: Record<string, string>) => ({
+    keychainHas: (n: string) => n in entries,
+    keychainRead: (n: string) => entries[n] ?? '',
+  });
+
+  it('takes only the read-only token and state key', () => {
+    const ro = readOnlyCloudflare(
+      kc({
+        [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend\n',
+        [READ_STATE_ENTRY]: JSON.stringify({ accessKeyId: 'ro-id', secretAccessKey: 'ro-secret' }),
+        'cloudflare-api-token': 'fixture-apply-token-harborlight',
+      }),
+    );
+    expect(ro).toEqual({
+      token: 'fixture-read-token-riverbend',
+      state: { AWS_ACCESS_KEY_ID: 'ro-id', AWS_SECRET_ACCESS_KEY: 'ro-secret' },
+    });
+  });
+
+  it('never falls back to the apply token or the read-write state key', () => {
+    const apply = {
+      'cloudflare-api-token': 'fixture-apply-token-harborlight',
+      'cloudflare-r2-tfstate': JSON.stringify({ accessKeyId: 'rw', secretAccessKey: 'rw' }),
+    };
+    expect(() => readOnlyCloudflare(kc(apply))).toThrow(`the Keychain has no ${READ_TOKEN_ENTRY}`);
+    expect(() =>
+      readOnlyCloudflare(kc({ ...apply, [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend' })),
+    ).toThrow(`the Keychain has no ${READ_STATE_ENTRY}`);
+    expect(() =>
+      readOnlyCloudflare(
+        kc({ [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend', [READ_STATE_ENTRY]: 'not json' }),
+      ),
+    ).toThrow('has no accessKeyId and secretAccessKey');
   });
 });

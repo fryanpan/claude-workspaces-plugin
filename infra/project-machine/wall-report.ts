@@ -16,7 +16,7 @@
  * (`wall-probe.ts`).
  *
  * Cloudflare, per project, from `terraform output` (`infra/cloudflare/outputs.ts`,
- * the state bucket's credential only, never the API token): its own Access
+ * the state bucket's read-only key, Keychain `cloudflare-r2-tfstate-read`): its own Access
  * application with an audience no other project shares, hosts no other
  * project's application lists, its tunnel `cw-<project>` with its own origin
  * and a public host its own application gates, and the router route for
@@ -33,10 +33,10 @@
  * tunnel (a project machine). Exits 1 unless every row passes. A dry run
  * prints what it would run and runs nothing.
  */
-import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
+import { type TfOutputs, readOutputs, realOutputIo } from '../cloudflare/outputs.ts';
 import { isEnv } from '../cloudflare/terraform.ts';
-import { onMachine } from './mac-ops.ts';
-import { driftRows, realDriftIo } from './wall-drift-read.ts';
+import { keychainHas, keychainRead, onMachine } from './mac-ops.ts';
+import { driftRows, readOnlyCloudflare, realDriftIo } from './wall-drift-read.ts';
 import { type Row as DriftRow, PROBE, appFor, lastJson } from './wall-drift.ts';
 import type { Answer, Batch, WallType } from './wall-probe.ts';
 import { WALL_TYPES } from './wall-probe.ts';
@@ -275,12 +275,16 @@ async function main(): Promise<void> {
     return;
   }
   if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);
-  const outputs = readOutputs(tfEnv);
+  const ro = readOnlyCloudflare({ keychainHas, keychainRead });
+  const outputs = readOutputs(tfEnv, {
+    ...realOutputIo(tfEnv),
+    env: { ...process.env, ...ro.state },
+  });
   const projects = named ?? Object.keys(outputs.tunnels).sort();
   const cross = crossRows(projects, onMachine);
   const drift = args.includes('--no-drift')
     ? []
-    : await driftRows(projects, outputs, realDriftIo(tfEnv, outputs));
+    : await driftRows(projects, outputs, realDriftIo(tfEnv, outputs, ro));
   const r = report(projects, cross, cloudflareRows(outputs, projects), drift);
   console.log(r.text);
   if (!r.ok) process.exitCode = 1;
