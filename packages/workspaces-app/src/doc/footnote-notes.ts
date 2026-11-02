@@ -231,7 +231,6 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       card.el.classList.toggle('cw-fn-note-open', key === n);
       card.el.setAttribute('aria-expanded', String(key === n));
     }
-    relight();
     onChange();
   }
 
