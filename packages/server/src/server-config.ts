@@ -289,6 +289,13 @@ export function resolveServerConfig(opts: {
       'CW_LOOPBACK_REFUSED_UIDS is retired: name the uids to admit in CW_LOOPBACK_ALLOWED_UIDS',
     );
   }
+  // A server that shares its sockets with another user's group has other
+  // users on its box, so a missing allowlist fails the boot, not open.
+  if (boardSocketGroup !== undefined && loopbackAllowedUids.length === 0) {
+    throw new Error(
+      'CW_BOARD_SOCKET_GROUP is set, so CW_LOOPBACK_ALLOWED_UIDS must name the uids to admit',
+    );
+  }
 
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
   const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(

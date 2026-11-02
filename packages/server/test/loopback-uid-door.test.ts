@@ -277,6 +277,8 @@ describe('B. a server that admits only root, itself and the tunnel', () => {
     expect(cfg.boardSocketGroup).toBe(10010);
     // The retired denylist would leave the door off, so it stops the boot.
     expect(() => config({ CW_LOOPBACK_REFUSED_UIDS: '10004' })).toThrow('retired');
+    // A box with other users and no allowlist does not boot with the door off.
+    expect(() => config({ CW_BOARD_SOCKET_GROUP: '10010' })).toThrow('CW_LOOPBACK_ALLOWED_UIDS');
   });
 });
 
