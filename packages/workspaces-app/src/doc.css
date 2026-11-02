@@ -3970,6 +3970,21 @@ body.redline-mode .ProseMirror del.cw-del {
   padding-left: 6px;
   font: 400 12px / 1.4 var(--sans);
   color: var(--fg-muted);
+  /* One line until the reader asks (Bryan, 2026-11-02: "way too cramped on
+     the right margin"): the number and the start of the source, cut with an
+     ellipsis. Every caption is the same height, so with none open the column
+     never moves. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+/* Opened by a tap on the caption or its superscript (footnote-notes.ts),
+   one at a time. The column restacks the captions below it; no transition. */
+.cw-fn-note-open {
+  white-space: normal;
+  overflow: visible;
+  cursor: auto;
 }
 /* The number that pairs a caption or a popover with its superscript in the
    text: the same face, size and colour as that superscript, so the eye reads

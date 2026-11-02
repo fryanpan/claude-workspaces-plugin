@@ -52,6 +52,16 @@ import { noteParts } from './note-links.ts';
  * signal and is rare; pointing at a caption or a superscript — or tabbing
  * into a caption's link — lights that one note's fact and no other. That is
  * `relight` below, and the classes it writes are the ones `doc.css` draws.
+ *
+ * A MARGIN NOTE IS ONE LINE UNTIL ASKED (Bryan, 2026-11-02: "way too cramped
+ * on the right margin because of how many there are"). A caption at full
+ * length runs to three or four lines, and a doc with a source on every
+ * paragraph stacks them into a column taller than the prose it annotates.
+ * So every caption is drawn as its number and one truncated line, and a tap
+ * on that line or on the superscript in the text opens THAT note in full.
+ * One open at a time: a tap on another opens it and closes the first, a
+ * second tap on the same one closes it. The column restacks around the open
+ * note; with none open, every caption is one line and none moves.
  */
 
 export interface FootnoteNotesOptions {
@@ -181,6 +191,9 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   /** The words the open card is showing, so a refresh can tell whether the
    *  number still means the note the reader tapped. */
   let openNote = '';
+  /** The margin caption drawn in full, and its words, for the same reason. */
+  let expandedN: string | null = null;
+  let expandedNote = '';
 
   scope.onCleanup(() => {
     sources.remove();
@@ -198,7 +211,28 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     scope.listen(el, 'mouseleave', () => hover(null));
     scope.listen(el, 'focusin', () => hover(n));
     scope.listen(el, 'focusout', () => hover(null));
+    scope.listen(el, 'click', (ev) => {
+      const open = expandedN === n;
+      // A link in an open caption is followed; in a one-line caption the tap
+      // is a request to read the whole note first.
+      if (open && (ev.target as HTMLElement | null)?.closest?.('a')) return;
+      ev.preventDefault();
+      expand(open ? null : n);
+    });
     return el;
+  }
+
+  /** Draw caption `n` in full and every other caption as one line. */
+  function expand(n: string | null): void {
+    if (expandedN === n) return;
+    expandedN = n;
+    expandedNote = n === null ? '' : (cards.get(n)?.note ?? '');
+    for (const [key, { card }] of cards) {
+      card.el.classList.toggle('cw-fn-note-open', key === n);
+      card.el.setAttribute('aria-expanded', String(key === n));
+    }
+    relight();
+    onChange();
   }
 
   function cardFor(f: FoundNote): NoteCard {
@@ -209,6 +243,8 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     }
     const el = held?.card.el ?? noteEl(f.n);
     el.className = f.unsure ? 'cw-fn-note cw-fn-note-unsure' : 'cw-fn-note';
+    el.classList.toggle('cw-fn-note-open', expandedN === f.n);
+    el.setAttribute('aria-expanded', String(expandedN === f.n));
     drawNote(el, f.note);
     const card: NoteCard = {
       key: `fn:${f.n}`,
@@ -311,6 +347,12 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       held.card.el.remove();
       cards.delete(n);
     }
+    // The open caption is re-decided for the reason the card below is: a
+    // number that now names different words closes rather than swapping.
+    if (expandedN !== null) {
+      const still = notes.find((f) => f.n === expandedN);
+      if (!still || still.note !== expandedNote) expandedN = null;
+    }
     for (const f of notes) cardFor(f);
     // The open card has to be re-decided, not left standing. Its span was
     // just replaced, the paragraph under it may have moved, and the NUMBER is
@@ -339,9 +381,16 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
 
   scope.listen(prose, 'click', (ev) => {
     const target = (ev.target as HTMLElement | null)?.closest?.('.cw-fn') as HTMLElement | null;
-    // The margin already shows every note; a tap there would open a second
-    // copy of what the reader is looking at.
-    if (!target || marginVisible()) {
+    // With a margin, the superscript opens its caption there in full rather
+    // than a second copy of the note under the line; a tap elsewhere in the
+    // prose closes the open caption.
+    if (marginVisible()) {
+      closePop();
+      const n = target?.dataset.cwFn ?? null;
+      expand(n === null || n === expandedN ? null : n);
+      return;
+    }
+    if (!target) {
       closePop();
       return;
     }
@@ -399,7 +448,16 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   refresh();
 
   return {
-    cards: () => (marginVisible() ? notes.map((f) => cardFor(f)) : []),
+    cards: () => {
+      if (!marginVisible()) return [];
+      // The editor redraws a decorated span, with no transaction, when a
+      // class is written onto it — `relight` does that on a hover. Measured
+      // in Chrome: a caption opened after a hover was placed against the
+      // detached span, at the top of the doc. So a detached anchor is re-read
+      // rather than measured.
+      if (notes.some((f) => !f.anchor.isConnected)) notes = found(prose);
+      return notes.map((f) => cardFor(f));
+    },
     refresh,
   };
 }

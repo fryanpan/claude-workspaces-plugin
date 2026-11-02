@@ -27,6 +27,14 @@
  * opens a card that starts with 3. `lift` walks a column through the
  * painted number: it sat on the baseline (0.15) while the run's 0px font
  * made `vertical-align: super` raise it by almost nothing.
+ *
+ * ONE LINE UNTIL ASKED. With twenty-odd sources at three or four lines each
+ * the margin was a wall of grey (Bryan, 2026-11-02: "way too cramped").
+ * `compact` reads every caption's height at rest — one line each, with
+ * `truncated` as the control that the full text would have wrapped — then
+ * taps note 3's superscript, taps it again, taps caption 4 and caption 5,
+ * and reads every caption after each tap. Before the change every caption
+ * at rest measured several lines.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -185,6 +193,30 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
         // And a note whose line is in view is in view too.
         expect(p.scrolling.flatMap((r) => r.vanished)).toEqual([]);
         expect(p.settled.flatMap((r) => r.vanished)).toEqual([]);
+
+        // ONE LINE UNTIL ASKED: every caption at rest is one line high, and
+        // most of them are cut short, so the line is doing the work.
+        const c = p.compact;
+        if (c === null) throw new Error('no compact reading with a margin');
+        const oneLine = c.lineHeight + 1;
+        expect(c.restMax).toBeLessThanOrEqual(oneLine);
+        expect(c.restMin).toBeGreaterThanOrEqual(c.lineHeight - 1);
+        expect(c.truncated).toBeGreaterThanOrEqual(p.notes / 2);
+        // The superscript opens its caption in full, and only that one…
+        expect(c.viaSuperscript.open).toBeGreaterThanOrEqual(2 * c.lineHeight);
+        expect(c.viaSuperscript.othersMax).toBeLessThanOrEqual(oneLine);
+        expect(c.viaSuperscript.openCount).toBe(1);
+        // …a second tap closes it, and every caption is back where it was.
+        expect(c.closedAgain.height).toBeLessThanOrEqual(oneLine);
+        expect(c.closedAgain.openCount).toBe(0);
+        expect(c.closedAgain.moved).toBeLessThan(1);
+        // A caption opens itself, and opening the next one closes it.
+        expect(c.viaCaption.open4).toBeGreaterThanOrEqual(2 * c.lineHeight);
+        expect(c.viaCaption.then4).toBeLessThanOrEqual(oneLine);
+        expect(c.viaCaption.then5).toBeGreaterThanOrEqual(2 * c.lineHeight);
+        expect(c.viaCaption.openCount).toBe(1);
+        expect(c.closedCaption.height).toBeLessThanOrEqual(oneLine);
+        expect(c.closedCaption.openCount).toBe(0);
       },
       BROWSER_CASE_MS,
     );
@@ -197,8 +229,11 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
       expect(p.marginVisible).toBe(false);
       expect(p.notes).toBeGreaterThanOrEqual(20);
       expect(p.cards).toBe(0);
+      expect(p.compact).toBeNull();
       expect(p.superscripts).toBe(p.notes);
       expect(p.popNumber).toBe('"3"');
+      // No margin, so nothing to fold: the tapped note still opens in full.
+      expect(p.popHeight).toBeGreaterThanOrEqual(2 * (p.popLineHeight ?? 0));
       expect(p.lift).toBeGreaterThan(0.3);
       expect(p.numberColour).toBe(p.textColour);
     },

@@ -134,6 +134,73 @@ describe('notes in the margin', () => {
   });
 });
 
+describe('a margin caption is one line until the reader asks', () => {
+  const captionFor = (notes: ReturnType<typeof mount>['notes'], n: string) =>
+    notes.cards().find((c) => c.el.dataset.cwFnN === n)?.el as HTMLElement;
+  const openOnes = (notes: ReturnType<typeof mount>['notes']) =>
+    notes
+      .cards()
+      .filter((c) => c.el.classList.contains('cw-fn-note-open'))
+      .map((c) => c.el.dataset.cwFnN);
+
+  it('starts with every caption closed', () => {
+    const { notes } = mount({ marginVisible: true });
+    expect(openOnes(notes)).toEqual([]);
+    expect(captionFor(notes, '1').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens a caption from its superscript, and closes it on a second tap', () => {
+    const { notes, container, changed } = mount({ marginVisible: true });
+    const before = changed();
+    tap(supFor(container, '1'));
+    expect(openOnes(notes)).toEqual(['1']);
+    expect(captionFor(notes, '1').getAttribute('aria-expanded')).toBe('true');
+    expect(changed()).toBe(before + 1);
+    tap(supFor(container, '1'));
+    expect(openOnes(notes)).toEqual([]);
+    // …and the popover stays shut: the margin is where the note is.
+    expect(popover(container)?.hidden).toBe(true);
+  });
+
+  it('opens a caption from a tap on the caption, and swaps to the next one tapped', () => {
+    const { notes } = mount({ marginVisible: true });
+    tap(captionFor(notes, '1'));
+    expect(openOnes(notes)).toEqual(['1']);
+    tap(captionFor(notes, '2'));
+    expect(openOnes(notes)).toEqual(['2']);
+    tap(captionFor(notes, '2'));
+    expect(openOnes(notes)).toEqual([]);
+  });
+
+  it('closes the open caption on a tap elsewhere in the prose', () => {
+    const { notes, container } = mount({ marginVisible: true });
+    tap(supFor(container, '2'));
+    tap(factFor(container, '1'));
+    expect(openOnes(notes)).toEqual([]);
+  });
+
+  it('opens a closed caption rather than following its link, then follows it once open', () => {
+    const { notes } = mount({ marginVisible: true, md: LINKED });
+    const link = captionFor(notes, '1').querySelector('a') as HTMLAnchorElement;
+    const first = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    expect(openOnes(notes)).toEqual(['1']);
+    const second = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(false);
+    expect(openOnes(notes)).toEqual(['1']);
+  });
+
+  it('closes when an edit gives the open number different words', () => {
+    const { notes, container, editor } = mount({ marginVisible: true });
+    tap(supFor(container, '1'));
+    editor.editor.commands.setContent('<p>New^[A different source.]</p>');
+    notes.refresh();
+    expect(openOnes(notes)).toEqual([]);
+  });
+});
+
 describe('the popover on a phone', () => {
   it('opens under the tapped note and shows its text', () => {
     const { container } = mount({ marginVisible: false });
