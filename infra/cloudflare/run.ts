@@ -168,7 +168,7 @@ export function configReader(env: Record<string, string | undefined>, repo = REP
   };
 }
 
-function realIo(tfEnv: TfEnv): WrapperIo {
+export function realIo(tfEnv: TfEnv): WrapperIo {
   const dir = stateDir(tfEnv);
   return {
     read: configReader(process.env),

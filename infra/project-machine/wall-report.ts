@@ -4,7 +4,7 @@
  * other's credentials, and how Cloudflare walls each project, as the
  * Terraform outputs say.
  *
- *   bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--dry-run]
+ *   bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--no-drift] [--dry-run]
  *
  * Cross-project refusals, in the terms of `cross-server-walls.test.ts`: on
  * each project machine `wall-probe.ts mint` signs one value of each expiring
@@ -22,6 +22,13 @@
  * and a public host its own application gates, and the router route for
  * that host.
  *
+ * Drift (`wall-drift.ts`, read by `wall-drift-read.ts`): per machine, its Fly
+ * network, public addresses and services, the server's admission settings
+ * against the deploy's, trusted emails, the loopback uid policy,
+ * `git-push.json`'s approval flags, the deploy key's read-only flag and the
+ * tunnel's ingress; across the account, ONE_ADDRESS_ORIGIN, shared service
+ * tokens, and a Cloudflare plan with no changes. `--no-drift` leaves it out.
+ *
  * The projects are `--projects`, else every project the outputs give a
  * tunnel (a project machine). Exits 1 unless every row passes. A dry run
  * prints what it would run and runs nothing.
@@ -29,11 +36,12 @@
 import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
 import { isEnv } from '../cloudflare/terraform.ts';
 import { onMachine } from './mac-ops.ts';
+import { driftRows, realDriftIo } from './wall-drift-read.ts';
+import { type Row as DriftRow, PROBE, appFor, lastJson } from './wall-drift.ts';
 import type { Answer, Batch, WallType } from './wall-probe.ts';
 import { WALL_TYPES } from './wall-probe.ts';
 
-export const PROBE = 'bun /app/infra/project-machine/wall-probe.ts';
-export const appFor = (project: string): string => `cw-${project}`;
+export { PROBE, appFor, lastJson };
 
 /** Runs a command on a project's machine and returns its output. */
 export type MachineExec = (app: string, command: string) => string;
@@ -52,17 +60,6 @@ export interface CfRow {
   check: string;
   answer: string;
   ok: boolean;
-}
-
-/** The last JSON line of a command's output; `fly ssh` prints its own lines first. */
-export function lastJson<T>(out: string): T {
-  const line = out
-    .trim()
-    .split('\n')
-    .reverse()
-    .find((l) => l.trim().startsWith('{'));
-  if (!line) throw new Error('no JSON in the probe output');
-  return JSON.parse(line) as T;
 }
 
 /** Every server's verdict on every server's batch, one row per type. */
@@ -185,6 +182,7 @@ export function report(
   projects: readonly string[],
   cross: readonly CrossRow[],
   cf: readonly CfRow[],
+  drift: readonly DriftRow[] = [],
 ): Report {
   const reasons: string[] = [];
   if (projects.length < 2)
@@ -199,6 +197,8 @@ export function report(
     reasons.push(`${crossFails} cross-project value(s) were not refused for the signature`);
   const cfFails = cf.filter((r) => !r.ok).length;
   if (cfFails) reasons.push(`${cfFails} Cloudflare check(s) failed`);
+  const driftFails = drift.filter((r) => !r.ok).length;
+  if (driftFails) reasons.push(`${driftFails} drift check(s) failed`);
   const ok = reasons.length === 0;
   const text = [
     "Cross-project refusals (each server must accept its own value, the control, and refuse every other server's for its signature)",
@@ -220,6 +220,16 @@ export function report(
       cf.map((r) => [r.project, r.check, r.answer, r.ok ? 'PASS' : 'FAIL']),
     ),
     '',
+    ...(drift.length
+      ? [
+          'Drift: each machine, its Fly app and Cloudflare against the deploy and the config',
+          renderTable(
+            ['project', 'check', 'answer', 'result'],
+            drift.map((r) => [r.project, r.check, r.answer, r.ok ? 'PASS' : 'FAIL']),
+          ),
+          '',
+        ]
+      : []),
     ...reasons.map((r) => `[wall-report] ${r}`),
     `[wall-report] ${ok ? 'PASS' : 'FAIL'}`,
   ].join('\n');
@@ -252,6 +262,15 @@ async function main(): Promise<void> {
       console.log(
         `fly ssh console --app ${appFor(p)} --command '${PROBE} verify <each project's batch>'`,
       );
+    console.log('fly apps list --json');
+    for (const p of projects) {
+      console.log(`fly ips list --app ${appFor(p)} --json`);
+      console.log(`fly machine list --app ${appFor(p)} --json`);
+      console.log(`fly ssh console --app ${appFor(p)} --command '${PROBE} machine'`);
+      console.log(`gh api repos/<each repo the lead of ${p} clones or may push>/keys`);
+      console.log(`GET /accounts/<account>/cfd_tunnel/<${appFor(p)} id>/configurations`);
+    }
+    console.log(`bun run cf:plan ${tfEnv} (CI mode: no lock, nothing applied)`);
     console.log('[wall-report] DRY RUN: nothing was run');
     return;
   }
@@ -259,7 +278,10 @@ async function main(): Promise<void> {
   const outputs = readOutputs(tfEnv);
   const projects = named ?? Object.keys(outputs.tunnels).sort();
   const cross = crossRows(projects, onMachine);
-  const r = report(projects, cross, cloudflareRows(outputs, projects));
+  const drift = args.includes('--no-drift')
+    ? []
+    : await driftRows(projects, outputs, realDriftIo(tfEnv, outputs));
+  const r = report(projects, cross, cloudflareRows(outputs, projects), drift);
   console.log(r.text);
   if (!r.ok) process.exitCode = 1;
 }
