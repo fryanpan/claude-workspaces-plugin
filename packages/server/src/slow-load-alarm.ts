@@ -74,6 +74,11 @@ export interface LoadReportReading {
   /** The board's name for the same stamp, from before page types: the
    *  ydoc's task projection. */
   msToFirstProjection?: unknown;
+  /** The page was hidden at some point before it reported, so its stamps
+   *  hold time the reader was not looking at it (`page-load-report.ts`). */
+  hidden?: unknown;
+  /** The hidden ms the page saw. Kept in the board's log, never judged. */
+  hiddenMs?: unknown;
 }
 
 /**
@@ -92,6 +97,8 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 export interface ContentReading {
   page: PageType;
   msToContent: number | null;
+  /** Hidden before it reported: kept, never judged against the budget. */
+  hidden: boolean;
 }
 
 /**
@@ -106,12 +113,13 @@ export interface ContentReading {
 export function contentReading(report: LoadReportReading): ContentReading | null {
   const page = pageTypeOf(report.page);
   if (!page || !finite(report.msToBoot)) return null;
-  if (finite(report.msToContent)) return { page, msToContent: report.msToContent };
+  const hidden = report.hidden === true;
+  if (finite(report.msToContent)) return { page, msToContent: report.msToContent, hidden };
   // The board's older clients send the same stamp under its phase's name.
   if (page === 'board' && finite(report.msToFirstProjection)) {
-    return { page, msToContent: report.msToFirstProjection };
+    return { page, msToContent: report.msToFirstProjection, hidden };
   }
-  return { page, msToContent: null };
+  return { page, msToContent: null, hidden };
 }
 
 /** Why this load was slow, or null when it was not. */
@@ -126,10 +134,15 @@ export interface SlowLoadVerdict {
   budgetMs: number;
 }
 
-/** Read one report against the budget. */
+/**
+ * Read one report against the budget. A page that was hidden before it
+ * reported is not judged: a hidden tab paints nothing and its clock keeps
+ * running, so its number is how long the reader looked away. The 19.4s Home
+ * load of 1 Nov 2026 could not be told apart from one of those.
+ */
 export function slowLoadVerdict(report: LoadReportReading): SlowLoadVerdict | null {
   const reading = contentReading(report);
-  if (!reading) return null;
+  if (!reading || reading.hidden) return null;
   const { page, msToContent } = reading;
   if (msToContent === null) {
     return { page, reason: 'never-arrived', msToContent: null, budgetMs: PAGE_LOAD_BUDGET_MS };

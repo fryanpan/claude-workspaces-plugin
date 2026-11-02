@@ -134,3 +134,37 @@ export function rewriteAssetRefs(html: string, manifest: AssetManifest): string 
   }
   return out;
 }
+
+/**
+ * `<link rel="modulepreload">` support: the chunks an ESM entry imports
+ * statically. With splitting on, an entry imports shared chunks, and a browser
+ * only learns their names once the entry has downloaded and parsed — one more
+ * round trip, in series, before the page can run. Lazy chunks (`import()`)
+ * are left out on purpose.
+ *
+ * This one: the relative specifiers of a minified ESM file's static imports.
+ */
+export function staticImports(code: string): string[] {
+  const out = new Set<string>();
+  const re = /(?:^|[;}\s])import\s*(?:[\w$*{}\s,]*?from\s*)?["'](\.\/[^"']+\.js)["']/g;
+  for (const m of code.matchAll(re)) if (m[1]) out.add(m[1].slice(2));
+  return [...out];
+}
+
+/** Every chunk `entry` reaches through static imports, nearest first. */
+export function staticChunkClosure(entry: string, read: (name: string) => string | null): string[] {
+  const seen = new Set<string>([entry]);
+  const order: string[] = [];
+  const queue = [entry];
+  while (queue.length > 0) {
+    const code = read(queue.shift() as string);
+    if (code === null) continue;
+    for (const dep of staticImports(code)) {
+      if (seen.has(dep)) continue;
+      seen.add(dep);
+      order.push(dep);
+      queue.push(dep);
+    }
+  }
+  return order;
+}

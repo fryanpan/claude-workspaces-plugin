@@ -9,31 +9,9 @@
  * put back the bytes splitting took off the first load.
  */
 
-/** The relative specifiers of a minified ESM file's static imports. */
-export function staticImports(code: string): string[] {
-  const out = new Set<string>();
-  const re = /(?:^|[;}\s])import\s*(?:[\w$*{}\s,]*?from\s*)?["'](\.\/[^"']+\.js)["']/g;
-  for (const m of code.matchAll(re)) if (m[1]) out.add(m[1].slice(2));
-  return [...out];
-}
-
-/** Every chunk `entry` reaches through static imports, nearest first. */
-export function staticChunkClosure(entry: string, read: (name: string) => string | null): string[] {
-  const seen = new Set<string>([entry]);
-  const order: string[] = [];
-  const queue = [entry];
-  while (queue.length > 0) {
-    const code = read(queue.shift() as string);
-    if (code === null) continue;
-    for (const dep of staticImports(code)) {
-      if (seen.has(dep)) continue;
-      seen.add(dep);
-      order.push(dep);
-      queue.push(dep);
-    }
-  }
-  return order;
-}
+// The closure walk lives in core so the server can name the same chunks for
+// the shells it renders itself (Home's `landingModulePreloads`).
+export { staticChunkClosure, staticImports } from '@claude-workspaces/core/asset-manifest';
 
 /** `html` with one preload link per chunk, at the end of its head. */
 export function injectModulePreloads(html: string, chunks: readonly string[]): string {

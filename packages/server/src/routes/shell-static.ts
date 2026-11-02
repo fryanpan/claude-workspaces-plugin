@@ -74,6 +74,7 @@ import {
   buildProjectArtifacts,
   collectLandingProjects,
   collectLandingWorkspaces,
+  landingModulePreloads,
   readAppAssetManifest,
   renderBoardNotFound,
   renderBoardShell,
@@ -503,12 +504,13 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // waiting counts, "active in the last N days". Served with no cache
     // directives at all, as it was, a browser picks its own freshness
     // lifetime and can show a queue that has since been worked.
+    const assets = readAppAssetManifest(markdownAppDist);
     return new Response(
       renderLanding(
         model,
         browserSentry,
         defaultBoardWorkspaceName,
-        readAppAssetManifest(markdownAppDist),
+        assets,
         review,
         inbox,
         coach,
@@ -518,6 +520,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         // Never for a visitor, like the widget: the chat's own route refuses
         // one, and an id it cannot use is a board it was not shared.
         feedback ? (review.planWorkspaceId ?? '') : '',
+        landingModulePreloads(markdownAppDist, assets),
       ),
       { headers: HTML_SHELL_HEADERS },
     );
