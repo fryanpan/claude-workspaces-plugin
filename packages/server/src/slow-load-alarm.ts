@@ -77,7 +77,7 @@ export interface LoadReportReading {
   /** The page was hidden at some point before it reported, so its stamps
    *  hold time the reader was not looking at it (`page-load-report.ts`). */
   hidden?: unknown;
-  /** The hidden ms the page saw. Kept in the board's log, never judged. */
+  /** The hidden ms the page saw. Kept with the report as sent; never judged. */
   hiddenMs?: unknown;
 }
 
