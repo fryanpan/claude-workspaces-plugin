@@ -3894,8 +3894,7 @@ body.redline-mode .ProseMirror del.cw-del {
    nearly every sentence on a well-sourced page, which spends the reader's
    attention on the one thing they were not asking about. So the question is
    asked instead of answered: pointing at a caption, at a superscript, or
-   tabbing into a caption's link lights THAT note's words and no others, via
-   the `cw-fn-on` / `cw-fn-fact-on` classes footnote-notes.ts writes. No
+   tabbing into a caption's link lights THAT note's words and no others. No
    transition and no animation — a line appearing where the pointer is is
    already the whole signal.
    --------------------------------------------------------------------------- */
@@ -3925,10 +3924,6 @@ body.redline-mode .ProseMirror del.cw-del {
   padding: 0 1px 0 2px;
   cursor: pointer;
 }
-.cw-fn-on::after {
-  background: var(--bg-hover);
-  border-radius: 3px;
-}
 .cw-fn-open {
   font-size: inherit;
   letter-spacing: inherit;
@@ -3949,17 +3944,11 @@ body.redline-mode .ProseMirror del.cw-del {
 .cw-fn-fact-unsure {
   border-bottom: 1px dotted var(--border-strong);
 }
-/* Lit: the reader is pointing at this note. A hairline plus the same tint the
-   superscript takes, so the words and the number read as one thing. The
-   compound selector comes last so an unconfirmed fact stays DOTTED when it
-   lights up rather than changing stroke under the pointer. */
-.cw-fn-fact-on {
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-hover);
-}
-.cw-fn-fact-unsure.cw-fn-fact-on {
-  border-bottom-style: dotted;
-}
+/* Lit — the reader is pointing at this note — is NOT drawn here. The
+   superscript and the fact are the editor's spans, and a class written onto
+   one makes the editor redraw it, so a moving pointer redrew the paragraphs
+   under it (Bryan, 2026-11-02: "don't shift the body text please!"). The
+   lighting is a stylesheet footnote-notes.ts owns, naming the lit number. */
 
 /* The margin note. A caption, not a card: no box, no fill, no colour — the
    column already says "this is about the line beside it". */

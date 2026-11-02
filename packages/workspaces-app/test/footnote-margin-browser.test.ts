@@ -35,14 +35,23 @@
  * taps note 3's superscript, taps it again, taps caption 4 and caption 5,
  * and reads every caption after each tap. Before the change every caption
  * at rest measured several lines.
+ *
+ * NOTHING UNDER THE POINTER MOVES (Bryan, 2026-11-02: "don't shift the body
+ * text please!"). `hover` passes the pointer over every paragraph and every
+ * superscript and reads every line's box, and whether the editor replaced
+ * any superscript span: lighting a note used to write a class onto the
+ * editor's spans, and the editor redrew every one it was written onto.
+ * `litWhileOver` is the control that the hover still lights its note.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 import { RUN_ID_ENV, profilesOfRun } from '../../../scripts/ui-shot-lib.ts';
+import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
 import type { FootnoteProbe } from './footnote-margin-driver.ts';
 
 /** The browser these cases may launch, or null to skip them.
@@ -63,6 +72,17 @@ const SPAWN_MS = 55_000;
 const dirs: string[] = [];
 const owned: string[] = [];
 
+/** `/app/tokens.css` as the server serves it: the vendored Open Props files,
+ *  then the mapping in `src/tokens.css`. The mapping alone resolves every
+ *  token to nothing, which left a lit note's shade unpainted here. */
+function servedTokens(): string {
+  const fromPkg = createRequire(join(import.meta.dirname, '../package.json'));
+  return [
+    ...OPEN_PROPS_FILES.map((f) => readText(fromPkg.resolve(`open-props/${f}`))),
+    readText(join(SRC, 'tokens.css')),
+  ].join('\n');
+}
+
 /** The review editor's shell, as `app.ts` builds it around the doc. */
 function page(bundle: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
@@ -70,7 +90,7 @@ function page(bundle: string): string {
 <style>${readText(join(SRC, 'board.css'))}</style>
 <style>${readText(join(SRC, 'styles.css'))}</style>
 <style>${readText(join(SRC, 'doc.css'))}</style>
-<style>${readText(join(SRC, 'tokens.css'))}</style>
+<style>${servedTokens()}</style>
 <style>html,body{margin:0;height:100%}#shell{height:100vh;display:flex}
 #editor-pane{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;height:100vh}
 #editor{flex:1;min-height:0;overflow:auto}</style>
@@ -147,6 +167,18 @@ async function measure(viewport: string[]): Promise<FootnoteProbe> {
   return JSON.parse((JSON.parse(r.stdout) as { result: string }).result) as FootnoteProbe;
 }
 
+/** The body text never moves while the pointer passes over it. `crossed` and
+ *  `lines` are the controls: the pointer really went over every superscript,
+ *  and there were lines to watch. */
+function expectStillUnderPointer(p: FootnoteProbe): void {
+  expect(p.hover.crossed).toBe(p.notes);
+  expect(p.hover.litWhileOver).toBe(p.notes);
+  expect(p.hover.lines).toBeGreaterThan(20);
+  expect(p.hover.replaced).toBe(0);
+  expect(p.hover.shifted).toEqual([]);
+  expect(p.hover.rawShown).toBe(0);
+}
+
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   for (const runId of owned) {
@@ -173,6 +205,7 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
         // doc, and notes beside on-screen lines at every reading.
         expect(p.marginVisible).toBe(true);
         expect(p.notes).toBeGreaterThanOrEqual(20);
+        expectStillUnderPointer(p);
         expect(p.cards).toBe(p.notes);
         // Every run shows its number, and every card starts with it.
         expect(p.superscripts).toBe(p.notes);
@@ -228,6 +261,7 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
       const p = await measure(['--preset', 'phone']);
       expect(p.marginVisible).toBe(false);
       expect(p.notes).toBeGreaterThanOrEqual(20);
+      expectStillUnderPointer(p);
       expect(p.cards).toBe(0);
       expect(p.compact).toBeNull();
       expect(p.superscripts).toBe(p.notes);

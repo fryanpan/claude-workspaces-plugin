@@ -51,7 +51,7 @@ import { noteParts } from './note-links.ts';
  * rest now except an UNCONFIRMED note's dotted line, which is the certainty
  * signal and is rare; pointing at a caption or a superscript — or tabbing
  * into a caption's link — lights that one note's fact and no other. That is
- * `relight` below, and the classes it writes are the ones `doc.css` draws.
+ * `relight` below, which writes a stylesheet rather than touching the prose.
  *
  * A MARGIN NOTE IS ONE LINE UNTIL ASKED (Bryan, 2026-11-02: "way too cramped
  * on the right margin because of how many there are"). A caption at full
@@ -290,31 +290,49 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     relight();
   }
 
+  /** The rules that light one note's spans in the prose — see `relight`. */
+  const litSheet = document.createElement('style');
+  container.appendChild(litSheet);
+  scope.onCleanup(() => litSheet.remove());
+
   /**
    * Light exactly one note — the one being pointed at, or the one whose card
    * is open — and nothing else.
    *
    * Nothing is lit at rest, so the prose reads as prose; this is the whole of
-   * "which words is that note about". The decoration plugin replaces both
-   * spans on every rebuild, so the classes are put back by QUERY rather than
-   * through a remembered element: a run split by another mark renders as two
-   * spans carrying the same number, and both halves are the same note.
+   * "which words is that note about".
+   *
+   * NOTHING IS WRITTEN INTO THE PROSE (Bryan, 2026-11-02: "as I move my cursor
+   * over the body text, raw citation details expand and shift everything
+   * around -- don't shift the body text please!"). This used to add a class
+   * to the superscript and the fact spans. Those spans belong to the editor,
+   * and the editor treats any change to them that it did not make as an edit
+   * to read back: measured in Chrome, every hover replaced the spans with new
+   * ones, so a moving pointer redrew the paragraphs under it. So the lighting
+   * is a stylesheet this module owns, outside the editor, naming the lit
+   * number; a rebuilt span is lit by the same rule with nothing put back.
+   * The caption is this module's own element, so it still takes a class.
    */
   function relight(): void {
-    for (const el of prose.querySelectorAll('.cw-fn-on, .cw-fn-fact-on')) {
-      el.classList.remove('cw-fn-on', 'cw-fn-fact-on');
-    }
     for (const { card } of cards.values()) card.el.classList.remove('cw-fn-note-on');
     const n = hoverN ?? openN;
-    if (n === null) return;
+    if (n === null) {
+      litSheet.textContent = '';
+      delete container.dataset.cwFnLit;
+      return;
+    }
     cards.get(n)?.card.el.classList.add('cw-fn-note-on');
+    container.dataset.cwFnLit = n;
     const id = CSS.escape(n);
-    for (const el of prose.querySelectorAll(`.cw-fn[data-cw-fn="${id}"]`)) {
-      el.classList.add('cw-fn-on');
-    }
-    for (const el of prose.querySelectorAll(`.cw-fn-fact[data-cw-fn-for="${id}"]`)) {
-      el.classList.add('cw-fn-fact-on');
-    }
+    // The superscript takes the shade the caption's number takes, and the
+    // fact a hairline plus the same tint, so the words and the number read as
+    // one thing. The unconfirmed rule comes last so a dotted fact stays
+    // DOTTED when it lights up rather than changing stroke under the pointer.
+    litSheet.textContent = [
+      `.cw-fn[data-cw-fn="${id}"]::after{background:var(--bg-hover);border-radius:3px}`,
+      `.cw-fn-fact[data-cw-fn-for="${id}"]{border-bottom:1px solid var(--border-strong);background:var(--bg-hover)}`,
+      `.cw-fn-fact-unsure[data-cw-fn-for="${id}"]{border-bottom-style:dotted}`,
+    ].join('\n');
   }
 
   /**
@@ -372,8 +390,6 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
         placePop(still.anchor);
       }
     }
-    // Whatever the card did, the spans under the lit note are new elements
-    // and carry none of the classes the old ones did.
     relight();
     onChange();
   }
@@ -447,16 +463,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   refresh();
 
   return {
-    cards: () => {
-      if (!marginVisible()) return [];
-      // The editor redraws a decorated span, with no transaction, when a
-      // class is written onto it — `relight` does that on a hover. Measured
-      // in Chrome: a caption opened after a hover was placed against the
-      // detached span, at the top of the doc. So a detached anchor is re-read
-      // rather than measured.
-      if (notes.some((f) => !f.anchor.isConnected)) notes = found(prose);
-      return notes.map((f) => cardFor(f));
-    },
+    cards: () => (marginVisible() ? notes.map((f) => cardFor(f)) : []),
     refresh,
   };
 }

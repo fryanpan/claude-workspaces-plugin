@@ -18,6 +18,12 @@ import { mountDocMargin } from '../src/doc/doc-margin.ts';
 import { createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { mountReviewChrome } from '../src/review-chrome.ts';
+import {
+  type CompactReading,
+  type HoverReading,
+  compactReading,
+  hoverReading,
+} from './footnote-margin-taps.ts';
 
 /** See `ScrollReading.vanished`. */
 const ROOM_PX = 60;
@@ -77,6 +83,8 @@ export interface FootnoteProbe {
   scrolling: ScrollReading[];
   /** After the column has had its debounce at each step. */
   settled: ScrollReading[];
+  /** The pointer passing over the body text and its superscripts. */
+  hover: HoverReading;
   /** The one-line captions and the taps that open them; null without a
    *  margin. */
   compact: CompactReading | null;
@@ -84,25 +92,6 @@ export interface FootnoteProbe {
    *  line height — the note is still drawn in full there. */
   popHeight: number | null;
   popLineHeight: number | null;
-}
-
-/** Heights are `offsetHeight` px; `lineHeight` is one caption line. */
-export interface CompactReading {
-  lineHeight: number;
-  /** Every caption at rest, nothing open. */
-  restMin: number;
-  restMax: number;
-  /** Captions whose text is wider than their line — the control that a
-   *  caption at full length would have wrapped. */
-  truncated: number;
-  /** After a tap on note 3's superscript in the text. */
-  viaSuperscript: { open: number; othersMax: number; openCount: number };
-  /** After a second tap on the same superscript. */
-  closedAgain: { height: number; openCount: number; moved: number };
-  /** A tap on caption 4, then on caption 5. */
-  viaCaption: { open4: number; then4: number; then5: number; openCount: number };
-  /** After a second tap on caption 5. */
-  closedCaption: { height: number; openCount: number };
 }
 
 /** A source note in the shape the research notes carry: a link, a page range
@@ -214,7 +203,11 @@ function read(editorEl: HTMLElement, proseEl: HTMLElement): ScrollReading {
   };
 }
 
-async function probe(): Promise<string> {
+/** The fixture, mounted as the review page mounts it, and nothing measured. */
+async function mountFixture(): Promise<{
+  editorEl: HTMLElement;
+  editor: ReturnType<typeof createEditor>;
+}> {
   const editorEl = document.getElementById('editor') as HTMLElement;
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(fixtureMarkdown()));
@@ -236,6 +229,11 @@ async function probe(): Promise<string> {
   await frame();
   await sleep(300);
   await frame();
+  return { editorEl, editor };
+}
+
+async function probe(): Promise<string> {
+  const { editorEl, editor } = await mountFixture();
 
   // Each card carries the number of the run it belongs to, which is how a
   // reading pairs the two.
@@ -260,6 +258,8 @@ async function probe(): Promise<string> {
   const lift = numberLift(first);
   const numberColour = getComputedStyle(first, '::after').color;
   const textColour = getComputedStyle(first.parentElement as HTMLElement).color;
+
+  const hover = await hoverReading(editor);
 
   const max = editorEl.scrollHeight - editorEl.clientHeight;
   const hold = (window as { footnoteHold?: string }).footnoteHold;
@@ -345,87 +345,11 @@ async function probe(): Promise<string> {
     scrolling,
     settled,
     compact,
+    hover,
     popHeight,
     popLineHeight,
   };
   return JSON.stringify(out);
-}
-
-/** Tap the way a reader does — the superscript in the text, then the
- *  captions in the margin — and measure every caption after each tap. Leaves
- *  note 3 open, in view, for the screenshot. */
-async function compactReading(cards: HTMLElement[]): Promise<CompactReading> {
-  const settle = async (): Promise<void> => {
-    await frame();
-    await sleep(250);
-    await frame();
-  };
-  const card = (n: string): HTMLElement => cards.find((c) => c.dataset.cwFnN === n) as HTMLElement;
-  // Asked fresh each time: the decoration plugin replaces the spans on a
-  // rebuild, and a click on a detached one reaches nothing.
-  const run = (n: string): HTMLElement =>
-    document.querySelector<HTMLElement>(`.cw-fn[data-cw-fn="${n}"]`) as HTMLElement;
-  // A tap on a touch screen sends a mouseover first, which lights the note —
-  // and the editor redraws a span a class was written onto, so the tap lands
-  // on a superscript that is about to be replaced.
-  const tap = (el: HTMLElement): void => {
-    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  };
-  const openCount = (): number =>
-    cards.filter((c) => c.classList.contains('cw-fn-note-open')).length;
-  const heights = (): number[] => cards.map((c) => c.offsetHeight);
-
-  run('3').scrollIntoView({ block: 'center' });
-  await settle();
-  const lineHeight = Number.parseFloat(getComputedStyle(card('3')).lineHeight);
-  const rest = heights();
-  const restTops = cards.map((c) => c.offsetTop);
-  const truncated = cards.filter((c) => c.scrollWidth > c.clientWidth + 1).length;
-
-  tap(run('3'));
-  await settle();
-  const viaSuperscript = {
-    open: card('3').offsetHeight,
-    othersMax: Math.max(...cards.filter((c) => c !== card('3')).map((c) => c.offsetHeight)),
-    openCount: openCount(),
-  };
-
-  tap(run('3'));
-  await settle();
-  const closedAgain = {
-    height: card('3').offsetHeight,
-    openCount: openCount(),
-    moved: Math.max(...cards.map((c, i) => Math.abs(c.offsetTop - (restTops[i] as number)))),
-  };
-
-  tap(card('4'));
-  await settle();
-  const open4 = card('4').offsetHeight;
-  tap(card('5'));
-  await settle();
-  const viaCaption = {
-    open4,
-    then4: card('4').offsetHeight,
-    then5: card('5').offsetHeight,
-    openCount: openCount(),
-  };
-  tap(card('5'));
-  await settle();
-  const closedCaption = { height: card('5').offsetHeight, openCount: openCount() };
-
-  tap(run('3'));
-  await settle();
-  return {
-    lineHeight,
-    restMin: Math.min(...rest),
-    restMax: Math.max(...rest),
-    truncated,
-    viaSuperscript,
-    closedAgain,
-    viaCaption,
-    closedCaption,
-  };
 }
 
 /** A pseudo-element has no box of its own to ask for, but a hit on its paint
@@ -461,6 +385,10 @@ function numberLift(run: HTMLElement): number | null {
 declare global {
   interface Window {
     footnoteMarginProbe: () => Promise<string>;
+    footnoteMarginMount: () => Promise<void>;
   }
 }
 window.footnoteMarginProbe = probe;
+window.footnoteMarginMount = async () => {
+  await mountFixture();
+};
