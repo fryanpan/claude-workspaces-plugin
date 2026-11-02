@@ -146,13 +146,15 @@ describe('the lead chat voice', () => {
     expect(voice.state().phase).toBe('off');
   });
 
-  it('says so, and opens nothing, when the server has no listener for the lead', async () => {
+  it('says so, opens no socket and lets the mic go, when the server has no listener for the lead', async () => {
     const { voice, sockets, mic } = make([3, 4]);
     voice.start();
     await settle();
     expect(voice.state()).toMatchObject({ phase: 'off', notice: NO_VOICE });
     expect(sockets).toHaveLength(0);
-    expect(mic.starts).toBe(0);
+    // The mic is asked for inside the tap, before the setups are known
+    // (lead-chat-voice-gesture.test.ts), so it is released rather than unopened.
+    expect(mic.stops).toBe(mic.starts);
   });
 
   it('stops on the server’s error and shows its line', async () => {
