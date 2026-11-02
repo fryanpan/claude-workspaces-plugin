@@ -21,6 +21,21 @@
  * reach; Home and the review page are on no board and post to
  * `/api/load-reports`. The mock's host page reports from the widget bundle,
  * which cannot import this module, with the same shape (`mock-host.ts`).
+ *
+ * Two kinds of number ride along so a slow report names where its time went
+ * rather than only how much there was:
+ *
+ * - **Hidden time.** Both stamps run on `performance.now()`, which keeps
+ *   counting while the tab is hidden, and a hidden tab paints no frame. A
+ *   Home tab sent to the background between its script and its next frame
+ *   reported the whole time it sat there as load time. A report from a page
+ *   that was hidden at any point before it was sent carries `hidden: true`
+ *   and the hidden ms this page saw (`hiddenMs`), and the server keeps it out
+ *   of the budget (`slow-load-alarm.ts`).
+ * - **Where the request went.** `msToResponseStart` / `msToResponseEnd` are
+ *   the navigation's own timing: everything before `msToResponseStart` is the
+ *   network and the server rendering the shell; everything after
+ *   `msToResponseEnd` is this page's own work.
  */
 import { asBackgroundWrite } from './signin/write-gate.ts';
 
@@ -50,8 +65,12 @@ export function loadReportUrl(workspaceId: string | null): string {
  * Fire-and-forget by construction: a recorder must never break the page it
  * measures, so the fetch swallows its own failure.
  */
-export function postPageLoadReport(input: PageLoadReportInput): void {
+export function postPageLoadReport(
+  input: PageLoadReportInput,
+  hidden: HiddenClock = pageHiddenClock(),
+): void {
   const { page, workspaceId, msToBoot, msToContent, fields } = input;
+  const seen = hidden.read();
   // What the network actually moved: "slow because big" and "slow because
   // far" need different fixes, and the report should tell them apart.
   const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
@@ -69,6 +88,8 @@ export function postPageLoadReport(input: PageLoadReportInput): void {
         msToBoot,
         ...(msToContent !== null ? { msToContent } : {}),
         ...fields,
+        ...navigationFields(),
+        ...(seen.hidden ? { hidden: true, hiddenMs: seen.hiddenMs } : {}),
         resourceCount: resources.length,
         transferBytes: resources.reduce((sum, r) => sum + (r.transferSize || 0), 0),
         decodedBytes: resources.reduce((sum, r) => sum + (r.decodedBodySize || 0), 0),
@@ -99,7 +120,10 @@ export function startPageLoadReport(opts: {
   page: PageType;
   workspaceId: string | null;
   deadlineMs?: number;
+  /** The page's hidden clock; tests hand in their own. */
+  hidden?: HiddenClock;
 }): PageLoadClock {
+  const hidden = opts.hidden ?? pageHiddenClock();
   let page = opts.page;
   const msToBoot = Math.round(performance.now());
   let sent = false;
@@ -107,12 +131,15 @@ export function startPageLoadReport(opts: {
     if (sent) return;
     sent = true;
     clearTimeout(deadline);
-    postPageLoadReport({
-      page,
-      workspaceId: opts.workspaceId,
-      msToBoot,
-      msToContent,
-    });
+    postPageLoadReport(
+      {
+        page,
+        workspaceId: opts.workspaceId,
+        msToBoot,
+        msToContent,
+      },
+      hidden,
+    );
   };
   const deadline = setTimeout(() => send(null), opts.deadlineMs ?? PAGE_LOAD_DEADLINE_MS);
   return {
@@ -126,5 +153,82 @@ export function startPageLoadReport(opts: {
       if (document.visibilityState === 'hidden') send(Math.round(performance.now()));
       else requestAnimationFrame(() => send(Math.round(performance.now())));
     },
+  };
+}
+
+/** What a page's hidden clock has seen by the moment it is read. */
+export interface HiddenReading {
+  /** The page was hidden at some point before this read, or when it started. */
+  hidden: boolean;
+  /** The hidden ms this page observed. A floor: time hidden before the
+   *  page's script ran is counted only where the browser records it. */
+  hiddenMs: number;
+}
+
+export interface HiddenClock {
+  read(): HiddenReading;
+}
+
+/**
+ * Count the time `doc` spends hidden from now on, plus — where the browser
+ * keeps `visibility-state` entries (Chromium) — whether it was hidden before
+ * this script ran. Safari keeps none, so there a page hidden only before its
+ * script ran reads as never hidden; a page still hidden when the script runs
+ * is caught by `visibilityState`.
+ */
+export function createHiddenClock(
+  doc: Document = document,
+  now: () => number = () => performance.now(),
+): HiddenClock {
+  let hiddenSince: number | null = doc.visibilityState === 'hidden' ? now() : null;
+  let hiddenMs = 0;
+  let everHidden = hiddenSince !== null || hiddenBeforeScript();
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.visibilityState === 'hidden') {
+      everHidden = true;
+      if (hiddenSince === null) hiddenSince = now();
+    } else if (hiddenSince !== null) {
+      hiddenMs += now() - hiddenSince;
+      hiddenSince = null;
+    }
+  });
+  return {
+    read() {
+      const open = hiddenSince !== null ? now() - hiddenSince : 0;
+      return { hidden: everHidden, hiddenMs: Math.round(hiddenMs + open) };
+    },
+  };
+}
+
+/** A `visibility-state` entry says the page was hidden before now. */
+function hiddenBeforeScript(): boolean {
+  try {
+    return performance.getEntriesByType('visibility-state').some((e) => e.name === 'hidden');
+  } catch {
+    return false;
+  }
+}
+
+let shared: HiddenClock | null = null;
+
+/** The page's one hidden clock, started the first time anything asks — the
+ *  import of this module by the page's entry, below. */
+export function pageHiddenClock(): HiddenClock {
+  shared ??= createHiddenClock();
+  return shared;
+}
+if (typeof document !== 'undefined') pageHiddenClock();
+
+/** The navigation's request timing, in the report's units. Empty where the
+ *  browser has no navigation entry. */
+function navigationFields(): Record<string, number | string> {
+  const nav = performance.getEntriesByType('navigation')[0] as
+    | PerformanceNavigationTiming
+    | undefined;
+  if (!nav) return {};
+  return {
+    msToResponseStart: Math.round(nav.responseStart),
+    msToResponseEnd: Math.round(nav.responseEnd),
+    navType: nav.type,
   };
 }

@@ -83,6 +83,8 @@ export interface PageLoadRow {
   ws?: string;
   /** ms to the main content, or null when it never arrived. */
   ms: number | null;
+  /** The page was hidden before it reported; its `ms` is not a load time. */
+  hidden?: true;
 }
 
 /** The slowest load of one page type in the window. */
@@ -92,6 +94,9 @@ export interface PageLoadSummary {
   neverArrived: number;
   /** Loads over the budget, counting the ones that never arrived. */
   overBudget: number;
+  /** Loads from a page that was hidden before it reported. Counted in
+   *  `loads` and nowhere else: their number holds time nobody was looking. */
+  hidden: number;
   /** The slowest load that did arrive, or null when none did. */
   slowestMs: number | null;
   slowestAt: number | null;
@@ -141,6 +146,7 @@ export class PageLoadLog {
       page: reading.page,
       ...(workspaceId ? { ws: workspaceId } : {}),
       ms: reading.msToContent,
+      ...(reading.hidden ? { hidden: true as const } : {}),
     };
     try {
       this.trim(ts);
@@ -161,6 +167,7 @@ export class PageLoadLog {
           loads: 0,
           neverArrived: 0,
           overBudget: 0,
+          hidden: 0,
           slowestMs: null,
           slowestAt: null,
           slowestWorkspaceId: null,
@@ -171,6 +178,10 @@ export class PageLoadLog {
       if (row.ts < now - windowMs || row.ts > now) continue;
       const s = pages[row.page];
       s.loads += 1;
+      if (row.hidden) {
+        s.hidden += 1;
+        continue;
+      }
       if (row.ms === null) {
         s.neverArrived += 1;
         s.overBudget += 1;

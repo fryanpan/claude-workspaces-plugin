@@ -58,6 +58,17 @@ describe('reading one report', () => {
     expect(verdict?.msToContent).toBeNull();
   });
 
+  it('judges nothing from a page that was hidden before it reported', () => {
+    expect(
+      slowLoadVerdict({ page: 'home', msToBoot: 90, msToContent: 19_400, hidden: true }),
+    ).toBeNull();
+    expect(slowLoadVerdict({ page: 'home', msToBoot: 90, hidden: true })).toBeNull();
+    // Only `true` counts: a stray value does not switch the budget off.
+    expect(
+      slowLoadVerdict({ page: 'home', msToBoot: 90, msToContent: 19_400, hidden: 'yes' }),
+    ).toMatchObject({ reason: 'over-budget' });
+  });
+
   it('judges nothing without a boot stamp', () => {
     expect(slowLoadVerdict({ msToFirstProjection: 9_000 })).toBeNull();
     expect(slowLoadVerdict({ msToBoot: 'soon' })).toBeNull();

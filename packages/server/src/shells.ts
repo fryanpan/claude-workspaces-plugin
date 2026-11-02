@@ -32,6 +32,7 @@ import {
   assetHref,
   isContentHashedAsset,
   parseAssetManifest,
+  staticChunkClosure,
 } from '@claude-workspaces/core/asset-manifest';
 import { type BrowserSentryConfig, sentryHeadTags } from './browser-sentry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
@@ -152,6 +153,37 @@ export function readAppAssetManifest(dist: string | null): AssetManifest {
   } catch {
     return {};
   }
+}
+
+/** Home's static chunk closure, by the entry's content-addressed name. */
+const landingPreloadCache = new Map<string, string[]>();
+
+/**
+ * The chunks Home's entry imports statically, for `modulepreload` links.
+ *
+ * The landing bundle is split (its widget and lead chat load lazily), so its
+ * entry is a loader that imports shared chunks, and the browser learned
+ * their names only after the entry had arrived: three requests in series —
+ * the page, the entry, the chunks — before the page's script ran. Named in
+ * the shell, the chunks download beside the entry. Cached by the entry's
+ * content-addressed name, which changes whenever its imports could; an
+ * unhashed name (a dist from before the manifest) is read every time.
+ */
+export function landingModulePreloads(dist: string | null, assets: AssetManifest): string[] {
+  const entry = assets['landing.js'];
+  if (!dist || !entry) return [];
+  const cached = landingPreloadCache.get(entry);
+  if (cached) return cached;
+  const read = (name: string): string | null => {
+    try {
+      return readFileSync(join(dist, name), 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const chunks = staticChunkClosure(entry, read);
+  if (isContentHashedAsset(entry)) landingPreloadCache.set(entry, chunks);
+  return chunks;
 }
 
 export function serveStaticUnder(root: string, p: string, cacheControl?: string): Response | null {
@@ -1097,7 +1129,12 @@ function landingShell(
   sentry: BrowserSentryConfig | null,
   assets: AssetManifest = {},
   pageCss = '',
+  /** Chunks to fetch beside the entry (`landingModulePreloads`). */
+  preloads: readonly string[] = [],
 ): string {
+  const preloadLinks = preloads
+    .map((c) => `\n<link rel="modulepreload" href="/app/${escape(c)}">`)
+    .join('');
   const sentryTags = sentryHeadTags(sentry, 'landing', assets);
   const sentryMeta = sentryTags ? `\n${sentryTags}` : '';
   // The manifest belongs here most of all: `/` is the manifest's own
@@ -1106,7 +1143,7 @@ function landingShell(
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<meta name="theme-color" content="#2e7dd7">${sentryMeta}
+<meta name="theme-color" content="#2e7dd7">${sentryMeta}${preloadLinks}
 <style>${LANDING_CSS}${LANDING_REVIEW_CSS}${LANDING_REMOTE_CSS}${pageCss}</style>
 ${body}
 <footer>POST /workspaces/&lt;ws&gt;/docs · /widget.iife.js · /demos/mockup</footer>`;
@@ -1170,6 +1207,8 @@ export function renderLanding(
   owner = false,
   /** The board whose lead Home's agent button talks to, or '' for none. */
   leadWorkspaceId = '',
+  /** The entry's static chunks, preloaded (`landingModulePreloads`). */
+  preloads: readonly string[] = [],
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -1241,6 +1280,7 @@ ${nav}`,
     sentry,
     assets,
     LANDING_NAV_CSS,
+    preloads,
   );
 }
 

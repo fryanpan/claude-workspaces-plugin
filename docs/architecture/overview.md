@@ -1347,7 +1347,11 @@ from `widget/src/mock-host.ts`). A page on a board posts to that board's
 2,000 ms, raises through Sentry once per page type per board per five minutes,
 and `page-loads.ts` keeps one server-wide log that
 `GET /api/load-reports/slowest` reads back as the slowest load per page type
-over 24 h for the daily health check. These reports are the only record of
+over 24 h for the daily health check. A report from a page that was hidden
+before it was sent carries `hidden: true` and is counted but never judged:
+a hidden tab paints nothing and its clock keeps running. Each report also
+carries the navigation's `msToResponseStart` / `msToResponseEnd`, so a slow
+one says whether its time went to the request or to the page. These reports are the only record of
 load time: the browser's Sentry bundle (`sentry-boot.ts`) reports errors and
 console logs, with no tracing, so `sentry-page.ts` and the measurements it fed
 onto a pageload span are gone. That bundle loads `async`, and an inline buffer

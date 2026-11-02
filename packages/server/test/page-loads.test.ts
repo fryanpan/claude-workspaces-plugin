@@ -45,6 +45,7 @@ describe('the slowest load per page type', () => {
       loads: 3,
       neverArrived: 1,
       overBudget: 2,
+      hidden: 0,
       slowestMs: 4_100,
       slowestAt: T0 + 1,
       slowestWorkspaceId: 'w-2',
@@ -54,6 +55,23 @@ describe('the slowest load per page type', () => {
     // A page type nobody loaded reads as zero loads, not as absent: zero in a
     // day is itself the finding that its reporting is broken.
     expect(read.pages.mock).toMatchObject({ loads: 0, slowestMs: null });
+  });
+
+  it('counts a load from a hidden page, and keeps it out of the budget and the slowest', () => {
+    const log = freshLog();
+    log.record(null, { page: 'home', msToBoot: 90, msToContent: 600 }, T0);
+    // The shape of the 1 Nov 2026 reading: 19.4s, from a tab that was hidden.
+    log.record(null, { page: 'home', msToBoot: 90, msToContent: 19_400, hidden: true }, T0 + 1);
+    log.record(null, { page: 'home', msToBoot: 90, hidden: true, hiddenMs: 15_000 }, T0 + 2);
+    expect(log.slowestByPage(T0 + 10).pages.home).toEqual({
+      loads: 3,
+      neverArrived: 0,
+      overBudget: 0,
+      hidden: 2,
+      slowestMs: 600,
+      slowestAt: T0,
+      slowestWorkspaceId: null,
+    });
   });
 
   it('survives a torn line and a row with no page, which reads as the board', () => {
