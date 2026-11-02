@@ -84,6 +84,23 @@ describe('a widget reply the server refused', () => {
     expect(el.shadow.querySelector('.thread-popover')).toBeNull();
   });
 
+  it('empties the box while it posts, and a refusal puts the words back', async () => {
+    // The comment view redraws an open thread's popover when the thread
+    // changes and carries the box's words into it; an empty box carries none.
+    let refuse: (ok: boolean) => void = () => {};
+    const el = widget(() => new Promise<boolean>((r) => (refuse = r)));
+    showThreadPopover(el, thread(), 10, 10);
+    const pop = el.shadow.querySelector('.thread-popover') as HTMLElement;
+    const ta = pop.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'Harborlight pier at nine';
+    (pop.querySelector('.submit') as HTMLElement).click();
+    expect(ta.value, 'emptied while it posts').toBe('');
+    refuse(false);
+    await flush();
+    expect(ta.value).toBe('Harborlight pier at nine');
+    expect(pop.querySelector('.composer-err')?.textContent).toContain('Not sent');
+  });
+
   it('pressing Reply again after a refusal sends the same words again', async () => {
     const sent: string[] = [];
     const el = widget((_id, text) => {
