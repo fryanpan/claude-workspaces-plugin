@@ -187,6 +187,9 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       clearDone();
       rate = sampleRate;
       ctx = ctx ?? opts.context();
+      // iOS marks a context woken by the tap `interrupted` once the mic takes
+      // the audio session; while the page captures it may run again.
+      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => {});
       playAt = 0;
       heardFirst = false;
       active = true;

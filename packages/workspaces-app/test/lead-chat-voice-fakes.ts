@@ -60,6 +60,8 @@ export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
     playbackContext: () => null,
     blocked: () => null,
     storage: null,
+    // A stop is reported to the page; here it would surface as an uncaught error.
+    report: () => {},
   };
   return {
     seams,

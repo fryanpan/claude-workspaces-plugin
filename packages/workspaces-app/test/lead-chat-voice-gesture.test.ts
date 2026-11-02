@@ -105,13 +105,15 @@ describe('the lead chat voice, inside the tap', () => {
     expect(mic.starts).toBe(1);
   });
 
-  it('closes the mic again when the server has no voice set up', async () => {
-    const fake = make({ fetchSetups: async () => [] });
+  it('closes the mic again, and reports nothing, when the server has no voice set up', async () => {
+    const reports: Error[] = [];
+    const fake = make({ fetchSetups: async () => [], report: (e) => reports.push(e) });
     fake.tap();
     await settle();
     await settle();
     expect(fake.voice.state()).toMatchObject({ phase: 'off' });
     expect(fake.mic.stops).toBe(1);
+    expect(reports).toHaveLength(0);
   });
 });
 

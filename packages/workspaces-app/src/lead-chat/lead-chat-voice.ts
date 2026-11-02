@@ -15,10 +15,17 @@
  *
  * Listening goes on while voice is on: once the lead has answered and its
  * answer has been said, the next question starts listening by itself. The
- * microphone is opened once, inside the tap that turned voice on (Safari
- * starts audio only from a gesture), and stays open until voice is off; only
- * a question that is listening sends its frames, so the lead's own voice is
- * never sent back as the next question.
+ * microphone is opened once, inside the tap that turned voice on, and stays
+ * open until voice is off; only a question that is listening sends its
+ * frames, so the lead's own voice is never sent back as the next question.
+ *
+ * iOS Safari runs an AudioContext only when `resume()` is called inside the
+ * gesture, so the tap makes the capture context AND resumes it
+ * (`makeGestureContext`), and asks for the microphone, before anything is
+ * awaited. A context only constructed in the tap and resumed after the
+ * setups fetch stayed suspended on a phone: the mic was open, no frame was
+ * made, and the chat said "Listening…" with nothing to end it. A mic that
+ * still sends no sound now stops voice with `NO_SOUND` and is reported.
  * Only setups 1 and 2 are used — the ones that hear through the server's
  * listener and so can address an agent.
  */
@@ -36,6 +43,7 @@ import {
   startSpokenCapture,
 } from '../board/spoken-reply-audio.ts';
 import { SETUP_KEY, type SpokenSocket } from '../board/spoken-reply-client.ts';
+import { makeGestureContext } from '../meeting-audio.ts';
 import { defaultOriginFacts, insecureOriginMessage } from '../voice-capture.ts';
 
 export type LeadVoicePhase = 'off' | 'listening' | 'working' | 'speaking';
@@ -64,6 +72,9 @@ export interface LeadVoiceOpts {
   blocked?: () => string | null;
   /** Where the board mic keeps its chosen setup; omitted, this page's own. */
   storage?: Pick<Storage, 'getItem'> | null;
+  /** Where a failure is reported; omitted, the page's error reporter
+   *  (Sentry, where the shell loads it). */
+  report?: (err: Error) => void;
 }
 
 export interface LeadVoice {
@@ -74,6 +85,9 @@ export interface LeadVoice {
 }
 
 export const NO_VOICE = 'Voice is not set up on this server. Type to your lead instead.';
+export const NO_SOUND = 'The microphone is sending no sound. Tap the agent button to try again.';
+/** How long an open mic may send nothing before voice stops and says so. */
+const NO_SOUND_MS = 5_000;
 const LEAD_SETUPS: readonly SpokenSetup[] = [1, 2];
 const OPEN = 1;
 const MAX_HELD = 400;
@@ -97,6 +111,18 @@ function socketUrl(workspaceId: string): string {
   return `${scheme}://${location.host}${voiceBase(workspaceId)}/converse`;
 }
 
+/** Raise a voice failure where the page's error reporting sees it, without
+ *  throwing into the caller. `reportError` fires the window's `error` event,
+ *  which Sentry's handler (or the shell's early buffer) files. */
+function reportToPage(err: Error): void {
+  const w = window as unknown as { reportError?: (e: unknown) => void };
+  if (typeof w.reportError === 'function') w.reportError(err);
+  else
+    setTimeout(() => {
+      throw err;
+    }, 0);
+}
+
 function audioContext(): AudioContext | undefined {
   const Ctor =
     window.AudioContext ??
@@ -114,6 +140,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let gen = 0;
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
+  let soundTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emit = (): void => opts.onChange({ ...st });
   const set = (p: Partial<LeadVoiceState>): void => {
@@ -138,6 +165,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   const stopCapture = (): void => {
     gen++;
     forwarding = false;
+    if (soundTimer) clearTimeout(soundTimer);
+    soundTimer = null;
     capture?.stop();
     capture = null;
   };
@@ -145,9 +174,11 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** Open the mic for as long as voice is on, on a context the tap made. */
   const openMic = (ctx: AudioContext | undefined): void => {
     const mine = gen;
+    let frames = 0;
     void (opts.startCapture ?? startSpokenCapture)({
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
+        frames++;
         if (mine === gen && forwarding) sendRaw(pcm);
       },
     }).then((r) => {
@@ -155,8 +186,17 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         if (r.ok) r.capture.stop();
         return;
       }
-      if (r.ok) capture = r.capture;
-      else halt(r.message);
+      if (!r.ok) {
+        halt(r.message);
+        return;
+      }
+      capture = r.capture;
+      // An open mic that makes no frame is a context that never ran.
+      soundTimer = setTimeout(() => {
+        soundTimer = null;
+        if (mine !== gen || frames > 0) return;
+        halt(NO_SOUND, `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
+      }, NO_SOUND_MS);
     });
   };
 
@@ -211,7 +251,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   const listen = (): void => {
     const setup = pickSetup();
     if (setup === null) {
-      halt(NO_VOICE);
+      halt(NO_VOICE, '', true);
       return;
     }
     ensureSocket();
@@ -228,12 +268,16 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     set({ phase: 'listening', heard: '', notice: '' });
   };
 
-  /** Voice stops by itself, and says why. */
-  function halt(notice: string): void {
+  /** Voice stops by itself, says why, and reports it — except a state of
+   *  this server or origin (`quiet`), which every tap would report again. */
+  function halt(notice: string, detail = '', quiet = false): void {
     on = false;
     stopCapture();
     player.stop();
     set({ phase: 'off', heard: '', notice });
+    const err = new Error(`Lead chat voice stopped: ${notice}${detail ? ` (${detail})` : ''}`);
+    err.name = 'LeadVoiceStopped';
+    if (!quiet) (opts.report ?? reportToPage)(err);
   }
 
   const again = (): void => {
@@ -285,22 +329,19 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (on) return;
       const blocked = (opts.blocked ?? (() => insecureOriginMessage(defaultOriginFacts())))();
       if (blocked) {
-        halt(blocked);
+        halt(blocked, '', true);
         return;
       }
       on = true;
       player.wake();
       set({ phase: 'listening', heard: '', notice: '' });
-      // Made here, inside the tap, before anything is awaited.
-      const ctx = opts.startCapture ? undefined : audioContext();
+      // Inside the tap, before anything is awaited: the context is made and
+      // resumed, and the microphone is asked for (see the header).
+      openMic(makeGestureContext());
       const go = (): void => {
-        if (!on || pickSetup() === null) {
-          void ctx?.close().catch(() => {});
-          if (on) halt(NO_VOICE);
-          return;
-        }
-        openMic(ctx);
-        listen();
+        if (!on) return;
+        if (pickSetup() === null) halt(NO_VOICE, '', true);
+        else listen();
       };
       if (setups) return go();
       void (opts.fetchSetups ?? (() => defaultSetups(opts.workspaceId)))().then((s) => {
