@@ -3179,14 +3179,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * Bun’s specificity matching, still orders the eight adjacencies whose
    * comments call them load-bearing.
    */
-  // Loopback TCP from a refused user (a project machine's lead) is answered
-  // here, before any check that trusts a loopback peer reads it.
-  const refuseLoopbackUid = loopbackUidDoor(opts.loopbackRefusedUids ?? [], opts.peerUid);
+  // Loopback TCP from a user the machine does not name (a project machine's
+  // lead, backup upload or builder) is answered here, before any check that
+  // trusts a loopback peer reads it.
+  const refuseLoopbackUid = loopbackUidDoor(
+    { allowed: opts.loopbackAllowedUids ?? [], edge: opts.loopbackEdgeUids ?? [] },
+    opts.peerUid,
+  );
 
   /** The device and location a browser request's analytics rows carry, in
    *  scope for exactly as long as the request is (event-origin.ts). */
   function handleWithOrigin(req: Request): Promise<Response | undefined> {
-    const refusedCaller = refuseLoopbackUid(server.requestIP(req), server.port ?? 0);
+    const refusedCaller = refuseLoopbackUid(
+      server.requestIP(req),
+      server.port ?? 0,
+      req.headers.has('cf-ray'),
+    );
     if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several

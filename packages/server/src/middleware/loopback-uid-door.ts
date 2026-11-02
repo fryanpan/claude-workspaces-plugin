@@ -1,13 +1,30 @@
 /**
- * Refuse loopback TCP from named users of this machine.
+ * Admit loopback TCP only from users this machine names.
  *
- * On a project machine the server, its tunnel and its lead agent run as three
- * users (`infra/project-machine/entrypoint.sh`). A loopback caller is trusted
- * as the owner in several places (`isLoopbackAddress`), which is right for the
- * tunnel and the machine's own tools and wrong for the lead: the lead must
- * reach its own board, through that board's socket (`board-sockets.ts`), and
- * nothing else. So a request whose TCP peer belongs to a refused uid is
- * answered 403 before anything else reads it.
+ * On a project machine the server, its tunnel, its backup upload and its lead
+ * agent run as separate users (`infra/project-machine/entrypoint.sh`), and
+ * more users (builders) may join them. A loopback caller is trusted as the
+ * owner in several places (`isLoopbackAddress`, `CW_LOOPBACK_SKIPS_ACCESS`),
+ * which is right for root's own tools and the server calling itself and wrong
+ * for everyone else. So the door is an allowlist, in two lists:
+ *
+ * - `allowed` (`CW_LOOPBACK_ALLOWED_UIDS`): the operator. On a project
+ *   machine root, which runs the health check and `fly ssh console`, and
+ *   `cw`, the server itself: its hosted MCP connector calls its own REST over
+ *   loopback (`connector/host.ts`), and a process running as `cw` can read
+ *   the data dir and its keys anyway, so refusing it would buy nothing.
+ * - `edge` (`CW_LOOPBACK_EDGE_UIDS`): cloudflared, which carries the edge's
+ *   requests to the server and must keep doing so. Its requests are admitted
+ *   only when they carry `cf-ray`, which Cloudflare stamps on everything it
+ *   proxies and which the host guard never classifies local
+ *   (`host-guard.ts`), so they are gated by Access like any edge visitor. A
+ *   request from that uid without `cf-ray` is refused: a steered cloudflared
+ *   cannot pass for the box.
+ *
+ * Every other uid is refused: the lead, the backup upload, a builder added
+ * next month. A request whose TCP peer is refused is answered 403 before
+ * anything else reads it; the lead reaches its own board through that
+ * board's socket (`board-sockets.ts`).
  *
  * The uid comes from the kernel. On Linux `/proc/net/tcp` and `/proc/net/tcp6`
  * list every socket with its owner's uid; the caller's end of this connection
@@ -15,8 +32,8 @@
  * server's. A caller cannot choose that uid. When no single row answers — the
  * tables cannot be read, no live row matches (the caller closed its socket:
  * see `peerUidFromTables`), or rows of several uids match — the request is
- * refused: this door fails closed, and is only switched on where the refused
- * users exist (`CW_LOOPBACK_REFUSED_UIDS`).
+ * refused: this door fails closed, and is only switched on where the users
+ * exist (a non-empty `CW_LOOPBACK_ALLOWED_UIDS`).
  *
  * A request with no TCP peer (a board socket's) or a non-loopback peer is not
  * this door's to judge.
@@ -97,31 +114,43 @@ export const procPeerUid: PeerUidReader = (peer, serverPort) => {
   return peerUidFromTables(tables, peer.port, serverPort);
 };
 
-/** `CW_LOOPBACK_REFUSED_UIDS`: comma-separated uids. Anything else is an error. */
-export function parseRefusedUids(raw: string | undefined): number[] {
+/**
+ * A comma-separated uid list from `name`. Anything else is an error, so a
+ * typo stops the boot rather than opening the door.
+ */
+export function parseUidList(name: string, raw: string | undefined): number[] {
   const text = (raw ?? '').trim();
   if (text === '') return [];
   return text.split(',').map((part) => {
     const s = part.trim();
-    if (!/^\d{1,10}$/.test(s))
-      throw new Error(`CW_LOOPBACK_REFUSED_UIDS: ${JSON.stringify(s)} is not a uid`);
+    if (!/^\d{1,10}$/.test(s)) throw new Error(`${name}: ${JSON.stringify(s)} is not a uid`);
     return Number(s);
   });
 }
 
+export interface LoopbackUids {
+  /** Uids whose loopback requests go on as the operator's. Empty: the door is off. */
+  allowed: readonly number[];
+  /** Uids admitted only for a request carrying `cf-ray` (the tunnel's). */
+  edge?: readonly number[];
+}
+
 /**
  * The door: null when the request may go on, the reason when it may not.
- * With no refused uids it lets everything through and reads nothing.
+ * With no allowed uids it lets everything through and reads nothing.
  */
 export function loopbackUidDoor(
-  refusedUids: readonly number[],
+  uids: LoopbackUids,
   readUid: PeerUidReader = procPeerUid,
-): (peer: TcpPeer | null | undefined, serverPort: number) => string | null {
-  const refused = new Set(refusedUids);
-  return (peer, serverPort) => {
-    if (refused.size === 0 || !peer || !isLoopbackAddress(peer.address)) return null;
+): (peer: TcpPeer | null | undefined, serverPort: number, viaEdge: boolean) => string | null {
+  const allowed = new Set(uids.allowed);
+  const edge = new Set(uids.edge ?? []);
+  return (peer, serverPort, viaEdge) => {
+    if (allowed.size === 0 || !peer || !isLoopbackAddress(peer.address)) return null;
     const uid = readUid(peer, serverPort);
     if (uid === null) return 'loopback_caller_unknown';
-    return refused.has(uid) ? 'loopback_caller_refused' : null;
+    if (allowed.has(uid)) return null;
+    if (edge.has(uid) && viaEdge) return null;
+    return 'loopback_caller_refused';
   };
 }

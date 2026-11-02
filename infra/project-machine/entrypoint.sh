@@ -36,8 +36,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
 # The lead's working folder and transcripts, on the volume.
 LEAD_ROOT="$DATA_ROOT/lead"
-# The lead's uid, fixed in the Dockerfile. The server refuses its TCP calls.
-LEAD_UID=10004
+# Uids fixed in the Dockerfile. Over loopback TCP the server admits root and
+# itself (cw), and the tunnel (cwtunnel) only for requests the edge stamped
+# with cf-ray; every other user, the lead and cwbackup among them, is refused
+# (packages/server/src/middleware/loopback-uid-door.ts).
+CW_UID=10001
+TUNNEL_UID=10002
 # One unix socket per board (packages/server/src/board-sockets.ts), in a
 # folder of cw's that group cwboard (cw and lead, fixed in the Dockerfile) may
 # enter and not list. Only the lead's board's socket is that group's, mode
@@ -118,7 +122,8 @@ fi
 (
   drop_secrets
   export CW_BOARD_SOCKET_DIR="$SOCKETS" CW_BOARD_SOCKET_SHARED="$LEAD_BOARD" \
-    CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_REFUSED_UIDS="$LEAD_UID"
+    CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_ALLOWED_UIDS="0,$CW_UID" \
+    CW_LOOPBACK_EDGE_UIDS="$TUNNEL_UID"
   run_as cw bun run "$APP/packages/server/src/bin.ts" \
     --port "$PORT" --host 127.0.0.1 --no-port-walk \
     --data-dir "$CW_DATA_DIR" \
