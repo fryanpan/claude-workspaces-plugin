@@ -23,6 +23,7 @@ import {
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { cloudflareClient, keeperStage } from '../../../infra/project-machine/mac-ops.ts';
+import { mintCallerToken, writeCallerToken } from '../src/keeper/keeper-callers.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { openKeeperStore } from '../src/keeper/keeper-store.ts';
@@ -42,6 +43,7 @@ const exec: Executors = {
 let keeper: RunningKeeper;
 const saved = {
   url: process.env.CW_KEEPER_URL,
+  caller: process.env.CW_KEEPER_CALLER_TOKEN_FILE,
   user: process.env.CW_KEEPER_USER,
   path: process.env.PATH,
 };
@@ -59,12 +61,17 @@ beforeAll(() => {
   const store = openKeeperStore(dir);
   if ('error' in store) throw new Error(store.error);
   keeper = serveKeeper({ store, exec, port: 0, keeperUid: 4_000_000 });
+  // The deploy scripts read the caller token from the file, as on the Mac.
+  const callerFile = join(tmp, 'keeper-caller-token');
+  writeCallerToken(callerFile, mintCallerToken(store));
+  process.env.CW_KEEPER_CALLER_TOKEN_FILE = callerFile;
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
   process.env.CW_KEEPER_URL = `http://127.0.0.1:${keeper.port}`;
 });
 
 afterAll(async () => {
   restore('CW_KEEPER_URL', saved.url);
+  restore('CW_KEEPER_CALLER_TOKEN_FILE', saved.caller);
   restore('CW_KEEPER_USER', saved.user);
   restore('PATH', saved.path);
   await keeper?.stop();

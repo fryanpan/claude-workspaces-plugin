@@ -11,6 +11,8 @@
  * - `access.json`: the Access applications this keeper opened. Only these
  *   may be deleted without a passkey, which is how a share is revoked.
  * - `enroll.json`: the hash of the one-time enrollment link, while one is open.
+ * - `config.json`: the port, and the hash of the caller token every agent-API
+ *   request must carry (`keeper-callers.ts`). The token itself is never stored.
  *
  * **It refuses rather than repairs.** The directory must be owned by the
  * running user and carry no group or world bit, and so must every file in
@@ -86,6 +88,9 @@ export interface KeeperStore {
   /** The loopback port chosen at install (`keeper-port.ts`), or null before. */
   port(): number | null;
   savePort(port: number): void;
+  /** sha256 of the caller token (`keeper-callers.ts`), or null before one is made. */
+  callerTokenHash(): string | null;
+  saveCallerTokenHash(hash: string): void;
 }
 
 export const hashToken = (token: string): string =>
@@ -190,5 +195,9 @@ export function openKeeperStore(
     saveAlarm: (alarm) => write('alarm.json', alarm),
     port: () => read<{ port?: number }>('config.json', {}).port ?? null,
     savePort: (port) => write('config.json', { ...read('config.json', {}), port }),
+    callerTokenHash: () =>
+      read<{ callerTokenHash?: string }>('config.json', {}).callerTokenHash ?? null,
+    saveCallerTokenHash: (callerTokenHash) =>
+      write('config.json', { ...read('config.json', {}), callerTokenHash }),
   };
 }

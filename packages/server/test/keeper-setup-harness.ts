@@ -72,6 +72,8 @@ case "$cmd" in
   import) [ "$arg" = "$FAKE_IMPORT_FAILS" ] && { echo "refused" >&2; exit 1; }
     cat > "$S/cred-$arg"; echo "[keeper] stored $arg" ;;
   adopt) echo "$arg" >> "$S/apps"; echo "[keeper] $arg may now be started" ;;
+  caller-token) t="caller-token-for-tests-$(date +%s%N | tail -c 12)xxxxxxxxxxxxxxxxxxxx"
+    printf %s "$t" > "$S/caller"; echo "$t" ;;
   *) exit 9 ;;
 esac\n`,
   );
@@ -187,7 +189,13 @@ export function fakeFetch(w: World, cf: Cf): typeof fetch {
       return json({ success: false }, 404);
     }
     if (url.host === `localhost:${PORT}`) {
-      if (new Headers(init?.headers).get('x-cw-keeper') !== '1') return json({}, 403);
+      const h = new Headers(init?.headers);
+      if (h.get('x-cw-keeper') !== '1') return json({}, 403);
+      let caller = '';
+      try {
+        caller = readFileSync(join(w.state, 'caller'), 'utf8');
+      } catch {}
+      if (!caller || h.get('x-cw-keeper-caller') !== caller) return json({}, 401);
       if (method === 'POST' && url.pathname === '/v1/fly') {
         return json(
           {

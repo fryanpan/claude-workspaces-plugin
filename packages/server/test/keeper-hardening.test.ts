@@ -19,6 +19,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
@@ -75,7 +76,11 @@ const post = (path: string, body: unknown = {}) =>
 const hold = async (args: string[]): Promise<string> => {
   const r = await fetch(`${base}/v1/fly`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-cw-keeper': '1' },
+    headers: {
+      'content-type': 'application/json',
+      'x-cw-keeper': '1',
+      'x-cw-keeper-caller': CALLER,
+    },
     body: JSON.stringify({ args }),
   });
   expect(r.status).toBe(202);
@@ -108,8 +113,10 @@ const enrollOptions = async (token: string) => {
   };
 };
 
+let CALLER = '';
 beforeAll(async () => {
   store = openStore('store');
+  CALLER = mintCallerToken(store);
   store.addApp('cw-harborlight');
   // The test's files are this process's own, so the keeper here is another user.
   keeper = serveKeeper({ store, exec, port: 0, keeperUid: KEEPER_UID });
@@ -262,7 +269,11 @@ describe('paths a fly call names', () => {
   const submit = async (args: string[]) => {
     const r = await fetch(`${base}/v1/fly`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-cw-keeper': '1' },
+      headers: {
+        'content-type': 'application/json',
+        'x-cw-keeper': '1',
+        'x-cw-keeper-caller': CALLER,
+      },
       body: JSON.stringify({ args }),
     });
     return { status: r.status, body: (await r.json()) as { id?: string; error?: string } };

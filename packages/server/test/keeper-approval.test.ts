@@ -24,6 +24,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import { keeperFetch, keeperFly } from '../src/keeper/keeper-client.ts';
 import { keeperExecutors } from '../src/keeper/keeper-exec.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
@@ -58,6 +59,7 @@ const cfFetch = (async (input: string | URL | Request, init?: RequestInit) => {
 }) as typeof fetch;
 
 let store: KeeperStore;
+let CALLER = '';
 let keeper: RunningKeeper;
 let base: string;
 const key = new TestPasskey();
@@ -68,7 +70,12 @@ const flyLines = (): string[] =>
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${base}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', 'x-cw-keeper': '1', ...(init.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      'x-cw-keeper': '1',
+      'x-cw-keeper-caller': CALLER,
+      ...(init.headers ?? {}),
+    },
   });
 
 const page = (path: string, body: unknown = {}, headers: Record<string, string> = {}) =>
@@ -126,6 +133,7 @@ beforeAll(async () => {
   const opened = openKeeperStore(dir);
   if ('error' in opened) throw new Error(opened.error);
   store = opened;
+  CALLER = mintCallerToken(store);
   store.setCredential('fly-org-token', FLY_TOKEN);
   store.setCredential('cloudflare-api-token', CF_TOKEN);
   store.addApp('cw-harborlight');
@@ -282,6 +290,7 @@ describe('clients', () => {
   it('keeperFly waits through a hold and returns the approved command', async () => {
     let approveUrl = '';
     const pending = keeperFly(base, ['ssh', 'console', '--app', 'cw-harborlight'], undefined, {
+      callerToken: CALLER,
       pollMs: 20,
       onHeld: (h) => {
         approveUrl = h.approveUrl;
@@ -299,7 +308,11 @@ describe('clients', () => {
       accountId: 'acct1',
       token: '',
       apiBase: `${base}/v1/cloudflare`,
-      fetchImpl: keeperFetch(base, { pollMs: 20, onHeld: (h) => ids.push(h.id) }),
+      fetchImpl: keeperFetch(base, {
+        callerToken: CALLER,
+        pollMs: 20,
+        onHeld: (h) => ids.push(h.id),
+      }),
     });
     const making = cf.createApp({
       name: 'share',

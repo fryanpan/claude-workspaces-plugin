@@ -14,6 +14,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mintCallerToken } from '../packages/server/src/keeper/keeper-callers.ts';
 import type { FlyResult } from '../packages/server/src/keeper/keeper-requests.ts';
 import { serveKeeper } from '../packages/server/src/keeper/keeper-serve.ts';
 import { hashToken, openKeeperStore } from '../packages/server/src/keeper/keeper-store.ts';
@@ -34,6 +35,7 @@ const dir = join(tmp, 'store');
 mkdirSync(dir, { mode: 0o700 });
 const store = openKeeperStore(dir);
 if ('error' in store) throw new Error(store.error);
+const CALLER = mintCallerToken(store);
 
 const ran: string[][] = [];
 const keeper = serveKeeper({
@@ -100,7 +102,11 @@ try {
   const held = (await (
     await fetch(`http://127.0.0.1:${keeper.port}/v1/fly`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-cw-keeper': '1' },
+      headers: {
+        'content-type': 'application/json',
+        'x-cw-keeper': '1',
+        'x-cw-keeper-caller': CALLER,
+      },
       body: JSON.stringify({ args: ['apps', 'create', 'cw-harborlight'] }),
     })
   ).json()) as { approveUrl: string };

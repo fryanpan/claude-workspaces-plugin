@@ -7,7 +7,7 @@
  * not be framed, so no other page can lay a button over "Approve".
  */
 import { randomBytes } from 'node:crypto';
-import type { HoldKind } from './keeper-policy.ts';
+import { type HoldKind, shellQuote } from './keeper-policy.ts';
 import { type HeldRequest, secretNames } from './keeper-requests.ts';
 
 export const escapeHtml = (s: string): string =>
@@ -86,6 +86,16 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
   ];
   if (r.app) details.push(`<dt>App</dt><dd>${escapeHtml(r.app)}</dd>`);
   if (r.call.type === 'fly') {
+    // Every argument whole, one per line, so nothing a requester wrote can
+    // hide inside another argument or past the edge of the summary.
+    const args = r.call.args.map((a) => `<li><code>${escapeHtml(shellQuote(a))}</code></li>`);
+    details.push(`<dt>Every argument, in order</dt><dd><ol>${args.join('')}</ol></dd>`);
+    const remote = remoteCommand(r.call.args);
+    if (remote !== null) {
+      details.push(
+        `<dt>Runs on the machine as root, and its output goes back to whoever asked</dt><dd><pre id="remote">${escapeHtml(remote)}</pre></dd>`,
+      );
+    }
     const names = secretNames(r.call.input);
     if (names.length)
       details.push(`<dt>Secrets it sets</dt><dd>${escapeHtml(names.join(', '))}</dd>`);
@@ -101,7 +111,7 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
       );
     }
   } else if (r.call.body) {
-    details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body.slice(0, 4000))}</pre></dd>`);
+    details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body)}</pre></dd>`);
   }
   const state =
     r.status === 'pending' && pageToken
@@ -144,6 +154,21 @@ document.getElementById('deny')?.addEventListener('click', async () => {
   } catch (e) { say('Not denied: ' + e.message); }
 });`;
   return page(`Approve ${r.hold}`, body, r.status === 'pending' && pageToken ? script : '');
+}
+
+/**
+ * The command `fly ssh console --command` runs on the machine, exactly as
+ * given, or null when the call opens no command. Without `--command` the
+ * console is an interactive shell, which the summary already says.
+ */
+function remoteCommand(args: readonly string[]): string | null {
+  if (args[0] !== 'ssh' || args[1] !== 'console') return null;
+  for (let i = 2; i < args.length; i++) {
+    const a = args[i] as string;
+    if (a.startsWith('--command=')) return a.slice('--command='.length);
+    if (a === '--command') return args[i + 1] ?? '';
+  }
+  return null;
 }
 
 /** Served in place of every page while the alarm is raised. */

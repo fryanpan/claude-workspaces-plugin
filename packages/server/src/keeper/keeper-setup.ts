@@ -3,6 +3,8 @@
  * `docs/process/keeper.md`, after `scripts/keeper-install.sh` has the
  * keeper running. Runs as Bryan, never as root and never as an agent.
  *
+ * 0. The callers' token (`keeper-setup-callers.ts`), which every agent-API
+ *    request carries, in the caller token file under prod's root.
  * 1. A new Fly org token, made with Bryan's own `fly` login, into the keeper.
  * 2. A new Cloudflare token, made with the current one (or in the dashboard
  *    when it cannot), into the keeper with the one account id it sees.
@@ -30,7 +32,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { SECRET_ACCOUNT, storedSecretService } from '../../../core/src/secret-name.ts';
+import { CALLER_HEADER, CALLER_TOKEN_FILE } from './keeper-callers.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
+import { ensureCallerToken } from './keeper-setup-callers.ts';
 import {
   type CfAccount,
   manualTokenSteps,
@@ -174,6 +178,17 @@ async function steps(o: SetupOptions): Promise<void> {
   if (!/^\d+$/.test(port)) throw new Stop(`keeper port printed '${port}', not a number`);
   const url = `http://localhost:${port}`;
   ok(`the keeper's store is sound and it answers on ${url}`);
+  const caller = await ensureCallerToken({
+    path: join(o.home, CALLER_TOKEN_FILE),
+    url,
+    dryRun: o.dryRun,
+    fetch: o.fetch,
+    mint: () => keeper(['caller-token']),
+  });
+  if ('stop' in caller) throw new Stop(caller.stop);
+  if (caller.token === null) would(caller.would);
+  else ok(caller.said);
+  const api = { [API_HEADER]: '1', ...(caller.token ? { [CALLER_HEADER]: caller.token } : {}) };
 
   step('Confirm the org and the account');
   // Both come from stores anything running as you can write, so you see them
@@ -191,7 +206,7 @@ async function steps(o: SetupOptions): Promise<void> {
   if (needCf && !o.dryRun) {
     if (held.has('cloudflare-api-token')) {
       // An earlier run stored the token and stopped: ask through the keeper.
-      const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: { [API_HEADER]: '1' } });
+      const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: api });
       const body = (await r.json().catch(() => ({}))) as { result?: unknown };
       const one = theOneAccount(body.result);
       if ('why' in one) throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
@@ -386,7 +401,7 @@ async function steps(o: SetupOptions): Promise<void> {
     o.print('Dry run: nothing was changed.');
     return;
   }
-  await probe(o, url, ok);
+  await probe(o, url, api, ok);
   o.print('');
   o.print(
     `The keeper is set up: it holds the tokens, the callers use ${url}, and the check passed.`,
@@ -395,14 +410,15 @@ async function steps(o: SetupOptions): Promise<void> {
 }
 
 /** The probe: a held call that prints its link, then is withdrawn so it can never run. */
-async function probe(o: SetupOptions, url: string, ok: (s: string) => void): Promise<void> {
+async function probe(
+  o: SetupOptions,
+  url: string,
+  api: Record<string, string>,
+  ok: (s: string) => void,
+): Promise<void> {
   const res = await o.fetch(`${url}/v1/fly`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      [API_HEADER]: '1',
-      'x-cw-requester': 'keeper-setup',
-    },
+    headers: { 'content-type': 'application/json', ...api, 'x-cw-requester': 'keeper-setup' },
     body: JSON.stringify({ args: ['apps', 'create', PROBE_APP] }),
   });
   const body = (await res.json().catch(() => ({}))) as {
@@ -420,7 +436,7 @@ async function probe(o: SetupOptions, url: string, ok: (s: string) => void): Pro
   ok(`the probe waits for your passkey at ${body.approveUrl}`);
   const gone = await o.fetch(`${url}/v1/requests/${body.id}`, {
     method: 'DELETE',
-    headers: { [API_HEADER]: '1', 'x-cw-keeper-poll': body.pollToken },
+    headers: { ...api, 'x-cw-keeper-poll': body.pollToken },
   });
   if (!gone.ok)
     throw new Stop(`could not withdraw the probe; open ${body.approveUrl} and press Deny`);

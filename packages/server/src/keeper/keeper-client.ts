@@ -9,9 +9,12 @@
  * after the requester has gone. Once approved, the command has a limit of
  * its own (`runMs`), at least as long as the keeper lets `fly` run.
  * `CW_KEEPER_URL` (for example `http://localhost:8797`) is the setting that
- * turns this on; without it every caller keeps its old path.
+ * turns this on; without it every caller keeps its old path. Every request
+ * carries the caller token, read from the caller token file
+ * (`keeper-callers.ts`); without it the keeper refuses the call.
  */
 import { configuredHostFetch } from '../outbound-fetch.ts';
+import { CALLER_HEADER, callerTokenPath, readCallerToken } from './keeper-callers.ts';
 import { FLY_TIMEOUT_MS } from './keeper-exec.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
 import type { CloudflareResult, FlyResult } from './keeper-requests.ts';
@@ -35,8 +38,22 @@ export interface KeeperClientOptions {
   runMs?: number;
   pollMs?: number;
   requester?: string;
+  /** The caller token; read from the caller token file when not given. */
+  callerToken?: string;
   /** Injected in tests; production is the configured-host guard. */
   fetchImpl?: typeof fetch;
+}
+
+/** The token to send, and why there is none when there is none. */
+function callerOf(opts: KeeperClientOptions): { token: string | null; problem?: string } {
+  if (opts.callerToken !== undefined) return { token: opts.callerToken };
+  const read = readCallerToken(callerTokenPath());
+  return 'token' in read ? { token: read.token } : { token: null, problem: read.problem };
+}
+
+/** The headers every agent-API request carries. */
+function apiHeaders(token: string | null): Record<string, string> {
+  return { [API_HEADER]: '1', ...(token ? { [CALLER_HEADER]: token } : {}) };
 }
 
 type Waited<T> = { ok: true; result: T } | { ok: false; error: string };
@@ -46,11 +63,12 @@ export async function withdrawRequest(
   origin: string,
   held: Pick<HeldAnswer, 'id' | 'pollToken'>,
   doFetch: typeof fetch,
+  callerToken: string | null = callerOf({}).token,
 ): Promise<boolean> {
   try {
     const res = await doFetch(`${origin}/v1/requests/${held.id}`, {
       method: 'DELETE',
-      headers: { [API_HEADER]: '1', 'x-cw-keeper-poll': held.pollToken },
+      headers: { ...apiHeaders(callerToken), 'x-cw-keeper-poll': held.pollToken },
     });
     return res.ok;
   } catch {
@@ -63,6 +81,7 @@ async function waitForApproval<T>(
   held: HeldAnswer,
   opts: KeeperClientOptions,
   doFetch: typeof fetch,
+  callerToken: string | null,
 ): Promise<Waited<T>> {
   opts.onHeld?.(held);
   let deadline = Date.now() + (opts.waitMs ?? 10 * 60_000);
@@ -70,7 +89,7 @@ async function waitForApproval<T>(
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, opts.pollMs ?? 1000));
     const res = await doFetch(`${origin}/v1/requests/${held.id}`, {
-      headers: { [API_HEADER]: '1', 'x-cw-keeper-poll': held.pollToken },
+      headers: { ...apiHeaders(callerToken), 'x-cw-keeper-poll': held.pollToken },
     });
     if (!res.ok) return { ok: false, error: `the keeper lost request ${held.id}` };
     const view = (await res.json()) as { status: string; result?: T; error?: string };
@@ -90,7 +109,7 @@ async function waitForApproval<T>(
   if (running) {
     return { ok: false, error: `${held.summary} was approved and is still running past the wait` };
   }
-  const withdrawn = await withdrawRequest(origin, held, doFetch);
+  const withdrawn = await withdrawRequest(origin, held, doFetch, callerToken);
   return {
     ok: false,
     error: withdrawn
@@ -108,17 +127,30 @@ async function waitForApproval<T>(
 export function keeperFetch(origin: string, opts: KeeperClientOptions = {}): typeof fetch {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
   const wrapped = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const caller = callerOf(opts);
     const headers = new Headers(init?.headers);
-    headers.set(API_HEADER, '1');
     headers.delete('authorization');
+    for (const [k, v] of Object.entries(apiHeaders(caller.token))) headers.set(k, v);
     if (opts.requester) headers.set('x-cw-requester', opts.requester);
     const res = await doFetch(String(input instanceof Request ? input.url : input), {
       ...init,
       headers,
     });
+    if (res.status === 401 && caller.problem) {
+      const why = await res.text().catch(() => '');
+      return new Response(JSON.stringify({ error: `${caller.problem} (${why.slice(0, 200)})` }), {
+        status: 401,
+      });
+    }
     if (!res.headers.has(HELD_HEADER)) return res;
     const held = (await res.json()) as HeldAnswer;
-    const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch);
+    const waited = await waitForApproval<CloudflareResult>(
+      origin,
+      held,
+      opts,
+      doFetch,
+      caller.token,
+    );
     if (!waited.ok) {
       return new Response(JSON.stringify({ error: waited.error, approveUrl: held.approveUrl }), {
         status: 403,
@@ -137,11 +169,12 @@ export async function keeperFly(
   opts: KeeperClientOptions = {},
 ): Promise<FlyResult> {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
+  const caller = callerOf(opts);
   const res = await doFetch(`${origin}/v1/fly`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      [API_HEADER]: '1',
+      ...apiHeaders(caller.token),
       ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
     },
     body: JSON.stringify({ args, ...(input !== undefined ? { input } : {}) }),
@@ -154,6 +187,7 @@ export async function keeperFly(
     } catch {
       // not JSON: the text itself is the reason
     }
+    if (res.status === 401 && caller.problem) reason = `${caller.problem} (${reason})`;
     return {
       status: 1,
       stdout: '',
@@ -165,6 +199,6 @@ export async function keeperFly(
   }
   if (!res.headers.has(HELD_HEADER)) return (await res.json()) as FlyResult;
   const held = (await res.json()) as HeldAnswer;
-  const waited = await waitForApproval<FlyResult>(origin, held, opts, doFetch);
+  const waited = await waitForApproval<FlyResult>(origin, held, opts, doFetch, caller.token);
   return waited.ok ? waited.result : { status: 1, stdout: '', stderr: waited.error };
 }
