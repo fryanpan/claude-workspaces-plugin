@@ -77,8 +77,12 @@ describe('a footnote in the editor', () => {
    */
   it('hands over an unlit fact, whichever note it belongs to', () => {
     mount(DOC);
-    expect(facts().some((el) => el.classList.contains('cw-fn-fact-on'))).toBe(false);
-    expect(notes().some((el) => el.classList.contains('cw-fn-on'))).toBe(false);
+    expect(
+      facts().every(
+        (el) => el.className === 'cw-fn-fact' || el.className === 'cw-fn-fact cw-fn-fact-unsure',
+      ),
+    ).toBe(true);
+    expect(notes().every((el) => el.className === 'cw-fn')).toBe(true);
   });
 
   it('leaves the document itself untouched', () => {

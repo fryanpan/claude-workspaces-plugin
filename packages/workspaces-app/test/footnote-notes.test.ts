@@ -88,8 +88,13 @@ const point = (el: Element, over: boolean) =>
 /** `mouseenter` does not bubble, so it goes straight to the caption. */
 const enter = (el: Element, over: boolean) =>
   el.dispatchEvent(new MouseEvent(over ? 'mouseenter' : 'mouseleave'));
+/** The facts drawn lit — tinted — as the stylesheet resolves them. */
 const lit = (c: HTMLElement) =>
-  [...c.querySelectorAll<HTMLElement>('.cw-fn-fact-on')].map((el) => el.dataset.cwFnFor);
+  [...c.querySelectorAll<HTMLElement>('.cw-fn-fact')]
+    .filter((el) => styleOf(el).backgroundColor !== '')
+    .map((el) => el.dataset.cwFnFor);
+/** The note the module says is lit; the stylesheet keys on the same number. */
+const litN = (c: HTMLElement) => c.dataset.cwFnLit ?? null;
 
 describe('notes in the margin', () => {
   it('places one card per note, carrying the note text', () => {
@@ -134,6 +139,73 @@ describe('notes in the margin', () => {
   });
 });
 
+describe('a margin caption is one line until the reader asks', () => {
+  const captionFor = (notes: ReturnType<typeof mount>['notes'], n: string) =>
+    notes.cards().find((c) => c.el.dataset.cwFnN === n)?.el as HTMLElement;
+  const openOnes = (notes: ReturnType<typeof mount>['notes']) =>
+    notes
+      .cards()
+      .filter((c) => c.el.classList.contains('cw-fn-note-open'))
+      .map((c) => c.el.dataset.cwFnN);
+
+  it('starts with every caption closed', () => {
+    const { notes } = mount({ marginVisible: true });
+    expect(openOnes(notes)).toEqual([]);
+    expect(captionFor(notes, '1').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens a caption from its superscript, and closes it on a second tap', () => {
+    const { notes, container, changed } = mount({ marginVisible: true });
+    const before = changed();
+    tap(supFor(container, '1'));
+    expect(openOnes(notes)).toEqual(['1']);
+    expect(captionFor(notes, '1').getAttribute('aria-expanded')).toBe('true');
+    expect(changed()).toBe(before + 1);
+    tap(supFor(container, '1'));
+    expect(openOnes(notes)).toEqual([]);
+    // …and the popover stays shut: the margin is where the note is.
+    expect(popover(container)?.hidden).toBe(true);
+  });
+
+  it('opens a caption from a tap on the caption, and swaps to the next one tapped', () => {
+    const { notes } = mount({ marginVisible: true });
+    tap(captionFor(notes, '1'));
+    expect(openOnes(notes)).toEqual(['1']);
+    tap(captionFor(notes, '2'));
+    expect(openOnes(notes)).toEqual(['2']);
+    tap(captionFor(notes, '2'));
+    expect(openOnes(notes)).toEqual([]);
+  });
+
+  it('closes the open caption on a tap elsewhere in the prose', () => {
+    const { notes, container } = mount({ marginVisible: true });
+    tap(supFor(container, '2'));
+    tap(factFor(container, '1'));
+    expect(openOnes(notes)).toEqual([]);
+  });
+
+  it('opens a closed caption rather than following its link, then follows it once open', () => {
+    const { notes } = mount({ marginVisible: true, md: LINKED });
+    const link = captionFor(notes, '1').querySelector('a') as HTMLAnchorElement;
+    const first = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+    expect(openOnes(notes)).toEqual(['1']);
+    const second = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(false);
+    expect(openOnes(notes)).toEqual(['1']);
+  });
+
+  it('closes when an edit gives the open number different words', () => {
+    const { notes, container, editor } = mount({ marginVisible: true });
+    tap(supFor(container, '1'));
+    editor.editor.commands.setContent('<p>New^[A different source.]</p>');
+    notes.refresh();
+    expect(openOnes(notes)).toEqual([]);
+  });
+});
+
 describe('the popover on a phone', () => {
   it('opens under the tapped note and shows its text', () => {
     const { container } = mount({ marginVisible: false });
@@ -173,9 +245,9 @@ describe('the popover on a phone', () => {
   it('marks the open note so it can be lit', () => {
     const { container } = mount({ marginVisible: false });
     tap(supFor(container, '1'));
-    expect(supFor(container, '1').classList.contains('cw-fn-on')).toBe(true);
+    expect(litN(container)).toBe('1');
     tap(container);
-    expect(supFor(container, '1').classList.contains('cw-fn-on')).toBe(false);
+    expect(litN(container)).toBeNull();
   });
 });
 
@@ -190,7 +262,7 @@ describe('an open card while the text underneath changes', () => {
     expect(popover(container)?.textContent).toBe(
       'Planning Department annual report, 2025, table 4.',
     );
-    expect(supFor(container, '1').classList.contains('cw-fn-on')).toBe(true);
+    expect(lit(container)).toEqual(['1']);
   });
 
   it('closes rather than silently showing another note under the same number', () => {
@@ -201,7 +273,7 @@ describe('an open card while the text underneath changes', () => {
     editor.editor.commands.insertContentAt(1, 'Filed in March^[Intake log, 2025.]. ');
     notes.refresh();
     expect(popover(container)?.hidden).toBe(true);
-    expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
+    expect(litN(container)).toBeNull();
   });
 
   it('closes when the window grows a margin under it', () => {
@@ -216,7 +288,7 @@ describe('an open card while the text underneath changes', () => {
     document.body.dataset.cards = 'balloon';
     setViewport(IPAD);
     expect(popover(container)?.hidden).toBe(true);
-    expect(container.querySelectorAll('.cw-fn-on')).toHaveLength(0);
+    expect(litN(container)).toBeNull();
   });
 
   it('closes when the author edits the words the card is showing', () => {
@@ -330,6 +402,27 @@ describe('the fact underline', () => {
     expect(lit(container)).toEqual(['1']);
     expect(styleOf(factFor(container, '1')).borderBottomStyle).toBe('solid');
     expect(styleOf(factFor(container, '2')).borderBottomStyle).toBe('dotted');
+  });
+
+  it('writes nothing into the prose while it lights a note', async () => {
+    // The editor redraws a span changed under it, so a pointer moving over
+    // the text must not change any (Bryan, 2026-11-02: "don't shift the body
+    // text please!").
+    const { container, editor } = mount({ marginVisible: true });
+    // The editor finishes its own first render a task after mount.
+    await new Promise((r) => setTimeout(r, 0));
+    const seen: MutationRecord[] = [];
+    const watch = new MutationObserver((m) => seen.push(...m));
+    watch.observe(editor.editor.view.dom, { subtree: true, attributes: true, childList: true });
+    point(supFor(container, '1'), true);
+    // The control: the note really was lit. Read off the module, not off a
+    // computed style — happy-dom's style resolution writes into the tree.
+    const during = litN(container);
+    point(supFor(container, '1'), false);
+    await new Promise((r) => setTimeout(r, 0));
+    watch.disconnect();
+    expect(during).toBe('1');
+    expect(seen.map((m) => `${m.type} ${m.attributeName ?? ''}`)).toEqual([]);
   });
 
   it('puts it away again when the pointer leaves', () => {
