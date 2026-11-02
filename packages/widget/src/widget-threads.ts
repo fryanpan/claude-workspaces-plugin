@@ -334,6 +334,11 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
   const send = async (): Promise<void> => {
     const text = ta.value.trim();
     if (!text) return;
+    // Emptied as it goes. The reply can reach the page by its socket before
+    // the POST answers, and on a mock that redraws the comment view, which
+    // carries the box's words into a new popover; the one closed below is
+    // then the old one. A refusal puts the words back.
+    ta.value = '';
     // A rejected fetch (server unreachable) is a refused reply like any
     // other. Without the catch it left an unhandled rejection and a popover
     // still holding the words with nothing said about them — the same shape
@@ -343,9 +348,17 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
       posted = await el.postReply(t.id, text);
     } catch {}
     if (!posted) {
-      const note = composerNote(pop, 'Not sent — tap Reply to retry.');
+      // Into this thread's popover as it stands now: a redraw while it
+      // posted may have replaced this one.
+      const live =
+        pop.isConnected || el.activeThread !== t.id
+          ? pop
+          : (el.shadow.querySelector<HTMLElement>('.thread-popover') ?? pop);
+      const box = live.querySelector('textarea') as HTMLTextAreaElement;
+      if (!box.value) box.value = text;
+      const note = composerNote(live, 'Not sent — tap Reply to retry.');
       // Whatever they type next is not what failed, so the note goes with it.
-      ta.addEventListener('input', () => note.remove(), { once: true });
+      box.addEventListener('input', () => note.remove(), { once: true });
       return;
     }
     pop.remove();

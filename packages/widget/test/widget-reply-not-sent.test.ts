@@ -84,6 +84,29 @@ describe('a widget reply the server refused', () => {
     expect(el.shadow.querySelector('.thread-popover')).toBeNull();
   });
 
+  it('a refusal after a redraw replaced the popover puts the words in the new one', async () => {
+    // The comment view redraws an open thread's popover when the thread
+    // changes; the box is emptied on send, so the redraw carries nothing.
+    let refuse: (ok: boolean) => void = () => {};
+    const el = widget(() => new Promise<boolean>((r) => (refuse = r)));
+    Object.assign(el, { activeThread: 't1' });
+    showThreadPopover(el, thread(), 10, 10);
+    const old = el.shadow.querySelector('.thread-popover') as HTMLElement;
+    const oldBox = old.querySelector('textarea') as HTMLTextAreaElement;
+    oldBox.value = 'Harborlight pier at nine';
+    (old.querySelector('.submit') as HTMLElement).click();
+    expect(oldBox.value, 'emptied while it posts').toBe('');
+    old.remove();
+    showThreadPopover(el, thread(), 10, 10);
+    refuse(false);
+    await flush();
+    const now = el.shadow.querySelector('.thread-popover') as HTMLElement;
+    expect((now.querySelector('textarea') as HTMLTextAreaElement).value).toBe(
+      'Harborlight pier at nine',
+    );
+    expect(now.querySelector('.composer-err')?.textContent).toContain('Not sent');
+  });
+
   it('pressing Reply again after a refusal sends the same words again', async () => {
     const sent: string[] = [];
     const el = widget((_id, text) => {
