@@ -222,6 +222,43 @@ export class ScratchRepo {
     return r.code === 0 ? r.stdout.split('\n').filter(Boolean) : [];
   }
 
+  /**
+   * Paths under `.github/` that `tip` adds, changes or deletes against what
+   * upstream holds, at most `max`. Two reads, so neither alone is the gap:
+   * the tree diff from `base` (what the branch's tip looks like next to
+   * upstream), and every path any commit not already upstream touches,
+   * merges diffed against each parent, so a workflow added in one commit
+   * and removed in the next still counts. Renames are off, so a moved file
+   * reports both ends. Matched case-insensitively. Null when git cannot
+   * say, which the caller treats as touching.
+   */
+  async githubPaths(base: string | null, tip: string, max: number): Promise<string[] | null> {
+    const reads: string[][] = [
+      [
+        'log',
+        '-m',
+        '--no-renames',
+        '--format=',
+        '--name-only',
+        '-z',
+        tip,
+        '--not',
+        '--glob=refs/up/*',
+      ],
+    ];
+    if (base) reads.push(['diff', '--no-renames', '--name-only', '-z', base, tip]);
+    const found = new Set<string>();
+    for (const args of reads) {
+      const r = await this.git(args);
+      if (r.code !== 0) return null;
+      for (const name of r.stdout.split('\0')) {
+        const path = name.replace(/^\n+/, '');
+        if (path.toLowerCase().startsWith('.github/')) found.add(path);
+      }
+    }
+    return [...found].sort().slice(0, max);
+  }
+
   /** Push `sha` to `refs/heads/<branch>`: no `+`, no `--force`, so upstream
    *  refuses anything but a fast-forward or a new branch. */
   async push(upstream: Upstream, sha: string, branch: string): Promise<GitResult> {

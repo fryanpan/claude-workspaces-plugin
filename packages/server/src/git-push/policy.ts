@@ -1,12 +1,17 @@
 /**
  * Which repos a board's lead may push to through its server, and which of
- * them wait for a person's approval first.
+ * them may skip a person's approval.
  *
  * The policy is a file in the server's data dir, `git-push.json`:
  *
  *   { "boards": { "<boardId>": { "repos": [
  *       { "repo": "owner/name" },
- *       { "repo": "owner/other", "approval": true } ] } } }
+ *       { "repo": "owner/other", "approval": false } ] } } }
+ *
+ * Every push waits for a person's approval unless its repo says
+ * `"approval": false`. A missing flag means approval, so a repo added in a
+ * hurry fails closed. Even an opted-out repo's push waits when it touches
+ * `.github/` (`pusher.ts`).
  *
  * No route writes it. The operator edits it on the machine: on the Mac in
  * prod's data dir, which a walled lead's profile denies; on a project
@@ -23,7 +28,7 @@ export const GIT_PUSH_POLICY_FILE = 'git-push.json';
 export interface RepoRule {
   /** `owner/name`, as GitHub spells it. */
   repo: string;
-  /** Hold every push for a person's answer on a review item. */
+  /** Hold every push for a person's answer on a review item. True unless the file says false. */
   approval: boolean;
 }
 
@@ -70,7 +75,7 @@ export function parsePolicy(text: string): Map<string, RepoRule[]> | null {
       const approval = (r as { approval?: unknown }).approval;
       if (typeof repo !== 'string' || !isRepoName(repo)) return null;
       if (approval !== undefined && typeof approval !== 'boolean') return null;
-      rules.push({ repo, approval: approval === true });
+      rules.push({ repo, approval: approval !== false });
     }
     out.set(boardId, rules);
   }

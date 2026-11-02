@@ -9,7 +9,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { boardSocketPath } from '../src/board-sockets.ts';
 import { type GitCall, realGit } from '../src/git-push/git.ts';
 import { GIT_PUSH_POLICY_FILE } from '../src/git-push/policy.ts';
@@ -58,6 +58,11 @@ export interface PushWorld {
       subject?: string;
       tag?: string;
       refs?: (branch: string) => string[];
+      /**
+       * Each entry is one more commit: paths to write (a string) or remove
+       * (null), committed after the default change.
+       */
+      commits?: Record<string, string | null>[];
     },
   ) => ArrayBuffer;
   /**
@@ -163,6 +168,17 @@ export async function startPushWorld(
       writeFileSync(join(clone, `change-${n}.md`), `Change ${n}\n`);
       git(clone, 'add', '.');
       git(clone, 'commit', '--quiet', '-m', opts.subject ?? `Change ${n} from the Riverbend lead`);
+      for (const [i, files] of (opts.commits ?? []).entries()) {
+        for (const [path, text] of Object.entries(files)) {
+          if (text === null) git(clone, 'rm', '--quiet', path);
+          else {
+            mkdirSync(dirname(join(clone, path)), { recursive: true });
+            writeFileSync(join(clone, path), text);
+            git(clone, 'add', path);
+          }
+        }
+        git(clone, 'commit', '--quiet', '-m', `Follow-up ${i + 1} from the Riverbend lead`);
+      }
       if (opts.tag) git(clone, 'tag', opts.tag);
       const refs = opts.refs ? opts.refs(branch) : [`origin/main..${branch}`];
       return bundleOf(clone, `${n}`, refs);

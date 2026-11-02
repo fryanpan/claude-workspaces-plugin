@@ -14,7 +14,10 @@
  *  6. its tip descends from upstream's tip of the branch, so it is never a
  *     force-push.
  *
- * On a repo marked `approval`, the push is then held as a decision review
+ * Every push is then held for a person unless its repo opts out with
+ * `"approval": false`, and even then a push that adds, changes or deletes
+ * anything under `.github/` is held: a workflow runs with the repo's
+ * Actions secrets as soon as it lands on any branch. A held push is filed as a decision review
  * item with `step: 'push'` (owner-only when the board reserves that step),
  * at most `MAX_HELD_PER_BOARD` at a time. It runs only when the item's
  * answer chose Push AND carries `answeredBy`, which the store writes for a
@@ -164,25 +167,13 @@ export class GitPusher {
       );
     }
     if (rule.approval) {
-      const task = input.taskId ? this.o.taskStore.getTask(input.taskId) : undefined;
-      if (!task || task.workspaceId !== input.boardId) {
-        return this.finish(
-          record,
-          400,
-          'task-required',
-          `pushes to ${input.repo} wait for a person's approval; name a task on this board with ?task=<taskId>`,
-        );
-      }
-    }
-    if (rule.approval && this.heldOn(input.boardId) >= MAX_HELD_PER_BOARD) {
-      return this.finish(
+      const cannot = this.cannotHold(
         record,
-        429,
-        'too-many-held',
-        `this board already has ${MAX_HELD_PER_BOARD} pushes waiting for a person; wait for an answer first`,
+        `pushes to ${input.repo} wait for a person's approval`,
       );
+      if (cannot) return cannot;
     }
-    const judged = await this.run(record, !rule.approval);
+    const judged = await this.run(record, !rule.approval, true);
     if (!judged.ok) return this.refuse(record, judged);
     record.sha = judged.sha;
     if (judged.upToDate) {
@@ -190,12 +181,45 @@ export class GitPusher {
       record.message = `${input.branch} is already at ${judged.sha.slice(0, 12)}`;
       return this.done(record, 200);
     }
-    if (rule.approval) return this.hold(record, judged);
-    return this.pushed(record, judged.sha);
+    if (judged.pushed) return this.pushed(record, judged.sha);
+    if (!rule.approval) {
+      // The repo opted out, but the push touches `.github/`, so it was not sent.
+      const cannot = this.cannotHold(
+        record,
+        `this push changes ${judged.github.join(', ')}, and a change under .github/ waits for a person's approval`,
+      );
+      if (cannot) return cannot;
+    }
+    return this.hold(record, judged);
   }
 
-  /** Judge, and push when `push` is set, under the repo's lock. */
-  private run(record: PushRecord, push: boolean): Promise<RunResult> {
+  /** Why `record` cannot be held for a person, or null when it can. */
+  private cannotHold(record: PushRecord, why: string): PushOutcome | null {
+    const task = record.taskId ? this.o.taskStore.getTask(record.taskId) : undefined;
+    if (!task || task.workspaceId !== record.boardId) {
+      return this.finish(
+        record,
+        400,
+        'task-required',
+        `${why}; name a task on this board with ?task=<taskId>`,
+      );
+    }
+    if (this.heldOn(record.boardId) >= MAX_HELD_PER_BOARD) {
+      return this.finish(
+        record,
+        429,
+        'too-many-held',
+        `this board already has ${MAX_HELD_PER_BOARD} pushes waiting for a person; wait for an answer first`,
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Judge, and push when `push` is set, under the repo's lock. `holdGithub`
+   * keeps back a push that touches `.github/` until a person approved it.
+   */
+  private run(record: PushRecord, push: boolean, holdGithub: boolean): Promise<RunResult> {
     return this.locked(record.repo, () =>
       runPush(
         {
@@ -209,6 +233,7 @@ export class GitPusher {
           repo: record.repo,
           branch: record.branch,
           bundle: this.bundlePath(record.id),
+          holdGithub,
         },
         push,
       ),
@@ -242,6 +267,9 @@ export class GitPusher {
     const commits = judged.subjects.length
       ? `Newest commits:\n\n\`\`\`text\n${judged.subjects.map((s) => `- ${oneLine(s)}`).join('\n')}\n\`\`\``
       : '';
+    const github = judged.github.length
+      ? `**This push changes files under \`.github/\`**, which run with the repo's Actions secrets once they land:\n\n\`\`\`text\n${judged.github.map((p) => `- ${oneLine(p)}`).join('\n')}\n\`\`\``
+      : '';
     const res = this.o.taskStore.addReviewItem(
       taskId,
       {
@@ -250,6 +278,7 @@ export class GitPusher {
         detail: [
           `\`${record.requestedBy}\` asks this server to push \`${record.branch}\` to \`${record.repo}\` at \`${judged.sha.slice(0, 12)}\`, ${judged.tip ? `on top of \`${judged.tip.slice(0, 12)}\`` : 'as a new branch'}.`,
           commits,
+          github,
           'Only a person’s Push sends it. An agent’s answer sends nothing.',
         ]
           .filter(Boolean)
@@ -314,7 +343,7 @@ export class GitPusher {
       return;
     }
     record.updatedAt = this.now();
-    const judged = await this.run(record, true);
+    const judged = await this.run(record, true, false);
     if (!judged.ok) this.refuse(record, judged);
     else if (judged.upToDate) {
       record.state = 'up-to-date';
