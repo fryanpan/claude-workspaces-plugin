@@ -182,11 +182,8 @@ export class LeadChat {
     return { ok: true, message: publicMessage(message) };
   }
 
-  /**
-   * The lead's `answer_voice` for `queueId`: its `written` answer when it
-   * gave one, else `text`. True when it answered a chat message on this
-   * board, from the agent the message was sent to.
-   */
+  /** The lead's `answer_voice` for `queueId`, shown as `written` if given,
+   *  else `text`. True when it answered a chat message from this board's lead. */
   answer(
     workspaceId: string,
     queueId: string,
