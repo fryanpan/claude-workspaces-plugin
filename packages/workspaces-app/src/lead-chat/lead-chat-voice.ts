@@ -102,8 +102,9 @@ export const NO_VOICE = 'Voice is not set up on this server. Type to your lead i
 export const NO_SOUND = 'The microphone is sending no sound. Tap the agent button to try again.';
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
-/** Said while a carried-on voice waits for the tap its context needs. */
+/** Said, and reported, when the voice socket closes while the page stays. */
 const CLOSED = 'The connection closed. Tap the mic to try again.';
+/** Said while a carried-on voice waits for the tap its context needs. */
 export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
 /** How long a context started outside a tap has to run before the chat asks
  *  for one. */

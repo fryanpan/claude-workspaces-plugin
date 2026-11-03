@@ -317,6 +317,40 @@ describe('voice on, carried to the next page of the tab', () => {
     }
   });
 
+  it('a tap elsewhere that wakes voice leaves the agent button’s next tap its own', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    const saved = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    class Suspended {
+      state = 'suspended';
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = Suspended;
+    vi.useFakeTimers();
+    try {
+      const next = nextPage({ mode: 'voice' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      // The tap that wakes it lands on the page, not the button.
+      const page = document.createElement('p');
+      document.body.append(page);
+      page.click();
+      expect(next.view.button.dataset.listening).toBe('true');
+      // The next tap on the agent button stops voice, as it would anywhere.
+      next.view.button.click();
+      expect(next.view.button.dataset.listening).toBe('false');
+      expect(next.view.bar.hidden).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      (window as unknown as { AudioContext: unknown }).AudioContext = saved;
+    }
+  });
+
   it('on a phone, a page in the nav moves the listening panel into the bar', async () => {
     const { view, voice } = mount();
     const nav = document.createElement('a');
