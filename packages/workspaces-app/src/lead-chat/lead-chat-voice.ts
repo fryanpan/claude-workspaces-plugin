@@ -198,10 +198,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         if (mine !== gen || frames > 0) return;
         // What the mic's track and the graph's context said, so the report
         // answers why (`AudioPump.diag`).
-        halt(
-          NO_SOUND,
-          diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`,
-        );
+        halt(NO_SOUND, diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
       }, NO_SOUND_MS);
     });
   };
