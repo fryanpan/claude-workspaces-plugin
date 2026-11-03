@@ -271,6 +271,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     return html;
   };
 
+  /** Where the sheet was last placed, as written (the browser rewrites
+   *  `cssText`, so it cannot be read back to compare). */
+  let sheetCss = '';
   const place = (): void => {
     const vw = doc.documentElement.clientWidth || win.innerWidth;
     const vh = win.innerHeight;
@@ -302,10 +305,15 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     const keys = sheet ? typingBand(win) : null;
     pane.classList.toggle('lc-keys', !!keys);
     if (sheet) {
-      pane.style.cssText = keys
+      const css = keys
         ? `left:0;right:0;top:${keys.top}px;height:${keys.height}px`
         : `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
-      if (atFoot) list.scrollTop = list.scrollHeight;
+      // Only a sheet that changed size moves the list: a redraw under a
+      // press must leave the link where the finger is.
+      const moved = css !== sheetCss;
+      sheetCss = css;
+      pane.style.cssText = css;
+      if (moved && atFoot) list.scrollTop = list.scrollHeight;
     } else if (docking) {
       // Under the board's top bar, which keeps who is here and Settings in reach.
       const bar = doc.querySelector('.board-topbar')?.getBoundingClientRect();
