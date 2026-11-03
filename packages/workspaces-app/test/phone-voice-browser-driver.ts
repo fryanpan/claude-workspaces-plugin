@@ -42,8 +42,10 @@ import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 export interface PhoneVoiceRun {
   /** Audio frames the server's listener was sent after the tap. */
   framesHeard: number;
-  /** Contexts the page made, and how many a tap's own handler resumed. */
-  audio: { made: number; resumedInTap: number; refused: number };
+  /** Contexts the page made, how many a tap's own handler resumed, and how
+   *  many were closed without ever being let start — the pump's try at a
+   *  context at the mic's rate, which this model never lets run. */
+  audio: { made: number; resumedInTap: number; refused: number; discarded: number };
   listening: boolean;
   /** What the chat said, when it said why voice stopped. */
   status: string;
@@ -58,7 +60,7 @@ const SAFARI_AUDIO_RULE = `(() => {
   for (const t of ['touchend', 'click', 'pointerup', 'mouseup', 'keydown'])
     addEventListener(t, () => { tap = true; setTimeout(() => { tap = false; }, 0); }, true);
   const Native = window.AudioContext;
-  const log = (window.__safariAudio = { made: 0, resumedInTap: 0, refused: 0 });
+  const log = (window.__safariAudio = { made: 0, resumedInTap: 0, refused: 0, discarded: 0 });
   class SafariRule extends Native {
     constructor(...a) {
       super(...a);
@@ -73,6 +75,11 @@ const SAFARI_AUDIO_RULE = `(() => {
         return Promise.reject(new DOMException('needs a gesture', 'NotAllowedError'));
       }
       return Native.prototype.resume.call(this);
+    }
+    close() {
+      if (!this.__allowed && !this.__closed) log.discarded++;
+      this.__closed = true;
+      return Native.prototype.close.call(this);
     }
   }
   window.AudioContext = SafariRule;
@@ -216,7 +223,7 @@ async function main(): Promise<void> {
     }
     const run: PhoneVoiceRun = {
       framesHeard: ears.frames,
-      audio: last.audio ?? { made: 0, resumedInTap: 0, refused: 0 },
+      audio: last.audio ?? { made: 0, resumedInTap: 0, refused: 0, discarded: 0 },
       listening: last.listening,
       status: last.status,
     };
