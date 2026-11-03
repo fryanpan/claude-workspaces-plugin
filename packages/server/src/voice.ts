@@ -185,6 +185,7 @@ export function parseVoiceContext(raw: unknown, workspaceId?: string): VoiceCont
   const threadId = str(r.threadId, 300);
   const reviewItemId = str(r.reviewItemId, 300);
   const link = workspaceId === undefined ? undefined : messageLink(r.link, workspaceId);
+  const chatOpen = typeof r.chatOpen === 'boolean' ? r.chatOpen : undefined;
   return {
     surface: r.surface,
     ...(docId !== undefined ? { docId } : {}),
@@ -193,6 +194,7 @@ export function parseVoiceContext(raw: unknown, workspaceId?: string): VoiceCont
     ...(threadId !== undefined ? { threadId } : {}),
     ...(reviewItemId !== undefined ? { reviewItemId } : {}),
     ...(link !== undefined ? { link } : {}),
+    ...(chatOpen !== undefined ? { chatOpen } : {}),
   };
 }
 

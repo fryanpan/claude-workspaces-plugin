@@ -111,7 +111,8 @@ describe('the lead chat on a page', () => {
       {
         text: 'what is left on the signup?',
         via: 'chat',
-        context: { surface: 'doc', docId: 'd-saltmarsh' },
+        // Typed in the panel, so the lead knows the chat is being read.
+        context: { surface: 'doc', docId: 'd-saltmarsh', chatOpen: true },
       },
     ]);
     await new Promise((r) => setTimeout(r, 0));
@@ -174,7 +175,12 @@ describe('the lead chat on a page', () => {
     await settle();
     const ws = voice.socket();
     ws.open();
-    expect(ws.messages()[0]).toMatchObject({ type: 'start', agent: LEAD.agentId });
+    // Listening from the bar, with the panel shut: the answer is heard only.
+    expect(ws.messages()[0]).toMatchObject({
+      type: 'start',
+      agent: LEAD.agentId,
+      context: { surface: 'doc', docId: 'd-saltmarsh', chatOpen: false },
+    });
     expect(voice.mic.starts).toBe(1);
 
     ws.serve({ type: 'heard', text: 'read me the' });

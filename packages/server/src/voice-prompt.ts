@@ -55,6 +55,9 @@ export interface VoiceContext {
    * `messageLink` accepted it, so it names this board and nothing else.
    */
   link?: string;
+  /** Whether the speaker had the lead chat panel open, so the lead knows a
+   *  written answer will be read as well as the spoken one is heard. */
+  chatOpen?: boolean;
 }
 
 /**

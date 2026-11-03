@@ -47,6 +47,9 @@ export interface VoiceRequestPayload {
     /** The relative board path of the most specific thing the speaker had
      *  open, as the server accepted it for this board. */
     link?: string;
+    /** Whether the speaker had the lead chat panel open. Absent from an
+     *  older page, which says nothing either way. */
+    chatOpen?: boolean;
   };
   /** The queue row: what `answer_voice` answers. */
   queueId?: string;
@@ -118,7 +121,7 @@ export function voiceRequestLine(p: VoiceRequestPayload): string | null {
   // The speaker heard only "On it." The answer they are waiting for is the
   // lead's, said aloud on their page when it comes back through answer_voice.
   const answer = p.queueId
-    ? `. When you have the answer or the result, tell them with answer_voice(workspaceId="${p.workspaceId ?? ''}", queueId="${p.queueId}", text) as the shortest spoken answer that works ("No." beats a sentence).`
+    ? `. When you have the answer or the result, tell them with answer_voice(workspaceId="${p.workspaceId ?? ''}", queueId="${p.queueId}", text${writtenArg(p)}) as the shortest spoken answer that works ("No." beats a sentence).${panel(p)}`
     : '';
   return `${said} — act on it through the task/edit tools; the speaker was told: "${told}"${answer}${meetingBlock(p)}`;
 }
@@ -132,9 +135,27 @@ function addressedLine(p: VoiceRequestPayload, said: string): string {
     .map((t) => `${t.from === 'agent' ? 'You' : who}: ${truncate(t.text ?? '', 300)}`);
   const history = earlier.length ? `\nEarlier in this conversation:\n${earlier.join('\n')}` : '';
   const answer = p.queueId
-    ? ` Answer with answer_voice(workspaceId="${p.workspaceId ?? ''}", queueId="${p.queueId}", text): it is said aloud on their page, so keep it short and spoken.`
+    ? ` Answer with answer_voice(workspaceId="${p.workspaceId ?? ''}", queueId="${p.queueId}", text${writtenArg(p)}): text is said aloud on their page, so keep it short and spoken.${panel(p)}`
     : '';
   return `${said} — said to you by voice, in a conversation with you alone.${answer}${history}`;
+}
+
+/** The optional argument named in the call, when the panel is open. */
+function writtenArg(p: VoiceRequestPayload): string {
+  return p.context?.chatOpen === true ? ', written' : '';
+}
+
+/** Whether the speaker can read the chat as well as hear the answer, and
+ *  what that means for how long the spoken part is. Nothing when the page
+ *  did not say. */
+function panel(p: VoiceRequestPayload): string {
+  if (p.context?.chatOpen === true) {
+    return ' Their chat panel is open, so they read the chat while they listen: speak one sentence in text, and put any detail in written, which the chat shows in its place and is never said.';
+  }
+  if (p.context?.chatOpen === false) {
+    return ' Their chat panel is closed, so text is all they get: keep it short and leave written out.';
+  }
+  return '';
 }
 
 /** No line that could pass for the fence's own markers. */

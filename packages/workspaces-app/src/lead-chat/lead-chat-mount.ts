@@ -170,12 +170,15 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     render();
   });
 
-  /** Where the reader is, with the link to what they have open. */
-  const context = (): VoiceContext | undefined =>
-    withMessageLink(
+  /** Where the reader is, with the link to what they have open, and
+   *  whether they can read the chat as well as hear the answer. */
+  const context = (): VoiceContext | undefined => {
+    const at = withMessageLink(
       opts.getContext?.(),
       messageLinkOf(win.location.pathname, win.location.search, opts.openThread?.()),
     );
+    return at ? { ...at, chatOpen: ui.open } : undefined;
+  };
 
   const deliver = async (text: string, via: 'chat' | 'voice'): Promise<boolean> => {
     const res = await client.send(text, opts.author, context(), via);

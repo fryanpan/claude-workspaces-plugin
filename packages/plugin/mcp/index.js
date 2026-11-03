@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.347";
+var version2 = "0.1.348";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -15206,7 +15206,7 @@ function voiceRequestLine(p) {
   }
   if (typeof p.to === "string" && p.to)
     return addressedLine(p, said);
-  const answer = p.queueId ? `. When you have the answer or the result, tell them with answer_voice(workspaceId="${p.workspaceId ?? ""}", queueId="${p.queueId}", text) as the shortest spoken answer that works ("No." beats a sentence).` : "";
+  const answer = p.queueId ? `. When you have the answer or the result, tell them with answer_voice(workspaceId="${p.workspaceId ?? ""}", queueId="${p.queueId}", text${writtenArg(p)}) as the shortest spoken answer that works ("No." beats a sentence).${panel(p)}` : "";
   return `${said} — act on it through the task/edit tools; the speaker was told: "${told}"${answer}${meetingBlock(p)}`;
 }
 function addressedLine(p, said) {
@@ -15216,8 +15216,20 @@ function addressedLine(p, said) {
 Earlier in this conversation:
 ${earlier.join(`
 `)}` : "";
-  const answer = p.queueId ? ` Answer with answer_voice(workspaceId="${p.workspaceId ?? ""}", queueId="${p.queueId}", text): it is said aloud on their page, so keep it short and spoken.` : "";
+  const answer = p.queueId ? ` Answer with answer_voice(workspaceId="${p.workspaceId ?? ""}", queueId="${p.queueId}", text${writtenArg(p)}): text is said aloud on their page, so keep it short and spoken.${panel(p)}` : "";
   return `${said} — said to you by voice, in a conversation with you alone.${answer}${history}`;
+}
+function writtenArg(p) {
+  return p.context?.chatOpen === true ? ", written" : "";
+}
+function panel(p) {
+  if (p.context?.chatOpen === true) {
+    return " Their chat panel is open, so they read the chat while they listen: speak one sentence in text, and put any detail in written, which the chat shows in its place and is never said.";
+  }
+  if (p.context?.chatOpen === false) {
+    return " Their chat panel is closed, so text is all they get: keep it short and leave written out.";
+  }
+  return "";
 }
 function defused(s) {
   return s.replace(/-{3,}\s*(BEGIN|END)/gi, "— $1");
@@ -16679,7 +16691,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_voice",
-      description: 'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. delivered:false means that page has closed: post the answer on the task or a thread instead.',
+      description: 'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16688,6 +16700,10 @@ var TOOL_LIST = {
           text: {
             type: "string",
             description: "What to say: the shortest answer that works, one sentence at most."
+          },
+          written: {
+            type: "string",
+            description: "Optional: the fuller answer, for a reader whose chat panel is open. The chat shows it instead of text; it is never said aloud."
           },
           minute: {
             type: "string",
@@ -21506,14 +21522,20 @@ async function handleWorkspaceTool(name, a, ctx) {
       });
     }
     case "answer_voice": {
-      const { workspaceId, queueId, text, minute } = a;
+      const { workspaceId, queueId, text, written, minute } = a;
       const words = typeof text === "string" ? text.trim() : "";
+      const full = typeof written === "string" ? written.trim() : "";
       const kept = typeof minute === "string" ? minute.trim() : "";
       if (!workspaceId || !queueId)
         return err2("workspaceId and queueId are required");
       if (words === "")
         return err2("text is empty — say the answer");
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/voice-queue/${encodeURIComponent(queueId)}/answer`, { agentId: AUTHOR.id, text: words, ...kept ? { minute: kept } : {} });
+      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/voice-queue/${encodeURIComponent(queueId)}/answer`, {
+        agentId: AUTHOR.id,
+        text: words,
+        ...full ? { written: full } : {},
+        ...kept ? { minute: kept } : {}
+      });
       return ok2({
         delivered: res.delivered === true,
         ...res.delivered === true ? {} : { note: "No page is waiting for this answer. Post it on the task or a thread." }

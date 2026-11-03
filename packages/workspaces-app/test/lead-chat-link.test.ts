@@ -133,7 +133,7 @@ describe('a mounted chat sends the page link', () => {
     view.composer.value = 'yes, ship it';
     view.composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await Promise.resolve();
-    expect(sent).toEqual([{ surface: 'board', link: `${WS}/home?item=${ITEM}` }]);
+    expect(sent).toEqual([{ surface: 'board', link: `${WS}/home?item=${ITEM}`, chatOpen: true }]);
   });
 
   it('spoken, from a doc thread the panel has open', async () => {

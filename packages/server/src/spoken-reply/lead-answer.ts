@@ -21,6 +21,10 @@ export const LEAD_ANSWER_WINDOW_MS = 30 * 60_000;
 /** The longest answer accepted, in characters; the page writes what is not said. */
 export const LEAD_ANSWER_MAX = 4000;
 
+/** The longest written answer accepted, in characters: the fuller answer
+ *  the chat shows in place of the spoken one, for a reader with it open. */
+export const LEAD_WRITTEN_MAX = 8000;
+
 /** The longest minute a lead's answer may carry, in characters: a line for
  *  a meeting's notes, not a report. */
 export const LEAD_MINUTE_MAX = 300;
@@ -28,7 +32,8 @@ export const LEAD_MINUTE_MAX = 300;
 /** The route name a lead's answer carries on the page. */
 export const LEAD_ANSWER_ROUTE = 'lead-answer';
 
-/** `text` is the answer whole, before it was shaped for speech. */
+/** `text` is the answer as the chat shows it: the written answer when the
+ *  lead gave one, else the spoken answer whole, before it was shaped. */
 type Say = (answer: SpokenAnswer, text: string) => void;
 
 export class LeadAnswers {
@@ -60,7 +65,8 @@ export class LeadAnswers {
 
   /**
    * Say the lead's answer on the socket that asked, with its `minute` for a
-   * meeting's notes when it gave one. False when no open socket
+   * meeting's notes when it gave one. Only `text` is said; `written`, when
+   * given, is what the chat shows instead. False when no open socket
    * is waiting for it — closed, expired, never asked from a spoken socket, an
    * id from another board, or a turn addressed to an agent other than `by`.
    */
@@ -70,6 +76,7 @@ export class LeadAnswers {
     text: string,
     minute?: string,
     by?: string,
+    written?: string,
   ): boolean {
     this.prune();
     const key = this.key(workspaceId, queueId);
@@ -79,7 +86,8 @@ export class LeadAnswers {
     if (w.from !== undefined && w.from !== by) return false;
     this.waiting.delete(key);
     const kept = minute?.trim();
-    w.say({ ...shapedAnswer(words, LEAD_ANSWER_ROUTE), ...(kept ? { minute: kept } : {}) }, words);
+    const shown = written?.trim() || words;
+    w.say({ ...shapedAnswer(words, LEAD_ANSWER_ROUTE), ...(kept ? { minute: kept } : {}) }, shown);
     return true;
   }
 
