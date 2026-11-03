@@ -1,9 +1,10 @@
 /**
  * What each entry of the lead chat looks like, driven through the real
- * panel: a tool call is one line that opens to its input and output; a board
- * event is a compact row the header's toggle hides, and the choice is kept;
- * an answer to something said aloud is a bubble whose words open on a tap;
- * a person's message says where it got to.
+ * panel: a tool call is one terminal-style line that opens to its input and
+ * output; tool calls and board events are hidden but for the one the lead is
+ * on now, until the header's Tool use toggle shows them all, and the choice
+ * is kept; an answer to something said aloud is a bubble whose words open on
+ * a tap; a person's message says where it got to.
  */
 import type { LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -71,6 +72,13 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+/** Storage with the Tool use toggle already on. */
+function showingTools(): ReturnType<typeof memory> {
+  const m = memory();
+  m.map.set('cw.lead-chat.tools', 'show');
+  return m;
+}
+
 function open(messages: LeadChatMessage[], storage: ModeStorage | null = null) {
   const host = document.createElement('span');
   document.body.append(host);
@@ -95,7 +103,7 @@ function open(messages: LeadChatMessage[], storage: ModeStorage | null = null) {
 
 describe('the lead chat’s entries', () => {
   it('draws a tool call as one line that opens to its input and output', () => {
-    const { q } = open(CONVO);
+    const { q } = open(CONVO, showingTools());
     const head = q('.lc-tool .lc-row-head');
     expect(head?.textContent).toContain('Bash');
     expect(head?.textContent).toContain('git status');
@@ -111,23 +119,31 @@ describe('the lead chat’s entries', () => {
     expect(q('.lc-tool .lc-row-body')).toBeNull();
   });
 
-  it('hides board events behind the header’s toggle, counts them, and keeps the choice', () => {
+  it('shows every tool call and board event behind one toggle, counting them, and keeps the choice', () => {
     const storage = memory();
     const first = open(CONVO, storage);
+    // Off by default: the convo ends on a typed prompt, so nothing working shows.
+    expect(first.q('.lc-chan')).toBeNull();
+    expect(first.q('.lc-tool')).toBeNull();
+    const toggle = first.q('.lc-tools-toggle');
+    expect(toggle?.hidden).toBe(false);
+    expect(toggle?.textContent).toContain('Tool use');
+    expect(toggle?.getAttribute('aria-pressed')).toBe('false');
+    expect(first.q('.lc-tools-count')?.textContent).toBe('(2)');
+    toggle?.click();
     expect(first.q('.lc-chan .lc-row-kind')?.textContent).toBe('Board event');
     expect(first.q('.lc-chan .lc-row-head')?.textContent).toContain('Riverbend:');
-    expect(first.q('.lc-chan-toggle')?.textContent).toContain('Board events');
-    const toggle = first.q('.lc-chan-toggle');
-    expect(toggle?.getAttribute('aria-pressed')).toBe('true');
-    toggle?.click();
-    expect(first.q('.lc-chan')).toBeNull();
-    expect(first.q('.lc-chan-toggle')?.getAttribute('aria-pressed')).toBe('false');
-    expect(first.q('.lc-chan-count')?.textContent).toBe('(1)');
+    expect(first.q('.lc-tool')).not.toBeNull();
+    expect(first.q('.lc-tools-toggle')?.getAttribute('aria-pressed')).toBe('true');
+    expect(first.q('.lc-tools-count')?.textContent).toBe('');
+    // Ordinary messages show either way.
+    expect(first.root.querySelector('.lc-msg[data-message-id="k5"]')).not.toBeNull();
     view?.destroy();
     document.body.innerHTML = '';
     // The next page reads the same choice.
     const again = open(CONVO, storage);
-    expect(again.q('.lc-chan')).toBeNull();
+    expect(again.q('.lc-tool')).not.toBeNull();
+    expect(again.q('.lc-chan')).not.toBeNull();
   });
 
   it('draws the answer to a spoken question as a bubble whose words open on a tap', () => {
@@ -146,9 +162,9 @@ describe('the lead chat’s entries', () => {
     expect(row?.textContent).toBe('In the terminal');
   });
 
-  it('draws no toggle while there are no board events', () => {
-    const { q } = open(CONVO.filter((m) => m.via !== 'channel'));
-    expect(q('.lc-chan-toggle')?.hidden).toBe(true);
+  it('draws no toggle while there is no tool use or board event', () => {
+    const { q } = open(CONVO.filter((m) => m.via !== 'channel' && !m.tool));
+    expect(q('.lc-tools-toggle')?.hidden).toBe(true);
   });
 });
 
@@ -179,5 +195,134 @@ describe('where a person’s message got to', () => {
     const line = root.querySelector('.lc-state');
     expect(line?.textContent).toBe('Sent');
     expect((line as HTMLElement | null)?.dataset.s).toBe('sent');
+  });
+});
+
+describe('the one working row shown while the toggle is off', () => {
+  const asked = msg({
+    id: 'p20',
+    role: 'person',
+    author: BRYAN,
+    text: 'Where is the Harborlight plan?',
+    via: 'chat',
+    state: 'received',
+  });
+  const tool = (id: string, name: string, input: string): LeadChatMessage =>
+    msg({ id, via: 'terminal', text: `${name}: ${input}`, tool: { name, input } });
+  const shown = (root: ShadowRoot) =>
+    [...root.querySelectorAll<HTMLElement>('.lc-row')].map((r) => r.dataset.messageId);
+
+  it('shows the newest call while the turn runs, moves to each new one, and goes when the reply lands', () => {
+    const t1 = tool('t21', 'Grep', '{"pattern":"Harborlight"}');
+    const { root, model, v } = open([asked, t1]);
+    expect(shown(root)).toEqual(['t21']);
+    expect(root.querySelector('.lc-tool .lc-row-head')?.textContent).toContain('Harborlight');
+
+    // A new call arrives on the open page: it replaces the one shown.
+    const t2 = tool('t22', 'Read', 'docs/plans/harborlight.md');
+    v.render({ ...model, messages: [asked, t1, t2] });
+    expect(shown(root)).toEqual(['t22']);
+    expect(root.querySelector('.lc-tool .lc-row-head')?.textContent).toContain('harborlight.md');
+    expect(root.querySelector('.lc-tools-count')?.textContent).toBe('(1)');
+
+    // A board event the session takes mid-turn is the newest working row too.
+    const c3 = msg({
+      id: 'c23',
+      role: 'person',
+      author: { id: 'lead-channel', name: 'Riverbend' },
+      text: 'commented on the plan',
+      via: 'channel',
+    });
+    v.render({ ...model, messages: [asked, t1, t2, c3] });
+    expect(shown(root)).toEqual(['c23']);
+
+    // The lead's reply lands: every working row is hidden, the reply shows.
+    const reply = msg({ id: 'a24', text: 'It is in docs/plans.', replyTo: 'p20' });
+    v.render({ ...model, messages: [asked, t1, t2, c3, reply] });
+    expect(shown(root)).toEqual([]);
+    expect(root.querySelector('.lc-msg[data-message-id="a24"]')?.textContent).toContain(
+      'It is in docs/plans.',
+    );
+    expect(root.querySelector('.lc-msg[data-message-id="p20"]')).not.toBeNull();
+    expect(root.querySelector('.lc-tools-count')?.textContent).toBe('(3)');
+  });
+
+  it('keeps the toggle where it was as its count comes and goes', () => {
+    const t1 = tool('t31', 'Bash', 'git status');
+    const { q, model, v } = open([asked, t1]);
+    const toggle = q('.lc-tools-toggle');
+    // Nothing hidden yet: the count is empty but the toggle still shows.
+    expect(q('.lc-tools-count')?.textContent).toBe('');
+    expect(toggle?.hidden).toBe(false);
+    v.render({ ...model, messages: [asked, t1, msg({ id: 'a32', text: 'Clean.' })] });
+    expect(q('.lc-tools-count')?.textContent).toBe('(1)');
+    expect(q('.lc-tools-toggle')).toBe(toggle);
+  });
+});
+
+describe('a tool call’s line', () => {
+  const line = (name: string, input: string) => {
+    const { q } = open(
+      [msg({ id: 't40', via: 'terminal', tool: { name, input, output: 'done' } })],
+      showingTools(),
+    );
+    const out = {
+      name: q('.lc-tool .lc-row-kind')?.textContent,
+      arg: q('.lc-tool .lc-row-sum')?.textContent,
+    };
+    view?.destroy();
+    view = null;
+    document.body.innerHTML = '';
+    return out;
+  };
+
+  it('reads like the terminal: a short name and one main argument, never JSON', () => {
+    expect(line('Bash', 'git status --short\necho done')).toEqual({
+      name: 'Bash',
+      arg: 'git status --short',
+    });
+    expect(line('Read', 'packages/core/src/lead-chat.ts')).toEqual({
+      name: 'Read',
+      arg: 'lead-chat.ts',
+    });
+    expect(
+      line('Edit', '{"file_path":"/repo/docs/plan.md","old_string":"a","new_string":"b"}'),
+    ).toEqual({ name: 'Edit', arg: 'plan.md' });
+    expect(line('Write', '{"file_path":"/repo/notes/riverbend.md","content":"x"}')).toEqual({
+      name: 'Write',
+      arg: 'riverbend.md',
+    });
+    expect(line('Grep', '{"pattern":"tide","path":"/repo/src"}')).toEqual({
+      name: 'Grep',
+      arg: 'tide',
+    });
+    expect(line('Glob', '{"pattern":"**/*.ts"}')).toEqual({ name: 'Glob', arg: '**/*.ts' });
+    expect(
+      line(
+        'mcp__plugin_claude-workspaces_claude-workspaces__find_and_replace',
+        '{"docId":"saltmarsh-plan","find":"old","replace":"new"}',
+      ),
+    ).toEqual({ name: 'find_and_replace', arg: 'saltmarsh-plan' });
+    expect(line('Agent', '{"description":"Survey the tests","prompt":"long brief"}')).toEqual({
+      name: 'Agent',
+      arg: 'Survey the tests',
+    });
+  });
+
+  it('still names the file of an input the hook capped mid-value', () => {
+    const capped = `{"file_path":"/repo/src/board.ts","content":"${'x'.repeat(40)}`;
+    expect(line('Write', capped)).toEqual({ name: 'Write', arg: 'board.ts' });
+  });
+
+  it('keeps the whole input and the output behind the tap', () => {
+    const input = '{"file_path":"/repo/docs/plan.md","old_string":"a","new_string":"b"}';
+    const { q } = open(
+      [msg({ id: 't41', via: 'terminal', tool: { name: 'Edit', input, output: 'ok' } })],
+      showingTools(),
+    );
+    q('.lc-tool .lc-row-head')?.click();
+    expect(
+      [...(q('.lc-tool .lc-row-body')?.querySelectorAll('pre') ?? [])].map((p) => p.textContent),
+    ).toEqual([input, 'ok']);
   });
 });

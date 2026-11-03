@@ -15,9 +15,10 @@
  * column makes room (`html[data-lc-docked]`, board.css). On a narrow screen
  * it fills the screen down to the board's navbar, which pins to the bottom
  * with the agent button at its right (`html[data-lc-full]`); a page tapped
- * there closes the chat. Each entry is drawn by `lead-chat-rows.ts`; the header's toggle
- * hides the board events the lead's session took, and that choice is kept
- * on the device too.
+ * there closes the chat. Each entry is drawn by `lead-chat-rows.ts`; the
+ * header's Tool use toggle shows every tool call and board event of the
+ * lead's session, which are otherwise hidden but for the one it is on now,
+ * and that choice is kept on the device too.
  *
  * The lead's messages are markdown, drawn by the comments' escape-first
  * renderer (`comment-markdown.ts`), so a tag in one is text. A person's own
@@ -35,7 +36,7 @@ import {
 } from './lead-chat-meeting-view.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
-import { channelCount, drawMessage } from './lead-chat-rows.ts';
+import { drawMessage, hiddenWorkingCount, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 
 export { deliveryNote } from './lead-chat-rows.ts';
@@ -107,7 +108,7 @@ export interface LeadChatViewOpts {
    *  floated at the page's foot. */
   buttonHost: HTMLElement;
   placement: 'dock' | 'float';
-  /** Where the dock's width and the board-events toggle are kept. */
+  /** Where the dock's width and the Tool use toggle are kept. */
   storage?: ModeStorage | null;
 }
 
@@ -214,16 +215,16 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const start = make(doc, 'button', 'lc-start', 'Start a meeting');
   start.type = 'button';
   const meeting = createMeetingView(doc);
-  const chan = make(doc, 'button', 'lc-chan-toggle');
-  chan.type = 'button';
+  const tools = make(doc, 'button', 'lc-tools-toggle');
+  tools.type = 'button';
   const sw = make(doc, 'span', 'lc-sw');
   sw.setAttribute('aria-hidden', 'true');
-  const chanCount = make(doc, 'span', 'lc-chan-count');
-  chan.append(sw, make(doc, 'span', '', 'Board events'), chanCount);
+  const toolsCount = make(doc, 'span', 'lc-tools-count');
+  tools.append(sw, make(doc, 'span', '', 'Tool use'), toolsCount);
   // Two rows that keep their size: the heading, the lead's name and Close,
   // then the header's actions. One row left the heading a few pixels.
   const acts = make(doc, 'div', 'lc-head-acts');
-  acts.append(start, chan);
+  acts.append(start, tools);
   head.append(title, meeting.head, close, acts);
   const grip = make(doc, 'button', 'lc-grip');
   grip.type = 'button';
@@ -354,8 +355,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     if (item && !item.closest('.board-nav-dock')) close.click();
   };
   doc.addEventListener('click', onNavTap, true);
-  chan.addEventListener('click', () => {
-    dock.toggleChannel();
+  tools.addEventListener('click', () => {
+    dock.toggleWorking();
     if (last) renderAll(last);
   });
   // A compact row or a spoken reply opens and closes in place.
@@ -368,12 +369,13 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     renderList(last, true);
   });
 
-  const renderChannelToggle = (m: LeadChatViewModel): void => {
-    const n = channelCount(m.messages);
-    chan.hidden = n === 0;
-    chan.setAttribute('aria-pressed', String(dock.showChannel()));
-    chan.title = dock.showChannel() ? 'Hide board events' : 'Show board events';
-    chanCount.textContent = dock.showChannel() ? '' : `(${n})`;
+  const renderWorkingToggle = (m: LeadChatViewModel): void => {
+    const on = dock.showWorking();
+    const n = hiddenWorkingCount(m.messages);
+    tools.hidden = !m.messages.some(isWorkingRow);
+    tools.setAttribute('aria-pressed', String(on));
+    tools.title = on ? 'Hide tool use and board events' : 'Show tool use and board events';
+    toolsCount.textContent = on || n === 0 ? '' : `(${n})`;
   };
 
   const renderList = (m: LeadChatViewModel, keepScroll = false): void => {
@@ -397,7 +399,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       meId: m.meId,
       lead: m.lead,
       open: opened,
-      showChannel: dock.showChannel(),
+      showWorking: dock.showWorking(),
+      liveWorking: liveWorkingRow(m.messages),
       markdown,
       messages: m.messages,
     };
@@ -428,7 +431,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
 
   function renderAll(m: LeadChatViewModel): void {
     last = m;
-    renderChannelToggle(m);
+    renderWorkingToggle(m);
     // Placed first, so the list has its height when it scrolls to its foot.
     place();
     if (m.open) renderList(m);
