@@ -28,6 +28,8 @@
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { createDock } from './lead-chat-dock.ts';
+import { typingBand } from './lead-chat-keyboard.ts';
+import { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
 import {
   MEETING_STYLES,
   type MeetingView,
@@ -40,6 +42,7 @@ import { drawMessage, hiddenWorkingCount, isWorkingRow, liveWorkingRow } from '.
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 
 export { deliveryNote } from './lead-chat-rows.ts';
+export { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
 
 const SPARKLE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>';
@@ -122,50 +125,6 @@ function make<K extends keyof HTMLElementTagNameMap>(
   if (cls) el.className = cls;
   if (text !== undefined) el.textContent = text;
   return el;
-}
-
-/** The person's lines and the lead's, newest last, as the bar shows them. */
-export function barLines(
-  m: LeadChatViewModel,
-): Array<{ who: string; text: string; dim?: boolean }> {
-  const lines: Array<{ who: string; text: string; dim?: boolean }> = m.messages
-    .slice(-2)
-    .map((x) => ({
-      who: x.role === 'agent' ? x.author.name : 'You',
-      text: x.text.replace(/\s+/g, ' '),
-    }));
-  if (m.listening && (m.voice ?? 'listening') === 'listening') {
-    lines.push({ who: 'You', text: m.heard || 'Listening…', dim: !m.heard });
-  } else if (lines.length === 0) {
-    lines.push({ who: m.lead?.name ?? 'Your agents', text: 'Tap to open the chat', dim: true });
-  }
-  return lines.slice(-2);
-}
-
-/** The line under the list: who is working on what, or what went wrong. */
-export function statusLine(m: LeadChatViewModel): string {
-  if (m.notice) return m.notice;
-  const lead = m.lead?.name ?? 'Your lead';
-  if (m.listening && m.voice === 'working') return `${lead} is working on it`;
-  if (m.listening && m.voice === 'speaking') return `${lead} is answering`;
-  if (m.listening) return m.heard ? `Heard: ${m.heard}` : 'Listening…';
-  const last = m.messages.at(-1);
-  if (last?.role === 'person' && last.state === 'sent') {
-    return `${lead} is working on it`;
-  }
-  if (m.messages.some((x) => x.role === 'person' && x.state === 'received')) {
-    return `${lead} is working on it`;
-  }
-  return '';
-}
-
-/** The quiet line above the first message shown: older ones on their way,
- *  or the conversation's start. Empty while more wait to be scrolled to. */
-export function historyLine(m: LeadChatViewModel): string {
-  if (m.messages.length === 0) return '';
-  if (m.loadingOlder) return 'Loading earlier messages…';
-  if (m.more) return '';
-  return `Start of your conversation${m.lead ? ` with ${m.lead.name}` : ''}`;
 }
 
 export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
@@ -312,6 +271,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     return html;
   };
 
+  /** Where the sheet was last placed, as written (the browser rewrites
+   *  `cssText`, so it cannot be read back to compare). */
+  let sheetCss = '';
   const place = (): void => {
     const vw = doc.documentElement.clientWidth || win.innerWidth;
     const vh = win.innerHeight;
@@ -331,14 +293,27 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     }
     const sheet = !pane.hidden && narrow();
     const docking = !pane.hidden && !sheet;
+    // Read before any class below changes the list's height.
+    const atFoot = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     // Both cover the corner, so the widget's buttons step aside under them.
     hideWidget(!pane.hidden);
     // Full screen pins the navbar to the bottom; measure it after it moves.
     dock.full(sheet);
     pane.classList.toggle('lc-sheet', sheet);
     pane.classList.toggle('lc-dock', docking);
+    // The keyboard up: the sheet covers what is left on screen, over the navbar.
+    const keys = sheet ? typingBand(win) : null;
+    pane.classList.toggle('lc-keys', !!keys);
     if (sheet) {
-      pane.style.cssText = `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
+      const css = keys
+        ? `left:0;right:0;top:${keys.top}px;height:${keys.height}px`
+        : `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
+      // Only a sheet that changed size moves the list: a redraw under a
+      // press must leave the link where the finger is.
+      const moved = css !== sheetCss;
+      sheetCss = css;
+      pane.style.cssText = css;
+      if (moved && atFoot) list.scrollTop = list.scrollHeight;
     } else if (docking) {
       // Under the board's top bar, which keeps who is here and Settings in reach.
       const bar = doc.querySelector('.board-topbar')?.getBoundingClientRect();

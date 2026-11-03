@@ -10,6 +10,8 @@
  * none under reduced motion.
  */
 
+import { IOS_ACCESSORY } from '../keyboard-inset.ts';
+
 /** The agent button, in the board's dock or floated at a page's foot. */
 export const BUTTON_STYLES = `
 :host { all: initial; display: inline-flex; flex: none; }
@@ -39,6 +41,7 @@ export const LAYER_STYLES = `
 .lc-bar-line.lc-dim { color: var(--fg-muted, #57606a); }
 .lc-pane { position: fixed; z-index: 1000; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border, #d1d5da); border-radius: 14px; background: var(--bg, #fff); color: var(--fg, #1b1f23); box-shadow: 0 8px 28px rgba(0,0,0,.14); }
 .lc-pane.lc-sheet { z-index: 2147483001; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
+.lc-pane.lc-sheet.lc-keys { z-index: 2147483003; border-width: 0; }
 .lc-pane.lc-sheet .lc-row-head, .lc-pane.lc-sheet .lc-tools-toggle { min-height: 44px; border-radius: 22px; }
 .lc-pane.lc-sheet .lc-row-head { border-radius: 8px; }
 .lc-head { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 44px minmax(36px, auto); grid-template-areas: "title close" "acts acts"; align-items: center; column-gap: 8px; padding: 4px 6px 6px 16px; border-bottom: 1px solid var(--border, #d1d5da); }
@@ -83,6 +86,8 @@ export const LAYER_STYLES = `
 .lc-status { flex: none; min-height: 22px; padding: 2px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--fg-muted, #57606a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lc-compose { flex: none; display: flex; align-items: flex-end; gap: 6px; padding: 6px 8px 8px 12px; border-top: 1px solid var(--border, #d1d5da); padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 .lc-pane:not(.lc-sheet) .lc-compose { padding-bottom: 8px; }
+/* Above iOS's form-accessory bar, which floats over the page's foot while a field is focused. */
+.lc-pane.lc-keys .lc-compose { padding-bottom: ${8 + IOS_ACCESSORY}px; }
 .lc-compose textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 132px; margin: 0; padding: 11px 12px; border: 1px solid var(--border, #d1d5da); border-radius: 10px; background: var(--bg, #fff); color: var(--fg, #1b1f23); font: inherit; font-size: 16px; line-height: 20px; resize: none; }
 .lc-compose textarea:focus { outline: 2px solid var(--accent, #2e7dd7); outline-offset: -1px; border-color: var(--accent, #2e7dd7); }
 .lc-send { flex: none; min-width: 64px; height: 44px; margin: 0; padding: 0 14px; border: 1px solid var(--accent, #2e7dd7); border-radius: 10px; background: var(--accent, #2e7dd7); color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
