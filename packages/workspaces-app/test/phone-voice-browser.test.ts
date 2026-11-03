@@ -36,7 +36,10 @@ describe.skipIf(CHROME === null)('voice to the lead from a phone', () => {
   it('a finger tap starts the microphone context inside the tap', () => {
     const { audio } = result();
     expect(audio.made).toBeGreaterThanOrEqual(2);
-    expect(audio.resumedInTap).toBe(audio.made);
+    // Every context the page kept was started inside the tap. One made after
+    // it, at the mic's rate, may be tried and let go (`graphContext`).
+    expect(audio.discarded).toBeLessThanOrEqual(1);
+    expect(audio.resumedInTap).toBe(audio.made - audio.discarded);
   }, 60_000);
 
   it('the microphone audio reaches the server and the chat is still listening', () => {
