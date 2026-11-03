@@ -307,6 +307,9 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   meet.sync();
   const onResize = (): void => view.place();
   win.addEventListener('resize', onResize);
+  // The on-screen keyboard moves only the visual viewport (lead-chat-keyboard.ts).
+  win.visualViewport?.addEventListener('resize', onResize);
+  win.visualViewport?.addEventListener('scroll', onResize);
   render();
 
   return {
@@ -321,6 +324,8 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       client.close();
       doc.removeEventListener('keydown', onKey);
       win.removeEventListener('resize', onResize);
+      win.visualViewport?.removeEventListener('resize', onResize);
+      win.visualViewport?.removeEventListener('scroll', onResize);
       view.destroy();
       if (!opts.dock) host.remove();
     },
