@@ -28,6 +28,15 @@
  * still sends no sound now stops voice with `NO_SOUND` and is reported.
  * Only setups 1 and 2 are used — the ones that hear through the server's
  * listener and so can address an agent.
+ *
+ * A PAGE MOVE CARRIES VOICE ON. A link that loads another of the board's
+ * pages unloads this one with its microphone, so the next page calls
+ * `start({ gesture: false })`. Chrome lets that context run, because the
+ * reader tapped on this origin a moment ago. iOS Safari does not: the context
+ * stays suspended, so instead of stopping with `NO_SOUND` the chat asks for
+ * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it. The
+ * socket that closes as this page unloads is that move, not a stop, so it
+ * is neither said nor reported.
  */
 import {
   type SpokenClientMessage,
@@ -78,7 +87,12 @@ export interface LeadVoiceOpts {
 }
 
 export interface LeadVoice {
-  start(): void;
+  /** Voice on. `gesture: false` is a page carrying voice on from the page
+   *  before, outside any tap; omitted, this is the reader's tap. */
+  start(how?: { gesture: boolean }): void;
+  /** A tap anywhere on the page: starts a context that waits for one, and
+   *  says whether there was one. */
+  wake(): boolean;
   stop(): void;
   state(): LeadVoiceState;
   destroy(): void;
@@ -88,6 +102,13 @@ export const NO_VOICE = 'Voice is not set up on this server. Type to your lead i
 export const NO_SOUND = 'The microphone is sending no sound. Tap the agent button to try again.';
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
+/** Said, and reported, when the voice socket closes while the page stays. */
+const CLOSED = 'The connection closed. Tap the mic to try again.';
+/** Said while a carried-on voice waits for the tap its context needs. */
+export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
+/** How long a context started outside a tap has to run before the chat asks
+ *  for one. */
+const TAP_WAIT_MS = 600;
 const LEAD_SETUPS: readonly SpokenSetup[] = [1, 2];
 const OPEN = 1;
 const MAX_HELD = 400;
@@ -141,6 +162,21 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
   let soundTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A context started outside a tap that is not running yet. */
+  let waiting: AudioContext | null = null;
+  let tapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The page is unloading: its socket closing is the move, not a stop. */
+  let leaving = false;
+  const onPageHide = (): void => {
+    leaving = true;
+  };
+  /** Back from the back-forward cache with the socket gone: voice is off. */
+  const onPageShow = (): void => {
+    leaving = false;
+    if (on && !socket) halt(CLOSED, '', true);
+  };
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('pageshow', onPageShow);
 
   const emit = (): void => opts.onChange({ ...st });
   const set = (p: Partial<LeadVoiceState>): void => {
@@ -167,6 +203,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     forwarding = false;
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
+    if (tapTimer) clearTimeout(tapTimer);
+    tapTimer = null;
+    waiting = null;
     capture?.stop();
     capture = null;
   };
@@ -192,14 +231,20 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       }
       capture = r.capture;
       const diag = r.capture.diag;
-      // An open mic that makes no frame is a context that never ran.
-      soundTimer = setTimeout(() => {
+      // An open mic that makes no frame is a context that never ran — unless
+      // it is waiting for the reader's tap, which restarts this clock.
+      const noSound = (): void => {
         soundTimer = null;
         if (mine !== gen || frames > 0) return;
+        if (waiting) {
+          soundTimer = setTimeout(noSound, NO_SOUND_MS);
+          return;
+        }
         // What the mic's track and the graph's context said, so the report
         // answers why (`AudioPump.diag`).
         halt(NO_SOUND, diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
-      }, NO_SOUND_MS);
+      };
+      soundTimer = setTimeout(noSound, NO_SOUND_MS);
     });
   };
 
@@ -233,7 +278,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (socket !== ws) return;
       socket = null;
       queue = [];
-      if (on) halt('The connection closed. Tap the mic to try again.');
+      if (on && !leaving) halt(CLOSED);
     };
     socket = ws;
   };
@@ -328,7 +373,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   }
 
   return {
-    start() {
+    start(how) {
       if (on) return;
       const blocked = (opts.blocked ?? (() => insecureOriginMessage(defaultOriginFacts())))();
       if (blocked) {
@@ -340,7 +385,16 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'listening', heard: '', notice: '' });
       // Inside the tap, before anything is awaited: the context is made and
       // resumed, and the microphone is asked for (see the header).
-      openMic(makeGestureContext());
+      const ctx = makeGestureContext();
+      openMic(ctx);
+      if (how?.gesture === false && ctx) {
+        tapTimer = setTimeout(() => {
+          tapTimer = null;
+          if (!on || ctx.state === 'running') return;
+          waiting = ctx;
+          set({ notice: TAP_TO_LISTEN });
+        }, TAP_WAIT_MS);
+      }
       const go = (): void => {
         if (!on) return;
         if (pickSetup() === null) halt(NO_VOICE, '', true);
@@ -363,8 +417,19 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       else dropSocket();
       set({ phase: 'off', heard: '', notice: '' });
     },
+    wake() {
+      const ctx = waiting;
+      if (!ctx || !on) return false;
+      waiting = null;
+      // Inside the gesture: the one call Safari lets start the context.
+      void ctx.resume().catch(() => {});
+      set({ notice: '' });
+      return true;
+    },
     state: () => ({ ...st }),
     destroy() {
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       on = false;
       stopCapture();
       player.stop();

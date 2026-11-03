@@ -41,6 +41,9 @@ import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
 import { drawMessage, hiddenWorkingCount, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 
+/** Fired on the pane when a full-screen chat must make way for a page. */
+export const LEAVE_EVENT = 'lc-leave';
+
 export { deliveryNote } from './lead-chat-rows.ts';
 export { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
 
@@ -323,11 +326,12 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     dock.docked(docking ? dock.width(vw) : null);
   };
 
-  // Full screen, a page in the navbar beneath closes the chat on its way.
+  // Full screen, a page in the navbar beneath moves the chat out of its way
+  // (`LEAVE_EVENT`: the mount closes it, or keeps voice on in the bar).
   const onNavTap = (e: Event): void => {
     if (pane.hidden || !pane.classList.contains('lc-sheet')) return;
     const item = (e.target as Element | null)?.closest?.('.board-nav-item');
-    if (item && !item.closest('.board-nav-dock')) close.click();
+    if (item && !item.closest('.board-nav-dock')) pane.dispatchEvent(new Event(LEAVE_EVENT));
   };
   doc.addEventListener('click', onNavTap, true);
   tools.addEventListener('click', () => {

@@ -166,3 +166,52 @@ describe('the lead chat voice', () => {
     expect(voice.state()).toMatchObject({ phase: 'off', notice: 'Sign in to use the mic.' });
   });
 });
+
+describe('the lead chat voice, as its page unloads', () => {
+  const live = async () => {
+    const fake = fakeVoice();
+    const reports: Error[] = [];
+    voice = createLeadVoice({
+      ...fake.seams,
+      report: (e) => reports.push(e),
+      workspaceId: 'w-harbor',
+      author: ME,
+      getContext: () => ({ surface: 'board' }),
+      agent: () => 'harborlight-lead',
+      onChange: () => {},
+    });
+    voice.start();
+    await settle();
+    const ws = fake.socket();
+    ws.open();
+    return { voice, ws, reports };
+  };
+
+  it('a socket closed by a move to another page is not a stop, and nothing is reported', async () => {
+    const { voice, ws, reports } = await live();
+    window.dispatchEvent(new Event('pagehide'));
+    ws.onclose?.();
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(reports).toHaveLength(0);
+    window.dispatchEvent(new Event('pageshow'));
+  });
+
+  it('a socket that closes while the page stays is a stop, said and reported', async () => {
+    const { voice, ws, reports } = await live();
+    ws.onclose?.();
+    expect(voice.state()).toMatchObject({
+      phase: 'off',
+      notice: 'The connection closed. Tap the mic to try again.',
+    });
+    expect(reports.map((e) => e.message)).toEqual([expect.stringContaining('connection closed')]);
+  });
+
+  it('back from the back-forward cache with the socket gone, voice is off, quietly', async () => {
+    const { voice, ws, reports } = await live();
+    window.dispatchEvent(new Event('pagehide'));
+    ws.onclose?.();
+    window.dispatchEvent(new Event('pageshow'));
+    expect(voice.state().phase).toBe('off');
+    expect(reports).toHaveLength(0);
+  });
+});
