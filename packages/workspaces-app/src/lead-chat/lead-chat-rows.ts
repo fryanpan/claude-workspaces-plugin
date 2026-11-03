@@ -7,19 +7,26 @@
  * (`server/src/lead-chat/mirror.ts`), drawn compact so the conversation
  * stays readable:
  *
- * - a tool call: one line naming the tool and its input, which opens to the
- *   input and output the hook sent, already scrubbed;
+ * - a tool call: one line as Claude Code's terminal prints it, the tool's
+ *   short name and its main argument (`lead-chat-tool-line.ts`), which opens
+ *   to the input and output the hook sent, already scrubbed;
  * - a board event the session took as a prompt: one dashed line naming who
- *   caused it, which opens to the whole line, and which the header's toggle
- *   hides;
+ *   caused it, which opens to the whole line;
  * - a spoken reply: a short bubble that says it was spoken, whose words
  *   open on a tap.
+ *
+ * Tool calls and board events are the session's working, not its answer, so
+ * they are hidden unless the header's Tool use toggle is on — all but the
+ * newest, and that one only while nothing has been said after it: it is what
+ * the lead is doing now, and the lead's reply landing replaces it
+ * (`liveWorkingRow`).
  *
  * A person's message carries where it got to, one steady line under it:
  * Sent, Received, Working, Done or Answered. Nothing blinks (CLAUDE.md, calm
  * by default).
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import { toolLine } from './lead-chat-tool-line.ts';
 
 export interface RowContext {
   doc: Document;
@@ -27,7 +34,10 @@ export interface RowContext {
   lead: LeadChatLead | null;
   /** Ids of the compact rows and voice bubbles the reader opened. */
   open: ReadonlySet<string>;
-  showChannel: boolean;
+  /** The Tool use toggle is on: every tool call and board event shows. */
+  showWorking: boolean;
+  /** The one working row shown while the toggle is off (`liveWorkingRow`). */
+  liveWorking: string | null;
   /** The lead's markdown, rendered safely (`comment-markdown.ts`). */
   markdown(msg: LeadChatMessage): string;
   /** The whole list, for the line under a person's message. */
@@ -47,6 +57,23 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (text !== undefined) e.textContent = text;
   return e;
 }
+
+/** A tool call or a board event: the session working, not talking. */
+export const isWorkingRow = (m: LeadChatMessage): boolean =>
+  !!m.tool || (m.role === 'person' && m.via === 'channel');
+
+/** The newest working row, while nothing has been said after it — the lead
+ *  is still on its turn — or null once a message follows it. */
+export function liveWorkingRow(list: readonly LeadChatMessage[]): string | null {
+  const last = list.at(-1);
+  return last && isWorkingRow(last) ? last.id : null;
+}
+
+/** How many working rows the toggle is hiding. */
+export const hiddenWorkingCount = (list: readonly LeadChatMessage[]): number => {
+  const live = liveWorkingRow(list);
+  return list.filter((m) => isWorkingRow(m) && m.id !== live).length;
+};
 
 /** A row from the lead's session. */
 export const isSessionRow = (m: LeadChatMessage): boolean =>
@@ -127,16 +154,12 @@ function compactRow(
 function toolRow(ctx: RowContext, msg: LeadChatMessage): HTMLElement {
   const t = msg.tool;
   if (!t) throw new Error('not a tool row');
-  const first =
-    t.input
-      .split('\n')
-      .find((l) => l.trim() !== '')
-      ?.trim() ?? '';
+  const line = toolLine(t);
   const row = compactRow(
     ctx,
     msg,
     'tool',
-    { icon: t.failed ? '✕' : '●', label: t.name, summary: first },
+    { icon: t.failed ? '✕' : '●', label: line.name, summary: line.arg },
     (b) => {
       b.append(el(ctx.doc, 'h4', '', 'Input'), el(ctx.doc, 'pre', '', t.input || '(none)'));
       b.append(el(ctx.doc, 'h4', '', 'Output'), el(ctx.doc, 'pre', '', t.output ?? '(no output)'));
@@ -198,12 +221,11 @@ function whoFor(ctx: RowContext, msg: LeadChatMessage): string {
   return msg.via === 'voice' ? `${name}, by voice` : name;
 }
 
-/** One entry, or null for a board event the reader has hidden. */
+/** One entry, or null for a working row the toggle hides. */
 export function drawMessage(ctx: RowContext, msg: LeadChatMessage): HTMLElement | null {
+  if (isWorkingRow(msg) && !ctx.showWorking && msg.id !== ctx.liveWorking) return null;
   if (msg.tool) return toolRow(ctx, msg);
-  if (msg.role === 'person' && msg.via === 'channel') {
-    return ctx.showChannel ? channelRow(ctx, msg) : null;
-  }
+  if (msg.role === 'person' && msg.via === 'channel') return channelRow(ctx, msg);
   if (msg.role === 'agent' && msg.replyTo) {
     const asked = ctx.messages.find((m) => m.id === msg.replyTo);
     if (asked?.via === 'voice') return voiceReply(ctx, msg);
@@ -233,7 +255,3 @@ export function drawMessage(ctx: RowContext, msg: LeadChatMessage): HTMLElement 
   if (note) item.append(el(doc, 'span', 'lc-note', note));
   return item;
 }
-
-/** How many board events the toggle is hiding. */
-export const channelCount = (list: readonly LeadChatMessage[]): number =>
-  list.filter((m) => m.role === 'person' && m.via === 'channel').length;

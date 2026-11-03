@@ -39,7 +39,7 @@ export const LAYER_STYLES = `
 .lc-bar-line.lc-dim { color: var(--fg-muted, #57606a); }
 .lc-pane { position: fixed; z-index: 1000; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border, #d1d5da); border-radius: 14px; background: var(--bg, #fff); color: var(--fg, #1b1f23); box-shadow: 0 8px 28px rgba(0,0,0,.14); }
 .lc-pane.lc-sheet { z-index: 2147483001; border-radius: 0; border-width: 0 0 1px; box-shadow: none; }
-.lc-pane.lc-sheet .lc-row-head, .lc-pane.lc-sheet .lc-chan-toggle { min-height: 44px; border-radius: 22px; }
+.lc-pane.lc-sheet .lc-row-head, .lc-pane.lc-sheet .lc-tools-toggle { min-height: 44px; border-radius: 22px; }
 .lc-pane.lc-sheet .lc-row-head { border-radius: 8px; }
 .lc-head { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 44px minmax(36px, auto); grid-template-areas: "title close" "acts acts"; align-items: center; column-gap: 8px; padding: 4px 6px 6px 16px; border-bottom: 1px solid var(--border, #d1d5da); }
 .lc-head > .lc-title, .lc-head > .lc-meet { grid-area: title; }
@@ -94,12 +94,12 @@ export const LAYER_STYLES = `
 .lc-grip:hover::after, .lc-grip:focus-visible::after, .lc-grip.lc-dragging::after { background: var(--accent, #2e7dd7); }
 .lc-grip:focus-visible { outline: none; }
 .lc-pane:not(.lc-dock) .lc-grip { display: none; }
-.lc-chan-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--border, #d1d5da); border-radius: 16px; background: var(--bg, #fff); color: var(--fg-muted, #57606a); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-.lc-chan-toggle .lc-sw { position: relative; flex: none; width: 26px; height: 16px; border-radius: 8px; background: #c8ccd1; }
-.lc-chan-toggle .lc-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
-.lc-chan-toggle[aria-pressed="true"] .lc-sw { background: var(--accent, #2e7dd7); }
-.lc-chan-toggle[aria-pressed="true"] .lc-sw::after { left: 12px; }
-.lc-chan-count { min-width: 4ch; text-align: left; font-variant-numeric: tabular-nums; }
+.lc-tools-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--border, #d1d5da); border-radius: 16px; background: var(--bg, #fff); color: var(--fg-muted, #57606a); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.lc-tools-toggle .lc-sw { position: relative; flex: none; width: 26px; height: 16px; border-radius: 8px; background: #c8ccd1; }
+.lc-tools-toggle .lc-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+.lc-tools-toggle[aria-pressed="true"] .lc-sw { background: var(--accent, #2e7dd7); }
+.lc-tools-toggle[aria-pressed="true"] .lc-sw::after { left: 12px; }
+.lc-tools-count { min-width: 4ch; text-align: left; font-variant-numeric: tabular-nums; }
 .lc-state { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin: 3px 2px 0; font-size: 12px; white-space: normal; color: var(--fg-muted, #57606a); }
 .lc-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #c8ccd1; }
 .lc-state[data-s="received"] .lc-dot { background: var(--accent, #2e7dd7); }
@@ -108,7 +108,7 @@ export const LAYER_STYLES = `
 .lc-row { align-self: stretch; max-width: 100%; font-size: 13px; line-height: 18px; color: var(--fg, #1b1f23); }
 .lc-row-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; margin: 0; padding: 6px 10px; border: 1px solid var(--border, #d1d5da); border-radius: 8px; background: var(--bg, #fff); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .lc-row-head:hover { background: var(--bg-hover, #f6f8fa); }
-.lc-row-head:focus-visible, .lc-chan-toggle:focus-visible, .lc-voice-btn:focus-visible { outline: 2px solid var(--accent, #2e7dd7); outline-offset: 2px; }
+.lc-row-head:focus-visible, .lc-tools-toggle:focus-visible, .lc-voice-btn:focus-visible { outline: 2px solid var(--accent, #2e7dd7); outline-offset: 2px; }
 .lc-row-icon { flex: none; width: 16px; text-align: center; color: #2da44e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lc-row[data-failed="true"] .lc-row-icon { color: #d1242f; }
 .lc-chan .lc-row-icon { color: var(--fg-muted, #57606a); }

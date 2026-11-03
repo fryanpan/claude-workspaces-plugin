@@ -5,9 +5,10 @@
  *
  * The lead's session posts a board event, a tool call and, later, a flush of
  * text through the routes its hooks use; a spoken question and its answer
- * are in the log. The driver taps the tool call open, hides the board events
- * with the header's toggle, opens the spoken reply's words, and watches the
- * text flush arrive. Wide, it drags the docked panel's edge and loads the
+ * are in the log. The driver taps the tool call open, shows and hides tool
+ * use and board events with the header's toggle, watches a second tool call
+ * take the first one's place, opens the spoken reply's words, and watches
+ * the text flush arrive and the tool call go. Wide, it drags the docked panel's edge and loads the
  * page again: the panel is open, at the width it was left.
  *
  * Spawned by `lead-chat-mirror-browser.test.ts`, which reads the JSON it
@@ -235,10 +236,6 @@ async function main(): Promise<void> {
       typed: false,
       channel: { author: 'Riverbend', text: 'replied on Deploy plan: the install takes 40s' },
     });
-    await post(`${agent}/mirror`, {
-      kind: 'tools',
-      calls: [{ name: 'Bash', input: 'git status --short', output: ' M deploy.ts' }],
-    });
 
     const boardUrl = `${base}/workspaces/${ws}`;
     const widths: MirrorWidthRun[] = [];
@@ -247,8 +244,20 @@ async function main(): Promise<void> {
       [1000, 800],
       [430, 932],
     ] as const) {
+      // The lead's turn at this width: a tool call after everything said.
+      await post(`${agent}/mirror`, {
+        kind: 'tools',
+        calls: [{ name: 'Bash', input: 'git status --short', output: ' M deploy.ts' }],
+      });
       step(`open the chat at ${width}`);
       const cdp = await openBrowser(width, height);
+      const shot = async (name: string): Promise<void> => {
+        if (!shots) return;
+        const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
+          data: string;
+        };
+        writeFileSync(join(shots, `${name}-${width}.png`), Buffer.from(png.data, 'base64'));
+      };
       const first = await load(cdp, boardUrl);
       if (!first.button) throw new Error('no button');
       // The bar's tabs with the chat closed, to compare with it open.
@@ -278,39 +287,62 @@ async function main(): Promise<void> {
         `return sr.querySelector('.lc-tool .lc-row-head').getAttribute('aria-expanded');`,
       );
 
-      step(`board events toggle at ${width}`);
+      step(`tool use toggle at ${width}`);
       // The header's two rows: the heading, whole and on one line, level with
       // the close button; then the actions, the toggle's label not wrapping
       // and the toggle level with Start a meeting.
       const headerFits = await inLayer<boolean>(
         cdp,
-        `const t = sr.querySelector('.lc-chan-toggle'); const lab = t.children[1];` +
+        `const t = sr.querySelector('.lc-tools-toggle'); const lab = t.children[1];` +
           ' const lh = parseFloat(getComputedStyle(lab).lineHeight) || 1.4 * parseFloat(getComputedStyle(lab).fontSize);' +
           ' const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; };' +
           ` const h2 = sr.querySelector('.lc-title h2'); const h2lh = parseFloat(getComputedStyle(h2).lineHeight);` +
           ` const h2r = h2.getBoundingClientRect(); const room = sr.querySelector('.lc-close').getBoundingClientRect().left;` +
-          ` return lab.textContent === 'Board events' && lab.getBoundingClientRect().height <= lh * 1.5` +
+          ` return lab.textContent === 'Tool use' && lab.getBoundingClientRect().height <= lh * 1.5` +
           ` && h2.textContent === 'Chat with Lead Agent' && h2r.height <= h2lh * 1.5` +
           ' && h2.scrollWidth <= h2.clientWidth && h2r.right <= room' +
           ` && Math.abs(mid(h2) - mid(sr.querySelector('.lc-close'))) < 8` +
           ` && Math.abs(mid(t) - mid(sr.querySelector('.lc-start'))) < 8;`,
       );
       const chanCount = `return sr.querySelectorAll('.lc-chan').length;`;
+      const toolCount = `return sr.querySelectorAll('.lc-tool').length;`;
+      const toggleBox = `const r = sr.querySelector('.lc-tools-toggle').getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(',');`;
+      // Off: the board event is hidden, the tool call the lead is on shows.
       const before = await inLayer<number>(cdp, chanCount);
-      await tapIn(cdp, '.lc-chan-toggle');
-      const hidden = await until('board events hidden', async () => {
-        const n = await inLayer<number>(cdp, chanCount);
-        return n === 0 ? n : null;
-      }).catch(() => -1);
+      const toolsBefore = await inLayer<number>(cdp, toolCount);
       const count = await inLayer<string>(
         cdp,
-        `return sr.querySelector('.lc-chan-count').textContent;`,
+        `return sr.querySelector('.lc-tools-count').textContent;`,
       );
-      await tapIn(cdp, '.lc-chan-toggle');
-      const after = await until('board events back', async () => {
+      const boxOff = await inLayer<string>(cdp, toggleBox);
+      await shot('lead-chat-working');
+      await tapIn(cdp, '.lc-tools-toggle');
+      const shown = await until('board events shown', async () => {
         const n = await inLayer<number>(cdp, chanCount);
         return n > 0 ? n : null;
       }).catch(() => 0);
+      const boxOn = await inLayer<string>(cdp, toggleBox);
+      await shot('lead-chat-tool-use-on');
+      await tapIn(cdp, '.lc-tools-toggle');
+      const after = await until('board events hidden again', async () => {
+        const n = await inLayer<number>(cdp, chanCount);
+        return n === 0 ? n : null;
+      }).catch(() => -1);
+
+      step(`a second tool call takes the first one's place at ${width}`);
+      await post(`${agent}/mirror`, {
+        kind: 'tools',
+        calls: [{ name: 'Read', input: `docs/deploy-${width}.md`, output: 'steps' }],
+      });
+      const latestMoved = await until(
+        'the second call in the first one’s place',
+        () =>
+          inLayer<boolean | null>(
+            cdp,
+            `const t = [...sr.querySelectorAll('.lc-tool .lc-row-head')]; return t.length === 1 && t[0].textContent.includes('deploy-${width}.md') ? true : null;`,
+          ),
+        1000,
+      ).catch(() => false);
 
       step(`spoken reply at ${width}`);
       const closedText = await inLayer<boolean>(
@@ -343,6 +375,11 @@ async function main(): Promise<void> {
         async () => ((await state(cdp)).texts.includes(flush) ? true : null),
         1000,
       ).catch(() => false);
+      const toolGoneOnReply = await until(
+        'the tool call gone once the reply landed',
+        async () => ((await inLayer<number>(cdp, toolCount)) === 0 ? true : null),
+        1000,
+      ).catch(() => false);
 
       const placed = await state(cdp);
       const layout = {
@@ -352,15 +389,7 @@ async function main(): Promise<void> {
         width: Math.round(placed.pane?.width ?? 0),
         vw: placed.vw,
       };
-      if (shots) {
-        const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
-          data: string;
-        };
-        writeFileSync(
-          join(shots, `lead-chat-mirror-${width}.png`),
-          Buffer.from(png.data, 'base64'),
-        );
-      }
+      await shot('lead-chat-mirror');
 
       // Full screen at a narrow width: the pane from the top down to the
       // navbar pinned at the bottom; a page tapped there closes the chat.
@@ -435,7 +464,9 @@ async function main(): Promise<void> {
       widths.push({
         width,
         tool: { head, open, expanded },
-        channel: { before, hidden, count, after, headerFits },
+        channel: { before, toolsBefore, count, shown, after, headerFits, boxOff, boxOn },
+        latestMoved,
+        toolGoneOnReply,
         voice: { closedText, label, words },
         liveWithin1s,
         layout,

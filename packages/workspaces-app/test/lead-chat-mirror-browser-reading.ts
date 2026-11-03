@@ -5,9 +5,24 @@ export interface MirrorWidthRun {
   width: number;
   /** The tool call's line, then its body once tapped. */
   tool: { head: string; open: string[]; expanded: string | null };
-  /** Board-event rows shown, then after the toggle, then the toggle's count;
-   *  and whether the heading shows whole and the toggle sits level with Start a meeting. */
-  channel: { before: number; hidden: number; count: string; after: number; headerFits: boolean };
+  /** With the Tool use toggle off: board-event and tool rows shown and the
+   *  toggle's count; board-event rows with it on, then off again; the
+   *  toggle's box off and on; and whether the heading shows whole and the
+   *  toggle sits level with Start a meeting. */
+  channel: {
+    before: number;
+    toolsBefore: number;
+    count: string;
+    shown: number;
+    after: number;
+    headerFits: boolean;
+    boxOff: string;
+    boxOn: string;
+  };
+  /** A second tool call replaced the first on the open page within a second. */
+  latestMoved: boolean;
+  /** The lead's text landing hid the tool call within a second. */
+  toolGoneOnReply: boolean;
   /** The spoken reply's words before and after a tap. */
   voice: { closedText: boolean; label: string; words: string };
   /** A flush of the lead's text reached the open page within a second. */

@@ -1,7 +1,7 @@
 /**
  * The lead chat's dock on a wide screen: how wide the panel is, the drag on
  * its left edge that changes that, and the choices kept on the device — the
- * width and whether board events show. `lead-chat-view.ts` places the panel
+ * width and whether tool use and board events show. `lead-chat-view.ts` places the panel
  * with what this answers.
  *
  * While the panel is docked, `<html data-lc-docked>` and `--lc-dock-w` say
@@ -20,7 +20,10 @@ const PAGE_MIN = 400;
 /** How far one arrow key moves the edge. */
 const KEY_STEP = 16;
 export const DOCK_WIDTH_KEY = 'cw.lead-chat.width';
-export const CHANNEL_KEY = 'cw.lead-chat.channel';
+/** Whether every tool call and board event shows; unset is off. It
+ *  replaced `cw.lead-chat.channel`, the board-events-only toggle that
+ *  defaulted on, whose stored choice is not carried over. */
+export const WORKING_KEY = 'cw.lead-chat.tools';
 
 export interface LeadChatDock {
   /** The panel's width on a page `vw` wide. */
@@ -29,8 +32,8 @@ export interface LeadChatDock {
   docked(w: number | null): void;
   /** Say the panel fills the screen (at 1100px or narrower), or not. */
   full(on: boolean): void;
-  showChannel(): boolean;
-  toggleChannel(): void;
+  showWorking(): boolean;
+  toggleWorking(): void;
 }
 
 export function createDock(opts: {
@@ -57,7 +60,7 @@ export function createDock(opts: {
       // Unkept, it still holds for this page.
     }
   };
-  let show = read(CHANNEL_KEY) !== 'hide';
+  let show = read(WORKING_KEY) === 'show';
   let want = Number(read(DOCK_WIDTH_KEY)) || DOCK_W;
   const vw = (): number => html.clientWidth || win.innerWidth;
   const width = (w: number): number =>
@@ -109,10 +112,10 @@ export function createDock(opts: {
       if (on) html.dataset.lcFull = 'true';
       else delete html.dataset.lcFull;
     },
-    showChannel: () => show,
-    toggleChannel() {
+    showWorking: () => show,
+    toggleWorking() {
       show = !show;
-      write(CHANNEL_KEY, show ? 'show' : 'hide');
+      write(WORKING_KEY, show ? 'show' : 'hide');
     },
   };
 }
