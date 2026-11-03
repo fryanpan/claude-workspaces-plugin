@@ -7,6 +7,8 @@
  *                                      signed with this server's key, as JSON
  *   bun wall-probe.ts verify <batch>   this server's verdict on another's batch
  *                                      (base64 JSON, as `mint` printed it)
+ *   bun wall-probe.ts machine          what this machine's walls are set to
+ *                                      (`machine-facts.ts`)
  *
  * The question is the one `cross-server-walls.test.ts` asks: does a server
  * accept a credential another server signed? Every signed type derives its
@@ -26,7 +28,8 @@
  * Reads the key file and never writes it: a missing key is an error, not a
  * reason to make one.
  */
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { appVoiceToken } from '../../packages/server/src/app-voice/token.ts';
 import {
@@ -37,6 +40,7 @@ import {
 } from '../../packages/server/src/auth/signed-token.ts';
 import { boardWidgetToken } from '../../packages/server/src/auth/widget-token.ts';
 import { frameCookie, frameTicket } from '../../packages/server/src/frame-ticket.ts';
+import { type FactsIo, type Proc, readFacts } from './machine-facts.ts';
 
 export const WALL_TYPES = ['wt2', 'ft1', 'fc1', 'app-voice'] as const;
 export type WallType = (typeof WALL_TYPES)[number];
@@ -115,10 +119,59 @@ export function readServerKey(dataDir: string): string {
   return key;
 }
 
+const readOrNull = (path: string): string | null => {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+/** /proc, /etc/passwd and the volume, read as root. */
+const realFactsIo: FactsIo = {
+  procs: () =>
+    readdirSync('/proc')
+      .filter((d) => /^\d+$/.test(d))
+      .map((pid): Proc | null => {
+        const cmd = readOrNull(`/proc/${pid}/cmdline`);
+        if (cmd === null) return null;
+        return {
+          cmdline: cmd.split('\0').filter(Boolean),
+          environ: () =>
+            Object.fromEntries(
+              (readOrNull(`/proc/${pid}/environ`) ?? '')
+                .split('\0')
+                .filter((kv) => kv.includes('='))
+                .map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]),
+            ),
+        };
+      })
+      .filter((p): p is Proc => p !== null),
+  read: readOrNull,
+  dirs: (path) => {
+    try {
+      return readdirSync(path, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => join(path, d.name));
+    } catch {
+      return [];
+    }
+  },
+  publicKey: (path) => {
+    if (!existsSync(path)) return null;
+    const r = spawnSync('ssh-keygen', ['-y', '-f', path], { encoding: 'utf8' });
+    return r.status === 0 ? r.stdout : null;
+  },
+};
+
 if (import.meta.main) {
   const dataDir = process.env.CW_DATA_DIR ?? '/data/cw';
   const [cmd, arg] = process.argv.slice(2);
   try {
+    if (cmd === 'machine') {
+      console.log(JSON.stringify(readFacts(realFactsIo)));
+      process.exit(0);
+    }
     const key = readServerKey(dataDir);
     if (cmd === 'mint') console.log(JSON.stringify(mintExpired(key)));
     else if (cmd === 'verify' && arg)
@@ -127,7 +180,7 @@ if (import.meta.main) {
           verifyBatch(key, JSON.parse(Buffer.from(arg, 'base64').toString('utf8')) as Batch),
         ),
       );
-    else throw new Error('usage: wall-probe.ts mint | verify <base64 batch>');
+    else throw new Error('usage: wall-probe.ts mint | verify <base64 batch> | machine');
   } catch (err) {
     console.error(`[wall-probe] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

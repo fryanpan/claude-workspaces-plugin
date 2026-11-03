@@ -564,10 +564,10 @@ reads neither the token nor the org.
 ### The daily wall report
 
 ```bash
-bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--dry-run]
+bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--no-drift] [--dry-run]
 ```
 
-The daily prod check runs this. It reports two things.
+The daily prod check runs this. It reports three things.
 
 **Cross-project refusals**, in the terms of
 `packages/server/test/cross-server-walls.test.ts`. On each project machine,
@@ -591,6 +591,42 @@ application lists. Its tunnel must be `cw-<project>` with its own origin, and
 the tunnel's public host must be one its own application gates. Its board
 router route must point at a host its own application gates. The Access
 team domain must be set. Audiences are compared and never printed.
+
+**Drift**, because `machine:deploy` never sets a secret that already exists,
+so a hand-set value would otherwise go unnoticed. The report flags drift and
+changes nothing. Per machine:
+
+| Check | Passes when | Read from |
+| --- | --- | --- |
+| Fly network | the app `cw-<project>` is on the network of that name, and no other project shares it | `fly apps list` |
+| No public address, no Fly service | the app holds no public IP and no machine publishes a service | `fly ips list`, `fly machine list` |
+| Admission settings | each setting `settings.ts` names matches what the deploy would set now | the server's environment, through `wall-probe.ts machine` |
+| Trusted emails | `CW_PROXIED_TRUSTED_EMAILS` is unset or holds the owner alone | the same |
+| Loopback uid policy | the lead's uid is refused and `CW_LOOPBACK_SKIPS_ACCESS` is `1`; the users it still admits are listed | the same, and `/etc/passwd` |
+| `git-push.json` | every listed repo has `approval: true` | the file on the volume |
+| Deploy key | the lead's key is read-only on GitHub | its public half, matched against `gh api repos/<repo>/keys` for each repo the lead clones or may push to |
+| Tunnel ingress | cloudflared runs the named tunnel, whose ingress sends the project's host to the server and everything else to a 404 | Cloudflare's API |
+
+Across the account it checks three more things. When the router config has
+more than one origin, `ONE_ADDRESS_ORIGIN` must be set to one of them. No
+service token may be admitted by two projects' Access applications. A
+Cloudflare plan in CI mode (no lock, nothing applied) must have no changes,
+which shows that the live Access applications and policies, the tunnel
+configurations and the router Worker's bindings match the config. The
+probe's output carries addresses, hostnames, audiences and uids and no
+secret, and the report prints only whether each one matches. `--no-drift`
+leaves this part out.
+
+It runs on the Mac and reads Cloudflare with read-only credentials only: the
+Keychain entries `cloudflare-api-token-read` (an API token with read
+permissions on the zone, Access, tunnels and Workers, the same token as the
+repository's read-only `CLOUDFLARE_API_TOKEN` secret) and
+`cloudflare-r2-tfstate-read` (JSON `{accessKeyId, secretAccessKey}`, the
+state bucket's Object Read key). It uses them for the outputs, the plan and
+the tunnel ingress. Without both entries it stops; it never falls back to
+`cloudflare-api-token` or `cloudflare-r2-tfstate`, which can write. Fly reads
+use the org token the way `machine:deploy` does, and the deploy-key read uses
+the Mac's `gh` login.
 
 The projects are `--projects`, or else every project the outputs give a
 tunnel. With fewer than two project machines there is no pair to compare,
