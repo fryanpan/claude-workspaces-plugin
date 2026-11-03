@@ -21,7 +21,7 @@ import { MAX_BUNDLE_BYTES } from '../src/routes/git-push.ts';
 import { FAKE_TOKEN, type PushWorld, pushPath, startPushWorld } from './git-push-fixture.ts';
 
 const policy = (board: string) => ({
-  boards: { [board]: { repos: [{ repo: 'Harborlight/notes' }] } },
+  boards: { [board]: { repos: [{ repo: 'Harborlight/notes', approval: false }] } },
 });
 
 const post = (body: ArrayBuffer) => ({ method: 'POST', body });
@@ -222,7 +222,12 @@ describe('a lead on the Mac pushes over its board socket', () => {
       join(w.dataDir, GIT_PUSH_POLICY_FILE),
       JSON.stringify({
         boards: {
-          [w.board]: { repos: [{ repo: 'Harborlight/notes' }, { repo: 'Harborlight/missing' }] },
+          [w.board]: {
+            repos: [
+              { repo: 'Harborlight/notes', approval: false },
+              { repo: 'Harborlight/missing', approval: false },
+            ],
+          },
         },
       }),
     );
@@ -247,9 +252,13 @@ describe('a lead on a project machine pushes over its board socket, never loopba
   const OPERATOR_UID = 4243;
   let peer = OPERATOR_UID;
   beforeAll(async () => {
-    // As on Fly: the lead's uid is refused on loopback TCP. The board is made
+    // As on Fly: only root and the operator's uid are admitted on loopback
+    // TCP, so the lead's is refused. The board is made
     // by another uid first, as the machine's deploy makes it.
-    w = await startPushWorld(policy, { loopbackRefusedUids: [LEAD_UID], peerUid: () => peer });
+    w = await startPushWorld(policy, {
+      loopbackAllowedUids: [0, OPERATOR_UID],
+      peerUid: () => peer,
+    });
     peer = LEAD_UID;
   });
   afterAll(() => w.stop());

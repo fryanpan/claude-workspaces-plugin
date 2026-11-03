@@ -311,20 +311,26 @@ git bundle create - origin/main..my-branch | curl -sS --unix-socket "$CW_BOARD_S
 
 The answer is the push's record: `pushed`, `up-to-date`, `refused` with an
 `error` and a `message`, or `awaiting-approval`. Read it again with
-`GET /workspaces/<board>/git/pushes/<id>`. A repo marked for approval also
-needs `&task=<taskId>`: the server files a review item on that task, and
-pushes when a person on the board chooses Push. Only the board's socket may
-ask; the same request over loopback TCP is refused.
+`GET /workspaces/<board>/git/pushes/<id>`. Every push waits for a person
+unless its repo opts out, so a push also needs `&task=<taskId>`: the server
+files a review item on that task, and pushes when a person on the board
+chooses Push. A push that adds, changes or deletes anything under
+`.github/` waits for a person even on a repo that opted out, because a
+workflow runs with the repo's Actions secrets as soon as it lands on any
+branch. Only the board's socket may ask; the same request over loopback TCP
+is refused.
 
 **Which repos.** `<dataDir>/git-push.json`, edited on the machine:
 
 ```json
 { "boards": { "<boardId>": { "repos": [
   { "repo": "<owner>/<name>" },
-  { "repo": "<owner>/<other>", "approval": true } ] } } }
+  { "repo": "<owner>/<other>", "approval": false } ] } } }
 ```
 
-No route writes it, and it is read again on every push. The server refuses
+A repo with no `approval` flag waits for a person; only `"approval": false`
+lets its pushes go without one, and never a `.github/` change. No route
+writes the file, and it is read again on every push. The server refuses
 the repo's default branch and anything that is not a fast-forward. Any other
 branch is allowed, including one a repo's `on: push` workflow runs for. The
 bundle must carry exactly one ref, `refs/heads/<branch>`, and build only on

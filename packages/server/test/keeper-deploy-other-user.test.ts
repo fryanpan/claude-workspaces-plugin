@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
@@ -45,12 +46,15 @@ describe.skipIf(!ENABLED)('a deploy on a keeper that is this process', () => {
   const owner = new TestPasskey();
   let keeper: RunningKeeper;
   let base = '';
+  let caller = '';
   const post = (path: string, body: unknown, agent = false) =>
     fetch(`${base}${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(agent ? { 'x-cw-keeper': '1' } : { origin: keeper.origin }),
+        ...(agent
+          ? { 'x-cw-keeper': '1', 'x-cw-keeper-caller': caller }
+          : { origin: keeper.origin }),
       },
       body: JSON.stringify(body),
     });
@@ -68,6 +72,7 @@ describe.skipIf(!ENABLED)('a deploy on a keeper that is this process', () => {
     mkdirSync(dir, { mode: 0o700 });
     const store = openKeeperStore(dir);
     if ('error' in store) throw new Error(store.error);
+    caller = mintCallerToken(store);
     keeper = serveKeeper({ store, exec, port: 0, keeperUid: process.getuid?.() ?? -1 });
     base = `http://127.0.0.1:${keeper.port}`;
     store.saveEnroll({

@@ -1,15 +1,19 @@
 /**
- * `middleware/loopback-uid-door.ts`: loopback TCP from a refused uid (a
- * project machine's lead) is answered 403 before any check that trusts a
- * loopback peer, while that board's shared socket still serves it.
+ * `middleware/loopback-uid-door.ts`: loopback TCP is admitted only from the
+ * uids a project machine names (root and the server's own), the tunnel's uid
+ * only for a request the edge stamped with `cf-ray`, and every other uid (the
+ * lead, the backup upload, a builder) is answered 403 before any check that
+ * trusts a loopback peer, while the lead's board's shared socket still
+ * serves it.
  *
  * A. The table parser finds the caller's row, on IPv4 and IPv6, and answers
  *    null when no single uid does.
- * B. A server with the lead's uid refused: the lead's no-token owner call is
- *    refused, another uid's is served (the control), an unknown caller is
- *    refused, and the shared board socket is mode 666 in a 710 folder.
+ * B. A server admitting root and `cw`: their no-token owner calls are served
+ *    (the control); the lead's, cwbackup's and an unlisted builder's are
+ *    refused; the tunnel's is refused without `cf-ray`; an unknown caller is
+ *    refused; and the shared board socket is mode 660 in a 710 folder.
  * C. On Linux, the real `/proc/net/tcp` reader refuses this process's own
- *    uid, and the same server with nobody refused serves it (the control).
+ *    uid when it is not listed, and serves it when it is (the control).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { chownSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -18,14 +22,19 @@ import { join } from 'node:path';
 import { boardSocketPath } from '../src/board-sockets.ts';
 import {
   loopbackUidDoor,
-  parseRefusedUids,
+  parseUidList,
   peerUidFromTables,
 } from '../src/middleware/loopback-uid-door.ts';
 import { resolveServerConfig } from '../src/server-config.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoardOnHandle } from './workspace-seed.ts';
 
+const CW = 10001;
+const TUNNEL = 10002;
+const BACKUP = 10003;
 const LEAD = 10004;
+const BUILDER = 10020;
+const MACHINE = { allowed: [0, CW], edge: [TUNNEL] };
 // A group this user may give its files to, other than its own where one
 // exists, so giving the socket to it is a change the test can see.
 const GROUP = (() => {
@@ -93,33 +102,52 @@ describe('A. finding the caller in the kernel tables', () => {
   });
 
   it('reads only digits as uids', () => {
-    expect(parseRefusedUids(' 10004, 10005 ')).toEqual([10004, 10005]);
-    expect(parseRefusedUids(undefined)).toEqual([]);
-    expect(() => parseRefusedUids('lead')).toThrow('not a uid');
-    expect(() => parseRefusedUids('10004,-1')).toThrow('not a uid');
+    expect(parseUidList('X', ' 0, 10001 ')).toEqual([0, CW]);
+    expect(parseUidList('X', undefined)).toEqual([]);
+    expect(() => parseUidList('X', 'cw')).toThrow('X: "cw" is not a uid');
+    expect(() => parseUidList('X', '0,-1')).toThrow('not a uid');
   });
 
-  it('judges only loopback TCP, and nothing when no uid is refused', () => {
+  it('judges only loopback TCP, and nothing when no uid is allowed', () => {
     let reads = 0;
-    const door = loopbackUidDoor([LEAD], () => {
+    const door = loopbackUidDoor(MACHINE, () => {
       reads++;
       return LEAD;
     });
-    expect(door(null, 8787)).toBeNull();
-    expect(door({ address: '192.0.2.7', port: 41000 }, 8787)).toBeNull();
+    expect(door(null, 8787, false)).toBeNull();
+    expect(door({ address: '192.0.2.7', port: 41000 }, 8787, false)).toBeNull();
     expect(reads).toBe(0);
-    expect(door({ address: '127.0.0.1', port: 41000 }, 8787)).toBe('loopback_caller_refused');
-    expect(loopbackUidDoor([], () => LEAD)({ address: '127.0.0.1', port: 1 }, 8787)).toBeNull();
+    expect(door({ address: '127.0.0.1', port: 41000 }, 8787, false)).toBe(
+      'loopback_caller_refused',
+    );
+    const off = loopbackUidDoor({ allowed: [] }, () => LEAD);
+    expect(off({ address: '127.0.0.1', port: 1 }, 8787, false)).toBeNull();
+  });
+
+  it('admits only the listed uids, and the tunnel’s only through the edge', () => {
+    const at = (uid: number | null, viaEdge = false) =>
+      loopbackUidDoor(MACHINE, () => uid)({ address: '127.0.0.1', port: 41000 }, 8787, viaEdge);
+    expect(at(0)).toBeNull();
+    expect(at(CW)).toBeNull();
+    expect(at(TUNNEL, true)).toBeNull();
+    expect(at(TUNNEL)).toBe('loopback_caller_refused');
+    // cf-ray is the edge's stamp for the tunnel's uid only; on anyone else's
+    // request it admits nothing.
+    for (const uid of [BACKUP, LEAD, BUILDER]) {
+      expect(at(uid)).toBe('loopback_caller_refused');
+      expect(at(uid, true)).toBe('loopback_caller_refused');
+    }
+    expect(at(null, true)).toBe('loopback_caller_unknown');
   });
 });
 
-describe('B. a server that refuses the lead’s uid', () => {
+describe('B. a server that admits only root, itself and the tunnel', () => {
   let h: ServerHandle;
   let dataDir: string;
   let socketDir: string;
   let ws: string;
   let other: string;
-  let caller: number | null = 10001;
+  let caller: number | null = CW;
   const seen: number[] = [];
 
   beforeAll(async () => {
@@ -128,7 +156,8 @@ describe('B. a server that refuses the lead’s uid', () => {
     h = createServer({
       port: 0,
       dataDir,
-      loopbackRefusedUids: [LEAD],
+      loopbackAllowedUids: MACHINE.allowed,
+      loopbackEdgeUids: MACHINE.edge,
       peerUid: (peer, serverPort) => {
         seen.push(peer.port, serverPort);
         return caller;
@@ -147,7 +176,8 @@ describe('B. a server that refuses the lead’s uid', () => {
     h = createServer({
       port: 0,
       dataDir,
-      loopbackRefusedUids: [LEAD],
+      loopbackAllowedUids: MACHINE.allowed,
+      loopbackEdgeUids: MACHINE.edge,
       peerUid: (peer, serverPort) => {
         seen.push(peer.port, serverPort);
         return caller;
@@ -171,18 +201,36 @@ describe('B. a server that refuses the lead’s uid', () => {
       body: JSON.stringify({ name: 'Saltmarsh' }),
     });
 
-  it('serves another uid’s no-token owner call (the control)', async () => {
-    caller = 10001;
-    expect((await ownerRead()).status).toBe(200);
-    expect(seen.at(-1)).toBe(h.port);
+  it('serves root’s and the server’s own no-token owner call (the control)', async () => {
+    for (const uid of [0, CW]) {
+      caller = uid;
+      expect((await ownerRead()).status).toBe(200);
+      expect(seen.at(-1)).toBe(h.port);
+    }
   });
 
-  it('refuses the lead’s no-token owner read and write', async () => {
-    caller = LEAD;
-    const read = await ownerRead();
-    expect(read.status).toBe(403);
-    expect(((await read.json()) as { error: string }).error).toBe('loopback_caller_refused');
-    expect((await ownerWrite()).status).toBe(403);
+  it('refuses the lead’s, the backup upload’s and an unlisted builder’s owner read and write', async () => {
+    for (const uid of [LEAD, BACKUP, BUILDER]) {
+      caller = uid;
+      const read = await ownerRead();
+      expect(read.status, `uid ${uid}`).toBe(403);
+      expect(((await read.json()) as { error: string }).error).toBe('loopback_caller_refused');
+      expect((await ownerWrite()).status, `uid ${uid}`).toBe(403);
+    }
+  });
+
+  it('refuses the tunnel’s request without cf-ray, and leaves one with it to the edge’s gates', async () => {
+    caller = TUNNEL;
+    const bare = await ownerRead();
+    expect(bare.status).toBe(403);
+    expect(((await bare.json()) as { error: string }).error).toBe('loopback_caller_refused');
+    // With cf-ray the door lets it on, and the host guard, which never
+    // classifies an edge request local, is what answers.
+    const edge = await fetch(`http://127.0.0.1:${h.port}/workspaces/${ws}?format=json`, {
+      headers: { 'cf-ray': '8f00000000000000-SJC' },
+    });
+    expect(((await edge.json()) as { error?: string }).error ?? '').not.toMatch(/^loopback_caller/);
+    expect(edge.status).not.toBe(200);
   });
 
   it('refuses a caller whose uid cannot be found', async () => {
@@ -210,34 +258,41 @@ describe('B. a server that refuses the lead’s uid', () => {
     expect(folder.gid).toBe(GROUP);
   });
 
-  it('is read from CW_LOOPBACK_REFUSED_UIDS and CW_BOARD_SOCKET_SHARED', () => {
-    const cfg = resolveServerConfig({
-      env: {
-        CW_DATA_DIR: '/nonexistent-data',
-        CW_LOOPBACK_REFUSED_UIDS: '10004',
-        CW_BOARD_SOCKET_SHARED: 'w-riverbend',
-        CW_BOARD_SOCKET_GROUP: '10010',
-      },
-      repoRoot: '/nonexistent-repo',
-      arg: (_name: string, fallback?: string) => fallback,
+  it('is read from CW_LOOPBACK_ALLOWED_UIDS, CW_LOOPBACK_EDGE_UIDS and CW_BOARD_SOCKET_SHARED', () => {
+    const config = (env: Record<string, string>) =>
+      resolveServerConfig({
+        env: { CW_DATA_DIR: '/nonexistent-data', ...env },
+        repoRoot: '/nonexistent-repo',
+        arg: (_name: string, fallback?: string) => fallback,
+      });
+    const cfg = config({
+      CW_LOOPBACK_ALLOWED_UIDS: '0,10001',
+      CW_LOOPBACK_EDGE_UIDS: '10002',
+      CW_BOARD_SOCKET_SHARED: 'w-riverbend',
+      CW_BOARD_SOCKET_GROUP: '10010',
     });
-    expect(cfg.loopbackRefusedUids).toEqual([LEAD]);
+    expect(cfg.loopbackAllowedUids).toEqual([0, CW]);
+    expect(cfg.loopbackEdgeUids).toEqual([TUNNEL]);
     expect(cfg.boardSocketShared).toBe('w-riverbend');
     expect(cfg.boardSocketGroup).toBe(10010);
+    // The retired denylist would leave the door off, so it stops the boot.
+    expect(() => config({ CW_LOOPBACK_REFUSED_UIDS: '10004' })).toThrow('retired');
+    // A box with other users and no allowlist does not boot with the door off.
+    expect(() => config({ CW_BOARD_SOCKET_GROUP: '10010' })).toThrow('CW_LOOPBACK_ALLOWED_UIDS');
   });
 });
 
 describe.skipIf(process.platform !== 'linux')('C. the kernel’s own tables (Linux)', () => {
   const uid = process.getuid?.() ?? -1;
-  const boot = (refused: number[]) => {
+  const boot = (allowed: number[]) => {
     const dataDir = mkdtempSync(join(tmpdir(), 'uid-door-proc-'));
-    const h = createServer({ port: 0, dataDir, loopbackRefusedUids: refused });
+    const h = createServer({ port: 0, dataDir, loopbackAllowedUids: allowed });
     return { h, dataDir, ws: seedBoardOnHandle(h) };
   };
 
-  it('refuses this process’s own uid over loopback, and serves it when nobody is refused', async () => {
-    const refused = boot([uid]);
-    const open = boot([]);
+  it('refuses this process’s own uid over loopback when unlisted, and serves it when listed', async () => {
+    const refused = boot([uid + 1]);
+    const open = boot([uid]);
     try {
       const no = await fetch(
         `http://127.0.0.1:${refused.h.port}/workspaces/${refused.ws}?format=json`,

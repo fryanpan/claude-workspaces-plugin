@@ -73,6 +73,9 @@ handles the new tokens and agents can write a checkout. What a passing run
 prints, step by step:
 
 ```
+== 0. Preflight
+   ok: the keeper's store is sound and it answers on http://localhost:<port>
+   ok: wrote the keeper's caller token to ~/Library/Application Support/claude-workspaces/keeper-caller-token, mode 600
 == Confirm the org and the account
    Fly org:            <slug>
    Cloudflare account: <account name>
@@ -96,6 +99,13 @@ prints, step by step:
    ok: withdrew the probe, so it created nothing and no tap can run it
 ```
 
+- **The caller token:** every request an agent or prod makes to the keeper
+  carries it, and the keeper refuses one without it, a routine restart or
+  `fly logs` included. The keeper mints it and keeps only its hash; the
+  setup writes it, mode 600, under prod's folder in your home, which other
+  macOS users and walled leads cannot read. A second run keeps a token the
+  keeper still accepts. Running `keeper-bin.ts caller-token` again makes a
+  new one and retires the old, so run the setup after it.
 - **Confirm first:** the org slug and the Cloudflare account come from
   stores anything running as you can write, so the command shows them and
   makes nothing until you answer `y`. A dry run shows them without asking.

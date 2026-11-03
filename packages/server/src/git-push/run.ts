@@ -26,6 +26,12 @@ export interface RunInput {
   repo: string;
   branch: string;
   bundle: string;
+  /**
+   * Push nothing that adds, changes or deletes a path under `.github/`, even
+   * when asked to push: the result says which paths, and the caller holds
+   * the push for a person. Off only once a person has approved this push.
+   */
+  holdGithub: boolean;
 }
 
 export type RunResult =
@@ -36,6 +42,8 @@ export type RunResult =
       /** Commit subjects being added, newest first, at most ten. */
       subjects: string[];
       upToDate: boolean;
+      /** Paths under `.github/` the push touches, at most ten. */
+      github: string[];
       /** Set when the run was asked to push and did. */
       pushed?: true;
     }
@@ -136,7 +144,9 @@ async function judgeIn(
     return refused(400, 'bundle-unreadable', 'could not read the bundle');
   }
   const sha = named[0];
-  if (state.tip === sha) return { ok: true, sha, tip: state.tip, subjects: [], upToDate: true };
+  if (state.tip === sha) {
+    return { ok: true, sha, tip: state.tip, subjects: [], upToDate: true, github: [] };
+  }
   if (state.tip && !(await work.isAncestor(state.tip, sha))) {
     return refused(
       403,
@@ -146,11 +156,16 @@ async function judgeIn(
   }
   const base = state.tip ?? (await mirror.revParse(`refs/up/${state.defaultBranch}`));
   const subjects = await work.subjects(base, sha, 10);
-  if (!push) return { ok: true, sha, tip: state.tip, subjects, upToDate: false };
+  // Git that cannot list the paths counts as touching `.github/`.
+  const github = (await work.githubPaths(base, sha, 10)) ?? ['.github/ (could not be read)'];
+  const judged = { ok: true as const, sha, tip: state.tip, subjects, upToDate: false, github };
+  // A workflow file runs with the repo's Actions secrets the moment it lands
+  // on any branch, so a change under `.github/` waits for a person.
+  if (!push || (input.holdGithub && github.length > 0)) return judged;
   const r = await work.push(up, sha, branch);
   if (r.code !== 0) {
     const why = redact(r.stderr, token).trim().split('\n').slice(-2).join(' ').slice(0, 300);
     return refused(502, 'push-failed', `upstream refused the push: ${why}`);
   }
-  return { ok: true, sha, tip: state.tip, subjects, upToDate: false, pushed: true };
+  return { ...judged, pushed: true };
 }

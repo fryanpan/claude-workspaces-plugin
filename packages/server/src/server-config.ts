@@ -22,7 +22,7 @@ import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
-import { parseRefusedUids } from './middleware/loopback-uid-door.ts';
+import { parseUidList } from './middleware/loopback-uid-door.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -275,8 +275,27 @@ export function resolveServerConfig(opts: {
   const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
   /** `CW_FEEDBACK_BOARD=<board id or name>`: see ServerOptions.feedbackBoard. */
   const feedbackBoard = env.CW_FEEDBACK_BOARD?.trim() || undefined;
-  /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
-  const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
+  /** `CW_LOOPBACK_ALLOWED_UIDS=0,10001`: see ServerOptions.loopbackAllowedUids. */
+  const loopbackAllowedUids = parseUidList(
+    'CW_LOOPBACK_ALLOWED_UIDS',
+    env.CW_LOOPBACK_ALLOWED_UIDS,
+  );
+  /** `CW_LOOPBACK_EDGE_UIDS=10002`: see ServerOptions.loopbackEdgeUids. */
+  const loopbackEdgeUids = parseUidList('CW_LOOPBACK_EDGE_UIDS', env.CW_LOOPBACK_EDGE_UIDS);
+  // The old denylist named the uids to refuse. Read as nothing, it would
+  // leave the door off, so a machine still setting it does not boot.
+  if ((env.CW_LOOPBACK_REFUSED_UIDS ?? '').trim() !== '') {
+    throw new Error(
+      'CW_LOOPBACK_REFUSED_UIDS is retired: name the uids to admit in CW_LOOPBACK_ALLOWED_UIDS',
+    );
+  }
+  // A server that shares its sockets with another user's group has other
+  // users on its box, so a missing allowlist fails the boot, not open.
+  if (boardSocketGroup !== undefined && loopbackAllowedUids.length === 0) {
+    throw new Error(
+      'CW_BOARD_SOCKET_GROUP is set, so CW_LOOPBACK_ALLOWED_UIDS must name the uids to admit',
+    );
+  }
 
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
   const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
@@ -702,7 +721,8 @@ export function resolveServerConfig(opts: {
     feedbackBoard,
     accessOnlyBrowserHosts,
     loopbackSkipsAccess,
-    loopbackRefusedUids,
+    loopbackAllowedUids,
+    loopbackEdgeUids,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,

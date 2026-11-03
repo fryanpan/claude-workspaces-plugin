@@ -2641,9 +2641,10 @@ and pushes from a work repository made for that push, which borrows only
 upstream's objects from a mirror (`run.ts`, `git.ts`). git reads the
 credential from a mode-600 file for each call, never its arguments or
 environment (`credential.ts`: a Fly secret on a project server, a Keychain
-item on the Mac). On a repo marked `approval` it files a
-decision item with `step: 'push'` and pushes only when a person's answer
-chose Push and that person is a member of the board. Only the board's
+item on the Mac). Unless the repo opts out with `"approval": false`, and on
+every repo when the push touches `.github/`, it files a decision item with
+`step: 'push'` and pushes only when a person's answer chose Push and that
+person is a member of the board. Only the board's
 socket may ask; loopback TCP is refused. Tests: `git-push-route.test.ts`, `git-push-approval.test.ts`,
 `git-push-units.test.ts`.
 

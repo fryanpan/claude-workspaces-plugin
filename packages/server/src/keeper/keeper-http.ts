@@ -9,10 +9,13 @@
  *   host (`localhost:<port>` or `127.0.0.1:<port>`, so a rebound DNS name
  *   cannot reach it from a browser), and carry no `cf-ray`.
  * - **The agent API** (`POST /v1/fly`, `/v1/cloudflare/*`, `GET` and
- *   `DELETE /v1/requests/<id>`) must also carry `x-cw-keeper: 1`. A web page cannot
- *   add that header without a CORS preflight, which the keeper never grants.
- *   Any local process may call it: a routine call is safe for anyone to make,
- *   and a held one does nothing until Bryan's passkey answers.
+ *   `DELETE /v1/requests/<id>`) must also carry `x-cw-keeper: 1`, which a web
+ *   page cannot add without a CORS preflight the keeper never grants, and the
+ *   caller token in `x-cw-keeper-caller`, which only a process that can read
+ *   the caller token file holds (`keeper-callers.ts`). So another macOS user,
+ *   a lead user among them, and a walled lead cannot reach `fly logs`, a
+ *   restart, or the answer to a held shell, and a held request does nothing
+ *   until Bryan's passkey answers.
  * - **The page's own posts** (challenge, approve, deny, enroll) must carry
  *   the page's `Origin`. That stops another web page, not a local process,
  *   which can forge it. What stops a local process: approving and denying
@@ -29,6 +32,7 @@
  * nothing to sign.
  */
 import { randomBytes } from 'node:crypto';
+import { CALLER_HEADER, callerVerdict } from './keeper-callers.ts';
 import { type Page, alarmPage, approvePage, enrollPage, indexPage } from './keeper-page.ts';
 import type { HeldRequest, KeeperCall, KeeperRequests, Submitted } from './keeper-requests.ts';
 import { type KeeperStore, hashToken } from './keeper-store.ts';
@@ -187,6 +191,18 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         (path.startsWith('/v1/requests/') && (method === 'GET' || method === 'DELETE'))
       ) {
         if (!isApi) return json(403, { error: `the API needs ${API_HEADER}: 1` });
+        const caller = callerVerdict(store, req.headers.get(CALLER_HEADER));
+        if (caller === 'none') {
+          return json(401, {
+            error:
+              'the keeper has no caller token yet; keeper-setup makes one (docs/process/keeper.md)',
+          });
+        }
+        if (caller === 'wrong') {
+          return json(401, {
+            error: `the API needs the caller token in ${CALLER_HEADER}, read from the caller token file`,
+          });
+        }
       }
       const requester = (req.headers.get('x-cw-requester') ?? '').slice(0, 120);
       if (method === 'POST' && path === '/v1/fly') {

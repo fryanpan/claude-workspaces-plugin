@@ -182,12 +182,20 @@ export interface ServerOptions {
    */
   loopbackSkipsAccess?: boolean;
   /**
-   * Loopback TCP from these uids is refused before anything else reads it
-   * (`middleware/loopback-uid-door.ts`). A project machine names its lead's
-   * uid (`CW_LOOPBACK_REFUSED_UIDS`), so the lead reaches its board only
-   * through that board's socket. Empty, nothing is refused.
+   * Loopback TCP is admitted only from these uids, and every other uid is
+   * refused before anything else reads the request
+   * (`middleware/loopback-uid-door.ts`). A project machine names root and the
+   * server's own uid (`CW_LOOPBACK_ALLOWED_UIDS`), so its lead, backup upload
+   * and any builder are refused and the lead reaches its board only through
+   * that board's socket. Empty, the door is off.
    */
-  loopbackRefusedUids?: number[];
+  loopbackAllowedUids?: number[];
+  /**
+   * Uids admitted over loopback only for a request carrying `cf-ray`: the
+   * tunnel's (`CW_LOOPBACK_EDGE_UIDS`). Read only when
+   * `loopbackAllowedUids` is non-empty.
+   */
+  loopbackEdgeUids?: number[];
   /** Tests only: who owns a loopback caller's socket, in place of `/proc/net/tcp`. */
   peerUid?: (peer: { address: string; port: number }, serverPort: number) => number | null;
   /**

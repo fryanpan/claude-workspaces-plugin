@@ -26,19 +26,25 @@ import { runPush } from '../src/git-push/run.ts';
 const FAKE = 'fake-push-credential-for-tests-only';
 
 describe('the push policy', () => {
-  it('reads each board’s repos and approval flags, and nothing malformed', () => {
+  it('reads each board’s repos and approval flags, defaulting to approval, and nothing malformed', () => {
     const rules = parsePolicy(
       JSON.stringify({
         boards: {
           harbor: {
-            repos: [{ repo: 'Harborlight/notes' }, { repo: 'Harborlight/app', approval: true }],
+            repos: [
+              { repo: 'Harborlight/notes' },
+              { repo: 'Harborlight/app', approval: true },
+              { repo: 'Harborlight/docs', approval: false },
+            ],
           },
         },
       }),
     );
     expect(rules?.get('harbor')).toEqual([
-      { repo: 'Harborlight/notes', approval: false },
+      // A repo with no flag waits for a person: only an explicit false opts out.
+      { repo: 'Harborlight/notes', approval: true },
       { repo: 'Harborlight/app', approval: true },
+      { repo: 'Harborlight/docs', approval: false },
     ]);
     for (const bad of [
       'not json',
@@ -149,6 +155,7 @@ describe('runPush', () => {
     repo: 'Harborlight/notes',
     branch: 'feature-x',
     bundle: join(root, 'missing.bundle'),
+    holdGithub: true,
   });
 
   it('refuses with no credential, runs no git, and leaves no work repo', async () => {

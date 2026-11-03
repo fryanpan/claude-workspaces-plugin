@@ -111,6 +111,10 @@ const ROUTINE_ON_OURS: readonly Spec[] = [
   spec('ips list', 0, { app: 'value', json: 'bare' }),
   spec('status', 0, { app: 'value', json: 'bare' }),
   spec('releases', 0, { app: 'value', json: 'bare' }),
+];
+
+/** `fly logs`, always a tap: logs are an org's data, and the keeper cannot tell orgs apart. */
+const LOGS: readonly Spec[] = [
   spec('logs', 0, { app: 'value', machine: 'value', 'no-tail': 'bare', json: 'bare' }, ['no-tail']),
 ];
 
@@ -183,6 +187,7 @@ const HELD: readonly { hold: HoldKind; specs: readonly Spec[] }[] = [
       ...both('machine destroy', 1, { app: 'value', force: 'bare' }),
       ...both('volume destroy', 1, { app: 'value', yes: 'bare' }),
       ...ROUTINE_ON_OURS,
+      ...LOGS,
     ],
   },
 ];
@@ -286,8 +291,34 @@ function scan(args: unknown): Scan {
     app = a.includes('=') ? a.slice(a.indexOf('=') + 1) : (argv[i + 1] ?? '');
     if (!APP_NAME.test(app)) return { error: `"${app.slice(0, 64)}" is not an app name` };
   }
-  return { command, sub, words, app, summary: `fly ${argv.join(' ')}` };
+  return { command, sub, words, app, summary: `fly ${argv.map(shellQuote).join(' ')}` };
 }
+
+/**
+ * One argument as a shell would write it, so the approval page shows where
+ * each starts and ends (`--command 'ls --app cw-b'` is one), and a hidden
+ * character shows as its escape.
+ */
+export function shellQuote(arg: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) return arg;
+  if (HIDDEN.test(arg)) {
+    const escaped = arg
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(new RegExp(HIDDEN.source, 'g'), (c) => {
+        const n = c.charCodeAt(0);
+        return n < 0x100
+          ? `\\x${n.toString(16).padStart(2, '0')}`
+          : `\\u${n.toString(16).padStart(4, '0')}`;
+      });
+    return `$'${escaped}'`;
+  }
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Characters that draw as nothing, or reorder what follows them. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: making them visible is the point
+const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 
 /** The value of a `--name`-style flag given once, or null. */
 function onlyValue(argv: readonly string[], name: string): string | null | undefined {

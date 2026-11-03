@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
@@ -37,6 +38,7 @@ const exec: Executors = {
 };
 
 let store: KeeperStore;
+let CALLER = '';
 let keeper: RunningKeeper;
 let base: string;
 const owner = new TestPasskey();
@@ -51,7 +53,11 @@ const post = (path: string, body: unknown = {}) =>
 const submit = async (args: string[]) => {
   const r = await fetch(`${base}/v1/fly`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-cw-keeper': '1' },
+    headers: {
+      'content-type': 'application/json',
+      'x-cw-keeper': '1',
+      'x-cw-keeper-caller': CALLER,
+    },
     body: JSON.stringify({ args }),
   });
   return {
@@ -86,7 +92,12 @@ const approveOn = async (id: string, page: string) => {
 const withdraw = (id: string, pollToken: string, headers: Record<string, string> = {}) =>
   fetch(`${base}/v1/requests/${id}`, {
     method: 'DELETE',
-    headers: { 'x-cw-keeper': '1', 'x-cw-keeper-poll': pollToken, ...headers },
+    headers: {
+      'x-cw-keeper': '1',
+      'x-cw-keeper-caller': CALLER,
+      'x-cw-keeper-poll': pollToken,
+      ...headers,
+    },
   });
 
 beforeAll(async () => {
@@ -95,6 +106,7 @@ beforeAll(async () => {
   const s = openKeeperStore(dir);
   if ('error' in s) throw new Error(s.error);
   store = s;
+  CALLER = mintCallerToken(store);
   keeper = serveKeeper({ store, exec, port: 0, keeperUid: KEEPER_UID, idleTimeout: 1 });
   base = `http://127.0.0.1:${keeper.port}`;
   store.saveEnroll({
@@ -201,7 +213,7 @@ describe('a long call', () => {
     slowCloudflare = true;
     try {
       const r = await fetch(`${base}/v1/cloudflare/zones?name=example.com`, {
-        headers: { 'x-cw-keeper': '1' },
+        headers: { 'x-cw-keeper': '1', 'x-cw-keeper-caller': CALLER },
       });
       expect(r.status).toBe(200);
     } finally {

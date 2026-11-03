@@ -22,10 +22,19 @@ describe('fly policy', () => {
     [['machines', 'stop', 'm1', '-a', 'cw-harborlight']],
     [['machines', 'list', '--app', 'cw-harborlight', '--json']],
     [['status', '--app', 'cw-harborlight']],
-    [['logs', '--app', 'cw-harborlight', '--no-tail']],
     [['apps', 'list']],
   ])('runs %j with no passkey', (args) => {
     expect(classifyFly(args, APPS).kind).toBe('routine');
+  });
+
+  it('holds fly logs on every app, its own included, since logs are an org’s data', () => {
+    for (const app of ['cw-harborlight', 'cw-riverbend']) {
+      expect(classifyFly(['logs', '--app', app, '--no-tail'], APPS)).toMatchObject({
+        kind: 'held',
+        hold: 'other',
+        app,
+      });
+    }
   });
 
   it('holds a start of a machine the keeper did not create', () => {

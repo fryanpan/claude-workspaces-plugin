@@ -6,6 +6,7 @@
  *   bun packages/server/src/keeper/keeper-bin.ts import <name>  store one credential, read from stdin
  *   bun packages/server/src/keeper/keeper-bin.ts enroll         print a one-time passkey registration link
  *   bun packages/server/src/keeper/keeper-bin.ts adopt <app>    let routine calls reach a Fly app made before the keeper
+ *   bun packages/server/src/keeper/keeper-bin.ts caller-token   make a new caller token, print it to stdout, keep only its hash
  *   bun packages/server/src/keeper/keeper-bin.ts check          the start guard and the store check, and the names of what it holds
  *   bun packages/server/src/keeper/keeper-bin.ts port           print the keeper's port, choosing it at random the first time
  *   bun packages/server/src/keeper/keeper-bin.ts plist port|keeper  print one of the two LaunchDaemons
@@ -26,6 +27,7 @@ import { existsSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fixedHostFetch } from '../outbound-fetch.ts';
+import { mintCallerToken } from './keeper-callers.ts';
 import { keeperExecutors } from './keeper-exec.ts';
 import { keeperStartProblems } from './keeper-guard.ts';
 import { keeperJobPlist, portJobPlist } from './keeper-launchd.ts';
@@ -137,6 +139,10 @@ if (command === 'import') {
   const alarm = store.alarm();
   store.saveAlarm(null);
   console.log(alarm ? `[keeper] cleared: ${alarm.reason}` : '[keeper] no alarm was raised');
+} else if (command === 'caller-token') {
+  // stdout only, to `keeper-setup.ts`, which writes it to the caller token
+  // file; any earlier token stops working (`keeper-callers.ts`).
+  process.stdout.write(`${mintCallerToken(store)}\n`);
 } else if (command === 'adopt') {
   if (!arg) fail('adopt needs an app name');
   store.addApp(arg);
