@@ -6,7 +6,7 @@
  * and the microphone are fakes — no network, no device.
  */
 import type { LeadChatMessage } from '@claude-workspaces/core/lead-chat';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LeadChatClient, LeadChatState } from '../src/lead-chat/lead-chat-client.ts';
 import { LEAD_CHAT_MODE_KEY, type ModeStorage } from '../src/lead-chat/lead-chat-mode.ts';
 import { type LeadChatMount, mountLeadChat } from '../src/lead-chat/lead-chat-mount.ts';
@@ -282,6 +282,39 @@ describe('voice on, carried to the next page of the tab', () => {
     await settle();
     expect(next.view.bar.hidden).toBe(true);
     expect(next.voice.mic.starts).toBe(0);
+  });
+
+  it('where the next page waits for a tap, a tap on the agent button is that tap', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    // iOS Safari: a context made outside a tap stays suspended.
+    const saved = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    class Suspended {
+      state = 'suspended';
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = Suspended;
+    vi.useFakeTimers();
+    try {
+      const next = nextPage({ mode: 'voice' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(next.view.button.dataset.listening).toBe('true');
+      next.view.button.click();
+      expect(next.view.button.dataset.listening).toBe('true');
+      expect(next.view.bar.hidden).toBe(false);
+      // The next tap is the reader's own again: it puts the bar away.
+      next.view.button.click();
+      expect(next.view.button.dataset.listening).toBe('false');
+    } finally {
+      vi.useRealTimers();
+      (window as unknown as { AudioContext: unknown }).AudioContext = saved;
+    }
   });
 
   it('on a phone, a page in the nav moves the listening panel into the bar', async () => {

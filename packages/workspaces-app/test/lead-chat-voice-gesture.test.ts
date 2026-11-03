@@ -176,7 +176,7 @@ describe('the lead chat voice, carried on from the page before', () => {
   const tapPage = (voice: LeadVoice): void => {
     inTap = true;
     try {
-      voice.wake();
+      expect(voice.wake(), 'a context was waiting').toBe(true);
     } finally {
       inTap = false;
     }
@@ -241,7 +241,7 @@ describe('the lead chat voice, carried on from the page before', () => {
     tap();
     await vi.advanceTimersByTimeAsync(0);
     speak();
-    voice.wake();
+    expect(voice.wake()).toBe(false);
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
   });
 });

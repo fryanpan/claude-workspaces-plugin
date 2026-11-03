@@ -284,6 +284,10 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const inMeeting = (): boolean => !!client.state().meeting;
 
   const onAgent = (): void => {
+    if (woke) {
+      woke = false;
+      return;
+    }
     if (ui.open && !inMeeting()) {
       if (voice.state().phase !== 'off') stopListening();
       else startListening();
@@ -325,8 +329,13 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     keepOpen(false);
     render();
   };
-  /** Any tap is the gesture a carried-on voice may be waiting for. */
-  const onPageTap = (): void => voice.wake();
+  /** Any tap is the gesture a carried-on voice may be waiting for. The page
+   *  asked for a tap anywhere, so a tap that woke it on the agent button is
+   *  that tap and does not also turn voice off. */
+  let woke = false;
+  const onPageTap = (): void => {
+    woke = voice.wake();
+  };
   const onHidePage = (): void => {
     hiding = true;
   };

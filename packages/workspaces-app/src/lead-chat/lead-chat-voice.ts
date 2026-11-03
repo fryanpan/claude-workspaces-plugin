@@ -26,6 +26,8 @@
  * setups fetch stayed suspended on a phone: the mic was open, no frame was
  * made, and the chat said "Listening…" with nothing to end it. A mic that
  * still sends no sound now stops voice with `NO_SOUND` and is reported.
+ * Only setups 1 and 2 are used — the ones that hear through the server's
+ * listener and so can address an agent.
  *
  * A PAGE MOVE CARRIES VOICE ON. A link that loads another of the board's
  * pages unloads this one with its microphone, so the next page calls
@@ -33,8 +35,6 @@
  * reader tapped on this origin a moment ago. iOS Safari does not: the context
  * stays suspended, so instead of stopping with `NO_SOUND` the chat asks for
  * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it.
- * Only setups 1 and 2 are used — the ones that hear through the server's
- * listener and so can address an agent.
  */
 import {
   type SpokenClientMessage,
@@ -82,16 +82,15 @@ export interface LeadVoiceOpts {
   /** Where a failure is reported; omitted, the page's error reporter
    *  (Sentry, where the shell loads it). */
   report?: (err: Error) => void;
-  /** The capture context; omitted, `makeGestureContext`. Injected by tests. */
-  createContext?: () => AudioContext | undefined;
 }
 
 export interface LeadVoice {
   /** Voice on. `gesture: false` is a page carrying voice on from the page
    *  before, outside any tap; omitted, this is the reader's tap. */
   start(how?: { gesture: boolean }): void;
-  /** A tap anywhere on the page: starts a context that waits for one. */
-  wake(): void;
+  /** A tap anywhere on the page: starts a context that waits for one, and
+   *  says whether there was one. */
+  wake(): boolean;
   stop(): void;
   state(): LeadVoiceState;
   destroy(): void;
@@ -370,7 +369,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'listening', heard: '', notice: '' });
       // Inside the tap, before anything is awaited: the context is made and
       // resumed, and the microphone is asked for (see the header).
-      const ctx = (opts.createContext ?? makeGestureContext)();
+      const ctx = makeGestureContext();
       openMic(ctx);
       if (how?.gesture === false && ctx) {
         tapTimer = setTimeout(() => {
@@ -404,11 +403,12 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     },
     wake() {
       const ctx = waiting;
-      if (!ctx || !on) return;
+      if (!ctx || !on) return false;
       waiting = null;
       // Inside the gesture: the one call Safari lets start the context.
       void ctx.resume().catch(() => {});
       set({ notice: '' });
+      return true;
     },
     state: () => ({ ...st }),
     destroy() {
