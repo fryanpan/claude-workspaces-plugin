@@ -135,29 +135,45 @@ const centreOf = (sel: string): string => `(() => {
   return r.width > 0 ? { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2 } : null;
 })()`;
 
-/** Puts a link to the doc on the page, where a finger can reach it, and
- *  answers its centre. */
-const PLANT_DOC_LINK = (path: string): string => `(() => {
+/** Settled: the chat's panel is not mid-animation. A tap at a point the
+ *  growing panel passes over lands on the panel, not the page. */
+const SETTLED = `(() => {
+  const pane = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot?.querySelector('.lc-pane');
+  return !pane || typeof pane.getAnimations !== 'function' || pane.getAnimations().length === 0;
+})()`;
+
+/** Where a tap at the element's centre lands: `{x, y}` when it lands on the
+ *  element itself, or what is on top of it instead. */
+const topmost = (el: string): string => `(() => {
+  const el = ${el};
+  if (!el) return { on: 'nothing yet' };
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  const top = document.elementFromPoint(x, y);
+  if (top && (top === el || el.contains(top))) return { x, y };
+  return { on: top ? top.tagName.toLowerCase() + '.' + String(top.className || '') : 'nothing' };
+})()`;
+
+/** Puts a link to the doc on the page, left of where the docked panel sits. */
+const PLANT_DOC_LINK = (path: string): string =>
+  topmost(`(() => {
   let a = document.getElementById('riverbend-link');
   if (!a) {
     a = document.createElement('a');
     a.id = 'riverbend-link';
     a.href = ${JSON.stringify(path)};
     a.textContent = 'Riverbend summary';
-    a.style.cssText = 'position:fixed;left:50%;top:40%;z-index:1;padding:8px;background:#fff';
+    a.style.cssText = 'position:fixed;left:30%;top:40%;z-index:1;padding:8px;background:#fff';
     document.body.append(a);
   }
-  const r = a.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-})()`;
+  return a;
+})()`);
 
-/** The side nav's Tasks item, or null where it is not on screen. */
-const NAV_TASKS = `(() => {
-  const el = [...document.querySelectorAll('.board-nav-item')].find((n) => /Tasks/.test(n.textContent || '') && n.getBoundingClientRect().width > 0);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-})()`;
+/** The side nav's Tasks item, where it is on screen. */
+const NAV_TASKS = topmost(
+  `[...document.querySelectorAll('.board-nav-item')].find((n) => /Tasks/.test(n.textContent || '') && n.getBoundingClientRect().width > 0)`,
+);
 
 /** Microphone frames sent by the page under test, across its loads. */
 const mic = { frames: 0 };
@@ -358,18 +374,46 @@ async function main(): Promise<void> {
         // Follow a link on the page, with a real tap: a link to one of the
         // board's docs, or the side nav's Tasks.
         await cdp.evaluate('window.__cwSamePage = true');
-        const target = await until(`the ${link} link`, async () => {
-          return (await cdp.evaluate(link === 'doc' ? PLANT_DOC_LINK(docPath) : NAV_TASKS)) as {
-            x: number;
-            y: number;
-          } | null;
-        });
-        await tap(cdp, target);
         const goal = link === 'doc' ? docPath : `/workspaces/${ws}/tasks`;
-        await until(`the ${link} page`, async () => {
-          const here = String(await cdp.evaluate('location.pathname'));
-          return here === goal || (link === 'nav' && here === `/workspaces/${ws}`) ? here : null;
-        });
+        const arrived = async (): Promise<boolean> => {
+          const here = String(await cdp.evaluate('location.pathname').catch(() => ''));
+          return here === goal || (link === 'nav' && here === `/workspaces/${ws}`);
+        };
+        // A tap lands only where the link is on top; a slow runner can still
+        // be drawing the panel, so look again and tap again, twice at most.
+        let lastOn = '';
+        for (let attempt = 0; attempt < 3 && !(await arrived()); attempt++) {
+          const target = await until(
+            `the ${link} link on top`,
+            async () => {
+              if ((await cdp.evaluate(SETTLED)) !== true) return null;
+              const at = (await cdp.evaluate(
+                link === 'doc' ? PLANT_DOC_LINK(docPath) : NAV_TASKS,
+              )) as {
+                x?: number;
+                y?: number;
+                on?: string;
+              };
+              if (typeof at.x === 'number' && typeof at.y === 'number') return { x: at.x, y: at.y };
+              lastOn = at.on ?? '';
+              return null;
+            },
+            10_000,
+          ).catch(() => {
+            throw new Error(`the ${link} link is under ${lastOn} at ${width}, ${how}`);
+          });
+          await tap(cdp, target);
+          await until(
+            `the ${link} page`,
+            async () => ((await arrived()) ? true : null),
+            4_000,
+          ).catch(() => step(`tap ${attempt + 1} on the ${link} link went nowhere`));
+        }
+        if (!(await arrived())) {
+          throw new Error(
+            `never reached the ${link} page from ${String(await cdp.evaluate('location.pathname'))}`,
+          );
+        }
         // A full load wipes the marker; a route change inside the page keeps it.
         const fullLoad = (await cdp.evaluate('window.__cwSamePage !== true')) === true;
         const landed = String(await cdp.evaluate('location.pathname'));
