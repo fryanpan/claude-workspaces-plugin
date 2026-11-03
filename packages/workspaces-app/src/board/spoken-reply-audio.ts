@@ -53,6 +53,8 @@ export function pcm16ToFloat(bytes: Uint8Array): Float32Array<ArrayBuffer> {
 
 export interface SpokenCapture {
   stop(): void;
+  /** One line for an error report (`AudioPump.diag`). */
+  diag?(): string;
 }
 
 export interface SpokenCaptureOpts {
@@ -113,6 +115,7 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
   return {
     ok: true,
     capture: {
+      diag: () => pump.diag?.() ?? '',
       stop() {
         pump.onBlock = null;
         pump.stop();

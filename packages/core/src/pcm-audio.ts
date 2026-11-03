@@ -152,6 +152,83 @@ export interface AudioPump {
    */
   contextState?(): string;
   resume?(): Promise<void>;
+  /** One line for an error report: the context, the track, what arrived. */
+  diag?(): string;
+}
+
+/** What a microphone track says of itself — never its label, which names
+ *  the device and so the person. */
+export interface TrackFacts {
+  sampleRate?: number;
+  channelCount?: number;
+  /** `default` is the system's choice; `chosen` is any other device id. */
+  device: 'default' | 'chosen' | 'none';
+}
+
+export function trackFacts(stream: MediaStream): TrackFacts {
+  const t = stream.getAudioTracks?.()[0];
+  let s: MediaTrackSettings = {};
+  try {
+    s = t?.getSettings?.() ?? {};
+  } catch {}
+  const id = s.deviceId;
+  return {
+    ...(typeof s.sampleRate === 'number' && s.sampleRate > 0 ? { sampleRate: s.sampleRate } : {}),
+    ...(typeof s.channelCount === 'number' ? { channelCount: s.channelCount } : {}),
+    device: !id ? 'none' : id === 'default' ? 'default' : 'chosen',
+  };
+}
+
+/** How long a context made for the track's rate may take to start running
+ *  before the caller's is kept instead. */
+const REBUILD_WAIT_MS = 500;
+
+/**
+ * The context the graph runs on. A caller's context was made in the tap,
+ * before the microphone opened, at the output's rate; a Bluetooth headset's
+ * microphone (AirPods on an iPhone) runs at 16 or 24 kHz, and on iOS a
+ * stream source on a context at another rate was the one path left on which
+ * a running context delivered no audio at all. So when the track names a
+ * different rate, a context is made at that rate — and kept only if it
+ * starts running, since one made after an await may not; otherwise the
+ * caller's stays.
+ */
+async function graphContext(
+  Ctor: typeof AudioContext | undefined,
+  context: AudioContext | undefined,
+  track: TrackFacts,
+): Promise<{ ctx: AudioContext; rebuilt: boolean }> {
+  const at = (rate?: number): AudioContext | null => {
+    if (!Ctor) return null;
+    try {
+      return rate ? new Ctor({ sampleRate: rate }) : new Ctor();
+    } catch {
+      return rate ? at() : null;
+    }
+  };
+  if (!context) {
+    const ctx = at(track.sampleRate);
+    if (!ctx) throw Object.assign(new Error('no AudioContext'), { name: 'NotSupportedError' });
+    return { ctx, rebuilt: false };
+  }
+  if (!track.sampleRate || track.sampleRate === context.sampleRate) {
+    return { ctx: context, rebuilt: false };
+  }
+  const fresh = at(track.sampleRate);
+  if (!fresh || fresh.sampleRate !== track.sampleRate) {
+    void fresh?.close().catch(() => {});
+    return { ctx: context, rebuilt: false };
+  }
+  await Promise.race([
+    fresh.resume().catch(() => {}),
+    new Promise((r) => setTimeout(r, REBUILD_WAIT_MS)),
+  ]);
+  if (fresh.state !== 'running') {
+    void fresh.close().catch(() => {});
+    return { ctx: context, rebuilt: false };
+  }
+  void context.close().catch(() => {});
+  return { ctx: fresh, rebuilt: true };
 }
 
 export type AudioPumpFactory = (stream: MediaStream, context?: AudioContext) => Promise<AudioPump>;
@@ -163,11 +240,15 @@ export type AudioPumpFactory = (stream: MediaStream, context?: AudioContext) => 
  */
 const WORKLET_SOURCE = `
 class MeetingPcmProcessor extends AudioWorkletProcessor {
+  constructor() { super(); this.empty = 0; }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
     // A copy, not the view: the render quantum's buffer is reused, so a
     // reference posted across the port would be rewritten before it is read.
     if (channel && channel.length) this.port.postMessage(new Float32Array(channel));
+    // A render with no input, counted: it tells a source that delivers
+    // nothing from a graph that never renders. Every 100th, so it stays cheap.
+    else if (++this.empty % 100 === 1) this.port.postMessage(this.empty);
     return true;
   }
 }
@@ -200,25 +281,42 @@ export async function createAudioPump(
   }
   // A context made by the caller inside the tap that asked for it: Safari
   // starts one only from a gesture, and a context built after an await (a
-  // lazily loaded chunk, a permission prompt) can stay suspended for good.
-  const ctx = context ?? new (Ctor as typeof AudioContext)();
+  // lazily loaded chunk, a permission prompt) can stay suspended for good —
+  // unless the track runs at another rate (`graphContext`).
+  const track = trackFacts(stream);
+  const { ctx, rebuilt } = await graphContext(Ctor, context, track);
   // Not only `suspended`: iOS reports `interrupted` when getUserMedia takes
   // the audio session over a context that was already running.
   if (ctx.state !== 'running') void ctx.resume().catch(() => {});
   const source = ctx.createMediaStreamSource(stream);
+  let blocks = 0;
+  let empty = 0;
   const pump: AudioPump = {
     sampleRate: ctx.sampleRate,
     onBlock: null,
     stop: () => {},
     contextState: () => ctx.state,
     resume: () => ctx.resume(),
+    diag: () =>
+      [
+        `context ${ctx.state} at ${ctx.sampleRate} Hz${rebuilt ? ', made for the track' : ''}`,
+        `track ${track.sampleRate ?? '?'} Hz, ${track.channelCount ?? '?'} ch, ${track.device} device`,
+        `${blocks} blocks, ${empty} renders without input`,
+      ].join('; '),
+  };
+  const block = (samples: Float32Array): void => {
+    blocks++;
+    pump.onBlock?.(samples);
   };
   let url: string | null = null;
   try {
     url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'text/javascript' }));
     await ctx.audioWorklet.addModule(url);
     const node = new AudioWorkletNode(ctx, 'meeting-pcm');
-    node.port.onmessage = (ev: MessageEvent) => pump.onBlock?.(ev.data as Float32Array);
+    node.port.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data === 'number') empty = ev.data;
+      else block(ev.data as Float32Array);
+    };
     source.connect(node);
     pump.stop = () => {
       node.port.onmessage = null;
@@ -231,8 +329,7 @@ export async function createAudioPump(
     const node = ctx.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 1, 1);
     const mute = ctx.createGain();
     mute.gain.value = 0;
-    node.onaudioprocess = (ev) =>
-      pump.onBlock?.(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    node.onaudioprocess = (ev) => block(new Float32Array(ev.inputBuffer.getChannelData(0)));
     source.connect(node);
     node.connect(mute);
     mute.connect(ctx.destination);

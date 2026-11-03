@@ -191,11 +191,17 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         return;
       }
       capture = r.capture;
+      const diag = r.capture.diag;
       // An open mic that makes no frame is a context that never ran.
       soundTimer = setTimeout(() => {
         soundTimer = null;
         if (mine !== gen || frames > 0) return;
-        halt(NO_SOUND, `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
+        // What the mic's track and the graph's context said, so the report
+        // answers why (`AudioPump.diag`).
+        halt(
+          NO_SOUND,
+          diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`,
+        );
       }, NO_SOUND_MS);
     });
   };
