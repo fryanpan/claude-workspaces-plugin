@@ -20,6 +20,15 @@
  * turn and the lead's answer into the chat, so they arrive on the same stream
  * as a typed message, and the answer is also said aloud.
  *
+ * Voice on survives a move to another of the board's pages (Bryan,
+ * 2026-11-03). A link to a doc, a mock or the board from another page is a
+ * full load, and only the tab's session storage crosses it: the panel's open
+ * flag, and `VOICE_ON_KEY` while the page is listening. The next page opens
+ * the same bar or panel and starts listening again without a tap where the
+ * browser allows it (`start({ gesture: false })`), and asks for one tap
+ * where it does not (iOS Safari). On a phone the side nav's pages move the
+ * full-screen panel out of the way into the bar rather than closing the chat.
+ *
  * The button is drawn only for a reader who may talk to the lead — the
  * board's owner — so nobody else is offered a composer that refuses.
  */
@@ -32,13 +41,17 @@ import {
   wireLeadMeeting,
 } from './lead-chat-meeting-wiring.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
-import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
+import { LEAVE_EVENT, type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
 import {
   type LeadVoice,
   type LeadVoiceOpts,
   type LeadVoiceState,
   createLeadVoice,
 } from './lead-chat-voice.ts';
+
+/** In the tab's session storage while the page is listening, so the next
+ *  page listens again. */
+export const VOICE_ON_KEY = 'cw.lead-chat.voice';
 
 export interface LeadChatMountOpts {
   workspaceId: string;
@@ -124,8 +137,36 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       // Unkept, the next page opens closed.
     }
   };
+  /** The same for listening. Not touched while the page unloads: its
+   *  socket closing then is the move, not the reader turning voice off. */
+  const keepVoice = (on: boolean): void => {
+    if (hiding) return;
+    try {
+      if (on) session?.setItem(VOICE_ON_KEY, '1');
+      else session?.removeItem(VOICE_ON_KEY);
+    } catch {
+      // Unkept, the next page starts with voice off.
+    }
+  };
+  let hiding = false;
   let restored = false;
   let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
+  /** Voice was on on the page before: start it once the lead is known. */
+  const carryVoice = (s: ReturnType<LeadChatClient['state']>): void => {
+    let kept = false;
+    try {
+      kept = session?.getItem(VOICE_ON_KEY) === '1';
+    } catch {
+      // Nothing kept.
+    }
+    if (!kept) return;
+    if (!s.canTalk || s.meeting) {
+      keepVoice(false);
+      return;
+    }
+    if (!ui.open) ui.bar = true;
+    queueMicrotask(() => voice.start({ gesture: false }));
+  };
 
   const render = (): void => {
     const s = client.state();
@@ -136,6 +177,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       } catch {
         // Nothing kept.
       }
+      carryVoice(s);
     }
     host.hidden = !(s.loaded && s.canTalk);
     view.render({
@@ -195,6 +237,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     agent: () => client.state().lead?.agentId,
     onChange: (v) => {
       heard = v;
+      keepVoice(v.phase !== 'off');
       render();
     },
   });
@@ -271,10 +314,33 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape' && (ui.open || ui.bar)) closeAll();
   };
+  /** A full-screen panel making way for a page: listening goes on in the bar. */
+  const onLeave = (): void => {
+    if (voice.state().phase === 'off' || inMeeting()) {
+      closeAll();
+      return;
+    }
+    ui.open = false;
+    ui.bar = true;
+    keepOpen(false);
+    render();
+  };
+  /** Any tap is the gesture a carried-on voice may be waiting for. */
+  const onPageTap = (): void => voice.wake();
+  const onHidePage = (): void => {
+    hiding = true;
+  };
+  const onShowPage = (): void => {
+    hiding = false;
+  };
 
   view.button.addEventListener('click', onAgent);
   view.bar.addEventListener('click', () => openPane(view.bar.getBoundingClientRect()));
   view.close.addEventListener('click', closeAll);
+  view.pane.addEventListener(LEAVE_EVENT, onLeave);
+  doc.addEventListener('click', onPageTap, true);
+  win.addEventListener('pagehide', onHidePage);
+  win.addEventListener('pageshow', onShowPage);
   view.send.addEventListener('click', () => void sendTyped());
   view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {
@@ -326,6 +392,9 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       voice.destroy();
       client.close();
       doc.removeEventListener('keydown', onKey);
+      doc.removeEventListener('click', onPageTap, true);
+      win.removeEventListener('pagehide', onHidePage);
+      win.removeEventListener('pageshow', onShowPage);
       win.removeEventListener('resize', onResize);
       win.visualViewport?.removeEventListener('resize', onResize);
       win.visualViewport?.removeEventListener('scroll', onResize);

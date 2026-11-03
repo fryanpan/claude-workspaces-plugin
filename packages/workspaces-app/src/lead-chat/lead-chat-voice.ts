@@ -26,6 +26,13 @@
  * setups fetch stayed suspended on a phone: the mic was open, no frame was
  * made, and the chat said "Listening…" with nothing to end it. A mic that
  * still sends no sound now stops voice with `NO_SOUND` and is reported.
+ *
+ * A PAGE MOVE CARRIES VOICE ON. A link that loads another of the board's
+ * pages unloads this one with its microphone, so the next page calls
+ * `start({ gesture: false })`. Chrome lets that context run, because the
+ * reader tapped on this origin a moment ago. iOS Safari does not: the context
+ * stays suspended, so instead of stopping with `NO_SOUND` the chat asks for
+ * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it.
  * Only setups 1 and 2 are used — the ones that hear through the server's
  * listener and so can address an agent.
  */
@@ -75,10 +82,16 @@ export interface LeadVoiceOpts {
   /** Where a failure is reported; omitted, the page's error reporter
    *  (Sentry, where the shell loads it). */
   report?: (err: Error) => void;
+  /** The capture context; omitted, `makeGestureContext`. Injected by tests. */
+  createContext?: () => AudioContext | undefined;
 }
 
 export interface LeadVoice {
-  start(): void;
+  /** Voice on. `gesture: false` is a page carrying voice on from the page
+   *  before, outside any tap; omitted, this is the reader's tap. */
+  start(how?: { gesture: boolean }): void;
+  /** A tap anywhere on the page: starts a context that waits for one. */
+  wake(): void;
   stop(): void;
   state(): LeadVoiceState;
   destroy(): void;
@@ -88,6 +101,11 @@ export const NO_VOICE = 'Voice is not set up on this server. Type to your lead i
 export const NO_SOUND = 'The microphone is sending no sound. Tap the agent button to try again.';
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
+/** Said while a carried-on voice waits for the tap its context needs. */
+export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
+/** How long a context started outside a tap has to run before the chat asks
+ *  for one. */
+const TAP_WAIT_MS = 600;
 const LEAD_SETUPS: readonly SpokenSetup[] = [1, 2];
 const OPEN = 1;
 const MAX_HELD = 400;
@@ -141,6 +159,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
   let soundTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A context started outside a tap that is not running yet. */
+  let waiting: AudioContext | null = null;
+  let tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emit = (): void => opts.onChange({ ...st });
   const set = (p: Partial<LeadVoiceState>): void => {
@@ -167,6 +188,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     forwarding = false;
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
+    if (tapTimer) clearTimeout(tapTimer);
+    tapTimer = null;
+    waiting = null;
     capture?.stop();
     capture = null;
   };
@@ -192,14 +216,20 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       }
       capture = r.capture;
       const diag = r.capture.diag;
-      // An open mic that makes no frame is a context that never ran.
-      soundTimer = setTimeout(() => {
+      // An open mic that makes no frame is a context that never ran — unless
+      // it is waiting for the reader's tap, which restarts this clock.
+      const noSound = (): void => {
         soundTimer = null;
         if (mine !== gen || frames > 0) return;
+        if (waiting) {
+          soundTimer = setTimeout(noSound, NO_SOUND_MS);
+          return;
+        }
         // What the mic's track and the graph's context said, so the report
         // answers why (`AudioPump.diag`).
         halt(NO_SOUND, diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
-      }, NO_SOUND_MS);
+      };
+      soundTimer = setTimeout(noSound, NO_SOUND_MS);
     });
   };
 
@@ -328,7 +358,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   }
 
   return {
-    start() {
+    start(how) {
       if (on) return;
       const blocked = (opts.blocked ?? (() => insecureOriginMessage(defaultOriginFacts())))();
       if (blocked) {
@@ -340,7 +370,16 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'listening', heard: '', notice: '' });
       // Inside the tap, before anything is awaited: the context is made and
       // resumed, and the microphone is asked for (see the header).
-      openMic(makeGestureContext());
+      const ctx = (opts.createContext ?? makeGestureContext)();
+      openMic(ctx);
+      if (how?.gesture === false && ctx) {
+        tapTimer = setTimeout(() => {
+          tapTimer = null;
+          if (!on || ctx.state === 'running') return;
+          waiting = ctx;
+          set({ notice: TAP_TO_LISTEN });
+        }, TAP_WAIT_MS);
+      }
       const go = (): void => {
         if (!on) return;
         if (pickSetup() === null) halt(NO_VOICE, '', true);
@@ -362,6 +401,14 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (asked) sendMsg({ type: 'stop' });
       else dropSocket();
       set({ phase: 'off', heard: '', notice: '' });
+    },
+    wake() {
+      const ctx = waiting;
+      if (!ctx || !on) return;
+      waiting = null;
+      // Inside the gesture: the one call Safari lets start the context.
+      void ctx.resume().catch(() => {});
+      set({ notice: '' });
     },
     state: () => ({ ...st }),
     destroy() {

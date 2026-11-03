@@ -232,3 +232,85 @@ describe('the lead chat on a page', () => {
     expect((host.host as HTMLElement).hidden).toBe(true);
   });
 });
+
+describe('voice on, carried to the next page of the tab', () => {
+  /** The page unloads, and the next page of the tab mounts its own chat. */
+  const nextPage = (opts: Parameters<typeof mount>[0] = {}) => {
+    window.dispatchEvent(new Event('pagehide'));
+    mounted?.destroy();
+    document.body.innerHTML = '';
+    window.dispatchEvent(new Event('pageshow'));
+    return mount(opts);
+  };
+
+  it('Voice first: the next page brings the bar out and listens, with no tap', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    expect(first.view.button.dataset.listening).toBe('true');
+    const next = nextPage({ mode: 'voice' });
+    await settle();
+    expect(next.view.bar.hidden).toBe(false);
+    expect(next.view.pane.hidden).toBe(true);
+    expect(next.view.button.dataset.listening).toBe('true');
+    expect(next.voice.mic.starts).toBe(1);
+    // Addressed to the lead, as the tap's start was.
+    const ws = next.voice.socket();
+    ws.open();
+    expect(ws.messages().find((m) => m.type === 'start')).toMatchObject({ agent: LEAD.agentId });
+    next.voice.speak();
+    expect(ws.frames()).toBeGreaterThan(0);
+  });
+
+  it('with the panel open: the next page opens the panel and listens', async () => {
+    const first = mount();
+    first.view.button.click();
+    await settle();
+    const next = nextPage();
+    await settle();
+    expect(next.view.pane.hidden).toBe(false);
+    expect(next.view.button.dataset.listening).toBe('true');
+  });
+
+  it('stays off on the next page once the reader turned it off', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    first.view.button.click();
+    expect(first.view.button.dataset.listening).toBe('false');
+    const next = nextPage({ mode: 'voice' });
+    await settle();
+    expect(next.view.bar.hidden).toBe(true);
+    expect(next.voice.mic.starts).toBe(0);
+  });
+
+  it('on a phone, a page in the nav moves the listening panel into the bar', async () => {
+    const { view, voice } = mount();
+    const nav = document.createElement('a');
+    nav.className = 'board-nav-item';
+    document.body.append(nav);
+    view.button.click();
+    await settle();
+    view.pane.classList.add('lc-sheet');
+    nav.click();
+    expect(view.pane.hidden).toBe(true);
+    expect(view.bar.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('true');
+    expect(voice.mic.stops).toBe(0);
+  });
+
+  it('on a phone, a page in the nav still closes a panel that is not listening', async () => {
+    const { view } = mount();
+    const nav = document.createElement('a');
+    nav.className = 'board-nav-item';
+    document.body.append(nav);
+    view.button.click();
+    await settle();
+    view.button.click();
+    expect(view.button.dataset.listening).toBe('false');
+    view.pane.classList.add('lc-sheet');
+    nav.click();
+    expect(view.pane.hidden).toBe(true);
+    expect(view.bar.hidden).toBe(true);
+  });
+});
