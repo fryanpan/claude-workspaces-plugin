@@ -250,3 +250,53 @@ describe('where the message was sent from', () => {
     );
   });
 });
+
+describe('whether the asker can read the chat as well as hear the answer', () => {
+  const turn = {
+    route: 'agent',
+    to: 'harborlight-lead',
+    transcript: 'how did the Riverbend deploy go',
+    ack: 'Sent to Harborlight Lead.',
+    actor: { id: 'owner', name: 'Alice' },
+    workspaceId: 'w-1',
+    queueId: 'vt-4',
+  };
+
+  it('with the panel open, asks for one spoken sentence and the detail in written', () => {
+    const line = voiceRequestLine({
+      ...turn,
+      context: { surface: 'board', chatOpen: true },
+    }) as string;
+    expect(line).toContain('answer_voice(workspaceId="w-1", queueId="vt-4", text, written)');
+    expect(line).toContain('Their chat panel is open');
+    expect(line).toContain('speak one sentence in text, and put any detail in written');
+  });
+
+  it('with the panel closed, says text is all they get and leaves written out', () => {
+    const line = voiceRequestLine({
+      ...turn,
+      context: { surface: 'board', chatOpen: false },
+    }) as string;
+    expect(line).toContain('answer_voice(workspaceId="w-1", queueId="vt-4", text)');
+    expect(line).toContain('Their chat panel is closed');
+    expect(line).not.toContain('chat panel is open');
+  });
+
+  it('says neither when an older page sent no flag', () => {
+    const line = voiceRequestLine({ ...turn, context: { surface: 'board' } }) as string;
+    expect(line).not.toContain('chat panel');
+  });
+
+  it('carries the same guidance on a request the board handed to the lead', () => {
+    const line = voiceRequestLine({
+      route: 'agent-handoff',
+      transcript: 'go research ferry fares',
+      ack: 'On it.',
+      workspaceId: 'w-1',
+      queueId: 'vq-5',
+      context: { surface: 'board', chatOpen: true },
+    }) as string;
+    expect(line).toContain('queueId="vq-5", text, written)');
+    expect(line).toContain('Their chat panel is open');
+  });
+});

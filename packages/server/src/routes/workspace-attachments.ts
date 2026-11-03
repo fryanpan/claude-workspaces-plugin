@@ -33,7 +33,7 @@ import {
   readReleasedPluginVersion,
 } from '../plugin-release.ts';
 import { sentryWatchPlan } from '../sentry-projects.ts';
-import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX } from '../spoken-reply/lead-answer.ts';
+import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX, LEAD_WRITTEN_MAX } from '../spoken-reply/lead-answer.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
@@ -384,13 +384,23 @@ export async function handleWorkspaceAttachments(
     if (typeof minute === 'string' && minute.length > LEAD_MINUTE_MAX) {
       return j(400, { error: `minute over ${LEAD_MINUTE_MAX} chars` });
     }
+    // The fuller answer for a reader with the chat open: shown in the chat
+    // in place of `text`, never said. Absent from an older bundle.
+    const raw = body?.written;
+    if (raw !== undefined && typeof raw !== 'string') {
+      return j(400, { error: 'written must be a string' });
+    }
+    const written = typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+    if (written && written.length > LEAD_WRITTEN_MAX) {
+      return j(400, { error: `written over ${LEAD_WRITTEN_MAX} chars` });
+    }
     return j(200, {
       ok: true,
       // A typed lead-chat message first: its question is in the log, so its
       // answer lands however long the lead took. Then a socket or a meeting.
       delivered:
-        leadChat.answer(workspaceId, entryId, text, agentId) ||
-        spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId),
+        leadChat.answer(workspaceId, entryId, text, agentId, written) ||
+        spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId, written),
     });
   }
   const wsAgentDetachMatch = pathname.match(/^\/workspaces\/([^/]+)\/agents\/([^/]+)$/);

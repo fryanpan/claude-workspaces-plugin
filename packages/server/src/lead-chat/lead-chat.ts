@@ -183,15 +183,22 @@ export class LeadChat {
   }
 
   /**
-   * The lead's `answer_voice` for `queueId`. True when it answered a chat
-   * message on this board, from the agent the message was sent to.
+   * The lead's `answer_voice` for `queueId`: its `written` answer when it
+   * gave one, else `text`. True when it answered a chat message on this
+   * board, from the agent the message was sent to.
    */
-  answer(workspaceId: string, queueId: string, text: string, by: string): boolean {
+  answer(
+    workspaceId: string,
+    queueId: string,
+    text: string,
+    by: string,
+    written?: string,
+  ): boolean {
     this.messages(workspaceId);
     const w = this.waiting.get(queueId);
     if (!w || w.workspaceId !== workspaceId || w.agentId !== by) return false;
     this.waiting.delete(queueId);
-    this.reply(w, text);
+    this.reply(w, written?.trim() || text);
     return true;
   }
 

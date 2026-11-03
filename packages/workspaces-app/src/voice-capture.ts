@@ -20,6 +20,9 @@ export interface VoiceContext {
   /** The page's link to the most specific thing open on it
    *  (`lead-chat/lead-chat-link.ts`). */
   link?: string;
+  /** Whether the lead chat panel is open, so the lead can keep the spoken
+   *  answer to a sentence and write the rest. */
+  chatOpen?: boolean;
 }
 
 /**

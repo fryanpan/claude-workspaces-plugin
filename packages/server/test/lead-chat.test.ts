@@ -122,6 +122,33 @@ describe('the lead chat', () => {
     ]);
   });
 
+  it('tells the lead the panel is open and shows a written answer in place of text', async () => {
+    const text = 'why did the Riverbend build fail?';
+    const res = await post(`/workspaces/${boardId}/lead-chat`, {
+      text,
+      author: BRYAN,
+      context: { surface: 'board', chatOpen: true },
+    });
+    expect(res.status).toBe(201);
+    await waitFor(() => lead.voice.some((v) => v.transcript === text), {
+      describe: 'lead got the message',
+    });
+    const asked = lead.voice.find((v) => v.transcript === text);
+    expect(asked?.context?.chatOpen).toBe(true);
+    const written = 'A lint error in the widget bundle. The fix is pushed and CI is green.';
+    const answered = await post(`/workspaces/${boardId}/voice-queue/${asked?.queueId}/answer`, {
+      agentId: 'harborlight-lead',
+      text: 'A lint error; fixed.',
+      written,
+    });
+    expect(await answered.json()).toEqual({ ok: true, delivered: true });
+    await waitFor(() => page.messages.some((m) => m.text === written), {
+      describe: 'open page shown the written answer',
+      timeout: 1000,
+    });
+    expect(page.messages.some((m) => m.text === 'A lint error; fixed.')).toBe(false);
+  });
+
   it('keeps the page frames off the lead’s own stream', () => {
     // The lead has its own voice.request; a page frame on its stream as well
     // would cost its session a second turn for the same message.

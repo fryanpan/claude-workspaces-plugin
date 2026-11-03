@@ -165,14 +165,16 @@ export class SpokenReplyRelay {
 
   /** The lead's answer to a spoken request: said on the socket or into the
    *  bot meeting that asked, or false when none is waiting for it. `by` is the
-   *  answering agent: a turn addressed to one agent takes only its answer. */
+   *  answering agent: a turn addressed to one agent takes only its answer.
+   *  `written` is the fuller answer the chat shows; it is never said. */
   answerRequest(
     workspaceId: string,
     queueId: string,
     text: string,
     minute?: string,
     by?: string,
+    written?: string,
   ): boolean {
-    return this.leads.answer(workspaceId, queueId, text, minute, by);
+    return this.leads.answer(workspaceId, queueId, text, minute, by, written);
   }
 }
