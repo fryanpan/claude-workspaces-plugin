@@ -34,7 +34,9 @@
  * `start({ gesture: false })`. Chrome lets that context run, because the
  * reader tapped on this origin a moment ago. iOS Safari does not: the context
  * stays suspended, so instead of stopping with `NO_SOUND` the chat asks for
- * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it.
+ * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it. The
+ * socket that closes as this page unloads is that move, not a stop, so it
+ * is neither said nor reported.
  */
 import {
   type SpokenClientMessage,
@@ -101,6 +103,7 @@ export const NO_SOUND = 'The microphone is sending no sound. Tap the agent butto
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
 /** Said while a carried-on voice waits for the tap its context needs. */
+const CLOSED = 'The connection closed. Tap the mic to try again.';
 export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
 /** How long a context started outside a tap has to run before the chat asks
  *  for one. */
@@ -161,6 +164,18 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** A context started outside a tap that is not running yet. */
   let waiting: AudioContext | null = null;
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The page is unloading: its socket closing is the move, not a stop. */
+  let leaving = false;
+  const onPageHide = (): void => {
+    leaving = true;
+  };
+  /** Back from the back-forward cache with the socket gone: voice is off. */
+  const onPageShow = (): void => {
+    leaving = false;
+    if (on && !socket) halt(CLOSED, '', true);
+  };
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('pageshow', onPageShow);
 
   const emit = (): void => opts.onChange({ ...st });
   const set = (p: Partial<LeadVoiceState>): void => {
@@ -262,7 +277,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (socket !== ws) return;
       socket = null;
       queue = [];
-      if (on) halt('The connection closed. Tap the mic to try again.');
+      if (on && !leaving) halt(CLOSED);
     };
     socket = ws;
   };
@@ -412,6 +427,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     },
     state: () => ({ ...st }),
     destroy() {
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       on = false;
       stopCapture();
       player.stop();
