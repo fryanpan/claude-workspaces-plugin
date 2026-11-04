@@ -135,11 +135,13 @@ const suggestionCount = () => document.getElementById('suggestions-count')?.text
  *
  *  The payload carries `transaction`, as tiptap's own always does: the margin
  *  reads `docChanged` off it to decide whether the thread anchors have to be
- *  re-read, and a payload without one is a shape the editor never emits. */
+ *  re-read, and a payload without one is a shape the editor never emits. The
+ *  reading hold asks whether the reader made it (`selectionSet`, and the sync
+ *  plugin's meta through `getMeta`), so those are here too. */
 function transaction(editor: EditorHandle, docChanged = false): void {
   editor.editor.emit('transaction', {
     editor: editor.editor,
-    transaction: { docChanged },
+    transaction: { docChanged, selectionSet: false, getMeta: () => undefined },
   } as never);
 }
 
