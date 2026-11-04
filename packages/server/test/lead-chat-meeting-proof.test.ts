@@ -112,6 +112,20 @@ describe('a meeting line reaches the lead only from the owner’s proven microph
     expect((await asOwner({ action: 'end', id: m.id })).status).toBe(200);
   });
 
+  it('hands the lead a line opening with "Claude" or "lead agent", not one that mentions it', async () => {
+    const m = await startMeeting('mic');
+    const claude = 'Claude, file a task to price the Riverbend slipway.';
+    const agent = 'Lead agent what is left on Harborlight?';
+    const mention = 'We could ask Claude about the ferry later.';
+    expect(await line(m, 1, mention)).toBeUndefined();
+    expect(await line(m, 2, claude)).toBeDefined();
+    expect(await line(m, 3, agent)).toBeDefined();
+    // The two asks arriving is the positive control for the mention's absence.
+    await waitFor(() => heard(claude) > 0 && heard(agent) > 0, { describe: 'lead got both asks' });
+    expect(heard(mention)).toBe(0);
+    expect((await asOwner({ action: 'end', id: m.id })).status).toBe(200);
+  });
+
   it('never hands the lead a line from a call bot or from Mac audio', async () => {
     for (const source of ['bot', 'mix'] as const) {
       const m = await startMeeting(source);

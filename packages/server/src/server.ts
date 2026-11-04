@@ -77,7 +77,7 @@ import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './
 import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
-import { LeadMeetingFeed } from './lead-chat/meeting-feed.ts';
+import { LeadMeetingFeed, meetingLeadFeedEnabled } from './lead-chat/meeting-feed.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
@@ -3147,7 +3147,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenTimings,
     leadChat,
     leadChatMeetings,
-    leadMeetingFeed,
+    leadMeetingFeed:
+      (opts.meetingLeadFeed ?? meetingLeadFeedEnabled(process.env)) ? leadMeetingFeed : null,
     // What the lead says into a meeting is said in the board reply's voice.
     leadMeetingVoice: spokenEngines.voices[1] ?? spokenEngines.voices[2] ?? null,
     featuresOff: opts.featuresOff ?? {},

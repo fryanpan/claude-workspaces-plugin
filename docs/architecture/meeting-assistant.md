@@ -218,7 +218,25 @@ strip so both drive one copy.
 - **"No notes" is `notes: false` on `start`.** The relay opens no notes
   pipeline and no handoff; the transcript is still kept, in a doc of its own.
 
-### The board's lead sits in the meeting (`lead-chat/meeting-feed.ts`, 2026-10-31)
+### The board's lead speaks into the meeting only when asked (2026-11-04)
+
+A running meeting takes notes on its own. What the room says goes to the
+meeting's notes and to every page showing the meeting. It is not sent to the
+lead, and the lead is not told that a meeting started. In a microphone meeting,
+a line from a request that proves the owner still reaches the lead as a
+lead-chat message when it opens with a wake word: "Lead," or "Lead:", or
+"Claude" or "lead agent" with or without a comma (`addressesLead`,
+`core/src/lead-chat.ts`). A mention mid-sentence does not count. That is how
+the room asks the lead something.
+
+**The lead feed is off since 4 Nov, pending the meeting redesign.**
+`CW_MEETING_LEAD_FEED=1` (or the `meetingLeadFeed` server option) turns it back
+on, and the meeting then sends the lead what the section below describes.
+From 2026-10-31 (PR 1465) it ran by default, and Bryan's first meetings with
+it were "a giant mess". The lead took a turn every second or two and spoke
+into the room without being asked.
+
+### With the feed on: the board's lead sits in the meeting (`lead-chat/meeting-feed.ts`)
 
 The board's lead hears the meeting while it happens and can say one line into
 it. Only the lead: no other session on the board is woken by the room.
@@ -239,9 +257,9 @@ it. Only the lead: no other session on the board is woken by the room.
   session reported a plugin older than 0.1.347 (`LEAD_MEETING_SINCE`), or
   none, is sent neither event: its MCP has no wording for them and would wake
   on an empty line once per batch for the whole meeting.
-- **What is left out.** A "Lead, …" line already reached the lead as a request
-  and is not sent twice; the lead's own lines are not fed back; with no lead
-  on the board nothing is sent.
+- **What is left out.** A line with a wake word already reached the lead as a
+  request and is not sent twice; the lead's own lines are not fed back; with
+  no lead on the board nothing is sent.
 - **Two gaps, left open.** A later correction of a turn (the transcriber
   revising what it settled) never reaches the lead: only a turn's first
   version is fed. And a turn resent after its batch has gone (a page
@@ -252,6 +270,9 @@ it. Only the lead: no other session on the board is woken by the room.
   carries every guest on the call, so the MCP child renders the lines inside
   an untrusted quote (`meeting-feed-line.ts`). Both events ride the `voice.`
   family because `channel-gate.ts` drops every `meeting.*` event.
+
+### Either way: the lead speaking
+
 - **Speaking is one call.** `say_in_meeting(workspaceId, text)` posts to
   `POST /workspaces/<id>/lead-chat/meeting/say` with the session's agent
   token. The route takes the board's lead only (the token must speak for the
@@ -280,9 +301,10 @@ it. Only the lead: no other session on the board is woken by the room.
   count. The second test keeps a reply that picks up a few of the lead's
   words: "The slipway pricing" after "Who is the slipway pricing for?" is
   three words of six, and stays.
-- **Held to rare.** The start line tells the lead to speak rarely and in one
-  short sentence, and to keep other questions in the lead chat until the
-  meeting can tell when a speaker has finished a thought.
+- **Held to rare.** The start line (sent only with the feed on) tells the
+  lead to speak rarely and in one short sentence, and to keep other questions
+  in the lead chat until the meeting can tell when a speaker has finished a
+  thought.
 - **Cost.** The batch window caps wakes at one a second, but a room settles a
   turn every few seconds, so a lead is woken about once per settled turn:
   several hundred times in an hour of steady talk.

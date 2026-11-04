@@ -6,6 +6,11 @@
  * the `say` route (what `say_in_meeting` posts) puts its line in the meeting
  * on every page, and the page holding the microphone can fetch it voiced.
  *
+ * The feed is off by default since 2026-11-04, pending a redesign; this file
+ * runs with it switched on (`meetingLeadFeed: true`, which
+ * `CW_MEETING_LEAD_FEED=1` sets), so the redesign can turn it back on as it
+ * is. `meeting-lead-feed-off.test.ts` is the default.
+ *
  * The voice is a fake that answers fixed PCM: no network, no audio. These
  * cases wait on frames arriving and assert their order, never how long the
  * machine took; the batch window itself is `lead-meeting-feed.test.ts`'s,
@@ -136,6 +141,7 @@ describe('the lead in the meeting', () => {
       port: 0,
       dataDir,
       spokenReply: { listener: null, voices: { 1: voice, 2: null }, gemini: null },
+      meetingLeadFeed: true,
       // The say route takes the lead's token; the process check that the
       // mint route asks is injected, as agent-stream-auth.test.ts does.
       identifyAgentCaller: async () => ({ ok: true, agentId: callerIs, via: 'session' }),

@@ -196,7 +196,7 @@ async function meetingAction(
       speakers,
       recorder,
     });
-    if (r.ok) ctx.leadMeetingFeed.started(workspaceId, r.meeting);
+    if (r.ok) ctx.leadMeetingFeed?.started(workspaceId, r.meeting);
     return r.ok ? ctx.j(201, { meeting: r.meeting }) : answer(r, {});
   }
   if (!meetingId) return ctx.j(400, { error: 'id required' });
@@ -243,9 +243,10 @@ async function meetingAction(
         refused = 'sign-in';
       }
     }
-    // Everything else the room says, the lead hears as the meeting goes.
+    // Everything else the room says goes to the meeting's notes and pages.
+    // The lead hears it only while the feed is switched on (off by default).
     const m = meetings.current(workspaceId);
-    if (r.fresh && !toLead && m) ctx.leadMeetingFeed.heard(workspaceId, m, r.line);
+    if (r.fresh && !toLead && m) ctx.leadMeetingFeed?.heard(workspaceId, m, r.line);
     return ctx.j(200, {
       line: r.line,
       ...(toLead ? { message: toLead } : {}),
@@ -255,7 +256,7 @@ async function meetingAction(
   if (action === 'voice') return leadLineVoice(ctx, rq.req, workspaceId, meetingId, body?.turn);
   if (action === 'end') {
     const r = meetings.end(workspaceId, meetingId);
-    if (r.ok) ctx.leadMeetingFeed.ended(workspaceId);
+    if (r.ok) ctx.leadMeetingFeed?.ended(workspaceId);
     return answer(r, {});
   }
   return ctx.j(400, { error: 'unknown action' });

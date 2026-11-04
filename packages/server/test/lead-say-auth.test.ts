@@ -61,6 +61,8 @@ describe('speaking into a meeting, with the agent token required', () => {
       port: 0,
       dataDir,
       requireAgentToken,
+      // The plugin-version gate below is the feed's, which is off by default.
+      meetingLeadFeed: true,
       identifyAgentCaller: async () => ({ ok: true, agentId: callerIs, via: 'session' }),
     });
     base = `http://127.0.0.1:${handle.port}`;

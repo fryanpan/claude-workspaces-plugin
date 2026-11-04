@@ -75,8 +75,9 @@ export interface WorkspaceRoutesContext {
   leadChat: LeadChat;
   /** The meeting each board's lead chat is running. */
   leadChatMeetings: LeadChatMeetings;
-  /** The board's lead in that meeting: its start and the room's lines. */
-  leadMeetingFeed: LeadMeetingFeed;
+  /** The board's lead in that meeting: its start and the room's lines. Null
+   *  while the feed is off, which it is by default (`meetingLeadFeedEnabled`). */
+  leadMeetingFeed: LeadMeetingFeed | null;
   /** The voice a line the lead says into a meeting is played in, or null
    *  when this server has none (the line still shows). */
   leadMeetingVoice: SpokenVoice | null;
