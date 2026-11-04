@@ -223,9 +223,13 @@ describe('maybeAutoWatch answers on the argument shape alone', () => {
     expect(await watchedBy('get_doc', args)).toEqual([]);
   });
 
-  it('names the four tools whose intent auto-watch must not reverse', () => {
+  it('names the tools auto-watch must not fire before', () => {
     expect([...NO_AUTO_WATCH_TOOLS].sort()).toEqual([
       'attach_doc',
+      'attach_markdown',
+      'attach_mockup',
+      'bind_mock',
+      'create_review_doc',
       'observe_url',
       'unwatch_doc',
       'watch_doc',
