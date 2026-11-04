@@ -216,7 +216,7 @@ Claude Code sign-in:
 ```bash
 bun run machine:deploy --project <project> --memory 2048 \
   --lead-board <boardId> [--claude-account <label>] \
-  [--github-deploy-key <keychain entry>]
+  [--github-deploy-key <keychain entry> --lead-repo <owner/name>]
 ```
 
 - `--lead-board` sets `CW_LEAD_BOARD`. Without a board no lead runs, and the
@@ -228,6 +228,10 @@ bun run machine:deploy --project <project> --memory 2048 \
   `claude-lead-oauth-token.<label>`.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private
   key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
+  The deploy sets it only once GitHub lists it read-only: it reads the deploy
+  keys of each `--lead-repo` (repeatable) and `--push-repo` through `gh api
+  repos/<repo>/keys`, and refuses a key that can write, a key on none of them,
+  and a run that names no repo.
 - A machine with a lead needs `--memory 2048` or more; the deploy refuses a
   smaller one.
 - Each is set once, like every secret. A run that names a source sets that

@@ -11,6 +11,7 @@ import {
   ORG_KEY_SECRET,
   type ProjectConfig,
 } from './deploy-plan.ts';
+import { assertLeadKeyReadOnly } from './lead-key-check.ts';
 import { keychainRead } from './mac-ops.ts';
 import { recipientOf } from './snapshot.ts';
 
@@ -61,8 +62,9 @@ function leadToken(cfg: ProjectConfig): string {
 }
 
 /**
- * The deploy key, BASE64 so it is one line. The error names the entry, never
- * any part of the value.
+ * The deploy key, BASE64 so it is one line, and only once GitHub lists it
+ * read-only on a repo the lead works in (`lead-key-check.ts`, review L4). The
+ * error names the entry or the repo, never any part of the value.
  */
 function deployKey(cfg: ProjectConfig): string {
   const entry = cfg.keychain.deployKey ?? '';
@@ -73,5 +75,7 @@ function deployKey(cfg: ProjectConfig): string {
     )
   )
     throw new Error(`the Keychain entry ${entry} does not hold an OpenSSH private key`);
+  const repo = assertLeadKeyReadOnly(key, [...(cfg.leadRepos ?? []), ...(cfg.pushRepos ?? [])]);
+  console.log(`[deploy]   ${LEAD_DEPLOY_KEY_SECRET} is read-only on ${repo}, as GitHub lists it`);
   return Buffer.from(`${key}\n`).toString('base64');
 }

@@ -27,7 +27,8 @@
  *   from the Keychain's `claude-lead-oauth-token` (or, with
  *   `--claude-account <label>`, `claude-lead-oauth-token.<label>`), and the
  *   repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
- *   `--github-deploy-key` names. A machine with a lead needs `--memory 2048`.
+ *   `--github-deploy-key` names, only once GitHub lists it read-only on the
+ *   `--lead-repo` or a `--push-repo` (`lead-key-check.ts`). A machine with a lead needs `--memory 2048`.
  *   Each is set once, like every secret, except that a run naming its source
  *   sets it again, and `--refresh-lead` sets all three again
  *   the server's push keys, one write deploy key per `--push-repo`, which
@@ -470,6 +471,7 @@ async function main(): Promise<void> {
     githubDeployKey: arg(args, 'github-deploy-key'),
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),
+    leadRepos: args.flatMap((a, i) => (a === '--lead-repo' ? [args[i + 1] ?? ''] : [])),
     pushRepos: args.flatMap((a, i) => (a === '--push-repo' ? [args[i + 1] ?? ''] : [])),
     refreshPushKeys: args.includes('--refresh-push-keys'),
   });
