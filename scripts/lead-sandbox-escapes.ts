@@ -1,7 +1,8 @@
 /**
  * `--check`'s rows for the ways a lead could start a process outside the
  * wall (`escapeRules` in `lead-sandbox-lib.ts`), and for the board wall
- * (`lead-sandbox-wall.ts`). Each row drives the thing
+ * (`lead-sandbox-wall.ts`), and for the tools a config opens
+ * (`lead-sandbox-tools.ts`). Each row drives the thing
  * from inside the profile and has a control outside it, so a row fails when
  * its rule is removed, not only when the probe itself breaks.
  *
@@ -13,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
+import { ADB_SERVER_PORT } from './lead-sandbox-tools.ts';
 import { BOARD_SERVER_PORTS, CONNECT_PROBE, SOCKET_CONNECT_PROBE } from './lead-sandbox-wall.ts';
 
 export interface EscapeRow {
@@ -347,4 +349,86 @@ export function boardSocketRows(
       };
     }),
   ];
+}
+
+/**
+ * adb (`lead-sandbox-tools.ts`). A lead with it must run the SDK's `adb
+ * version`, which asks no server. Any other lead's connect to adb's port
+ * must answer `EPERM`. There is no control outside the wall: it would open a
+ * real connection to the adb server, and `EPERM` cannot come from anything
+ * but the sandbox (a port with no listener answers `ECONNREFUSED`).
+ */
+export function adbRow(
+  profile: string,
+  cwd: string,
+  hasAdb: boolean,
+  sdk: string,
+  runtime: string = probeRuntime() ?? process.execPath,
+): EscapeRow {
+  if (!hasAdb) {
+    const inside = connectFrom(runtime, profile, cwd, '127.0.0.1', ADB_SERVER_PORT);
+    return {
+      ok: inside === 'EPERM',
+      says: `adb: port ${ADB_SERVER_PORT} answers ${inside} inside (must be EPERM; the config gives no adb)`,
+    };
+  }
+  const adb = join(sdk, 'adb');
+  const r = spawnSync(SANDBOX_EXEC, ['-f', profile, adb, 'version'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const ran = r.status === 0 && r.stdout.includes('Android Debug Bridge');
+  return {
+    ok: ran,
+    says: `adb: ${adb} version ${ran ? 'runs' : `exits ${r.status}`} inside (must run)`,
+  };
+}
+
+/**
+ * The `bun` wrapper (`lead-sandbox-tools.ts`): inside the profile, a bun
+ * started in the plugin cache must see `BUN_CONFIG_SKIP_INSTALL_PACKAGES=1`
+ * and one started in the lead's own project must not (the control).
+ */
+export function bunWrapperRow(
+  profile: string,
+  cwd: string,
+  wrapper: string,
+  pluginDir: string,
+): EscapeRow {
+  const seen = (dir: string) => {
+    const r = spawnSync(
+      SANDBOX_EXEC,
+      [
+        '-f',
+        profile,
+        wrapper,
+        '--cwd',
+        dir,
+        '-e',
+        'console.log(process.env.BUN_CONFIG_SKIP_INSTALL_PACKAGES ?? "unset")',
+      ],
+      { cwd, encoding: 'utf8', timeout: 10_000 },
+    );
+    return r.status === 0 ? r.stdout.trim() : `exit ${r.status}`;
+  };
+  const plugin = seen(pluginDir);
+  const own = seen(cwd);
+  return {
+    ok: plugin === '1' && own === 'unset',
+    says: `bun wrapper: skips the install in ${pluginDir} (${plugin}, must be 1) and not in ${cwd} (${own}, must be unset)`,
+  };
+}
+
+/** uv (`lead-sandbox-tools.ts`): inside the profile, uv must list the Pythons it installed. */
+export function uvRow(profile: string, cwd: string, env: Record<string, string>): EscapeRow {
+  const r = spawnSync(
+    SANDBOX_EXEC,
+    ['-f', profile, 'uv', 'python', 'list', '--only-installed', '--offline'],
+    { cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 20_000 },
+  );
+  return {
+    ok: r.status === 0,
+    says: `uv: python list ${r.status === 0 ? 'answers' : `exits ${r.status}`} inside (must answer)`,
+  };
 }

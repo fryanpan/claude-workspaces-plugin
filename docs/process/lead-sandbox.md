@@ -186,6 +186,47 @@ Lead's included. The opt-out drops the tmux rules and its `--check` row, and
 nothing else. The Team Lead itself runs outside the wall and keeps starting,
 reading and sending to leads' panes as before (measured below).
 
+**A lead that drives an Android phone** lists `"tools": ["adb"]` in its
+entry. The profile then lets it read and run `~/Android/Sdk/platform-tools`,
+and not write there, and connect to adb's server on port 5037. Every other
+lead is refused that port at every address, because the server on it drives
+every phone plugged into this Mac. Measured 4 November: inside a real lead's
+profile with `adb` listed, `adb version` runs; without it, exec of the same
+binary is refused and a connect to 5037 answers `EPERM`. `--check` runs
+`adb version` inside the profile of a lead with adb, and probes 5037 inside
+every other lead's (it must be `EPERM`). It has no control outside the wall
+for that port, since the control would open a real connection to the adb
+server.
+
+**A lead that runs `uv` or `uvx`** lists `"uv"` in `tools`. The launch then
+gives it a uv cache of its own,
+`~/Library/Caches/claude-workspaces/lead-sandbox/<lead>/uv` (`UV_CACHE_DIR`
+and `UV_TOOL_DIR`), which its profile lets it write, and lets it read the
+Pythons uv installed (`~/.local/share/uv/python`), not write them. The
+owner's `~/.cache/uv` stays refused: a lead that wrote there could change a
+package the owner's next `uvx` runs. Measured 4 November: inside a lead's
+profile, `uvx applemusic-mcp` failed to start because the cache was refused
+(`failed to create directory ~/.cache/uv`), then because the Python folder
+was; with `uv` listed, the same `uvx` installed the package into the lead's
+cache and imported it. `--check` runs `uv python list` inside the profile of
+a lead with uv.
+
+**Every walled lead gets a `bun` wrapper** first on its PATH
+(`~/.config/claude-workspaces/lead-tools/<lead>/bin/bun`, which it reads and
+cannot write). A plugin MCP server such as Discord's starts with
+`bun run --cwd <plugin> start`, and its start script runs `bun install`
+first; bun relinks each package's bin on every install, the plugin cache is
+read only in the wall, so the install exited 1 (`Failed to link which:
+EPERM`) and the server never started: Claude Code reported
+`CONNECTION_CLOSED`. For a bun whose folder (`--cwd`, or the folder it runs
+in) is in `~/.claude/plugins`, the wrapper sets
+`BUN_CONFIG_SKIP_INSTALL_PACKAGES=1`, so the install exits 0 without
+writing and the server runs on the packages an unwalled session installed.
+Anywhere else it changes nothing. A plugin whose packages were never
+installed outside the wall still fails; start it once unwalled. `--check`
+asks the wrapper, inside the profile, from the plugin cache (it must skip)
+and from the lead's project (it must not).
+
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
 

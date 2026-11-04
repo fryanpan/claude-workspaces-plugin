@@ -76,6 +76,7 @@ describe('a hooks folder inside a walled project', () => {
         platform: 'darwin',
         say: (line) => said.push(line),
         readToken: () => null,
+        leadTools: () => ({}),
         registerRoots: () => null,
         hooksPathOf: readHooks,
         spawn: () => {
