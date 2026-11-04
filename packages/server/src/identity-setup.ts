@@ -33,7 +33,6 @@ import { EmailCodes } from './auth/email-code.ts';
 import { SessionRevocations } from './auth/session-revocations.ts';
 import {
   SESSION_COOKIE,
-  clearedPlainSessionCookieHeader,
   sessionKey as deriveSessionKey,
   sessionCookieHeader as emailSessionCookieHeader,
   readSessionCookie,
@@ -376,10 +375,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     const read = readSessionCookie(req.headers.get('cookie'), { secure });
     if (!read) return res;
     const claims = verifyEmailSession(read.value, emailSessionKey());
-    // A reader signed in before the `__Host-` name arrives with the plain
-    // one; over https that is moved across now, not when a day has passed.
-    const rename = secure && read.name === SESSION_COOKIE;
-    if (!claims || (!sessionNeedsRefresh(claims) && !rename)) return res;
+    if (!claims || !sessionNeedsRefresh(claims)) return res;
     if (res.headers.get('set-cookie')?.includes(`${SESSION_COOKIE}=`)) return res;
     const rec = sessionIdentityFor(req);
     if (!rec) return res;
@@ -392,7 +388,6 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
       // (An old-format cookie gains its id here — the upgrade path.)
       emailSessionCookieHeader(refreshedSession(claims), emailSessionKey(), { secure }),
     );
-    if (rename) res.headers.append('set-cookie', clearedPlainSessionCookieHeader({ secure }));
     return res;
   };
 
