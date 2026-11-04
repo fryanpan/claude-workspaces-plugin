@@ -478,6 +478,13 @@ const EVICT_SWEEP_MS = 10 * 60_000;
 /** Doc → `.ydoc`: how long a change waits before the CRDT snapshot is persisted. */
 const PERSIST_MS = DOC_STORE_TIMINGS.persistMs;
 
+/** A bound file a deferred read just brought back, handed to the hydrate it
+ *  was read for (`bindAfterRead`). Used only for the path it names. */
+interface HandedRead {
+  path: string;
+  file: PrereadFile;
+}
+
 export class DocStore {
   private docs = new Map<string, LiveDoc>();
 
@@ -1426,14 +1433,23 @@ export class DocStore {
    */
   private readonly parkedSources = new Map<
     string,
-    { reason: string; at: number; note: string; retryPath?: string; editedBefore?: number }
+    {
+      reason: string;
+      at: number;
+      note: string;
+      retryPath?: string;
+      editedBefore?: number;
+      /** Set by a deferred read that came back with no bytes, so the retry's
+       *  own "being read" park does not hide why the last one failed. */
+      failed?: true;
+    }
   >();
 
   /** Note why `docId` is parked, replacing any older reason. */
   private parkSource(
     docId: string,
     reason: string,
-    opts: { note: string; retryPath?: string },
+    opts: { note: string; retryPath?: string; failed?: true },
   ): void {
     const earlier = this.parkedSources.get(docId);
     this.parkedSources.set(docId, {
@@ -1442,6 +1458,7 @@ export class DocStore {
       note: opts.note,
       ...(opts.retryPath ? { retryPath: opts.retryPath } : {}),
       editedBefore: earlier ? earlier.editedBefore : this.docs.get(docId)?.lastContentChangeAt,
+      ...(opts.failed ? { failed: true as const } : {}),
     });
     if (opts.retryPath) this.armParkRetry();
   }
@@ -1500,7 +1517,10 @@ export class DocStore {
    * file never comes back would be re-stamped on every retry and never go
    * idle, although a park is deliberately no eviction hold.
    */
-  private rehydrateUntouched(docId: string, opts: { liveWins?: boolean } = {}): boolean {
+  private rehydrateUntouched(
+    docId: string,
+    opts: { liveWins?: boolean; read?: HandedRead } = {},
+  ): boolean {
     const touched = this.lastTouchedAt.get(docId);
     try {
       return this.hydrateDoc(docId, opts);
@@ -1545,7 +1565,7 @@ export class DocStore {
    */
   private hydrateDoc(
     docId: string,
-    opts: { blocking?: boolean; liveWins?: boolean; bind?: false } = {},
+    opts: { blocking?: boolean; liveWins?: boolean; bind?: false; read?: HandedRead } = {},
   ): boolean {
     if (opts.bind === false) {
       // A read-only hydrate: the `.ydoc` comes into memory and NOTHING is
@@ -1562,7 +1582,7 @@ export class DocStore {
 
   private hydrateDocInner(
     docId: string,
-    opts: { blocking?: boolean; liveWins?: boolean } = {},
+    opts: { blocking?: boolean; liveWins?: boolean; read?: HandedRead } = {},
   ): boolean {
     // Whether this hydrate may read its bound file on the main thread.
     //
@@ -1627,7 +1647,7 @@ export class DocStore {
         this.parkSource(docId, reason, { note: reason });
         return false;
       }
-      const homePre = this.prereadFor(docId, placement.absPath, blocking);
+      const homePre = this.prereadFor(docId, placement.absPath, blocking, opts.read);
       if (homePre === 'unavailable') return false;
       this.bindings.retargetHomeBinding(doc, placement.absPath, {
         liveWins,
@@ -1640,7 +1660,7 @@ export class DocStore {
       this.parkedSources.delete(docId);
       return false;
     }
-    const preread = this.prereadFor(docId, src, blocking);
+    const preread = this.prereadFor(docId, src, blocking, opts.read);
     if (preread === 'unavailable') return false;
     // With bytes in hand, existence is something we KNOW rather than something
     // to ask the filesystem — `existsSync` on a path whose provider has
@@ -1706,7 +1726,13 @@ export class DocStore {
     docId: string,
     path: string,
     blocking: boolean,
+    handed?: HandedRead,
   ): PrereadFile | 'unavailable' | undefined {
+    // The bytes a deferred read of THIS path just brought back, handed over
+    // directly. `takeFresh` would hand nothing over for a path a guard covers,
+    // and that is every file under a walled lead's roots: the bind found no
+    // bytes, parked again and read again, every tick, and never bound.
+    if (handed && handed.path === path) return handed.file;
     const fresh = boundFiles.takeFresh(path);
     if (fresh) {
       return fresh.exists
@@ -1772,6 +1798,13 @@ export class DocStore {
     // read, and the read goes to the pool, which either brings it back and
     // binds a moment later or quarantines the path and says so once.
     if (blocking) return undefined;
+    // A retry of a read that already came back empty-handed keeps saying
+    // why, rather than "being read": the retry tick re-parks every poll.
+    const earlier = this.parkedSources.get(docId);
+    if (earlier?.failed && earlier.retryPath === path) {
+      this.bindAfterRead(docId, path);
+      return 'unavailable';
+    }
     // The ordinary deferral, and the one an owner is most likely to catch:
     // the read is in flight and the binding lands a moment later. Recorded
     // anyway, because from the outside this is indistinguishable from the
@@ -1848,9 +1881,11 @@ export class DocStore {
     // backoff, and an edit made then is exactly as unknown to the file.
     const park = this.parkedSources.get(docId);
     const editedBefore = park ? park.editedBefore : this.docs.get(docId)?.lastContentChangeAt;
+    // `keep: false`: the bytes are handed straight to the hydrate below, so
+    // nothing is left in the held map for a later hydrate to trust.
     void boundFiles
-      .read(path)
-      .then(() => {
+      .read(path, { keep: false })
+      .then((result) => {
         // The instance this read belongs to is done; see `stopped`.
         if (this.stopped) return;
         // Evicted while the read ran, or bound by somebody else — either way
@@ -1858,9 +1893,19 @@ export class DocStore {
         // pull it back into memory as a side effect of a read it never asked
         // for.
         if (!this.docs.has(docId) || this.bindings.has(docId)) return;
+        if (result.status === 'unavailable') {
+          this.parkFailedRead(docId, path, result.reason);
+          return;
+        }
         const editedAfter = this.docs.get(docId)?.lastContentChangeAt;
         const editedInGap = editedAfter !== undefined && editedAfter !== editedBefore;
-        this.rehydrateUntouched(docId, editedInGap ? { liveWins: true } : {});
+        const file: PrereadFile = result.exists
+          ? { exists: true, text: result.text, mtimeMs: result.mtimeMs, size: result.size }
+          : { exists: false };
+        this.rehydrateUntouched(docId, {
+          ...(editedInGap ? { liveWins: true } : {}),
+          read: { path, file },
+        });
       })
       .catch((err) => {
         console.error(`[doc-store] ${docId}: deferred bind failed:`, err);
@@ -1868,6 +1913,45 @@ export class DocStore {
       .finally(() => {
         this.deferredBinds.delete(docId);
       });
+  }
+
+  /**
+   * A deferred read came back with no bytes. Say why on the park, so a status
+   * call stops reading "being read" for a read that is over.
+   *
+   * A timeout or a backoff quarantined the path, and a busy pool is the
+   * pool's state: the hydrate's own branches name those, so it runs again
+   * (it reads nothing while they hold). A refusal or an error earned no
+   * backoff, so the park keeps its `retryPath` and the retry tick tries again
+   * each poll — one cheap call, never on the main thread — with this reason
+   * kept until a read lands.
+   */
+  private parkFailedRead(
+    docId: string,
+    path: string,
+    why: 'timeout' | 'busy' | 'backoff' | 'error' | 'refused',
+  ): void {
+    if (why !== 'refused' && why !== 'error') {
+      this.rehydrateUntouched(docId);
+      return;
+    }
+    const shown = redactBoundPath(path);
+    const reason =
+      why === 'refused'
+        ? `the bound file was refused by this board's folder guard (${shown}): it is not ` +
+          'inside a folder this board may use, or a link on its way leads out of one; ' +
+          'content is served from the .ydoc and writes are parked'
+        : `the bound file could not be read (${shown}), for example an online-only cloud ` +
+          'file that is not on this machine; content is served from the .ydoc and writes ' +
+          'are parked until it can be read';
+    const note =
+      why === 'refused'
+        ? "the bound file was refused by this board's folder guard, so this doc is parked: " +
+          'edits are kept in the .ydoc and not written to the file.'
+        : 'the bound file could not be read, so this doc is parked: edits are kept in the ' +
+          '.ydoc and written to the file once it can be read.';
+    console.warn(`[doc-store] ${docId}: deferred read ${why}; writes parked (${shown})`);
+    this.parkSource(docId, reason, { note, retryPath: path, failed: true });
   }
 
   /**
