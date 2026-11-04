@@ -179,6 +179,10 @@ async function openPage(
     deviceScaleFactor: 1,
     mobile: touch,
   });
+  // A loaded runner, on request: `COMMENT_FOCUS_CPU_THROTTLE=4` runs the page
+  // four times slower, so edits can land mid-keystroke as they do on CI.
+  const throttle = Number(process.env.COMMENT_FOCUS_CPU_THROTTLE ?? 1);
+  if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
   if (touch) {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   }
