@@ -12,6 +12,7 @@
  */
 import { Editor } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
+import { Selection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from 'tiptap-markdown';
 import type {
@@ -82,7 +83,12 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       // surfaces showed the backslash literally. Respell it as the two-space
       // break: invisible in raw text, and it round-trips through a draft
       // restore where a bare newline would soften back into a space.
-      return md.replace(/\\\n/g, '  \n');
+      // A space typed last is the reader mid-sentence, and the serializer
+      // trims it. Keep it: a rebuilt card seeds its new editor from this
+      // value, and without the space the next word ran on ("firstand").
+      const tail = trailingSpaces(editor.state.doc.textContent);
+      const out = md.replace(/\\\n/g, '  \n');
+      return tail && !out.endsWith(tail) ? out.replace(/[ ]*$/, tail) : out;
     },
     setMarkdown(md: string) {
       // `emitUpdate: false` is load-bearing rather than an optimisation. A
@@ -90,6 +96,13 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       // back into `ta.value`, so a comment handed back after a refused post
       // would come back subtly rewritten instead of verbatim.
       editor.commands.setContent(md, { emitUpdate: false });
+      // The parser trims the same space `getMarkdown` kept; put it back,
+      // without an update for the reason above.
+      const tail = trailingSpaces(md);
+      if (tail && !editor.state.doc.textContent.endsWith(tail)) {
+        const end = Selection.atEnd(editor.state.doc).from;
+        editor.view.dispatch(editor.state.tr.insertText(tail, end).setMeta('preventUpdate', true));
+      }
     },
     focus(sel: ComposerSelection | null, opts: ComposerFocusOpts = {}) {
       const scrollIntoView = opts.scroll !== false;
@@ -102,6 +115,13 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       // `ReferenceError` that named nothing a person could act on. Nothing is
       // lost by declining to move a caret on a page that no longer exists.
       if (typeof requestAnimationFrame !== 'function') return;
+      // The caret moves NOW, not a frame later. A rebuilt card's box mounts
+      // with the hidden textarea still holding focus, and every key in the
+      // frame Tiptap waits went into that textarea and was overwritten by the
+      // editor's next update: a lead's suggestion landing at 1180 cut a
+      // space, or a whole phrase, out of the reply being typed.
+      if (!sel) editor.commands.setTextSelection(editor.state.doc.content.size);
+      if (!editor.isDestroyed) editor.view.focus();
       editor.commands.focus(sel ? undefined : 'end', { scrollIntoView });
     },
     blur() {
@@ -123,4 +143,9 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       editor.destroy();
     },
   };
+}
+
+/** The run of plain spaces a string ends with: what a reader typed last. */
+function trailingSpaces(text: string): string {
+  return /[ ]+$/.exec(text)?.[0] ?? '';
 }

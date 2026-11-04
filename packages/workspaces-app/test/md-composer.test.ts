@@ -544,3 +544,37 @@ describe('hard breaks leave the composer without backslashes', () => {
     }
   });
 });
+
+/**
+ * A lead's suggestion landing at 1180 rebuilds every margin card, and each
+ * rebuilt reply box is a fresh editor seeded from the old box's markdown.
+ * Two things went missing from the reply on the way across (measured headless,
+ * 4 Nov): a space typed last ("first " came back "first", so the next word
+ * ran on), and every key pressed in the frame before the new editor took the
+ * caret, which went into the hidden textarea and was overwritten.
+ */
+describe('a reply carried into a rebuilt card keeps every key', () => {
+  it('takes the caret in the same task it was asked for, not a frame later', () => {
+    const refresh = attachMarkdownComposer(ta);
+    ta.value = 'Bob checks the Riverbend slipway';
+    refresh();
+    focusMarkdownComposer(ta, null);
+    expect(surfaceOf(ta)?.contains(document.activeElement)).toBe(true);
+    expect(composerSelection(ta)?.from).toBe('Bob checks the Riverbend slipway'.length + 1);
+  });
+
+  it('keeps a trailing space through the box and back into a new editor', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const ed = realChunk.createComposerEditor({ parent, placeholder: '', onUpdate: () => {} });
+    try {
+      ed.setMarkdown('Alice walks the north quay ');
+      expect(ed.getMarkdown()).toBe('Alice walks the north quay ');
+      ed.setMarkdown('Alice walks the north quay');
+      expect(ed.getMarkdown()).toBe('Alice walks the north quay'); // control: nothing added
+    } finally {
+      ed.destroy();
+      parent.remove();
+    }
+  });
+});
