@@ -21,6 +21,7 @@ import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import { wantsJson } from '../workspace-path.ts';
+import { refuseLeadDiff } from './lead-diff-scope.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -247,7 +248,11 @@ export async function handleWorkspaceCreateRead(
     // of the two, not the narrower.
     if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
     const body = await safeJson(req);
-    const repoPath = body?.repo as string | undefined;
+    // A board's lead reaches this path for its own board only
+    // (`middleware/lead-scope.ts`); the body is held to its roots here.
+    const lead = rq.leadBoard ? refuseLeadDiff(rq.leadBoard, body, ctx.leadDiffRepo) : null;
+    if (lead && 'error' in lead) return j(403, lead);
+    const repoPath = lead ? lead.repo : (body?.repo as string | undefined);
     const base = body?.base as string | undefined;
     const target = body?.target as string | undefined;
     if (!repoPath) {
@@ -274,8 +279,11 @@ export async function handleWorkspaceCreateRead(
         ? (body.groups as Array<{ title: string; paths: string[]; details?: string }>)
         : undefined,
       maxFiles: typeof body?.maxFiles === 'number' ? Number(body.maxFiles) : undefined,
-      owner: body?.owner as string | undefined,
-      producedBy: body?.producedBy as { agentId?: string; sessionId?: string } | undefined,
+      // A lead's claims of who owns and who produced the review are not taken.
+      owner: lead ? undefined : (body?.owner as string | undefined),
+      producedBy: lead
+        ? undefined
+        : (body?.producedBy as { agentId?: string; sessionId?: string } | undefined),
     });
     if (!res.ok) {
       const status =

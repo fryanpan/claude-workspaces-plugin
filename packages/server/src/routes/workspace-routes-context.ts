@@ -46,6 +46,9 @@ export interface WorkspaceRoutesContext {
   /** The registered root `folderPath` resolves to, when it is one of the
    *  board's (`board-socket-roots.ts`); else null. */
   leadBindRoot: (boardId: string, folderPath: string) => string | null;
+  /** `repo` as the roots spell it, when the innermost root holding it is one
+   *  of the board's; else null (`routes/lead-diff-scope.ts`). */
+  leadDiffRepo: (boardId: string, repo: string) => string | null;
   /** The ydoc projection of the store, refreshed by hand after the writes
    *  that emit no store event (attach, unfile, archive-in-place). */
   taskProjection: TaskProjection;

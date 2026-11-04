@@ -9,7 +9,7 @@
  */
 import type { Thread } from '@claude-workspaces/core';
 import { type Anchor, anchors } from '@claude-workspaces/core';
-import { showFile } from '../git-diff.ts';
+import { showFileAsync } from '../git-diff.ts';
 import {
   RESEARCH_TOPIC_MAX,
   askCommentFor,
@@ -431,7 +431,7 @@ export async function handleDocResourceCore(
     if (meta.diffStatus === 'added') {
       baseText = '';
     } else if (workspaceRoot && diffBase && basePath) {
-      baseText = showFile(workspaceRoot, diffBase, basePath);
+      baseText = await showFileAsync(workspaceRoot, diffBase, basePath);
       if (baseText === null) error = 'base content unavailable (repo moved or pruned?)';
     } else {
       error = 'diff metadata incomplete';

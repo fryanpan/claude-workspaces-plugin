@@ -22,6 +22,9 @@
  *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
  *   board must be the lead's, the folder one of the roots registered for it
  *   (`board-socket-roots.ts`), and a board create is refused;
+ * - `POST /workspaces/<board>/attachments` — a diff review
+ *   (`create_diff_review`) of a repository inside one of the board's roots;
+ *   `routes/lead-diff-scope.ts` holds the body to it;
  * - `POST /workspaces/<board>/agents/<agent>/notes`, `…/prompts` and
  *   `…/mirror` — the plugin's Stop, PermissionDenied, UserPromptSubmit,
  *   MessageDisplay and PostToolBatch hooks, and `post_status`'s untargeted
@@ -66,6 +69,7 @@ export function leadScopeAllows(
   if (!match || decoded(match[1] ?? '') !== boardId) return false;
   const rest = match[2] ?? '';
   if (rest === 'docs') return m === 'GET' || m === 'POST';
+  if (rest === 'attachments') return m === 'POST';
   if (rest === 'git/push') return m === 'POST';
   if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
