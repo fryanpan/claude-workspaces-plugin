@@ -8,6 +8,7 @@
  * the script safe to run twice.
  */
 import { createHash } from 'node:crypto';
+import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 
 export type TunnelMode = 'quick' | 'named';
 
@@ -44,6 +45,10 @@ export interface ProjectConfig {
   leadBoard?: string;
   /** Lead secrets to set again even though they exist: the ones this run named. */
   leadRefresh: string[];
+  /** The repos the server pushes to, each with its own deploy key (`--push-repo`). */
+  pushRepos?: string[];
+  /** Make the push keys again even though the secret exists (`--refresh-push-keys`). */
+  refreshPushKeys: boolean;
 }
 
 export interface ConfigInput {
@@ -62,6 +67,8 @@ export interface ConfigInput {
   leadBoard?: string;
   /** Set every lead secret again from its source (`--refresh-lead`). */
   refreshLead?: boolean;
+  pushRepos?: string[];
+  refreshPushKeys?: boolean;
 }
 
 export const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
@@ -124,6 +131,11 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       `lead board must be a board id (A-Z, a-z, 0-9, _ and -), got "${input.leadBoard}"`,
     );
   }
+  const badRepo = input.pushRepos?.find((r) => !isRepoName(r));
+  if (badRepo !== undefined) throw new Error(`push repo must be owner/name, got "${badRepo}"`);
+  if (input.refreshPushKeys && !input.pushRepos?.length) {
+    throw new Error('--refresh-push-keys makes a key per repo, so it needs --push-repo');
+  }
   if (input.refreshLead && input.leadBoard === undefined) {
     throw new Error('--refresh-lead sets the board again, so it needs --lead-board');
   }
@@ -161,6 +173,8 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     },
     ...(input.leadBoard !== undefined ? { leadBoard: input.leadBoard } : {}),
     leadRefresh,
+    ...(input.pushRepos?.length ? { pushRepos: [...input.pushRepos] } : {}),
+    refreshPushKeys: input.refreshPushKeys === true,
   };
 }
 
@@ -192,9 +206,15 @@ export type Action =
   | { kind: 'make-writer-key' }
   | { kind: 'set-lifecycle' }
   | { kind: 'set-secrets'; names: string[] }
+  | { kind: 'make-push-keys'; repos: string[] }
   | { kind: 'unset-secrets'; names: string[] }
   | { kind: 'deploy' }
   | { kind: 'start-machine'; id: string };
+
+/** The server's push credential, a deploy key per repo: only the keeper sets it (`keeper-push-keys.ts`). */
+export const PUSH_KEYS_SECRET = 'CW_GITHUB_PUSH_KEYS';
+/** A classic GitHub token, which a project server never holds: unset wherever it is found. */
+export const CLASSIC_PUSH_TOKEN_SECRET = 'CW_GITHUB_PUSH_TOKEN';
 
 /** The secret a project server spends Claude calls from (project-profile.ts). */
 export const ORG_KEY_SECRET = 'CW_ORG_ANTHROPIC_API_KEY';
@@ -277,14 +297,20 @@ export function plan(
     ...settings,
   ].filter((n) => !obs.secrets.has(n) || refresh.includes(n) || cfg.leadRefresh.includes(n));
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
+  const pushKeys =
+    cfg.pushRepos !== undefined && (cfg.refreshPushKeys || !obs.secrets.has(PUSH_KEYS_SECRET));
+  if (pushKeys) actions.push({ kind: 'make-push-keys', repos: cfg.pushRepos ?? [] });
   // A machine that ran a quick tunnel keeps running one while this is set.
-  const unset =
-    cfg.tunnel === 'named' && obs.secrets.has('CW_TUNNEL_MODE') ? ['CW_TUNNEL_MODE'] : [];
+  const unset = [
+    ...(cfg.tunnel === 'named' && obs.secrets.has('CW_TUNNEL_MODE') ? ['CW_TUNNEL_MODE'] : []),
+    ...(obs.secrets.has(CLASSIC_PUSH_TOKEN_SECRET) ? [CLASSIC_PUSH_TOKEN_SECRET] : []),
+  ];
   if (unset.length > 0) actions.push({ kind: 'unset-secrets', names: unset });
   const current = obs.machines.filter((m) => m.state !== 'destroyed');
   if (
     current.length === 0 ||
     names.length > 0 ||
+    pushKeys ||
     unset.length > 0 ||
     current.some((m) => m.imageTag !== cfg.imageLabel || m.memoryMb !== cfg.vmMemoryMb)
   ) {
