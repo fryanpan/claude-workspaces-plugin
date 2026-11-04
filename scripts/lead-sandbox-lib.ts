@@ -91,20 +91,23 @@ export { CLAUDE_CODE_FOLDERS, CLAUDE_READ_ONLY_FOLDERS, SERVER_STATE_FOLDERS, tr
  * What in a project makes the owner's own git run a command: in a git folder,
  * `config` (`core.fsmonitor`, filter drivers), `config.worktree`, `commondir`
  * (where git reads the config from), `info/` (which filters apply) and
- * `hooks/`. A lead that wrote one would run code outside the wall the next
+ * `hooks/`; and a worktree's `gitdir`, which names the folder the owner's
+ * `git worktree remove` acts on. A lead that wrote one would run code outside
+ * the wall, or act on a folder outside it, the next
  * time the owner, or an unwalled session, ran git in that project. The names
  * `.git`, `.git/worktrees/<name>` and `.git/modules/…` are read only too:
  * Seatbelt judges a rename by the two names it moves, so a git folder built
  * elsewhere and renamed into place passed the rules on the files in it, and
  * a `.git` file can point git at any folder. At any depth, so a nested repo
  * and a worktree are covered. The cost: a walled lead cannot `git init`,
- * `git clone`, `git worktree add` or update a submodule inside a project.
+ * `git clone`, `git worktree add` or update a submodule inside a project;
+ * the git proxy makes its worktrees (`git-proxy-worktree.ts`).
  * A `core.hooksPath` inside a project is refused at launch
  * (`lead-sandbox-git.ts`).
  */
 export function gitCodeRegex(projectEnd: string): string {
   const gitFolder = '\\.git(/(modules/.+|worktrees(/[^/]+)?))?';
-  const runs = '(/(config(\\.worktree)?|commondir|info(/.*)?|hooks(/.*)?))?';
+  const runs = '(/(config(\\.worktree)?|commondir|gitdir|info(/.*)?|hooks(/.*)?))?';
   return `^${escapeRegex(projectEnd)}/(.*/)?${gitFolder}${runs}$`;
 }
 

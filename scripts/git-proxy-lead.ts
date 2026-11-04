@@ -10,7 +10,7 @@
  * GitHub with the owner's credential.
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const GIT_PROXY_PORT = 8793;
@@ -113,19 +113,66 @@ export function ensureLeadToken(dir: string): string {
 }
 
 /**
- * Write the lead's git config, and its token if it has none yet: 32 random
- * bytes, mode 600, in a mode 700 folder. An existing token is kept, so a
- * restart does not break a lead's running session.
+ * `cw-worktree <name> [<branch>] [<base>]`, run from inside a repository in
+ * one of the lead's projects: the proxy adds `<repo>/.claude/worktrees/<name>`
+ * on a new branch (`git-proxy-worktree.ts`), and this fills in its files with
+ * the lead's own git, inside the wall. The token goes to curl on its stdin,
+ * never in its arguments.
+ */
+export function worktreeScript(lead: string, tokenFile: string, proxyUrl: string): string {
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const url = `${proxyUrl.replace(/\/+$/, '')}/-/worktree`;
+  return [
+    '#!/bin/sh',
+    `# Written by scripts/lead-sandbox.ts for ${lead}; do not edit. See scripts/git-proxy-worktree.ts.`,
+    '# cw-worktree <name> [<branch>] [<base>]: a worktree at <repo>/.claude/worktrees/<name>,',
+    '# made by the git proxy outside the wall. <branch> defaults to <name>, <base> to',
+    '# origin/HEAD (git fetch first). It is set to push to origin/<branch>.',
+    'set -eu',
+    'if [ $# -lt 1 ] || [ $# -gt 3 ]; then',
+    "  echo 'usage: cw-worktree <name> [<branch>] [<base>]' >&2",
+    '  exit 2',
+    'fi',
+    'common=$(git rev-parse --path-format=absolute --git-common-dir)',
+    'repo=$(dirname "$common")',
+    'branch=$' + '{2:-$1}',
+    'base=$' + '{3:-}',
+    `auth=$(printf 'user = "%s:%s"\\n' ${q(lead)} "$(cat ${q(tokenFile)})")`,
+    `out=$(printf '%s\\n' "$auth" | /usr/bin/curl -sS -m 120 -K - -w '\\n%{http_code}' --data-urlencode "repo=$repo" --data-urlencode "name=$1" --data-urlencode "branch=$branch" --data-urlencode "base=$base" ${q(url)}) || { echo 'cw-worktree: the git proxy did not answer' >&2; exit 1; }`,
+    `code=$(printf '%s\\n' "$out" | tail -n 1)`,
+    `path=$(printf '%s\\n' "$out" | sed '$d')`,
+    'if [ "$code" != 200 ]; then',
+    '  echo "cw-worktree: the git proxy refused it ($code): $path" >&2',
+    '  exit 1',
+    'fi',
+    'git -C "$path" reset -q --hard',
+    `repo_name=$(git -C "$path" remote get-url origin | sed -e 's#\\.git$##' -e 's#^.*/\\([^/]*/[^/]*\\)$#\\1#')`,
+    'echo "$path"',
+    'echo "push it: git -C $path push" >&2',
+    'echo "its PR: gh pr create -R $repo_name --head $branch --base <default branch> --title ... --body ..." >&2',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Write the lead's git config and `bin/cw-worktree`, and its token if it has
+ * none yet: 32 random bytes, mode 600, in a mode 700 folder. An existing
+ * token is kept, so a restart does not break a lead's running session.
  */
 export function ensureGitProxyFiles(
   lead: string,
   dir: string,
   proxyUrl: string,
-): { gitconfig: string; token: string } {
+): { gitconfig: string; token: string; bin: string } {
   const token = ensureLeadToken(dir);
   const gitconfig = join(dir, 'gitconfig');
   writeFileSync(gitconfig, leadGitConfig(lead, token, proxyUrl), { mode: 0o600 });
-  return { gitconfig, token };
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true, mode: 0o700 });
+  const script = join(bin, 'cw-worktree');
+  writeFileSync(script, worktreeScript(lead, token, proxyUrl));
+  chmodSync(script, 0o700);
+  return { gitconfig, token, bin };
 }
 
 export interface ProxyLead {
@@ -134,6 +181,8 @@ export interface ProxyLead {
   repos: Set<string>;
   /** Whether its config lists the `gh` tool, which the gh proxy requires. */
   gh: boolean;
+  /** Its projects, from the owner's config: where the proxy may make it a worktree. */
+  projects: readonly string[];
 }
 
 /** The lead holding `password`, compared in constant time, or null. */
@@ -153,7 +202,12 @@ export function findLead(leads: Map<string, ProxyLead>, password: string | null)
  * on each request, so a new lead or a changed list needs no restart.
  */
 export function readLeadTokens(
-  leads: readonly { name: string; githubRepos: string[]; tools?: readonly string[] }[],
+  leads: readonly {
+    name: string;
+    githubRepos: string[];
+    tools?: readonly string[];
+    projects?: readonly string[];
+  }[],
   root: string,
 ): Map<string, ProxyLead> {
   const out = new Map<string, ProxyLead>();
@@ -170,6 +224,7 @@ export function readLeadTokens(
       name: l.name,
       repos: new Set(l.githubRepos.map((r) => r.toLowerCase())),
       gh: l.tools?.includes('gh') ?? false,
+      projects: l.projects ?? [],
     });
   }
   return out;
