@@ -118,13 +118,17 @@ const BAR = `(() => {
   return r.width > 0 ? { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2 } : null;
 })()`;
 
-/** The written answer's link, where it is on screen, or null while it is
- *  not drawn where a finger can reach it. */
-const LINK = (href: string): string => `(() => {
+/** This case's written answer's link, where it is on screen, or null while
+ *  it is not drawn where a finger can reach it. Every case links the same
+ *  doc, so the link is looked for only in the message that says `words`:
+ *  an earlier case's answer would satisfy a bare href match before this
+ *  one arrived, and the chat then scrolls to the new answer under the tap. */
+const LINK = (href: string, words: string): string => `(() => {
   const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
   const pane = sr && sr.querySelector('.lc-pane');
   if (!pane || pane.hidden || pane.getAnimations().length > 0) return null;
-  const a = [...sr.querySelectorAll('.lc-list a')].find((x) => new URL(x.href).pathname === ${JSON.stringify(href)});
+  const msg = [...sr.querySelectorAll('.lc-list .lc-msg')].find((m) => m.textContent.includes(${JSON.stringify(words)}));
+  const a = msg && [...msg.querySelectorAll('a')].find((x) => new URL(x.href).pathname === ${JSON.stringify(href)});
   if (!a) return null;
   a.scrollIntoView({ block: 'center' });
   const r = a.getBoundingClientRect();
@@ -164,6 +168,9 @@ async function openBrowser(width: number, height: number): Promise<{ cdp: Cdp; p
     deviceScaleFactor: 1,
     mobile: width <= 1100,
   });
+  // `CW_CPU_THROTTLE=4` runs it on a slower CPU, as a loaded CI runner is.
+  const throttle = Number(process.env.CW_CPU_THROTTLE ?? '');
+  if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
   // A returning reader on a Voice first device: the first tap listens.
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
     source: `try { localStorage.setItem('feedback-user-name', 'Alice'); localStorage.setItem('cw.lead-chat.mode', 'voice'); } catch {}`,
@@ -284,8 +291,9 @@ async function main(): Promise<void> {
         );
         // Away from the page that asked: its socket goes with it.
         if (way === 'left') await load();
+        const heading = `The summary for the ${way} case at ${width}:`;
         const written = [
-          `The summary for the ${way} case at ${width}:`,
+          heading,
           '',
           `- [The Riverbend summary](${docPath})`,
           `- [The same, absolute](${base}${docPath})`,
@@ -315,7 +323,8 @@ async function main(): Promise<void> {
         }
         const link = await until(
           'the written link',
-          async () => (await cdp.evaluate(LINK(docPath))) as (XY & { href: string }) | null,
+          async () =>
+            (await cdp.evaluate(LINK(docPath, heading))) as (XY & { href: string }) | null,
           SHOW_MS,
         ).catch(() => null);
         let landed = String(await cdp.evaluate('location.href'));
