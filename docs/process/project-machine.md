@@ -312,9 +312,24 @@ Control.
 
 ## Pushing a branch from the lead
 
-The lead pushes through the server, which holds the GitHub credential as
-the Fly secret `CW_GITHUB_PUSH_TOKEN` and the board's repo list in
-`/data/cw/git-push.json`. The request and the file are in
+The lead pushes through the server, which holds one write deploy key per
+repo as the Fly secret `CW_GITHUB_PUSH_KEYS` and the board's repo list in
+`/data/cw/git-push.json`. The keeper makes the keys:
+
+```bash
+bun run machine:deploy --project <project> \
+  --push-repo <owner/name> [--push-repo <owner/other>] [--refresh-push-keys]
+```
+
+For each repo the keeper makes a key pair, registers the public half on
+that repo as a write deploy key with the GitHub token in its store, and sets
+the private halves on the app. It waits for your passkey and lists every
+repo on the approval page. The keys are made once; `--refresh-push-keys`
+makes new ones and removes the keeper's older keys for the app. A deploy
+key reaches its one repo, so the machine can push nowhere else. The deploy
+also unsets `CW_GITHUB_PUSH_TOKEN` if the app still has one: a project
+machine holds no classic token. The keeper needs the token once, from you:
+[keeper.md](keeper.md), "The GitHub token". The request and the file are in
 [lead-sandbox.md](lead-sandbox.md), "A lead pushes through its board server".
 
 ## GitHub events for a board here
@@ -606,7 +621,7 @@ changes nothing. Per machine:
 | Admission settings | each setting `settings.ts` names matches what the deploy would set now | the server's environment, through `wall-probe.ts machine` |
 | Trusted emails | `CW_PROXIED_TRUSTED_EMAILS` is unset or holds the owner alone | the same |
 | Loopback uid policy | the lead's uid is refused and `CW_LOOPBACK_SKIPS_ACCESS` is `1`; the users it still admits are listed | the same, and `/etc/passwd` |
-| `git-push.json` | every listed repo has `approval: true` | the file on the volume |
+| `git-push.json` | it parses; each repo is listed with whether every push waits (a `.github/` change always does) | the file on the volume |
 | Deploy key | the lead's key is read-only on GitHub | its public half, matched against `gh api repos/<repo>/keys` for each repo the lead clones or may push to |
 | Tunnel ingress | cloudflared runs the named tunnel, whose ingress sends the project's host to the server and everything else to a 404 | Cloudflare's API |
 

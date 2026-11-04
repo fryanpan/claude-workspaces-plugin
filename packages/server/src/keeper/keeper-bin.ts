@@ -81,7 +81,7 @@ if (command === 'check') {
     if (saved !== null) console.log(`port: ${saved}`);
     if (alarm) console.log(`alarm: ${alarm.reason} at ${new Date(alarm.at).toISOString()}`);
     // Names only, never a value: `keeper-setup.ts` reads these to skip what is done.
-    const { cloudflare: cf, fly } = store.credentials();
+    const { cloudflare: cf, fly, github } = store.credentials();
     const held = CREDENTIAL_NAMES.filter(
       (n) =>
         ({
@@ -89,6 +89,7 @@ if (command === 'check') {
           'cloudflare-account-id': cf?.accountId,
           'fly-org-token': fly?.orgToken,
           'fly-org-slug': fly?.orgSlug,
+          'github-token': github?.token,
         })[n],
     );
     console.log(`credentials: ${held.join(' ') || 'none'}`);

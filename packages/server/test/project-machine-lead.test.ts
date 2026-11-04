@@ -239,9 +239,9 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
   // GitHub credential. Different users cannot read each other's
   // environments (/proc/<pid>/environ is the owner's), so the lead cannot
   // read a value only the server's process holds.
-  it('gives the GitHub push credential to the server and never to the lead', async () => {
+  it('gives the GitHub push keys to the server and never to the lead', async () => {
     const PUSH = 'push-credential-saltmarsh';
-    const { log } = leadMachine({ CW_GITHUB_PUSH_TOKEN: PUSH });
+    const { log } = leadMachine({ CW_GITHUB_PUSH_KEYS: PUSH });
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
@@ -252,7 +252,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
     // POSITIVE CONTROL: the recorder sees the credential where it belongs.
     expect(server?.uid).toBe('cw');
-    expect(server?.env.get('CW_GITHUB_PUSH_TOKEN')).toBe(PUSH);
+    expect(server?.env.get('CW_GITHUB_PUSH_KEYS')).toBe(PUSH);
     const holders = recs.filter((r) => [...r.env.values()].some((v) => v.includes(PUSH)));
     expect(holders).toEqual([server]);
     expect(find(recs, 'claude').every((r) => r.uid === 'lead')).toBe(true);

@@ -47,6 +47,7 @@ import {
   classifyFly,
   grantCovers,
 } from './keeper-policy.ts';
+import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
 import { stageFlyPaths } from './keeper-stage.ts';
 import type { KeeperStore } from './keeper-store.ts';
 import {
@@ -81,12 +82,14 @@ export interface CloudflareCall {
   body?: string;
 }
 
-export type KeeperCall = FlyCall | CloudflareCall;
+export type KeeperCall = FlyCall | CloudflareCall | PushKeysCall;
 export type KeeperResult = FlyResult | CloudflareResult;
 
 export interface Executors {
   fly(args: string[], input: string | undefined): Promise<FlyResult>;
   cloudflare(method: string, path: string, body: string | undefined): Promise<CloudflareResult>;
+  /** Make and register a project's push deploy keys (`keeper-push-keys.ts`). */
+  pushKeys?(app: string, repos: readonly string[]): Promise<CloudflareResult>;
 }
 
 export type RequestStatus = 'pending' | 'running' | 'done' | 'denied' | 'expired' | 'withdrawn';
@@ -183,7 +186,9 @@ export function createKeeperRequests(deps: {
   const classify = (call: KeeperCall): Verdict =>
     call.type === 'fly'
       ? classifyFly(call.args, deps.store.apps())
-      : classifyCloudflare(call.method, call.path, deps.store.accessApps());
+      : call.type === 'push-keys'
+        ? classifyPushKeys(call.app, call.repos, deps.store.apps())
+        : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
   const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
@@ -200,6 +205,10 @@ export function createKeeperRequests(deps: {
   /** `configs` are the ones cleaned at submit: what the owner saw is what fly reads. */
   const run = async (call: KeeperCall, configs: Configs): Promise<KeeperResult> => {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
+    if (call.type === 'push-keys') {
+      if (!deps.exec.pushKeys) throw new Error('this keeper cannot make push keys');
+      return deps.exec.pushKeys(call.app, call.repos);
+    }
     const checked = local(call);
     if ('error' in checked) throw new Error(`refused: ${checked.error}`);
     if (!checked.at.length) return deps.exec.fly(checked.args, call.input);
@@ -275,7 +284,11 @@ export function createKeeperRequests(deps: {
         return { outcome: 'refused', reason: paths.error };
       }
       const cfPath = call.type === 'cloudflare' ? call.path : null;
-      if (verdict.kind === 'routine' || grantCovers(grants, call.type, verdict, cfPath, now())) {
+      // A push key is a write key to a repo the requester named: always a tap.
+      if (
+        verdict.kind === 'routine' ||
+        (call.type !== 'push-keys' && grantCovers(grants, call.type, verdict, cfPath, now()))
+      ) {
         log(`ran ${requester}: ${verdict.summary}`);
         return {
           outcome: 'ran',

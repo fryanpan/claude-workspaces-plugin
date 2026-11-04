@@ -311,13 +311,12 @@ git bundle create - origin/main..my-branch | curl -sS --unix-socket "$CW_BOARD_S
 
 The answer is the push's record: `pushed`, `up-to-date`, `refused` with an
 `error` and a `message`, or `awaiting-approval`. Read it again with
-`GET /workspaces/<board>/git/pushes/<id>`. Every push waits for a person
-unless its repo opts out, so a push also needs `&task=<taskId>`: the server
-files a review item on that task, and pushes when a person on the board
-chooses Push. A push that adds, changes or deletes anything under
-`.github/` waits for a person even on a repo that opted out, because a
-workflow runs with the repo's Actions secrets as soon as it lands on any
-branch. Only the board's socket may ask; the same request over loopback TCP
+`GET /workspaces/<board>/git/pushes/<id>`. A push that waits for a person
+needs `&task=<taskId>`: the server files a review item on that task, and
+pushes when a person on the board chooses Push. A push waits when its repo
+asks for approval, and always when it adds, changes or deletes anything
+under `.github/`, because a workflow runs with the repo's Actions secrets
+as soon as it lands on any branch. Pass the task every time. Only the board's socket may ask; the same request over loopback TCP
 is refused.
 
 **Which repos.** `<dataDir>/git-push.json`, edited on the machine:
@@ -325,23 +324,24 @@ is refused.
 ```json
 { "boards": { "<boardId>": { "repos": [
   { "repo": "<owner>/<name>" },
-  { "repo": "<owner>/<other>", "approval": false } ] } } }
+  { "repo": "<owner>/<other>", "approval": true } ] } } }
 ```
 
-A repo with no `approval` flag waits for a person; only `"approval": false`
-lets its pushes go without one, and never a `.github/` change. No route
+A repo with no `approval` flag pushes without a person; `"approval": true`
+holds every push to it. A `.github/` change waits on every repo. No route
 writes the file, and it is read again on every push. The server refuses
 the repo's default branch and anything that is not a fast-forward. Any other
 branch is allowed, including one a repo's `on: push` workflow runs for. The
 bundle must carry exactly one ref, `refs/heads/<branch>`, and build only on
 commits upstream already has.
 
-**The credential.** A fine-grained GitHub token with Contents read and
-write on the listed repos only, and without the Workflows permission. On the
-Mac, the Keychain item `cw-github-push-token`
+**The credential.** On the Mac, the Keychain item `cw-github-push-token`
 (`security add-generic-password -a "$USER" -s cw-github-push-token -w`, then
-paste the token when asked). On a project machine, the Fly secret
-`CW_GITHUB_PUSH_TOKEN`. Without one, every push is refused with 503.
+paste the token when asked). On a project machine, one write deploy key per
+repo, in the Fly secret `CW_GITHUB_PUSH_KEYS`, which the keeper makes
+(`machine:deploy --push-repo <owner/name>`, in
+[project-machine.md](project-machine.md)); a project machine never holds a
+classic token. Without a credential for the repo, the push is refused with 503.
 Mechanics and limits: [security.md](../architecture/security.md), "A sandboxed
 lead pushes through its board server".
 

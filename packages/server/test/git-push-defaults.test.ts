@@ -2,13 +2,14 @@
  * Which pushes wait for a person without anyone asking for it
  * (`git-push/policy.ts`, `git-push/pusher.ts`).
  *
- * A repo listed with no `approval` flag waits, so a hurried policy edit
- * fails closed. A repo that opts out with `"approval": false` still waits
- * when the push adds, changes or deletes anything under `.github/`, because
- * a workflow runs with the repo's Actions secrets the moment it lands on any
- * branch. Each refusal is checked against upstream, which stays unchanged;
- * the positive controls are an opted-out push with no `.github/` change,
- * which lands at once, and a person's Push on a held `.github/` change.
+ * Approval is opt-in: a repo listed with no `approval` flag pushes at once.
+ * Whatever the flag, a push that adds, changes or deletes anything under
+ * `.github/` waits, because a workflow runs with the repo's Actions secrets
+ * the moment it lands on any branch, and GitHub cannot stop a deploy key
+ * from writing one on a public repo. Each refusal is checked against
+ * upstream, which stays unchanged; the positive controls are a push with no
+ * `.github/` change, which lands at once, and a person's Push on a held
+ * workflow change.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { registerOwnerIdentity, resetOwnerIdentities } from '../src/actor-identity.ts';
@@ -17,8 +18,8 @@ import { type PushWorld, pushPath, startPushWorld } from './git-push-fixture.ts'
 import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
-const DEFAULTED = 'Harborlight/approvals';
-const OPTED_OUT = 'Harborlight/notes';
+const OPTED_IN = 'Harborlight/approvals';
+const DEFAULTED = 'Harborlight/notes';
 const LEAD = { id: 'agent-harborlight-lead', name: 'Harborlight Lead', kind: 'agent' };
 const SETTLE_MS = 20_000;
 const WORKFLOW = 'on: push\njobs: {}\n';
@@ -32,7 +33,7 @@ interface Pushed {
   reviewItemId: string;
 }
 
-describe('pushes that wait for a person by default', () => {
+describe('which pushes wait for a person when nobody asked', () => {
   let w: PushWorld;
   let person: SignedInPerson;
   let taskId: string;
@@ -52,7 +53,7 @@ describe('pushes that wait for a person by default', () => {
   beforeAll(async () => {
     w = await startPushWorld((board) => ({
       boards: {
-        [board]: { repos: [{ repo: DEFAULTED }, { repo: OPTED_OUT, approval: false }] },
+        [board]: { repos: [{ repo: OPTED_IN, approval: true }, { repo: DEFAULTED }] },
       },
     }));
     person = signedInPerson(w.h, w.dataDir, w.base, { name: 'Alice' });
@@ -68,57 +69,54 @@ describe('pushes that wait for a person by default', () => {
     resetOwnerIdentities();
   });
 
-  it('holds a push to a repo listed with no approval flag', async () => {
-    const bare = await send(
-      DEFAULTED,
-      'feature-default',
-      w.leadBundle(DEFAULTED, 'feature-default'),
-    );
+  it('pushes a repo listed with no approval flag at once when it leaves .github/ alone', async () => {
+    const r = await send(DEFAULTED, 'feature-plain', w.leadBundle(DEFAULTED, 'feature-plain'));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.state).toBe('pushed');
+    expect(w.upstreamTip(DEFAULTED, 'feature-plain')).toBe(r.body.sha);
+  });
+
+  it('holds every push to a repo that asks for approval', async () => {
+    const bare = await send(OPTED_IN, 'feature-opted', w.leadBundle(OPTED_IN, 'feature-opted'));
     expect(bare.status, JSON.stringify(bare.body)).toBe(400);
     expect(bare.body.error).toBe('task-required');
     const held = await send(
-      DEFAULTED,
-      'feature-default',
-      w.leadBundle(DEFAULTED, 'feature-default'),
+      OPTED_IN,
+      'feature-opted',
+      w.leadBundle(OPTED_IN, 'feature-opted'),
       taskId,
     );
     expect(held.status, JSON.stringify(held.body)).toBe(202);
     expect(held.body.state).toBe('awaiting-approval');
-    expect(w.upstreamTip(DEFAULTED, 'feature-default')).toBe('');
+    expect(w.upstreamTip(OPTED_IN, 'feature-opted')).toBe('');
   });
 
-  it('pushes an opted-out repo’s branch at once when it leaves .github/ alone', async () => {
-    const r = await send(OPTED_OUT, 'feature-plain', w.leadBundle(OPTED_OUT, 'feature-plain'));
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(w.upstreamTip(OPTED_OUT, 'feature-plain')).toBe(r.body.sha);
-  });
-
-  it('refuses an opted-out repo’s .github/ change with no task to ask on', async () => {
-    const body = w.leadBundle(OPTED_OUT, 'feature-wf-bare', {
+  it('refuses a workflow change with no task to ask on', async () => {
+    const body = w.leadBundle(DEFAULTED, 'feature-wf-bare', {
       commits: [{ '.github/workflows/ci.yml': WORKFLOW }],
     });
-    const r = await send(OPTED_OUT, 'feature-wf-bare', body);
+    const r = await send(DEFAULTED, 'feature-wf-bare', body);
     expect(r.status, JSON.stringify(r.body)).toBe(400);
     expect(r.body.error).toBe('task-required');
-    expect(w.upstreamTip(OPTED_OUT, 'feature-wf-bare')).toBe('');
+    expect(w.upstreamTip(DEFAULTED, 'feature-wf-bare')).toBe('');
   });
 
   it('holds a workflow added and removed again before the tip', async () => {
-    const body = w.leadBundle(OPTED_OUT, 'feature-wf-gone', {
+    const body = w.leadBundle(DEFAULTED, 'feature-wf-gone', {
       commits: [{ '.github/workflows/leak.yml': WORKFLOW }, { '.github/workflows/leak.yml': null }],
     });
-    const r = await send(OPTED_OUT, 'feature-wf-gone', body, taskId);
+    const r = await send(DEFAULTED, 'feature-wf-gone', body, taskId);
     expect(r.status, JSON.stringify(r.body)).toBe(202);
-    expect(w.upstreamTip(OPTED_OUT, 'feature-wf-gone')).toBe('');
+    expect(w.upstreamTip(DEFAULTED, 'feature-wf-gone')).toBe('');
   });
 
-  it('holds an opted-out repo’s .github/ change until a person chooses Push', async () => {
-    const body = w.leadBundle(OPTED_OUT, 'feature-wf', {
+  it('holds a workflow change until a person chooses Push', async () => {
+    const body = w.leadBundle(DEFAULTED, 'feature-wf', {
       commits: [{ '.github/workflows/ci.yml': WORKFLOW }],
     });
-    const r = await send(OPTED_OUT, 'feature-wf', body, taskId);
+    const r = await send(DEFAULTED, 'feature-wf', body, taskId);
     expect(r.status, JSON.stringify(r.body)).toBe(202);
-    expect(w.upstreamTip(OPTED_OUT, 'feature-wf')).toBe('');
+    expect(w.upstreamTip(DEFAULTED, 'feature-wf')).toBe('');
     const item = w.h.tasks.listReviewItems(taskId).find((i) => i.id === r.body.reviewItemId);
     expect(item?.review.detail).toContain('.github/workflows/ci.yml');
 
@@ -133,6 +131,6 @@ describe('pushes that wait for a person by default', () => {
       describe: 'the approved .github/ push is settled',
     });
     expect(await statusOf(r.body.id)).toMatchObject({ state: 'pushed' });
-    expect(w.upstreamTip(OPTED_OUT, 'feature-wf')).toBe(r.body.sha);
+    expect(w.upstreamTip(DEFAULTED, 'feature-wf')).toBe(r.body.sha);
   });
 });

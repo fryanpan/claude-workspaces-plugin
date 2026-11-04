@@ -202,3 +202,36 @@ export async function keeperFly(
   const waited = await waitForApproval<FlyResult>(origin, held, opts, doFetch, caller.token);
   return waited.ok ? waited.result : { status: 1, stdout: '', stderr: waited.error };
 }
+
+/**
+ * Ask the keeper to make `app`'s push deploy keys on `repos`
+ * (`keeper-push-keys.ts`). Always a tap. The answer names each key's id and
+ * public half; the private halves went to the app's secret and are not in it.
+ */
+export async function keeperPushKeys(
+  origin: string,
+  app: string,
+  repos: readonly string[],
+  opts: KeeperClientOptions = {},
+): Promise<CloudflareResult> {
+  const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
+  const caller = callerOf(opts);
+  const res = await doFetch(`${origin}/v1/push-keys`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...apiHeaders(caller.token),
+      ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
+    },
+    body: JSON.stringify({ app, repos }),
+  });
+  if (!res.headers.has(HELD_HEADER)) {
+    const text = await res.text().catch(() => '');
+    const status = res.ok ? 502 : res.status;
+    const reason = res.ok ? 'the keeper ran a push-key request without a tap' : text.slice(0, 300);
+    return { status, body: JSON.stringify({ error: reason }) };
+  }
+  const held = (await res.json()) as HeldAnswer;
+  const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
+  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+}

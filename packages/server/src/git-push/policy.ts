@@ -6,12 +6,14 @@
  *
  *   { "boards": { "<boardId>": { "repos": [
  *       { "repo": "owner/name" },
- *       { "repo": "owner/other", "approval": false } ] } } }
+ *       { "repo": "owner/other", "approval": true } ] } } }
  *
- * Every push waits for a person's approval unless its repo says
- * `"approval": false`. A missing flag means approval, so a repo added in a
- * hurry fails closed. Even an opted-out repo's push waits when it touches
- * `.github/` (`pusher.ts`).
+ * A push goes through without a person unless its repo says
+ * `"approval": true`, which holds every push to it. Whatever the flag, a
+ * push that touches `.github/` waits for a person (`pusher.ts`): a workflow
+ * runs with the repo's Actions secrets once it lands, and GitHub cannot stop
+ * a deploy key from writing one on a public repo, so that check is the only
+ * one there is.
  *
  * No route writes it. The operator edits it on the machine: on the Mac in
  * prod's data dir, which a walled lead's profile denies; on a project
@@ -28,7 +30,7 @@ export const GIT_PUSH_POLICY_FILE = 'git-push.json';
 export interface RepoRule {
   /** `owner/name`, as GitHub spells it. */
   repo: string;
-  /** Hold every push for a person's answer on a review item. True unless the file says false. */
+  /** Hold every push for a person's answer on a review item. False unless the file says true. */
   approval: boolean;
 }
 
@@ -75,7 +77,7 @@ export function parsePolicy(text: string): Map<string, RepoRule[]> | null {
       const approval = (r as { approval?: unknown }).approval;
       if (typeof repo !== 'string' || !isRepoName(repo)) return null;
       if (approval !== undefined && typeof approval !== 'boolean') return null;
-      rules.push({ repo, approval: approval !== false });
+      rules.push({ repo, approval: approval === true });
     }
     out.set(boardId, rules);
   }

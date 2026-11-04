@@ -106,7 +106,7 @@ export async function startPushWorld(
     dataDir,
     boardSocketDir: socketDir,
     gitPush: {
-      credential: async () => FAKE_TOKEN,
+      credential: async () => ({ kind: 'token', token: FAKE_TOKEN }),
       remoteUrlFor: (repo) => `file://${upstreamRoot}/${repo}.git`,
       runGit: (call) => {
         calls.push(call);

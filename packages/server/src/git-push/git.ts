@@ -10,12 +10,17 @@
  * arguments nor its environment: on the Mac a walled lead runs as the same
  * user and `ps eww` prints both for every process. It goes in a mode-600
  * config file under the data dir, which the lead cannot read, named by
- * `GIT_CONFIG_GLOBAL` for that one call and removed when it returns.
+ * `GIT_CONFIG_GLOBAL` for that one call and removed when it returns. A token
+ * is an `http.<url>.extraheader` there. A deploy key is a mode-600 key file
+ * beside it, which the config's `core.sshCommand` names; that ssh reads no
+ * config, uses no agent and no other key, and trusts only the pinned host
+ * keys (`/etc/ssh/ssh_known_hosts` on a project machine, from the image).
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hardenedGitArgs, hardenedGitEnv } from '../git-hardening.ts';
+import type { PushAuth } from './credential.ts';
 
 export interface GitCall {
   args: string[];
@@ -57,28 +62,71 @@ export function basicAuthHeader(token: string): string {
   return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
 }
 
-/** `text` with the token, and the header form of it, replaced. */
-export function redact(text: string, token: string | null): string {
-  if (!token) return text;
-  const header = basicAuthHeader(token).slice('Authorization: Basic '.length);
-  return text.split(token).join('[credential]').split(header).join('[credential]');
+/** `text` with the credential replaced: a token and its header form, or each line of a key. */
+export function redact(text: string, auth: PushAuth | string | null): string {
+  if (!auth) return text;
+  const a: PushAuth = typeof auth === 'string' ? { kind: 'token', token: auth } : auth;
+  if (a.kind === 'ssh-key') {
+    let out = text;
+    for (const line of a.key.split('\n')) {
+      if (line.length >= 16 && !line.startsWith('-----'))
+        out = out.split(line).join('[credential]');
+    }
+    return out;
+  }
+  const header = basicAuthHeader(a.token).slice('Authorization: Basic '.length);
+  return text.split(a.token).join('[credential]').split(header).join('[credential]');
 }
+
+/** Where ssh finds GitHub's host keys on a project machine (the image pins them). */
+export const PINNED_KNOWN_HOSTS = '/etc/ssh/ssh_known_hosts';
 
 export interface Upstream {
   url: string;
-  token: string;
+  auth: PushAuth;
+  /** The only host keys ssh trusts for a deploy key. Default `PINNED_KNOWN_HOSTS`. */
+  knownHosts?: string;
 }
 
-/** The scheme git may use for `url`, or null for one it may not. */
-function schemeOf(url: string): string | null {
-  const m = /^(https|file):\/\//.exec(url);
-  return m ? (m[1] ?? null) : null;
+/**
+ * The scheme git may use for `url` with this credential, or null: https
+ * carries a token, ssh a deploy key, and `file` (tests' local upstreams)
+ * either.
+ */
+function schemeOf(url: string, auth: PushAuth): string | null {
+  const m = /^(https|ssh|file):\/\//.exec(url);
+  const scheme = m?.[1] ?? null;
+  if (scheme === 'https' && auth.kind !== 'token') return null;
+  if (scheme === 'ssh' && auth.kind !== 'ssh-key') return null;
+  return scheme;
 }
 
-/** A git config file that sends `upstream`'s credential to its URL only. */
-function authConfig(upstream: Upstream): string {
-  const url = upstream.url.replace(/[\\"]/g, '\\$&');
-  return `[http "${url}"]\n\textraheader = ${basicAuthHeader(upstream.token)}\n`;
+/** A path a config value and ssh's command line both carry unchanged in single quotes. */
+const SAFE_PATH = /^[^'\n\\"#;]+$/;
+
+/**
+ * A git config file that sends `upstream`'s credential to its URL only: a
+ * token as a header for that URL, a deploy key through an ssh that reads
+ * nothing but `keyFile` and the pinned host keys.
+ */
+function authConfig(upstream: Upstream, keyFile: string): string | null {
+  if (upstream.auth.kind === 'token') {
+    const url = upstream.url.replace(/[\\"]/g, '\\$&');
+    return `[http "${url}"]\n\textraheader = ${basicAuthHeader(upstream.auth.token)}\n`;
+  }
+  const known = upstream.knownHosts ?? PINNED_KNOWN_HOSTS;
+  if (!SAFE_PATH.test(keyFile) || !SAFE_PATH.test(known)) return null;
+  const ssh = [
+    'ssh -F /dev/null',
+    `-i '${keyFile}'`,
+    '-o IdentitiesOnly=yes',
+    '-o IdentityAgent=none',
+    '-o BatchMode=yes',
+    '-o StrictHostKeyChecking=yes',
+    `-o UserKnownHostsFile='${known}'`,
+    `-o GlobalKnownHostsFile='${known}'`,
+  ].join(' ');
+  return `[core]\n\tsshCommand = ${ssh}\n`;
 }
 
 export class ScratchRepo {
@@ -107,12 +155,19 @@ export class ScratchRepo {
         env: this.env(),
       });
     }
-    const scheme = schemeOf(upstream.url);
+    const scheme = schemeOf(upstream.url, upstream.auth);
     if (!scheme) return { code: 128, stdout: '', stderr: 'remote scheme not allowed' };
     mkdirSync(this.authDir, { recursive: true, mode: 0o700 });
-    const authFile = join(this.authDir, `${randomBytes(12).toString('hex')}.gitconfig`);
-    writeFileSync(authFile, authConfig(upstream), { mode: 0o600 });
+    const name = randomBytes(12).toString('hex');
+    const authFile = join(this.authDir, `${name}.gitconfig`);
+    const keyFile = join(this.authDir, `${name}.key`);
+    const config = authConfig(upstream, keyFile);
+    if (config === null) return { code: 128, stdout: '', stderr: 'credential path not allowed' };
     try {
+      if (upstream.auth.kind === 'ssh-key') {
+        writeFileSync(keyFile, upstream.auth.key, { mode: 0o600 });
+      }
+      writeFileSync(authFile, config, { mode: 0o600 });
       return await this.run({
         args: hardenedGitArgs([
           '-c',
@@ -126,6 +181,7 @@ export class ScratchRepo {
       });
     } finally {
       rmSync(authFile, { force: true });
+      rmSync(keyFile, { force: true });
     }
   }
 
