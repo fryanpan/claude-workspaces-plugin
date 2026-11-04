@@ -60,8 +60,9 @@ describe('a hooks folder inside a walled project', () => {
     const bin = join(root, 'fake-bin');
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "nocache-$xcrun_nocache"\n', { mode: 0o755 });
-    const { xcrun_nocache: _drop, ...given } = env;
-    expect(gitHooksPath(root, { ...given, PATH: `${bin}:/usr/bin:/bin` })).toBe('nocache-1');
+    const given: NodeJS.ProcessEnv = { ...env, PATH: `${bin}:/usr/bin:/bin` };
+    Reflect.deleteProperty(given, 'xcrun_nocache');
+    expect(gitHooksPath(root, given)).toBe('nocache-1');
   });
 
   it('sets xcrun_nocache for the whole launcher before anything runs', () => {
