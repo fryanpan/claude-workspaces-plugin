@@ -13,11 +13,13 @@
  * Audio never leaves for a service the board's own mic does not already use:
  * no browser speech recognition, which in Chrome sends it to Google.
  *
- * Listening goes on while voice is on: once the lead has answered and its
- * answer has been said, the next question starts listening by itself. The
- * microphone is opened once, inside the tap that turned voice on, and stays
- * open until voice is off; only a question that is listening sends its
- * frames, so the lead's own voice is never sent back as the next question.
+ * Listening goes on while voice is on: once an answer has been said, or the
+ * lead has taken the question to work on, the next question starts listening
+ * by itself, and a question left working for `WORKING_MS` with nothing said
+ * listens anyway. The microphone is opened once, inside the tap that turned
+ * voice on, and stays open until voice is off; only a question that is
+ * listening sends its frames, and none go up while an answer is said, so
+ * the lead's own voice is never sent back as the next question.
  *
  * iOS Safari runs an AudioContext only when `resume()` is called inside the
  * gesture, so the tap makes the capture context AND resumes it
@@ -104,6 +106,14 @@ export const NO_SOUND = 'The microphone is sending no sound. Tap the agent butto
 const NO_SOUND_MS = 5_000;
 /** Said, and reported, when the voice socket closes while the page stays. */
 const CLOSED = 'The connection closed. Tap the mic to try again.';
+/** How long a question may show working with nothing said before the next
+ *  one listens anyway: a router or voice that never answers does not leave
+ *  voice deaf (Bryan, 3 Nov: "stopping often after I say one thing"). A
+ *  board answer takes a few seconds, and a slow one plays its filler cue
+ *  well inside this. */
+export const WORKING_MS = 30_000;
+/** The route of the lead's later answer (`spoken-reply/lead-answer.ts`). */
+const LEAD_ANSWER = 'lead-answer';
 /** Said while a carried-on voice waits for the tap its context needs. */
 export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
 /** How long a context started outside a tap has to run before the chat asks
@@ -161,6 +171,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let gen = 0;
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
+  /** Questions the lead took and has not answered yet. */
+  let awaiting = 0;
+  let workTimer: ReturnType<typeof setTimeout> | null = null;
   let soundTimer: ReturnType<typeof setTimeout> | null = null;
   /** A context started outside a tap that is not running yet. */
   let waiting: AudioContext | null = null;
@@ -198,9 +211,24 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   };
   const sendMsg = (m: SpokenClientMessage): void => sendRaw(JSON.stringify(m));
 
+  const doneWorking = (): void => {
+    if (workTimer) clearTimeout(workTimer);
+    workTimer = null;
+  };
+  /** Working, with a way out: no word for `WORKING_MS` and the next
+   *  question listens. */
+  const stillWorking = (): void => {
+    doneWorking();
+    workTimer = setTimeout(() => {
+      workTimer = null;
+      if (on && st.phase === 'working') again();
+    }, WORKING_MS);
+  };
+
   const stopCapture = (): void => {
     gen++;
     forwarding = false;
+    doneWorking();
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
     if (tapTimer) clearTimeout(tapTimer);
@@ -312,6 +340,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       author: opts.author,
       ...(agent ? { agent } : {}),
     });
+    doneWorking();
     forwarding = true;
     set({ phase: 'listening', heard: '', notice: '' });
   };
@@ -341,23 +370,30 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       case 'turn-end':
         forwarding = false;
         set({ phase: 'working', heard: m.text });
+        stillWorking();
         return;
       case 'working':
         set({ phase: 'working' });
+        stillWorking();
         return;
       case 'reply':
-        // The lead took the question: its answer comes later, as a reply of
-        // its own. Listening now would open the server's listener, and the
-        // server does not speak an answer over an open listener, so the
-        // answer would arrive as text only.
-        if (!m.spoken && m.route === 'agent') {
-          set({ phase: 'working' });
+        if (m.route === 'agent' && !m.spoken) awaiting++;
+        if (m.route === LEAD_ANSWER) awaiting = Math.max(0, awaiting - 1);
+        // Nothing to say now — nothing heard, or the lead took the question
+        // and answers later: the next question listens while it works. The
+        // server says the lead's answer over a listener that has heard
+        // nothing yet (`SpokenSession.sayAside`).
+        if (!m.spoken) {
+          if (st.phase === 'working') again();
           return;
         }
-        // Nothing heard: listen again rather than wait on a voice.
-        if (!m.spoken) again();
+        if (st.phase === 'working') stillWorking();
         return;
       case 'audio-start':
+        // An answer said while listening: the mic hears the speaker, and
+        // none of it goes back as a question.
+        forwarding = false;
+        doneWorking();
         player.begin(m.sampleRate);
         set({ phase: 'speaking' });
         return;
@@ -407,7 +443,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       });
     },
     stop() {
-      const asked = st.phase === 'working' || st.phase === 'speaking';
+      const asked = st.phase === 'working' || st.phase === 'speaking' || awaiting > 0;
       on = false;
       stopCapture();
       player.stop();
