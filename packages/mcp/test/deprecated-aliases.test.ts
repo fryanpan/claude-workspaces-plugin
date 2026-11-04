@@ -160,6 +160,7 @@ function recorder(answer: unknown) {
     err: (message: string) => ({ isError: true, content: [{ type: 'text', text: message }] }),
     AUTHOR: { id: 'a1', name: 'Tester', kind: 'agent' },
     watchWorkspace: async () => ({ open: true, persisted: true }),
+    watchDoc: async () => true,
     claimNoticeFor: async () => undefined,
   };
   return { calls, ctx };
