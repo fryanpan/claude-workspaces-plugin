@@ -201,13 +201,13 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     ).toEqual([]);
 
     // The server opens the board sockets, shares the lead's board's, and
-    // admits only root and itself over TCP.
+    // admits only itself over TCP.
     const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
     expect(server?.env.get('CW_BOARD_SOCKET_DIR')).toBe(`${volume}/boards`);
     expect(server?.env.get('CW_BOARD_SOCKET_SHARED')).toBe(BOARD);
-    // Root and cw are the only uids admitted over loopback TCP, the tunnel
-    // only through the edge; the lead (10004) and cwbackup (10003) are not.
-    expect(server?.env.get('CW_LOOPBACK_ALLOWED_UIDS')).toBe('0,10001');
+    // cw is the only uid admitted over loopback TCP, the tunnel only through
+    // the edge; root, the lead (10004) and cwbackup (10003) are not.
+    expect(server?.env.get('CW_LOOPBACK_ALLOWED_UIDS')).toBe('10001');
     expect(server?.env.get('CW_LOOPBACK_EDGE_UIDS')).toBe('10002');
     expect(server?.env.has('CW_LOOPBACK_REFUSED_UIDS')).toBe(false);
     expect(server?.env.get('CW_BOARD_SOCKET_GROUP')).toBe('10010');

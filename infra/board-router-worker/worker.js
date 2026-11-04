@@ -28,7 +28,8 @@
  * With `ONE_ADDRESS_ORIGIN` set, the one address forwards only to the machine
  * that owns its Access application and redirects every other board to its
  * project's own hostname (`keepOneAddressStampHome`), so no server ever holds a
- * copy of a stamp that another server accepts.
+ * copy of a stamp that another server accepts. Unset while the tables name more
+ * than one origin, the one address forwards nothing.
  *
  * The Worker is routing, not authorization. `Cf-Access-Jwt-Assertion` goes
  * through as it arrived, and every server verifies that stamp against
@@ -66,18 +67,22 @@ const PROJECT_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
  */
 const KEPT_COOKIES = new Set(['cw_session', 'lf_share', 'cw_geo', 'cw_touch']);
 
-/** The one cookie a frame hostname's server reads: the board's frame ticket
- *  (`packages/server/src/frame-ticket.ts`). A frame's page can set any other
- *  name on its own hostname, and none of them grants anything there. */
-const FRAME_COOKIE = 'cw_frame';
+/** The cookies a frame hostname's server reads: each board's frame cookie,
+ *  `__Host-cw_frame-<board>`, and the name it had before, `cw_frame`, read for
+ *  one release (`packages/server/src/frame-ticket.ts`). A frame's page can set
+ *  any other name on its own hostname, and none of them grants anything there. */
+const FRAME_COOKIE_PREFIX = '__Host-cw_frame-';
+const LEGACY_FRAME_COOKIE = 'cw_frame';
 
-/** The `Cookie` header on a frame hostname, cut down to the frame cookie. */
+/** The `Cookie` header on a frame hostname, cut down to the frame cookies. */
 export function frameCookies(header) {
   if (!header) return null;
   const kept = [];
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
-    if (eq >= 0 && part.slice(0, eq).trim() === FRAME_COOKIE) kept.push(part.trim());
+    const name = eq >= 0 ? part.slice(0, eq).trim() : '';
+    if (name === LEGACY_FRAME_COOKIE || name.startsWith(FRAME_COOKIE_PREFIX))
+      kept.push(part.trim());
   }
   return kept.length > 0 ? kept.join('; ') : null;
 }
@@ -268,12 +273,20 @@ export function routeRequest(url, referer, env) {
  * forwarded. It is redirected to its project's own hostname, where the
  * browser signs in to that project's application and gets a stamp of its own;
  * a board on an origin with no single project label gets a 404. A malformed
- * value routes nothing on the one address. Unset, every board is forwarded as
- * before projects had applications of their own.
+ * value routes nothing on the one address.
+ *
+ * Unset, the Worker cannot tell which machine owns the stamp, so it forwards
+ * only while the tables name a single origin: then there is no other machine
+ * to hand it to. Once a second origin appears in either table, an unset value
+ * routes nothing on the one address (review M2). Project hostnames are not
+ * affected; each carries its own project's stamp.
  */
 function keepOneAddressStampHome(route, url, oneAddress, env) {
   const home = env?.ONE_ADDRESS_ORIGIN;
-  if (home === undefined || home === '' || route.kind !== 'forward') return route;
+  if (route.kind !== 'forward') return route;
+  if (home === undefined || home === '') {
+    return originCount(env) <= 1 ? route : { kind: 'not_found' };
+  }
   if (typeof home !== 'string' || !ORIGIN_HOST.test(home)) return { kind: 'not_found' };
   if (route.origin === home) return route;
   const label = soleLabelOf(route.origin, parseProjectOrigins(env?.PROJECT_ORIGINS));
@@ -282,6 +295,14 @@ function keepOneAddressStampHome(route, url, oneAddress, env) {
     kind: 'redirect',
     location: `https://${projectHost(label, oneAddress)}${url.pathname}${url.search}`,
   };
+}
+
+/** How many distinct origins the two tables name between them. A malformed
+ *  table names none here; it routes nothing of its own. */
+function originCount(env) {
+  const origins = new Set(parseBoardOrigins(env?.BOARD_ORIGINS)?.values() ?? []);
+  for (const o of parseProjectOrigins(env?.PROJECT_ORIGINS)?.values() ?? []) origins.add(o);
+  return origins.size;
 }
 
 /** The response without any `Set-Cookie` that names a Domain; untouched when it has none. */

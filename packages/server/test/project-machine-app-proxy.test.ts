@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FRAME_COOKIE } from '../src/frame-ticket.ts';
+import { frameCookieName } from '../src/frame-ticket.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type AccessHarness, accessHarness } from './access-share.ts';
 import { type ViteFixture, startViteFixture } from './vite-base-fixture.ts';
@@ -130,7 +130,7 @@ describe('a dev server on a project machine, opened through the board', () => {
       expect(src.pathname).toBe(prefix);
       expect(src.searchParams.get('cw-ft')).not.toBeNull();
       expect(redeemed.status).toBe(303);
-      expect(cookie.startsWith(`${FRAME_COOKIE}=`)).toBe(true);
+      expect(cookie.startsWith(`${frameCookieName(ws)}=`)).toBe(true);
     });
 
     it('loads the frame with the widget and the dev server’s module scripts', async () => {

@@ -121,7 +121,7 @@ describe('a project subdomain reaches that project and no other', () => {
     const { calls } = await send(`https://riverbend-workspaces.${ZONE}/workspaces/w-mac1`);
     expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
     // The same path on the one address goes to the Mac.
-    const control = await send(`${ONE}/workspaces/w-mac1`);
+    const control = await send(`${ONE}/workspaces/w-mac1`, {}, { ...ENV, ONE_ADDRESS_ORIGIN: MAC });
     expect(control.calls.map((c) => c.origin)).toEqual([MAC]);
   });
 
@@ -226,9 +226,11 @@ describe('a cookie not set by a project server for its own host is stripped', ()
   });
 
   it('strips cookies on the one address too', async () => {
-    const { calls } = await send(`${ONE}/workspaces/w-river`, {
-      headers: { cookie: `parent_pref=dark; ${PROJECT_COOKIES}` },
-    });
+    const { calls } = await send(
+      `${ONE}/workspaces/w-mac1`,
+      { headers: { cookie: `parent_pref=dark; ${PROJECT_COOKIES}` } },
+      { ...ENV, ONE_ADDRESS_ORIGIN: MAC },
+    );
     expect(calls[0]?.request.headers.get('cookie')).toBe(PROJECT_COOKIES);
   });
 
@@ -283,13 +285,12 @@ describe('every current board path on the one address routes as before', () => {
   it.each(PATHS)('%s routes the same with subdomains configured', (path, referer) => {
     const url = new URL(path, ONE);
     const before = routeBoardRequest(url, referer, parseBoardOrigins(BOARDS));
-    expect(routeRequest(url, referer, ENV)).toEqual(before);
     expect(routeRequest(url, referer, { BOARD_ORIGINS: BOARDS })).toEqual(before);
   });
 
   it('CONTROL: the table above is not all one answer', () => {
     const origins = PATHS.map(([path, referer]) => {
-      const r = routeRequest(new URL(path, ONE), referer, ENV);
+      const r = routeRequest(new URL(path, ONE), referer, { BOARD_ORIGINS: BOARDS });
       return r.kind === 'forward' ? r.origin : r.kind;
     });
     expect(new Set(origins)).toEqual(new Set([RIVERBEND, MAC, 'not_found']));
@@ -313,8 +314,34 @@ describe('ONE_ADDRESS_ORIGIN keeps the one address’s stamp on its own machine'
     expect(calls).toEqual([]);
   });
 
-  it('CONTROL: unset, the same request is forwarded to that machine', async () => {
-    const { res, calls } = await send(`${ONE}/workspaces/w-river/tasks?x=1`);
+  it('unset while a second origin exists, the one address forwards nothing (review M2)', async () => {
+    for (const path of ['/workspaces/w-river/tasks?x=1', '/workspaces/w-mac1']) {
+      const { res, calls } = await send(`${ONE}${path}`);
+      expect(res.status).toBe(404);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('a second origin named only by PROJECT_ORIGINS also counts', async () => {
+    const env = { ...ENV, BOARD_ORIGINS: JSON.stringify({ [MAC]: ['w-mac1'] }) };
+    const { res, calls } = await send(`${ONE}/workspaces/w-mac1`, {}, env);
+    expect(res.status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+
+  it('CONTROL: unset with only one origin anywhere, the one address forwards as before', async () => {
+    const env = {
+      ONE_ADDRESS: ONE_HOST,
+      BOARD_ORIGINS: JSON.stringify({ [MAC]: ['w-mac1'] }),
+      PROJECT_ORIGINS: JSON.stringify({ harborlight: MAC }),
+    };
+    const { res, calls } = await send(`${ONE}/workspaces/w-mac1`, {}, env);
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.origin)).toEqual([MAC]);
+  });
+
+  it('CONTROL: unset, a project hostname still reaches its own machine', async () => {
+    const { res, calls } = await send(`https://riverbend-workspaces.${ZONE}/workspaces/w-river`);
     expect(res.status).toBe(200);
     expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
   });

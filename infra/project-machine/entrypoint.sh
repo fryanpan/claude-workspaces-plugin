@@ -40,10 +40,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
 # The lead's working folder and transcripts, on the volume.
 LEAD_ROOT="$DATA_ROOT/lead"
-# Uids fixed in the Dockerfile. Over loopback TCP the server admits root and
-# itself (cw), and the tunnel (cwtunnel) only for requests the edge stamped
-# with cf-ray; every other user, the lead and cwbackup among them, is refused
-# (packages/server/src/middleware/loopback-uid-door.ts).
+# Uids fixed in the Dockerfile. Over loopback TCP the server admits itself
+# (cw) alone, and the tunnel (cwtunnel) only for requests the edge stamped
+# with cf-ray; every other user, root, the lead and cwbackup among them, is
+# refused (packages/server/src/middleware/loopback-uid-door.ts). Root keeps
+# the power to switch users: a machine tool that calls the server's REST runs
+# as cw (`asCw`, infra/project-machine/mac-ops.ts).
 CW_UID=10001
 TUNNEL_UID=10002
 # One unix socket per board (packages/server/src/board-sockets.ts), in a
@@ -133,7 +135,7 @@ fi
 (
   drop_secrets
   export CW_BOARD_SOCKET_DIR="$SOCKETS" CW_BOARD_SOCKET_SHARED="$LEAD_BOARD" \
-    CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_ALLOWED_UIDS="0,$CW_UID" \
+    CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_ALLOWED_UIDS="$CW_UID" \
     CW_LOOPBACK_EDGE_UIDS="$TUNNEL_UID"
   run_as cw bun run "$APP/packages/server/src/bin.ts" \
     --port "$PORT" --host 127.0.0.1 --no-port-walk \
@@ -268,7 +270,8 @@ fi
 # The health check. Fly's own checks reach a machine over its private
 # address, and this server listens on loopback only, so the check runs here:
 # any HTTP status from loopback is alive (the same rule as the Mac's
-# supervisor, docs/architecture/supervisor.md). A first bind gets 240s; after
+# supervisor, docs/architecture/supervisor.md), so the 403 the uid door gives
+# root's curl counts as alive. A first bind gets 240s; after
 # that, three misses 25s apart exit the machine.
 (
   sleep 240

@@ -99,6 +99,7 @@ import {
   createPauseTicker,
   wordsOf,
 } from './pause-ticker.ts';
+import { recordModelSpend } from './spend-alarm.ts';
 import type { EngineTurn } from './transcribe.ts';
 
 /**
@@ -1647,6 +1648,7 @@ export function beginNotesSession(
       const recordCall = (c: NotesCallUsage): void => {
         tickCalls.push(c);
         meetingCalls.push(c);
+        recordModelSpend(c.model, c.usage);
       };
       // WHAT THE DOC WOULD NOT TAKE, filled in by the write path while the
       // batch is being applied and read back by `report` below. Per tick, so

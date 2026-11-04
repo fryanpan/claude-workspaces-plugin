@@ -279,7 +279,7 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
       let operator = false;
       let appVoice = false;
       const members: string[] = [];
-      for (const v of frameCookiesOf(req.headers.get('cookie'))) {
+      for (const v of frameCookiesOf(req.headers.get('cookie'), ws)) {
         const c = checkFrameCookie(keys.cookie, v, frameHost, ws);
         if (!c.ok) continue;
         if (c.member === undefined) operator = true;

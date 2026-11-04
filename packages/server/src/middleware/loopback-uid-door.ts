@@ -5,14 +5,18 @@
  * agent run as separate users (`infra/project-machine/entrypoint.sh`), and
  * more users (builders) may join them. A loopback caller is trusted as the
  * owner in several places (`isLoopbackAddress`, `CW_LOOPBACK_SKIPS_ACCESS`),
- * which is right for root's own tools and the server calling itself and wrong
- * for everyone else. So the door is an allowlist, in two lists:
+ * which is right for the server calling itself and wrong for everyone else.
+ * So the door is an allowlist, in two lists:
  *
  * - `allowed` (`CW_LOOPBACK_ALLOWED_UIDS`): the operator. On a project
- *   machine root, which runs the health check and `fly ssh console`, and
- *   `cw`, the server itself: its hosted MCP connector calls its own REST over
- *   loopback (`connector/host.ts`), and a process running as `cw` can read
- *   the data dir and its keys anyway, so refusing it would buy nothing.
+ *   machine that is `cw` alone, the server itself: its hosted MCP connector
+ *   calls its own REST over loopback (`connector/host.ts`), and a process
+ *   running as `cw` can read the data dir and its keys anyway, so refusing it
+ *   would buy nothing. Root is not on it (security review M3): the
+ *   supervisor keeps only the power to switch users, so a machine tool run
+ *   over `fly ssh console` that calls the REST runs as `cw`
+ *   (`asCw`, `infra/project-machine/mac-ops.ts`). The health check counts
+ *   any answer, the 403 this door gives root included, as alive.
  * - `edge` (`CW_LOOPBACK_EDGE_UIDS`): cloudflared, which carries the edge's
  *   requests to the server and must keep doing so. Its requests are admitted
  *   only when they carry `cf-ray`, which Cloudflare stamps on everything it
@@ -21,8 +25,8 @@
  *   request from that uid without `cf-ray` is refused: a steered cloudflared
  *   cannot pass for the box.
  *
- * Every other uid is refused: the lead, the backup upload, a builder added
- * next month. A request whose TCP peer is refused is answered 403 before
+ * Every other uid is refused: root, the lead, the backup upload, a builder
+ * added next month. A request whose TCP peer is refused is answered 403 before
  * anything else reads it; the lead reaches its own board through that
  * board's socket (`board-sockets.ts`).
  *

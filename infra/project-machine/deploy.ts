@@ -27,7 +27,8 @@
  *   from the Keychain's `claude-lead-oauth-token` (or, with
  *   `--claude-account <label>`, `claude-lead-oauth-token.<label>`), and the
  *   repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
- *   `--github-deploy-key` names. A machine with a lead needs `--memory 2048`.
+ *   `--github-deploy-key` names, only once GitHub lists it read-only on the
+ *   `--lead-repo` or a `--push-repo` (`lead-key-check.ts`). A machine with a lead needs `--memory 2048`.
  *   Each is set once, like every secret, except that a run naming its source
  *   sets it again, and `--refresh-lead` sets all three again
  *   the server's push keys, one write deploy key per `--push-repo`, which
@@ -99,7 +100,9 @@ import {
   createAccessKey,
   ensurePolicy,
   hasLifecycle,
+  hasVersioning,
   setLifecycle,
+  setVersioning,
 } from './tigris.ts';
 import {
   type AppliedTunnel,
@@ -180,12 +183,25 @@ async function observe(cfg: ProjectConfig) {
       (n): n is string => n !== undefined && (keychainHas(n) || inferred(n)),
     ),
   );
-  // The lifecycle rule is read with the bucket's admin credential, which CI
-  // does not hold; the Mac set the rule when it made the bucket.
-  const lifecycle = keychainHas(cfg.keychain.bucketAdmin)
+  // The lifecycle rule and versioning are read with the bucket's admin
+  // credential, which CI does not hold; the Mac set both when it made the
+  // bucket, or on its first run since.
+  const admin = keychainHas(cfg.keychain.bucketAdmin);
+  const lifecycle = admin
     ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
     : inferred(cfg.keychain.bucketAdmin);
-  return { app, volumes, keychain, lifecycle, secrets, machines: app ? machines(cfg.app) : [] };
+  const versioning = admin
+    ? await hasVersioning(bucketAdmin(cfg), cfg.bucket)
+    : inferred(cfg.keychain.bucketAdmin);
+  return {
+    app,
+    volumes,
+    keychain,
+    lifecycle,
+    versioning,
+    secrets,
+    machines: app ? machines(cfg.app) : [],
+  };
 }
 
 function deploy(cfg: ProjectConfig): void {
@@ -277,6 +293,9 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       keychainCreate(cfg.keychain.writer, JSON.stringify(key));
       return;
     }
+    case 'set-versioning':
+      await setVersioning(bucketAdmin(cfg), cfg.bucket);
+      return;
     case 'set-lifecycle':
       await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
       return;
@@ -470,6 +489,7 @@ async function main(): Promise<void> {
     githubDeployKey: arg(args, 'github-deploy-key'),
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),
+    leadRepos: args.flatMap((a, i) => (a === '--lead-repo' ? [args[i + 1] ?? ''] : [])),
     pushRepos: args.flatMap((a, i) => (a === '--push-repo' ? [args[i + 1] ?? ''] : [])),
     refreshPushKeys: args.includes('--refresh-push-keys'),
   });

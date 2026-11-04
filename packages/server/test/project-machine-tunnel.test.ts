@@ -121,6 +121,7 @@ describe('the machine plan for a named tunnel', () => {
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
+    versioning: true,
     secrets: new Set(requiredSecrets('named')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
   };

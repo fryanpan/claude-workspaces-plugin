@@ -184,9 +184,9 @@ export interface ServerOptions {
   /**
    * Loopback TCP is admitted only from these uids, and every other uid is
    * refused before anything else reads the request
-   * (`middleware/loopback-uid-door.ts`). A project machine names root and the
-   * server's own uid (`CW_LOOPBACK_ALLOWED_UIDS`), so its lead, backup upload
-   * and any builder are refused and the lead reaches its board only through
+   * (`middleware/loopback-uid-door.ts`). A project machine names the server's
+   * own uid alone (`CW_LOOPBACK_ALLOWED_UIDS`), so root, its lead, backup
+   * upload and any builder are refused and the lead reaches its board only through
    * that board's socket. Empty, the door is off.
    */
   loopbackAllowedUids?: number[];
@@ -196,6 +196,13 @@ export interface ServerOptions {
    * `loopbackAllowedUids` is non-empty.
    */
   loopbackEdgeUids?: number[];
+  /**
+   * Dollars of Claude spend per UTC day at which this server raises one
+   * warning (`CW_SPEND_ALARM_USD`, `spend-alarm.ts`, security review L3).
+   * Every board server spends the one shared key, so each watches its own.
+   * Unset, no alarm.
+   */
+  spendAlarmUsd?: number;
   /** Tests only: who owns a loopback caller's socket, in place of `/proc/net/tcp`. */
   peerUid?: (peer: { address: string; port: number }, serverPort: number) => number | null;
   /**

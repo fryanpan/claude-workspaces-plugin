@@ -53,6 +53,10 @@ primary_region = "sjc"
   # The server listens on loopback only and Access fronts its one host, so
   # the machine's own tools (board move check, restore drill) skip the token.
   CW_LOOPBACK_SKIPS_ACCESS = "1"
+  # Every board server spends the one shared Anthropic key, so each raises a
+  # Sentry warning the day its own Claude calls pass this many dollars
+  # (packages/server/src/spend-alarm.ts, security review L3).
+  CW_SPEND_ALARM_USD = "25"
   # Claude Code's session transcripts: entrypoint.sh points the cw user's
   # ~/.claude/projects here, so they live on the volume and are backed up.
   BACKUP_TRANSCRIPTS_DIR = "/data/claude-projects"

@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Runs ON the machine, as root over `fly ssh console`, for `machine:move-board`.
+ * Runs ON the machine, over `fly ssh console`, for `machine:move-board`:
+ * `holds` and `import` as root, `fingerprint` as cw, because it calls the
+ * server's REST and the loopback uid door admits cw alone (`asCw`, mac-ops.ts).
  *
  *   bun board-probe.ts holds <board>                  {"holds": true|false}
  *   bun board-probe.ts import <bundle dir>            the bundle into the data dir;

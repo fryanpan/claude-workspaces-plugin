@@ -313,6 +313,17 @@ export function sanitizeErrorForCapture(err: unknown): unknown {
 }
 
 /**
+ * A warning-level message: something a person should hear about that is not
+ * an error in this process. Same rule as below for `extra`. No-op when Sentry
+ * isn't configured.
+ */
+export function captureServerWarning(message: string, extra?: Record<string, string>): void {
+  const Sentry = sentryModule;
+  if (!Sentry) return;
+  Sentry.captureMessage(message, { level: 'warning', ...(extra ? { extra } : {}) });
+}
+
+/**
  * Capture an error with whatever non-content context helps name the phase it
  * broke in (a route pattern, a socket kind — never a doc id, title, comment
  * body, or file path). No-op when Sentry isn't configured.

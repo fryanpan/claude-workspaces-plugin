@@ -73,8 +73,19 @@ const MEMBER_FIELD = 'm';
 
 /** The query parameter the host page writes the ticket into. */
 export const FRAME_TICKET_PARAM = 'cw-ft';
-/** The cookie the frame hostname sets in exchange for a ticket. */
-export const FRAME_COOKIE = 'cw_frame';
+/**
+ * The cookie the frame hostname sets in exchange for a ticket, one name per
+ * board (`frameCookieName`). `__Host-` because every project's frame hostname
+ * sits under one frame domain, so a mock on one could otherwise set a
+ * parent-domain cookie of this name for another (security review L2); a
+ * browser accepts a `__Host-` cookie only with no Domain and `Path=/`. The
+ * board is in the name rather than in the Path, which `__Host-` fixes at `/`,
+ * so two boards framed on one hostname each keep their own.
+ */
+export const FRAME_COOKIE_PREFIX = '__Host-cw_frame-';
+/** The name before L2, still read for one release so a frame opened before
+ *  the deploy keeps its cookie. Never set. */
+export const LEGACY_FRAME_COOKIE = 'cw_frame';
 /** How long a ticket in a frame's address may be traded for the cookie. */
 export const FRAME_TICKET_TTL_MS = 2 * 60_000;
 /** How long the grant a ticket starts lasts, counted from the ticket's mint. */
@@ -261,15 +272,17 @@ export function redeemFrameTicket(
   };
 }
 
-/** The path the cookie is scoped to: the board's own paths, and no other's. */
-export function frameCookiePath(workspaceId: string): string {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/`;
+/** The frame cookie's name for a board. A character a cookie name cannot
+ *  hold becomes `_`; a minted board id has none, and the value is signed for
+ *  its board, so two ids that map to one name still open only their own. */
+export function frameCookieName(workspaceId: string): string {
+  return `${FRAME_COOKIE_PREFIX}${workspaceId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 }
 
 /**
  * The cookie, partitioned so that a browser keeps it in a third-party frame,
- * HttpOnly so the attachment's script cannot read it, and with no Domain so
- * it is this frame hostname's alone.
+ * HttpOnly so the attachment's script cannot read it, and `__Host-` (no
+ * Domain, `Path=/`) so it is this frame hostname's alone.
  */
 export function frameCookieHeader(
   value: string,
@@ -277,20 +290,22 @@ export function frameCookieHeader(
   maxAgeMs: number = FRAME_COOKIE_TTL_MS,
 ): string {
   return (
-    `${FRAME_COOKIE}=${value}; Path=${frameCookiePath(workspaceId)}; ` +
+    `${frameCookieName(workspaceId)}=${value}; Path=/; ` +
     `Max-Age=${Math.floor(maxAgeMs / 1000)}; HttpOnly; Secure; SameSite=None; Partitioned`
   );
 }
 
-/** Every `cw_frame` value a `Cookie` header carries. A page's script may have
- *  planted one beside the real one, so each is tried. */
-export function frameCookiesOf(header: string | null): string[] {
+/** Every frame cookie value for this board a `Cookie` header carries, under
+ *  its own name or the legacy one. A page's script may have planted one
+ *  beside the real one, so each is tried. */
+export function frameCookiesOf(header: string | null, workspaceId: string): string[] {
   if (!header) return [];
+  const names = new Set([frameCookieName(workspaceId), LEGACY_FRAME_COOKIE]);
   const out: string[] = [];
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
-    if (part.slice(0, eq).trim() === FRAME_COOKIE) out.push(part.slice(eq + 1).trim());
+    if (names.has(part.slice(0, eq).trim())) out.push(part.slice(eq + 1).trim());
   }
   return out;
 }

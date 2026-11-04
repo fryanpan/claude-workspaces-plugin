@@ -152,37 +152,37 @@ export function settingsRows(
   return rows;
 }
 
-/** The lead's uid must be refused over loopback; the rest are listed. */
+/**
+ * The loopback uid door admits `cw` alone as the operator, and the tunnel
+ * alone through the edge (security review M3): root, the lead, the backup
+ * upload and any builder are refused. An empty allowed list turns the door off.
+ */
 export function uidRows(project: string, facts: MachineFacts): Row[] {
   if (!facts.server) return [];
-  const raw = facts.server.CW_LOOPBACK_REFUSED_UIDS ?? '';
-  const refused = new Set(list(raw).map(Number));
-  const lead = facts.users.find((u) => u.name === 'lead');
-  const rows = [
+  const names = new Map(facts.users.map((u) => [u.uid, u.name]));
+  names.set(0, 'root');
+  const named = (uids: number[]) =>
+    uids.map((uid) => `${names.get(uid) ?? 'uid'} ${uid}`).join(', ');
+  const only = (uids: number[], user: string) => {
+    const want = facts.users.find((u) => u.name === user)?.uid;
+    return want !== undefined && uids.length > 0 && uids.every((uid) => uid === want);
+  };
+  const allowed = list(facts.server.CW_LOOPBACK_ALLOWED_UIDS ?? '').map(Number);
+  const edge = list(facts.server.CW_LOOPBACK_EDGE_UIDS ?? '').map(Number);
+  return [
     row(
       project,
-      'loopback refuses the lead',
-      !lead
-        ? 'no lead user'
-        : refused.has(lead.uid)
-          ? `uid ${lead.uid} refused`
-          : `uid ${lead.uid} admitted`,
-      !!lead && refused.has(lead.uid),
+      'loopback admits cw alone',
+      allowed.length ? named(allowed) : 'off: every uid is admitted',
+      only(allowed, 'cw'),
+    ),
+    row(
+      project,
+      'loopback admits the tunnel alone through the edge',
+      edge.length ? named(edge) : 'nobody',
+      edge.length === 0 || only(edge, 'cwtunnel'),
     ),
   ];
-  // The door is a denylist (security review M3): say who it admits.
-  const admitted = facts.users.filter((u) => u.name !== 'cw' && !refused.has(u.uid));
-  rows.push(
-    row(
-      project,
-      'loopback admits (as the operator)',
-      admitted.length
-        ? admitted.map((u) => `${u.name} ${u.uid}`).join(', ')
-        : 'nobody but cw and root',
-      true,
-    ),
-  );
-  return rows;
 }
 
 /**
