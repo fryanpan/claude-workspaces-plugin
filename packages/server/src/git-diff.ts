@@ -110,6 +110,14 @@ export function resolveCommit(repo: string, ref: string): string | null {
   return runSync(repo, resolveCommitSteps(ref));
 }
 
+/**
+ * `resolveCommit` off the main thread. In a walled lead's repository it runs
+ * contained (`git-contained.ts`), where the sync form can only say "barred".
+ */
+export function resolveCommitAsync(repo: string, ref: string): Promise<string | null> {
+  return runAsync(repo, resolveCommitSteps(ref));
+}
+
 function* resolveCommitSteps(ref: string): GitSteps<string | null> {
   if (!isSafeRef(ref)) return null;
   const res = yield ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`];
@@ -313,6 +321,19 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
 /** Read a file's bytes at a commit. Returns null when the path doesn't exist there. */
 export function showFile(repo: string, commit: string, relPath: string): string | null {
   const res = gitSync(repo, ['show', `${commit}:${relPath}`]);
+  return res.ok ? res.stdout : null;
+}
+
+/**
+ * `showFile` off the main thread, and contained in a walled lead's
+ * repository. `cat-file blob` prints the stored bytes, with no textconv.
+ */
+export async function showFileAsync(
+  repo: string,
+  commit: string,
+  relPath: string,
+): Promise<string | null> {
+  const res = await gitAsync(repo, ['cat-file', 'blob', `${commit}:${relPath}`]);
   return res.ok ? res.stdout : null;
 }
 

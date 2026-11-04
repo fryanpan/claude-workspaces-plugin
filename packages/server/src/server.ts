@@ -3123,6 +3123,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
+    leadDiffRepo: (boardId, repo) => {
+      const c = boardSocketRoots.containedOf(repo);
+      return c && boardSocketRoots.rootsOf(boardId).includes(c.root) ? c.abs : null;
+    },
     chatAudit,
     shareLinks,
     accessProposals,

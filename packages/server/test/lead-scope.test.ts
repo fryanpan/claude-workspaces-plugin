@@ -53,6 +53,8 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${RIVERBEND}/tasks/t-river/notes`,
   ],
   ['POST', `/workspaces/${HARBORLIGHT}/git/push`, `/workspaces/${RIVERBEND}/git/push`],
+  // A diff review; `routes/lead-diff-scope.ts` holds the repo to the board's roots.
+  ['POST', `/workspaces/${HARBORLIGHT}/attachments`, `/workspaces/${RIVERBEND}/attachments`],
   [
     'GET',
     `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`,
@@ -89,7 +91,7 @@ describe('leadScopeAllows', () => {
       ['POST', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/reparse_from_disk`],
       ['GET', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content/extra`],
       ['GET', `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/notes`],
-      ['POST', `/workspaces/${HARBORLIGHT}/attachments`],
+      ['GET', `/workspaces/${HARBORLIGHT}/attachments`],
       ['POST', `/workspaces/${HARBORLIGHT}/mounts`],
       ['POST', '/api/board-tokens'],
       ['GET', `/workspaces/${HARBORLIGHT}/git/push`],
