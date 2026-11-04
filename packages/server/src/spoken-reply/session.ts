@@ -234,6 +234,10 @@ export class SpokenSession {
       case 'stop':
         this.stopSpeaking();
         return;
+      case 'context':
+        // A meeting's context names the doc it hears; only a question moves.
+        if (!this.ears) this.context = this.deps.parseContext(msg.context);
+        return;
       case 'pause':
         this.pauseTiming = msg.pause;
         this.pauseAsked = true;
