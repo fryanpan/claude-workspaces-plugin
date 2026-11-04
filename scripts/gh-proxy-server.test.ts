@@ -132,8 +132,8 @@ beforeAll(async () => {
     }
   });
   const leads = new Map<string, ProxyLead>([
-    [LEAD_TOKEN, { name: 'riverbend', repos: new Set(['a/b']), gh: true }],
-    [NO_GH_TOKEN, { name: 'saltmarsh', repos: new Set(['a/b']), gh: false }],
+    [LEAD_TOKEN, { name: 'riverbend', repos: new Set(['a/b']), gh: true, projects: [] }],
+    [NO_GH_TOKEN, { name: 'saltmarsh', repos: new Set(['a/b']), gh: false, projects: [] }],
   ]);
   proxy = createGhProxy({
     credential: CREDENTIAL,

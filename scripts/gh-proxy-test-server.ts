@@ -23,7 +23,7 @@ const env = (k: string) => {
 const leads = new Map<string, ProxyLead>(
   (
     JSON.parse(env('GHP_LEADS')) as { token: string; name: string; repos: string[]; gh: boolean }[]
-  ).map((l) => [l.token, { name: l.name, repos: new Set(l.repos), gh: l.gh }]),
+  ).map((l) => [l.token, { name: l.name, repos: new Set(l.repos), gh: l.gh, projects: [] }]),
 );
 
 const api = http.createServer((req, res) => {

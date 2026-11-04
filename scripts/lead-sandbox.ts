@@ -118,14 +118,15 @@ function profilePath(lead: Lead): string {
 }
 
 /**
- * For a lead that names GitHub repos: its proxy token (made once) and git
- * config, and the environment that points its git at them. Nothing for the rest.
+ * For a lead that names GitHub repos: its proxy token (made once), git
+ * config and `cw-worktree`, and the environment that points its git at them,
+ * `cw-worktree`'s folder first on `path`. Nothing for the rest.
  */
-function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, string> {
+function gitProxyFiles(lead: Lead, config: LeadSandboxConfig, path = process.env.PATH) {
   if (lead.githubRepos.length === 0) return {};
   const dir = gitProxyLeadDir(machine.home, lead.name);
-  const url = `http://127.0.0.1:${config.gitProxyPort}`;
-  return gitProxyEnv(ensureGitProxyFiles(lead.name, dir, url).gitconfig);
+  const f = ensureGitProxyFiles(lead.name, dir, `http://127.0.0.1:${config.gitProxyPort}`);
+  return { ...gitProxyEnv(f.gitconfig), PATH: path ? `${f.bin}:${path}` : f.bin };
 }
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
@@ -360,8 +361,8 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
     const env = {
       ...withoutBoardBearers(process.env),
-      ...gitProxyFiles(lead, config),
       ...tools,
+      ...gitProxyFiles(lead, config, tools.PATH),
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
     };
@@ -436,7 +437,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         turn,
         account: account.account,
         read: deps.readToken,
-        env: { ...process.env, ...gitProxyFiles(lead, config), ...toolsEnv },
+        env: { ...process.env, ...toolsEnv, ...gitProxyFiles(lead, config, toolsEnv.PATH) },
       });
       if (!row.ran) {
         notRun++;

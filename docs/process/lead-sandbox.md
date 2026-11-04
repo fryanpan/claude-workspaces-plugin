@@ -146,9 +146,11 @@ and writes docs the owner binds in those projects, and a link the lead made
 in one, or made elsewhere and moved in, would carry the server outside it.
 `bun install` and `npm install` still work, since their links are in
 `node_modules`, and the server refuses every path through one. The server
-runs no git in a repository that holds one of the lead's projects, so the
-lead's git settings stay writable: commits, `git push -u`, `git config` and
-`git worktree add` work. The costs: a walled lead cannot check out a
+runs no git in a repository that holds one of the lead's projects. The
+lead's git settings are read only whatever the wall says (`gitCodeRegex`), so
+commits and `git push` work, while `git push -u`, `git config` and
+`git worktree add` do not; `cw-worktree` makes its worktrees ("Branches and
+pull requests from inside the wall", below). The costs: a walled lead cannot check out a
 repository whose tracked files include symlinks outside `node_modules`, and
 cannot rename or delete a `node_modules` folder; and a diff review of its
 repository, or of a repository that holds it, does not work, since that
@@ -440,6 +442,7 @@ the profiles and the proxy together.
 | a repo not in that lead's `githubRepos` (GitHub's names match without case) | 403 |
 | a push that deletes a ref | 403 |
 | a push that moves the default branch other than forward (a force-push, a reset back) | 403 |
+| `POST /-/worktree` with a lead's token | a worktree of its own project, made here (below) |
 | everything else | sent to `https://github.com` with Bryan's credential |
 
 A push that creates a ref is allowed, and so is a force-push to any branch
@@ -557,6 +560,67 @@ unlisted repo gets the proxy's refusal, and a lead without `gh` gets `EPERM`
 on the socket. `--check` runs `gh api /` inside each gh lead's profile and
 needs the proxy's refusal back, so nothing goes to GitHub. Not run yet: gh
 through it against real GitHub.
+
+### Branches and pull requests from inside the wall
+
+A lead with `githubRepos` makes a branch in a worktree of its own, commits,
+pushes and opens the pull request without leaving the wall. In a repository
+of one of its projects, after `git fetch`:
+
+```bash
+cw-worktree fix-1 fix/harbor-notes origin/main
+cd .claude/worktrees/fix-1 && git commit -am '…' && git push
+gh pr create -R Harborlight/notes --head fix/harbor-notes --base main --title '…' --body '…'
+```
+
+**Why the proxy makes the worktree.** `git worktree add` writes
+`.git/worktrees/<name>/`, whose `commondir`, `gitdir` and `config.worktree`
+can point git at a config the lead wrote, and a config can run code through
+`core.fsmonitor` or `core.hooksPath`. The wall makes those read only, so the
+lead's own `git worktree add` fails with "Operation not permitted". A clone
+of its own, in a folder it can write, would hold a config and hooks the lead
+wrote, and the server, an unwalled session or the owner would run them the
+next time they ran git there. So the lead asks the proxy, which runs as the
+owner.
+
+**What `cw-worktree` does.** The launch writes it into
+`~/.config/claude-workspaces/git-proxy/<lead>/bin/`, read only to the lead
+and first on its `PATH`. It sends `POST /-/worktree` to the proxy with the
+lead's token (on curl's stdin, never in its arguments) and the repository it
+was run in. The proxy (`scripts/git-proxy-worktree.ts`):
+
+- refuses a repository that is not at or inside one of the lead's projects
+  as the config names them (403), one whose `.git` is not a folder, a path
+  on the way through a symlink, and a name, branch or worktree that exists;
+- runs `git worktree add --no-checkout --no-track -b <branch>
+  <repo>/.claude/worktrees/<name> <base>` with `core.hooksPath=/dev/null`,
+  `core.fsmonitor=false` and none of its own `GIT_` variables, so it runs no
+  hook, and no filter a `.gitattributes` the lead wrote names;
+- checks that the worktree's `.git` file, `commondir` and `gitdir` say what
+  git writes, and that there is no `config.worktree`;
+- sets `branch.<branch>.remote` to `origin` and `.merge` to the branch
+  itself, so a plain `git push` from the worktree goes to `origin/<branch>`.
+
+`cw-worktree` then fills in the files with the lead's own git, inside the
+wall, and prints the `gh pr create` line for the branch. The worktree's
+`.git` file and git folder are read only to the lead like the rest.
+
+**Why gh needs `-R` and `--head`.** gh reads the remote's URL after git's
+`insteadOf`, which is the proxy's, so it finds no GitHub remote. `-R
+<owner/repo>` names the repository and `--head <branch>` the branch, and gh
+then asks nothing of the remotes (gh 2.102, measured 4 November 2026).
+
+**What it was proved against.** `scripts/lead-sandbox-ship.test.ts` runs a
+board-walled lead under the real `sandbox-exec`: its own `git worktree add`
+fails; `cw-worktree`, a commit and `git push` land the branch on a stand-in
+for GitHub; the project's `config`, `hooks/` and `info/`, the worktree's
+`commondir`, `gitdir` and `config.worktree`, and its `.git` file are each
+unwritable while a plain file beside them is written; the real `gh pr create`
+opens a pull request through the gh proxy, with the owner's credential seen
+only upstream; and a pull request on another repository is refused, by name
+and by a crafted node id. `scripts/git-proxy-worktree.test.ts` covers the
+refusals, the symlink checks, and that the proxy's git runs no hook while the
+owner's own does.
 
 ## Restarting the fleet's leads under it
 
