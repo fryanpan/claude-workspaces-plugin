@@ -96,6 +96,17 @@ describe.skipIf(CHROME === null)('typing a comment while an agent edits the doc'
             if (st.where === 'inside') {
               expect(moved, `${st.where}: ${moved}px`).toBeGreaterThanOrEqual(-STILL_PX);
               expect(moved, `${st.where}: ${moved}px`).toBeLessThanOrEqual(INSIDE_GROWTH_PX);
+            } else if (st.where === 'burst') {
+              // The reader types during a burst, so the box may have grown by
+              // their own words. It grows from the edge it is pinned to: the
+              // top for a balloon or an in-flow card, the bottom for the
+              // sheet at 430. That edge stays put; a box that jumped moves
+              // both edges.
+              const bottom = (st.landed.boxBottom ?? Number.NaN) - (st.before.boxBottom ?? 0);
+              const grew = bottom - moved;
+              const still =
+                Math.abs(moved) <= STILL_PX || (grew > 0 && Math.abs(bottom) <= STILL_PX);
+              expect(still, `${st.where}: top ${moved}px, bottom ${bottom}px`).toBe(true);
             } else {
               expect(Math.abs(moved), `${st.where}: ${moved}px`).toBeLessThanOrEqual(STILL_PX);
             }

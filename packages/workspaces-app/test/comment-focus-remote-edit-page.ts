@@ -88,6 +88,7 @@ export const HELPERS = (kind: ComposerKind, cardSel: string) => `(() => {
         : a === document.body || a === null ? 'body' : 'other',
       text: box ? box.textContent : null,
       boxTop: drawn ? Math.round(box.getBoundingClientRect().top) : null,
+      boxBottom: drawn ? Math.round(box.getBoundingClientRect().bottom) : null,
       scrollTop: Math.round(document.querySelector('#editor').scrollTop),
       anchorTop: __anchorTop(),
     };

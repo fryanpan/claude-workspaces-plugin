@@ -15,6 +15,10 @@ export interface FocusReading {
   text: string | null;
   /** The box's top edge in viewport pixels, or null when it is not drawn. */
   boxTop: number | null;
+  /** The box's bottom edge. A box pinned to the bottom of the screen (the
+   *  new-comment sheet at 430) grows upward as the reader's words wrap, so
+   *  its top moves and this edge does not. */
+  boxBottom: number | null;
   /** The document scroller's scrollTop. */
   scrollTop: number;
   /** The top of the words the comment is about, in viewport pixels. */

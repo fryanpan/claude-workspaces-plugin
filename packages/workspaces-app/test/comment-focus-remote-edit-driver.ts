@@ -58,6 +58,15 @@ import type {
   FocusScenario,
 } from './comment-focus-remote-edit-reading.ts';
 
+/** What the reader types after each edit of the burst: long enough that
+ *  the box wraps onto a new line during it, whatever the font. */
+const BURST_WORDS = [
+  'and the Harborlight pilots ',
+  'then the Riverbend ferry ',
+  'and the Saltmarsh tide table ',
+  'then Alice and Bob sign it ',
+];
+
 /** Past `onComposerOpened`'s 500ms keyboard fallback. */
 const PAST_OPEN_FOLLOW_MS = 800;
 
@@ -358,7 +367,8 @@ async function scenario(
           () => lengthen(16, 'Bob'),
         ].entries()) {
           await send();
-          await type(i % 2 === 0 ? 'and ' : 'then ');
+          // Enough words that the box wraps onto a new line on any font.
+          await type(BURST_WORDS[i] ?? '');
         }
         const ms = Date.now() - t0;
         if (ms >= 1000) throw new Error(`the burst took ${ms}ms, not under a second`);
