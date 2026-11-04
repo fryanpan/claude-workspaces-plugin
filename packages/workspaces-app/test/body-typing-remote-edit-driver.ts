@@ -319,6 +319,9 @@ async function scenario(
   await type();
   const final = await page.settle();
   page.cdp.close();
+  // One browser at a time: this scenario's is stopped before the next starts.
+  const mine = browsers.pop();
+  if (mine) await stopBrowser(mine.proc, mine.profile);
   return { width, height, mode, opened, steps, final, typed };
 }
 

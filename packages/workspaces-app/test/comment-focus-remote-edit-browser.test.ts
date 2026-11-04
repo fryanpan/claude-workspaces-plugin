@@ -44,6 +44,9 @@ const STILL_PX = 2;
  * past this is more than that paragraph can account for.
  */
 const INSIDE_GROWTH_PX = 200;
+/** How far above the bottom of the screen the margin stops a growing card
+ *  (`EDGE` in doc/composer-slot.ts). */
+const MARGIN_EDGE_PX = 8;
 
 let run: FocusRun | null = null;
 const scenario = (width: number, kind: ComposerKind): FocusScenario => {
@@ -98,15 +101,22 @@ describe.skipIf(CHROME === null)('typing a comment while an agent edits the doc'
               expect(moved, `${st.where}: ${moved}px`).toBeLessThanOrEqual(INSIDE_GROWTH_PX);
             } else if (st.where === 'burst') {
               // The reader types during a burst, so the box may have grown by
-              // their own words. It grows from the edge it is pinned to: the
-              // top for a balloon or an in-flow card, the bottom for the
-              // sheet at 430. That edge stays put; a box that jumped moves
-              // both edges.
+              // their own words, and a growing box moves only by its own
+              // rules: it keeps the edge it is pinned to (the top of a card,
+              // the bottom of the sheet at 430), or, in the margin, it stops
+              // with its card 8px above the bottom of the screen
+              // (doc/composer-slot.ts). A box an edit moved does neither.
               const bottom = (st.landed.boxBottom ?? Number.NaN) - (st.before.boxBottom ?? 0);
-              const grew = bottom - moved;
+              const grew = bottom - moved > STILL_PX;
+              const atEdge =
+                st.landed.holderBottom !== null &&
+                Math.abs(st.landed.holderBottom - (st.landed.bandBottom - MARGIN_EDGE_PX)) <=
+                  STILL_PX;
               const still =
-                Math.abs(moved) <= STILL_PX || (grew > 0 && Math.abs(bottom) <= STILL_PX);
-              expect(still, `${st.where}: top ${moved}px, bottom ${bottom}px`).toBe(true);
+                Math.abs(moved) <= STILL_PX ||
+                (grew && (Math.abs(bottom) <= STILL_PX || (moved < 0 && atEdge)));
+              const said = `${st.where}: top ${moved}px, bottom ${bottom}px, card bottom ${st.landed.holderBottom} of ${st.landed.bandBottom}`;
+              expect(still, said).toBe(true);
             } else {
               expect(Math.abs(moved), `${st.where}: ${moved}px`).toBeLessThanOrEqual(STILL_PX);
             }

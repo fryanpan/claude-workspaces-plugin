@@ -61,10 +61,10 @@ import type {
 /** What the reader types after each edit of the burst: long enough that
  *  the box wraps onto a new line during it, whatever the font. */
 const BURST_WORDS = [
-  'and the Harborlight pilots ',
-  'then the Riverbend ferry ',
-  'and the Saltmarsh tide table ',
-  'then Alice and Bob sign it ',
+  'and the Harborlight pilots board at the north quay before the tide turns ',
+  'then the Riverbend ferry waits at the middle berth for the evening freight ',
+  'and the Saltmarsh tide table decides which slipway takes the loaded ferry ',
+  'then Alice and Bob sign the survey and send it to the harbour office ',
 ];
 
 /** Past `onComposerOpened`'s 500ms keyboard fallback. */
@@ -175,6 +175,10 @@ async function openPage(
     deviceScaleFactor: 1,
     mobile: touch,
   });
+  // A loaded runner, on request: `COMMENT_FOCUS_CPU_THROTTLE=4` runs the page
+  // four times slower, so edits can land mid-keystroke as they do on CI.
+  const throttle = Number(process.env.COMMENT_FOCUS_CPU_THROTTLE ?? 1);
+  if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
   if (touch) {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   }
@@ -398,6 +402,9 @@ async function scenario(
   }
   const final = await page.settle();
   page.cdp.close();
+  // One browser at a time: this scenario's is stopped before the next starts.
+  const mine = browsers.pop();
+  if (mine) await stopBrowser(mine.proc, mine.profile);
   return { width, height, kind, opened, steps, final, typed };
 }
 

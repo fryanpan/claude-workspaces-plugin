@@ -82,13 +82,33 @@ export const HELPERS = (kind: ComposerKind, cardSel: string) => `(() => {
     const box = __box();
     const a = document.activeElement;
     const drawn = box && box.getClientRects().length > 0;
+    // The box the reader sees is the surface around the editor: past its
+    // height cap it scrolls the editor inside it to keep the caret in view,
+    // and the editor's own top moves up while the box stays put.
+    const frame = box ? box.closest('.md-composer-surface') || box : null;
     return {
       focus: box && (a === box || box.contains(a)) ? 'composer'
         : a && a.closest && a.closest('#editor .ProseMirror') && !a.closest('.thread, .cw-inline-card') ? 'doc'
         : a === document.body || a === null ? 'body' : 'other',
       text: box ? box.textContent : null,
-      boxTop: drawn ? Math.round(box.getBoundingClientRect().top) : null,
-      boxBottom: drawn ? Math.round(box.getBoundingClientRect().bottom) : null,
+      boxTop: drawn ? Math.round(frame.getBoundingClientRect().top) : null,
+      boxBottom: drawn ? Math.round(frame.getBoundingClientRect().bottom) : null,
+      // The margin keeps the card holding the box (the new-comment box, or
+      // a reply's balloon) 8px above the bottom of the band the reader can
+      // see, so a box that grows past it moves up (doc/composer-slot.ts).
+      holderBottom: (() => {
+        const c = document.getElementById('composer');
+        const holder = ${
+          kind === 'new'
+            ? "c && c.classList.contains('composer--margin') && !c.classList.contains('hidden') ? c : null"
+            : "document.body.dataset.cards === 'balloon' ? __card() : null"
+        };
+        return holder ? Math.round(holder.getBoundingClientRect().bottom) : null;
+      })(),
+      bandBottom: Math.round(Math.min(
+        document.querySelector('#editor').getBoundingClientRect().bottom,
+        (visualViewport ? visualViewport.offsetTop + visualViewport.height : innerHeight),
+      )),
       scrollTop: Math.round(document.querySelector('#editor').scrollTop),
       anchorTop: __anchorTop(),
     };
