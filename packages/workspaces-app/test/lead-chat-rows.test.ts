@@ -156,6 +156,21 @@ describe('the lead chat’s entries', () => {
     expect(q('.lc-voice-btn')?.textContent).toContain('Hide words');
   });
 
+  it('draws a written answer to a spoken question as words, with its link, since nobody heard it', () => {
+    const p1 = CONVO[0] as LeadChatMessage;
+    const { q } = open([
+      p1,
+      msg({
+        id: 'a2',
+        text: 'It is [the Saltmarsh summary](/workspaces/w-x/docs/d-saltmarsh).',
+        replyTo: 'p1',
+        written: true,
+      }),
+    ]);
+    expect(q('.lc-voice')).toBeNull();
+    expect(q('.lc-msg[data-message-id="a2"] .lc-md a')?.textContent).toBe('the Saltmarsh summary');
+  });
+
   it('names a prompt typed in the lead’s terminal as such', () => {
     const { root } = open(CONVO);
     const row = root.querySelector('.lc-msg[data-message-id="k5"] .lc-msg-who');

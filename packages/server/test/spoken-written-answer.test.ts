@@ -147,6 +147,53 @@ describe('a spoken answer with a written one', () => {
     sock.close();
   });
 
+  it('writes the answer to the chat when the page that asked has gone', async () => {
+    const sock = new WebSocket(
+      `ws://127.0.0.1:${handle.port}/workspaces/${boardId}/voice/converse`,
+    );
+    const frames: Frame[] = [];
+    sock.addEventListener('message', (ev) => {
+      if (typeof ev.data === 'string') frames.push(JSON.parse(ev.data) as Frame);
+    });
+    await new Promise<void>((resolve) => sock.addEventListener('open', () => resolve()));
+    await waitFor(() => frames.some((f) => f.type === 'ready'), { describe: 'ready' });
+    const question = 'where is the Saltmarsh summary';
+    sock.send(
+      JSON.stringify({
+        type: 'start',
+        setup: 1,
+        mode: 'hold',
+        agent: 'harborlight-lead',
+        author: BRYAN,
+      }),
+    );
+    sock.send(JSON.stringify({ type: 'say', text: question }));
+    await waitFor(() => lead.voice.some((v) => v.transcript === question), {
+      describe: 'the lead got the spoken turn',
+    });
+    const asked = lead.voice.find((v) => v.transcript === question);
+    sock.close();
+    const written = 'It is [the Saltmarsh summary](/workspaces/w-x/docs/d-saltmarsh).';
+    const answer = (agentId: string) =>
+      post(`/workspaces/${boardId}/voice-queue/${asked?.queueId}/answer`, {
+        agentId,
+        text: 'In the chat.',
+        written,
+      });
+    // Another agent on the board cannot answer the lead's question.
+    handle.tasks.attachAgent(boardId, {
+      agentId: 'riverbend-peer',
+      agentName: 'Riverbend Peer',
+      runtime: 'claude-code-local',
+    });
+    await answer('riverbend-peer');
+    expect((await chat()).some((m) => m.text === written)).toBe(false);
+    // No page waits for it now, so nothing says it; the chat still keeps it.
+    expect(await (await answer('harborlight-lead')).json()).toEqual({ ok: true, delivered: false });
+    const kept = (await chat()).find((m) => m.text === written);
+    expect(kept).toMatchObject({ role: 'agent', written: true });
+  });
+
   it('refuses a written answer that is not a string or is over the cap', async () => {
     const path = `/workspaces/${boardId}/voice-queue/vq-x/answer`;
     const lead = { agentId: 'harborlight-lead', text: 'Fine.' };

@@ -228,7 +228,8 @@ export function drawMessage(ctx: RowContext, msg: LeadChatMessage): HTMLElement 
   if (msg.role === 'person' && msg.via === 'channel') return channelRow(ctx, msg);
   if (msg.role === 'agent' && msg.replyTo) {
     const asked = ctx.messages.find((m) => m.id === msg.replyTo);
-    if (asked?.via === 'voice') return voiceReply(ctx, msg);
+    // A written answer was never heard: it shows as words, not a recording.
+    if (asked?.via === 'voice' && !msg.written) return voiceReply(ctx, msg);
   }
   const { doc } = ctx;
   const mine = msg.role === 'person';

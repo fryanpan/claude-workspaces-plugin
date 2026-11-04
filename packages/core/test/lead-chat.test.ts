@@ -26,6 +26,15 @@ describe('parseLeadChatMessage', () => {
     ).toEqual({ ...base, via: 'voice', state: 'answered', replyTo: 'm0' });
   });
 
+  it('keeps the mark on a written answer, and only a true one', () => {
+    const answer = { ...base, role: 'agent', replyTo: 'm0' };
+    expect(parseLeadChatMessage({ ...answer, written: true })).toEqual({
+      ...answer,
+      written: true,
+    });
+    expect(parseLeadChatMessage({ ...answer, written: 'yes' })).toEqual(answer);
+  });
+
   it('drops an unknown via or state rather than the message', () => {
     expect(parseLeadChatMessage({ ...base, via: 'fax', state: 'lost' })).toEqual(base);
   });

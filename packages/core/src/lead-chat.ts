@@ -71,6 +71,9 @@ export interface LeadChatMessage {
   /** On an agent's message: its session is still writing it, so its text
    *  grows. Kept out of the log until it is whole. */
   streaming?: true;
+  /** On the lead's answer to something said aloud: `text` is the written
+   *  part `answer_voice` gave, which nobody heard, so the chat shows it. */
+  written?: true;
 }
 
 /** A tool call as the lead's terminal shows it, reduced by the hook the way
@@ -311,6 +314,7 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
     ...(receivedAt !== undefined ? { receivedAt } : {}),
     ...(tool ? { tool } : {}),
     ...(m.streaming === true ? { streaming: true as const } : {}),
+    ...(m.written === true ? { written: true as const } : {}),
   };
 }
 
