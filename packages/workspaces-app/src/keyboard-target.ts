@@ -39,3 +39,12 @@ export function eventPath(ev: Event): readonly (EventTarget | undefined)[] {
   const target = ev.target;
   return target ? [target] : [];
 }
+
+/** The one question every single-key shortcut asks first: does this keystroke
+ *  belong to a text field — ours, or one inside any shadow root, such as the
+ *  agent chat's composer? A document listener that judges by `ev.target`
+ *  instead sees the chat's shadow HOST, finds no text field, and acts: on the
+ *  front page that removed an Incoming Messages line while Bryan typed an `e`. */
+export function typingIn(ev: Event): boolean {
+  return typingInPath(eventPath(ev));
+}

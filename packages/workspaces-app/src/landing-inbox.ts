@@ -23,6 +23,7 @@
  * text is set with `textContent` and never parsed as markup.
  */
 
+import { eventPath, typingIn } from './keyboard-target.ts';
 import {
   closeModal,
   keysOpen,
@@ -389,11 +390,12 @@ function step(delta: number): void {
 function onKey(ev: KeyboardEvent): void {
   if (ev.metaKey || ev.ctrlKey || ev.altKey || !section()) return;
   const t = ev.target as HTMLElement | null;
-  if (
-    t &&
-    (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)
-  ) {
-    if (ev.key === 'Escape') {
+  if (typingIn(ev)) {
+    // Escape in one of the page's own boxes puts it away. A box inside a
+    // shadow root (the agent chat) has its own Escape, and `t` there is the
+    // shadow host rather than the box, so only a box `t` IS is ours.
+    const inner = eventPath(ev)[0];
+    if (ev.key === 'Escape' && inner === t) {
       closeModal();
       if (t instanceof HTMLTextAreaElement) t.blur();
     }

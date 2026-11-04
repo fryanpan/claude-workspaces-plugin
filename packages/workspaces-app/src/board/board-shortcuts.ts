@@ -8,7 +8,7 @@
  * handler is testable — board-app runs `main()` on import, which needs a live
  * workspace URL, so nothing in it can be exercised from a test.
  */
-import { eventPath, typingInPath } from '../keyboard-target.ts';
+import { typingIn } from '../keyboard-target.ts';
 
 export interface BoardShortcutDeps {
   /** Live board state, read at keydown time — pass the state object itself,
@@ -44,7 +44,7 @@ export interface BoardShortcutDeps {
 export function boardShortcutKeydown(deps: BoardShortcutDeps): (ev: KeyboardEvent) => void {
   const { state } = deps;
   return (ev) => {
-    if (typingInPath(eventPath(ev))) return;
+    if (typingIn(ev)) return;
     // A meta/ctrl/alt chord belongs to the browser or the OS. None of these
     // shortcuts is a chord, so every one of them passes through untouched —
     // and it must, because `c` is also Cmd+C: the capture box stole the copy
