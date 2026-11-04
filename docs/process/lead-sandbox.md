@@ -127,7 +127,10 @@ repo still works. Every other lead is refused the keychain by default,
 because a lead that can read it reads every item there, the Cloudflare and
 Fly tokens included until the keeper's cutover. A lead that needs only git
 fetch and push to named GitHub repos lists them in `githubRepos` instead and
-keeps the keychain refused ("GitHub through the proxy", below).
+keeps the keychain refused ("GitHub through the proxy", below). One that
+also needs `gh` for its pull requests adds `"tools": ["gh"]`, and its gh
+goes through the same proxy ("gh through the proxy", below); it needs
+neither the keychain nor `~/.config/gh`.
 
 **A test lead for the board wall** sets `"boardWall": true` and its board's
 id, `"boardId": "w-…"`, in its entry. The profile then denies every board
@@ -495,6 +498,65 @@ repeats the credential reaches the client redacted.
 `sandbox-exec`: a lead with repos reaches the port and reads its token, and
 cannot write it; a lead without them reaches neither. Not run yet: a real
 push to GitHub through it.
+
+### gh through the proxy
+
+A lead with `"tools": ["gh"]` and a `githubRepos` list (the config refuses
+`gh` without one) runs `gh` for reads and pull requests on those repos. The
+git proxy's process also serves gh, on the unix socket
+`/private/tmp/cw-<uid>-gh/api.sock` (folder mode 700, socket 600), with the
+same credential, read once. The handler is `scripts/gh-proxy-server.ts`; what
+it lets through is `scripts/gh-proxy-policy.ts`.
+
+**What the launch writes**, in the lead's git-proxy folder, which it reads
+and never writes: `gh/config.yml`, with `http_unix_socket` set to the socket.
+gh 2.102 then sends every API call to the socket in plain HTTP, with
+`Host: api.github.com`. The launch sets `GH_CONFIG_DIR` to that folder,
+`GH_TOKEN` to the lead's own proxy token (the one its git sends; it also
+outranks a token the owner's shell exported), `GH_HOST=github.com` and the
+two `GH_NO_*_NOTIFIER` variables. A lead without `gh` is denied the socket in
+its profile.
+
+**What the proxy lets through:**
+
+- REST: `GET` and `HEAD` under `/repos/<listed repo>/`, except `hooks`,
+  `keys`, `invitations`, `environments`, and the secrets, variables and
+  runners folders. A redirect to GitHub's file storage (a run's logs, an
+  artifact) is followed by the proxy, without the credential; a redirect
+  back into the API is refused.
+- GraphQL: only the operations gh 2.102 sends for `gh pr view`, `list`,
+  `status`, `checks`, `create`, `comment` and `edit` (`OPERATIONS`), each
+  with its own root fields. `repository(owner, name)` must name a listed
+  repo. `search` must name exactly one listed repo with `repo:`, and no
+  `org:`, `user:` or `owner:`. Every field path must be one gh asks for
+  (`scripts/gh-proxy-fields.json`), so a walk out of a listed repo, such as
+  `author { repositories }`, is refused. `node(id)` and the id in each
+  mutation's input are resolved upstream first, and must be a pull request
+  (a repository, for `createPullRequest`) in a listed repo.
+- Mutations: `addComment` on a pull request, `createPullRequest`,
+  `updatePullRequest` with a title, body or base, and the assignee and
+  reviewer mutations gh's `pr create` and `pr edit` send. Merge, review,
+  close, labels and every repo or settings mutation are refused.
+
+A refusal is a 403 whose `message` starts `gh proxy:` and names what to add
+(the operation, the field path, the input field) if gh needs it. A newer gh
+that changes its queries is refused until its operations are added: capture
+them by pointing a gh at a stub socket, and add them to `OPERATIONS` and the
+fields file.
+
+**What it was proved against.** `scripts/gh-proxy-policy.test.ts` checks
+every operation gh 2.102 sent (`scripts/fixtures/gh-proxy/`) passes, and
+that each refusal above holds, through fragments and aliases too.
+`scripts/gh-proxy-server.test.ts` runs the handler on a real socket in front
+of a stand-in for GitHub, with a fake credential: the upstream sees the
+credential and never the lead's token, an unlisted repo's node id is refused
+after one lookup, and neither a response nor a log line holds the
+credential. `scripts/gh-proxy-wall.test.ts` runs the real `gh` inside a
+generated profile: `gh pr view` and `gh api` answer from the stand-in, an
+unlisted repo gets the proxy's refusal, and a lead without `gh` gets `EPERM`
+on the socket. `--check` runs `gh api /` inside each gh lead's profile and
+needs the proxy's refusal back, so nothing goes to GitHub. Not run yet: gh
+through it against real GitHub.
 
 ## Restarting the fleet's leads under it
 

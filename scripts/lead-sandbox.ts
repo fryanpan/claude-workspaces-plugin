@@ -59,6 +59,7 @@ import {
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { projectSlugs } from '../packages/core/src/lead-wall.ts';
+import { ghProxySocket } from './gh-proxy-lead.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
   adbRow,
@@ -66,6 +67,7 @@ import {
   boardWallRows,
   bunWrapperRow,
   escapeRows,
+  ghRows,
   installRow,
   keychainRow,
   probeRuntime,
@@ -418,6 +420,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
           pluginDirs(machine.home, machine.realpath)[0] ?? '',
         ),
         ...(lead.tools.includes('uv') ? [uvRow(profile, cwd, toolsEnv)] : []),
+        ...ghRows(profile, cwd, lead.tools.includes('gh'), ghProxySocket(machine.uid), toolsEnv),
         ...wallRows(lead, config, guard, profile, cwd),
       ]) {
         total++;

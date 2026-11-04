@@ -12,6 +12,11 @@
  *   owner's cache stays out of the wall: a lead that wrote to it could change
  *   a package the owner's next `uvx` runs.
  *
+ * - `gh`: gh sends its API calls to the gh proxy's socket
+ *   (`gh-proxy-lead.ts`), which holds the owner's credential and passes
+ *   only reads and PR create, comment and edit on the lead's `githubRepos`.
+ *   Needs `githubRepos`. Without it the socket is refused.
+ *
  * The `bun` wrapper: a plugin MCP server such as Discord starts with
  * `bun run --cwd <plugin> start`, and its start script runs `bun install`
  * first. In the plugin cache the wall refuses every write, so that install
@@ -23,8 +28,10 @@
  */
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ensureGhFiles, ghNetworkRules, ghProxySocket } from './gh-proxy-lead.ts';
+import { gitProxyLeadDir } from './git-proxy-lead.ts';
 
-export const LEAD_TOOLS = ['adb', 'uv'] as const;
+export const LEAD_TOOLS = ['adb', 'uv', 'gh'] as const;
 export type LeadTool = (typeof LEAD_TOOLS)[number];
 
 /** The port adb's client finds its server on. */
@@ -76,10 +83,18 @@ export function toolWritePaths(lead: ToolLead, home: string): string[] {
   return lead.tools.includes('uv') ? [uvCache(home, lead.name)] : [];
 }
 
-/** Port 5037 is refused at every address unless the lead has `adb`. */
-export function toolNetworkRules(lead: ToolLead, adbPort: number = ADB_SERVER_PORT): string[] {
-  if (lead.tools.includes('adb')) return [];
-  return [`(deny network-outbound (remote ip "*:${adbPort}")) ; adb's server`];
+/** Port 5037 is refused at every address unless the lead has `adb`, and the gh proxy's socket unless it has `gh`. */
+export function toolNetworkRules(
+  lead: ToolLead,
+  ghSocket: string,
+  adbPort: number = ADB_SERVER_PORT,
+): string[] {
+  return [
+    ...(lead.tools.includes('adb')
+      ? []
+      : [`(deny network-outbound (remote ip "*:${adbPort}")) ; adb's server`]),
+    ...ghNetworkRules(lead, ghSocket),
+  ];
 }
 
 function shQuote(s: string): string {
@@ -138,6 +153,7 @@ export function ensureLeadTools(
   realBun: string | null,
   realpath: (p: string) => string,
   path: string | undefined,
+  ghSocket: string = ghProxySocket(process.getuid?.() ?? 0),
 ): Record<string, string> {
   const bin = join(leadToolsDir(home, lead.name), 'bin');
   // Not the bun running the launch: from prod's checkout that may be prod's
@@ -155,5 +171,7 @@ export function ensureLeadTools(
     env.UV_CACHE_DIR = join(cache, 'cache');
     env.UV_TOOL_DIR = join(cache, 'tools');
   }
+  if (lead.tools.includes('gh'))
+    Object.assign(env, ensureGhFiles(lead.name, gitProxyLeadDir(home, lead.name), ghSocket));
   return env;
 }
