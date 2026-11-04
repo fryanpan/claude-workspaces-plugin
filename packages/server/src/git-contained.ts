@@ -23,11 +23,12 @@
  * Design and tests: docs/architecture/lead-tree-containment.md.
  */
 import { execFile } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { boundFiles } from './slow-fs.ts';
+import { kindTree } from './tree-fs-create.ts';
 import type { Contained } from './tree-fs.ts';
-import { listTreeSync, readTreeSync } from './tree-fs.ts';
+import { readTreeSync } from './tree-fs.ts';
 
 export interface ContainedGitResult {
   ok: boolean;
@@ -36,11 +37,8 @@ export interface ContainedGitResult {
 }
 
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
-const XCRUN = '/usr/bin/xcrun';
 const MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
-/** The most entries one folder may hold while the repository is looked for. */
-const DIR_SCAN_MAX = 100_000;
 
 const cannotTell = (why: string): ContainedGitResult => ({ ok: false, stdout: '', stderr: why });
 
@@ -100,37 +98,69 @@ export function setContainedGitSeamForTest(fn: ((cwd: string) => void) | null): 
   seam = fn;
 }
 
-let resolved: string | null | undefined;
+/** One git the server may run: the binary, and the prefix its profile reads. */
+export interface GitCandidate {
+  git: string;
+  prefix: string;
+}
 
 /**
- * The git binary, resolved once and outside any sandbox. Xcode's git where
- * `xcrun` exists, so the `/usr/bin/git` shim is never what the profile
- * execs; otherwise the first `git` on `/usr/bin:/bin`. Real paths, because
- * Seatbelt matches the path a file really has.
+ * The gits a contained call may run, in order. A fixed list, never `xcrun`:
+ * `xcrun` answers from a per-user cache in the temporary folder, which a
+ * lead under the same user can write (review round 2, H1).
  */
-async function gitBinary(): Promise<string | null> {
-  if (gitOverride) return gitOverride;
-  if (resolved !== undefined) return resolved;
-  resolved = await new Promise<string | null>((done) => {
-    if (!existsSync(XCRUN)) {
-      done(existsSync('/usr/bin/git') ? '/usr/bin/git' : null);
-      return;
+export const GIT_CANDIDATES: readonly GitCandidate[] = [
+  {
+    git: '/Applications/Xcode.app/Contents/Developer/usr/bin/git',
+    prefix: '/Applications/Xcode.app/Contents/Developer/usr',
+  },
+  {
+    git: '/Library/Developer/CommandLineTools/usr/bin/git',
+    prefix: '/Library/Developer/CommandLineTools/usr',
+  },
+];
+
+let candidates: readonly GitCandidate[] = GIT_CANDIDATES;
+
+/** Tests: the list `gitBinary` picks from, or null for `GIT_CANDIDATES`. */
+export function setGitCandidatesForTest(next: readonly GitCandidate[] | null): void {
+  candidates = next ?? GIT_CANDIDATES;
+  resolved = undefined;
+}
+
+/** Whether nobody but root can change `path`: owned by root, no group or other write. */
+function rootOnly(path: string): boolean {
+  const st = lstatSync(path);
+  return !st.isSymbolicLink() && st.uid === 0 && (st.mode & 0o022) === 0;
+}
+
+/**
+ * The first candidate whose binary, and every folder from it up to its
+ * prefix's parent, is root's alone and reached through no link. Null when
+ * none is.
+ */
+export function pickGit(list: readonly GitCandidate[]): GitCandidate | null {
+  for (const c of list) {
+    try {
+      if (realpathSync(c.git) !== c.git || !c.git.startsWith(`${c.prefix}/`)) continue;
+      const top = dirname(c.prefix);
+      let ok = rootOnly(c.git);
+      for (let at = dirname(c.git); ok && at.length >= top.length; at = dirname(at))
+        ok = rootOnly(at);
+      if (ok) return c;
+    } catch {
+      // Missing or unreadable: the next candidate.
     }
-    execFile(
-      XCRUN,
-      ['-f', 'git'],
-      { env: { PATH: '/usr/bin:/bin' }, timeout: 10_000, killSignal: 'SIGKILL' },
-      (err, stdout) => {
-        const out = typeof stdout === 'string' ? stdout.trim() : '';
-        if (err || !out.startsWith('/')) return done(null);
-        try {
-          done(realpathSync(out));
-        } catch {
-          done(null);
-        }
-      },
-    );
-  });
+  }
+  return null;
+}
+
+let resolved: GitCandidate | null | undefined;
+
+/** The git to run, picked once. */
+function gitBinary(): GitCandidate | null {
+  if (gitOverride) return { git: gitOverride, prefix: dirname(dirname(gitOverride)) };
+  if (resolved === undefined) resolved = pickGit(candidates);
   return resolved;
 }
 
@@ -138,9 +168,8 @@ async function gitBinary(): Promise<string | null> {
 const literalSafe = (text: string): boolean =>
   ![...text].some((ch) => ch === '"' || ch === '\\' || ch.charCodeAt(0) < 0x20 || ch === '\u007f');
 
-/** The Seatbelt profile for one call: read `root` and git, exec git only. */
-export function containedGitProfile(root: string, git: string): string {
-  const prefix = dirname(dirname(git));
+/** The Seatbelt profile for one call: read `root` and git's prefix, exec git only. */
+export function containedGitProfile(root: string, git: string, prefix: string): string {
   const q = (p: string) => `"${p}"`;
   return [
     '(version 1)',
@@ -213,29 +242,24 @@ export function driverOverrides(names: readonly string[]): [string, string][] {
 /**
  * Whether git would find its repository inside `c.root`, from `c`: the first
  * `.git` on the way up from `c.abs` to the root is a folder, or a regular
- * file whose `gitdir:` names a path under the root. Read through tree-fs, so
- * a `.git` link is seen as one. A root with no `.git` inside it sits in a
- * larger repository, which this does not run git in.
+ * file whose `gitdir:` names a path under the root. One tree-fs open of
+ * `.git` per level, so a `.git` link is seen as one and no folder is
+ * listed. A root with no `.git` inside it sits in a larger repository,
+ * which this does not run git in.
  */
 export function repoInsideRoot(c: Contained): boolean {
   let at = c.abs;
   for (;;) {
-    const listed = listTreeSync(
-      { root: c.root, abs: at },
-      { maxEntries: DIR_SCAN_MAX, enter: () => false },
-    );
-    if (listed === null) return false;
-    const base = at === c.root ? '' : `${at.slice(c.root.length + 1)}/`;
-    const dotGit = listed.find((e) => e.rel === `${base}.git`);
-    if (dotGit) {
-      if (dotGit.kind === 'dir') return true;
-      if (dotGit.kind !== 'file') return false;
-      const bytes = readTreeSync({ root: c.root, abs: join(at, '.git') }, 4_096);
+    const dotGit = { root: c.root, abs: join(at, '.git') };
+    const kind = kindTree(dotGit);
+    if (kind === 'dir') return true;
+    if (kind === 'other') return false;
+    if (kind === 'file') {
+      const bytes = readTreeSync(dotGit, 4_096);
       if (bytes === 'too-large') return false;
       const named = /^gitdir:\s*(.+?)\s*$/m.exec(Buffer.from(bytes).toString('utf8'))?.[1];
       if (!named) return false;
-      const target = resolve(at, named);
-      return target.startsWith(`${c.root}/`);
+      return resolve(at, named).startsWith(`${c.root}/`);
     }
     if (at === c.root) return false;
     at = dirname(at);
@@ -251,6 +275,23 @@ export function isSafeGitName(rel: string): boolean {
   if (rel === '' || rel.startsWith('/') || rel.includes('\0')) return false;
   return rel.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
+
+/**
+ * The subcommands a contained call may run, first in `args`. A subcommand
+ * outside it (`blame`, `grep --textconv`, a global option first) would run
+ * without `withReadFlags`; the profile still refuses the exec, but the
+ * answer would be a refusal nobody reads as one (round 2, L3).
+ */
+const ALLOWED = new Set([
+  'ls-files',
+  'diff',
+  'rev-parse',
+  'merge-base',
+  'status',
+  'config',
+  'cat-file',
+  'hash-object',
+]);
 
 /** The subcommands that can run a diff driver or textconv. */
 const DIFFING = new Set([
@@ -321,6 +362,7 @@ export function containedGit(
     return Promise.resolve(cannotTell('a path guard refused this folder'));
   }
   if (!c) return null;
+  if (!ALLOWED.has(args[0] ?? '')) return Promise.resolve(cannotTell('not a contained subcommand'));
   return runContained(c, args);
 }
 
@@ -336,9 +378,12 @@ async function runContained(c: Contained, args: readonly string[]): Promise<Cont
   } catch {
     return cannotTell('the lead folder could not be read');
   }
-  const git = await gitBinary();
-  if (!git || !literalSafe(git)) return cannotTell('no git binary');
-  const profile = containedGitProfile(c.root, git);
+  const picked = gitBinary();
+  if (!picked || !literalSafe(picked.git) || !literalSafe(picked.prefix)) {
+    return cannotTell('no root-owned git binary');
+  }
+  const { git } = picked;
+  const profile = containedGitProfile(c.root, git, picked.prefix);
   seam?.(c.abs);
   const listed = await run(
     git,

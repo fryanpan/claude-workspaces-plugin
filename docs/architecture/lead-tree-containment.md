@@ -246,7 +246,8 @@ tell":
 - `PathGuards.containedOf(cwd)` names a root;
 - the repository is found inside that root: a `.git` folder, or a `.git`
   regular file whose `gitdir:`, read through `tree-fs`, names a folder inside
-  the root. A `.git` link, a pointer out of the root, or no `.git` below the
+  the root. Each level from the working folder up costs one `tree-fs` open of
+  its `.git` (`kindTree`), never a listing of the folder (round 2, M1). A `.git` link, a pointer out of the root, or no `.git` below the
   root (the root sits inside a larger repository) is refused;
 - the root's text holds no `"`, `\` or control character, so it can be written
   into the profile as a literal.
@@ -276,12 +277,29 @@ Measured on this Mac (2026-11-04, Xcode's git and Homebrew git 2.54.0):
 `log` and `show` all succeed under it. Without `(literal "/")`, git aborts
 at start (SIGABRT). It needs no `mach-lookup`.
 
-The git binary is resolved once, outside the sandbox. Where `/usr/bin/xcrun`
-exists, it is `xcrun -f git`, so the owner-run shim is never run inside the
-profile. Otherwise it is the resolved `git` on `PATH`. The prefix is the
-binary's grandparent folder (`…/usr`), so git's own `share/git-core` is
-readable. The server's launchd `PATH` holds no `/opt/homebrew`, so prod
-resolves Xcode's git, which is root-owned.
+The git binary comes from a fixed list, never from `xcrun` (review round 2,
+H1): Xcode's git (`/Applications/Xcode.app/Contents/Developer/usr/bin/git`),
+then the Command Line Tools' (`/Library/Developer/CommandLineTools/usr/bin/git`).
+The first is used whose binary, and every folder from it up to its
+`Developer` folder, is owned by root with no group or other write, and whose
+path holds no link. The profile's read prefix (`…/usr`) comes from the same
+list, so git's own `share/git-core` is readable. `xcrun -f git` and the
+`/usr/bin/git` shim answer from `xcrun_db`, a per-user cache in the temporary
+folder that a lead under the same user can write; a forged entry there is
+honoured (measured in the round 2 review: a copy with git's path swapped made
+`/usr/bin/git --version` run the copy's script).
+
+The same cache chooses what every unsandboxed `/usr/bin/git` runs, so the
+server (`bin.ts`), the git proxy and the lead launcher set `xcrun_nocache=1`,
+which makes every Xcode shim skip it (measured: with it set, the forged entry
+is ignored). The wall makes `xcrun_db` and its folder read only to every lead
+(`xcrunCachePaths` in `scripts/lead-sandbox-owner-bins.ts`), so renaming the
+folder away and putting a new one in its place is refused too.
+
+**Subcommands.** A contained call runs only `ls-files`, `diff`, `rev-parse`,
+`merge-base`, `status`, `config`, `cat-file` or `hash-object`, first in its
+arguments (round 2, L3). Anything else, a global option first included, is
+"cannot tell".
 
 Under this profile, a program a hostile config names cannot start: exec is
 allowed for the git binary alone, and Seatbelt checks an interpreter as well
@@ -414,7 +432,7 @@ whether the path is under a root (`PathGuards.heldByRoot`, true in every
 in `packages/server/src` and `packages/core/src` (tests excluded) that imports
 `fs`, `fs/promises` or `child_process` in any spelling (static, `import()`,
 `require()`), uses `Bun.file`, `Bun.write` or `Bun.spawn`, imports
-`safe-file`, or calls a checked helper or `readLine`: 181 today. The labels:
+`safe-file`, or calls a checked helper or `readLine`: 180 today. The labels:
 `tree-fs` (reaches a lead tree only through `PathGuards`, `tree-fs.ts` or
 `git-contained.ts`), `refused-when-covered` (asks `covers` or `gitBarred`
 first), `spelling-only` (section G's `realpath` comparisons), `never-covered`
@@ -473,6 +491,9 @@ says what happens at 3413ccb27. Three kinds:
 | 23 | `scripts/check-tree-fs.test.ts` | fixture modules importing `node:fs`, calling `readLine` with no `fs` import, with `import('fs')`, one in `packages/core/src`, one importing `bound-path-checked.ts`, one naming `treeInternals` | n/a, new gate | each fails the gate; each passes once its row is added; a module that reaches nothing needs no row (review M4) |
 | 24 | `lead-tree-helpers.test.ts` | each helper in "The helpers fail closed", called on a file under a registered root | Base: each reads or writes it | each refuses; the same helpers read a plain file |
 | 25 | `board-socket-lead.test.ts`, `board-socket-lead-writes.test.ts`, `walled-folder-bind.test.ts` (unchanged) | none | the lead's folder bind, doc list and set-content work on its own board and are refused on another | unchanged; re-run as the regression |
+| 26 | `git-contained-binary.test.ts` | an owner-writable git listed before the root-owned ones, and one reached through a link | Base: `xcrun`'s answer is trusted, whatever the cache names | both passed over; the root-owned git runs and the forged one never does; with only the forged one listed, "cannot tell" |
+| 27 | `git-contained-binary.test.ts` | a repository three folders above the working folder, beside 200 files | Base: every level is listed (`listTreeSync`) | found with no listing (a spy on `listTreeSync` sees none) |
+| 28 | `lead-sandbox-owner-bins.test.ts` | a stand-in `xcrun_db` and its folder, under the real `sandbox-exec` | Base: the lead's write lands (the mutation control) | the write and a rename of the folder are refused; other files there and the project still write |
 
 Test 6 of the first draft (a framed page's folder renamed out during the
 read) is covered by `tree-fs.test.ts`'s folder-moved case, which every read
@@ -493,6 +514,11 @@ there.
   work changes neither.
 - **Case and Unicode spellings** of one APFS file still become separate doc
   ids (PR 1440's L3).
+- **A hard link made before walling.** Seatbelt judges the path opened, so a
+  hard link inside the root to a file outside it is readable to contained git,
+  and `git diff` would print it. `tree-fs`'s `nlink == 1` check does not apply
+  to git. The wall refuses making such a link (round 2, P6), so this needs one
+  that existed before the lead was walled (round 2, L7).
 - **The owner's own sessions.** A hook or MCP child in the owner's
   unsandboxed session that reads a lead's project is not server code. PR
   1423's O2 (shared transcripts and memory) stays open.

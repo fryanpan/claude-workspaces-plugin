@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import type { DiffFileStatus } from '@claude-workspaces/core';
-import { containedGit } from './git-contained.ts';
+import { containedGit, isSafeGitName } from './git-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
@@ -302,7 +302,12 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
     }
   }
 
-  return { ok: true, files };
+  // Git prints the repository's text; a crafted index can name `../x`.
+  // Judged raw, before any caller joins one to its folder (round 2, L1).
+  const safe = files.filter(
+    (f) => isSafeGitName(f.relPath) && (f.oldPath === undefined || isSafeGitName(f.oldPath)),
+  );
+  return { ok: true, files: safe };
 }
 
 /** Read a file's bytes at a commit. Returns null when the path doesn't exist there. */

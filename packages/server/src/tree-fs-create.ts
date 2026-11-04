@@ -5,7 +5,7 @@
  * `O_NOFOLLOW_ANY`, every descriptor is judged, and nothing after the open
  * goes by path.
  */
-import { closeSync, writeSync } from 'node:fs';
+import { closeSync, fstatSync, writeSync } from 'node:fs';
 import { GuardRefused } from './guard-refused.ts';
 import { SF_DATALESS } from './tree-fs-native.ts';
 import { type Contained, namesOf, treeInternals as t } from './tree-fs.ts';
@@ -33,6 +33,39 @@ export function existsTree(c: Contained): boolean {
   }
   closeSync(fd);
   return true;
+}
+
+/**
+ * What is at `c`, from one open of its own name: a folder, a regular file
+ * with one name, nothing, or anything else (a link, a dataless file, a
+ * file with a second name, a device). No folder is listed.
+ */
+export function kindTree(c: Contained): 'dir' | 'file' | 'missing' | 'other' {
+  const dev = t.rootDev(c.root);
+  namesOf(c);
+  const flags = t.native(c.abs).flagsAt(c.abs);
+  if (flags !== null && (flags & SF_DATALESS) !== 0) return 'other';
+  let fd: number;
+  try {
+    fd = t.openNoLink(c.abs, t.FILE_OPEN);
+  } catch (err) {
+    if (err instanceof GuardRefused) return 'other';
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 'missing';
+    throw err;
+  }
+  try {
+    const st = fstatSync(fd);
+    const kind = st.isDirectory() ? 'dir' : st.isFile() ? 'file' : null;
+    if (kind === null) return 'other';
+    t.judge(fd, c, dev, kind);
+    return kind;
+  } catch (err) {
+    if (err instanceof GuardRefused) return 'other';
+    throw err;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

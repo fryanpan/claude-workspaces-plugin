@@ -44,6 +44,9 @@ function main(argv: string[]): number {
     return 2;
   }
   const file = resolve(given);
+  // The proxy's `git worktree add` runs `/usr/bin/git`, whose real binary an
+  // Xcode cache a lead can write would otherwise choose (lead-tree-containment.md).
+  process.env.xcrun_nocache = '1';
   const load = (): LeadSandboxConfig | string => {
     try {
       const parsed = parseConfig(JSON.parse(readFileSync(file, 'utf8')), homedir());

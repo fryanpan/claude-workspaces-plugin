@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { installRow } from './lead-sandbox-escapes.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
-import { ownerBinFolders, withOwnerBins } from './lead-sandbox-owner-bins.ts';
+import { ownerBinFolders, withOwnerBins, xcrunCachePaths } from './lead-sandbox-owner-bins.ts';
 
 /** A machine of folders, each writable or not; every other path is missing. */
 function walk(
@@ -98,7 +98,7 @@ describe.skipIf(!RUN)('owner program folders under the real sandbox-exec', () =>
   const brewRoot = join(root, 'homebrew');
   const brew = join(brewRoot, 'bin', 'brew');
 
-  const profileFor = (ownerBins: string[], machineHome = home) => {
+  const profileFor = (ownerBins: string[], machineHome = home, xcrunCache: string[] = []) => {
     const parsed = parseConfig(
       { leads: [{ name: 'harborlight', projects: [project] }] },
       machineHome,
@@ -106,8 +106,8 @@ describe.skipIf(!RUN)('owner program folders under the real sandbox-exec', () =>
     if (!parsed.ok) throw new Error(parsed.error);
     const lead = parsed.config.leads[0];
     if (!lead) throw new Error('fixture has one lead');
-    const m: Machine = { home: machineHome, uid: 501, realpath: (p) => p, ownerBins };
-    const file = join(root, `profile-${ownerBins.length}.sb`);
+    const m: Machine = { home: machineHome, uid: 501, realpath: (p) => p, ownerBins, xcrunCache };
+    const file = join(root, `profile-${ownerBins.length}-${xcrunCache.length}.sb`);
     writeFileSync(file, buildProfile(lead, parsed.config, m));
     return file;
   };
@@ -129,6 +129,26 @@ describe.skipIf(!RUN)('owner program folders under the real sandbox-exec', () =>
     expect(readFileSync(join(project, 'notes.md'), 'utf8')).toBe('planted\n');
     // The mutation control: without the rule, the same write lands.
     expect(append(profileFor([]), brew)).toBe(0);
+  });
+
+  it("refuses a write to Xcode's shim cache, and to renaming its folder away", () => {
+    // A stand-in for DARWIN_USER_TEMP_DIR; the real cache is never touched.
+    const temp = join(root, 'var-folders', 'T');
+    mkdirSync(temp, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    const db = join(temp, 'xcrun_db');
+    writeFileSync(db, 'real\n');
+    const walled = profileFor([], home, xcrunCachePaths(`${temp}/`));
+    expect(append(walled, db)).not.toBe(0);
+    expect(readFileSync(db, 'utf8')).toBe('real\n');
+    const move = (profile: string) =>
+      spawnSync(SANDBOX_EXEC, ['-f', profile, '/bin/mv', temp, `${temp}-moved`]).status;
+    expect(move(walled)).not.toBe(0);
+    // Positive controls: other files in that folder, and the lead's project.
+    expect(append(walled, join(temp, 'scratch'))).toBe(0);
+    expect(append(walled, join(project, 'notes.md'))).toBe(0);
+    // The mutation control: without the rule, the same write lands.
+    expect(append(profileFor([]), db)).toBe(0);
   });
 
   const realBrew = '/opt/homebrew';

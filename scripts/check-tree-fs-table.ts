@@ -161,7 +161,6 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/reading-time-backfill.ts': 'not-in-inventory',
   'packages/server/src/ready-nudge.ts': 'not-in-inventory',
   'packages/server/src/recall-calendar.ts': 'not-in-inventory',
-  'packages/server/src/repo-registry-checkouts.ts': 'not-in-inventory',
   'packages/server/src/repo-registry-file.ts': 'not-in-inventory',
   'packages/server/src/review-answer-ledger.ts': 'not-in-inventory',
   'packages/server/src/review-archive.ts': 'not-in-inventory',
