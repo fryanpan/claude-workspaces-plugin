@@ -144,6 +144,9 @@ export type SpokenClientMessage =
     }
   | { type: 'end' }
   | { type: 'stop' }
+  /** The reader moved while voice listens: what they have open now, for the
+   *  question they are asking. Parsed as `start`'s context is. */
+  | { type: 'context'; context: unknown }
   /** The pause setting changed mid-meeting: the next wait uses it. */
   | { type: 'pause'; pause: SpokenPause }
   /** A choice tapped instead of said: answered as if it had been heard, on
@@ -308,6 +311,8 @@ export function parseSpokenClientMessage(text: string): SpokenClientMessage | nu
       return { type: 'end' };
     case 'stop':
       return { type: 'stop' };
+    case 'context':
+      return m.context !== undefined ? { type: 'context', context: m.context } : null;
     case 'pause': {
       const pause = parseSpokenPause(m.pause);
       return pause ? { type: 'pause', pause } : null;

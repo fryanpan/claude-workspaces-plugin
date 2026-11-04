@@ -140,7 +140,7 @@ const LINK_TRIM = ['item', 'thread', 'task', 'goal'] as const;
  * is the Home feed's check (no scheme, host, backslash, whitespace or dot
  * segment, and it must survive URL parsing unchanged); on top of it a link
  * carries no fragment, no param but the four a page names its open thing by,
- * and no review item key of another board, so the agent's event holds a path
+ * and no review item key but this board's (`itemOnBoard`), so the agent's event holds a path
  * on this board rather than words a client chose. A link over `LINK_MAX` is
  * cut back (`shortLink`).
  */
@@ -152,10 +152,23 @@ export function messageLink(raw: unknown, workspaceId: string): string | undefin
   if (url.hash) return undefined;
   for (const [name, value] of url.searchParams) {
     if (!LINK_PARAMS.has(name)) return undefined;
-    // A review item's key leads with its board's id (`cross-review-queue.ts`).
-    if (name === 'item' && !value.startsWith(`${workspaceId}:`)) return undefined;
+    if (name === 'item' && !itemOnBoard(value, workspaceId)) return undefined;
   }
   return href.length <= LINK_MAX ? href : shortLink(url, workspaceId);
+}
+
+/** What a review item's key starts with: its kind (`rowKey` in
+ *  `cross-review-queue.ts`, `reviewQueue` in the board's
+ *  `board-review-model.ts`). */
+const ITEM_KINDS = new Set(['task-review', 'decision', 'task-thread', 'goal-thread', 'doc-thread']);
+
+/** A review item key that is this board's. The board's Home writes its own
+ *  key, which leads with the item's kind and names no board; the review
+ *  page's leads with the board's id. Anything else, another board's key
+ *  included, is not. */
+function itemOnBoard(key: string, workspaceId: string): boolean {
+  const own = key.startsWith(`${workspaceId}:`) ? key.slice(workspaceId.length + 1) : key;
+  return ITEM_KINDS.has(own.split(':', 1)[0] ?? '');
 }
 
 /** An accepted link that is too long, with the most specific param dropped

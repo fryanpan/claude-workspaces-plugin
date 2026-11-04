@@ -394,13 +394,17 @@ export async function handleWorkspaceAttachments(
     if (written && written.length > LEAD_WRITTEN_MAX) {
       return j(400, { error: `written over ${LEAD_WRITTEN_MAX} chars` });
     }
+    // A typed lead-chat message first: its question is in the log, so its
+    // answer lands however long the lead took. A spoken one is written to
+    // the chat whether or not its socket is still open, and then said on it
+    // or into the meeting that asked.
+    if (leadChat.answer(workspaceId, entryId, text, agentId, written)) {
+      return j(200, { ok: true, delivered: true });
+    }
+    leadChat.voiceReply(workspaceId, entryId, written ?? text, agentId, written !== undefined);
     return j(200, {
       ok: true,
-      // A typed lead-chat message first: its question is in the log, so its
-      // answer lands however long the lead took. Then a socket or a meeting.
-      delivered:
-        leadChat.answer(workspaceId, entryId, text, agentId, written) ||
-        spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId, written),
+      delivered: spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId, written),
     });
   }
   const wsAgentDetachMatch = pathname.match(/^\/workspaces\/([^/]+)\/agents\/([^/]+)$/);

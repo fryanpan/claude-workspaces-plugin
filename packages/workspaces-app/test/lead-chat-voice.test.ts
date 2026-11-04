@@ -25,14 +25,17 @@ afterEach(() => {
   voice = null;
 });
 
-function make(setups?: Array<1 | 2 | 3 | 4>) {
+function make(
+  setups?: Array<1 | 2 | 3 | 4>,
+  getContext: () => unknown = () => ({ surface: 'board' }),
+) {
   const fake = fakeVoice(setups ? { setups } : {});
   const seen: LeadVoiceState[] = [];
   voice = createLeadVoice({
     ...fake.seams,
     workspaceId: 'w-harbor',
     author: ME,
-    getContext: () => ({ surface: 'board' }),
+    getContext,
     agent: () => 'harborlight-lead',
     onChange: (s) => seen.push(s),
   });
@@ -217,6 +220,25 @@ describe('the lead chat voice', () => {
     // The mic is asked for inside the tap, before the setups are known
     // (lead-chat-voice-gesture.test.ts), so it is released rather than unopened.
     expect(mic.stops).toBe(mic.starts);
+  });
+
+  it('tells the server where the reader is now when they move while it listens', async () => {
+    // Voice stays on while the reader opens a review item: the question is
+    // about what they have open when they say it, not where they were when
+    // voice came on (Bryan, 30 Oct: a voice message from an open review item
+    // reached the lead "(at board)").
+    let at: Record<string, unknown> = { surface: 'board', link: '/workspaces/w-harbor/home' };
+    const { voice, socket, speak } = make(undefined, () => at);
+    voice.start();
+    await settle();
+    const ws = socket();
+    ws.open();
+    speak();
+    at = { surface: 'board', link: '/workspaces/w-harbor/home?item=task-review%3At-1%3Ari-1' };
+    speak();
+    speak();
+    const sent = ws.messages().filter((m) => m.type === 'context');
+    expect(sent).toEqual([{ type: 'context', context: at }]);
   });
 
   it('stops on the server’s error and shows its line', async () => {

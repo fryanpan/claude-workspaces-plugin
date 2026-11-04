@@ -11,6 +11,8 @@ import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bu
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildBoardUrl } from '../../workspaces-app/src/board/board-url.ts';
+import { messageLinkOf } from '../../workspaces-app/src/lead-chat/lead-chat-link.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { SpokenVoice } from '../src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../src/transcribe.ts';
@@ -52,9 +54,29 @@ describe('the link a message carries to its agent', () => {
       body: JSON.stringify(body),
     });
 
-  /** The review item Home's walkthrough has open: `?item=` holds its key. */
-  const itemLink = () =>
-    `/workspaces/${boardId}/home?item=${encodeURIComponent(`${boardId}:task-review:t-1:ri-1`)}`;
+  /** A page's link as the page itself builds it: its address cut down by
+   *  `messageLinkOf`, the lead chat's own call. */
+  const pageLink = (address: string, openThread?: string | null): string => {
+    const url = new URL(address, 'https://board.invalid');
+    const link = messageLinkOf(url.pathname, url.search, openThread);
+    if (!link) throw new Error(`no link for ${address}`);
+    return link;
+  };
+  const board = (loc: Partial<Parameters<typeof buildBoardUrl>[1]>): string =>
+    buildBoardUrl(boardId, {
+      nav: 'tasks',
+      task: null,
+      goal: null,
+      thread: null,
+      item: null,
+      archived: false,
+      ...loc,
+    });
+
+  /** The review item the board's Home walkthrough has open. `?item=` holds
+   *  the board's own key for it (`board-review-model.ts`), which names no
+   *  board: it is this one's. */
+  const itemLink = () => pageLink(board({ nav: 'home', item: 'task-review:t-1:ri-1' }));
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-message-link-'));
@@ -92,7 +114,7 @@ describe('the link a message carries to its agent', () => {
   }
 
   /** Say `text` to the lead on the converse socket with `context`. */
-  async function spoken(text: string, context: unknown) {
+  async function spoken(text: string, context: unknown, movedTo?: unknown) {
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/workspaces/${boardId}/voice/converse`);
     const frames: Array<{ type: string }> = [];
     ws.addEventListener('message', (ev) => {
@@ -115,6 +137,8 @@ describe('the link a message carries to its agent', () => {
       }),
     );
     await waitFor(() => opened.length > before, { describe: 'listener opened' });
+    // The reader opened something else while voice listened.
+    if (movedTo !== undefined) ws.send(JSON.stringify({ type: 'context', context: movedTo }));
     opened.at(-1)?.onTurn({ turn: 0, text, final: true });
     ws.send(JSON.stringify({ type: 'end' }));
     await waitFor(() => lead.voice.some((v) => v.transcript === text), {
@@ -140,20 +164,38 @@ describe('the link a message carries to its agent', () => {
     expect(frame?.context?.link).toBe(itemLink());
   });
 
-  // Each surface's own link, as its page builds it, reaches the agent whole.
-  const surfaces: Array<[string, string, (ws: string) => string]> = [
-    ['a doc thread', 'doc', (ws) => `/workspaces/${ws}/docs/d-plan?thread=th-1`],
-    ['a doc', 'doc', (ws) => `/workspaces/${ws}/docs/d-plan`],
-    ['a task', 'task', (ws) => `/workspaces/${ws}?task=t-1`],
-    ['a task thread', 'task', (ws) => `/workspaces/${ws}?task=t-1&thread=th-2`],
-    ['a mock', 'doc', (ws) => `/workspaces/${ws}/mockups/m-signup`],
-    ['an app door', 'doc', (ws) => `/workspaces/${ws}/apps/a-signup/`],
-    ['the plain board page', 'board', (ws) => `/workspaces/${ws}/library`],
+  it('a voice message links the item opened while voice was already listening', async () => {
+    const home = pageLink(board({ nav: 'home' }));
+    const frame = await spoken(
+      'yes, ship the Harborlight fix',
+      { surface: 'board', link: home },
+      { surface: 'board', link: itemLink() },
+    );
+    expect(frame?.context?.link).toBe(itemLink());
+  });
+
+  // Each surface's link, built by the page's own code from the address it
+  // shows, reaches the agent whole: the most specific thing open on it.
+  const surfaces: Array<[string, string, () => string]> = [
+    ['a review item on Home', 'board', () => itemLink()],
+    [
+      'a doc thread review item on Home',
+      'board',
+      () => pageLink(board({ nav: 'home', item: 'doc-thread:d-plan:th-1' })),
+    ],
+    ['a doc thread', 'doc', () => pageLink(`/workspaces/${boardId}/docs/d-plan`, 'th-1')],
+    ['a doc', 'doc', () => pageLink(`/workspaces/${boardId}/docs/d-plan`, null)],
+    ['a task', 'task', () => pageLink(board({ task: 't-1' }))],
+    ['a task thread', 'task', () => pageLink(board({ task: 't-1', thread: 'th-2' }))],
+    ['a goal', 'board', () => pageLink(board({ goal: 'g-1' }))],
+    ['a mock', 'doc', () => pageLink(`/workspaces/${boardId}/mockups/m-signup`)],
+    ['an app door', 'doc', () => pageLink(`/workspaces/${boardId}/apps/a-signup/`)],
+    ['the plain board page', 'board', () => pageLink(board({ nav: 'library' }))],
   ];
   for (const [name, surface, link] of surfaces) {
     it(`a message sent from ${name} carries its link`, async () => {
-      const frame = await typed(`sent from ${name}`, { surface, link: link(boardId) });
-      expect(frame?.context?.link).toBe(link(boardId));
+      const frame = await typed(`sent from ${name}`, { surface, link: link() });
+      expect(frame?.context?.link).toBe(link());
     });
   }
 
@@ -184,6 +226,9 @@ describe('messageLink', () => {
     for (const ok of [
       `/workspaces/${ws}`,
       `/workspaces/${ws}/home?item=w-harbor%3Atask-review%3At-1%3Ari-1`,
+      `/workspaces/${ws}/home?item=task-review%3At-1%3Ari-1`,
+      `/workspaces/${ws}/home?item=decision%3At-1`,
+      `/workspaces/${ws}/home?item=doc-thread%3Ad-plan%3Ath-1`,
       `/workspaces/${ws}/docs/d-plan?thread=th-1`,
       `/workspaces/${ws}?task=t-1&thread=th-2`,
       `/workspaces/${ws}?goal=g-1`,
@@ -205,7 +250,8 @@ describe('messageLink', () => {
       '/workspaces/w-harbor#note',
       '/docs/d-plan',
       `/workspaces/${ws}/home?item=w-river%3Atask-review%3At-1%3Ari-1`,
-      `/workspaces/${ws}/home?item=task-review%3At-1%3Ari-1`,
+      `/workspaces/${ws}/home?item=w-harbor%3Aw-river%3Atask-review%3At-1%3Ari-1`,
+      `/workspaces/${ws}/home?item=delete-every-task`,
       42,
       undefined,
     ]) {

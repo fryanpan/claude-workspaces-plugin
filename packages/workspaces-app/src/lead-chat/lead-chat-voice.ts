@@ -171,6 +171,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let gen = 0;
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
+  /** The context the server holds for this question, as sent. */
+  let sentContext = '';
   /** Questions the lead took and has not answered yet. */
   let awaiting = 0;
   let workTimer: ReturnType<typeof setTimeout> | null = null;
@@ -238,6 +240,16 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     capture = null;
   };
 
+  /** The reader moved while the question listens — opened a review item,
+   *  a thread, a doc: the server answers about what is open now. */
+  const keepContext = (): void => {
+    const context = opts.getContext();
+    const now = JSON.stringify(context ?? null);
+    if (now === sentContext) return;
+    sentContext = now;
+    sendMsg({ type: 'context', context });
+  };
+
   /** Open the mic for as long as voice is on, on a context the tap made. */
   const openMic = (ctx: AudioContext | undefined): void => {
     const mine = gen;
@@ -246,7 +258,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
         frames++;
-        if (mine === gen && forwarding) sendRaw(pcm);
+        if (mine !== gen || !forwarding) return;
+        keepContext();
+        sendRaw(pcm);
       },
     }).then((r) => {
       if (mine !== gen) {
@@ -334,11 +348,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     }
     ensureSocket();
     const agent = opts.agent();
+    const context = opts.getContext();
+    sentContext = JSON.stringify(context ?? null);
     sendMsg({
       type: 'start',
       setup,
       mode: 'tap',
-      context: opts.getContext(),
+      context,
       author: opts.author,
       ...(agent ? { agent } : {}),
     });
