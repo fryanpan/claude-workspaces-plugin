@@ -5,7 +5,7 @@
  *
  *  - Setups 1 and 2 hear with Soniox's real-time listener. In `hold` mode the
  *    question ends when the page sends `end`; in `tap` mode it ends at the
- *    listener's own end of speech, called at most 1 s after the last word
+ *    listener's own end of speech, called at most 2 s after the last word
  *    (`SPOKEN_TAP_TUNING`) so the speaker can tap once and walk away, unless
  *    the words so far stop on a filler or an opener ("Hey, can you, uh."),
  *    when it waits for the rest (`unfinishedAsk` in `pause-gate.ts`). On a
@@ -73,13 +73,18 @@ import type { SpokenVoice } from './tts.ts';
 export const SPOKEN_INPUT_RATE = 16_000;
 
 /** The listener's tuning for a board question: end of speech called at most
- *  1 s after the last word (Bryan, 30 Oct: "make endpoint detection wait a
- *  bit longer -- it's often cutting me off too soon"; it was 500 ms from his
- *  2 Oct ask that a tapped turn end about half a second after he stops).
- *  A thinking pause after a finished-sounding sentence ends the question;
- *  one after a filler or an opener does not (`unfinishedAsk`). Level 2 is
- *  already the adapter's default. */
-export const SPOKEN_TAP_TUNING = { max_endpoint_delay_ms: 1000 };
+ *  2 s after the last word. It was 500 ms from Bryan's 2 Oct ask, then 1 s
+ *  (30 Oct: "it's often cutting me off too soon"), and 1 s still cut him off
+ *  (3 Nov: "The voice is stopping often after I say one thing"). A pause to
+ *  think in the middle of a request runs past a second; 2 s covers it and
+ *  adds at most a second to an answer, where the 3 s maximum a plan uses
+ *  would add two to every one. A pause after a filler or an opener waits
+ *  longer still (`unfinishedAsk`). Level 2 is already the adapter's default. */
+export const SPOKEN_TAP_TUNING = { max_endpoint_delay_ms: 2000 };
+/** The pause gate's windows for a tapped board question, unless the page
+ *  sends its own: the same 2 s as the listener, so a partial the listener
+ *  has not finalized is not ended sooner by the gate. */
+export const SPOKEN_TAP_PAUSE: SpokenPause = { finishedMs: 2000, unfinishedMs: 3000 };
 /** On a planning doc the pause gate decides, so the listener waits as long as
  *  Soniox allows and a dangling sentence is not split into two turns. */
 export const SPOKEN_PLANNING_TUNING = { max_endpoint_delay_ms: 3000 };
@@ -158,6 +163,8 @@ export class SpokenSession {
   private readonly errands = new MeetingErrands();
   /** The page's pause setting, from its latest `start`. */
   private pauseTiming: SpokenPause = SPOKEN_PAUSE_DEFAULT;
+  /** The page named its own pause windows, on start or since. */
+  private pauseAsked = false;
 
   // Setups 1 and 2: the listener for the current turn.
   private stt: TranscriptionSession | null = null;
@@ -229,6 +236,7 @@ export class SpokenSession {
         return;
       case 'pause':
         this.pauseTiming = msg.pause;
+        this.pauseAsked = true;
         this.pause?.retime(msg.pause);
         return;
       case 'say':
@@ -307,6 +315,7 @@ export class SpokenSession {
     this.mode = msg.mode;
     this.ears = msg.ears === 'meeting';
     this.pauseTiming = msg.pause ?? SPOKEN_PAUSE_DEFAULT;
+    this.pauseAsked = msg.pause !== undefined;
     this.context = this.deps.parseContext(msg.context);
     // A start frame's author is a claim, not a proof: it may comment as it
     // always could, and is marked so the router records no answer for it
@@ -389,7 +398,7 @@ export class SpokenSession {
       this.pause = new PauseGate(
         () => void this.finishListening(turn, this.tail === null),
         this.deps.timers,
-        this.pauseTiming,
+        this.pauseAsked ? this.pauseTiming : SPOKEN_TAP_PAUSE,
         unfinishedAsk,
       );
     }
@@ -595,18 +604,29 @@ export class SpokenSession {
   }
 
   /** Said unasked — a failed review write, or the lead's answer arriving
-   *  later (`lead-answer.ts`); only written while the speaker talks. Setups
-   *  3 and 4 speak through their own sessions, so an aside there borrows
-   *  setup 1's or 2's voice when this server has one. */
+   *  later (`lead-answer.ts`); only written while the speaker talks. A page
+   *  listens again while the lead works (Bryan, 3 Nov), so a listener that
+   *  has heard nothing yet is let go for the answer, and the page opens the
+   *  next one when the answer has been said. Setups 3 and 4 speak through
+   *  their own sessions, so an aside there borrows setup 1's or 2's voice
+   *  when this server has one. */
   sayAside(answer: SpokenAnswer | null): void {
     if (!answer) return;
     const { voices } = this.deps.engines;
     const voice =
       this.setup === 1 || this.setup === 2 ? voices[this.setup] : (voices[1] ?? voices[2]);
-    const say = voice && answer.spoken && this.stt === null && this.sttOpening === null;
+    const listening = this.stt !== null || this.sttOpening !== null;
+    const say = voice && answer.spoken && (!listening || this.idleEars());
     if (say) this.stopSpeaking();
+    if (say && listening) this.dropListener();
     this.deps.sendJson(replyMessage(answer));
     if (say) void this.speak(voice, answer, ++this.turn);
+  }
+
+  /** A board question's listener is open and has heard not a word. */
+  private idleEars(): boolean {
+    if (this.ears || (this.setup !== 1 && this.setup !== 2)) return false;
+    return !this.finishing && this.finals.length === 0 && this.tail === null;
   }
 
   /** The lead's answer to `queueId`. One a meeting asked for has its minute

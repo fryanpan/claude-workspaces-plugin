@@ -1,15 +1,18 @@
 /**
  * The lead chat's voice: the converse socket, aimed at the lead. A question
- * names the lead in `start` and streams the mic behind it; while the lead
- * works and speaks no frame goes up; once the answer has been said the next
- * question listens by itself on the same open mic.
+ * names the lead in `start` and streams the mic behind it; once the lead
+ * takes the question, or its answer has been said, the next question listens
+ * by itself on the same open mic, and no frame goes up while an answer is
+ * said.
  * The socket and the microphone are fakes.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import type { SpokenServerMessage } from '@claude-workspaces/core/spoken-reply';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type LeadVoice,
   type LeadVoiceState,
   NO_VOICE,
+  WORKING_MS,
   createLeadVoice,
 } from '../src/lead-chat/lead-chat-voice.ts';
 import { fakeVoice, settle } from './lead-chat-voice-fakes.ts';
@@ -90,7 +93,9 @@ describe('the lead chat voice', () => {
     expect([mic.starts, mic.stops]).toEqual([1, 0]);
   });
 
-  it('waits for the lead’s answer, without listening, after the lead takes the question', async () => {
+  // Bryan, 3 Nov: "when the agent starts thinking I can no longer record
+  // anything". The next question listens while the lead works on this one.
+  it('listens again while the lead works, and holds the mic back while its answer is said', async () => {
     const { voice, socket, speak } = make();
     voice.start();
     await settle();
@@ -100,11 +105,13 @@ describe('the lead chat voice', () => {
     // The router hands it to the lead and says nothing yet.
     ws.serve({ type: 'reply', spoken: '', detail: [], asking: false, route: 'agent' });
     await settle();
-    expect(voice.state().phase).toBe('working');
-    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(1);
+    expect(voice.state().phase).toBe('listening');
+    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(2);
+    // What is said while the lead thinks goes up, as the next question.
     speak();
-    expect(ws.frames()).toBe(0);
-    // The lead's answer arrives later, and is said.
+    expect(ws.frames()).toBe(1);
+    // The lead's answer arrives, and is said; the mic hears the speaker and
+    // sends none of it back.
     ws.serve({
       type: 'reply',
       spoken: 'The ferry task.',
@@ -114,12 +121,67 @@ describe('the lead chat voice', () => {
     });
     ws.serve({ type: 'audio-start', sampleRate: 24_000 });
     expect(voice.state().phase).toBe('speaking');
+    speak();
+    expect(ws.frames()).toBe(1);
     ws.serve({ type: 'audio-end' });
     await settle();
     await settle();
     expect(voice.state().phase).toBe('listening');
-    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(2);
+    expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(3);
+    speak();
+    expect(ws.frames()).toBe(2);
   });
+
+  it('a stop while the lead works keeps the socket, so its answer still lands', async () => {
+    const { voice, socket } = make();
+    voice.start();
+    await settle();
+    const ws = socket();
+    ws.open();
+    ws.serve({ type: 'turn-end', text: 'what is next' });
+    ws.serve({ type: 'reply', spoken: '', detail: [], asking: false, route: 'agent' });
+    await settle();
+    voice.stop();
+    expect(ws.closed).toBe(false);
+    expect(ws.messages().at(-1)).toEqual({ type: 'stop' });
+    // Answered while voice was off: the next stop while listening has
+    // nothing to wait for, and lets the socket go.
+    ws.serve({ type: 'reply', spoken: 'Done.', detail: [], asking: false, route: 'lead-answer' });
+    voice.start();
+    await settle();
+    voice.stop();
+    expect(ws.closed).toBe(true);
+  });
+
+  const cases: Array<[string, SpokenServerMessage[]]> = [
+    ['no reply', []],
+    [
+      'a reply whose voice never starts',
+      [{ type: 'reply', spoken: 'Three open.', detail: [], asking: false, route: 'brief' }],
+    ],
+  ];
+  for (const [name, after] of cases) {
+    it(`listens again by itself when working ends in ${name}`, async () => {
+      vi.useFakeTimers();
+      try {
+        const { voice, socket, speak } = make();
+        voice.start();
+        await vi.advanceTimersByTimeAsync(0);
+        const ws = socket();
+        ws.open();
+        speak();
+        ws.serve({ type: 'turn-end', text: 'give me a status update' });
+        for (const m of after) ws.serve(m);
+        await vi.advanceTimersByTimeAsync(WORKING_MS - 1);
+        expect(voice.state().phase).toBe('working');
+        await vi.advanceTimersByTimeAsync(1);
+        expect(voice.state().phase).toBe('listening');
+        expect(ws.messages().filter((m) => m.type === 'start')).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
 
   it('a stop while listening drops the question with its socket', async () => {
     const { voice, socket, mic } = make();

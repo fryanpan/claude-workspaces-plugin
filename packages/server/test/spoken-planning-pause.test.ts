@@ -193,6 +193,59 @@ describe('the planning voice asks only at a pause', () => {
     opened[0]?.onTurn({ turn: 0, text: 'give me a status update', final: true });
     await waitFor(() => json.some((m) => m.type === 'reply'), { describe: 'routed reply' });
   });
+
+  // Bryan, 3 Nov: "The voice is stopping often after I say one thing." A
+  // thinking pause of a second and a half no longer ends a board question;
+  // two seconds of quiet does, at the listener and at the gate alike.
+  it('off a plan, a pause of 1.5s mid-thought does not end the question; 2s does', async () => {
+    fx = await planFixture({ onBoard: false });
+    const clock = fakeClock();
+    const opened: TranscriptionOpenOpts[] = [];
+    const json: SpokenServerMessage[] = [];
+    // Ending the question closes the listener before any await.
+    let closed = 0;
+    const s = new SpokenSession({
+      engines: {
+        listener: {
+          name: 'fake',
+          async open(o) {
+            opened.push(o);
+            return {
+              send: () => {},
+              close: async () => {
+                closed++;
+              },
+            };
+          },
+        },
+        voices: { 1: MUTE, 2: null },
+        gemini: null,
+      },
+      answerer: fx.answerer,
+      timings: new SpokenTimings(undefined, () => {}),
+      provenActor: null,
+      readOnly: false,
+      parseContext: parseVoiceContext,
+      sendJson: (m) => json.push(m),
+      sendAudio: () => {},
+      timers: clock.timers,
+    });
+    s.onText(
+      JSON.stringify({ type: 'start', setup: 1, mode: 'tap', context: { surface: 'board' } }),
+    );
+    await waitFor(() => opened.length === 1, { describe: 'listener opened' });
+    expect(opened[0]?.tuning).toEqual({ max_endpoint_delay_ms: 2000 });
+    const ended = () => json.filter((m) => m.type === 'turn-end');
+    // A sentence that sounds finished, still a partial: the listener has not
+    // called its end of speech yet.
+    opened[0]?.onTurn({ turn: 0, text: 'give me a status update', final: false });
+    clock.advanceTo(1500);
+    clock.advanceTo(1999);
+    expect(closed).toBe(0);
+    clock.advanceTo(2000);
+    expect(closed).toBe(1);
+    await waitFor(() => ended().length === 1, { describe: 'question ended at 2s' });
+  });
 });
 
 describe('midSentence', () => {
