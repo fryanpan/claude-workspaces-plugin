@@ -21,7 +21,7 @@
 import { dirname } from 'node:path';
 import { gitProxyNetworkRules, gitProxyPaths } from './git-proxy-lead.ts';
 import type { Lead, LeadSandboxConfig, Machine } from './lead-sandbox-config.ts';
-import { toolNetworkRules, toolReadPaths } from './lead-sandbox-tools.ts';
+import { toolNetworkRules, toolReadPaths, toolWritePaths } from './lead-sandbox-tools.ts';
 import { boardWallRules, defaultBoardSocketDir } from './lead-sandbox-wall.ts';
 import { expandRealPaths } from './mac-lead-users-lib.ts';
 
@@ -261,6 +261,7 @@ function rulesFor(
     add('read', p, 'config tools');
     rules.push({ access: 'nowrite', filter: { subpath: p }, why: 'config tools', last: true });
   }
+  for (const p of toolWritePaths(lead, m.home)) add('write', p, 'config tools');
   for (const p of gitProxyPaths(lead, m.home)) {
     add('read', p, 'git proxy token');
     rules.push({ access: 'nowrite', filter: { subpath: p }, why: 'git proxy token', last: true });

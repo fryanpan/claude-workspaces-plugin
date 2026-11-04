@@ -64,10 +64,12 @@ import {
   adbRow,
   boardSocketRows,
   boardWallRows,
+  bunWrapperRow,
   escapeRows,
   installRow,
   keychainRow,
   probeRuntime,
+  uvRow,
 } from './lead-sandbox-escapes.ts';
 import { gitHooksPath, hooksPathRefusal } from './lead-sandbox-git.ts';
 import {
@@ -90,7 +92,7 @@ import {
   tokenService,
   turnCheck,
 } from './lead-sandbox-token.ts';
-import { ADB_SDK } from './lead-sandbox-tools.ts';
+import { ADB_SDK, ensureLeadTools, leadToolsDir, pluginDirs } from './lead-sandbox-tools.ts';
 import { defaultBoardSocketDir, wallHosts } from './lead-sandbox-wall.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
@@ -238,6 +240,13 @@ export interface LaunchDeps {
   registerRoots: RootsRegistrar;
   /** `core.hooksPath` in a project (`lead-sandbox-git.ts`); git by default. */
   hooksPathOf?: (project: string) => string | null;
+  /** Writes the lead's `bun` wrapper and caches (`lead-sandbox-tools.ts`); answers its env. */
+  leadTools?: (lead: Lead) => Record<string, string>;
+}
+
+/** The lead's tools, written under the real home, run with the bun running this. */
+function realLeadTools(lead: Lead): Record<string, string> {
+  return ensureLeadTools(lead, machine.home, process.execPath, machine.realpath, process.env.PATH);
 }
 
 const realDeps: LaunchDeps = {
@@ -289,6 +298,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     return 2;
   }
   const { config } = parsed;
+  const leadTools = deps.leadTools ?? realLeadTools;
   profileDir = resolve(flag('--profiles') ?? PROFILE_DIR);
   const accountFlag = flag('--claude-account');
   const guard = [file, profileDir];
@@ -343,10 +353,14 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say(`launch refused for ${lead.name}: ${token.error}`);
       return 2;
     }
+    // Made before the profile, which resolves each path it names: a folder
+    // not made yet is written at one end of `~/.config`'s symlink only.
+    const tools = leadTools(lead);
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
     const env = {
       ...withoutBoardBearers(process.env),
       ...gitProxyFiles(lead, config),
+      ...tools,
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
     };
@@ -362,6 +376,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     let total = 0;
     let notRun = 0;
     for (const lead of config.leads) {
+      const toolsEnv = leadTools(lead);
       const profile = writeProfile(lead, config, guard);
       const t = checkTargets(lead, config, machine);
       for (const [path, must] of [
@@ -397,6 +412,13 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         keychain,
         install,
         adbRow(profile, cwd, lead.tools.includes('adb'), join(machine.home, ADB_SDK)),
+        bunWrapperRow(
+          profile,
+          cwd,
+          join(leadToolsDir(machine.home, lead.name), 'bin', 'bun'),
+          pluginDirs(machine.home, machine.realpath)[0] ?? '',
+        ),
+        ...(lead.tools.includes('uv') ? [uvRow(profile, cwd, toolsEnv)] : []),
         ...wallRows(lead, config, guard, profile, cwd),
       ]) {
         total++;
@@ -412,7 +434,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         turn,
         account: account.account,
         read: deps.readToken,
-        env: { ...process.env, ...gitProxyFiles(lead, config) },
+        env: { ...process.env, ...gitProxyFiles(lead, config), ...toolsEnv },
       });
       if (!row.ran) {
         notRun++;
@@ -434,6 +456,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
   for (const lead of config.leads) {
     const path = profilePath(lead);
     if (write) {
+      leadTools(lead);
       writeProfile(lead, config, guard);
       gitProxyFiles(lead, config);
     } else {

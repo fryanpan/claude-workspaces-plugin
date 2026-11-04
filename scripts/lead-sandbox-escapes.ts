@@ -384,3 +384,51 @@ export function adbRow(
     says: `adb: ${adb} version ${ran ? 'runs' : `exits ${r.status}`} inside (must run)`,
   };
 }
+
+/**
+ * The `bun` wrapper (`lead-sandbox-tools.ts`): inside the profile, a bun
+ * started in the plugin cache must see `BUN_CONFIG_SKIP_INSTALL_PACKAGES=1`
+ * and one started in the lead's own project must not (the control).
+ */
+export function bunWrapperRow(
+  profile: string,
+  cwd: string,
+  wrapper: string,
+  pluginDir: string,
+): EscapeRow {
+  const seen = (dir: string) => {
+    const r = spawnSync(
+      SANDBOX_EXEC,
+      [
+        '-f',
+        profile,
+        wrapper,
+        '--cwd',
+        dir,
+        '-e',
+        'console.log(process.env.BUN_CONFIG_SKIP_INSTALL_PACKAGES ?? "unset")',
+      ],
+      { cwd, encoding: 'utf8', timeout: 10_000 },
+    );
+    return r.status === 0 ? r.stdout.trim() : `exit ${r.status}`;
+  };
+  const plugin = seen(pluginDir);
+  const own = seen(cwd);
+  return {
+    ok: plugin === '1' && own === 'unset',
+    says: `bun wrapper: skips the install in ${pluginDir} (${plugin}, must be 1) and not in ${cwd} (${own}, must be unset)`,
+  };
+}
+
+/** uv (`lead-sandbox-tools.ts`): inside the profile, uv must list the Pythons it installed. */
+export function uvRow(profile: string, cwd: string, env: Record<string, string>): EscapeRow {
+  const r = spawnSync(
+    SANDBOX_EXEC,
+    ['-f', profile, 'uv', 'python', 'list', '--only-installed', '--offline'],
+    { cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 20_000 },
+  );
+  return {
+    ok: r.status === 0,
+    says: `uv: python list ${r.status === 0 ? 'answers' : `exits ${r.status}`} inside (must answer)`,
+  };
+}
