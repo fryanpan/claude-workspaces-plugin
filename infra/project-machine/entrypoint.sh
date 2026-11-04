@@ -16,6 +16,10 @@
 #             sign-in, its board's socket and its repo's deploy key, and
 #             nothing else. The server refuses its loopback TCP calls, so it
 #             reaches only its own board, through that board's socket.
+#   cwdev     the project's dev server, when CW_DEV_SERVER_CMD names one, with
+#             PATH and nothing else. It binds loopback; the board proxies it
+#             (attach_app) behind the board's own sign-in. The server refuses
+#             its loopback TCP calls, and it is in no board's socket group.
 #
 # A user's processes can read each other's environment (/proc/<pid>/environ),
 # so a secret kept from the server has to live under another uid, not merely
@@ -51,6 +55,11 @@ SOCKETS="$DATA_ROOT/boards"
 BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
+# The dev server's folder. Group cwdevsrc (cwdev and lead, fixed in the
+# Dockerfile) owns it, setgid, so the lead's checkout there is the one the
+# dev server reads and the dev server's caches are ones the lead can clear.
+# No other user enters it.
+DEV_ROOT="$DATA_ROOT/dev"
 
 if [ "$(id -u)" != 0 ]; then
   echo "[machine] entrypoint.sh must start as root, to run each child as its own user" >&2
@@ -65,13 +74,13 @@ fi
 # A volume from before this rule had /data owned by cw; this takes it back.
 chown root:root "$DATA_ROOT"
 chmod 0755 "$DATA_ROOT"
-for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS"; do
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$DEV_ROOT"; do
   if [ -L "$d" ]; then
     echo "[machine] $d is a symlink; refusing to start" >&2
     exit 2
   fi
 done
-mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS"
+mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$DEV_ROOT"
 # Claude Code writes session transcripts to ~/.claude/projects. The home
 # directory is the image's and does not survive a restart, so that one
 # folder is a link onto the volume, where backup.ts snapshots it. The
@@ -81,12 +90,14 @@ ln -sfn "$TRANSCRIPTS" "$HOMES/cw/.claude/projects"
 chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude"
 chown -h lead:lead "$LEAD_ROOT"
 chown -h cw:cwboard "$SOCKETS"
+chown -h cwdev:cwdevsrc "$DEV_ROOT"
 # Each user's folders are its own: the lead runs as another user so that it
 # cannot read the server's data dir, which holds the board's tokens and keys,
 # except through the server. And the server cannot read the lead's folder, so
 # no doc is ever bound to a file the lead can write (docs/process/project-machine.md).
 chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT"
 chmod 0710 "$SOCKETS"
+chmod 2770 "$DEV_ROOT"
 # Copies a restore set aside (restore-machine.ts) were 0755 before this rule.
 for d in "$DATA_ROOT"/*.before-restore-*; do
   if [ -d "$d" ] && [ ! -L "$d" ]; then chmod 0700 "$d"; fi
@@ -199,7 +210,10 @@ else
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
           CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_REMOTE_CONTROL CW_LEAD_GITHUB_DEPLOY_KEY \
           DISABLE_AUTOUPDATER
-        umask 077
+        # 007, not 077: a file's group is the lead's own group, which holds
+        # nobody else, except in the setgid dev folder, where it is
+        # cwdevsrc's, so the dev server can read the checkout there.
+        umask 007
         run_as lead bash "$HERE/lead.sh" supervise
       ) &
       child=$!
@@ -208,6 +222,44 @@ else
       log "the lead's supervisor exited ($status); starting it again in 10s"
       sleep 10 &
       wait $! || true
+    done
+  ) &
+  pids+=($!)
+fi
+
+# The project's dev server, when CW_DEV_SERVER_CMD names one: a command line
+# run by bash in $DEV_ROOT/work as cwdev, with PATH and nothing else, so it
+# holds no secret and reaches the board only as the internet does. It must
+# bind 127.0.0.1 on a port of its own (the server's, 8787, is refused at
+# attach). It is started again when it exits, after a wait that doubles from
+# 5s to 60s and resets once a run lasts 5 minutes; it never stops the
+# machine. The command is an operator setting (fly secrets set), never a
+# value the lead or a board can write.
+if [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
+  (
+    cmd="$CW_DEV_SERVER_CMD"
+    child=""
+    trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; fi; exit 0' TERM INT
+    delay=5
+    while :; do
+      started=$SECONDS
+      (
+        only_env PATH
+        umask 007
+        cd "$DEV_ROOT" || exit 1
+        # The folder is made by cwdev, so it is cwdev's and cwdevsrc's.
+        run_as cwdev bash -c 'mkdir -p work && cd work && exec bash -c "$1"' dev-server "$cmd"
+      ) &
+      child=$!
+      status=0
+      wait "$child" || status=$?
+      child=""
+      if [ $((SECONDS - started)) -ge 300 ]; then delay=5; fi
+      log "the dev server exited ($status); starting it again in ${delay}s"
+      sleep "$delay" &
+      wait $! || true
+      delay=$((delay * 2))
+      if [ "$delay" -gt 60 ]; then delay=60; fi
     done
   ) &
   pids+=($!)
