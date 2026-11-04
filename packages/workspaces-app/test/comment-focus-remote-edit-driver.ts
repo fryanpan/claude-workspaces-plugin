@@ -58,6 +58,15 @@ import type {
   FocusScenario,
 } from './comment-focus-remote-edit-reading.ts';
 
+/** What the reader types after each edit of the burst: long enough that
+ *  the box wraps onto a new line during it, whatever the font. */
+const BURST_WORDS = [
+  'and the Harborlight pilots board at the north quay before the tide turns ',
+  'then the Riverbend ferry waits at the middle berth for the evening freight ',
+  'and the Saltmarsh tide table decides which slipway takes the loaded ferry ',
+  'then Alice and Bob sign the survey and send it to the harbour office ',
+];
+
 /** Past `onComposerOpened`'s 500ms keyboard fallback. */
 const PAST_OPEN_FOLLOW_MS = 800;
 
@@ -166,6 +175,10 @@ async function openPage(
     deviceScaleFactor: 1,
     mobile: touch,
   });
+  // A loaded runner, on request: `COMMENT_FOCUS_CPU_THROTTLE=4` runs the page
+  // four times slower, so edits can land mid-keystroke as they do on CI.
+  const throttle = Number(process.env.COMMENT_FOCUS_CPU_THROTTLE ?? 1);
+  if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
   if (touch) {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   }
@@ -297,6 +310,13 @@ async function scenario(
     }
     typed += text;
   };
+  /** Lengthen a numbered paragraph at its start. */
+  const lengthen = (pier: number, tag: string) =>
+    s.post(`/workspaces/${s.ws}/docs/${docId}/find_and_replace`, {
+      author: AGENT,
+      find: `Pier ${pier}: `,
+      replace: `Pier ${pier}: ${tag} lengthens pier ${pier}. ${FILLER} `,
+    });
   const edits: Array<{ where: EditStep['where']; marker: string; run: () => Promise<unknown> }> = [
     {
       where: 'above',
@@ -328,6 +348,36 @@ async function scenario(
           replace: `Bob counts the bollards twice, once at each tide. ${FILLER}`,
         }),
     },
+    {
+      where: 'between',
+      marker: 'Harborlight lengthens pier 13',
+      run: () => lengthen(13, 'Harborlight'),
+    },
+    {
+      where: 'burst',
+      marker: 'Bob lengthens pier 16',
+      // Four edits inside a second, a word typed after each, the way a
+      // builder revising a doc section by section sends them.
+      run: async () => {
+        const t0 = Date.now();
+        for (const [i, send] of [
+          () => lengthen(12, 'Riverbend'),
+          () =>
+            s.post(
+              `/workspaces/${s.ws}/docs/${docId}/threads/${threads[ABOVE]}/insert_blocks_after`,
+              { author: AGENT, markdown: `Saltmarsh pilots rest ashore. ${FILLER}` },
+            ),
+          () => lengthen(13, 'Saltmarsh'),
+          () => lengthen(16, 'Bob'),
+        ].entries()) {
+          await send();
+          // Enough words that the box wraps onto a new line on any font.
+          await type(BURST_WORDS[i] ?? '');
+        }
+        const ms = Date.now() - t0;
+        if (ms >= 1000) throw new Error(`the burst took ${ms}ms, not under a second`);
+      },
+    },
   ];
 
   await type(CHUNKS[0] ?? '');
@@ -352,6 +402,9 @@ async function scenario(
   }
   const final = await page.settle();
   page.cdp.close();
+  // One browser at a time: this scenario's is stopped before the next starts.
+  const mine = browsers.pop();
+  if (mine) await stopBrowser(mine.proc, mine.profile);
   return { width, height, kind, opened, steps, final, typed };
 }
 

@@ -197,3 +197,86 @@ describe('the hold follows the line, not the element showing it', () => {
     scope.dispose();
   });
 });
+
+describe('while the reader types, the hold keeps their caret still', () => {
+  const LINE_PX = 50;
+  /** Where the caret's line is, in document pixels: below the top line. */
+  let caretAt = 1300;
+  let top = 1000;
+
+  function layout(): void {
+    top = 1000;
+    caretAt = 1300;
+    document.body.innerHTML = `<div id="pane"><div id="prose">${['a', 'b', 'c', 'd', 'e', 'f']
+      .map((line, i) => `<p id="${line}" data-y="${1000 + i * LINE_PX}">${line}</p>`)
+      .join('')}</div></div>`;
+    const scroller = pane();
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    scroller.getBoundingClientRect = () => new DOMRect(0, 0, 400, 500);
+    for (const p of Array.from(scroller.querySelectorAll<HTMLElement>('p'))) {
+      p.getBoundingClientRect = () => new DOMRect(0, Number(p.dataset.y) - top, 400, LINE_PX);
+    }
+  }
+  const caret = () => caretAt - top;
+
+  /** An agent grows a block between the top line and the caret: the top line
+   *  stays, the caret goes down. */
+  function growBetween(px: number): void {
+    caretAt += px;
+    const b = document.getElementById('b') as HTMLElement;
+    b.textContent = 'b, longer now';
+  }
+
+  it('scrolls by what an edit between the top line and the caret moved it', async () => {
+    layout();
+    const scope = new MountScope();
+    mountReadingHold({ scroller: pane(), scope, workingLine: caret });
+    growBetween(77);
+    await vi.waitFor(() => expect(pane().scrollTop).toBe(1000 + 77));
+    expect(caret()).toBe(300);
+    scope.dispose();
+  });
+
+  it('holds only the top line without a working line', async () => {
+    // The control: the same edit, with nothing telling the hold where the
+    // reader types. The top line did not move, so nothing does.
+    layout();
+    const scope = new MountScope();
+    mountReadingHold({ scroller: pane(), scope });
+    growBetween(77);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane().scrollTop).toBe(1000);
+    scope.dispose();
+  });
+
+  it('does not chase the caret the reader moved, once told', async () => {
+    layout();
+    const scope = new MountScope();
+    const hold = mountReadingHold({ scroller: pane(), scope, workingLine: caret });
+    // The reader's own typing wraps the caret onto the next line; the editor
+    // tells the hold before the mutation reaches it.
+    caretAt += LINE_PX;
+    hold.repick();
+    (document.getElementById('c') as HTMLElement).textContent = 'c and more words';
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane().scrollTop).toBe(1000);
+    scope.dispose();
+  });
+
+  it('ignores a caret off screen and holds the top line', async () => {
+    layout();
+    caretAt = 3000;
+    const scope = new MountScope();
+    mountReadingHold({ scroller: pane(), scope, workingLine: caret });
+    growBetween(77);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pane().scrollTop).toBe(1000);
+    scope.dispose();
+  });
+});

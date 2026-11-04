@@ -29,6 +29,7 @@ import { workspaceIdFromPath } from './doc-path.ts';
 import { boardEmbedFramesFor } from './doc/board-embed-frames.ts';
 import { FootnoteDecorations } from './doc/footnote-decorations.ts';
 import { FIRST_PAINT_CLASS } from './doc/prose-paint.ts';
+import { RemoteEditsKeepScroll } from './doc/remote-edit-scroll.ts';
 import { resolveDocLink, safeLinkHref } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MassDeleteUndo } from './mass-delete-undo.ts';
@@ -244,6 +245,9 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // A dispatch from a Yjs observer must not write a stale doc back over
       // the change being observed — see yjs-observer-guard.ts.
       YjsObserverGuard.configure({ ydoc: opts.ydoc }),
+      // A remote edit leaves the page where it is; the reading hold keeps
+      // the caret on its pixel (doc/remote-edit-scroll.ts).
+      RemoteEditsKeepScroll,
       ThreadDecorations,
       // Delete after a tap on a comment and a select-all does not take the
       // whole doc (comment-delete-guard.ts).

@@ -25,7 +25,7 @@ export const para = (i: number): string => {
   if (i === 14) return `${FILLER} The ${TARGET} opens in spring. ${INSIDE}`;
   if (i === 15) return `${FILLER} The ${PHRASE} opens in spring. ${INSIDE}`;
   if (i === 24) return `${FILLER} ${BELOW}`;
-  return `${FILLER} ${FILLER}`;
+  return `Pier ${i}: ${FILLER} ${FILLER}`;
 };
 export const PLAN = [
   '# Harborlight ferry plan',
@@ -37,7 +37,9 @@ export const CHUNKS = [
   'Alice signs off the berth ',
   'once the Saltmarsh survey is back ',
   'and the tide table agrees, ',
-  'so Bob checks the Riverbend slipway first.',
+  'so Bob checks the Riverbend slipway first ',
+  'and Alice walks the north quay ',
+  'before the evening ferry.',
 ];
 
 /**
@@ -80,12 +82,17 @@ export const HELPERS = (kind: ComposerKind, cardSel: string) => `(() => {
     const box = __box();
     const a = document.activeElement;
     const drawn = box && box.getClientRects().length > 0;
+    // The box the reader sees is the surface around the editor: past its
+    // height cap it scrolls the editor inside it to keep the caret in view,
+    // and the editor's own top moves up while the box stays put.
+    const frame = box ? box.closest('.md-composer-surface') || box : null;
     return {
       focus: box && (a === box || box.contains(a)) ? 'composer'
         : a && a.closest && a.closest('#editor .ProseMirror') && !a.closest('.thread, .cw-inline-card') ? 'doc'
         : a === document.body || a === null ? 'body' : 'other',
       text: box ? box.textContent : null,
-      boxTop: drawn ? Math.round(box.getBoundingClientRect().top) : null,
+      boxTop: drawn ? Math.round(frame.getBoundingClientRect().top) : null,
+      boxBottom: drawn ? Math.round(frame.getBoundingClientRect().bottom) : null,
       scrollTop: Math.round(document.querySelector('#editor').scrollTop),
       anchorTop: __anchorTop(),
     };
