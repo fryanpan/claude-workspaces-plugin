@@ -92,7 +92,8 @@ describe.skipIf(!RUN)('a walled lead ships a branch from inside the wall', () =>
   const credential = `fake-owner-${randomBytes(12).toString('hex')}`;
   const uid = 90_000 + Math.floor(Math.random() * 9_000);
   const ghSocket = ghProxySocket(uid);
-  const root = realpathSync(mkdtempSync('/private/tmp/ship-'));
+  // Vitest runs a skipped suite's body too, and Linux has no /private/tmp.
+  const root = RUN ? realpathSync(mkdtempSync('/private/tmp/ship-')) : '/nonexistent';
   const home = join(root, 'home');
   const project = join(home, 'dev', 'harborlight');
   const worktree = join(project, '.claude', 'worktrees', 'fix-1');
