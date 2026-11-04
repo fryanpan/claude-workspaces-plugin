@@ -29,6 +29,7 @@
  * which is the per-tick read the poll is built to skip.
  */
 import { type BigIntStats, statSync } from 'node:fs';
+import { rootView } from './bound-root-view.ts';
 
 /** The stamp itself: a fractional-millisecond mtime and the byte count. */
 export interface FileStamp {
@@ -41,7 +42,12 @@ export function stampOf(st: BigIntStats): FileStamp {
   return { mtimeMs: Number(st.mtimeNs) / 1e6, size: Number(st.size) };
 }
 
-/** The stamp of a file, read synchronously. Throws exactly like `statSync`. */
+/** The stamp of a file, read synchronously. Throws exactly like `statSync`,
+ *  and `GuardRefused`: a path a guard covers is stat'd through the guards
+ *  (`bound-root-view.ts`), so a link under a walled lead's root is never
+ *  followed to the size and mtime of a file outside it. */
 export function statStampSync(path: string): FileStamp {
+  const view = rootView();
+  if (view?.covers(path)) return stampOf(view.statBigSync(path));
   return stampOf(statSync(path, { bigint: true }));
 }

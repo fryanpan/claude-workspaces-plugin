@@ -7,7 +7,6 @@
  * getOrCreate + attach) and their writers, and the writers now live in
  * `bind-meta.ts` so neither file owns the other's rules.
  */
-import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
 import { type DocMeta, type DocType, attachmentIdOf, mediaTypeOf } from '@claude-workspaces/core';
 import {
@@ -159,7 +158,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     };
   }
   const root = resolvePath(opts.repoPath);
-  if (!existsSync(root)) return { ok: false, error: 'not-found' };
+  if (!boundFiles.guards.exists(root)) return { ok: false, error: 'not-found' };
 
   // Shape first: a spec is PERSISTED on the members for refreshWorkspace to
   // replay, so one that would blow up assignGroups must never be written.

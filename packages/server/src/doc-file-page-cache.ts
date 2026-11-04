@@ -1,5 +1,5 @@
 import type { BigIntStats } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * Built framed pages (`doc-file-frame.ts` `frameHtml`), kept so a reload does
@@ -52,7 +52,7 @@ async function stillCurrent(entry: Entry): Promise<boolean> {
   checks++;
   const same = await Promise.all(
     entry.deps.map((d) =>
-      stat(d.abs, { bigint: true }).then(
+      boundFiles.guards.stat(d.abs).then(
         (st) => st.size === d.size && st.mtimeNs === d.mtimeNs,
         () => false,
       ),

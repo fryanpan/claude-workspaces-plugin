@@ -257,7 +257,7 @@ export class DocStoreWorkspaces {
   } {
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
     const root = liveRoot(members);
-    if (!root || !existsSync(root)) return { ok: false, error: 'not-found' };
+    if (!root || !boundFiles.guards.exists(root)) return { ok: false, error: 'not-found' };
     // A changed file can carry BOTH its diff member and its companion
     // editable markdown doc on the same relPath — the diff member is the
     // reviewable surface this list must point at.
