@@ -42,6 +42,7 @@ import {
   holdCountWord,
   holdGapKey,
   judgedText,
+  quotesOwnWords,
 } from '@claude-workspaces/core/review-hold';
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import {
@@ -64,6 +65,7 @@ import {
 } from './review-hold-message.ts';
 import { reviewItemRefusedEvent } from './review-items/analytics.ts';
 import { linkHoldReason } from './review-items/link-check.ts';
+import { ownerCheckBoilerplate } from './review-items/owner-check-template.ts';
 import { type PriorAskRow, priorAsksFor } from './review-items/prior-asks.ts';
 import type { ReviewJudge, ReviewJudgeVerdict } from './review-judge.ts';
 import type { SseBus } from './sse.ts';
@@ -93,6 +95,15 @@ import {
  * contradicted later.
  */
 export const REVIEW_GATE_MAX_HOLDS = 2;
+
+/** The verdict recorded when the judge's only concern was one the gate could
+ *  not state inside the item's words, and there was no sentence of the
+ *  filer's left to point at. See the rule in `runReviewGate`. */
+export const UNSTATED_PASS_REASON =
+  'Not held: the judge raised a concern the gate could not state inside this item’s words.';
+
+/** The gap identity of every hold carrying `REVIEW_HOLD_UNUSABLE_REASON`. */
+const UNSTATED_GAP_KEY = holdGapKey(REVIEW_HOLD_UNUSABLE_REASON);
 
 /**
  * How long a hold may stand UNREVISED before the item reaches the reader's
@@ -397,6 +408,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
     return (taskStore.getTask(address.taskId)?.doneWhen ?? []).find((l) => l.id === lineId);
   }
 
+  /** The template sentences of an owner check's card, read against the line
+   *  as it stands. Empty when the line has gone. */
+  function ownerBoilerplateFor(task: Task, address: ReviewGateAddress): string[] {
+    const line = ownerLineFor(address);
+    return line === undefined ? [] : ownerCheckBoilerplate(task, line);
+  }
+
   /**
    * What a filing route says when the gate held the item — composed in
    * `review-hold-message.ts`, which is where the wording and its test live.
@@ -501,6 +519,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
      *  check — see `ReviewJudgeItem.refusedCheck` and the guard in
      *  `runReviewGate` that drops a get-it-anyway hold on one. */
     refusedCheck?: boolean;
+    /** Sentences of the item the BOARD wrote, not the filer — an owner
+     *  check's template. A hold never quotes one; see `boundHoldWords`. */
+    boilerplate?: readonly string[];
   }
 
   type GateOutcome<T> =
@@ -648,7 +669,12 @@ export function createReviewGate(ctx: ReviewGateContext) {
       // The standing hold is the gap it answers. Absent — a held row with no
       // stored reason — leaves the note on the record with nothing exempted,
       // which is the safe direction.
-      if (priorJudgement?.gapKey !== undefined) {
+      // A standing hold the gate could not put in words is answered as ONE
+      // gap, whatever the judge's raw sentence was: the filer was never told
+      // which concern it was, so their note answers the hold they were shown.
+      if (priorJudgement?.reason === REVIEW_HOLD_UNUSABLE_REASON) {
+        carriedAdmission.lessSpecificFor = UNSTATED_GAP_KEY;
+      } else if (priorJudgement?.gapKey !== undefined) {
         carriedAdmission.lessSpecificFor = priorJudgement.gapKey;
       }
     }
@@ -809,20 +835,58 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // never shown the SOURCE an item was written from, so any specific it
     // supplies is one it invented — which is what four live cards were
     // carrying on 2026-09-14.
-    const bounded =
+    const itemText = judgedText({
+      headline: words.headline,
+      ...(words.detail !== undefined ? { detail: words.detail } : {}),
+      ...(words.options !== undefined ? { options: words.options } : {}),
+    });
+    let bounded =
       verdict !== null && !verdict.ok
         ? boundHoldWords(
             {
               reason: verdict.reason,
               ...(verdict.quote !== undefined ? { quote: verdict.quote } : {}),
             },
-            judgedText({
-              headline: words.headline,
-              ...(words.detail !== undefined ? { detail: words.detail } : {}),
-              ...(words.options !== undefined ? { options: words.options } : {}),
-            }),
+            itemText,
+            target.boilerplate,
           )
         : undefined;
+    /**
+     * A hold the gate could not put in words is issued at most once per
+     * concern, and only when it can point at a sentence the filer wrote.
+     *
+     * Its reason is one fixed sentence, so the quote is the whole of what the
+     * filer is told. On 2026-11-04 one item was held six times for it, each
+     * round naming a different sentence — two of them the board's own
+     * template — and another was held a second time naming nothing, with the
+     * "last hold" notice attached. A filer cannot fix a hold like that; they
+     * can only revise until the cap runs out.
+     *
+     * So: with no sentence of the filer's to name, it is not a hold. Once the
+     * item has been held for it, it is raised again only while the sentence
+     * that hold named is still in the item — named again, not swapped for a
+     * new one. A deterministic link hold is never touched here: it is a fact,
+     * not the judge's concern.
+     */
+    if (
+      verdict !== null &&
+      !verdict.ok &&
+      refusal === undefined &&
+      linkReason === undefined &&
+      bounded?.reason === REVIEW_HOLD_UNUSABLE_REASON
+    ) {
+      const heldForItBefore = (priorJudgement?.heldFor ?? []).includes(REVIEW_HOLD_UNUSABLE_REASON);
+      const standingQuote =
+        priorJudgement?.reason === REVIEW_HOLD_UNUSABLE_REASON ? priorJudgement.quote : undefined;
+      const standingUnfixed =
+        standingQuote !== undefined && quotesOwnWords(standingQuote, itemText, target.boilerplate);
+      if (heldForItBefore && standingUnfixed) {
+        bounded = { reason: REVIEW_HOLD_UNUSABLE_REASON, quote: standingQuote };
+      } else if (heldForItBefore || bounded.quote === undefined) {
+        verdict = { ok: true, reason: UNSTATED_PASS_REASON };
+        bounded = undefined;
+      }
+    }
     /**
      * A judge that could not answer must not ADMIT a held item.
      *
@@ -865,7 +929,16 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // the diagnosis carried an invented figure, so every such hold would
     // share one identity and one answered gap would exempt every later
     // numeric concern (codex review).
-    const gapKey = verdict !== null && !verdict.ok ? holdGapKey(verdict.reason) : undefined;
+    //
+    // The one exception is the hold the gate could not put in words: its key
+    // is fixed, because the filer was shown one sentence for all of them and
+    // answered that (2026-11-04: `lessSpecific` did not clear it).
+    const gapKey =
+      verdict !== null && !verdict.ok
+        ? bounded?.reason === REVIEW_HOLD_UNUSABLE_REASON
+          ? UNSTATED_GAP_KEY
+          : holdGapKey(verdict.reason)
+        : undefined;
     const answeredAgain =
       gapKey !== undefined &&
       carriedAdmission.lessSpecificFor !== undefined &&
@@ -1100,6 +1173,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
         settled: () => taskProjection.refreshTask(task),
         ...(ownerCheck ? { ownerCheck: true } : {}),
         ...(refusedCheck ? { refusedCheck: true } : {}),
+        ...(ownerCheck ? { boilerplate: ownerBoilerplateFor(task, address) } : {}),
       },
       item,
       author,

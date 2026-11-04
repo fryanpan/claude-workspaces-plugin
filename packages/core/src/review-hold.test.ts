@@ -14,6 +14,7 @@ import {
   holdGapKey,
   judgedText,
   numberTokens,
+  quotesOwnWords,
   spelledNumbers,
 } from './review-hold.ts';
 
@@ -24,6 +25,28 @@ const ITEM = judgedText({
     { label: 'Keep it', detail: 'no extra time' },
     { label: 'Halve it', detail: 'adds an hour' },
   ],
+});
+
+describe('a quote of the board\u2019s own boilerplate', () => {
+  const TEMPLATE = 'Marks this line met. The task closes once every line is.';
+  const CARD = `Check: the chart reads on a phone. ${TEMPLATE}`;
+
+  it('is dropped, while a quote of the filer\u2019s words is kept', () => {
+    expect(
+      boundHoldWords({ reason: 'Vague.', quote: 'The task closes' }, CARD, [TEMPLATE]),
+    ).toEqual({
+      reason: 'Vague.',
+    });
+    expect(
+      boundHoldWords({ reason: 'Vague.', quote: 'the chart reads on a phone' }, CARD, [TEMPLATE]),
+    ).toEqual({ reason: 'Vague.', quote: 'the chart reads on a phone' });
+  });
+
+  it('is dropped when it straddles the boilerplate and the filer\u2019s words', () => {
+    expect(quotesOwnWords('on a phone. Marks this line', CARD, [TEMPLATE])).toBe(false);
+    // The control: with no boilerplate named, the same words are found.
+    expect(quotesOwnWords('on a phone. Marks this line', CARD)).toBe(true);
+  });
 });
 
 describe('boundHoldWords', () => {

@@ -67,6 +67,8 @@ describe('a hold stays inside the item it is about', () => {
 
   it('carries no figure the item does not state, and no quote it does not contain', async () => {
     const { workspaceId, taskId } = await board(h);
+    // An invented figure and an invented quote, with nothing of the item's
+    // left to name, is not a hold at all (`review-hold-unstated.test.ts`).
     h.judge = inventingJudge;
     const out = await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
@@ -74,7 +76,7 @@ describe('a hold stays inside the item it is about', () => {
         review: COSTS_IN_OPTIONS,
       }),
     );
-    expect(out.held).toBe(true);
+    expect(out.held ?? false).toBe(false);
     const message = out.message ?? '';
     // The item states 02:00, 2GB and 1GB. "45" is the judge's own invention,
     // and the whole sentence carrying it is dropped rather than patched.
@@ -312,7 +314,7 @@ describe('the filer answers that the source is less specific than the hold asked
     // STORED is the gate's own replacement sentence. A later round repeating
     // that same diagnosis has to be recognised as the same gap, or the escape
     // hatch silently does nothing (codex review).
-    h.judge = inventingJudge;
+    h.judge = quotingInventor;
     const filed = await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
         author: FILER,
@@ -322,10 +324,12 @@ describe('the filer answers that the source is less specific than the hold asked
     const itemId = filed.item?.id as string;
     expect(filed.held).toBe(true);
     expect(filed.item?.judge?.reason).toBe(REVIEW_HOLD_UNUSABLE_REASON);
+    // The sentence the hold named stays, so the concern still stands and it
+    // is the note that answers it.
     const out = await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/revise`, {
         author: FILER,
-        detail: 'A second blurb, as specific as the log allows.',
+        detail: `${COSTS_IN_OPTIONS.detail} As specific as the log allows.`,
         lessSpecific: NOTE,
       }),
     );
@@ -333,14 +337,13 @@ describe('the filer answers that the source is less specific than the hold asked
     expect(out.item?.judge?.admitted).toBe('less-specific');
   });
 
-  it('does not let one bounded gap stand in for every other bounded gap', async () => {
+  it('answers an unstateable hold without exempting a stateable one', async () => {
     const { workspaceId, taskId } = await board(h);
-    // Both diagnoses below carry a figure the item never states, so BOTH are
-    // stored as the gate's one replacement sentence. If the answered gap were
-    // identified by that stored text, answering the first would admit the
-    // second — a different defect entirely — with nobody having looked (codex
-    // review).
-    h.judge = inventingJudge;
+    // Every hold the gate could not put in words is ONE gap to the filer: they
+    // were shown the same sentence for each, so their note answers all of
+    // them (2026-11-04). A concern the gate CAN state is a different gap, and
+    // the note buys it nothing.
+    h.judge = quotingInventor;
     const filed = await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
         author: FILER,
@@ -351,11 +354,11 @@ describe('the filer answers that the source is less specific than the hold asked
     await jj(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/revise`, {
         author: FILER,
-        detail: 'A second blurb, as specific as the log allows.',
+        detail: `${COSTS_IN_OPTIONS.detail} As specific as the log allows.`,
         lessSpecific: NOTE,
       }),
     );
-    h.judge = async () => ({ ok: false as const, reason: 'The first link answers 404.' });
+    h.judge = async () => ({ ok: false as const, reason: 'The first link goes nowhere.' });
     const held = await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/revise`, {
         author: FILER,
@@ -363,9 +366,7 @@ describe('the filer answers that the source is less specific than the hold asked
       }),
     );
     expect(held.held).toBe(true);
-    // Stored as the replacement sentence, exactly like the first hold — which
-    // is the point: two holds that READ the same are still two gaps.
-    expect(held.item?.judge?.reason).toBe(REVIEW_HOLD_UNUSABLE_REASON);
+    expect(held.heldReason).toContain('first link goes nowhere');
   });
 
   it('is refused as a body field that is not a string', async () => {
@@ -400,6 +401,14 @@ describe('the filer answers that the source is less specific than the hold asked
     expect(h.calls.length).toBe(before + 1);
     expect(filed.item?.judge?.admitted).toBeUndefined();
   });
+});
+
+/** Invents a figure, so the gate replaces its words, and quotes the item's
+ *  own detail, so the hold still names a sentence the filer wrote. */
+const quotingInventor = async (input: { item: { detail?: string } }) => ({
+  ok: false as const,
+  reason: 'The rebuild takes 45 minutes, so the detail understates what waits.',
+  quote: input.item.detail ?? '',
 });
 
 /** The harness's board, named here so each block above reads as one call. */
