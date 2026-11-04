@@ -87,18 +87,25 @@ const MERMAID =
   '```mermaid\ngraph TD\n  A[Harborlight] --> B[Riverbend]\n  B --> C[Saltmarsh]\n```';
 
 /** Thirty piers, with a table, a code block and a diagram above the
- *  commented words. */
+ *  commented words, and two sections below them for the heading verbs. */
 function plan(): string {
   const out = ['# Harborlight ferry plan'];
   for (let i = 0; i < 30; i++) {
     out.push(para(i));
     if (i === 8) out.push(TABLE);
     if (i === 9) out.push(CODE, MERMAID);
+    if (i === 18) out.push('## South piers');
+    if (i === 26) out.push('## Old piers');
   }
   return out.join('\n\n');
 }
 
-async function makeDoc(s: Server, dir: string, name: string): Promise<string> {
+/** The doc, and the thread above the commented words. */
+async function makeDoc(
+  s: Server,
+  dir: string,
+  name: string,
+): Promise<{ docId: string; aboveThread: string }> {
   const file = join(dir, `${name}.md`);
   writeFileSync(file, plan());
   const docId = String(
@@ -108,6 +115,7 @@ async function makeDoc(s: Server, dir: string, name: string): Promise<string> {
   await fetch(`${s.base}/workspaces/${s.ws}/docs/${docId}`);
   const ydoc = await until('the doc in memory', () => s.handle.docStore.get(docId)?.ydoc ?? null);
   // One thread per phrase, anchored exactly as the editor anchors one.
+  let aboveThread = '';
   for (const needle of [ABOVE, TARGET]) {
     const walk = prose.walkProse(prose.getProseFragment(ydoc));
     const at = walk.plainText.indexOf(needle);
@@ -119,7 +127,7 @@ async function makeDoc(s: Server, dir: string, name: string): Promise<string> {
           Y.createRelativePositionFromTypeIndex(seg.node, i - seg.docOffset),
         ),
       );
-    await s.post(`/workspaces/${s.ws}/docs/${docId}/threads`, {
+    const made = await s.post(`/workspaces/${s.ws}/docs/${docId}/threads`, {
       author: { id: 'known-alice', name: 'Alice', color: '#3366cc' },
       text: `Who signs off the ${needle}?`,
       anchor: {
@@ -129,8 +137,11 @@ async function makeDoc(s: Server, dir: string, name: string): Promise<string> {
         snippet: { text: needle },
       },
     });
+    const id = (made.thread as { id?: string } | undefined)?.id ?? (made.id as string | undefined);
+    if (!id) throw new Error(`no thread id: ${JSON.stringify(made)}`);
+    if (needle === ABOVE) aboveThread = id;
   }
-  return docId;
+  return { docId, aboveThread };
 }
 
 interface Page {
@@ -291,7 +302,7 @@ async function scenario(
 ): Promise<LeadVerbsScenario> {
   const name = `lead-verbs-${width}-${kind}`;
   step(`${width}x${height} ${kind}`);
-  const docId = await makeDoc(s, dir, name);
+  const { docId, aboveThread } = await makeDoc(s, dir, name);
   const page = await openPage(`${s.base}/workspaces/${s.ws}/docs/${docId}`, width, height, kind);
   const home = scrollAnchorTo(Math.round(height * 0.3));
   await page.cdp.evaluate(home);
@@ -307,21 +318,50 @@ async function scenario(
     }
     typed += text;
   };
+  // Typing one key at a time, without waiting on the page, until `done`
+  // resolves and then ten keys more: the reader who keeps typing while the
+  // edit lands. Every key goes to wherever the caret is at that moment.
+  const STREAM = CHUNKS.join('');
+  let streamAt = 0;
+  const typeThrough = async (done: Promise<unknown>): Promise<void> => {
+    let landed = false;
+    void done.then(() => {
+      landed = true;
+    });
+    for (let extra = 0; extra < 10; ) {
+      const ch = STREAM[streamAt++ % STREAM.length] ?? ' ';
+      await page.cdp.send('Input.insertText', { text: ch });
+      typed += ch;
+      if (landed) extra++;
+    }
+  };
   await type(CHUNKS[0] ?? '');
   const steps: LeadVerbStep[] = [];
-  for (const [i, edit] of leadEdits(s, docId, (expr) => page.cdp.evaluate(expr)).entries()) {
+  const edits = leadEdits(s, docId, aboveThread, (expr) => page.cdp.evaluate(expr));
+  for (const [i, edit] of edits.entries()) {
     if (edit.scrollAway) {
       await page.cdp.evaluate(
         `document.querySelector('#editor').scrollTop += ${height + 200}; true`,
       );
     }
     const before = await page.settle();
-    await edit.run();
-    await until(`the ${edit.where} edit on the page`, edit.landed);
+    const arrive = (async () => {
+      await edit.run();
+      await until(`the ${edit.where} edit on the page`, edit.landed);
+    })();
+    if (edit.typeThrough) await Promise.all([arrive, typeThrough(arrive)]);
+    else await arrive;
     const landed = await page.settle();
     await type(CHUNKS[(i % (CHUNKS.length - 1)) + 1] ?? '');
     const after = await page.settle();
-    steps.push({ where: edit.where, before, landed, after, typed });
+    steps.push({
+      where: edit.where,
+      typedThrough: edit.typeThrough === true,
+      before,
+      landed,
+      after,
+      typed,
+    });
     if (edit.scrollAway) {
       await page.cdp.evaluate(home);
       await page.settle();
@@ -386,7 +426,11 @@ async function main(): Promise<void> {
         scenarios.push(await scenario(s, dir, width, height, kind));
       }
     }
-    process.stdout.write(`\n${JSON.stringify({ scenarios })}\n`);
+    // Past 64KB a pipe write is still in flight when `process.exit` runs, and
+    // the reader gets a cut-off line: wait for it to drain.
+    await new Promise<void>((resolve) =>
+      process.stdout.write(`\n${JSON.stringify({ scenarios })}\n`, () => resolve()),
+    );
   } finally {
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
     await handle?.stop();
@@ -395,10 +439,10 @@ async function main(): Promise<void> {
 }
 
 setTimeout(() => {
-  step('gave up after 280s');
+  step('gave up after 470s');
   void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
     process.exit(3),
   );
-}, 280_000).unref();
+}, 470_000).unref();
 await main();
 process.exit(0);

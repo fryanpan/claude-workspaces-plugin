@@ -1,24 +1,26 @@
 /**
- * Typing a comment while a lead edits the doc with the verbs a lead sends
- * keeps the caret, every word and the reader's place, at 1180x820 and
- * 430x932, for a new comment and for a reply. The driver,
+ * Typing a comment while a lead edits the doc keeps the caret, every word,
+ * the reader's place and the diagram, through every edit verb a lead has
+ * (`comment-focus-lead-verbs-edits.ts` lists them), at 1180x820 and 430x932,
+ * for a new comment and for a reply. The first step is the outline read on a
+ * doc whose blocks have no ids yet. The driver,
  * `comment-focus-lead-verbs-driver.ts`, runs them in headless Chromium
  * against a real server and the real doc bundle; these cases assert on the
  * JSON it prints.
  *
- * Positive control, measured on 39c9398d0 (before this fix): the lead's first
- * outline read gives every block its id in one update, and the page took that
- * as a change to the whole document. At 430 the reply card was dropped and
- * re-added, focus went to `body`, and the reader's next words were typed into
- * the doc. At 1180 the diagram was redrawn empty (312px to 0) and the
- * commented words moved 312px up. Separately, at 1180 a suggestion landing or
- * being accepted rebuilt the reply card, and a space or a whole phrase of the
- * reply was lost, so the next word ran on.
+ * Positive control: with `thread-decorations.ts` and `md-composer-chunk.ts`
+ * restored to 39c9398d0, the outline read fails all four scenarios. The
+ * diagram is redrawn empty (312px to 0) in all four, and at 1180 the
+ * commented words move 312px for a new comment. At 430 the reply loses focus
+ * to `body`, and every later word goes into the doc. At 1180 the reply also
+ * loses keys when its card is rebuilt, first at replace_block, so its text
+ * is wrong from there to the end of the run.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
+import { LEAD_EDIT_ORDER } from './comment-focus-lead-verbs-edits.ts';
 import type { LeadVerbsRun, LeadVerbsScenario } from './comment-focus-lead-verbs-reading.ts';
 import type { ComposerKind } from './comment-focus-remote-edit-reading.ts';
 
@@ -27,9 +29,9 @@ import type { ComposerKind } from './comment-focus-remote-edit-reading.ts';
 const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'comment-focus-lead-verbs-driver.ts');
-/** Two bundle builds, four launches, four page loads and twenty-eight edits. */
-const SUITE_MS = 300_000;
-const SPAWN_MS = 290_000;
+/** Two bundle builds, four launches, four page loads and sixty-four edits. */
+const SUITE_MS = 490_000;
+const SPAWN_MS = 480_000;
 
 /** Sub-pixel layout and rounding: a line that moved by less has not moved. */
 const STILL_PX = 2;
@@ -77,6 +79,12 @@ describe.skipIf(CHROME === null)('typing a comment while a lead edits the doc', 
             expect(Math.abs(anchor), `${st.where}: words ${anchor}px`).toBeLessThanOrEqual(
               STILL_PX,
             );
+            // A box the reader typed into while the edit landed may have
+            // grown by those keys; the words it is about may not move.
+            if (st.typedThrough) continue;
+            // A box scrolled wholly off the top is not where the reader is
+            // looking; the margin may restack it (25px, measured offscreen).
+            if ((st.before.boxBottom ?? 0) < 0) continue;
             const box = (st.landed.boxTop ?? Number.NaN) - (st.before.boxTop ?? 0);
             // The whole reading on failure: one run in six moved the reply
             // box 152px on set-content at 1180 (4 Nov) and five did not.
@@ -102,11 +110,14 @@ describe.skipIf(CHROME === null)('typing a comment while a lead edits the doc', 
   }
 
   it('ran every edit in every scenario', () => {
-    expect(run?.scenarios.map((s) => `${s.width} ${s.kind} ${s.steps.length}`)).toEqual([
-      '1180 new 7',
-      '1180 reply 7',
-      '430 new 7',
-      '430 reply 7',
+    expect(run?.scenarios.map((s) => `${s.width} ${s.kind}`)).toEqual([
+      '1180 new',
+      '1180 reply',
+      '430 new',
+      '430 reply',
     ]);
+    for (const s of run?.scenarios ?? []) {
+      expect(s.steps.map((st) => st.where)).toEqual(LEAD_EDIT_ORDER);
+    }
   });
 });

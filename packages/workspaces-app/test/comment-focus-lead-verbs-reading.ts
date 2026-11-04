@@ -14,15 +14,27 @@ export interface LeadVerbsReading extends FocusReading {
 
 export interface LeadVerbStep {
   where:
+    | 'outline-first'
     | 'far-paragraph'
     | 'table-row'
+    | 'after-thread'
+    | 'at-anchor'
+    | 'under-heading'
+    | 'at-end'
     | 'replace-block'
+    | 'delete-block'
     | 'suggest'
     | 'accept-all'
+    | 'delete-at-anchor'
+    | 'delete-range'
+    | 'delete-section'
     | 'offscreen'
     | 'set-content';
+  /** The reader typed one key at a time while the edit landed, so `landed`
+   *  is read after that typing, and the box may have grown by it. */
+  typedThrough: boolean;
   before: LeadVerbsReading;
-  /** The edit is on the page and the page has settled; nothing typed yet. */
+  /** The edit is on the page and the page has settled. */
   landed: LeadVerbsReading;
   /** After the next chunk of typing. */
   after: LeadVerbsReading;
