@@ -196,6 +196,13 @@ export interface ServerOptions {
    * `loopbackAllowedUids` is non-empty.
    */
   loopbackEdgeUids?: number[];
+  /**
+   * Dollars of Claude spend per UTC day at which this server raises one
+   * warning (`CW_SPEND_ALARM_USD`, `spend-alarm.ts`, security review L3).
+   * Every board server spends the one shared key, so each watches its own.
+   * Unset, no alarm.
+   */
+  spendAlarmUsd?: number;
   /** Tests only: who owns a loopback caller's socket, in place of `/proc/net/tcp`. */
   peerUid?: (peer: { address: string; port: number }, serverPort: number) => number | null;
   /**

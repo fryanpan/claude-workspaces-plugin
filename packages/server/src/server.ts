@@ -166,7 +166,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { captureServerError } from './sentry.ts';
+import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
 import { buildAccessView } from './share/access-view.ts';
@@ -179,6 +179,7 @@ import { sharingOffCardPath, sharingOffDoorAllows } from './sharing-off-door.ts'
 import { boundFiles } from './slow-fs.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
+import { SpendAlarm, setSpendAlarm } from './spend-alarm.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
 import { AgentCallbacks } from './spoken-reply/agent-llm.ts';
 import type { SpokenBoard } from './spoken-reply/answer.ts';
@@ -3090,6 +3091,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const slowLoadAlarm = new SlowLoadAlarm((message, extra) =>
     captureServerError(new Error(message), extra),
   );
+  // This org's Claude spend per day, from the calls' own usage rows
+  // (security review L3). Process-wide, because the rows are recorded deep
+  // in the meeting pipeline, which holds no server context.
+  if (opts.spendAlarmUsd !== undefined) {
+    setSpendAlarm(
+      new SpendAlarm({ thresholdUsd: opts.spendAlarmUsd, raise: captureServerWarning }),
+    );
+  }
   // Every page's judged loads, one server-wide log, so the daily health
   // check can read the slowest per page type (`routes/load-reports.ts`).
   const pageLoads = new PageLoadLog(dataDir);

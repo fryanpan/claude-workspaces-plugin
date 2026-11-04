@@ -83,6 +83,7 @@ const {
   loopbackSkipsAccess,
   loopbackAllowedUids,
   loopbackEdgeUids,
+  spendAlarmUsd,
   emailCodeSignIn,
   ownerEmail,
   trustedHosts,
@@ -280,6 +281,7 @@ while (!handle) {
       loopbackSkipsAccess,
       loopbackAllowedUids,
       loopbackEdgeUids,
+      ...(spendAlarmUsd !== undefined ? { spendAlarmUsd } : {}),
       emailCodeSignIn,
       ...(ownerEmail ? { ownerEmail } : {}),
       // Browser Sentry DSN — box config, never the repo (see ServerOptions).

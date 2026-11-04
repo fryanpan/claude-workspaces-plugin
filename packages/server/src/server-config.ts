@@ -297,6 +297,13 @@ export function resolveServerConfig(opts: {
     );
   }
 
+  /** `CW_SPEND_ALARM_USD=25`: see ServerOptions.spendAlarmUsd. */
+  const spendAlarmRaw = (env.CW_SPEND_ALARM_USD ?? '').trim();
+  const spendAlarmUsd = spendAlarmRaw === '' ? undefined : Number(spendAlarmRaw);
+  if (spendAlarmUsd !== undefined && !(Number.isFinite(spendAlarmUsd) && spendAlarmUsd > 0)) {
+    throw new Error(`CW_SPEND_ALARM_USD: ${JSON.stringify(spendAlarmRaw)} is not a dollar figure`);
+  }
+
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
   const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
     (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
@@ -723,6 +730,7 @@ export function resolveServerConfig(opts: {
     loopbackSkipsAccess,
     loopbackAllowedUids,
     loopbackEdgeUids,
+    spendAlarmUsd,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,
