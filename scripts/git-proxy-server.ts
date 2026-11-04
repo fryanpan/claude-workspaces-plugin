@@ -15,11 +15,10 @@
  * the few git needs, an upstream refusal is replaced by fixed text, and any
  * other error text and every log line pass through `redact`.
  */
-import { timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { gunzipSync } from 'node:zlib';
-import type { ProxyLead } from './git-proxy-lead.ts';
+import { type ProxyLead, findLead } from './git-proxy-lead.ts';
 import {
   type RepoRequest,
   addNoThin,
@@ -51,17 +50,6 @@ export interface GitProxyOptions {
 }
 
 const PASS_BACK = ['content-type', 'cache-control', 'expires', 'pragma', 'content-encoding'];
-
-function findLead(leads: Map<string, ProxyLead>, password: string | null): ProxyLead | null {
-  if (password === null) return null;
-  const given = Buffer.from(password, 'utf8');
-  let found: ProxyLead | null = null;
-  for (const [token, lead] of leads) {
-    const want = Buffer.from(token, 'utf8');
-    if (want.length === given.length && timingSafeEqual(want, given)) found = lead;
-  }
-  return found;
-}
 
 function readBody(req: http.IncomingMessage, max: number): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {

@@ -19,6 +19,7 @@
  * `mac-lead-users-lib.ts` does for its ACLs.
  */
 import { dirname } from 'node:path';
+import { ghProxySocket } from './gh-proxy-lead.ts';
 import { gitProxyNetworkRules, gitProxyPaths } from './git-proxy-lead.ts';
 import type { Lead, LeadSandboxConfig, Machine } from './lead-sandbox-config.ts';
 import { toolNetworkRules, toolReadPaths, toolWritePaths } from './lead-sandbox-tools.ts';
@@ -414,7 +415,7 @@ export function buildProfile(
     ...escapeRules(lead, m),
     ...keychainRules(lead),
     ...gitProxyNetworkRules(lead, config.gitProxyPort),
-    ...toolNetworkRules(lead),
+    ...toolNetworkRules(lead, ghProxySocket(m.uid)),
     ...boardWallRules(lead, config.boardSocketDir ?? defaultBoardSocketDir(m.uid), m.realpath),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,

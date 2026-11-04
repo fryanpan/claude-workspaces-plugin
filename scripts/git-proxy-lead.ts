@@ -9,7 +9,7 @@
  * outside every sandbox, maps the token to the lead's repo list and talks to
  * GitHub with the owner's credential.
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -101,6 +101,18 @@ export function gitProxyEnv(gitconfig: string): Record<string, string> {
 }
 
 /**
+ * The lead's token file, made if it has none yet: 32 random bytes, mode 600,
+ * in a mode 700 folder. Its git and its gh both send it.
+ */
+export function ensureLeadToken(dir: string): string {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const token = join(dir, 'token');
+  if (!existsSync(token))
+    writeFileSync(token, randomBytes(32).toString('base64url'), { mode: 0o600, flag: 'wx' });
+  return token;
+}
+
+/**
  * Write the lead's git config, and its token if it has none yet: 32 random
  * bytes, mode 600, in a mode 700 folder. An existing token is kept, so a
  * restart does not break a lead's running session.
@@ -110,10 +122,7 @@ export function ensureGitProxyFiles(
   dir: string,
   proxyUrl: string,
 ): { gitconfig: string; token: string } {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const token = join(dir, 'token');
-  if (!existsSync(token))
-    writeFileSync(token, randomBytes(32).toString('base64url'), { mode: 0o600, flag: 'wx' });
+  const token = ensureLeadToken(dir);
   const gitconfig = join(dir, 'gitconfig');
   writeFileSync(gitconfig, leadGitConfig(lead, token, proxyUrl), { mode: 0o600 });
   return { gitconfig, token };
@@ -123,6 +132,20 @@ export interface ProxyLead {
   name: string;
   /** Lowercase `owner/name`: GitHub matches repo names without case. */
   repos: Set<string>;
+  /** Whether its config lists the `gh` tool, which the gh proxy requires. */
+  gh: boolean;
+}
+
+/** The lead holding `password`, compared in constant time, or null. */
+export function findLead(leads: Map<string, ProxyLead>, password: string | null): ProxyLead | null {
+  if (password === null) return null;
+  const given = Buffer.from(password, 'utf8');
+  let found: ProxyLead | null = null;
+  for (const [token, lead] of leads) {
+    const want = Buffer.from(token, 'utf8');
+    if (want.length === given.length && timingSafeEqual(want, given)) found = lead;
+  }
+  return found;
 }
 
 /**
@@ -130,7 +153,7 @@ export interface ProxyLead {
  * on each request, so a new lead or a changed list needs no restart.
  */
 export function readLeadTokens(
-  leads: readonly { name: string; githubRepos: string[] }[],
+  leads: readonly { name: string; githubRepos: string[]; tools?: readonly string[] }[],
   root: string,
 ): Map<string, ProxyLead> {
   const out = new Map<string, ProxyLead>();
@@ -143,7 +166,11 @@ export function readLeadTokens(
       continue;
     }
     if (token.length < 32) continue;
-    out.set(token, { name: l.name, repos: new Set(l.githubRepos.map((r) => r.toLowerCase())) });
+    out.set(token, {
+      name: l.name,
+      repos: new Set(l.githubRepos.map((r) => r.toLowerCase())),
+      gh: l.tools?.includes('gh') ?? false,
+    });
   }
   return out;
 }
