@@ -34,6 +34,9 @@ import { boundFiles } from '../src/slow-fs.ts';
 import * as treeFs from '../src/tree-fs.ts';
 
 const DARWIN = process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
+// Off macOS a root's path never reaches tree-fs or a contained git:
+// `containedOf` answers null there, and the callers keep git barred.
+const CONTAINED = treeFs.treeFsMode() === 'contained';
 const top = realpathSync(mkdtempSync(join(tmpdir(), 'git-contained-bin-')));
 const roots = new BoardSocketRoots(boardSocketRootsPath(join(top, 'data')), undefined, undefined, {
   home: join(top, 'home'),
@@ -97,7 +100,7 @@ describe('the git a contained call runs', () => {
   );
 });
 
-describe('finding the repository inside a root', () => {
+describe.skipIf(!CONTAINED)('finding the repository inside a root', () => {
   it('opens .git once per level and lists no folder', () => {
     const root = join(top, 'riverbend');
     const deep = join(root, 'a', 'b', 'c');
@@ -133,7 +136,7 @@ describe('finding the repository inside a root', () => {
   });
 });
 
-describe('the subcommands a contained call runs', () => {
+describe.skipIf(!CONTAINED)('the subcommands a contained call runs', () => {
   it('refuses one outside the list, and a global option first', async () => {
     const root = join(top, 'harborlight-sub');
     mkdirSync(join(root, '.git'), { recursive: true });
