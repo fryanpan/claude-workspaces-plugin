@@ -2,7 +2,7 @@
  * The Mac side of the deploy scripts: the Keychain, and `fly` run with the
  * org token in its environment.
  *
- * Off the Mac (CI, `.github/workflows/cloudflare.yml`) every Keychain entry
+ * Off the Mac (the keeper, or a shell with no Keychain) every Keychain entry
  * can be handed in instead as the environment variable `secretEnvName(entry)`
  * (`fly-org-slug` -> CW_SECRET_FLY_ORG_SLUG), plain rather than base64, and
  * the org token as FLY_API_TOKEN. With CW_SECRETS_FROM_ENV=1 the Keychain is

@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 /**
- * The project machines CI deploys after every Cloudflare apply on main
- * (`.github/workflows/cloudflare.yml`), read from the committed
- * `machines.json`:
+ * The project machines, read from the committed `machines.json`. CI no
+ * longer runs this: machines install signed releases themselves
+ * (`release-cli.ts`), and an image deploy runs from the keeper.
  *
  *   { "machines": [ { "project": "<name>", "tunnel": "named",
  *                     "memory": 2048, "leadBoard": "<board id>" } ] }
  *
  * Only `project` is required; `tunnel` defaults to named. Nothing here is a
  * secret: the app is `cw-<project>` (`deploy-plan.ts`), and every credential
- * comes from the job's environment.
+ * comes from the Keychain, or from the environment with CW_SECRETS_FROM_ENV=1.
  *
  *   bun infra/project-machine/machines.ts deploy [--ref <commit>] [--dry-run]
  *
