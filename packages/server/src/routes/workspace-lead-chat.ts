@@ -196,7 +196,6 @@ async function meetingAction(
       speakers,
       recorder,
     });
-    if (r.ok) ctx.leadMeetingFeed.started(workspaceId, r.meeting);
     return r.ok ? ctx.j(201, { meeting: r.meeting }) : answer(r, {});
   }
   if (!meetingId) return ctx.j(400, { error: 'id required' });
@@ -227,7 +226,7 @@ async function meetingAction(
     const source = meetings.current(workspaceId)?.source;
     const r = meetings.line(workspaceId, meetingId, { turn, who, text });
     if (!r.ok) return answer(r, {});
-    // The lead's own voice heard back: not shown, not fed, not an ask.
+    // The lead's own voice heard back: not shown, not an ask.
     if (r.echo) return ctx.j(200, { line: r.line, echo: true });
     // The one line of the meeting the lead acts on, sent once per turn: a
     // revision of a turn the meeting already holds is not a second ask.
@@ -243,9 +242,9 @@ async function meetingAction(
         refused = 'sign-in';
       }
     }
-    // Everything else the room says, the lead hears as the meeting goes.
-    const m = meetings.current(workspaceId);
-    if (r.fresh && !toLead && m) ctx.leadMeetingFeed.heard(workspaceId, m, r.line);
+    // Everything else the room says goes to the meeting's notes only. The
+    // lead is not sent it: a lead that heard every line took a turn per
+    // batch and spoke into the meeting unasked.
     return ctx.j(200, {
       line: r.line,
       ...(toLead ? { message: toLead } : {}),
@@ -255,7 +254,6 @@ async function meetingAction(
   if (action === 'voice') return leadLineVoice(ctx, rq.req, workspaceId, meetingId, body?.turn);
   if (action === 'end') {
     const r = meetings.end(workspaceId, meetingId);
-    if (r.ok) ctx.leadMeetingFeed.ended(workspaceId);
     return answer(r, {});
   }
   return ctx.j(400, { error: 'unknown action' });

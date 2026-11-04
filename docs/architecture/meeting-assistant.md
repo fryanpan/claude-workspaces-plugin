@@ -218,40 +218,24 @@ strip so both drive one copy.
 - **"No notes" is `notes: false` on `start`.** The relay opens no notes
   pipeline and no handoff; the transcript is still kept, in a doc of its own.
 
-### The board's lead sits in the meeting (`lead-chat/meeting-feed.ts`, 2026-10-31)
+### The board's lead speaks into the meeting only when asked (2026-11-04)
 
-The board's lead hears the meeting while it happens and can say one line into
-it. Only the lead: no other session on the board is woken by the room.
+A running meeting takes notes on its own. What the room says goes to the
+meeting's notes and to every page showing the meeting, and nowhere else: it
+is not sent to the lead, and the lead is not told a meeting started. A line
+that opens with "Lead," or "Lead:" in a microphone meeting, from a request
+that proves the owner, still reaches the lead as a lead-chat message, which
+is how the room asks the lead something.
 
-- **Start, then the room's lines.** `start` sends the lead one
-  `voice.meeting_started` (buffered, so a reconnect replays it), naming the
-  notes doc and how to speak. Each settled line then goes to the lead in a
-  `voice.meeting_heard`, batched over `LEAD_MEETING_BATCH_MS` (1s) so a
-  stretch of talk wakes the lead at most once per second.
-  `end` flushes what is held. Lines are addressed and transient: they reach
-  the lead's own stream, never a page, and are not kept in the replay buffer,
-  where they would push out frames that matter more.
-- **Who is sent it.** A lead that takes the seat mid-meeting, under an id the
-  meeting has not greeted, gets a start of its own before its first batch. A
-  lead that restarts under the same id is not greeted again: it learns of the
-  meeting only if its stream replays the buffered start, which a long meeting
-  may have pushed out of the board's 200-event replay buffer. A lead whose
-  session reported a plugin older than 0.1.347 (`LEAD_MEETING_SINCE`), or
-  none, is sent neither event: its MCP has no wording for them and would wake
-  on an empty line once per batch for the whole meeting.
-- **What is left out.** A "Lead, …" line already reached the lead as a request
-  and is not sent twice; the lead's own lines are not fed back; with no lead
-  on the board nothing is sent.
-- **Two gaps, left open.** A later correction of a turn (the transcriber
-  revising what it settled) never reaches the lead: only a turn's first
-  version is fed. And a turn resent after its batch has gone (a page
-  reconnecting) is not fed again, because the meeting already holds it, but
-  one the meeting had dropped past its 200-line window would be. Feeding
-  corrections is out of scope here.
-- **The words are data.** Anyone in the room can speak, and a bot meeting
-  carries every guest on the call, so the MCP child renders the lines inside
-  an untrusted quote (`meeting-feed-line.ts`). Both events ride the `voice.`
-  family because `channel-gate.ts` drops every `meeting.*` event.
+From 2026-10-31 (PR 1465) the lead was sent every settled line
+(`voice.meeting_started`, then `voice.meeting_heard` batched over 1s,
+`lead-chat/meeting-feed.ts`) and told to follow along and speak. Bryan's
+first meetings with it were "a giant mess": the lead took a turn per batch
+and spoke into the room unasked. The route stopped calling the feed on
+2026-11-04. `meeting-feed.ts` and its unit test stay, unwired, and the
+MCP child still words the two events, so an older server's frames still
+render.
+
 - **Speaking is one call.** `say_in_meeting(workspaceId, text)` posts to
   `POST /workspaces/<id>/lead-chat/meeting/say` with the session's agent
   token. The route takes the board's lead only (the token must speak for the
@@ -275,14 +259,13 @@ it. Only the lead: no other session on the board is woken by the room.
   reduces the lead's voice in the transcript and does not remove it. In a
   microphone meeting, the only kind that plays the line, a room line said
   within 30s of a lead line (`echoOfLead`, `LEAD_ECHO_MS`) is neither shown
-  nor fed to the lead when its words equal that line, or are a run of its
+  nor taken as a request to the lead when its words equal that line, or are a run of its
   whole words at least 12 characters long and at least 60% of its word
   count. The second test keeps a reply that picks up a few of the lead's
   words: "The slipway pricing" after "Who is the slipway pricing for?" is
   three words of six, and stays.
-- **Held to rare.** The start line tells the lead to speak rarely and in one
-  short sentence, and to keep other questions in the lead chat until the
-  meeting can tell when a speaker has finished a thought.
+- **Held to rare.** The lead speaks when the room asks it, in one short
+  sentence, and keeps anything longer for the lead chat.
 - **Cost.** The batch window caps wakes at one a second, but a room settles a
   turn every few seconds, so a lead is woken about once per settled turn:
   several hundred times in an hour of steady talk.

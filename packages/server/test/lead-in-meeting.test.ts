@@ -1,10 +1,11 @@
 /**
- * The board's lead in the meeting its lead chat runs, through the REAL
- * server: starting the meeting sends the lead `voice.meeting_started`, and
- * every line the room settles reaches the lead in a `voice.meeting_heard`,
- * in the order said and after the start. Then the lead speaks: one call to
- * the `say` route (what `say_in_meeting` posts) puts its line in the meeting
- * on every page, and the page holding the microphone can fetch it voiced.
+ * The board's lead and the meeting its lead chat runs, through the REAL
+ * server. A running meeting takes notes on its own: starting it and the
+ * room's lines reach every open page and are NOT sent to the lead, which
+ * hears only a "Lead, …" line. When the lead does speak,
+ * one call to the `say` route (what `say_in_meeting` posts) puts its line in
+ * the meeting on every page, and the page holding the microphone can fetch
+ * it voiced.
  *
  * The voice is a fake that answers fixed PCM: no network, no audio. These
  * cases wait on frames arriving and assert their order, never how long the
@@ -183,7 +184,13 @@ describe('the lead in the meeting', () => {
     expect(res.status).toBe(409);
   });
 
-  it('tells the lead, and only the lead, that the meeting started', async () => {
+  /** Every event the lead's stream carried that names this meeting. */
+  const leadMeetingFrames = () =>
+    lead.frames.filter(
+      (f) => f.event === LEAD_MEETING_STARTED_EVENT || f.event === LEAD_MEETING_HEARD_EVENT,
+    );
+
+  it('does not tell the lead, or anyone’s session, that the meeting started', async () => {
     const res = await act({
       action: 'start',
       docId,
@@ -195,21 +202,11 @@ describe('the lead in the meeting', () => {
     });
     expect(res.status).toBe(201);
     meeting = ((await res.json()) as { meeting: LeadChatMeeting }).meeting;
-    await waitFor(() => of(lead, LEAD_MEETING_STARTED_EVENT).length === 1, {
-      describe: 'the lead told the meeting started',
-    });
-    expect(of(lead, LEAD_MEETING_STARTED_EVENT)[0]).toMatchObject({
-      workspaceId: boardId,
-      meetingId: meeting.id,
-      docId,
-      docTitle: 'Saltmarsh plan',
-      actor: { id: ALICE.id, name: 'Alice' },
-    });
     expect(of(helper, LEAD_MEETING_STARTED_EVENT)).toEqual([]);
     expect(of(page, LEAD_MEETING_STARTED_EVENT)).toEqual([]);
   });
 
-  it('sends the lead every settled line, in the order said, after the start', async () => {
+  it('sends the room’s lines to the pages and not to the lead', async () => {
     const lines = [
       'The Harborlight ferry runs at six.',
       'Riverbend wants the slipway priced.',
@@ -219,33 +216,23 @@ describe('the lead in the meeting', () => {
       const res = await act({ action: 'line', id: meeting.id, turn, who: 'Alice', text });
       expect(res.status).toBe(200);
     }
-    const heardLines = () =>
-      of(lead, LEAD_MEETING_HEARD_EVENT).flatMap((f) => f.lines as LeadChatMeetingLine[]);
-    await waitFor(() => heardLines().length === lines.length, {
-      describe: 'the lead heard every line',
-    });
-    expect(heardLines().map((l) => [l.turn, l.who, l.text])).toEqual(
-      lines.map((t, i) => [i, 'Alice', t]),
-    );
-    // The start came first on the lead's stream.
-    const events = lead.frames.map((f) => f.event);
-    expect(events.indexOf(LEAD_MEETING_STARTED_EVENT)).toBeLessThan(
-      events.indexOf(LEAD_MEETING_HEARD_EVENT),
-    );
-    expect(of(lead, LEAD_MEETING_HEARD_EVENT)[0]).toMatchObject({
-      meetingId: meeting.id,
-      actor: { id: ALICE.id },
-    });
-    // Nobody else's session pays a turn for the room's words.
-    expect(of(helper, LEAD_MEETING_HEARD_EVENT)).toEqual([]);
-    expect(of(page, LEAD_MEETING_HEARD_EVENT)).toEqual([]);
-    // A line resent across a reconnect is not heard twice.
-    await act({ action: 'line', id: meeting.id, turn: 0, who: 'Alice', text: lines[0] });
     await act({ action: 'line', id: meeting.id, turn: 3, who: 'Alice', text: 'Next topic.' });
-    await waitFor(() => heardLines().length === lines.length + 1, {
-      describe: 'the next line heard',
+    // Positive control: the same lines reached an open page.
+    const shown = () =>
+      of(page, LEAD_CHAT_MEETING_LINE_EVENT).map((f) => (f.line as LeadChatMeetingLine).text);
+    await waitFor(() => shown().includes('Next topic.'), { describe: 'every line on the page' });
+    expect(shown()).toEqual([...lines, 'Next topic.']);
+    // And the lead's stream is live: a frame addressed to the lead after the
+    // lines still arrives, so its silence about them is not a dead stream.
+    await post(`/workspaces/${boardId}/lead-chat`, {
+      author: ALICE,
+      text: 'Is the Harborlight plan ready?',
     });
-    expect(heardLines().filter((l) => l.turn === 0)).toHaveLength(1);
+    await waitFor(() => lead.frames.some((f) => JSON.stringify(f).includes('Harborlight plan')), {
+      describe: 'the lead’s stream carries a chat message',
+    });
+    expect(leadMeetingFrames()).toEqual([]);
+    expect(of(helper, LEAD_MEETING_HEARD_EVENT)).toEqual([]);
   });
 
   it('refuses a speaker that is not the board’s lead', async () => {
@@ -256,7 +243,6 @@ describe('the lead in the meeting', () => {
   });
 
   it('puts what the lead says in the meeting on every page, voiced for the recorder', async () => {
-    const before = of(lead, LEAD_MEETING_HEARD_EVENT).length;
     const res = await say('harborlight-lead', 'Who is the slipway pricing for?');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { turn: number; played: boolean; meetingId: string };
@@ -284,20 +270,21 @@ describe('the lead in the meeting', () => {
     // Only a line the lead said is voiced.
     expect((await act({ action: 'voice', id: meeting.id, turn: 1 })).status).toBe(404);
 
-    // The room's next line still reaches the lead; the lead's own does not.
+    // The room's answer goes to the pages, and still not to the lead.
     await act({ action: 'line', id: meeting.id, turn: 4, who: 'Alice', text: 'For Riverbend.' });
-    await waitFor(() => of(lead, LEAD_MEETING_HEARD_EVENT).length > before, {
-      describe: 'the answer heard',
-    });
-    const fed = of(lead, LEAD_MEETING_HEARD_EVENT).flatMap((f) => f.lines as LeadChatMeetingLine[]);
-    expect(fed.map((l) => l.text)).toContain('For Riverbend.');
-    expect(fed.map((l) => l.text)).not.toContain('Who is the slipway pricing for?');
+    await waitFor(
+      () =>
+        of(page, LEAD_CHAT_MEETING_LINE_EVENT).some(
+          (f) => (f.line as LeadChatMeetingLine).text === 'For Riverbend.',
+        ),
+      { describe: 'the answer on the page' },
+    );
+    expect(leadMeetingFrames()).toEqual([]);
   });
 
-  it('drops the lead’s own voice heard back by the room: not shown, not fed', async () => {
+  it('drops the lead’s own voice heard back by the room: not shown', async () => {
     const res = await say('harborlight-lead', 'Is Saltmarsh paying for it?');
     expect(res.status).toBe(200);
-    const fedBefore = of(lead, LEAD_MEETING_HEARD_EVENT).length;
     const echo = await act({
       action: 'line',
       id: meeting.id,
@@ -306,16 +293,15 @@ describe('the lead in the meeting', () => {
       text: 'is saltmarsh paying for it',
     });
     expect(await echo.json()).toMatchObject({ echo: true });
-    // The room's real answer after it still goes through, and is the only
-    // new line either the page or the lead sees.
+    // The room's real answer after it still goes through to the page.
     await act({ action: 'line', id: meeting.id, turn: 6, who: 'Bob', text: 'Riverbend is.' });
-    await waitFor(() => of(lead, LEAD_MEETING_HEARD_EVENT).length > fedBefore, {
-      describe: 'the answer heard',
-    });
-    const fed = of(lead, LEAD_MEETING_HEARD_EVENT)
-      .slice(fedBefore)
-      .flatMap((f) => f.lines as LeadChatMeetingLine[]);
-    expect(fed.map((l) => l.text)).toEqual(['Riverbend is.']);
+    await waitFor(
+      () =>
+        of(page, LEAD_CHAT_MEETING_LINE_EVENT).some(
+          (f) => (f.line as LeadChatMeetingLine).text === 'Riverbend is.',
+        ),
+      { describe: 'the answer on the page' },
+    );
     const shown = of(page, LEAD_CHAT_MEETING_LINE_EVENT).map((f) => f.line as LeadChatMeetingLine);
     expect(shown.some((l) => l.turn === 5)).toBe(false);
   });
