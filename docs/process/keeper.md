@@ -157,6 +157,20 @@ local plan. `machine:deploy` reads the Access settings from `terraform
 output`. It reads a named tunnel's token from the API with the Keychain's
 token, which the keeper refuses because the answer is a credential.
 
+## The GitHub token
+
+The keeper registers each project's push deploy keys with a GitHub token
+of yours (`packages/server/src/keeper/keeper-push-keys.ts`). It uses the
+token only to add, list and remove deploy keys, and never sends it to a
+project machine. Store it once, piping it in so it is never an argument:
+
+```bash
+/bin/zsh -f -c 'security find-generic-password -s cw-github-push-token -w | /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR=/Users/cw-relay/keeper/state /Users/cw-relay/keeper/bin/bun /Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts import github-token'
+```
+
+`machine:deploy --push-repo` then asks the keeper for the keys, and each
+request waits for your passkey with every repo listed on the page.
+
 ## 5. Retire the old tokens
 
 ```bash

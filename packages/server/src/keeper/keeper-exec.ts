@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import type { GuardedFetch } from '../outbound-fetch.ts';
+import { ed25519Pair, makePushKeys } from './keeper-push-keys.ts';
 import type { CloudflareResult, Executors, FlyResult } from './keeper-requests.ts';
 import type { KeeperStore } from './keeper-store.ts';
 
@@ -18,6 +19,7 @@ const MAX_OUTPUT = 16 * 1024 * 1024;
 /** The longest the keeper lets one `fly` run before it kills it. */
 export const FLY_TIMEOUT_MS = 30 * 60_000;
 const CF_API = 'https://api.cloudflare.com/client/v4';
+const GITHUB_API = 'https://api.github.com';
 
 export function runFly(
   flyBin: string,
@@ -57,7 +59,7 @@ export function keeperExecutors(opts: {
   home: string;
   fetch: GuardedFetch;
 }): Executors {
-  return {
+  const exec: Executors = {
     fly(args, input) {
       const token = opts.store.credentials().fly?.orgToken;
       if (!token)
@@ -78,5 +80,32 @@ export function keeperExecutors(opts: {
       });
       return { status: res.status, body: await res.text() };
     },
+    async pushKeys(app, repos): Promise<CloudflareResult> {
+      const token = opts.store.credentials().github?.token;
+      if (!token)
+        return { status: 503, body: JSON.stringify({ error: 'the keeper holds no GitHub token' }) };
+      return makePushKeys(
+        {
+          github: async (method, path, body) => {
+            const res = await opts.fetch(`${GITHUB_API}${path}`, {
+              method,
+              headers: {
+                authorization: `Bearer ${token}`,
+                accept: 'application/vnd.github+json',
+                'x-github-api-version': '2022-11-28',
+                ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+              },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            });
+            return { status: res.status, body: await res.text() };
+          },
+          keygen: async (comment) => ed25519Pair(comment),
+          fly: (args, input) => exec.fly(args, input),
+        },
+        app,
+        repos,
+      );
+    },
   };
+  return exec;
 }

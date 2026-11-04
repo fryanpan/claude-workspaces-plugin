@@ -215,6 +215,15 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         };
         return answer(await requests.submit(call, requester));
       }
+      if (method === 'POST' && path === '/v1/push-keys') {
+        const body = await readJson(req);
+        const call: KeeperCall = {
+          type: 'push-keys',
+          app: body.app as string,
+          repos: body.repos as string[],
+        };
+        return answer(await requests.submit(call, requester));
+      }
       if (path.startsWith('/v1/cloudflare/')) {
         const body = method === 'GET' || method === 'HEAD' ? '' : await readBody(req);
         const call: KeeperCall = {
