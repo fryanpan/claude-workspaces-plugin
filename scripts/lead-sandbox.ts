@@ -268,6 +268,7 @@ const realDeps: LaunchDeps = {
 };
 
 export function main(argv: string[], deps: LaunchDeps = realDeps): number {
+  process.env.xcrun_nocache = '1'; // before any spawn: Xcode shims skip their lead-writable cache
   const { say } = deps;
   if (deps.platform !== 'darwin') {
     say('Seatbelt is macOS only.');
@@ -368,7 +369,6 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       ...gitProxyFiles(lead, config, tools.PATH),
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
-      xcrun_nocache: '1', // Xcode shims skip their per-user cache; see lead-sandbox-owner-bins.ts
     };
     return deps.spawn(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,
