@@ -22,9 +22,8 @@
  *
  * The socket is a lead's (`middleware/lead-scope.ts`), so on this board it
  * also reaches task notes and the plugin hooks' notes and prompt marks,
- * which `collabScope` refuses a member. The doc list, a whole-doc rewrite
- * and a folder bind stay refused: each has the server act on files the
- * lead can write.
+ * which `collabScope` refuses a member, and the doc reads and edits of
+ * `middleware/board-doc-edit-scope.ts` on this board's docs.
  *
  * Every other case reaches `collabScope` with the socket's board as the only board
  * it is a member of, plus, for a named agent, its own watch set cut to that
@@ -34,6 +33,7 @@
  */
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import { boardAgentMemberKey } from '../auth/board-agent-token.ts';
+import { boardDocEditAllows } from './board-doc-edit-scope.ts';
 import { type ShareTarget, collabScope } from './host-guard.ts';
 import { leadScopeAllows } from './lead-scope.ts';
 import { isBrowserRequest } from './write-gate.ts';
@@ -89,6 +89,7 @@ export function boardSocketScopeAllows(
     );
   }
   if (leadScopeAllows(pathname, method, boardId, workspacesOf)) return true;
+  if (boardDocEditAllows(pathname, method, boardId, workspacesOf)) return true;
   const scope = collabScope(pathname, method, {
     workspacesOf,
     isMember: (workspaceId) => workspaceId === boardId,

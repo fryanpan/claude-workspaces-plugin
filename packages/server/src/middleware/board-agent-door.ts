@@ -26,7 +26,8 @@
  * verbs a member is refused (Mac paths, mounts, deploy, share administration,
  * the doc list, every other board) are refused here by the same lines, and a
  * route added to one is added to both — plus its own watch set, which the
- * route then filters to that board.
+ * route then filters to that board, plus the doc reads and edits
+ * `middleware/board-doc-edit-scope.ts` names on its board's docs.
  *
  * A token the server holds for a session opened on a board's own socket
  * (`held`, `connector/board-token-lease.ts`) is that board's lead, and also
@@ -36,6 +37,7 @@
  */
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import { boardAgentMemberKey } from '../auth/board-agent-token.ts';
+import { boardDocEditAllows } from './board-doc-edit-scope.ts';
 import type { CfAccessResult } from './cf-access.ts';
 import { type ShareTarget, collabScope, isLoopbackAddress } from './host-guard.ts';
 import { leadScopeAllows } from './lead-scope.ts';
@@ -95,6 +97,7 @@ export function boardAgentScopeAllows(
     return decoded(watches[1] ?? '') === grant.agentId && (m === 'GET' || m === 'POST');
   }
   if (lead && leadScopeAllows(pathname, method, grant.boardId, workspacesOf)) return true;
+  if (boardDocEditAllows(pathname, method, grant.boardId, workspacesOf)) return true;
   const scope = collabScope(pathname, method, {
     workspacesOf,
     isMember: (workspaceId) => workspaceId === grant.boardId,
