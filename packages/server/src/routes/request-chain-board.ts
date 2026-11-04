@@ -148,6 +148,7 @@ export async function serveBoardRoutes(
       url,
       scope,
       visitor: Boolean(visitor),
+      member: visitor && !boardAgent ? (gate.visitorHome?.signedInAs ?? null) : null,
       mayMintAppVoice: rq.mayMintAppVoice(),
     });
     if (handled) return handled;
