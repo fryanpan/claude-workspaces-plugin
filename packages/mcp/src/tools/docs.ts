@@ -391,7 +391,12 @@ export async function handleDocsTool(
       return ok(res);
     }
     case 'attach_app': {
-      const { docId, origin, title } = a as { docId: string; origin: string; title?: string };
+      const { docId, origin, title, servesPrefix } = a as {
+        docId: string;
+        origin: string;
+        title?: string;
+        servesPrefix?: boolean;
+      };
       // The server owns the loopback rule and answers a refusal naming it, so
       // nothing is checked here that could disagree with it.
       const res = await http('POST', `${board()}/apps`, {
@@ -401,6 +406,7 @@ export async function handleDocsTool(
         // Who the server tells when the dev server stops answering.
         producedBy: { agentId: AUTHOR.id },
         ...(title ? { title } : {}),
+        ...(typeof servesPrefix === 'boolean' ? { servesPrefix } : {}),
       });
       return ok(res);
     }

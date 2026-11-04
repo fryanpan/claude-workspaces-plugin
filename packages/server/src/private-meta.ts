@@ -22,6 +22,7 @@ import * as Y from 'yjs';
  */
 export const PRIVATE_META_KEYS = [
   'sourceUrl',
+  'appServesPrefix',
   'owner',
   'workspaceRoot',
   'producedBy',

@@ -10,6 +10,7 @@ import {
   parseLoopbackOrigin,
   relayedLocation,
   relayedResponseHeaders,
+  upstreamBase,
   upstreamRequestHeaders,
   upstreamUrl,
 } from '../src/app-proxy.ts';
@@ -97,7 +98,27 @@ describe('upstreamUrl', () => {
       '%zz',
     ]) {
       expect(upstreamUrl(ORIGIN, tail, '')).toBeNull();
+      // The same refusal with the prefix kept: the base is ours, the tail theirs.
+      expect(upstreamUrl(ORIGIN, tail, '', PREFIX)).toBeNull();
     }
+  });
+
+  it("keeps the board's prefix for a dev server started under it", () => {
+    expect(upstreamUrl(ORIGIN, '', '', PREFIX)?.href).toBe(`${ORIGIN}${PREFIX}`);
+    expect(upstreamUrl(ORIGIN, '/src/main.ts', '?t=1&cw-frame=1', PREFIX)?.href).toBe(
+      `${ORIGIN}${PREFIX}src/main.ts?t=1`,
+    );
+    expect(upstreamUrl(ORIGIN, '//evil.example/x', '', PREFIX)?.href).toBe(
+      `${ORIGIN}${PREFIX}evil.example/x`,
+    );
+  });
+});
+
+describe('upstreamBase', () => {
+  it("is the app's prefix only when the app serves under it", () => {
+    expect(upstreamBase({ appServesPrefix: true }, 'w-1', 'd-1')).toBe(PREFIX);
+    expect(upstreamBase({}, 'w-1', 'd-1')).toBe('/');
+    expect(upstreamBase({ appServesPrefix: false }, 'w-1', 'd-1')).toBe('/');
   });
 });
 

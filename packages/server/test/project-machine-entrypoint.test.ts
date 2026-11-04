@@ -24,7 +24,15 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -47,7 +55,8 @@ if (BASH === null) console.warn('[project-machine-entrypoint] SKIPPED: no bash 4
 
 const scratch = mkdtempSync(join(tmpdir(), 'machine-entrypoint-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-const stubs = (idOutput: string, real: string[] = []) => stubsIn(scratch, idOutput, real);
+const stubs = (idOutput: string, real: string[] = [], bodies: Record<string, string> = {}) =>
+  stubsIn(scratch, idOutput, real, bodies);
 
 describe.skipIf(BASH === null)('the project machine process tree', () => {
   it('runs the server as cw without the tunnel token or the bucket credential', async () => {
@@ -119,6 +128,66 @@ describe.skipIf(BASH === null)('the project machine process tree', () => {
       expect(recs.filter((r) => r.uid === 'root').map((r) => r.argv)).toEqual([]);
       const argvs = [...recs.map((r) => r.argv), ...setprivArgv];
       expect(argvs.filter((a) => values.some((s) => a.includes(s)))).toEqual([]);
+    } finally {
+      if (child.pid) process.kill(-child.pid, 'SIGKILL');
+    }
+  }, 30_000);
+
+  it("runs the project's dev server as cwdev, in its own folder, with PATH and nothing else", async () => {
+    const devRecord = `d=$(dirname "$0")/../log; f=$(/usr/bin/mktemp "$d/.part.XXXXXX")
+{ echo "uid=\${STUB_UID:-root}"; echo "argv=devserve $*"; /usr/bin/env; } > "$f"
+/bin/mv "$f" "$d/rec.dev.$$"
+exec /bin/sleep 1000`;
+    const { bin, log, volume } = stubs('0', [], { devserve: devRecord });
+    // The mkdir stub makes nothing, so the folder cwdev would make is made here.
+    mkdirSync(join(volume, 'dev', 'work'), { recursive: true });
+    const env = {
+      ...machineEnv(bin, volume),
+      CW_DEV_SERVER_CMD: 'devserve --host 127.0.0.1 --port 5173',
+    };
+    const child = spawn(BASH as string, [entrypoint], { env, detached: true, stdio: 'ignore' });
+    try {
+      const dev = () => readRecords(log).recs.find((r) => r.argv.startsWith('devserve'));
+      const server = () => readRecords(log).recs.find((r) => r.argv.includes('bin.ts'));
+      await waitFor(() => dev() !== undefined && server() !== undefined, {
+        timeout: 20_000,
+        describe: 'the dev server and the board server',
+      });
+      const rec = dev();
+      expect(rec?.uid).toBe('cwdev');
+      expect(rec?.argv).toBe('devserve --host 127.0.0.1 --port 5173');
+      expect(rec?.env.get('PWD')).toBe(realpathSync(join(volume, 'dev', 'work')));
+      expect(rec?.env.get('HOME')).toBe('/home/cwdev');
+      const bashOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD']);
+      expect([...(rec?.env.keys() ?? [])].filter((k) => !bashOwn.has(k)).sort()).toEqual(
+        ['HOME', 'LOGNAME', 'PATH', 'STUB_UID', 'USER'].sort(),
+      );
+      // Its folder is its own and the lead's group's, setgid, and nobody else's.
+      expect(lines(log, '.chown')).toContain(`root -h cwdev:cwdevsrc ${volume}/dev`);
+      expect(lines(log, '.chmod')).toContain(`root 2770 ${volume}/dev`);
+      // CONTROL: the server, beside it, still runs as cw with its own key.
+      expect(server()?.uid).toBe('cw');
+      expect(server()?.env.get('CW_ORG_ANTHROPIC_API_KEY')).toBe(
+        SERVER_OWN.CW_ORG_ANTHROPIC_API_KEY,
+      );
+    } finally {
+      if (child.pid) process.kill(-child.pid, 'SIGKILL');
+    }
+  }, 30_000);
+
+  it('runs no dev server when none is configured', async () => {
+    const { bin, log, volume } = stubs('0');
+    const child = spawn(BASH as string, [entrypoint], {
+      env: machineEnv(bin, volume),
+      detached: true,
+      stdio: 'ignore',
+    });
+    try {
+      await waitFor(() => readRecords(log).recs.some((r) => r.argv.includes('bin.ts')), {
+        timeout: 20_000,
+        describe: 'the server',
+      });
+      expect(readRecords(log).recs.filter((r) => r.uid === 'cwdev')).toEqual([]);
     } finally {
       if (child.pid) process.kill(-child.pid, 'SIGKILL');
     }

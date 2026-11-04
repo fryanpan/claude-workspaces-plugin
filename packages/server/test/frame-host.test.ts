@@ -92,6 +92,33 @@ describe('the frame hostname setting', () => {
     expect(fh.sameSiteBoardHosts).toEqual([]);
   });
 
+  it("frames a board member's page there with a ticket naming them, never with voice", () => {
+    const fh = createFrameHost({
+      origin: 'https://harborlight.frames.test',
+      boardHosts: ['harborlight.board.test'],
+      keys: () => ({ ticket: 'k', cookie: 'c' }),
+    });
+    const on = (host: string) => new Request('http://x/', { headers: { host } });
+    const target = fh.frameFor(
+      on('harborlight.board.test'),
+      true,
+      'w-harbor',
+      true,
+      ' Reviewer@Partner.example ',
+    );
+    expect(checkFrameTicket('k', target?.ticket, 'harborlight.frames.test', 'w-harbor')).toEqual({
+      ok: true,
+      expiresAt: expect.any(Number),
+      appVoice: false,
+      member: 'reviewer@partner.example',
+    });
+    // A visitor naming nobody, or a member on a hostname that is not a board's.
+    expect(fh.frameFor(on('harborlight.board.test'), true, 'w-harbor', false, '')).toBeNull();
+    expect(
+      fh.frameFor(on('share.board.test'), true, 'w-harbor', false, 'reviewer@partner.example'),
+    ).toBeNull();
+  });
+
   it('is framed by nobody when no board hostname is named', () => {
     const fh = createFrameHost({
       origin: 'https://harborlight.frames.test',
