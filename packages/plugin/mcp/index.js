@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.349";
+var version2 = "0.1.350";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14225,11 +14225,18 @@ function createAliasDeprecationWarner(log = (line) => console.error(line)) {
 var warnDeprecatedAlias = createAliasDeprecationWarner();
 
 // packages/mcp/src/call-tool.ts
+var ATTACH_THEN_WATCH_TOOLS = [
+  "attach_markdown",
+  "create_review_doc",
+  "attach_mockup",
+  "bind_mock"
+];
 var NO_AUTO_WATCH_TOOLS = new Set([
   "unwatch_doc",
   "watch_doc",
   "observe_url",
-  "attach_doc"
+  "attach_doc",
+  ...ATTACH_THEN_WATCH_TOOLS
 ]);
 async function maybeAutoWatch(watchDoc, name, args) {
   if (NO_AUTO_WATCH_TOOLS.has(name))
@@ -19382,6 +19389,14 @@ function threadCreateRequest(input, author, board) {
 // packages/mcp/src/tools/docs.ts
 var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason", "taskId", "why"]);
 var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason", "taskId", "why"]);
+async function watchCreated(watchDoc, a, res) {
+  if (a.subscribe === false)
+    return;
+  const made = res?.docId;
+  const docId = typeof made === "string" && made !== "" ? made : a.docId;
+  if (typeof docId === "string" && docId !== "")
+    await watchDoc(docId);
+}
 async function handleDocsTool(name, a, ctx) {
   const {
     http,
@@ -19531,6 +19546,7 @@ async function handleDocsTool(name, a, ctx) {
         ...setId ? { setId } : {},
         ...producedBy ? { producedBy } : {}
       });
+      await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "set_doc_content": {
@@ -19563,6 +19579,7 @@ async function handleDocsTool(name, a, ctx) {
         ...sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {},
         ...title ? { title } : {}
       });
+      await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "attach_app": {

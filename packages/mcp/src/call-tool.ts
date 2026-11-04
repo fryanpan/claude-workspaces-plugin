@@ -61,6 +61,14 @@ export interface CallToolDeps {
   warnDeprecatedAlias?: (name: string) => void;
 }
 
+/** The creates that watch the doc's real id once the server has made it. */
+export const ATTACH_THEN_WATCH_TOOLS = [
+  'attach_markdown',
+  'create_review_doc',
+  'attach_mockup',
+  'bind_mock',
+] as const;
+
 /**
  * Tools that take a `docId` but should NOT trigger implicit auto-watch.
  *
@@ -78,6 +86,11 @@ export const NO_AUTO_WATCH_TOOLS = new Set([
   // per-doc SSE channel — the board watch is the WORKSPACE channel, wired by
   // create_workspace / attach_agent instead.
   'attach_doc',
+  // These create the doc they name, so before the call the docId is an alias
+  // nothing holds yet. A board token's watch set takes only keys on its board,
+  // so a walled lead's pre-call watch was refused and never saved. They watch
+  // the id the server answers with, after the create (tools/docs.ts).
+  ...ATTACH_THEN_WATCH_TOOLS,
 ]);
 
 /**

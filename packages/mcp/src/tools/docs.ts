@@ -82,6 +82,23 @@ const SHARING_SWITCH_ARGS = new Set(['enabled', 'workspaceId', 'reason', 'taskId
 /** The arguments `set_board_sharing_lock` reads. Anything else is refused. */
 const BOARD_LOCK_ARGS = new Set(['locked', 'workspaceId', 'reason', 'taskId', 'why']);
 
+/**
+ * Watch a doc an attach just made, by the id the server answered with. The
+ * pre-call auto-watch skips these tools (`ATTACH_THEN_WATCH_TOOLS`): before
+ * the create, the alias names no doc, and a board token's watch set refuses a
+ * key on no board. Honours `subscribe: false` as the auto-watch does.
+ */
+async function watchCreated(
+  watchDoc: (docId: string) => Promise<boolean>,
+  a: Record<string, unknown>,
+  res: unknown,
+): Promise<void> {
+  if (a.subscribe === false) return;
+  const made = (res as { docId?: unknown } | null)?.docId;
+  const docId = typeof made === 'string' && made !== '' ? made : a.docId;
+  if (typeof docId === 'string' && docId !== '') await watchDoc(docId);
+}
+
 /** Answers the document tools; `undefined` means "not one of mine". */
 export async function handleDocsTool(
   name: string,
@@ -331,6 +348,7 @@ export async function handleDocsTool(
         ...(setId ? { setId } : {}),
         ...(producedBy ? { producedBy } : {}),
       });
+      await watchCreated(watchDoc, a, res);
       return ok(res);
     }
     case 'set_doc_content': {
@@ -388,6 +406,7 @@ export async function handleDocsTool(
         ...(sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {}),
         ...(title ? { title } : {}),
       });
+      await watchCreated(watchDoc, a, res);
       return ok(res);
     }
     case 'attach_app': {
