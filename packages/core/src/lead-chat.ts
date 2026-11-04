@@ -218,16 +218,19 @@ export function leadLineTurn(lines: readonly LeadChatMeetingLine[]): number | nu
 }
 
 /**
- * Whether a line said in a meeting is addressed to the lead: it opens with
- * "Lead," (or "Lead:"), as "Lead, file a task…" does. Everything else is the
- * room talking, and only the note-taker hears it.
+ * Whether a line said in a meeting is addressed to the lead: it opens with a
+ * wake word. Everything else is the room talking, and only the note-taker
+ * hears it.
  *
- * The comma is required. "Lead the way" and "lead time is two weeks" are a
- * room talking, and the transcribers this runs on punctuate a name used to
- * address someone.
+ * - "Lead," or "Lead:" — the comma is required, because "Lead the way" and
+ *   "lead time is two weeks" are a room talking, and the transcribers this
+ *   runs on punctuate a name used to address someone.
+ * - "Claude" or "lead agent" — what Bryan says. Both are names rather than
+ *   common words, so the comma is optional ("Claude file a task" counts).
+ *   Only at the start: "ask Claude later" mid-sentence is the room talking.
  */
 export function addressesLead(text: string): boolean {
-  return /^\s*lead\s*[,:]\s*\S/i.test(text);
+  return /^\s*(?:lead\s*[,:]|(?:claude|lead[\s-]+agent)\b[\s,:]*)\s*\S/i.test(text);
 }
 
 /** How many messages one read hands a page: the first read, and each page

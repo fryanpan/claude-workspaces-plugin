@@ -61,6 +61,8 @@ describe('speaking into a meeting, with the agent token required', () => {
       port: 0,
       dataDir,
       requireAgentToken,
+      // The plugin-version gate below is the feed's, which is off by default.
+      meetingLeadFeed: true,
       identifyAgentCaller: async () => ({ ok: true, agentId: callerIs, via: 'session' }),
     });
     base = `http://127.0.0.1:${handle.port}`;
@@ -141,8 +143,7 @@ describe('speaking into a meeting, with the agent token required', () => {
   describe('a lead on a plugin older than the meeting frames', () => {
     beforeEach(() => start('0.1.346'));
 
-    // Since 2026-11-04 no lead is sent either frame, whatever its plugin.
-    it('is sent neither the start nor the room’s lines, and nor is a current lead', async () => {
+    it('is sent neither the start nor the room’s lines', async () => {
       const token = await tokenFor(LEAD);
       const controller = new AbortController();
       const stream = await fetch(`${base}/workspaces/${board}/events:stream?agentId=${LEAD}`, {
@@ -180,8 +181,8 @@ describe('speaking into a meeting, with the agent token required', () => {
         text: 'The Harborlight ferry runs at six.',
       });
       await act({ action: 'end', id });
-      // The same lead, once its session reports a current plugin, is not told
-      // of the next meeting either.
+      // The positive control: the same lead, once its session reports a
+      // current plugin, is told of the next meeting on this same stream.
       handle.tasks.attachAgent(board, {
         agentId: LEAD,
         runtime: 'claude-code-local',
@@ -199,18 +200,16 @@ describe('speaking into a meeting, with the agent token required', () => {
       const second = await meetingId();
       expect(second).not.toBe('');
       expect(id).not.toBe('');
-      // Positive control: the stream is live, and carries a chat message to
-      // the lead posted after both meetings started.
-      await post(`/workspaces/${board}/lead-chat`, { author: ALICE, text: 'Riverbend check-in.' });
-      await waitFor(() => text.includes('Riverbend check-in.'), {
-        describe: 'the lead’s stream carries a chat message',
+      await waitFor(() => text.includes(LEAD_MEETING_STARTED_EVENT), {
+        describe: 'the current lead told of the second meeting',
       });
       controller.abort();
       await reading;
-      expect(text).not.toContain(LEAD_MEETING_STARTED_EVENT);
-      expect(text).not.toContain(LEAD_MEETING_HEARD_EVENT);
-      expect(text).not.toContain(second);
+      // One SSE frame names its event twice: the `event:` line and the data.
+      expect(text.split(`event: ${LEAD_MEETING_STARTED_EVENT}\n`)).toHaveLength(2);
+      expect(text).toContain(second);
       expect(text).not.toContain(id);
+      expect(text).not.toContain(LEAD_MEETING_HEARD_EVENT);
     });
   });
 });

@@ -427,6 +427,13 @@ export interface ServerOptions {
    */
   spawnerAgentId?: string | null;
   /**
+   * Whether the board's lead is sent a running meeting's lines
+   * (`lead-chat/meeting-feed.ts`). Off since 2026-11-04, pending a redesign:
+   * a lead sent every line took a turn per batch and spoke into the meeting
+   * unasked. Unset → `CW_MEETING_LEAD_FEED=1` turns it on.
+   */
+  meetingLeadFeed?: boolean;
+  /**
    * How many quiet windows a row with a WATCHING builder dispatch gets
    * before the wake calls its builder silent (default
    * `BUILDER_SILENT_MULTIPLIER_DEFAULT`, two; `CW_BUILDER_SILENT_MULTIPLIER`

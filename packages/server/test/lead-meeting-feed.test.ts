@@ -15,6 +15,7 @@ import {
   LEAD_MEETING_SINCE,
   LEAD_MEETING_STARTED_EVENT,
   LeadMeetingFeed,
+  meetingLeadFeedEnabled,
 } from '../src/lead-chat/meeting-feed.ts';
 import type { TickScheduler } from '../src/pause-ticker.ts';
 
@@ -176,5 +177,14 @@ describe('the lead in its meeting', () => {
     feed.heard('w-harbor', MEETING, { turn: 0, who: 'Alice', text: 'Anyone there?' });
     clock.advance(LEAD_MEETING_BATCH_MS);
     expect(sent).toEqual([]);
+  });
+});
+
+describe('the switch', () => {
+  it('is off unless CW_MEETING_LEAD_FEED is exactly 1', () => {
+    expect(meetingLeadFeedEnabled({})).toBe(false);
+    expect(meetingLeadFeedEnabled({ CW_MEETING_LEAD_FEED: '0' })).toBe(false);
+    expect(meetingLeadFeedEnabled({ CW_MEETING_LEAD_FEED: 'true' })).toBe(false);
+    expect(meetingLeadFeedEnabled({ CW_MEETING_LEAD_FEED: '1' })).toBe(true);
   });
 });

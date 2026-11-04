@@ -9,6 +9,7 @@ import type { HomeBriefStore } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { LeadChat } from '../lead-chat/lead-chat.ts';
+import type { LeadMeetingFeed } from '../lead-chat/meeting-feed.ts';
 import type { LeadChatMeetings } from '../lead-chat/meeting.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -74,6 +75,9 @@ export interface WorkspaceRoutesContext {
   leadChat: LeadChat;
   /** The meeting each board's lead chat is running. */
   leadChatMeetings: LeadChatMeetings;
+  /** The board's lead in that meeting: its start and the room's lines. Null
+   *  while the feed is off, which it is by default (`meetingLeadFeedEnabled`). */
+  leadMeetingFeed: LeadMeetingFeed | null;
   /** The voice a line the lead says into a meeting is played in, or null
    *  when this server has none (the line still shows). */
   leadMeetingVoice: SpokenVoice | null;
