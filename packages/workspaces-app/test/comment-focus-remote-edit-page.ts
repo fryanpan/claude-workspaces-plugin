@@ -93,22 +93,6 @@ export const HELPERS = (kind: ComposerKind, cardSel: string) => `(() => {
       text: box ? box.textContent : null,
       boxTop: drawn ? Math.round(frame.getBoundingClientRect().top) : null,
       boxBottom: drawn ? Math.round(frame.getBoundingClientRect().bottom) : null,
-      // The margin keeps the card holding the box (the new-comment box, or
-      // a reply's balloon) 8px above the bottom of the band the reader can
-      // see, so a box that grows past it moves up (doc/composer-slot.ts).
-      holderBottom: (() => {
-        const c = document.getElementById('composer');
-        const holder = ${
-          kind === 'new'
-            ? "c && c.classList.contains('composer--margin') && !c.classList.contains('hidden') ? c : null"
-            : "document.body.dataset.cards === 'balloon' ? __card() : null"
-        };
-        return holder ? Math.round(holder.getBoundingClientRect().bottom) : null;
-      })(),
-      bandBottom: Math.round(Math.min(
-        document.querySelector('#editor').getBoundingClientRect().bottom,
-        (visualViewport ? visualViewport.offsetTop + visualViewport.height : innerHeight),
-      )),
       scrollTop: Math.round(document.querySelector('#editor').scrollTop),
       anchorTop: __anchorTop(),
     };

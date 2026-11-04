@@ -19,12 +19,6 @@ export interface FocusReading {
    *  new-comment sheet at 430) grows upward as the reader's words wrap, so
    *  its top moves and this edge does not. */
   boxBottom: number | null;
-  /** The bottom of the card holding the box when it sits in the margin (the
-   *  new-comment box, or a reply's balloon), else null. */
-  holderBottom: number | null;
-  /** The bottom of the band the reader can see: the doc pane's bottom edge,
-   *  or the visual viewport's when that is higher. */
-  bandBottom: number;
   /** The document scroller's scrollTop. */
   scrollTop: number;
   /** The top of the words the comment is about, in viewport pixels. */
