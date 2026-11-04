@@ -2,8 +2,9 @@
  * The keeper's store: a directory only the keeper's macOS user can open,
  * holding these JSON files, each mode 600.
  *
- * - `credentials.json`: the Cloudflare API token and account id, and the
- *   Fly org token and org slug. The only copy on the Mac once the cutover in
+ * - `credentials.json`: the Cloudflare API token and account id, the Fly
+ *   org token and org slug, and the GitHub token that registers a project's
+ *   push deploy keys (`keeper-push-keys.ts`). The only copy on the Mac once the cutover in
  *   `docs/process/keeper.md` is done.
  * - `passkeys.json`: the public half of each passkey Bryan registered.
  * - `apps.json`: the Fly apps this keeper created (or Bryan adopted). Only
@@ -38,6 +39,7 @@ import type { StoredPasskey } from './webauthn.ts';
 export interface KeeperCredentials {
   cloudflare?: { apiToken?: string; accountId?: string };
   fly?: { orgToken?: string; orgSlug?: string };
+  github?: { token?: string };
 }
 
 /** The names `keeper-bin.ts import` accepts, one value each, on stdin. */
@@ -46,6 +48,7 @@ export const CREDENTIAL_NAMES = [
   'cloudflare-account-id',
   'fly-org-token',
   'fly-org-slug',
+  'github-token',
 ] as const;
 export type CredentialName = (typeof CREDENTIAL_NAMES)[number];
 
@@ -173,6 +176,7 @@ export function openKeeperStore(
         creds.cloudflare = { ...creds.cloudflare, accountId: value };
       if (name === 'fly-org-token') creds.fly = { ...creds.fly, orgToken: value };
       if (name === 'fly-org-slug') creds.fly = { ...creds.fly, orgSlug: value };
+      if (name === 'github-token') creds.github = { ...creds.github, token: value };
       write('credentials.json', creds);
     },
     passkeys: () => read<StoredPasskey[]>('passkeys.json', []),

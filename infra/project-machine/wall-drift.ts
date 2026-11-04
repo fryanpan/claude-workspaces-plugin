@@ -185,7 +185,11 @@ export function uidRows(project: string, facts: MachineFacts): Row[] {
   return rows;
 }
 
-/** Every repo a board may push to waits for a person (plan: "after a person approves"). */
+/**
+ * Which repos a board may push to, and whether every push waits. Approval
+ * is opt-in (`git-push/policy.ts`), so a repo that pushes without it is the
+ * intended state, not drift; a `.github/` change waits either way.
+ */
 export function gitPushRows(project: string, facts: MachineFacts): Row[] {
   const g = facts.gitPush;
   if (g.state === 'absent') return [row(project, 'git-push.json', 'absent: no push allowed', true)];
@@ -196,8 +200,8 @@ export function gitPushRows(project: string, facts: MachineFacts): Row[] {
     row(
       project,
       `git push ${r.repo}`,
-      `board ${r.board}: ${r.approval ? 'waits for approval' : 'pushes without approval'}`,
-      r.approval,
+      `board ${r.board}: ${r.approval ? 'waits for approval' : 'pushes without approval; a .github/ change waits'}`,
+      true,
     ),
   );
 }

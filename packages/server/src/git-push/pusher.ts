@@ -14,10 +14,12 @@
  *  6. its tip descends from upstream's tip of the branch, so it is never a
  *     force-push.
  *
- * Every push is then held for a person unless its repo opts out with
- * `"approval": false`, and even then a push that adds, changes or deletes
- * anything under `.github/` is held: a workflow runs with the repo's
- * Actions secrets as soon as it lands on any branch. A held push is filed as a decision review
+ * A push then goes through at once unless its repo opts in with
+ * `"approval": true`, which holds every push to it. Whatever the flag, a
+ * push that adds, changes or deletes anything under `.github/` is held: a
+ * workflow runs with the repo's Actions secrets as soon as it lands on any
+ * branch, and a deploy key may write one on a public repo, so this hold is
+ * the only gate on it. A held push is filed as a decision review
  * item with `step: 'push'` (owner-only when the board reserves that step),
  * at most `MAX_HELD_PER_BOARD` at a time. It runs only when the item's
  * answer chose Push AND carries `answeredBy`, which the store writes for a
@@ -29,10 +31,10 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
 import type { TaskStore } from '../tasks.ts';
-import type { PushCredential } from './credential.ts';
+import type { PushAuth, PushCredential } from './credential.ts';
 import { type GitRunner, realGit } from './git.ts';
 import { ruleFor } from './policy.ts';
-import { type RunResult, runPush } from './run.ts';
+import { type RunResult, githubUrlFor, runPush } from './run.ts';
 
 export const PUSH_APPROVE = 'o-push';
 export const PUSH_REJECT = 'o-no-push';
@@ -84,7 +86,7 @@ export interface GitPusherOptions {
     person: { id: string; email?: string },
   ) => 'owner' | 'member' | null;
   /** Upstream's URL for `owner/name`. Tests point it at a local bare repo. */
-  remoteUrlFor?: (repo: string) => string;
+  remoteUrlFor?: (repo: string, auth: PushAuth['kind']) => string;
   runGit?: GitRunner;
   now?: () => number;
 }
@@ -97,7 +99,7 @@ export class GitPusher {
   private readonly root: string;
   private readonly records = new Map<string, PushRecord>();
   private readonly locks = new Map<string, Promise<unknown>>();
-  private readonly remoteUrlFor: (repo: string) => string;
+  private readonly remoteUrlFor: (repo: string, auth: PushAuth['kind']) => string;
   private readonly runGit: GitRunner;
   private readonly now: () => number;
   private readonly unsubscribe: () => void;
@@ -107,7 +109,7 @@ export class GitPusher {
   constructor(private readonly o: GitPusherOptions) {
     this.root = join(o.dataDir, 'git-push');
     mkdirSync(join(this.root, 'bundles'), { recursive: true, mode: 0o700 });
-    this.remoteUrlFor = o.remoteUrlFor ?? ((repo) => `https://github.com/${repo}.git`);
+    this.remoteUrlFor = o.remoteUrlFor ?? githubUrlFor;
     this.runGit = o.runGit ?? realGit;
     this.now = o.now ?? Date.now;
     this.load();
@@ -183,7 +185,7 @@ export class GitPusher {
     }
     if (judged.pushed) return this.pushed(record, judged.sha);
     if (!rule.approval) {
-      // The repo opted out, but the push touches `.github/`, so it was not sent.
+      // The repo does not ask for approval, but the push touches `.github/`, so it was not sent.
       const cannot = this.cannotHold(
         record,
         `this push changes ${judged.github.join(', ')}, and a change under .github/ waits for a person's approval`,

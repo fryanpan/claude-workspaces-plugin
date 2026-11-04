@@ -17,7 +17,7 @@
  */
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PushCredential } from './credential.ts';
+import type { PushAuth, PushCredential } from './credential.ts';
 import { type GitRunner, ScratchRepo, type Upstream, redact } from './git.ts';
 
 export interface RunInput {
@@ -53,8 +53,16 @@ export interface RunDeps {
   /** `<dataDir>/git-push`. */
   root: string;
   credential: PushCredential;
-  remoteUrlFor: (repo: string) => string;
+  /** Upstream's URL for `repo`, for the kind of credential the host holds for it. */
+  remoteUrlFor: (repo: string, auth: PushAuth['kind']) => string;
   runGit: GitRunner;
+  /** The host keys ssh trusts; the image's pinned file by default. */
+  knownHosts?: string;
+}
+
+/** GitHub's URL for `repo`: https for a token, ssh for a deploy key. */
+export function githubUrlFor(repo: string, auth: PushAuth['kind']): string {
+  return auth === 'ssh-key' ? `ssh://git@github.com/${repo}.git` : `https://github.com/${repo}.git`;
 }
 
 const refused = (status: number, error: string, message: string): RunResult => ({
@@ -85,11 +93,15 @@ async function judgeIn(
   push: boolean,
 ): Promise<RunResult> {
   const { repo, branch, bundle } = input;
-  const token = await deps.credential();
+  const token = await deps.credential(repo);
   if (!token)
-    return refused(503, 'no-credential', 'this server holds no GitHub credential to push with');
+    return refused(503, 'no-credential', `this server holds no GitHub credential for ${repo}`);
   const authDir = join(deps.root, 'auth');
-  const up: Upstream = { url: deps.remoteUrlFor(repo), token };
+  const up: Upstream = {
+    url: deps.remoteUrlFor(repo, token.kind),
+    auth: token,
+    ...(deps.knownHosts ? { knownHosts: deps.knownHosts } : {}),
+  };
   const mirror = new ScratchRepo(
     join(deps.root, 'mirrors', `${repo.replace('/', '__')}.git`),
     deps.runGit,

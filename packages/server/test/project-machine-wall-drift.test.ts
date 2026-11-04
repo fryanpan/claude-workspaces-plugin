@@ -191,16 +191,18 @@ describe('the drift judges', () => {
     expect(rows[1]?.answer).toBe('cwtunnel 10002, lead 10004');
   });
 
-  it('reports a push without approval and a policy the server cannot read', () => {
+  it('lists a push without approval as intended, and fails a policy the server cannot read', () => {
     const f = facts({
       gitPush: {
         state: 'ok',
         rules: [{ board: 'w-riverbend', repo: 'alice/riverbend', approval: false }],
       },
     });
-    expect(failing(gitPushRows('riverbend', f))).toEqual([
-      'git push alice/riverbend: board w-riverbend: pushes without approval',
-    ]);
+    const rows = gitPushRows('riverbend', f);
+    expect(failing(rows)).toEqual([]);
+    expect(rows[0]?.answer).toBe(
+      'board w-riverbend: pushes without approval; a .github/ change waits',
+    );
     expect(
       gitPushRows('riverbend', facts({ gitPush: { state: 'absent', rules: [] } }))[0]?.ok,
     ).toBe(true);

@@ -6,6 +6,7 @@
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
  *       [--lead-board <boardId>] [--claude-account <label>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
+ *       [--push-repo <owner/name>]... [--refresh-push-keys]
  *       [--refresh-tunnel-token] [--tf-env prod|staging]
  *
  * Each run reads what exists and does only what is missing, so a second run
@@ -29,6 +30,9 @@
  *   `--github-deploy-key` names. A machine with a lead needs `--memory 2048`.
  *   Each is set once, like every secret, except that a run naming its source
  *   sets it again, and `--refresh-lead` sets all three again
+ *   the server's push keys, one write deploy key per `--push-repo`, which
+ *   the keeper makes and sets as CW_GITHUB_PUSH_KEYS (`push-keys.ts`); a
+ *   classic CW_GITHUB_PUSH_TOKEN found on the app is unset
  *   the owner's address, the public address and the Access settings
  *   (`settings.ts`), from the Keychain and the Terraform outputs; each one
  *   whose source is missing is skipped with a line saying why
@@ -41,19 +45,14 @@
  * kept out of the state. A tunnel Terraform remade has a new token:
  * `--refresh-tunnel-token` sets it again.
  *
- * With CW_SECRETS_FROM_ENV=1 every Keychain entry is handed in as an
- * environment variable (`mac-ops.ts`), and it only updates a machine the Mac
- * already made: a run that would make an app, a volume or a credential is
- * refused. CI no longer runs it: a machine takes new code from the signed
- * releases CI publishes (`release-cli.ts`), and an image deploy is this
- * command, run from the keeper.
- *
- * The image records its own commit's serial (`image-release.json`), so a
- * machine boots it in preference to any older release on its volume.
+ * With CW_SECRETS_FROM_ENV=1 Keychain entries come from the environment
+ * (`mac-ops.ts`) and only a machine the Mac made is updated. CI never runs
+ * it: machines install signed releases (`release-cli.ts`). The image records
+ * its serial (`image-release.json`) so it beats an older release on the volume.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
- * credential comes out of the Keychain (or, in CI, the environment) into a
+ * credential comes out of the Keychain (or the environment) into a
  * child's environment or stdin.
  * Why Tigris: README.md.
  */
@@ -92,6 +91,7 @@ import {
   keychainRead,
   secretsFromEnv,
 } from './mac-ops.ts';
+import { makePushKeysThroughKeeper } from './push-keys.ts';
 import { writeImageRelease } from './release-publish.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
@@ -299,6 +299,10 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input: `${lines.join('\n')}\n` });
       return;
     }
+    case 'make-push-keys':
+      for (const line of await makePushKeysThroughKeeper(cfg.app, a.repos))
+        console.log(`[deploy]   ${line}`);
+      return;
     case 'unset-secrets':
       flyOk(['secrets', 'unset', ...a.names, '--app', cfg.app, '--stage']);
       return;
@@ -352,6 +356,7 @@ const MAKES = new Set([
   'make-backup-key',
   'create-bucket',
   'make-writer-key',
+  'make-push-keys',
 ]);
 
 export async function deployProject(
@@ -467,6 +472,8 @@ async function main(): Promise<void> {
     githubDeployKey: arg(args, 'github-deploy-key'),
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),
+    pushRepos: args.flatMap((a, i) => (a === '--push-repo' ? [args[i + 1] ?? ''] : [])),
+    refreshPushKeys: args.includes('--refresh-push-keys'),
   });
   const tfEnv = arg(args, 'tf-env') ?? 'prod';
   if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);

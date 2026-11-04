@@ -310,7 +310,7 @@ export interface ServerOptions {
    */
   gitPush?: {
     credential: PushCredential;
-    remoteUrlFor?: (repo: string) => string;
+    remoteUrlFor?: (repo: string, auth: 'token' | 'ssh-key') => string;
     runGit?: GitRunner;
   };
   /**

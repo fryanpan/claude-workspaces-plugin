@@ -174,6 +174,7 @@ const HELD: readonly { hold: HoldKind; specs: readonly Spec[] }[] = [
     specs: [
       spec('secrets import', 0, { app: 'value', stage: 'bare' }),
       spec('secrets set', 32, { app: 'value', stage: 'bare' }),
+      spec('secrets unset', 8, { app: 'value', stage: 'bare' }),
       spec('ssh console', 0, { app: 'value', command: 'value' }),
       spec('ssh sftp put', 2, { app: 'value' }),
       spec('ssh sftp get', 2, { app: 'value' }),
