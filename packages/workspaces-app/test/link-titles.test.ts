@@ -310,3 +310,58 @@ describe('statusChipEl', () => {
     expect(chip.getAttribute('aria-label')).toBe('Task: Draft');
   });
 });
+
+describe('a markdown link whose label is only its own address', () => {
+  const DOC_PATH = '/workspaces/w-abc123/docs/doc-1';
+  const titled = (markdown: string): Promise<string[]> => {
+    const el = document.createElement('div');
+    el.innerHTML = renderCommentMarkdown(markdown);
+    const fetcher = async () =>
+      new Response(
+        JSON.stringify({ titles: { [DOC_URL]: 'Redline Design', [DOC_PATH]: 'Redline Design' } }),
+        {
+          status: 200,
+        },
+      );
+    return hydrateLinkTitles(el, fetcher).then(() =>
+      [...el.querySelectorAll('a')].map((a) => a.textContent ?? ''),
+    );
+  };
+
+  it('reads as the resource’s name when the label is the URL, its path or its id', async () => {
+    expect(await titled(`[${DOC_URL}](${DOC_URL})`)).toEqual(['Redline Design']);
+    expect(await titled(`[${DOC_PATH}](${DOC_URL})`)).toEqual(['Redline Design']);
+    expect(await titled(`[doc-1](${DOC_PATH})`)).toEqual(['Redline Design']);
+  });
+
+  it('keeps words the author chose, even ones that contain the id', async () => {
+    expect(await titled(`[see doc-1](${DOC_PATH})`)).toEqual(['see doc-1']);
+    expect(await titled(`[\`doc-1\`](${DOC_PATH})`)).toEqual(['doc-1']);
+  });
+});
+
+describe('sameTabBoardLinks', () => {
+  const targets = (markdown: string): Array<string | null> => {
+    const el = document.createElement('div');
+    el.innerHTML = renderCommentMarkdown(markdown, { bareLinks: true, sameTabBoardLinks: true });
+    return [...el.querySelectorAll('a')].map((a) => a.getAttribute('target'));
+  };
+
+  it('opens a board link in the same tab, bare or labelled', () => {
+    expect(targets(`${DOC_URL} and [the doc](${DOC_URL})`)).toEqual([null, null]);
+  });
+
+  it('still opens a link off the board in a new tab', () => {
+    expect(
+      targets(
+        'https://github.com/owner/repo/pull/1 and [the PR](https://github.com/owner/repo/pull/2)',
+      ),
+    ).toEqual(['_blank', '_blank']);
+  });
+
+  it('is off unless asked for', () => {
+    const el = document.createElement('div');
+    el.innerHTML = renderCommentMarkdown(DOC_URL);
+    expect(el.querySelector('a')?.getAttribute('target')).toBe('_blank');
+  });
+});

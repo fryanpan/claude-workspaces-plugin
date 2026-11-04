@@ -22,7 +22,7 @@
  * non-workspace URLs stay plain text — unless the caller passes `bareLinks`,
  * as the lead chat does, whose agent pastes PR and CI links bare.
  */
-import { parseWorkspaceLink } from '@claude-workspaces/core';
+import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
 import {
   cachedLinkStatus,
   cachedLinkTitle,
@@ -59,6 +59,47 @@ function safeHref(url: string): string | null {
 export interface CommentMarkdownOpts {
   /** Link a bare http(s) URL that is not a workspace one, too. */
   bareLinks?: boolean;
+  /** Open a link to this board's own pages in the same tab, so a plain
+   *  click stays on the board and Ctrl- or Cmd-click opens a new tab — the
+   *  browser's own rule once the anchor has no `target`. Other links still
+   *  open a new tab. The lead chat asks for this: leaving the board for a
+   *  PR would leave the conversation too. */
+  sameTabBoardLinks?: boolean;
+}
+
+/** The id a board link names: the task, goal, doc, mock or review. */
+function linkIdOf(link: WorkspaceLink): string {
+  switch (link.kind) {
+    case 'workspace':
+      return link.workspaceId;
+    case 'task':
+      return link.taskId;
+    case 'goal':
+      return link.goalId;
+    case 'review':
+      return link.reviewId;
+    default:
+      return link.docId;
+  }
+}
+
+/**
+ * Whether a link's label is only its own address or id — `[d-x](…/docs/d-x)`
+ * or `[https://…](https://…)` — which says nothing a reader can use. Such a
+ * label is drawn like a bare URL, as the resource's name once known. `label`
+ * is escaped text; marks inside it (a code span, bold) make it the author's.
+ */
+function isAddressLabel(label: string, url: string, link: WorkspaceLink): boolean {
+  if (label.includes('<')) return false;
+  const text = label.replace(/&amp;/g, '&').trim();
+  if (text === url || text === linkIdOf(link)) return true;
+  try {
+    const base = typeof window !== 'undefined' ? window.location.href : 'http://localhost/';
+    const u = new URL(url, base);
+    return text === u.href || text === `${u.pathname}${u.search}`;
+  } catch {
+    return false;
+  }
 }
 
 /** Inline marks on an ALREADY-escaped string. Order matters: code first so
@@ -76,20 +117,27 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
     const url = rawUrl.replace(/&amp;/g, '&');
     const href = safeHref(url);
     if (!href) return m;
-    const base = `href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer"`;
+    const newTab = 'target="_blank" rel="noopener noreferrer"';
     // A workspace target keeps the author's label but is still marked, so a
     // task/goal link can wear its status chip once hydration answers. Same
     // origin rule as the bare-URL pass — a foreign lookalike stays unmarked.
-    if (!isSameOriginWorkspaceUrl(url) || !parseWorkspaceLink(url))
-      return `<a ${base}>${label}</a>`;
+    const link = isSameOriginWorkspaceUrl(url) ? parseWorkspaceLink(url) : null;
+    if (!link) return `<a href="${escapeHtml(href)}" ${newTab}>${label}</a>`;
+    const base = `href="${escapeHtml(href)}"${opts.sameTabBoardLinks ? '' : ` ${newTab}`}`;
+    // A label that is only the address is not the author's words: it takes
+    // the resource's name, as a bare URL does.
+    const named = isAddressLabel(label, url, link);
+    const title = named ? cachedLinkTitle(url) : null;
     const status = cachedLinkStatus(url);
-    if (status === undefined) scheduleLinkTitleHydration();
+    const pending = status === undefined || title === undefined;
+    if (pending) scheduleLinkTitleHydration();
     const attrs =
-      `${base} class="ws-link" data-ws-link="${escapeHtml(url)}" data-ws-custom=""` +
-      `${status === undefined ? ' data-ws-pending=""' : ''}`;
-    return `<a ${attrs}>${label}${status ? statusChipHtml(status) : ''}</a>`;
+      `${base} class="ws-link" data-ws-link="${escapeHtml(url)}"` +
+      `${named ? '' : ' data-ws-custom=""'}${pending ? ' data-ws-pending=""' : ''}`;
+    const text = title ? escapeHtml(title) : label;
+    return `<a ${attrs}>${text}${status ? statusChipHtml(status) : ''}</a>`;
   });
-  out = linkifyWorkspaceUrls(out, opts.bareLinks === true);
+  out = linkifyWorkspaceUrls(out, opts);
   return out;
 }
 
@@ -151,7 +199,8 @@ function trimUrlTail(s: string): string {
  * present were all emitted by this module, so the split is over known-safe
  * markup, and the text segments are still escape-first.
  */
-function linkifyWorkspaceUrls(html: string, bareLinks: boolean): string {
+function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
+  const bareLinks = opts.bareLinks === true;
   if (!/https?:\/\/|\/workspaces\//.test(html)) return html;
   let anchorDepth = 0;
   let codeDepth = 0;
@@ -180,7 +229,8 @@ function linkifyWorkspaceUrls(html: string, bareLinks: boolean): string {
       if (title === undefined) sawPending = true;
       const attrs =
         `href="${escapeHtml(url)}" class="ws-link" data-ws-link="${escapeHtml(url)}"` +
-        `${title === undefined ? ' data-ws-pending=""' : ''} target="_blank" rel="noopener noreferrer"`;
+        `${title === undefined ? ' data-ws-pending=""' : ''}` +
+        `${opts.sameTabBoardLinks ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
       // Title text via escapeHtml (server data is not markup); the raw-URL
       // fallback is `trimmed`, which is already escaped text.
       return `<a ${attrs}>${title ? escapeHtml(title) : trimmed}${status ? statusChipHtml(status) : ''}</a>${tail}`;

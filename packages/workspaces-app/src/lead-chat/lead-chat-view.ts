@@ -27,6 +27,7 @@
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { hydrateLinkTitles } from '../link-titles.ts';
 import { createDock } from './lead-chat-dock.ts';
 import { typingBand } from './lead-chat-keyboard.ts';
 import { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
@@ -266,10 +267,12 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
    *  mic hears a line redraws the list but parses nothing again. */
   const drawn = new Map<string, { text: string; html: string }>();
   const drawnRows = new Map<string, DrawnRow>();
+  /** Row nodes whose board links have been sent for their titles. */
+  const titled = new WeakSet<Element>();
   const markdown = (msg: LeadChatMessage): string => {
     const hit = drawn.get(msg.id);
     if (hit?.text === msg.text) return hit.html;
-    const html = renderCommentMarkdown(msg.text, { bareLinks: true });
+    const html = renderCommentMarkdown(msg.text, { bareLinks: true, sameTabBoardLinks: true });
     drawn.set(msg.id, { text: msg.text, html });
     return html;
   };
@@ -388,6 +391,16 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       if (item) rows.push([`m:${msg.id}`, item]);
     }
     patchRows(list, rows, drawnRows);
+    // The renderer's own title pass reads the document, which does not see
+    // into this shadow root, so a board link here would keep its raw URL.
+    // Titles land on the nodes on screen, which `patchRows` keeps while their
+    // markup is unchanged. Each node is asked about once: the list redraws on
+    // every word heard, and a lookup that failed must not repeat at that rate.
+    for (const row of drawnRows.values()) {
+      if (titled.has(row.node)) continue;
+      titled.add(row.node);
+      void hydrateLinkTitles(row.node);
+    }
     if (keepScroll) {
       list.scrollTop = prevTop;
       return;
