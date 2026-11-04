@@ -99,7 +99,8 @@ const graphql = (query: string, variables: Record<string, unknown> = {}) =>
   call('POST', '/graphql', { token: LEAD_TOKEN, body: { query, variables } });
 
 beforeAll(async () => {
-  dir = mkdtempSync('/private/tmp/ghp-');
+  // /tmp, not os.tmpdir(): a unix socket path may be at most 104 bytes. Linux has no /private.
+  dir = mkdtempSync('/tmp/ghp-');
   socket = join(dir, 'api.sock');
   storage = http.createServer(async (req, res) => {
     await record(storageSeen, req);
