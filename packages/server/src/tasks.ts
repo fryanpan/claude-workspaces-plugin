@@ -2860,6 +2860,13 @@ export class TaskStore {
     ownerCheck: (taskId, lineId, verdict, actor) =>
       this.doneWhen.ownerCheck(taskId, lineId, verdict, actor),
     appendNote: (taskId, input) => this.appendNote(taskId, input),
+    markOwnerTemplate: (taskId, reviewItemId, key) => {
+      const task = this.getTask(taskId);
+      const item = task?.reviews?.find((r) => r.id === reviewItemId);
+      if (!task || !item || item.ownerTemplate === key) return;
+      item.ownerTemplate = key;
+      this.scheduleSave(task.workspaceId);
+    },
   };
 
   // ── Review items ─────────────────────────────────────────────────────────
