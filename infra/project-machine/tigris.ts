@@ -1,7 +1,9 @@
 /**
  * The Tigris calls `deploy.ts` makes with the bucket's admin credential:
- * mint the machine's write-only key, and set the rule that prunes old
- * snapshots (the machine cannot delete, so the bucket must).
+ * mint the machine's write-only key, turn on versioning (the key may overwrite
+ * a snapshot whose name it knows, and the bucket keeps the version it
+ * replaced), and set the rule that prunes old snapshots and old versions (the
+ * machine cannot delete, so the bucket must).
  *
  * No value read here is ever printed. Errors carry the API's error code and
  * message, which name the request, never a key.
@@ -124,7 +126,7 @@ function lifecycleUrl(cred: BucketCredential, bucket: string): string {
 }
 
 export function lifecycleXml(prefix: string, days: number): string {
-  return `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>expire-snapshots</ID><Filter><Prefix>${prefix}</Prefix></Filter><Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration></Rule></LifecycleConfiguration>`;
+  return `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>expire-snapshots</ID><Filter><Prefix>${prefix}</Prefix></Filter><Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration><NoncurrentVersionExpiration><NoncurrentDays>${days}</NoncurrentDays></NoncurrentVersionExpiration></Rule></LifecycleConfiguration>`;
 }
 
 /** Whether the bucket already expires objects under `prefix` after `days`. */
@@ -142,6 +144,7 @@ export async function hasLifecycle(
   return (
     text.includes(`<Prefix>${prefix}</Prefix>`) &&
     text.includes(`<Days>${days}</Days>`) &&
+    text.includes(`<NoncurrentDays>${days}</NoncurrentDays>`) &&
     text.includes('<Status>Enabled</Status>')
   );
 }
@@ -161,5 +164,39 @@ export async function setLifecycle(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`PutBucketLifecycle: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
+  }
+}
+
+function versioningUrl(cred: BucketCredential, bucket: string): string {
+  return `${cred.endpoint.replace(/\/$/, '')}/${bucket}?versioning=`;
+}
+
+export function versioningXml(): string {
+  return '<?xml version="1.0" encoding="UTF-8"?><VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>';
+}
+
+/**
+ * Whether the bucket keeps old versions (security review L5). A bucket that
+ * never had versioning answers with no Status; a suspended one keeps nothing
+ * new, so both read as off.
+ */
+export async function hasVersioning(cred: BucketCredential, bucket: string): Promise<boolean> {
+  const res = await s3(cred, 'GET', versioningUrl(cred, bucket));
+  const text = await res.text();
+  if (!res.ok)
+    throw new Error(`GetBucketVersioning: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
+  return xmlValue(text, 'Status') === 'Enabled';
+}
+
+export async function setVersioning(cred: BucketCredential, bucket: string): Promise<void> {
+  const body = versioningXml();
+  const md5 = createHash('md5').update(body).digest('base64');
+  const res = await s3(cred, 'PUT', versioningUrl(cred, bucket), body, {
+    'content-md5': md5,
+    'content-type': 'application/xml',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`PutBucketVersioning: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
   }
 }

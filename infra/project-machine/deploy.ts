@@ -100,7 +100,9 @@ import {
   createAccessKey,
   ensurePolicy,
   hasLifecycle,
+  hasVersioning,
   setLifecycle,
+  setVersioning,
 } from './tigris.ts';
 import {
   type AppliedTunnel,
@@ -181,12 +183,25 @@ async function observe(cfg: ProjectConfig) {
       (n): n is string => n !== undefined && (keychainHas(n) || inferred(n)),
     ),
   );
-  // The lifecycle rule is read with the bucket's admin credential, which CI
-  // does not hold; the Mac set the rule when it made the bucket.
-  const lifecycle = keychainHas(cfg.keychain.bucketAdmin)
+  // The lifecycle rule and versioning are read with the bucket's admin
+  // credential, which CI does not hold; the Mac set both when it made the
+  // bucket, or on its first run since.
+  const admin = keychainHas(cfg.keychain.bucketAdmin);
+  const lifecycle = admin
     ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
     : inferred(cfg.keychain.bucketAdmin);
-  return { app, volumes, keychain, lifecycle, secrets, machines: app ? machines(cfg.app) : [] };
+  const versioning = admin
+    ? await hasVersioning(bucketAdmin(cfg), cfg.bucket)
+    : inferred(cfg.keychain.bucketAdmin);
+  return {
+    app,
+    volumes,
+    keychain,
+    lifecycle,
+    versioning,
+    secrets,
+    machines: app ? machines(cfg.app) : [],
+  };
 }
 
 function deploy(cfg: ProjectConfig): void {
@@ -278,6 +293,9 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       keychainCreate(cfg.keychain.writer, JSON.stringify(key));
       return;
     }
+    case 'set-versioning':
+      await setVersioning(bucketAdmin(cfg), cfg.bucket);
+      return;
     case 'set-lifecycle':
       await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
       return;

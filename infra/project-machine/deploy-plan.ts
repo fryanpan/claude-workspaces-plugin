@@ -201,6 +201,8 @@ export interface Observed {
   /** Names of Keychain entries that exist (values are never read here). */
   keychain: ReadonlySet<string>;
   lifecycle: boolean;
+  /** Whether the bucket keeps old versions of an object (review L5). */
+  versioning: boolean;
   /** Names of the app's Fly secrets. */
   secrets: ReadonlySet<string>;
   machines: readonly ObservedMachine[];
@@ -212,6 +214,7 @@ export type Action =
   | { kind: 'make-backup-key' }
   | { kind: 'create-bucket' }
   | { kind: 'make-writer-key' }
+  | { kind: 'set-versioning' }
   | { kind: 'set-lifecycle' }
   | { kind: 'set-secrets'; names: string[] }
   | { kind: 'make-push-keys'; repos: string[] }
@@ -297,6 +300,9 @@ export function plan(
   const bucketIsNew = !obs.keychain.has(cfg.keychain.bucketAdmin);
   if (bucketIsNew) actions.push({ kind: 'create-bucket' });
   if (!obs.keychain.has(cfg.keychain.writer)) actions.push({ kind: 'make-writer-key' });
+  // Versioning first: the machine's key may overwrite a snapshot whose name
+  // it knows, and only a versioned bucket keeps the one it replaced.
+  if (bucketIsNew || !obs.versioning) actions.push({ kind: 'set-versioning' });
   if (bucketIsNew || !obs.lifecycle) actions.push({ kind: 'set-lifecycle' });
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.

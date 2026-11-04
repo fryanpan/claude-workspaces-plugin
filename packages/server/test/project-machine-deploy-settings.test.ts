@@ -72,7 +72,7 @@ const outputs = (): TfOutputs => ({
   tunnels: {},
 });
 
-/** The bucket's lifecycle read, on loopback. */
+/** The bucket's lifecycle and versioning reads, on loopback. */
 let server: ReturnType<typeof Bun.serve>;
 
 const saved = {
@@ -88,6 +88,10 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     fetch(req) {
       const url = new URL(req.url);
+      if (url.pathname === `/${cfg.bucket}` && url.searchParams.has('versioning'))
+        return new Response(
+          '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>',
+        );
       if (url.pathname === `/${cfg.bucket}`) return new Response(lifecycleXml('snapshots/', 30));
       return new Response('not found', { status: 404 });
     },
@@ -516,6 +520,7 @@ describe('plan, with the settings', () => {
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
+    versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: HEAD, memoryMb: 512 }],
   });
