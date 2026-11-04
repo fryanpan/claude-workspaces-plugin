@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isCredentialShapedName } from './fs-scan.ts';
+import { containedGit, isSafeGitName } from './git-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * Which files of a framed page's folder git lists, for `routes/doc-files.ts`.
@@ -68,9 +69,21 @@ const keyOf = (dir: string, folder: string[]): string => `${dir}\0${folder.join(
 
 /** Paths relative to `dir`, as git names them, or null when git would not list. */
 function gitList(dir: string, folder: string[]): Promise<Set<string> | null> {
-  if (gitBarred(dir)) return Promise.resolve(null);
+  const pathspec = ['--', `:(literal)${folder.join('/')}/`];
+  if (gitBarred(dir)) {
+    // A walled lead's repository: git contained, or "would not list".
+    const got = containedGit(dir, [
+      'ls-files',
+      '-z',
+      '--cached',
+      '--others',
+      '--exclude-standard',
+      ...pathspec,
+    ]);
+    return got ? got.then((r) => (r.ok ? admitted(r.stdout) : null)) : Promise.resolve(null);
+  }
   const args = ['-C', dir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'];
-  args.push('--', `:(literal)${folder.join('/')}/`);
+  args.push(...pathspec);
   return new Promise((resolve) => {
     execFile(
       'git',
@@ -87,14 +100,19 @@ function gitList(dir: string, folder: string[]): Promise<Set<string> | null> {
           resolve(null);
           return;
         }
-        const out = new Set<string>();
-        for (const rel of stdout.split('\0')) {
-          if (rel !== '' && !isCredentialShapedName(rel.split('/').pop() ?? rel)) out.add(rel);
-        }
-        resolve(out);
+        resolve(admitted(stdout));
       },
     );
   });
+}
+
+/** What `ls-files -z` named, less unsafe names and credential-shaped ones. */
+function admitted(stdout: string): Set<string> {
+  const out = new Set<string>();
+  for (const rel of stdout.split('\0')) {
+    if (isSafeGitName(rel) && !isCredentialShapedName(rel.split('/').pop() ?? rel)) out.add(rel);
+  }
+  return out;
 }
 
 const sameSet = (a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean =>
@@ -141,10 +159,8 @@ export async function isGitListed(dir: string, folder: string[], rel: string): P
   const got = await listing(dir, folder);
   if (got.paths === null) return false;
   if (got.paths.has(rel)) return true;
-  const exists = await lstat(join(dir, rel)).then(
-    () => true,
-    () => false,
-  );
+  // `guards.exists` answers true for any link under a root, so no oracle.
+  const exists = boundFiles.guards.exists(join(dir, rel));
   if (!exists || Date.now() - got.at < LISTING_AGES.missRescanMs) return false;
   return (await rescan(dir, folder)).paths?.has(rel) ?? false;
 }

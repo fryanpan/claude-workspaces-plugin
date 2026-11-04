@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import type { DiffFileStatus } from '@claude-workspaces/core';
+import { containedGit } from './git-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
@@ -54,7 +55,8 @@ function gitSync(repo: string, args: string[]): GitResult {
 const GIT_ASYNC_TIMEOUT_MS = 30_000;
 
 function gitAsync(repo: string, args: string[]): Promise<GitResult> {
-  if (gitBarred(repo)) return Promise.resolve(BARRED);
+  // In a walled lead's repository, git runs contained or not at all.
+  if (gitBarred(repo)) return containedGit(repo, args) ?? Promise.resolve(BARRED);
   return new Promise((resolve) => {
     execFile(
       'git',
