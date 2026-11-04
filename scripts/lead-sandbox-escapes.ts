@@ -1,7 +1,8 @@
 /**
  * `--check`'s rows for the ways a lead could start a process outside the
  * wall (`escapeRules` in `lead-sandbox-lib.ts`), and for the board wall
- * (`lead-sandbox-wall.ts`). Each row drives the thing
+ * (`lead-sandbox-wall.ts`), and for the tools a config opens
+ * (`lead-sandbox-tools.ts`). Each row drives the thing
  * from inside the profile and has a control outside it, so a row fails when
  * its rule is removed, not only when the probe itself breaks.
  *
@@ -13,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
+import { ADB_SERVER_PORT } from './lead-sandbox-tools.ts';
 import { BOARD_SERVER_PORTS, CONNECT_PROBE, SOCKET_CONNECT_PROBE } from './lead-sandbox-wall.ts';
 
 export interface EscapeRow {
@@ -347,4 +349,38 @@ export function boardSocketRows(
       };
     }),
   ];
+}
+
+/**
+ * adb (`lead-sandbox-tools.ts`). A lead with it must run the SDK's `adb
+ * version`, which asks no server. Any other lead's connect to adb's port
+ * must answer `EPERM`. There is no control outside the wall: it would open a
+ * real connection to the adb server, and `EPERM` cannot come from anything
+ * but the sandbox (a port with no listener answers `ECONNREFUSED`).
+ */
+export function adbRow(
+  profile: string,
+  cwd: string,
+  hasAdb: boolean,
+  sdk: string,
+  runtime: string = probeRuntime() ?? process.execPath,
+): EscapeRow {
+  if (!hasAdb) {
+    const inside = connectFrom(runtime, profile, cwd, '127.0.0.1', ADB_SERVER_PORT);
+    return {
+      ok: inside === 'EPERM',
+      says: `adb: port ${ADB_SERVER_PORT} answers ${inside} inside (must be EPERM; the config gives no adb)`,
+    };
+  }
+  const adb = join(sdk, 'adb');
+  const r = spawnSync(SANDBOX_EXEC, ['-f', profile, adb, 'version'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const ran = r.status === 0 && r.stdout.includes('Android Debug Bridge');
+  return {
+    ok: ran,
+    says: `adb: ${adb} version ${ran ? 'runs' : `exits ${r.status}`} inside (must run)`,
+  };
 }

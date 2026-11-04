@@ -186,6 +186,18 @@ Lead's included. The opt-out drops the tmux rules and its `--check` row, and
 nothing else. The Team Lead itself runs outside the wall and keeps starting,
 reading and sending to leads' panes as before (measured below).
 
+**A lead that drives an Android phone** lists `"tools": ["adb"]` in its
+entry. The profile then lets it read and run `~/Android/Sdk/platform-tools`,
+and not write there, and connect to adb's server on port 5037. Every other
+lead is refused that port at every address, because the server on it drives
+every phone plugged into this Mac. Measured 4 November: inside a real lead's
+profile with `adb` listed, `adb version` runs; without it, exec of the same
+binary is refused and a connect to 5037 answers `EPERM`. `--check` runs
+`adb version` inside the profile of a lead with adb, and probes 5037 inside
+every other lead's (it must be `EPERM`). It has no control outside the wall
+for that port, since the control would open a real connection to the adb
+server.
+
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
 

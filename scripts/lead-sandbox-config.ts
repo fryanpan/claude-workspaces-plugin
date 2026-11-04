@@ -5,6 +5,7 @@
  */
 import { boardSocketDirError } from '../packages/server/src/board-sockets.ts';
 import { parseGitProxyPort, parseGithubRepos } from './git-proxy-lead.ts';
+import { type LeadTool, parseTools } from './lead-sandbox-tools.ts';
 
 export interface Lead {
   /** Lowercase words, for the profile's file name. */
@@ -28,6 +29,8 @@ export interface Lead {
   allowKeychain: boolean;
   /** `owner/name` repos it may fetch and push through the GitHub proxy (`git-proxy.ts`). */
   githubRepos: string[];
+  /** Tools it may use inside the wall (`lead-sandbox-tools.ts`). None by default. */
+  tools: LeadTool[];
   /**
    * Deny every board server's port and every board's socket but its own
    * (`lead-sandbox-wall.ts`). Off by default.
@@ -126,7 +129,8 @@ export function parseConfig(
       if (o[key] !== undefined && typeof o[key] !== 'boolean')
         return { ok: false, error: `${name}.${key} must be true or false` };
     const githubRepos = parseGithubRepos(o.githubRepos, name);
-    for (const p of [projects, allow, allowRead, githubRepos])
+    const tools = parseTools(o.tools, name);
+    for (const p of [projects, allow, allowRead, githubRepos, tools])
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
       return { ok: false, error: `${name}.projects must name at least one repo` };
@@ -148,6 +152,7 @@ export function parseConfig(
       allowTmux: o.allowTmux === true,
       allowKeychain: o.allowKeychain === true,
       githubRepos: githubRepos as string[],
+      tools: tools as LeadTool[],
       boardWall: o.boardWall === true,
       ...(typeof boardId === 'string' ? { boardId } : {}),
       ...(claudeAccount ? { claudeAccount } : {}),

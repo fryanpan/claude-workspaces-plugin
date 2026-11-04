@@ -61,6 +61,7 @@ import { dirname, join, resolve } from 'node:path';
 import { projectSlugs } from '../packages/core/src/lead-wall.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
+  adbRow,
   boardSocketRows,
   boardWallRows,
   escapeRows,
@@ -89,6 +90,7 @@ import {
   tokenService,
   turnCheck,
 } from './lead-sandbox-token.ts';
+import { ADB_SDK } from './lead-sandbox-tools.ts';
 import { defaultBoardSocketDir, wallHosts } from './lead-sandbox-wall.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
@@ -394,6 +396,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         ...escapeRows(profile, cwd, machine.uid, lead.allowTmux),
         keychain,
         install,
+        adbRow(profile, cwd, lead.tools.includes('adb'), join(machine.home, ADB_SDK)),
         ...wallRows(lead, config, guard, profile, cwd),
       ]) {
         total++;
