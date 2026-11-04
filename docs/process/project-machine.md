@@ -10,9 +10,9 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and four users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent |
+| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and five users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent, `cwdev` for the project's dev server |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
-| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
+| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, the project's dev server as `cwdev` when one is configured, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
 | `lead.sh` | Keeps one Claude Code session running in a tmux session named `lead`, and starts it again when it ends (below) |
 | `github-known-hosts.txt` | GitHub's SSH host keys, installed as `/etc/ssh/ssh_known_hosts` for the lead's git |
 | `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
@@ -309,6 +309,50 @@ board socket under the image's bun. Attach once after the first deploy and
 look. The session runs in Claude Code's default permission mode, so it asks
 before each tool; nobody answers unless a person attaches or uses Remote
 Control.
+
+## A dev server for review
+
+A collaborator opens the project's dev server through the board, with the
+widget on it, under the board's own sign-in. The dev server runs on the
+machine and binds loopback; nothing reaches back to the Mac.
+
+```bash
+fly secrets set --app cw-<project> \
+  CW_DEV_SERVER_CMD='bunx vite --host 127.0.0.1 --port 5173 --strictPort --base /workspaces/<board>/apps/<app id>/' \
+  CW_FRAME_ORIGIN=https://<project>.<frame domain>
+```
+
+- **Its user.** The entrypoint runs `CW_DEV_SERVER_CMD` with bash as
+  `cwdev`, in `/data/dev/work`, with `PATH` and nothing else: no secret, no
+  board socket, and the server refuses its loopback TCP calls as it refuses
+  every uid but root's and its own. It is started again when it exits, after
+  a wait that doubles from 5s to 60s; it never stops the machine.
+- **Its files.** `/data/dev` is `cwdev:cwdevsrc` mode 2770, and the group
+  `cwdevsrc` holds `cwdev` and `lead`. The lead clones the project's repo
+  into `/data/dev/work` and edits it there; the lead's umask is 007, so its
+  files there are the group's and the dev server reads them. Its own folder,
+  `/data/lead`, stays mode 700.
+- **The address.** The lead attaches it with `attach_app(workspaceId,
+  docId, "http://127.0.0.1:5173", servesPrefix: true)` and gets the prefix
+  back, `/workspaces/<board>/apps/<app id>/`. That prefix is Vite's `base`,
+  and the app's router takes `import.meta.env.BASE_URL` as its basename. With
+  `servesPrefix` the board sends the dev server the whole path, prefix kept,
+  which is what Vite started with `base` answers; without it, Vite answers
+  every path with a redirect or a 404. The command is an operator setting, so
+  the prefix goes into `CW_DEV_SERVER_CMD` after the first attach.
+- **Who opens it.** The owner and the board's members, through the
+  project's hostname and Access. Each opens a host page whose frame is on the
+  frame hostname with a ticket naming them, so the app's own scripts load with
+  the frame cookie; an opaque frame's subresources carry no cookie, and Access
+  answers them with its sign-in page. A member's frame ends when the
+  membership does. A share visitor reaches it as they reach a mock on the
+  board, GET and HEAD only ([security.md](../architecture/security.md), "An
+  attached dev server").
+- **Not yet.** `machine:deploy` sets neither setting, and the frame
+  hostname has to be routed to the machine (`FRAME_DOMAIN` in the board
+  router). Vite's HMR socket is not proxied, so an edit shows on reload.
+  Without `CW_FRAME_ORIGIN` the app's page and widget load and its scripts do
+  not.
 
 ## Pushing a branch from the lead
 

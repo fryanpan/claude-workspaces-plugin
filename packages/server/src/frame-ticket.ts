@@ -36,6 +36,12 @@
  * how that verdict reaches the frame. Without it a ticket grants no voice,
  * and so does every ticket minted before the field existed.
  *
+ * In its place a ticket may carry `m` and an address: the host page was
+ * served to a board MEMBER, not the operator (`frame-host.ts`, "Who may
+ * ask"). The frame hostname asks the membership records about that address
+ * on every request, so the cookie opens nothing once the member is removed.
+ * A member's ticket never carries `v`.
+ *
  * The cookie it is traded for is a second format, `fc1`, with the same
  * fields under a key domain of its own, scoped by its path to the board's own
  * paths. The two are not interchangeable: a cookie value sent as a ticket is
@@ -61,6 +67,9 @@ const TICKET_TAG = 'ft1';
 const COOKIE_TAG = 'fc1';
 /** The optional fifth field: the reader may be handed an app voice token. */
 const VOICE_FIELD = 'v';
+/** The optional member field's tag: `m` and the address, base64url. Never
+ *  beside the voice field, because a member is never handed app voice. */
+const MEMBER_FIELD = 'm';
 
 /** The query parameter the host page writes the ticket into. */
 export const FRAME_TICKET_PARAM = 'cw-ft';
@@ -79,6 +88,13 @@ export interface FrameTicketClaims {
   expiresAt: number;
   /** The host page's reader may be handed an app voice token. */
   appVoice: boolean;
+  /**
+   * The board member the host page was served to, when it was not the
+   * operator: their Access address, folded. The frame hostname asks the
+   * membership records about it on every request, so ending the membership
+   * ends the frame's reads at once rather than when the cookie expires.
+   */
+  member?: string;
 }
 
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64url');
@@ -92,11 +108,23 @@ function frameFormat(tag: string, keyDomain: string): TokenFormat<FrameTicketCla
     keyDomain,
     tags: [tag],
     encode: (c) =>
-      `${tag}.${b64(c.frameHost)}.${b64(c.workspaceId)}.${Math.floor(c.expiresAt / 1000).toString(36)}${c.appVoice ? `.${VOICE_FIELD}` : ''}`,
+      `${tag}.${b64(c.frameHost)}.${b64(c.workspaceId)}.${Math.floor(c.expiresAt / 1000).toString(36)}${
+        c.member !== undefined
+          ? `.${MEMBER_FIELD}${b64(c.member)}`
+          : c.appVoice
+            ? `.${VOICE_FIELD}`
+            : ''
+      }`,
     decode(payload) {
-      const [version, host, ws, exp, voice, ...rest] = payload.split('.');
+      const [version, host, ws, exp, extra, ...rest] = payload.split('.');
       if (version !== tag || rest.length > 0 || !host || !ws || !exp) return null;
-      if (voice !== undefined && voice !== VOICE_FIELD) return null;
+      const voice = extra === VOICE_FIELD;
+      let member: string | undefined;
+      if (extra !== undefined && !voice) {
+        const named = extra.startsWith(MEMBER_FIELD) ? unb64(extra.slice(1)) : null;
+        if (!named) return null;
+        member = named;
+      }
       const frameHost = unb64(host);
       const workspaceId = unb64(ws);
       if (!/^[0-9a-z]{1,12}$/.test(exp) || frameHost === null || workspaceId === null) return null;
@@ -104,7 +132,8 @@ function frameFormat(tag: string, keyDomain: string): TokenFormat<FrameTicketCla
         frameHost,
         workspaceId,
         expiresAt: Number.parseInt(exp, 36) * 1000,
-        appVoice: voice === VOICE_FIELD,
+        appVoice: voice,
+        ...(member !== undefined ? { member } : {}),
       };
     },
     expiresAt: (c) => c.expiresAt,
@@ -129,20 +158,27 @@ export function frameKeys(cookieKey: string): FrameKeys {
 const whole = (ms: number): number => Math.floor(ms / 1000) * 1000;
 
 /** A ticket for the host page to write into a frame's address. `appVoice`
- *  is the host page's own `mayMintAppVoice` verdict for its reader. */
+ *  is the host page's own `mayMintAppVoice` verdict for its reader;
+ *  `member` names the board member it was served to, and a member's ticket
+ *  never carries app voice, whatever was asked. */
 export function mintFrameTicket(
   key: string,
   frameHost: string,
   workspaceId: string,
   now: number = Date.now(),
   appVoice = false,
+  member?: string,
 ): string {
   const expiresAt = whole(now + FRAME_TICKET_TTL_MS);
-  return mintToken(frameTicket, { frameHost, workspaceId, expiresAt, appVoice }, key);
+  const claims: FrameTicketClaims =
+    member !== undefined
+      ? { frameHost, workspaceId, expiresAt, appVoice: false, member }
+      : { frameHost, workspaceId, expiresAt, appVoice };
+  return mintToken(frameTicket, claims, key);
 }
 
 type FrameCheck =
-  | { ok: true; expiresAt: number; appVoice: boolean }
+  | { ok: true; expiresAt: number; appVoice: boolean; member?: string }
   | { ok: false; reason: string };
 
 function check(
@@ -157,7 +193,12 @@ function check(
   if (!v.ok) return { ok: false, reason: v.reason };
   if (v.claims.frameHost !== frameHost) return { ok: false, reason: 'other_frame_host' };
   if (v.claims.workspaceId !== workspaceId) return { ok: false, reason: 'other_board' };
-  return { ok: true, expiresAt: v.claims.expiresAt, appVoice: v.claims.appVoice };
+  return {
+    ok: true,
+    expiresAt: v.claims.expiresAt,
+    appVoice: v.claims.appVoice,
+    ...(v.claims.member !== undefined ? { member: v.claims.member } : {}),
+  };
 }
 
 /**
@@ -207,7 +248,13 @@ export function redeemFrameTicket(
     ok: true,
     cookie: mintToken(
       frameCookie,
-      { frameHost, workspaceId, expiresAt, appVoice: t.appVoice },
+      {
+        frameHost,
+        workspaceId,
+        expiresAt,
+        appVoice: t.appVoice,
+        ...(t.member !== undefined ? { member: t.member } : {}),
+      },
       keys.cookie,
     ),
     maxAgeMs: Math.max(0, expiresAt - now),

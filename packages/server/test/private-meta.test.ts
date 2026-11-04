@@ -25,6 +25,9 @@ import {
 describe('private meta keys', () => {
   it('names exactly the host-describing fields', () => {
     expect([...PRIVATE_META_KEYS].sort()).toEqual([
+      // Not a host fact, but it travels with `sourceUrl`: how the proxy asks
+      // the app's origin for a path, which no reader needs.
+      'appServesPrefix',
       'bindingLostAt',
       'docHome',
       'docKey',

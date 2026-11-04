@@ -33,6 +33,10 @@
 #   CW_LEAD_AGENT_NAME            the lead's agent name; `<project>-lead` unless set
 #   CW_LEAD_REMOTE_CONTROL        `1` starts the lead's session with Remote Control
 #   CW_LEAD_MEMORY_MAX            the lead's cgroup memory ceiling; 1280M unless set
+#   CW_DEV_SERVER_CMD             the project's dev server, run as cwdev in
+#                                 /data/dev/work; none unless set
+#   CW_FRAME_ORIGIN               the project's frame hostname (read by the server), so an app's own
+#                                 scripts load behind Access
 # (each read by entrypoint.sh, which passes the lead only what it uses)
 #
 # Claude calls spend CW_ORG_ANTHROPIC_API_KEY and nothing else: never a Mac

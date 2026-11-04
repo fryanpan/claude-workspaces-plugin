@@ -40,7 +40,8 @@ RUN apt-get update \
 FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14e08a5afcf4a1436cd89
 # Every home is 0700: a user's files are its own. `cwboard` holds the server
 # and the lead and nobody else: the lead's board socket is that group's
-# (entrypoint.sh).
+# (entrypoint.sh). `cwdevsrc` holds the lead and the dev server's user
+# (`cwdev`) and nobody else: the dev server's folder is that group's.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
@@ -48,10 +49,14 @@ RUN apt-get update \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
   && useradd --uid 10003 --create-home --shell /usr/sbin/nologin cwbackup \
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \
+  && useradd --uid 10005 --create-home --shell /usr/sbin/nologin cwdev \
   && groupadd --gid 10010 cwboard \
+  && groupadd --gid 10011 cwdevsrc \
   && usermod -aG cwboard cw \
   && usermod -aG cwboard lead \
-  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead
+  && usermod -aG cwdevsrc cwdev \
+  && usermod -aG cwdevsrc lead \
+  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 # The lead clones and pushes its project's repo over SSH with a deploy key
 # (lead.sh); GitHub's host keys are pinned, not learned on first use.
@@ -63,7 +68,8 @@ ENV NODE_ENV=production \
   CW_DATA_DIR=/data/cw
 # The entrypoint stays root to supervise and starts each child as its own
 # user: the server as `cw`, cloudflared as `cwtunnel`, the backup upload as
-# `cwbackup`, the lead agent as `lead`, so no child's user can read another's
+# `cwbackup`, the lead agent as `lead`, the dev server as `cwdev`, so no
+# child's user can read another's
 # secrets (entrypoint.sh).
 # `-s`: Fly's own init is PID 1, so tini registers as a subreaper to reap.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/infra/project-machine/entrypoint.sh"]

@@ -122,6 +122,43 @@ describe('redeeming a ticket', () => {
     expect(checkFrameTicket(KEY, promoted, HOST, 'w-harbor', NOW).ok).toBe(false);
   });
 
+  it("carries a board member's address into the cookie, and never app voice with it", () => {
+    const t = mintFrameTicket(KEY, HOST, 'w-harbor', NOW, true, 'reviewer@partner.example');
+    expect(checkFrameTicket(KEY, t, HOST, 'w-harbor', NOW)).toEqual({
+      ok: true,
+      expiresAt: NOW + 120_000,
+      appVoice: false,
+      member: 'reviewer@partner.example',
+    });
+    const r = redeemFrameTicket(KEYS, t, HOST, 'w-harbor', NOW);
+    if (!r.ok) throw new Error(r.reason);
+    expect(checkFrameCookie(KEYS.cookie, r.cookie, HOST, 'w-harbor', NOW)).toMatchObject({
+      ok: true,
+      appVoice: false,
+      member: 'reviewer@partner.example',
+    });
+    // The owner's ticket names nobody, so it is checked as it always was.
+    const owner = checkFrameTicket(
+      KEY,
+      mintFrameTicket(KEY, HOST, 'w-harbor', NOW),
+      HOST,
+      'w-harbor',
+      NOW,
+    );
+    expect(owner.ok && 'member' in owner).toBe(false);
+  });
+
+  it('refuses a member address added to, or removed from, a signed ticket', () => {
+    const plain = mintFrameTicket(KEY, HOST, 'w-harbor', NOW);
+    const dot = plain.lastIndexOf('.');
+    const named = `${plain.slice(0, dot)}.m${Buffer.from('a@b.example').toString('base64url')}${plain.slice(dot)}`;
+    expect(checkFrameTicket(KEY, named, HOST, 'w-harbor', NOW).ok).toBe(false);
+    const member = mintFrameTicket(KEY, HOST, 'w-harbor', NOW, false, 'a@b.example');
+    const parts = member.split('.');
+    const stripped = [...parts.slice(0, 4), ...parts.slice(5)].join('.');
+    expect(checkFrameTicket(KEY, stripped, HOST, 'w-harbor', NOW).ok).toBe(false);
+  });
+
   it('refuses an expired ticket', () => {
     expect(redeemFrameTicket(KEYS, ticket, HOST, 'w-harbor', NOW + 121_000)).toEqual({
       ok: false,

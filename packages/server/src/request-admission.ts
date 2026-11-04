@@ -573,7 +573,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         return null;
       }
       // The frame-only hostname (frame-host.ts): two read families, for the
-      // operator alone. Ahead of every other kind, so nothing else this
+      // operator and a board's members. Ahead of every other kind, so nothing else this
       // server answers is reachable on it, whatever the lists say.
       if (frameHost?.isFrameHost(req)) {
         const search = new URL(req.url).searchParams;
@@ -596,7 +596,20 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         if (proof.kind === 'bad_ticket') return frameGateRefusal(404);
         if (proof.kind === 'held') {
           frameAppVoice = proof.appVoice;
-          return null;
+          if (proof.members.length === 0) return null;
+          // A board member's cookie: a visitor on exactly the terms their own
+          // requests on the board get (the proxied-local branch below), asked
+          // again on every request, so ending the membership ends the frame.
+          // The cookies a browser holds here were all set by this server for
+          // that browser, so the first one names its reader.
+          accessEmail = proof.members[0] ?? null;
+          return memberDoor(
+            (wsId) => shareLinkMemberOf(wsId, accessEmail) || collabMemberOf(wsId, accessEmail),
+            (wsId, email) =>
+              shareLinkMemberOf(wsId, email)
+                ? shareMemberKey(wsId, email)
+                : collabMemberKey(wsId, email),
+          );
         }
         if (proof.kind === 'public') return null;
         // Off the tunnel: a caller on this machine that is not a browser. A
