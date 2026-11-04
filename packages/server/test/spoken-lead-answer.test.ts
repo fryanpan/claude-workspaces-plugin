@@ -203,6 +203,84 @@ describe('the lead’s answer through the real server', () => {
     other.ws.close();
   });
 
+  /** A page listening again while the lead works (Bryan, 3 Nov: "when the
+   *  agent starts thinking I can no longer record anything"): its new start
+   *  opens a listener before the answer arrives. */
+  async function listenAgain(ws: WebSocket): Promise<TranscriptionOpenOpts | undefined> {
+    const before = opened.length;
+    ws.send(JSON.stringify({ type: 'start', setup: 1, mode: 'tap', author: PERSON }));
+    await waitFor(() => opened.length > before, { describe: 'listener opened again' });
+    return opened.at(-1);
+  }
+
+  async function answerLead(queueId: string, text: string): Promise<void> {
+    const r = await post(`/workspaces/${boardId}/voice-queue/${queueId}/answer`, {
+      agentId: 'lead',
+      text,
+    });
+    expect(await r.json()).toEqual({ ok: true, delivered: true });
+  }
+
+  it('the lead’s answer is said over a listener that has heard nothing yet', async () => {
+    const { ws, frames } = await connect();
+    await ask(ws, frames, 'go research ferry fares to Saltmarsh');
+    const queueId = queued().at(-1) ?? '';
+    const ears = await listenAgain(ws);
+    const answer = 'The Saltmarsh ferry is eight dollars.';
+    const starts = frames.filter((f) => f.type === 'audio-start').length;
+    await answerLead(queueId, answer);
+    await waitFor(() => said.at(-1) === answer, { describe: 'said over the idle listener' });
+    await waitFor(() => frames.filter((f) => f.type === 'audio-start').length > starts, {
+      describe: 'audio-start for the answer',
+    });
+    // The idle listener was let go for the answer: a word it reports now is
+    // not a new question.
+    const turns = frames.filter((f) => f.type === 'turn-end').length;
+    ears?.onTurn({ turn: 0, text: 'The Saltmarsh ferry is eight dollars.', final: true });
+    expect(frames.filter((f) => f.type === 'heard' && f.text === answer)).toHaveLength(0);
+    expect(frames.filter((f) => f.type === 'turn-end')).toHaveLength(turns);
+    ws.close();
+  });
+
+  it('what is said while the lead works reaches the lead as its own request', async () => {
+    const { ws, frames } = await connect();
+    await ask(ws, frames, 'go research ferry fares to Riverbend');
+    const first = queued().at(-1) ?? '';
+    const ears = await listenAgain(ws);
+    const replies = frames.filter((f) => f.type === 'reply').length;
+    ears?.onTurn({ turn: 0, text: 'also research the Harborlight timetable.', final: true });
+    await waitFor(() => frames.filter((f) => f.type === 'reply').length > replies, {
+      describe: 'the second request routed',
+    });
+    const second = queued().at(-1) ?? '';
+    expect(second).not.toBe('');
+    expect(second).not.toBe(first);
+    expect(queued()).toContain(first);
+    ws.close();
+  });
+
+  it('an answer that arrives mid-sentence is written, not said over the speaker', async () => {
+    const { ws, frames } = await connect();
+    await ask(ws, frames, 'go research ferry fares to Harborlight');
+    const queueId = queued().at(-1) ?? '';
+    const ears = await listenAgain(ws);
+    ears?.onTurn({ turn: 0, text: 'and while you are at it', final: false });
+    await waitFor(
+      () => frames.some((f) => f.type === 'heard' && f.text === 'and while you are at it'),
+      {
+        describe: 'heard the half sentence',
+      },
+    );
+    const saidBefore = said.length;
+    const answer = 'Harborlight fares are ten dollars.';
+    await answerLead(queueId, answer);
+    await waitFor(() => frames.some((f) => f.type === 'reply' && f.spoken === answer), {
+      describe: 'written to the page',
+    });
+    expect(said.length).toBe(saidBefore);
+    ws.close();
+  });
+
   it('a status ask goes to the live lead, and a closed page reports the answer undelivered', async () => {
     const { ws, frames } = await connect();
     const reply = await ask(ws, frames, 'what’s the status');
