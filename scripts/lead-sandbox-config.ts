@@ -65,6 +65,8 @@ export interface Machine {
   uid: number;
   /** The path with every symlink resolved, or the path itself if it is missing. */
   realpath(path: string): string;
+  /** Owner-writable folders of programs outside home (`lead-sandbox-owner-bins.ts`), read only to every lead. */
+  ownerBins?: readonly string[];
 }
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -134,6 +136,11 @@ export function parseConfig(
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
       return { ok: false, error: `${name}.projects must name at least one repo` };
+    if ((tools as LeadTool[]).includes('gh') && (githubRepos as string[]).length === 0)
+      return {
+        ok: false,
+        error: `${name}.tools has gh, which needs githubRepos: the repos gh may reach`,
+      };
     const boardId = o.boardId;
     if (boardId !== undefined && (typeof boardId !== 'string' || !BOARD_ID.test(boardId)))
       return { ok: false, error: `${name}.boardId must be a board id` };

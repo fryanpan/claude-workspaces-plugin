@@ -4,6 +4,9 @@
  * credential. The CLI is `git-proxy.ts`; the protocol reading is
  * `git-proxy-lib.ts`; the fast-forward check is `git-proxy-push.ts`.
  *
+ * `POST /-/worktree` is the one other path: a lead asking for a worktree of
+ * its own project, which `git-proxy-worktree.ts` makes, with the same token.
+ *
  * What it answers, in order: a path that is not one repo's smart-HTTP
  * endpoint, 404; no token or an unknown one, 401; a repo the lead's list
  * does not name, 403; a push that deletes a ref or moves one other than
@@ -15,11 +18,10 @@
  * the few git needs, an upstream refusal is replaced by fixed text, and any
  * other error text and every log line pass through `redact`.
  */
-import { timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { gunzipSync } from 'node:zlib';
-import type { ProxyLead } from './git-proxy-lead.ts';
+import { type ProxyLead, findLead } from './git-proxy-lead.ts';
 import {
   type RepoRequest,
   addNoThin,
@@ -33,6 +35,7 @@ import {
   redact,
 } from './git-proxy-lib.ts';
 import { type Ancestry, githubAncestry, isFastForward, packCommits } from './git-proxy-push.ts';
+import { WORKTREE_PATH, addLeadWorktree, parseWorktreeForm } from './git-proxy-worktree.ts';
 
 export interface GitProxyOptions {
   /** The owner's GitHub credential. Never logged, stored or returned. */
@@ -51,17 +54,6 @@ export interface GitProxyOptions {
 }
 
 const PASS_BACK = ['content-type', 'cache-control', 'expires', 'pragma', 'content-encoding'];
-
-function findLead(leads: Map<string, ProxyLead>, password: string | null): ProxyLead | null {
-  if (password === null) return null;
-  const given = Buffer.from(password, 'utf8');
-  let found: ProxyLead | null = null;
-  for (const [token, lead] of leads) {
-    const want = Buffer.from(token, 'utf8');
-    if (want.length === given.length && timingSafeEqual(want, given)) found = lead;
-  }
-  return found;
-}
 
 function readBody(req: http.IncomingMessage, max: number): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
@@ -215,7 +207,32 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
     return null;
   };
 
+  /** A worktree of one of the lead's projects, made here, outside its wall. */
+  const worktree = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const lead = findLead(opts.leads(), basicPassword(req.headers.authorization));
+    if (!lead) {
+      log('401 worktree: no token, or one no lead holds');
+      return answer(res, 401, 'a lead token is needed', {
+        'www-authenticate': 'Basic realm="claude-workspaces git proxy"',
+      });
+    }
+    const body = await readBody(req, 16 * 1024);
+    const asked = body === null ? 'the request is over 16 KiB' : parseWorktreeForm(String(body));
+    if (typeof asked === 'string') {
+      log(`400 ${lead.name} worktree: ${asked}`);
+      return answer(res, 400, asked);
+    }
+    const made = addLeadWorktree(lead.projects, asked);
+    if (!made.ok) {
+      log(`${made.status} ${lead.name} worktree ${asked.name}: ${made.why}`);
+      return answer(res, made.status, made.why);
+    }
+    log(`200 ${lead.name} worktree ${made.path} on ${made.branch}`);
+    answer(res, 200, made.path);
+  };
+
   const handle = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    if (req.method === 'POST' && req.url === WORKTREE_PATH) return worktree(req, res);
     const r = parseRepoRequest(req.method ?? '', req.url ?? '');
     if (!r) return answer(res, 404, 'not a smart-HTTP git request for one repo');
     const lead = findLead(opts.leads(), basicPassword(req.headers.authorization));

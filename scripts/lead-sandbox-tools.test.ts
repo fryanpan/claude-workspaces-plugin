@@ -9,6 +9,7 @@ import { type Server, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ghProxySocket } from './gh-proxy-lead.ts';
 import { adbRow, bunWrapperRow } from './lead-sandbox-escapes.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
 import {
@@ -118,7 +119,7 @@ describe.skipIf(!HAVE_SANDBOX)('adb under the real sandbox-exec', () => {
       const file = join(root, `${key}.sb`);
       writeFileSync(
         file,
-        `${buildProfile(lead, config, m)}${toolNetworkRules(lead, port).join('\n')}\n`,
+        `${buildProfile(lead, config, m)}${toolNetworkRules(lead, ghProxySocket(m.uid), port).join('\n')}\n`,
       );
       profiles[key] = file;
     }

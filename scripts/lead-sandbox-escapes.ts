@@ -189,7 +189,12 @@ export function keychainRow(profile: string, cwd: string): EscapeRow {
  * writable (the control, asked with `access`, so nothing is made there);
  * inside, `touch` must be refused. A stray file is removed if the wall fails.
  */
-export function installRow(profile: string, cwd: string, dir: string): EscapeRow {
+export function installRow(
+  profile: string,
+  cwd: string,
+  dir: string,
+  what = 'claude install',
+): EscapeRow {
   const probe = join(dir, '.lead-sandbox-check');
   let control = true;
   try {
@@ -205,7 +210,7 @@ export function installRow(profile: string, cwd: string, dir: string): EscapeRow
   rmSync(probe, { force: true });
   return {
     ok: control && !wrote,
-    says: `claude install: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
+    says: `${what}: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
   };
 }
 
@@ -431,4 +436,46 @@ export function uvRow(profile: string, cwd: string, env: Record<string, string>)
     ok: r.status === 0,
     says: `uv: python list ${r.status === 0 ? 'answers' : `exits ${r.status}`} inside (must answer)`,
   };
+}
+
+/**
+ * gh (`gh-proxy-lead.ts`). A lead with it runs `gh api /` inside the
+ * profile, and must get the proxy's own refusal back: that shows gh reached
+ * the socket, and nothing goes to GitHub, since the proxy refuses `/`. Any
+ * other lead's connect to the socket must answer `EPERM`, while one outside
+ * any sandbox connects (the control); with no proxy running there is nothing
+ * to connect to, so that row is not run.
+ */
+export function ghRows(
+  profile: string,
+  cwd: string,
+  hasGh: boolean,
+  socket: string,
+  env: Record<string, string>,
+  runtime: string = probeRuntime() ?? process.execPath,
+): EscapeRow[] {
+  if (hasGh) {
+    const r = spawnSync(SANDBOX_EXEC, ['-f', profile, 'gh', 'api', '/'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      timeout: 20_000,
+    });
+    const reached = `${r.stdout ?? ''}${r.stderr ?? ''}`.includes('gh proxy:');
+    return [
+      {
+        ok: reached,
+        says: `gh: \`gh api /\` ${reached ? 'gets the proxy' : `exits ${r.status} without the proxy`} inside (must get the proxy at ${socket}; is git-proxy.ts running?)`,
+      },
+    ];
+  }
+  const control = socketConnectFrom(runtime, null, cwd, socket);
+  if (control !== 'connected') return [];
+  const inside = socketConnectFrom(runtime, profile, cwd, socket);
+  return [
+    {
+      ok: inside === 'EPERM',
+      says: `gh proxy: ${socket} answers ${control} without the wall (the control), ${inside} inside (must be EPERM; the config gives no gh)`,
+    },
+  ];
 }

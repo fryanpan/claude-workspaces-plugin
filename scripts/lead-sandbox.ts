@@ -59,6 +59,7 @@ import {
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { projectSlugs } from '../packages/core/src/lead-wall.ts';
+import { ghProxySocket } from './gh-proxy-lead.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
   adbRow,
@@ -66,6 +67,7 @@ import {
   boardWallRows,
   bunWrapperRow,
   escapeRows,
+  ghRows,
   installRow,
   keychainRow,
   probeRuntime,
@@ -83,6 +85,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { withOwnerBins } from './lead-sandbox-owner-bins.ts';
 import { type RootsRegistrar, leadRoots, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
@@ -116,15 +119,18 @@ function profilePath(lead: Lead): string {
 }
 
 /**
- * For a lead that names GitHub repos: its proxy token (made once) and git
- * config, and the environment that points its git at them. Nothing for the rest.
+ * For a lead that names GitHub repos: its proxy token (made once), git
+ * config and `cw-worktree`, and the environment that points its git at them,
+ * `cw-worktree`'s folder first on `path`. Nothing for the rest.
  */
-function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, string> {
+function gitProxyFiles(lead: Lead, config: LeadSandboxConfig, path = process.env.PATH) {
   if (lead.githubRepos.length === 0) return {};
   const dir = gitProxyLeadDir(machine.home, lead.name);
-  const url = `http://127.0.0.1:${config.gitProxyPort}`;
-  return gitProxyEnv(ensureGitProxyFiles(lead.name, dir, url).gitconfig);
+  const f = ensureGitProxyFiles(lead.name, dir, `http://127.0.0.1:${config.gitProxyPort}`);
+  return { ...gitProxyEnv(f.gitconfig), PATH: path ? `${f.bin}:${path}` : f.bin };
 }
+
+const ownerMachine = (config: LeadSandboxConfig) => withOwnerBins(machine, config);
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
@@ -132,7 +138,7 @@ function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): s
   // own folders: one the lead made would be the lead's.
   mkdirSync(join(machine.home, '.claude', 'projects'), { recursive: true, mode: 0o700 });
   const path = profilePath(lead);
-  writeFileSync(path, buildProfile(lead, config, machine, guard), { mode: 0o600 });
+  writeFileSync(path, buildProfile(lead, config, ownerMachine(config), guard), { mode: 0o600 });
   return path;
 }
 
@@ -358,8 +364,8 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
     const env = {
       ...withoutBoardBearers(process.env),
-      ...gitProxyFiles(lead, config),
       ...tools,
+      ...gitProxyFiles(lead, config, tools.PATH),
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
     };
@@ -418,7 +424,9 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
           pluginDirs(machine.home, machine.realpath)[0] ?? '',
         ),
         ...(lead.tools.includes('uv') ? [uvRow(profile, cwd, toolsEnv)] : []),
+        ...ghRows(profile, cwd, lead.tools.includes('gh'), ghProxySocket(machine.uid), toolsEnv),
         ...wallRows(lead, config, guard, profile, cwd),
+        ...ownerMachine(config).ownerBins.map((d) => installRow(profile, cwd, d, 'programs')),
       ]) {
         total++;
         if (!row.ok) bad++;
@@ -433,7 +441,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         turn,
         account: account.account,
         read: deps.readToken,
-        env: { ...process.env, ...gitProxyFiles(lead, config), ...toolsEnv },
+        env: { ...process.env, ...toolsEnv, ...gitProxyFiles(lead, config, toolsEnv.PATH) },
       });
       if (!row.ran) {
         notRun++;
@@ -460,7 +468,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       gitProxyFiles(lead, config);
     } else {
       say(`# ${path}`);
-      say(buildProfile(lead, config, machine, guard));
+      say(buildProfile(lead, config, ownerMachine(config), guard));
     }
     const wrapper = ['bun', join(import.meta.dirname, 'lead-sandbox.ts'), '--config', file];
     if (profileDir !== PROFILE_DIR) wrapper.push('--profiles', profileDir);
