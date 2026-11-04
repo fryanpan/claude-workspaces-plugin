@@ -61,6 +61,14 @@ export interface CallToolDeps {
   warnDeprecatedAlias?: (name: string) => void;
 }
 
+/** The creates that watch the doc's real id once the server has made it. */
+export const ATTACH_THEN_WATCH_TOOLS = [
+  'attach_markdown',
+  'create_review_doc',
+  'attach_mockup',
+  'bind_mock',
+] as const;
+
 /**
  * Tools that take a `docId` but should NOT trigger implicit auto-watch.
  *
@@ -70,14 +78,6 @@ export interface CallToolDeps {
  * - `observe_url`: returns the SSE URL but doesn't imply the caller is
  *   actually consuming the stream from this MCP session.
  */
-/** The creates that watch the doc's real id once the server has made it. */
-export const ATTACH_THEN_WATCH_TOOLS = [
-  'attach_markdown',
-  'create_review_doc',
-  'attach_mockup',
-  'bind_mock',
-] as const;
-
 export const NO_AUTO_WATCH_TOOLS = new Set([
   'unwatch_doc',
   'watch_doc',
