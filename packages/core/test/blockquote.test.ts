@@ -83,3 +83,39 @@ describe('blockquote serialization', () => {
     expect((round.get(0) as Y.XmlElement).nodeName).toBe('blockquote');
   });
 });
+
+describe('blockquote parsing', () => {
+  const kids = (md: string): string[] => {
+    const frag = getProseFragment(new Y.Doc());
+    frag.push(parseMarkdownBlocks(md));
+    const bq = frag.get(0) as Y.XmlElement;
+    expect(bq.nodeName).toBe('blockquote');
+    return bq.toArray().map((c) => (c as Y.XmlElement).nodeName);
+  };
+
+  it('reads a quote of paragraphs and a list as those blocks, not one paragraph', () => {
+    // One paragraph carrying the newlines is a shape the editor cannot keep:
+    // a keystroke turns each newline into a space (blockquote-writeback.test.ts).
+    const md = '> Harborlight opens at nine.\n>\n> **Alice will chair**\n>\n> - a\n> - b\n';
+    expect(kids(md)).toEqual(['paragraph', 'paragraph', 'bulletList']);
+    const frag = getProseFragment(new Y.Doc());
+    frag.push(parseMarkdownBlocks(md));
+    expect(serialize(frag)).toBe(md);
+  });
+
+  it('keeps a quote of one run of prose as one paragraph with its line breaks', () => {
+    const md = '> Line one\n> line two\n';
+    expect(kids(md)).toEqual(['paragraph']);
+    const frag = getProseFragment(new Y.Doc());
+    frag.push(parseMarkdownBlocks(md));
+    expect(serialize(frag)).toBe(md);
+  });
+
+  it('does not read a quote opening on a rule as frontmatter', () => {
+    expect(kids('> ---\n>\n> Riverbend\n>\n> ---\n')).toEqual([
+      'horizontalRule',
+      'paragraph',
+      'horizontalRule',
+    ]);
+  });
+});
