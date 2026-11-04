@@ -24,8 +24,10 @@ export interface FocusReading {
 /** One agent edit, read before it, once it reached the page, and after the
  *  reader typed on. */
 export interface EditStep {
-  /** Where the edit landed relative to the commented words. */
-  where: 'above' | 'below' | 'inside';
+  /** Where the edit landed relative to the commented words: `between` is a
+   *  paragraph lengthened between the top of the screen and them, and
+   *  `burst` is four edits fired inside a second while the reader types. */
+  where: 'above' | 'below' | 'inside' | 'between' | 'burst';
   before: FocusReading;
   /** The edit is on the page and the page has settled; nothing typed yet. */
   landed: FocusReading;

@@ -297,6 +297,13 @@ async function scenario(
     }
     typed += text;
   };
+  /** Lengthen a numbered paragraph at its start. */
+  const lengthen = (pier: number, tag: string) =>
+    s.post(`/workspaces/${s.ws}/docs/${docId}/find_and_replace`, {
+      author: AGENT,
+      find: `Pier ${pier}: `,
+      replace: `Pier ${pier}: ${tag} lengthens pier ${pier}. ${FILLER} `,
+    });
   const edits: Array<{ where: EditStep['where']; marker: string; run: () => Promise<unknown> }> = [
     {
       where: 'above',
@@ -327,6 +334,35 @@ async function scenario(
           contextBefore: `The ${kind === 'new' ? PHRASE : TARGET} opens in spring. `,
           replace: `Bob counts the bollards twice, once at each tide. ${FILLER}`,
         }),
+    },
+    {
+      where: 'between',
+      marker: 'Harborlight lengthens pier 13',
+      run: () => lengthen(13, 'Harborlight'),
+    },
+    {
+      where: 'burst',
+      marker: 'Bob lengthens pier 16',
+      // Four edits inside a second, a word typed after each, the way a
+      // builder revising a doc section by section sends them.
+      run: async () => {
+        const t0 = Date.now();
+        for (const [i, send] of [
+          () => lengthen(12, 'Riverbend'),
+          () =>
+            s.post(
+              `/workspaces/${s.ws}/docs/${docId}/threads/${threads[ABOVE]}/insert_blocks_after`,
+              { author: AGENT, markdown: `Saltmarsh pilots rest ashore. ${FILLER}` },
+            ),
+          () => lengthen(13, 'Saltmarsh'),
+          () => lengthen(16, 'Bob'),
+        ].entries()) {
+          await send();
+          await type(i % 2 === 0 ? 'and ' : 'then ');
+        }
+        const ms = Date.now() - t0;
+        if (ms >= 1000) throw new Error(`the burst took ${ms}ms, not under a second`);
+      },
     },
   ];
 

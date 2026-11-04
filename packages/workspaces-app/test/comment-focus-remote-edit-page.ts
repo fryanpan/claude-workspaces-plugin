@@ -25,7 +25,7 @@ export const para = (i: number): string => {
   if (i === 14) return `${FILLER} The ${TARGET} opens in spring. ${INSIDE}`;
   if (i === 15) return `${FILLER} The ${PHRASE} opens in spring. ${INSIDE}`;
   if (i === 24) return `${FILLER} ${BELOW}`;
-  return `${FILLER} ${FILLER}`;
+  return `Pier ${i}: ${FILLER} ${FILLER}`;
 };
 export const PLAN = [
   '# Harborlight ferry plan',
@@ -37,7 +37,9 @@ export const CHUNKS = [
   'Alice signs off the berth ',
   'once the Saltmarsh survey is back ',
   'and the tide table agrees, ',
-  'so Bob checks the Riverbend slipway first.',
+  'so Bob checks the Riverbend slipway first ',
+  'and Alice walks the north quay ',
+  'before the evening ferry.',
 ];
 
 /**
