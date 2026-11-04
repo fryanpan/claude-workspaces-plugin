@@ -161,4 +161,42 @@ describe('a walled lead’s attach and comment receipt', () => {
     expect(r.text).toContain('403');
     expect(h.tasks.listAttachments(harbor).map((a) => a.agentId)).not.toContain(OTHER_AGENT);
   }, 30_000);
+
+  describe('the route itself, with the bearer a walled lead carries', () => {
+    const asLead = (path: string, body: unknown) =>
+      tcp(path, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${h.boardTokens.mintHeld(AGENT_ID, harbor).token}` },
+        body: JSON.stringify(body),
+      });
+
+    it('refuses to clear a row addressed to another agent, and keeps it', async () => {
+      const theirs = h.tasks.queueComment(harbor, row(OTHER_AGENT)) as string;
+      const refused = await asLead(`/workspaces/${harbor}/comment-queue/${theirs}/ack`, {});
+      expect(refused.status, await refused.clone().text()).toBe(403);
+      expect(h.tasks.listQueuedComments(harbor).map((q) => q.id)).toContain(theirs);
+      // Positive control: the same bearer clears a row addressed to its own agent.
+      const mine = h.tasks.queueComment(harbor, row(AGENT_ID)) as string;
+      const cleared = await asLead(`/workspaces/${harbor}/comment-queue/${mine}/ack`, {});
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
+      expect(((await cleared.json()) as { cleared: boolean }).cleared).toBe(true);
+      expect(h.tasks.listQueuedComments(harbor).map((q) => q.id)).not.toContain(mine);
+    });
+
+    it('attaches only a claude-code-local session, and records no endpoint', async () => {
+      for (const runtime of ['webhook', 'managed-agent']) {
+        const r = await asLead(`/workspaces/${harbor}/agents`, { agentId: AGENT_ID, runtime });
+        expect(r.status, `${runtime}: ${await r.clone().text()}`).toBe(403);
+      }
+      const ok = await asLead(`/workspaces/${harbor}/agents`, {
+        agentId: AGENT_ID,
+        runtime: 'claude-code-local',
+        endpoint: 'http://127.0.0.1:9/hook',
+      });
+      expect(ok.status, await ok.clone().text()).toBe(200);
+      const seat = h.tasks.listAttachments(harbor).find((a) => a.agentId === AGENT_ID);
+      expect(seat?.runtime).toBe('claude-code-local');
+      expect(seat?.endpoint).toBeUndefined();
+    });
+  });
 });

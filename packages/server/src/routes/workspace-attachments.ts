@@ -192,6 +192,10 @@ export async function handleWorkspaceAttachments(
     if (!isAttachmentRuntime(runtime)) {
       return j(400, { error: 'runtime must be claude-code-local | managed-agent | webhook' });
     }
+    // A walled lead is a local session: it has no reason to register a
+    // webhook or managed runtime on its seat, nor a host endpoint.
+    if (visitor && runtime !== 'claude-code-local')
+      return j(403, { error: 'a board token attaches only a claude-code-local session' });
     const res = taskStore.attachAgent(workspaceId, {
       agentId: agentId.trim(),
       // The display name the session runs under. Absent from older
@@ -203,7 +207,7 @@ export async function handleWorkspaceAttachments(
       capabilities: Array.isArray(body?.capabilities)
         ? (body.capabilities as unknown[]).filter((c): c is string => typeof c === 'string')
         : undefined,
-      endpoint: typeof body?.endpoint === 'string' ? body.endpoint : undefined,
+      endpoint: !visitor && typeof body?.endpoint === 'string' ? body.endpoint : undefined,
       // The bundle this session is running. Absent from every peer
       // older than the release that added it — which is the signal,
       // not a gap to paper over with a default.
