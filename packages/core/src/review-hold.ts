@@ -194,11 +194,16 @@ export interface HoldWords {
 /**
  * The judge's hold, with everything it could not have known removed.
  *
- * Two rules, and each one closes a defect that was seen live:
+ * Three rules, and each one closes a defect that was seen live:
  *
  *  - a quote that is not in the item is dropped. A judge that paraphrases
  *    while claiming to quote hands the filer words to search for that are not
  *    there, which is the same dead end as naming the wrong field.
+ *  - a quote that falls in `boilerplate` is dropped too. Those are sentences
+ *    the BOARD wrote around the filer's words — an owner check's fixed
+ *    template — and no revision the filer makes can change them, so naming
+ *    one sends the filer to fix a sentence they do not own (2026-11-04: two
+ *    of one item's six holds named the template).
  *  - a reason carrying a digit the item does not carry is replaced whole.
  *    That is the invented specific, arriving in the diagnosis rather than in
  *    a draft.
@@ -206,15 +211,42 @@ export interface HoldWords {
  * Nothing here is a judgement about whether the hold is RIGHT. It is a bound
  * on what the hold may contain, which is the only thing this side can check.
  */
-export function boundHoldWords(words: HoldWords, itemText: string): HoldWords {
-  const flatItem = flat(itemText);
+export function boundHoldWords(
+  words: HoldWords,
+  itemText: string,
+  boilerplate: readonly string[] = [],
+): HoldWords {
   const quote = words.quote === undefined ? undefined : flat(words.quote);
   const keptQuote =
-    quote !== undefined && quote !== '' && flatItem.includes(quote) ? quote : undefined;
+    quote !== undefined && quotesOwnWords(quote, itemText, boilerplate) ? quote : undefined;
   const reason = hasNumberNotIn(words.reason, itemText)
     ? REVIEW_HOLD_UNUSABLE_REASON
     : words.reason;
   return keptQuote === undefined ? { reason } : { reason, quote: keptQuote };
+}
+
+/**
+ * Is `quote` words the FILER wrote — present in the item, and not inside any
+ * sentence the board generated around them?
+ *
+ * The boilerplate is cut out of the item before the search rather than
+ * checked against the quote, so a quote straddling a generated sentence and
+ * the filer's own words is not found either: half of it is still a sentence
+ * the filer cannot edit.
+ */
+export function quotesOwnWords(
+  quote: string,
+  itemText: string,
+  boilerplate: readonly string[] = [],
+): boolean {
+  const q = flat(quote);
+  if (q === '') return false;
+  let own = flat(itemText);
+  for (const b of boilerplate) {
+    const fb = flat(b);
+    if (fb !== '') own = own.split(fb).join(' \u0000 ');
+  }
+  return own.includes(q);
 }
 
 /** How many holds, as a sentence says it. Words to three, because a hold

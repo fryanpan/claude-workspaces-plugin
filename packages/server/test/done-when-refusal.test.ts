@@ -42,6 +42,10 @@ const SECOND_HOLD =
   'An agent can check this itself: the agent blocked by the classifier can work around it by having a separate agent call GET /v1/models with each key and compare the organisation fields in the response headers—this is API output, a fact not a judgment.';
 
 const BUILDER = { id: 'agent-millwright', name: 'Millwright', kind: 'agent' };
+/** The line's own words. A hold whose reason the gate had to replace is only
+ *  issued while it names a sentence the filer wrote, so the verdicts below
+ *  that are replaced quote this one. */
+const LINE_TEXT = 'the two runs bill to different organisations';
 const DENIED = 'Reading the two key slots was refused by this machine’s permission classifier.';
 const LOG = 'https://example.com/run-log';
 
@@ -103,7 +107,7 @@ async function lineTask(): Promise<{ taskId: string; lineId: string }> {
   const r = await post(`/workspaces/${ws}/tasks`, {
     author: BUILDER,
     title: 'Bryan can tell which key slot paid for a run',
-    doneWhen: [{ text: 'the two runs bill to different organisations' }],
+    doneWhen: [{ text: LINE_TEXT }],
   });
   const task = ((await r.json()) as { task: Task }).task;
   return { taskId: task.id, lineId: (await detail(task.id)).doneWhen?.[0]?.id as string };
@@ -179,7 +183,7 @@ describe('a check the agent was refused permission to run', () => {
       [FIRST_HOLD, 'the run log'],
       [SECOND_HOLD, 'the run log, and what I was unable to read'],
     ] as const) {
-      verdict = { ok: false, reason: hold };
+      verdict = { ok: false, reason: hold, quote: LINE_TEXT };
       const round = await report(taskId, lineId, [{ text: words, url: LOG }]);
       expect(round.body.held).toHaveLength(1);
     }
@@ -209,6 +213,7 @@ describe('a check the agent was refused permission to run', () => {
       verdict = {
         ok: false,
         reason: 'The run took 45 minutes, so the line understates what waits.',
+        quote: LINE_TEXT,
       };
       const round = await report(taskId, lineId, [{ text: words, url: LOG }]);
       expect(round.body.held).toHaveLength(1);
@@ -271,7 +276,7 @@ describe('a line nobody was refused', () => {
   it('is still held by the same reason, so the gate is narrowed and not disarmed', async () => {
     await fresh();
     const { taskId, lineId } = await lineTask();
-    verdict = { ok: false, reason: FIRST_HOLD };
+    verdict = { ok: false, reason: FIRST_HOLD, quote: LINE_TEXT };
     const { body } = await report(taskId, lineId, [{ text: 'the run log', url: LOG }]);
     expect(body.held).toHaveLength(1);
     // NOT the verbatim sentence: the hold-bounding rule owns the stored
@@ -287,7 +292,7 @@ describe('a line nobody was refused', () => {
   it('is HELD, never refused, under the self-check opening, and the third report admits it', async () => {
     await fresh();
     const { taskId, lineId } = await lineTask();
-    verdict = { ok: false, reason: FIRST_HOLD };
+    verdict = { ok: false, reason: FIRST_HOLD, quote: LINE_TEXT };
     // Two holds, each reworded so it is judged again.
     for (const words of ['the run log', 'the run log again']) {
       const { body } = await report(taskId, lineId, [{ text: words, url: LOG }]);
@@ -332,7 +337,7 @@ describe('a line nobody was refused', () => {
   it('goes to the owner on the one-hour release when the judge named a rule', async () => {
     await fresh(0);
     const { taskId, lineId } = await lineTask();
-    verdict = { ok: false, reason: FIRST_HOLD, refuse: 'self-check' };
+    verdict = { ok: false, reason: FIRST_HOLD, refuse: 'self-check', quote: LINE_TEXT };
     const { body } = await report(taskId, lineId, [{ text: 'the run log', url: LOG }]);
     expect(body.held).toHaveLength(1);
     await waitFor(
