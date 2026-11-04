@@ -24,7 +24,11 @@ import { isValidAgentId } from '../agent-watches.ts';
 import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
-import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
+import {
+  type WorkspaceRouteRequest,
+  type WorkspaceRoutesContext,
+  leadProvedAs,
+} from './workspace-routes-context.ts';
 
 export async function handleWorkspaceLeadChat(
   ctx: WorkspaceRoutesContext,
@@ -33,8 +37,10 @@ export async function handleWorkspaceLeadChat(
   const { req, pathname, scope, visitor, authorFor, requireOwner } = rq;
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting\/say$/.test(pathname)) {
     if (req.method !== 'POST') return undefined;
-    if (visitor) return ctx.j(403, { error: 'not a member route' });
-    return leadSays(ctx, req, scope.workspaceId);
+    // A board's own lead is admitted for its board (`middleware/lead-scope.ts`).
+    if (visitor && rq.leadBoard !== scope.workspaceId)
+      return ctx.j(403, { error: 'not a member route' });
+    return leadSays(ctx, req, scope.workspaceId, rq);
   }
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting$/.test(pathname)) {
     if (req.method !== 'POST') return undefined;
@@ -270,14 +276,18 @@ async function leadSays(
   ctx: WorkspaceRoutesContext,
   req: Request,
   workspaceId: string,
+  rq: WorkspaceRouteRequest,
 ): Promise<Response> {
   const body = await ctx.safeJson(req);
   const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
   // Always the token: the route is new, and every caller (`say_in_meeting`)
   // sends one, so there is no tokenless client to carry through the rollout.
-  const allowed = ctx.authorizeAgent(req, agentId, { requireToken: true });
-  if (!allowed.ok) return ctx.j(allowed.status, allowed.body);
+  // A board token held for the lead names its agent, which is the proof.
+  if (!leadProvedAs(rq, workspaceId, agentId)) {
+    const allowed = ctx.authorizeAgent(req, agentId, { requireToken: true });
+    if (!allowed.ok) return ctx.j(allowed.status, allowed.body);
+  }
   if (ctx.taskStore.getWorkspace(workspaceId)?.leadAgentId !== agentId) {
     return ctx.j(403, { error: 'not-lead', hint: 'Only the board’s lead speaks in its meeting.' });
   }

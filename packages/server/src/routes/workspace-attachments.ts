@@ -36,7 +36,11 @@ import { sentryWatchPlan } from '../sentry-projects.ts';
 import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX, LEAD_WRITTEN_MAX } from '../spoken-reply/lead-answer.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
-import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
+import {
+  type WorkspaceRouteRequest,
+  type WorkspaceRoutesContext,
+  leadProvedAs,
+} from './workspace-routes-context.ts';
 
 /** How far back the presence strip's unfiled-ask number looks. A week, so a
  *  quiet day does not read as a fixed problem and a bad Tuesday does not
@@ -341,8 +345,10 @@ export async function handleWorkspaceAttachments(
   // "gone because someone else drained it".
   const wsVoiceAckMatch = pathname.match(/^\/workspaces\/([^/]+)\/voice-queue\/([^/]+)\/ack$/);
   if (wsVoiceAckMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsVoiceAckMatch[1] ?? '');
+    // A board's own lead is admitted for its board (`middleware/lead-scope.ts`).
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsVoiceAckMatch[2] ?? '');
     const cleared = taskStore.ackVoiceRequest(workspaceId, entryId);
     // The receiving session has it: a lead-chat message it carried now
@@ -357,16 +363,19 @@ export async function handleWorkspaceAttachments(
     /^\/workspaces\/([^/]+)\/voice-queue\/([^/]+)\/answer$/,
   );
   if (wsVoiceAnswerMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsVoiceAnswerMatch[1] ?? '');
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsVoiceAnswerMatch[2] ?? '');
     const body = await safeJson(req);
     // Only an agent on this board answers aloud on it, proved the way its
     // own feed is: on this machine, with its token.
     const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
     if (!isValidAgentId(agentId)) return j(400, { error: 'agentId required' });
-    const allowed = authorizeAgent(req, agentId);
-    if (!allowed.ok) return j(allowed.status, allowed.body);
+    if (!leadProvedAs(rq, workspaceId, agentId)) {
+      const allowed = authorizeAgent(req, agentId);
+      if (!allowed.ok) return j(allowed.status, allowed.body);
+    }
     if (!taskStore.listAttachments(workspaceId).some((a) => a.agentId === agentId)) {
       return j(403, { error: 'not attached to this board' });
     }

@@ -29,6 +29,11 @@
  *   `…/mirror` — the plugin's Stop, PermissionDenied, UserPromptSubmit,
  *   MessageDisplay and PostToolBatch hooks, and `post_status`'s untargeted
  *   form;
+ * - `POST /workspaces/<board>/voice-queue/<id>/answer` and `…/ack` —
+ *   `answer_voice`, and the MCP child's receipt for a queued spoken request;
+ *   the routes check the agent is on the board (`routes/workspace-attachments.ts`);
+ * - `POST /workspaces/<board>/lead-chat/meeting/say` — `say_in_meeting`; the
+ *   route checks the agent is the board's lead;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
  *   of that board;
  * - `POST /workspaces/<board>/git/push` and `GET …/git/pushes/<id>` — a push
@@ -56,6 +61,8 @@ const FOLDER_BIND_PATH = '/workspaces';
 const BOARD_PATH = /^\/workspaces\/([^/]+)\/(.+)$/;
 /** What a lead's hooks post about its own session. */
 const AGENT_VERBS: readonly string[] = ['notes', 'prompts', 'mirror'];
+/** What a lead does with a spoken request queued for it. */
+const VOICE_VERBS: readonly string[] = ['answer', 'ack'];
 
 export function leadScopeAllows(
   pathname: string,
@@ -79,6 +86,8 @@ export function leadScopeAllows(
   if (collection === 'tasks' && verb === 'notes')
     return onBoard(workspacesOf, `task:${id}`, boardId);
   if (collection === 'agents') return AGENT_VERBS.includes(verb ?? '') && id !== '';
+  if (collection === 'voice-queue') return VOICE_VERBS.includes(verb ?? '') && id !== '';
+  if (collection === 'lead-chat') return id === 'meeting' && verb === 'say';
   return false;
 }
 

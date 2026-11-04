@@ -274,6 +274,15 @@ export interface WorkspaceRouteRequest {
   /** The board this request is that board's lead on (the admission gate's
    *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
   leadBoard?: string | null;
+  /** The agent a board token or board socket proved (the admission gate's
+   *  `boardAgent`), or null/absent. */
+  boardAgent?: { agentId: string; boardId: string } | null;
+}
+
+/** Whether `rq` is the board's own lead and proved it is `agentId`: a board
+ *  token names its agent, so no agent token is asked of it as well. */
+export function leadProvedAs(rq: WorkspaceRouteRequest, boardId: string, agentId: string): boolean {
+  return rq.leadBoard === boardId && rq.boardAgent?.agentId === agentId;
 }
 
 /**
