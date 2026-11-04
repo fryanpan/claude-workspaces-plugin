@@ -25,6 +25,20 @@ describe('the pause a page sets', () => {
   });
 });
 
+describe('where the reader moved while voice listens', () => {
+  it('carries the context through unparsed, for the server to check', () => {
+    const context = { surface: 'board', link: '/workspaces/w-harbor/home?item=decision%3At-1' };
+    expect(parseSpokenClientMessage(JSON.stringify({ type: 'context', context }))).toEqual({
+      type: 'context',
+      context,
+    });
+  });
+
+  it('refuses a context frame with no context', () => {
+    expect(parseSpokenClientMessage(JSON.stringify({ type: 'context' }))).toBeNull();
+  });
+});
+
 describe('undoing a spoken review decision', () => {
   it("posts to the task review item's undo, with no body", () => {
     expect(
