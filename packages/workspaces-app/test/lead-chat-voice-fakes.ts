@@ -42,7 +42,38 @@ export class FakeSocket implements SpokenSocket {
   }
 }
 
+/** Which tab hears the reader, set by the test: hears until told otherwise. */
+export function fakeTab() {
+  const tab = { hears: true, joined: false, onChange: null as ((h: boolean) => void) | null };
+  const make: NonNullable<LeadVoiceOpts['listeningTab']> = (o) => {
+    tab.onChange = o.onChange;
+    return {
+      join: () => {
+        tab.joined = true;
+        tab.hears = true;
+      },
+      leave: () => {
+        tab.joined = false;
+      },
+      hears: () => tab.hears,
+      destroy: () => {
+        tab.joined = false;
+      },
+    };
+  };
+  return {
+    tab,
+    make,
+    /** Another tab took the reader, or this one got them back. */
+    set: (hears: boolean) => {
+      tab.hears = hears;
+      tab.onChange?.(hears);
+    },
+  };
+}
+
 export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
+  const tabs = fakeTab();
   const sockets: FakeSocket[] = [];
   const mic = { starts: 0, stops: 0, onFrame: null as SpokenCaptureOpts['onFrame'] | null };
   const seams: Partial<LeadVoiceOpts> = {
@@ -62,9 +93,11 @@ export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
     storage: null,
     // A stop is reported to the page; here it would surface as an uncaught error.
     report: () => {},
+    listeningTab: tabs.make,
   };
   return {
     seams,
+    tabs,
     sockets,
     mic,
     socket: (): FakeSocket => {

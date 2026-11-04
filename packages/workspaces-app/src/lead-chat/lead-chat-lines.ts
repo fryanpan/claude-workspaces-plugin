@@ -5,6 +5,9 @@
  */
 import type { LeadChatViewModel } from './lead-chat-view.ts';
 
+/** Said while listening is on here and another tab hears the reader. */
+export const PAUSED = 'Paused. Listening in your other tab.';
+
 /** The person's lines and the lead's, newest last, as the bar shows them. */
 export function barLines(
   m: LeadChatViewModel,
@@ -15,7 +18,9 @@ export function barLines(
       who: x.role === 'agent' ? x.author.name : 'You',
       text: x.text.replace(/\s+/g, ' '),
     }));
-  if (m.listening && (m.voice ?? 'listening') === 'listening') {
+  if (m.listening && m.paused && (m.voice ?? 'listening') === 'listening') {
+    lines.push({ who: 'You', text: PAUSED, dim: true });
+  } else if (m.listening && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: m.heard || 'Listening…', dim: !m.heard });
   } else if (lines.length === 0) {
     lines.push({ who: m.lead?.name ?? 'Your agents', text: 'Tap to open the chat', dim: true });
@@ -29,6 +34,7 @@ export function statusLine(m: LeadChatViewModel): string {
   const lead = m.lead?.name ?? 'Your lead';
   if (m.listening && m.voice === 'working') return `${lead} is working on it`;
   if (m.listening && m.voice === 'speaking') return `${lead} is answering`;
+  if (m.listening && m.paused) return PAUSED;
   if (m.listening) return m.heard ? `Heard: ${m.heard}` : 'Listening…';
   const last = m.messages.at(-1);
   if (last?.role === 'person' && last.state === 'sent') {
