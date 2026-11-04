@@ -224,12 +224,12 @@ export class LeadChat {
     }
   }
 
-  /** The answer to a spoken turn, already said on the socket that asked. */
-  voiceReply(workspaceId: string, queueId: string, text: string): void {
+  /** A spoken turn's answer, kept whether or not a socket waits; `written`: nobody heard it. */
+  voiceReply(workspaceId: string, queueId: string, text: string, by?: string, written?: boolean) {
     const w = this.spoken.get(queueId);
-    if (!w || w.workspaceId !== workspaceId) return;
+    if (!w || w.workspaceId !== workspaceId || (by !== undefined && w.agentId !== by)) return;
     this.spoken.delete(queueId);
-    this.reply(w, text);
+    this.reply(w, text, written);
   }
 
   /** The board's lead is the session `agentName` names: by the id an agent
@@ -381,7 +381,7 @@ export class LeadChat {
     return true;
   }
 
-  private reply(w: Waiting, text: string): void {
+  private reply(w: Waiting, text: string, written?: boolean): void {
     const list = this.messages(w.workspaceId);
     const asked = list.find((m) => m.id === w.messageId);
     if (asked) this.record(w.workspaceId, { ...asked, state: 'answered' });
@@ -392,6 +392,7 @@ export class LeadChat {
       text,
       ts: this.now(),
       replyTo: w.messageId,
+      ...(written ? { written: true as const } : {}),
     });
   }
 
