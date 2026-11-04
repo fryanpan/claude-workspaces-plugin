@@ -248,8 +248,10 @@ class BoundFileReader {
     const hit = this.fresh.get(path);
     if (!hit) return undefined;
     this.fresh.delete(path);
-    // Under a walled lead's project the hydrate reads again through the
-    // guard: the folders on the way may have changed since these bytes.
+    // Under a walled lead's project a prewarm's bytes are not trusted: the
+    // folders on the way may have changed since. The hydrate parks and reads
+    // again through the guard, and that read hands its bytes straight to the
+    // bind (`bindAfterRead` in doc-store.ts) rather than through this map.
     if (this.guards.covers(path)) return undefined;
     return Date.now() - hit.at > BOUND_READ_FRESH_MS ? undefined : hit.result;
   }

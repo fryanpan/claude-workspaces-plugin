@@ -24,6 +24,7 @@ import { boardSocketPath } from '../src/board-sockets.ts';
 import { boardDocEditAllows } from '../src/middleware/board-doc-edit-scope.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { treeFsMode } from '../src/tree-fs.ts';
+import { waitFor, waitForFile } from './wait-for.ts';
 
 const CONTAINED = treeFsMode() === 'contained';
 const AGENT = 'Harborlight Lead';
@@ -282,6 +283,40 @@ describe('A. a walled lead works its own board’s docs over its socket', () => 
       expect(outside.isError).toBe(true);
       expect(outside.text).toContain('403');
       expect(outside.text).not.toContain('Not the lead’s.');
+    },
+    30_000,
+  );
+
+  // On prod a walled lead's get_doc on its own bound doc parked it for good:
+  // the doc was out of memory, the hydrate read the file off the main thread,
+  // and the bind that followed refused the read's bytes for a guarded path.
+  it.skipIf(treeFsMode() === 'refuse')(
+    'a doc hydrated by get_doc binds again, and its edit reaches the file',
+    async () => {
+      const path = join(inside, 'reload-plan.md');
+      const docId = await makeDoc(harborlight, 'reload-plan', inside);
+      await waitFor(() => h.docStore.boundPathOf(docId) !== undefined, {
+        describe: 'the new doc to bind',
+      });
+      expect(h.docStore.evictDoc(docId)).toBe(true);
+
+      const call = await session(harborlight);
+      const got = await call('get_doc', { workspaceId: harborlight, docId });
+      expect(got.isError, got.text).toBe(false);
+      await waitFor(() => h.docStore.boundPathOf(docId) !== undefined, {
+        describe: 'the hydrated doc to bind again by itself',
+      });
+      expect(h.docStore.getDocStatus(docId)?.sourceParked).toBeUndefined();
+
+      const edit = await call('find_and_replace', {
+        workspaceId: harborlight,
+        docId,
+        find: 'First line',
+        replace: 'Rebound line',
+      });
+      expect(edit.isError, edit.text).toBe(false);
+      expect(edit.text).not.toContain('still being read');
+      await waitForFile(path, (text) => text.includes('Rebound line of the body.'));
     },
     30_000,
   );
