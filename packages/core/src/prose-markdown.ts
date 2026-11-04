@@ -793,9 +793,23 @@ export function parseMarkdownSource(
       }
       const bq = new Y.XmlElement('blockquote');
       // A quote that is exactly one display equation holds it as a block, so
-      // it is drawn as one; any other quote stays the one paragraph it was.
+      // it is drawn as one. A quote of one run of prose stays one paragraph,
+      // its line breaks kept. A quote holding more than that — a blank `>`
+      // line, a list, a heading — is parsed as the blocks it holds. It used
+      // to be one paragraph whose text carried the newlines, and the editor
+      // cannot keep a newline in a paragraph: a keystroke re-reads the text
+      // from the page and turns each into a space, so the next flush wrote
+      // the whole quote as one `> ` line.
       const quotedMath = mathFlowEnd(quoted, 0) === quoted.length;
-      bq.insert(0, [quotedMath ? mkMathDisplay(quoted) : mkParagraph(quoted.join('\n'))]);
+      const oneParagraph = quoted.every((l) => l.trim() !== '' && !isBlockStart(l));
+      const inner = quotedMath
+        ? [mkMathDisplay(quoted)]
+        : oneParagraph
+          ? [mkParagraph(quoted.join('\n'))]
+          : // The leading blank line keeps a quote opening on `---` from
+            // being read as the file's frontmatter, which only line 0 can be.
+            parseMarkdownSource(`\n${quoted.join('\n')}`, opts).blocks;
+      bq.insert(0, inner.length > 0 ? inner : [mkParagraph('')]);
       out.push(bq);
       continue;
     }
