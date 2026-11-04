@@ -271,6 +271,8 @@ function rulesFor(
     rules.push({ access: 'nowrite', filter: { subpath: p }, why: 'git proxy token', last: true });
   }
   rules.push(...claudeCodeRules(m));
+  for (const p of m.ownerBins ?? [])
+    rules.push({ access: 'nowrite', filter: { subpath: p }, why: 'owner programs', last: true });
   // The config and the profiles: a lead that could edit them would widen
   // its own next launch. Denied last, so no allow at any depth reopens them,
   // and prod's root with them.

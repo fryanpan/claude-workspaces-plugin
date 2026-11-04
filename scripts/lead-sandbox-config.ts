@@ -65,6 +65,8 @@ export interface Machine {
   uid: number;
   /** The path with every symlink resolved, or the path itself if it is missing. */
   realpath(path: string): string;
+  /** Owner-writable folders of programs outside home (`lead-sandbox-owner-bins.ts`), read only to every lead. */
+  ownerBins?: readonly string[];
 }
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

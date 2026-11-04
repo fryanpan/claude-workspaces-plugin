@@ -85,6 +85,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { withOwnerBins } from './lead-sandbox-owner-bins.ts';
 import { type RootsRegistrar, leadRoots, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
@@ -129,13 +130,15 @@ function gitProxyFiles(lead: Lead, config: LeadSandboxConfig, path = process.env
   return { ...gitProxyEnv(f.gitconfig), PATH: path ? `${f.bin}:${path}` : f.bin };
 }
 
+const ownerMachine = (config: LeadSandboxConfig) => withOwnerBins(machine, config);
+
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   // Made outside the wall, which denies the lead every write to it but its
   // own folders: one the lead made would be the lead's.
   mkdirSync(join(machine.home, '.claude', 'projects'), { recursive: true, mode: 0o700 });
   const path = profilePath(lead);
-  writeFileSync(path, buildProfile(lead, config, machine, guard), { mode: 0o600 });
+  writeFileSync(path, buildProfile(lead, config, ownerMachine(config), guard), { mode: 0o600 });
   return path;
 }
 
@@ -423,6 +426,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         ...(lead.tools.includes('uv') ? [uvRow(profile, cwd, toolsEnv)] : []),
         ...ghRows(profile, cwd, lead.tools.includes('gh'), ghProxySocket(machine.uid), toolsEnv),
         ...wallRows(lead, config, guard, profile, cwd),
+        ...ownerMachine(config).ownerBins.map((d) => installRow(profile, cwd, d, 'programs')),
       ]) {
         total++;
         if (!row.ok) bad++;
@@ -464,7 +468,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       gitProxyFiles(lead, config);
     } else {
       say(`# ${path}`);
-      say(buildProfile(lead, config, machine, guard));
+      say(buildProfile(lead, config, ownerMachine(config), guard));
     }
     const wrapper = ['bun', join(import.meta.dirname, 'lead-sandbox.ts'), '--config', file];
     if (profileDir !== PROFILE_DIR) wrapper.push('--profiles', profileDir);

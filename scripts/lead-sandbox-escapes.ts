@@ -189,7 +189,12 @@ export function keychainRow(profile: string, cwd: string): EscapeRow {
  * writable (the control, asked with `access`, so nothing is made there);
  * inside, `touch` must be refused. A stray file is removed if the wall fails.
  */
-export function installRow(profile: string, cwd: string, dir: string): EscapeRow {
+export function installRow(
+  profile: string,
+  cwd: string,
+  dir: string,
+  what = 'claude install',
+): EscapeRow {
   const probe = join(dir, '.lead-sandbox-check');
   let control = true;
   try {
@@ -205,7 +210,7 @@ export function installRow(profile: string, cwd: string, dir: string): EscapeRow
   rmSync(probe, { force: true });
   return {
     ok: control && !wrote,
-    says: `claude install: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
+    says: `${what}: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
   };
 }
 
