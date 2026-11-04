@@ -55,6 +55,21 @@ describe('a hooks folder inside a walled project', () => {
     expect(hooksPathRefusal([repo('alice', outside)], readHooks, realpath)).toBeNull();
   });
 
+  it('runs its git with xcrun_nocache, whatever env it was given', () => {
+    // A `git` that prints the variable as the hooks path, first on PATH.
+    const bin = join(root, 'fake-bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "nocache-$xcrun_nocache"\n', { mode: 0o755 });
+    const { xcrun_nocache: _drop, ...given } = env;
+    expect(gitHooksPath(root, { ...given, PATH: `${bin}:/usr/bin:/bin` })).toBe('nocache-1');
+  });
+
+  it('sets xcrun_nocache for the whole launcher before anything runs', () => {
+    Reflect.deleteProperty(process.env, 'xcrun_nocache');
+    main([], { platform: 'linux', say: () => {} } as unknown as Parameters<typeof main>[1]);
+    expect(process.env.xcrun_nocache).toBe('1');
+  });
+
   it('stops the launch before the lead starts', () => {
     const p = repo('bob', '.githooks');
     const config = join(root, 'config.json');

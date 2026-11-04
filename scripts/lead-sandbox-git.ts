@@ -10,11 +10,16 @@
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 
-/** `core.hooksPath` as git in `project` reads it, every config level, or null. */
+/**
+ * `core.hooksPath` as git in `project` reads it, every config level, or
+ * null. This git runs as the owner outside the wall, so `xcrun_nocache` is
+ * set: `/usr/bin/git` would otherwise pick its binary from `xcrun_db`, a
+ * cache the lead can write (lead-tree-containment.md, "The git binary").
+ */
 export function gitHooksPath(project: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const r = spawnSync('git', ['-C', project, 'config', '--get', '--type=path', 'core.hooksPath'], {
     encoding: 'utf8',
-    env,
+    env: { ...env, xcrun_nocache: '1' },
     timeout: 5_000,
   });
   const value = r.status === 0 ? r.stdout.trim() : '';
