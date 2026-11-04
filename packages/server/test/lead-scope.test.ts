@@ -53,6 +53,22 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${RIVERBEND}/tasks/t-river/notes`,
   ],
   ['POST', `/workspaces/${HARBORLIGHT}/git/push`, `/workspaces/${RIVERBEND}/git/push`],
+  // The voice verbs: `answer_voice`, the queued request's receipt, `say_in_meeting`.
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/answer`,
+    `/workspaces/${RIVERBEND}/voice-queue/lc-1/answer`,
+  ],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/ack`,
+    `/workspaces/${RIVERBEND}/voice-queue/lc-1/ack`,
+  ],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/lead-chat/meeting/say`,
+    `/workspaces/${RIVERBEND}/lead-chat/meeting/say`,
+  ],
   // A diff review; `routes/lead-diff-scope.ts` holds the repo to the board's roots.
   ['POST', `/workspaces/${HARBORLIGHT}/attachments`, `/workspaces/${RIVERBEND}/attachments`],
   [
@@ -93,6 +109,8 @@ describe('leadScopeAllows', () => {
       ['GET', `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/notes`],
       ['GET', `/workspaces/${HARBORLIGHT}/attachments`],
       ['POST', `/workspaces/${HARBORLIGHT}/mounts`],
+      ['GET', `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/answer`],
+      ['POST', `/workspaces/${HARBORLIGHT}/lead-chat/meeting`],
       ['POST', '/api/board-tokens'],
       ['GET', `/workspaces/${HARBORLIGHT}/git/push`],
       ['POST', `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`],
