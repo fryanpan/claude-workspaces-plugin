@@ -275,7 +275,7 @@ export function resolveServerConfig(opts: {
   const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
   /** `CW_FEEDBACK_BOARD=<board id or name>`: see ServerOptions.feedbackBoard. */
   const feedbackBoard = env.CW_FEEDBACK_BOARD?.trim() || undefined;
-  /** `CW_LOOPBACK_ALLOWED_UIDS=0,10001`: see ServerOptions.loopbackAllowedUids. */
+  /** `CW_LOOPBACK_ALLOWED_UIDS=10001`: see ServerOptions.loopbackAllowedUids. */
   const loopbackAllowedUids = parseUidList(
     'CW_LOOPBACK_ALLOWED_UIDS',
     env.CW_LOOPBACK_ALLOWED_UIDS,

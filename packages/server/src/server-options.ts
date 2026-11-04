@@ -184,9 +184,9 @@ export interface ServerOptions {
   /**
    * Loopback TCP is admitted only from these uids, and every other uid is
    * refused before anything else reads the request
-   * (`middleware/loopback-uid-door.ts`). A project machine names root and the
-   * server's own uid (`CW_LOOPBACK_ALLOWED_UIDS`), so its lead, backup upload
-   * and any builder are refused and the lead reaches its board only through
+   * (`middleware/loopback-uid-door.ts`). A project machine names the server's
+   * own uid alone (`CW_LOOPBACK_ALLOWED_UIDS`), so root, its lead, backup
+   * upload and any builder are refused and the lead reaches its board only through
    * that board's socket. Empty, the door is off.
    */
   loopbackAllowedUids?: number[];

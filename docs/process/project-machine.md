@@ -252,12 +252,13 @@ What the lead can reach:
   `cwbackup` reach none. A request
   on that socket is held to that board (`middleware/board-socket-door.ts`),
   which is how a walled lead on the Mac reaches its board too. The server
-  admits loopback TCP only from root and itself (`CW_LOOPBACK_ALLOWED_UIDS`),
+  admits loopback TCP only from itself (`CW_LOOPBACK_ALLOWED_UIDS`),
   and from cloudflared only for requests the edge stamped with `cf-ray`
   (`CW_LOOPBACK_EDGE_UIDS`, `middleware/loopback-uid-door.ts`). Every other
-  uid, the lead's and `cwbackup`'s among them, is refused, so the lead is
+  uid, root's, the lead's and `cwbackup`'s among them, is refused, so the lead is
   never the owner that a loopback caller otherwise is, and neither is a
-  user added later.
+  user added later. A `fly ssh console` command that calls the REST runs as
+  `cw` (`asCw`, `infra/project-machine/mac-ops.ts`).
 - **Its repo.** `lead.sh` writes the deploy key to `~/.ssh/github_deploy_key`
   (mode 600) and points git's `core.sshCommand` at it. GitHub's host keys are
   pinned in the image (`/etc/ssh/ssh_known_hosts`), and an unknown host key
