@@ -8,7 +8,6 @@
  * every thread away, so these two do the work in place instead, and that is
  * the rule the whole file is written to.
  */
-import { existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { attachmentIdOf } from '@claude-workspaces/core';
 import { bindDiff } from './bind-diff.ts';
@@ -28,6 +27,7 @@ import {
   findOverlongGroupDetails,
 } from './diff-groups.ts';
 import { scanFolder } from './fs-scan.ts';
+import { boundFiles } from './slow-fs.ts';
 
 export interface WorkspaceMemberRef {
   docId: string;
@@ -102,7 +102,7 @@ export async function refreshWorkspace(
   if (members.length === 0) return noRoot;
   const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
   if (!root) return noRoot;
-  if (!existsSync(root)) return { ok: false, error: 'root-missing', detail: root };
+  if (!boundFiles.guards.exists(root)) return { ok: false, error: 'root-missing', detail: root };
 
   const diffMember = members.find((m) => m.type === 'diff');
   if (diffMember?.diffTarget) return { ok: false, error: 'pinned' };
@@ -201,7 +201,7 @@ export async function refreshWorkspace(
     const gone =
       meta.type === 'diff' && liveRelPaths
         ? !liveRelPaths.has(meta.relPath)
-        : staleDiffPaths.has(meta.relPath) || !existsSync(join(root, meta.relPath));
+        : staleDiffPaths.has(meta.relPath) || !boundFiles.guards.exists(join(root, meta.relPath));
     if (gone) {
       setStaleFlag(host, meta.docId, true);
       stale.push({ ...ref, openThreads: host.listThreads(meta.docId, { status: 'open' }).length });

@@ -9,6 +9,7 @@ import {
   resolveInside,
   sniffImage,
   storeImageBeside,
+  storeImageInTree,
 } from '../doc-image-store.ts';
 import { fileSandboxHeaders } from '../mockup-frame.ts';
 import { boundFiles } from '../slow-fs.ts';
@@ -74,19 +75,27 @@ export async function handleDocAssetsRoute(
   if (!md) return j(404, { error: 'this doc is not bound to a file' });
   // Under a walled lead's root, judged as every bound read is: the folders
   // on the way may have been swapped for links since the doc was bound.
+  const asked = join(dirname(md), ...segments);
   let lands: ((real: string) => boolean) | null;
   try {
-    lands = boundFiles.guards.landsFor(join(dirname(md), ...segments));
+    lands = boundFiles.guards.landsFor(asked);
   } catch {
     return j(404, { error: 'no image at that path beside the doc' });
   }
-  const abs = resolveInside(dirname(md), segments);
+  // Under a root, tree-fs reads the name asked for and follows no link, so
+  // no `realpath` is taken of a path the lead can change.
+  const contained = boundFiles.guards.containedOf(asked) !== null;
+  const abs = contained ? asked : resolveInside(dirname(md), segments);
   if (!abs) return j(404, { error: 'no image at that path beside the doc' });
   // Asked again of where a link LANDS: `chart.png -> notes.txt` is a text file.
   if (IMAGE_TYPES[extname(abs).toLowerCase()] !== type) {
     return j(415, { error: 'only images are served beside a doc' });
   }
-  const guarded = lands ? await guardedImage(abs, lands) : null;
+  const guarded = contained
+    ? await containedImage(abs)
+    : lands
+      ? await guardedImage(abs, lands)
+      : null;
   if (guarded === 'refused') return j(404, { error: 'no image at that path beside the doc' });
   if (guarded === 'too-large') return j(413, { error: 'this image is too large to serve' });
   const st = guarded ? guarded.st : statSync(abs, { bigint: true });
@@ -120,7 +129,19 @@ export async function handleDocAssetsRoute(
 /** The most a guarded image answer reads into memory. */
 export const GUARDED_IMAGE_MAX = 16 * 1024 * 1024;
 
-/** An image under a walled lead's root, read from the descriptor that was
+/** An image under a walled lead's root, read through `tree-fs.ts`. */
+async function containedImage(
+  abs: string,
+): Promise<Awaited<ReturnType<typeof readBytesChecked>> | 'refused'> {
+  try {
+    return (await boundFiles.guards.readBytes(abs, GUARDED_IMAGE_MAX)) ?? 'refused';
+  } catch (err) {
+    if (err instanceof GuardRefused || (err as NodeJS.ErrnoException).code) return 'refused';
+    throw err;
+  }
+}
+
+/** An image a plain-path guard covers, read from the descriptor that was
  *  judged rather than reopened by path. */
 async function guardedImage(
   abs: string,
@@ -151,7 +172,9 @@ async function uploadImage(ctx: DocRoutesContext, rq: DocResourceRouteRequest): 
   } catch {
     return j(409, { error: 'cannot store beside this doc: outside' });
   }
-  const out = storeImageBeside(md, bytes, ext, imageStem(name), undefined, lands);
+  const out = boundFiles.guards.containedOf(md)
+    ? storeImageInTree(md, bytes, ext, imageStem(name), boundFiles.guards)
+    : storeImageBeside(md, bytes, ext, imageStem(name), undefined, lands);
   if (!out.ok) return j(409, { error: `cannot store beside this doc: ${out.reason}` });
   return j(201, { src: out.src });
 }

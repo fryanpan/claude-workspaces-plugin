@@ -21,7 +21,7 @@
  * hang on; a file the doc overwrites is copied to `backupDir` first.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import { replaceFile } from '@claude-workspaces/core/safe-file';
@@ -30,6 +30,7 @@ import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { statStampSync } from '../file-stamp.ts';
+import { boundFiles } from '../slow-fs.ts';
 
 const MSG_SYNC = 0;
 
@@ -81,7 +82,9 @@ function readFile(path: string): { text: string; stamp: string } | null {
   const stamp = stampOf(path);
   if (stamp === null) return null;
   try {
-    return { text: readFileSync(path, 'utf8'), stamp };
+    // Through the guards: under a walled lead's root (`sync-bin.ts` installs
+    // them) the read follows no link.
+    return { text: boundFiles.guards.readSync(path), stamp };
   } catch {
     return null;
   }
@@ -133,7 +136,10 @@ export function createDocMirror(opts: DocMirrorOptions) {
     }
     const bytes = prose.serializeKeepingSource(fragment, lastDisk ?? undefined);
     try {
-      writeFileSync(opts.path, bytes);
+      // A covered path is written through tree-fs; any other in place, as before.
+      if (boundFiles.guards.covers(opts.path))
+        boundFiles.guards.writeSync(opts.path, bytes, 'export');
+      else writeFileSync(opts.path, bytes);
     } catch (err) {
       opts.log(`${opts.docId}: could not write ${opts.path}: ${(err as Error).message}`);
       return;
@@ -196,7 +202,7 @@ export function createDocMirror(opts: DocMirrorOptions) {
       // A file that holds only what this mirror last wrote needs no copy.
       if (opts.mark?.disk !== sha(f.text)) backup(f.text);
     }
-    if (f === null && !existsSync(opts.path)) lastStamp = null;
+    if (f === null && !boundFiles.guards.exists(opts.path)) lastStamp = null;
     lastMd = null;
     writeFile();
   }

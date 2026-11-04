@@ -11,6 +11,7 @@ import type { BigIntStats, Stats } from 'node:fs';
 import {
   constants,
   closeSync,
+  existsSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -25,6 +26,7 @@ import {
   UTF8,
   nearestRealpathSync,
   openCheckedSync,
+  readBytesChecked,
   readChecked,
   readCheckedSync,
   readRangeChecked,
@@ -34,9 +36,11 @@ import {
 } from './bound-path-checked.ts';
 import { stampOf } from './file-stamp.ts';
 import { GuardRefused } from './guard-refused.ts';
+import { createTree, existsTree } from './tree-fs-create.ts';
 import {
   type Contained,
   mkdirTreeSync,
+  openFileSync,
   readTree,
   readTreeRangeSync,
   readTreeSync,
@@ -47,6 +51,10 @@ import {
   writeTreeSync,
 } from './tree-fs.ts';
 
+// Each of these refuses a path a walled lead's root holds itself
+// (`refuseRootPath` in bound-path-checked.ts), so a caller that reaches one
+// without `PathGuards` still cannot follow a link under a root
+// (docs/architecture/lead-tree-containment.md, "The helpers fail closed").
 export {
   GUARDED_TEXT_MAX,
   isEnoent,
@@ -121,6 +129,65 @@ export class PathGuards {
       if (c) return c;
     }
     return null;
+  }
+
+  /** Whether a registered root holds `path`, on every platform: the helpers
+   *  below `PathGuards` refuse such a path themselves (`bound-root-view.ts`). */
+  heldByRoot(path: string): boolean {
+    for (const guard of this.set) if (guard.containedOf?.(path)) return true;
+    return false;
+  }
+
+  /**
+   * Whether something is at `path`. Under a root, a link anywhere on the way
+   * answers true whatever it points at (`existsTree`), so the answer never
+   * says whether a file outside exists, and a root that is not the folder
+   * registered answers true too, for the read after it to refuse. Elsewhere,
+   * `existsSync`.
+   */
+  exists(path: string): boolean {
+    const c = this.containedOf(path);
+    if (!c) return existsSync(path);
+    try {
+      return existsTree(c);
+    } catch (err) {
+      if (err instanceof GuardRefused) return true;
+      throw err;
+    }
+  }
+
+  /**
+   * At most `max` bytes of a covered file and its stat, judged as `read`
+   * judges one; null for a path no guard covers, which the caller reads
+   * itself. Rejects with `GuardRefused` as the reads here do.
+   */
+  async readBytes(
+    path: string,
+    max: number,
+  ): Promise<{ bytes: Uint8Array<ArrayBuffer>; st: BigIntStats } | 'too-large' | null> {
+    if (!this.covers(path)) return null;
+    if (!this.allows(path)) throw new GuardRefused(path);
+    const c = this.tree(path);
+    if (c) return readTree(c, max);
+    return readBytesChecked(path, max, (real) => this.landsAll(path, real));
+  }
+
+  /** `statSync` with `{ bigint: true }`, judged as `statSync` judges one. */
+  statBigSync(path: string): BigIntStats {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    if (!this.covers(path)) return statSync(path, { bigint: true });
+    const c = this.tree(path);
+    if (c) {
+      const { fd, st } = openFileSync(c);
+      closeSync(fd);
+      return st;
+    }
+    const fd = openCheckedSync(path, (real) => this.landsAll(path, real));
+    try {
+      return fstatSync(fd, { bigint: true });
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /** `path` as a root holds it, for a caller that lists or reads it
@@ -280,6 +347,19 @@ export class PathGuards {
       }
       if (!lands(realpathSync(folder))) throw new GuardRefused(dir);
     }
+  }
+
+  /**
+   * A new file at `path` holding `bytes`, made only under a root: through
+   * `createTree`, so a link at the name or on the way makes nothing. Throws
+   * `EEXIST` when the name is taken, and `GuardRefused` for a path no root
+   * holds, which has no contained create.
+   */
+  createNewSync(path: string, bytes: Uint8Array): void {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    const c = this.containedOf(path);
+    if (!c) throw new GuardRefused(path, 'no root holds it');
+    createTree(c, bytes);
   }
 
   /** `write` on the calling thread, through `lane`'s own temp file. */

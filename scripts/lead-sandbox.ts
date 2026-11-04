@@ -368,6 +368,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       ...gitProxyFiles(lead, config, tools.PATH),
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
+      xcrun_nocache: '1', // Xcode shims skip their per-user cache; see lead-sandbox-owner-bins.ts
     };
     return deps.spawn(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,

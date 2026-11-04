@@ -100,17 +100,38 @@ export function findOwnerBinFolders(
   });
 }
 
+/**
+ * The exception to "the owner runs nothing from them": every Xcode shim
+ * (`/usr/bin/git`, `python3`, `make`) picks its real binary from
+ * `xcrun_db` in the owner's temporary folder, so a lead that rewrote it
+ * would choose what owner processes run (lead-tree-containment.md review
+ * round 2, H1). The file, and its folder so the folder cannot be renamed
+ * away and replaced. Both are literals: the lead still writes inside it.
+ */
+export function xcrunCachePaths(userTemp: string | null): string[] {
+  if (!userTemp || !isAbsolute(userTemp)) return [];
+  const dir = userTemp.replace(/\/+$/, '');
+  return [`${dir}/xcrun_db`, dir];
+}
+
+/** `DARWIN_USER_TEMP_DIR`, or null where there is none. */
+export function userTempDir(): string | null {
+  if (process.platform !== 'darwin') return null;
+  const r = spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() || null : null;
+}
+
 const found = new WeakMap<object, string[]>();
 
-/** `machine` with `ownerBins` for `config`, found once per config object. */
+/** `machine` with `ownerBins` for `config`, found once per config object, and the Xcode cache. */
 export function withOwnerBins<M extends { home: string; realpath(p: string): string }>(
   machine: M,
   config: Parameters<typeof findOwnerBinFolders>[0],
-): M & { ownerBins: readonly string[] } {
+): M & { ownerBins: readonly string[]; xcrunCache: readonly string[] } {
   let bins = found.get(config);
   if (!bins) {
     bins = findOwnerBinFolders(config, machine.home, machine.realpath);
     found.set(config, bins);
   }
-  return { ...machine, ownerBins: bins };
+  return { ...machine, ownerBins: bins, xcrunCache: xcrunCachePaths(userTempDir()) };
 }

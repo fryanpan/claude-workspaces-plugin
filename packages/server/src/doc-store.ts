@@ -1666,7 +1666,7 @@ export class DocStore {
     // to ask the filesystem — `existsSync` on a path whose provider has
     // stopped answering parks the loop exactly as a read does. The `existsSync`
     // survives only on the boot branch, where `preread` is undefined.
-    if (preread ? !preread.exists : !existsSync(src)) {
+    if (preread ? !preread.exists : !boundFiles.guards.exists(src)) {
       // Not a park: the file answered, and it is not there. A doc bound to a
       // missing file comes back unbound at boot with no reason recorded, and
       // one reached through a deferred read must end the same way — or the

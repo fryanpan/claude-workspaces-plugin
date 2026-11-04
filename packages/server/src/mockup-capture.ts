@@ -84,6 +84,7 @@ export function checkMockupSource(
   path: string,
   guards: PathGuards = boundFiles.guards,
 ): MockupSourceCheck {
+  if (guards.heldByRoot(path)) return checkInRoot(path, guards);
   if (!existsSync(path)) return { ok: false, reason: 'no such file' };
   // A folder a walled lead writes: its scratch, or a link out of its root.
   if (!guards.landsAllowedSync(path)) return { ok: false, reason: 'refused path' };
@@ -102,6 +103,23 @@ export function checkMockupSource(
       ok: false,
       reason: `unreadable (${(err as NodeJS.ErrnoException).code ?? 'no read permission'})`,
     };
+  }
+  return { ok: true };
+}
+
+/**
+ * `checkMockupSource` under a walled lead's root: one stat through tree-fs,
+ * which opens the file, so it is also the read check. A link anywhere on the
+ * way is "refused path" whatever it points at, so the reason never says
+ * whether a file outside exists.
+ */
+function checkInRoot(path: string, guards: PathGuards): MockupSourceCheck {
+  try {
+    if (!guards.statSync(path).isFile()) return { ok: false, reason: 'not a regular file' };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { ok: false, reason: 'no such file' };
+    return { ok: false, reason: 'refused path' };
   }
   return { ok: true };
 }

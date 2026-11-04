@@ -1,9 +1,9 @@
-import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import { parseFileEmbedDirective } from '@claude-workspaces/core/board-embeds';
 import * as Y from 'yjs';
 import { isGitListed } from './doc-file-listing.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * Which part of a doc's folder `routes/doc-files.ts` may serve: the folder of
@@ -81,7 +81,8 @@ export function candidatePages(pages: FramedPage[], segments: string[]): FramedP
 
 /** Whether the page is a file on disk that git lists. */
 async function pagePresent(dir: string, p: FramedPage): Promise<boolean> {
-  const isFile = await stat(join(dir, ...p.page)).then(
+  // Under a lead's root `guards.stat` reads through tree-fs, so a link is refused.
+  const isFile = await boundFiles.guards.stat(join(dir, ...p.page)).then(
     (st) => st.isFile(),
     () => false,
   );

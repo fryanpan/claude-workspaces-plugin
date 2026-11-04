@@ -37,6 +37,7 @@
  */
 import type { BigIntStats } from 'node:fs';
 import { GuardRefused, PathGuards, isEnoent, redactBoundPath } from './bound-path-guard.ts';
+import { setRootView } from './bound-root-view.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import { stampOf } from './file-stamp.ts';
 
@@ -491,3 +492,5 @@ class BoundFileReader {
 
 /** The one reader. Shared so the quarantine is shared. */
 export const boundFiles = new BoundFileReader();
+// The helpers below the guards refuse a root's path themselves (`bound-root-view.ts`).
+setRootView(boundFiles.guards);

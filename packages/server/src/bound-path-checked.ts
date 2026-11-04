@@ -26,8 +26,22 @@ import {
 } from 'node:fs';
 import { type FileHandle, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { rootView } from './bound-root-view.ts';
 import { stampOf } from './file-stamp.ts';
 import { GuardRefused } from './guard-refused.ts';
+import { treeFsMode } from './tree-fs.ts';
+
+/**
+ * These checks follow a link that lands inside a root, so they refuse a path
+ * a walled lead's root holds themselves rather than trusting the caller
+ * (docs/architecture/lead-tree-containment.md, "The helpers fail closed"):
+ * unguarded (`lands` null) on every platform, and guarded on macOS, where
+ * `PathGuards` sends such a path to `tree-fs.ts` and never here.
+ */
+function refuseRootPath(path: string, guarded: boolean): void {
+  if (guarded && treeFsMode() === 'legacy') return;
+  if (rootView()?.heldByRoot(path)) throw new GuardRefused(path, 'a root holds it');
+}
 
 /** Where `path` really is, or, when it is not there yet, where its nearest
  *  existing folder is. Null when nothing on the way resolves. */
@@ -70,6 +84,7 @@ export const GUARDED_TEXT_MAX = 16 * 1024 * 1024;
  * link swapped in after the resolve fails the open instead of being followed.
  */
 async function openChecked(path: string, lands: (real: string) => boolean): Promise<FileHandle> {
+  refuseRootPath(path, true);
   const fh = await open(await realpath(path), CHECKED_OPEN);
   try {
     const st = await fh.stat();
@@ -89,6 +104,7 @@ export async function readChecked(
   path: string,
   lands: ((real: string) => boolean) | null,
 ): Promise<{ text: string } & ReturnType<typeof stampOf>> {
+  refuseRootPath(path, lands !== null);
   if (!lands) {
     const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path, { bigint: true })]);
     return { text, ...stampOf(st) };
@@ -183,6 +199,7 @@ export async function writeChecked(
   text: string,
   lands: ((real: string) => boolean) | null,
 ): Promise<BigIntStats> {
+  refuseRootPath(path, lands !== null);
   let target = path;
   try {
     target = await realpath(path);
@@ -221,6 +238,7 @@ function tempBeside(target: string, lane: 'pool-write' | 'flush' | 'export'): st
 
 /** `openChecked` on the calling thread, for the synchronous reads. */
 export function openCheckedSync(path: string, lands: (real: string) => boolean): number {
+  refuseRootPath(path, true);
   const fd = openSync(realpathSync(path), CHECKED_OPEN);
   try {
     const st = fstatSync(fd);
@@ -237,6 +255,7 @@ export function openCheckedSync(path: string, lands: (real: string) => boolean):
 /** `readChecked` on the calling thread: the attach without a preread, the
  *  reparse and the synchronous reconcile. Unguarded, a plain read. */
 export function readCheckedSync(path: string, lands: ((real: string) => boolean) | null): string {
+  refuseRootPath(path, lands !== null);
   if (!lands) return readFileSync(path, 'utf8');
   const fd = openCheckedSync(path, lands);
   try {
@@ -255,6 +274,7 @@ export function writeCheckedSync(
   lane: 'flush' | 'export',
   lands: ((real: string) => boolean) | null,
 ): void {
+  refuseRootPath(path, lands !== null);
   let target = path;
   try {
     target = realpathSync(path);

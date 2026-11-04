@@ -151,6 +151,8 @@ export async function readDocFile(
   } catch {
     return { ok: false, status: 404 };
   }
+  const contained = await readContained(dir, folder, segments, type);
+  if (contained) return contained;
   const abs = resolveInside(root, segments.slice(folder.length));
   if (!abs) return { ok: false, status: 404 };
   const rel = realPathUnder(root, abs);
@@ -179,6 +181,34 @@ export async function readDocFile(
     const got = await readBytesChecked(abs, DOC_FILE_MAX, landsInside(realRoot, type, guard));
     if (got === 'too-large') return { ok: false, status: 413 };
     return { ok: true, bytes: got.bytes, st: got.st, type, abs };
+  } catch (err) {
+    if (err instanceof GuardRefused || (err as NodeJS.ErrnoException).code) {
+      return { ok: false, status: 404 };
+    }
+    throw err;
+  }
+}
+
+/**
+ * `readDocFile` under a walled lead's root: the file is read through
+ * `tree-fs.ts`, which follows no link on the way, so the name asked for is
+ * the file read and only it must be git-listed. Null for a path no root
+ * holds, which takes the checks above.
+ */
+async function readContained(
+  dir: string,
+  folder: string[],
+  segments: string[],
+  type: string,
+): Promise<DocFileRead | null> {
+  const path = join(dir, ...segments);
+  if (!boundFiles.guards.containedOf(path)) return null;
+  if (!(await isGitListed(dir, folder, segments.join('/')))) return { ok: false, status: 404 };
+  try {
+    const got = await boundFiles.guards.readBytes(path, DOC_FILE_MAX);
+    if (got === null) return { ok: false, status: 404 };
+    if (got === 'too-large') return { ok: false, status: 413 };
+    return { ok: true, bytes: got.bytes, st: got.st, type, abs: path };
   } catch (err) {
     if (err instanceof GuardRefused || (err as NodeJS.ErrnoException).code) {
       return { ok: false, status: 404 };

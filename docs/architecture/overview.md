@@ -248,12 +248,19 @@ reader (`slow-fs.ts`) uses under those roots. On macOS a path under a root
 goes through `tree-fs.ts`, which walks from the root's pinned descriptor one
 name at a time and never follows a link below it (its system calls are bound
 in `tree-fs-native.ts`); `fs-scan-contained.ts` is the folder listing done
-the same way. Every other covered path, and every path off macOS, takes the
-plain-path checks in `bound-path-checked.ts`, judged by where the open file
-really is. `guard-refused.ts` is the one error all of them throw. `git-hardening.ts` decides where the server runs no
+the same way, and `tree-fs-create.ts` holds the two calls added after it
+(is a name there, make a new file). Every other covered path, and every path
+off macOS, takes the plain-path checks in `bound-path-checked.ts`, judged by
+where the open file really is; those helpers refuse a root's file themselves,
+through `bound-root-view.ts`, a leaf module the guard registers itself in so
+the helpers can ask without importing it. `guard-refused.ts` is the one error
+all of them throw. `git-hardening.ts` decides where the server runs no
 git at all (a repository holding such a project) and the options every
 other git read passes, so a repository's settings cannot make that read
-run a program. `server-options.ts` holds
+run a program. `git-contained.ts` is the one exception: an asynchronous
+read inside a walled lead's own repository runs under a deny-default
+`sandbox-exec` profile the server writes from the root
+([lead-tree-containment](lead-tree-containment.md)). `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. `review-hold-message.ts` joins those two at the top level: it is the

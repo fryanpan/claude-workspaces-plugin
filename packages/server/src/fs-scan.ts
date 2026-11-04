@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
 import { containedRoot, includedStat, readdirContained } from './fs-scan-contained.ts';
+import { containedGit, isSafeGitName } from './git-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
@@ -244,6 +245,7 @@ const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
 function admitGitListed(root: string, rels: string[], skipped: SkippedFile[] | null): string[] {
   const out: string[] = [];
   for (const rel of rels) {
+    if (!isSafeGitName(rel)) continue;
     const name = rel.split('/').pop() ?? rel;
     const reason = isCredentialShapedName(name)
       ? 'credential-name'
@@ -268,17 +270,20 @@ export async function scanFolderPathsAsync(
   include: readonly string[] = [],
 ): Promise<string[]> {
   const barred = gitBarred(root);
-  const rels = barred
-    ? null
-    : await new Promise<string[] | null>((resolve) => {
-        // A hung git is killed (`gitOptions`), so the cache's in-flight mark clears.
-        execFile(
-          'git',
-          hardenedGitArgs(['-C', root, 'ls-files', '-z', ...LISTING_ARGS]),
-          gitOptions(),
-          (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
-        );
-      });
+  const contained = barred ? containedGit(root, ['ls-files', '-z', ...LISTING_ARGS]) : null;
+  const rels = contained
+    ? await contained.then((r) => (r.ok ? r.stdout.split('\0').filter((rel) => rel !== '') : null))
+    : barred
+      ? null
+      : await new Promise<string[] | null>((resolve) => {
+          // A hung git is killed (`gitOptions`), so the cache's in-flight mark clears.
+          execFile(
+            'git',
+            hardenedGitArgs(['-C', root, 'ls-files', '-z', ...LISTING_ARGS]),
+            gitOptions(),
+            (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
+          );
+        });
   let files: string[];
   if (rels !== null) files = admitGitListed(root, rels, null);
   else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {

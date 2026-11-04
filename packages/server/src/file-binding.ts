@@ -822,7 +822,7 @@ export class FileBindings {
     ) {
       return { ok: false, error: 'read-failed' };
     }
-    const fileExists = () => (pre ? pre.exists : existsSync(abs));
+    const fileExists = () => (pre ? pre.exists : boundFiles.guards.exists(abs));
     const readFile = () => (pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs));
     let seeded = false;
     let seedText: string | undefined;
@@ -1091,7 +1091,7 @@ export class FileBindings {
     ) {
       return { ok: false, error: 'read-failed' };
     }
-    const fileExists = () => (pre ? pre.exists : existsSync(abs));
+    const fileExists = () => (pre ? pre.exists : boundFiles.guards.exists(abs));
     let text = '';
     if (fileExists()) {
       try {
@@ -1288,7 +1288,7 @@ export class FileBindings {
       const binding = this.bindings.get(doc.docId);
       // Already bound to an EXISTING copy of the home: nothing to move. A
       // missing file still retargets — the retarget is what exports it.
-      if (binding?.path === placement.absPath && existsSync(placement.absPath)) {
+      if (binding?.path === placement.absPath && boundFiles.guards.exists(placement.absPath)) {
         this.p.schedulePersist(doc);
       } else {
         this.retargetHomeBinding(doc, placement.absPath);
@@ -1359,7 +1359,7 @@ export class FileBindings {
       const guards = boundFiles.guards;
       guards.mkdirSync(dirname(absPath));
       if (guards.covers(absPath)) {
-        if (existsSync(absPath)) return { ok: false, error: 'target-exists' };
+        if (boundFiles.guards.exists(absPath)) return { ok: false, error: 'target-exists' };
         guards.writeSync(absPath, md, 'export');
       } else writeFileSync(absPath, md, { flag: 'wx' });
     } catch (err) {
@@ -1403,7 +1403,7 @@ export class FileBindings {
     // (`opts.liveWins`), by mtime otherwise.
     // A preread already answered "is it there" off the main thread; asking
     // the filesystem again here would put the blocking call straight back.
-    const absent = opts.preread ? !opts.preread.exists : !existsSync(absPath);
+    const absent = opts.preread ? !opts.preread.exists : !boundFiles.guards.exists(absPath);
     let attachOpts = opts;
     if (absent && boundFiles.guards.landsAllowedSync(absPath)) {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
@@ -1550,7 +1550,7 @@ export class FileBindings {
     // caller. Making it async moved `pollArmed` a tick later and broke every
     // test that counts armed bindings straight after an attach.
     if (boundFiles.quarantined(binding.path)) return;
-    if (!existsSync(binding.path)) return;
+    if (!boundFiles.guards.exists(binding.path)) return;
     try {
       const st = statStampSync(binding.path);
       binding.lastMtimeMs = st.mtimeMs;
@@ -1931,7 +1931,7 @@ export class FileBindings {
     // A path that has already refused to answer is not force-readable either
     // — this read is synchronous and would park the whole server (slow-fs).
     if (boundFiles.quarantined(binding.path)) return { ok: false, error: 'missing' };
-    if (!existsSync(binding.path)) return { ok: false, error: 'missing' };
+    if (!boundFiles.guards.exists(binding.path)) return { ok: false, error: 'missing' };
     // The caller is declaring disk the winner. A pending write-back holds a
     // PRE-reparse serialization — letting it fire would rewrite the file the
     // caller just forced ("its stale in-memory copy flushed to disk and the
@@ -2018,7 +2018,7 @@ export class FileBindings {
       // is the same answer they get for a file that has gone, and the poll
       // retries once the backoff lapses.
       if (boundFiles.quarantined(binding.path)) return 'missing';
-      if (!existsSync(binding.path)) return 'missing';
+      if (!boundFiles.guards.exists(binding.path)) return 'missing';
       try {
         md = boundFiles.guards.readSync(binding.path);
       } catch (err) {
@@ -2291,7 +2291,7 @@ export class FileBindings {
         // A 'missing' reconcile read nothing, so the change stays pending.
         let seen: { mtimeMs: number; size: number } | undefined;
         try {
-          if (!boundFiles.quarantined(binding.path) && existsSync(binding.path)) {
+          if (!boundFiles.quarantined(binding.path) && boundFiles.guards.exists(binding.path)) {
             seen = statStampSync(binding.path);
           }
         } catch {}
@@ -2314,7 +2314,7 @@ export class FileBindings {
       if (
         binding.lastMtimeMs !== undefined &&
         !boundFiles.quarantined(binding.path) &&
-        existsSync(binding.path)
+        boundFiles.guards.exists(binding.path)
       ) {
         try {
           const st = statStampSync(binding.path);
@@ -2910,7 +2910,7 @@ export class FileBindings {
     if (!doc || !binding) return 'no-binding';
     this.touchDoc(doc.docId);
     if (boundFiles.quarantined(binding.path)) return 'missing';
-    if (!existsSync(binding.path)) return 'missing';
+    if (!boundFiles.guards.exists(binding.path)) return 'missing';
     // Advance the poll baseline the same way the poll itself would, so this
     // manual reconcile doesn't get replayed on the next tick.
     try {

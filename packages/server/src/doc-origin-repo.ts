@@ -9,6 +9,7 @@ import {
   sep,
 } from 'node:path';
 import type { DocOriginRepo } from '@claude-workspaces/core';
+import { rootView } from './bound-root-view.ts';
 import { gitBarred, readLine } from './git-hardening.ts';
 
 /**
@@ -60,6 +61,10 @@ function gitDirOf(worktreeRoot: string): string | null {
  * bind paths routinely reach the same place through different links.
  */
 export function gitCommonDir(worktreeRoot: string): string | null {
+  // Under a walled lead's root the `.git` pointer and `commondir` are the
+  // lead's to write, and a common dir names a repository identity that is
+  // looked up across every board (lead-tree-containment.md, rule 4).
+  if (rootView()?.covers(worktreeRoot)) return null;
   const gd = gitDirOf(worktreeRoot);
   if (!gd) return null;
   let common = gd;
@@ -112,6 +117,9 @@ export function checkoutBranch(worktreeRoot: string): string | null {
 /** Walk up from a path (which need not exist yet) to the enclosing worktree
  *  root — the nearest ancestor with a `.git` entry. */
 export function findWorktreeRoot(absPath: string): string | null {
+  // A path under a walled lead's root has no repository identity: its doc is
+  // keyed by its path alone (lead-tree-containment.md, rule 4).
+  if (rootView()?.covers(absPath)) return null;
   let dir = resolvePath(absPath);
   for (;;) {
     if (existsSync(join(dir, '.git'))) return dir;

@@ -128,6 +128,47 @@ export function storeImageBeside(
   return { ok: false, reason: 'no-free-name' };
 }
 
+/** The two calls `storeImageInTree` makes, as `PathGuards` answers them. */
+export interface ImageTree {
+  mkdirSync(dir: string): void;
+  createNewSync(path: string, bytes: Uint8Array): void;
+}
+
+/**
+ * `storeImageBeside` for a doc under a walled lead's root. No `realpath` is
+ * taken of the lead's folders: `tree` makes `images/` and the file one name
+ * at a time, each judged in the folder above it, so a link anywhere on the
+ * way stores nothing and creates nothing outside.
+ */
+export function storeImageInTree(
+  mdPath: string,
+  bytes: Uint8Array,
+  ext: ImageExt,
+  stem: string,
+  tree: ImageTree,
+  suffix: () => string = () => randomBytes(4).toString('hex'),
+): StoreResult {
+  const folder = join(dirname(mdPath), IMAGE_FOLDER);
+  try {
+    tree.mkdirSync(folder);
+  } catch (err) {
+    return { ok: false, reason: (err as NodeJS.ErrnoException).code ? 'not-a-folder' : 'outside' };
+  }
+  for (let i = 0; i < ATTEMPTS; i++) {
+    const name = `${stem}-${suffix()}${ext}`;
+    try {
+      tree.createNewSync(join(folder, name), bytes);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') continue;
+      if (code === 'ENOTDIR' || code === 'ENOENT') return { ok: false, reason: 'not-a-folder' };
+      return { ok: false, reason: 'outside' };
+    }
+    return { ok: true, src: `${IMAGE_FOLDER}/${name}` };
+  }
+  return { ok: false, reason: 'no-free-name' };
+}
+
 /** What the assets route serves beside a doc, by extension. */
 export const IMAGE_TYPES: Readonly<Record<string, string>> = {
   '.png': 'image/png',

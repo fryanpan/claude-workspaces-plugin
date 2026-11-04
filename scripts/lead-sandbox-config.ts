@@ -67,6 +67,8 @@ export interface Machine {
   realpath(path: string): string;
   /** Owner-writable folders of programs outside home (`lead-sandbox-owner-bins.ts`), read only to every lead. */
   ownerBins?: readonly string[];
+  /** Xcode's per-user cache and its folder (`xcrunCachePaths`), not writable by any lead. */
+  xcrunCache?: readonly string[];
 }
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
