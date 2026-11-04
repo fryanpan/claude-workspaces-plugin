@@ -71,6 +71,19 @@ export function appPrefix(workspaceId: string, docId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/apps/${encodeURIComponent(docId)}/`;
 }
 
+/**
+ * Where an app's dev server is asked for a path: under the board's prefix
+ * when it was started there (Vite's `base`, `DocMeta.appServesPrefix`), so
+ * it receives the address the reader's browser used; at its root otherwise.
+ */
+export function upstreamBase(
+  meta: { appServesPrefix?: boolean },
+  workspaceId: string,
+  docId: string,
+): string {
+  return meta.appServesPrefix ? appPrefix(workspaceId, docId) : '/';
+}
+
 function decodeOrNull(segment: string): string | null {
   try {
     return decodeURIComponent(segment);
@@ -86,8 +99,17 @@ function decodeOrNull(segment: string): string | null {
  * board's and not the app's. The upstream `Host` is the bound origin's own
  * (`127.0.0.1:<port>`), because the request is made to that URL and no
  * reader header named `host` is forwarded.
+ *
+ * `base` is where the tail is put on the dev server: `/` for a site that
+ * serves at its root, the app's own prefix for one started under it
+ * (`upstreamBase`). It is built here, never read from the request.
  */
-export function upstreamUrl(origin: string, rawTail: string, search: string): URL | null {
+export function upstreamUrl(
+  origin: string,
+  rawTail: string,
+  search: string,
+  base = '/',
+): URL | null {
   const tail = rawTail.replace(/^\/+/, '');
   if (tail.includes('\\')) return null;
   for (const seg of tail.split('/')) {
@@ -97,7 +119,7 @@ export function upstreamUrl(origin: string, rawTail: string, search: string): UR
   }
   let u: URL;
   try {
-    u = new URL(`/${tail}`, origin);
+    u = new URL(`${base}${tail}`, origin);
   } catch {
     return null;
   }

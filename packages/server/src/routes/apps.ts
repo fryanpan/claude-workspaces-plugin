@@ -17,7 +17,9 @@
  * origin, filed on the board, so the record persists the way a mock's does
  * and a restart keeps it.
  *
- * The read proxies `<origin>/<p>`. A document gets the mock's shape
+ * The read proxies `<origin>/<p>`, or `<origin><prefix><p>` for an app
+ * attached with `servesPrefix` (a Vite dev server started with `base` set to
+ * the prefix, which answers nothing outside it). A document gets the mock's shape
  * (`mockup-frame.ts`): the address a person opens answers a host page
  * holding one sandboxed frame, and the frame (`?cw-frame=1`) is the app's
  * own HTML with the widget and the bridge written in, so the widget comments
@@ -45,6 +47,7 @@ import {
   isHtmlResponse,
   parseLoopbackOrigin,
   relayedResponseHeaders,
+  upstreamBase,
   upstreamRequestHeaders,
   upstreamUrl,
 } from '../app-proxy.ts';
@@ -101,6 +104,11 @@ export interface AppRouteRequest {
   /** A share visitor, admitted above; read only to draw the host page's
    *  link back to the board, never to decide access. */
   visitor: boolean;
+  /** The Access address of a visitor admitted as a board member, or null.
+   *  Their host page frames the app on the frame hostname with a ticket
+   *  naming them (`frame-host.ts`), so the app's own scripts load behind
+   *  Access. */
+  member: string | null;
   /** Whether the frame served to this reader carries an app voice token
    *  (`app-voice/gate.ts`). */
   mayMintAppVoice: boolean;
@@ -163,6 +171,13 @@ async function attachApp(
   if (!ctx.isValidDocId(name)) return j(400, { error: 'bad docId' });
   const origin = parseLoopbackOrigin(body?.origin, ctx.ownPort());
   if (!origin.ok) return j(400, { error: 'origin_not_loopback', message: origin.error });
+  // Whether the dev server serves under the board's prefix (Vite's `base`).
+  // Omitted keeps what the app already has, so a re-attach for its link
+  // cannot turn the mode off by forgetting it.
+  const servesPrefix = body?.servesPrefix;
+  if (servesPrefix !== undefined && typeof servesPrefix !== 'boolean') {
+    return j(400, { error: 'bad servesPrefix', message: 'servesPrefix must be true or false.' });
+  }
   // A name already held by a doc stays that doc, as a create through the
   // docs route does (`doc-create-conflict.ts`). Turning a markdown doc into
   // an app would strand its content behind a proxy, and pointing an app at
@@ -200,11 +215,15 @@ async function attachApp(
   // The origin is set as a repoint rather than at creation: a creation that
   // carries a `sourceUrl` asks the repo registry which document that PATH
   // is, and an origin is not a path.
-  docStore.getOrCreate(docId, { sourceUrl: origin.origin });
+  docStore.getOrCreate(docId, {
+    sourceUrl: origin.origin,
+    ...(servesPrefix !== undefined ? { appServesPrefix: servesPrefix } : {}),
+  });
   ctx.fileUnderBoardWorkspace(docId, workspaceId);
-  const root = await probe(origin.origin);
-  const meta = ctx.withReviewUrl(docStore.get(docId)?.meta ?? created.doc.meta);
+  const stored = docStore.get(docId)?.meta ?? created.doc.meta;
   const prefix = appPrefix(workspaceId, docId);
+  const root = await probe(`${origin.origin}${upstreamBase(stored, workspaceId, docId)}`);
+  const meta = ctx.withReviewUrl(stored);
   // A dev server started without the board's base path writes links that
   // leave the mount. An unreachable app is not judged: there is no page yet.
   const escaping =
@@ -215,6 +234,7 @@ async function attachApp(
     docId,
     prefix,
     origin: origin.origin,
+    servesPrefix: stored.appServesPrefix === true,
     reachable: root.reachable,
     reviewUrl: meta.reviewUrl,
     url: meta.reviewUrl,
@@ -288,13 +308,14 @@ const attachedAppFetch = loopbackFetch('attached-app');
 /** The most of the root page the link check reads. */
 const PROBE_HTML_MAX = 2 * 1024 * 1024;
 
-/** Does anything answer at the origin, and what HTML is its root page?
+/** Does anything answer at the app's root, and what HTML is its page?
+ *  `root` is the origin and the path the app's first page is asked at.
  *  Informational: a server not started yet is an ordinary state to attach
  *  in. `html` is null for anything but a 2xx HTML answer. */
-async function probe(origin: string): Promise<{ reachable: boolean; html: string | null }> {
+async function probe(root: string): Promise<{ reachable: boolean; html: string | null }> {
   let r: Response;
   try {
-    r = await attachedAppFetch(`${origin}/`, {
+    r = await attachedAppFetch(root, {
       redirect: 'manual',
       signal: AbortSignal.timeout(PROBE_MS),
     });
@@ -335,7 +356,7 @@ async function serveApp(
   if (tail === undefined) {
     return new Response(null, { status: 302, headers: { location: `${prefix}${url.search}` } });
   }
-  const target = upstreamUrl(origin, tail, url.search);
+  const target = upstreamUrl(origin, tail, url.search, upstreamBase(meta, workspaceId, meta.docId));
   if (!target) return j(400, { error: 'path_outside_app' });
 
   let up: Response;
@@ -391,7 +412,14 @@ async function serveApp(
           visitor: rq.visitor,
           coachHref: assetHref(assets, 'coach.js'),
           leadChatHref: assetHref(assets, 'lead-chat.js'),
-          frame: ctx.frameHost?.frameFor(req, rq.visitor, workspaceId, rq.mayMintAppVoice) ?? null,
+          frame:
+            ctx.frameHost?.frameFor(
+              req,
+              rq.visitor,
+              workspaceId,
+              rq.mayMintAppVoice,
+              rq.member ?? undefined,
+            ) ?? null,
         }),
         ctx.browserSentry,
         'mockup',

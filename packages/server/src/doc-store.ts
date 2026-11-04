@@ -1993,6 +1993,8 @@ export class DocStore {
     init?: {
       type?: DocType;
       sourceUrl?: string;
+      /** See `DocMeta.appServesPrefix`; set on an existing doc like `sourceUrl`. */
+      appServesPrefix?: boolean;
       title?: string;
       setId?: string;
       webhookUrl?: string;
@@ -2059,6 +2061,13 @@ export class DocStore {
         !isBoardOwnedDoc(docId)
       ) {
         existing.meta.sourceUrl = init.sourceUrl;
+        this.saveToDisk(existing);
+      }
+      if (
+        init?.appServesPrefix !== undefined &&
+        init.appServesPrefix !== (existing.meta.appServesPrefix ?? false)
+      ) {
+        existing.meta.appServesPrefix = init.appServesPrefix ? true : undefined;
         this.saveToDisk(existing);
       }
       return existing;
