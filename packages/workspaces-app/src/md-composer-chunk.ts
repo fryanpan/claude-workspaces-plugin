@@ -71,6 +71,8 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
   doc.addEventListener('selectstart', keepSelectAllInside, true);
 
   const clamp = (pos: number) => Math.max(0, Math.min(pos, editor.state.doc.content.size));
+  // Only prose carries a typed trailing space; a code block's own is its content.
+  const endsInParagraph = () => editor.state.doc.lastChild?.type.name === 'paragraph';
 
   return {
     getMarkdown() {
@@ -86,7 +88,7 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       // A space typed last is the reader mid-sentence, and the serializer
       // trims it. Keep it: a rebuilt card seeds its new editor from this
       // value, and without the space the next word ran on ("firstand").
-      const tail = trailingSpaces(editor.state.doc.textContent);
+      const tail = endsInParagraph() ? trailingSpaces(editor.state.doc.textContent) : '';
       const out = md.replace(/\\\n/g, '  \n');
       return tail && !out.endsWith(tail) ? out.replace(/[ ]*$/, tail) : out;
     },
@@ -99,7 +101,7 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
       // The parser trims the same space `getMarkdown` kept; put it back,
       // without an update for the reason above.
       const tail = trailingSpaces(md);
-      if (tail && !editor.state.doc.textContent.endsWith(tail)) {
+      if (tail && endsInParagraph() && !editor.state.doc.textContent.endsWith(tail)) {
         const end = Selection.atEnd(editor.state.doc).from;
         editor.view.dispatch(editor.state.tr.insertText(tail, end).setMeta('preventUpdate', true));
       }
