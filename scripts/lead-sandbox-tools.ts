@@ -21,7 +21,7 @@
  * There the install could not write anyway; the plugin runs on the packages
  * an unwalled session installed.
  */
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const LEAD_TOOLS = ['adb', 'uv'] as const;
@@ -108,6 +108,19 @@ export function bunWrapper(lead: string, realBun: string, readOnly: readonly str
   ].join('\n');
 }
 
+/** The first `bun` on `path` outside `wrappers` (every lead's wrapper folder), or null. */
+export function bunOnPath(
+  path: string | undefined,
+  wrappers: string,
+  exists: (p: string) => boolean,
+): string | null {
+  for (const dir of (path ?? '').split(':')) {
+    if (dir === '' || dir.startsWith(wrappers)) continue;
+    if (exists(join(dir, 'bun'))) return join(dir, 'bun');
+  }
+  return null;
+}
+
 /** The plugin cache at both ends of `~/.claude`. */
 export function pluginDirs(home: string, realpath: (p: string) => string): string[] {
   const claude = join(home, '.claude');
@@ -117,19 +130,23 @@ export function pluginDirs(home: string, realpath: (p: string) => string): strin
 /**
  * Write the lead's wrapper and make its caches, and answer what its
  * environment gains: the wrapper first on PATH, and each tool's settings.
- * No value is a secret.
+ * No value is a secret. `realBun` null is the first bun on `path`.
  */
 export function ensureLeadTools(
   lead: ToolLead,
   home: string,
-  realBun: string,
+  realBun: string | null,
   realpath: (p: string) => string,
   path: string | undefined,
 ): Record<string, string> {
   const bin = join(leadToolsDir(home, lead.name), 'bin');
+  // Not the bun running the launch: from prod's checkout that may be prod's
+  // `bin/bun`, under the prod root the wall refuses.
+  const bun =
+    realBun ?? bunOnPath(path, join(home, LEAD_TOOLS_DIR), existsSync) ?? process.execPath;
   mkdirSync(bin, { recursive: true, mode: 0o700 });
   const wrapper = join(bin, 'bun');
-  writeFileSync(wrapper, bunWrapper(lead.name, realBun, pluginDirs(home, realpath)));
+  writeFileSync(wrapper, bunWrapper(lead.name, bun, pluginDirs(home, realpath)));
   chmodSync(wrapper, 0o700);
   const env: Record<string, string> = { PATH: path ? `${bin}:${path}` : bin };
   if (lead.tools.includes('uv')) {

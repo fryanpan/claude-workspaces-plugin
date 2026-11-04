@@ -16,6 +16,7 @@ import {
   ADB_SERVER_PORT,
   LEAD_CACHE_DIR,
   UV_PYTHONS,
+  bunOnPath,
   bunWrapper,
   ensureLeadTools,
   leadToolsDir,
@@ -164,6 +165,18 @@ describe.skipIf(!HAVE_SANDBOX)('adb under the real sandbox-exec', () => {
     expect(adbRow(profiles.without, project, false, sdk, node).ok).toBe(true);
     expect(adbRow(profiles.without, project, true, sdk, node).ok).toBe(false);
     expect(adbRow(profiles.with, project, true, join(root, 'no-sdk'), node).ok).toBe(false);
+  });
+});
+
+describe('the bun the wrapper runs', () => {
+  it("is the first bun on PATH that is not a lead's wrapper", () => {
+    const have = new Set(['/w/harborlight-lead/bin/bun', '/opt/bin/bun', '/usr/bin/bun']);
+    const exists = (p: string) => have.has(p);
+    expect(bunOnPath('/w/harborlight-lead/bin:/nope:/opt/bin:/usr/bin', '/w/', exists)).toBe(
+      '/opt/bin/bun',
+    );
+    expect(bunOnPath('/nope', '/w/', exists)).toBe(null);
+    expect(bunOnPath(undefined, '/w/', exists)).toBe(null);
   });
 });
 

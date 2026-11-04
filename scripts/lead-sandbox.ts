@@ -244,10 +244,9 @@ export interface LaunchDeps {
   leadTools?: (lead: Lead) => Record<string, string>;
 }
 
-/** The lead's tools, written under the real home, run with the bun running this. */
-function realLeadTools(lead: Lead): Record<string, string> {
-  return ensureLeadTools(lead, machine.home, process.execPath, machine.realpath, process.env.PATH);
-}
+/** The lead's tools, under the real home; the wrapper's bun is found on PATH (`bunOnPath`). */
+const realLeadTools = (lead: Lead) =>
+  ensureLeadTools(lead, machine.home, null, machine.realpath, process.env.PATH);
 
 const realDeps: LaunchDeps = {
   platform: process.platform,
