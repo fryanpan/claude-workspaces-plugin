@@ -79,6 +79,7 @@ import {
 } from '../task-owner.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { clipToWordBoundary } from '../task-title.ts';
+import { treeFsMode } from '../tree-fs.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
@@ -95,6 +96,21 @@ import type {
 import { handleWhiteboardRoutes } from './whiteboard-routes.ts';
 /** The anchor's display snippet, whichever anchor kind carries it — an
  *  orphan keeps its original's snippet. */
+/** Why a lead may not bind this file, or null. Markdown only: a mockup's
+ *  HTML is read by a path that is not judged against the lead's folders. */
+function leadBindRefusal(
+  type: DocType,
+  sourceUrl: string | undefined,
+  writable: (path: string) => boolean,
+): string | null {
+  if (type !== 'markdown') return 'A lead may bind a markdown file only.';
+  if (treeFsMode() !== 'contained')
+    return 'A lead may bind a file only where the contained file calls are.';
+  if (sourceUrl === undefined || !writable(sourceUrl))
+    return 'A lead may bind a file only when it is under one of its board’s folders.';
+  return null;
+}
+
 function anchorSnippetText(anchor: Anchor): string | undefined {
   if (anchor.kind === 'subject') return undefined;
   if (anchor.kind === 'orphan') {
@@ -231,6 +247,16 @@ export async function handleDocCreateListRoutes(
         error: 'sourceUrl required',
         hint: 'Markdown and code attachments are backed by a file on disk. Pass sourceUrl: "/abs/path/to/file" in the POST body.',
       });
+    }
+    // A board's lead reaches this route (`middleware/lead-scope.ts`) to bind
+    // a markdown file it wrote. The server then reads and writes that file as
+    // the owner, so the file must be under a folder registered for the board
+    // and the contained calls must be there to reach it (`tree-fs.ts`).
+    if (rq.leadBoard) {
+      const refused = leadBindRefusal(type, sourceUrl, (path) =>
+        ctx.leadWritable(rq.leadBoard ?? '', path),
+      );
+      if (refused) return j(403, { error: 'out_of_lead_scope', message: refused });
     }
     // A mockup binds to a file OUTSIDE the repo, so this route was the
     // one bind that took a path on faith: an unreachable one bound

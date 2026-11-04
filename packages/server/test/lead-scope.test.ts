@@ -25,6 +25,8 @@ const allows = (path: string, method: string) =>
 /** Each new path, on Harborlight and the same path on Riverbend. */
 const CASES: Array<[string, string, string]> = [
   ['GET', `/workspaces/${HARBORLIGHT}/docs`, `/workspaces/${RIVERBEND}/docs`],
+  // A file bind; `routes/docs.ts` holds the file to the board's roots.
+  ['POST', `/workspaces/${HARBORLIGHT}/docs`, `/workspaces/${RIVERBEND}/docs`],
   [
     'POST',
     `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`,
@@ -82,7 +84,7 @@ describe('leadScopeAllows', () => {
 
   it('names its verbs, and nothing else', () => {
     for (const [method, path] of [
-      ['POST', `/workspaces/${HARBORLIGHT}/docs`],
+      ['PUT', `/workspaces/${HARBORLIGHT}/docs`],
       ['DELETE', `/workspaces/${HARBORLIGHT}/docs/harbor-plan`],
       ['POST', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/reparse_from_disk`],
       ['GET', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content/extra`],

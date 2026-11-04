@@ -13,6 +13,9 @@
  * operator; a lead is the board's operator, so on its own board it gets:
  *
  * - `GET /workspaces/<board>/docs` — the board's doc list (`list_docs`);
+ * - `POST /workspaces/<board>/docs` — a markdown file bind
+ *   (`attach_markdown`) onto that board. `routes/docs.ts` holds the file to
+ *   the roots registered for the board, as the folder bind below is held;
  * - `POST /workspaces/<board>/docs/<doc>/content` — a whole-doc rewrite
  *   (`set_doc_content`) of a doc on that board;
  * - `POST /workspaces` — a folder bind (`attach_folder`). The path names no
@@ -30,7 +33,7 @@
  *   that board's list (`routes/git-push.ts`). The lead sends objects, never
  *   a path, so the server reads nothing the lead can write.
  *
- * The bind and the rewrite have the server act on a file tree the lead
+ * The binds and the rewrite have the server act on a file tree the lead
  * controls. That is safe because every read, listing and write under a
  * registered root goes through `tree-fs.ts`, which follows no link below the
  * root, takes a regular file with one name only, and writes through a temp
@@ -62,7 +65,7 @@ export function leadScopeAllows(
   const match = pathname.match(BOARD_PATH);
   if (!match || decoded(match[1] ?? '') !== boardId) return false;
   const rest = match[2] ?? '';
-  if (rest === 'docs') return m === 'GET';
+  if (rest === 'docs') return m === 'GET' || m === 'POST';
   if (rest === 'git/push') return m === 'POST';
   if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
