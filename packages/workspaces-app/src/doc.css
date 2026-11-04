@@ -1395,6 +1395,16 @@ body.is-archived #editor .ProseMirror {
   max-width: 100%;
 }
 
+/* ========== images ========== */
+/* A doc image draws no wider than the text column: an 1800px PNG drew at
+   1800px against a 1083px column. A width the markdown gives stays an upper
+   limit, and `height: auto` keeps the picture's shape when it is narrowed.
+   The first paint (doc/prose-paint.ts) carries the same classes. */
+#editor > .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ========== board embeds (doc/board-embed-frames.ts) ========== */
 /* A `::name{block="…"}` line's live app frame, drawn under the line. */
 #editor > .ProseMirror .board-embed {
