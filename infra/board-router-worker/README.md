@@ -95,7 +95,7 @@ one before the request leaves:
 | Kept | Set by | Why it survives |
 | --- | --- | --- |
 | any `__Host-…` name | the server | A browser accepts a `__Host-` cookie only with no Domain, so it was set by this exact host. The session is `__Host-cw_session` (PR 1353). |
-| `cw_session` | the server | The session's name over http, and over https until 4 November 2026 (`PLAIN_SESSION_OVER_HTTPS_UNTIL`, `auth/session.ts`). |
+| `cw_session` | the server | The session's name over http. Over https it is not read (`readSessionCookie`, `auth/session.ts`); the server reads `__Host-cw_session` there. |
 | `lf_share` | the server | A redeemed share link. Signed with the server's own key. |
 | `cw_geo`, `cw_touch` | the app's own page script | Where an event came from (`device-context.ts`). They label events and grant nothing. |
 
