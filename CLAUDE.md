@@ -43,7 +43,10 @@ OpenAI-format protocol any app uses to talk to one agent, its token, and why
 it streams with a 180s bound),
 [app-voice](docs/architecture/app-voice.md) (how a sandboxed mock or app
 proves it is one doc on one board, so it can speak, listen and write through
-its own socket) and
+its own socket),
+[lead-tree-containment](docs/architecture/lead-tree-containment.md) (every
+server path that touches a walled lead's files, how each is contained, and
+the sandboxed git that runs in a lead's own repository) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.
