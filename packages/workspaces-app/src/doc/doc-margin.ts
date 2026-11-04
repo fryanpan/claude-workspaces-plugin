@@ -27,6 +27,8 @@ import type { ReviewChrome } from '../review-chrome.ts';
 import { mountSuggestionsSummary } from '../suggestions/suggestions-summary.ts';
 import { threadCards } from '../thread-morph.ts';
 import { type FootnoteNotesHandle, mountFootnoteNotes } from './footnote-notes.ts';
+import { isRemoteSync } from './remote-edit-scroll.ts';
+import { docWorkingLine } from './working-line.ts';
 
 export interface DocMarginOptions {
   docId: string;
@@ -103,7 +105,37 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
   // note landing above the fold moves the text the cards are drawn against,
   // and moving the pane by the same amount is what leaves the reader where
   // they were.
-  mountReadingHold({ scroller: editorMount, scope, locator: proseBlockLocator(editor) });
+  //
+  // While the reader is typing — in the doc or in a comment box — the line
+  // held is the one they are typing at (`working-line.ts`), and it is re-read
+  // whenever THEY move it: a local edit or caret move, or focus going to
+  // another box. Only a remote edit is corrected for.
+  const view = editor.editor.view;
+  const hold = mountReadingHold({
+    scroller: editorMount,
+    scope,
+    locator: proseBlockLocator(editor),
+    workingLine: docWorkingLine(view),
+  });
+  const onLocalMove = (props: {
+    transaction: Parameters<typeof isRemoteSync>[0];
+  }): void => {
+    const tr = props.transaction;
+    if ((tr.docChanged || tr.selectionSet) && !isRemoteSync(tr)) hold.repick();
+  };
+  editor.editor.on('transaction', onLocalMove);
+  scope.onCleanup(() => editor.editor.off('transaction', onLocalMove));
+  // A frame later, not now: a remote edit can take a focused card out of the
+  // flow and put it back (`composer-keep.ts`), and a re-read inside that
+  // update would take the moved layout as the reading and correct nothing.
+  const repickSoon = (): void => {
+    requestAnimationFrame(() => {
+      if (!scope.disposed) hold.repick();
+    });
+  };
+  scope.listen(document, 'focusin', repickSoon);
+  scope.listen(document, 'focusout', repickSoon);
+  scope.listen(document, 'selectionchange', repickSoon);
 
   // The balloon margin: plain markdown docs get comment balloons only (no
   // git base, so no deletions) — reuses the same mount as the redline

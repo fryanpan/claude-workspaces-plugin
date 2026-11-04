@@ -64,6 +64,23 @@ export interface BlockLocator {
   find: (mark: unknown) => Element | null;
 }
 
+/**
+ * The viewport top of the line the reader is WORKING on — the caret they are
+ * typing at, or the words a comment box they are typing in is about — or
+ * null when they are not working anywhere.
+ *
+ * The topmost visible block is the line a reader is READING. A writer's line
+ * is the one their caret is on, which can sit half a screen below it, and an
+ * agent replacing, deleting or lengthening a block between the two moves the
+ * caret while the top block stays exactly where it was. Measured at 1180x820
+ * with the caret 60% down the pane: a block replaced above it moved the
+ * caret 77px and a block deleted above it moved it 136px, with the hold
+ * reading a correction of zero; at 430 an insert above moved it 300px. While
+ * the reader is working on a line that is on screen, that line is the one
+ * held.
+ */
+export type WorkingLine = () => number | null;
+
 export interface ReadingHold {
   /** The block whose screen position is being held, or null when the pane has
    *  nothing laid out. Exposed so a probe can name the line it measured. */
@@ -80,8 +97,9 @@ export function mountReadingHold(opts: {
   scroller: HTMLElement;
   scope: MountScope;
   locator?: BlockLocator;
+  workingLine?: WorkingLine;
 }): ReadingHold {
-  const { scroller, scope, locator } = opts;
+  const { scroller, scope, locator, workingLine } = opts;
   // We are the hold; the browser must not also be one. See the header.
   const priorAnchor = scroller.style.overflowAnchor;
   scroller.style.overflowAnchor = 'none';
@@ -105,10 +123,24 @@ export function mountReadingHold(opts: {
    */
   const held: Array<{ el: Element; y: number; mark: unknown }> = [];
   const UNDERSTUDIES = 4;
+  /** Where the working line sat below the pane's top edge when the reading
+   *  was taken, or null when the reader was not working on a line on screen. */
+  let workingY: number | null = null;
   /** The offset the pane was at when that reading was taken. */
   let refScrollTop = 0;
 
   const paneTop = (): number => scroller.getBoundingClientRect().top;
+
+  /** The working line's offset below the pane's top edge, while it is on
+   *  screen. A caret the reader scrolled away from is not one they can see,
+   *  so it is not the line they would notice moving. */
+  function readWorking(): number | null {
+    const y = workingLine?.() ?? null;
+    if (y === null) return null;
+    const r = scroller.getBoundingClientRect();
+    if (y < r.top || y > r.bottom) return null;
+    return y - r.top;
+  }
 
   /**
    * The blocks a reader's eye can land on, in document order: the children of
@@ -134,6 +166,7 @@ export function mountReadingHold(opts: {
     const top = paneTop();
     held.length = 0;
     refScrollTop = scroller.scrollTop;
+    workingY = readWorking();
     // The block the reader's eye is on is the first one that BEGINS on screen,
     // not merely the first one still showing. The difference is a long
     // paragraph or list item running up past the top of the pane: its own box
@@ -196,6 +229,19 @@ export function mountReadingHold(opts: {
       repick();
       return;
     }
+    // The line the reader is typing at, while they are: the editor puts the
+    // caret back in the same words after a remote edit, so wherever those
+    // words were moved to is where the caret reads now.
+    const workingNow = workingY === null ? null : (workingLine?.() ?? null);
+    if (workingY !== null && workingNow !== null) {
+      const dy = workingNow - paneTop() - workingY;
+      // Re-read the blocks even when nothing moved: a block between the top
+      // of the pane and the caret may have, and the blocks are what the hold
+      // falls back to once the reader stops typing.
+      if (Math.abs(dy) >= EPSILON_PX) correct(dy);
+      else reread();
+      return;
+    }
     // The reader's own line where it survived the tick, and the line under it
     // where it did not. A block the tick replaced is gone from the document
     // by the time this runs, and its understudy moved by the same growth.
@@ -233,7 +279,17 @@ export function mountReadingHold(opts: {
       repick();
       return;
     }
+    correct(dy);
+  }
+
+  /** Move the pane by `dy` and re-read every line held against the result. */
+  function correct(dy: number): void {
     scroller.scrollTop += dy;
+    reread();
+  }
+
+  /** Re-read where every held line sits, without moving the pane. */
+  function reread(): void {
     refScrollTop = scroller.scrollTop;
     // What we actually got, not what we asked for: at either end of the
     // travel the scroller clamps, and remembering the asked-for offset would
@@ -251,7 +307,11 @@ export function mountReadingHold(opts: {
       }
       h.el = el;
       h.y = el.getBoundingClientRect().top - top;
+      // The name too: a line the reader typed into is a new node now, and the
+      // old name would find nothing on the next tick.
+      if (locator) h.mark = locator.mark(el);
     }
+    if (workingY !== null) workingY = readWorking();
   }
 
   /**
