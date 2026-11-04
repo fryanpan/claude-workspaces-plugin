@@ -67,18 +67,22 @@ const PROJECT_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
  */
 const KEPT_COOKIES = new Set(['cw_session', 'lf_share', 'cw_geo', 'cw_touch']);
 
-/** The one cookie a frame hostname's server reads: the board's frame ticket
- *  (`packages/server/src/frame-ticket.ts`). A frame's page can set any other
- *  name on its own hostname, and none of them grants anything there. */
-const FRAME_COOKIE = 'cw_frame';
+/** The cookies a frame hostname's server reads: each board's frame cookie,
+ *  `__Host-cw_frame-<board>`, and the name it had before, `cw_frame`, read for
+ *  one release (`packages/server/src/frame-ticket.ts`). A frame's page can set
+ *  any other name on its own hostname, and none of them grants anything there. */
+const FRAME_COOKIE_PREFIX = '__Host-cw_frame-';
+const LEGACY_FRAME_COOKIE = 'cw_frame';
 
-/** The `Cookie` header on a frame hostname, cut down to the frame cookie. */
+/** The `Cookie` header on a frame hostname, cut down to the frame cookies. */
 export function frameCookies(header) {
   if (!header) return null;
   const kept = [];
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
-    if (eq >= 0 && part.slice(0, eq).trim() === FRAME_COOKIE) kept.push(part.trim());
+    const name = eq >= 0 ? part.slice(0, eq).trim() : '';
+    if (name === LEGACY_FRAME_COOKIE || name.startsWith(FRAME_COOKIE_PREFIX))
+      kept.push(part.trim());
   }
   return kept.length > 0 ? kept.join('; ') : null;
 }

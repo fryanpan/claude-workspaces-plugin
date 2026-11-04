@@ -7,11 +7,12 @@
 import { describe, expect, it } from 'bun:test';
 import { mintToken } from '../src/auth/signed-token.ts';
 import {
-  FRAME_COOKIE,
   FRAME_COOKIE_TTL_MS,
+  LEGACY_FRAME_COOKIE,
   checkFrameCookie,
   checkFrameTicket,
   frameCookieHeader,
+  frameCookieName,
   frameCookiesOf,
   frameKeys,
   frameTicket,
@@ -131,15 +132,29 @@ describe('redeeming a ticket', () => {
 });
 
 describe('the frame cookie', () => {
-  it('is partitioned, script-proof, host-only and scoped to the board', () => {
+  it('is a __Host- cookie of its board: partitioned, script-proof, host-only, Path=/', () => {
     const header = frameCookieHeader('v.1', 'w-harbor');
     expect(header).toBe(
-      `${FRAME_COOKIE}=v.1; Path=/workspaces/w-harbor/; Max-Age=43200; HttpOnly; Secure; SameSite=None; Partitioned`,
+      '__Host-cw_frame-w-harbor=v.1; Path=/; Max-Age=43200; HttpOnly; Secure; SameSite=None; Partitioned',
     );
   });
 
-  it('reads every value of its name and no other cookie', () => {
-    expect(frameCookiesOf('a=1; cw_frame=x.1; cw_framed=2; cw_frame=y.2')).toEqual(['x.1', 'y.2']);
-    expect(frameCookiesOf(null)).toEqual([]);
+  it('names one cookie per board, so two boards on one frame hostname keep both', () => {
+    expect(frameCookieName('w-harbor')).toBe('__Host-cw_frame-w-harbor');
+    expect(frameCookieName('w-river')).not.toBe(frameCookieName('w-harbor'));
+    // A character a cookie name cannot hold is replaced, never passed through.
+    expect(frameCookieName('w;x=y')).toBe('__Host-cw_frame-w_x_y');
+  });
+
+  it('reads every value of its own board’s name and no other cookie', () => {
+    const header =
+      'a=1; __Host-cw_frame-w-harbor=x.1; __Host-cw_frame-w-river=r.1; __Host-cw_frame-w-harbor=y.2';
+    expect(frameCookiesOf(header, 'w-harbor')).toEqual(['x.1', 'y.2']);
+    expect(frameCookiesOf(null, 'w-harbor')).toEqual([]);
+  });
+
+  it('still reads the old cw_frame name for one release, so an open frame keeps working', () => {
+    expect(LEGACY_FRAME_COOKIE).toBe('cw_frame');
+    expect(frameCookiesOf('cw_frame=old.1; cw_framed=2', 'w-harbor')).toEqual(['old.1']);
   });
 });

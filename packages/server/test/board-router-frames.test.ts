@@ -75,18 +75,23 @@ describe("a project's frame hostname reaches that project and no other", () => {
 });
 
 describe('a frame hostname carries the frame cookie and nothing else', () => {
-  it('keeps only cw_frame, every copy of it', () => {
-    expect(frameCookies('cw_session=s; cw_frame=a.1; CF_Authorization=t; cw_frame=b.2')).toBe(
-      'cw_frame=a.1; cw_frame=b.2',
-    );
-    expect(frameCookies('__Host-cw_session=s; lf_share=x')).toBeNull();
+  const NEW = '__Host-cw_frame-w-harbor=a.1';
+  it('keeps every board’s __Host- frame cookie and the old cw_frame name, every copy', () => {
+    expect(
+      frameCookies(
+        `cw_session=s; ${NEW}; CF_Authorization=t; __Host-cw_frame-w-river=b.2; cw_frame=c.3`,
+      ),
+    ).toBe(`${NEW}; __Host-cw_frame-w-river=b.2; cw_frame=c.3`);
+    expect(frameCookies('__Host-cw_session=s; lf_share=x; cw_framed=1')).toBeNull();
+    // A name that only starts like the prefix without its separator is not one.
+    expect(frameCookies('__Host-cw_framed=1')).toBeNull();
   });
 
   it("drops the board's session and share cookies on the way to the frame hostname", async () => {
     const { calls } = await send(`https://harborlight.${FRAME_DOMAIN}${APP}`, {
-      headers: { cookie: '__Host-cw_session=s; lf_share=x; cw_frame=a.1' },
+      headers: { cookie: `__Host-cw_session=s; lf_share=x; ${NEW}` },
     });
-    expect(calls[0]?.request.headers.get('cookie')).toBe('cw_frame=a.1');
+    expect(calls[0]?.request.headers.get('cookie')).toBe(NEW);
   });
 
   it('CONTROL: the same cookies reach a board subdomain as they always did', async () => {

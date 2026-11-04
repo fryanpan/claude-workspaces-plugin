@@ -114,8 +114,10 @@ or labels an event only, so a planted one can sign a reader out but reads
 nothing. That is the accepted risk in the design (decision 16). Renaming
 `lf_share` to `__Host-lf_share` would close it for share links.
 
-On a frame hostname only `cw_frame` is kept: the board's frame ticket, the one
-cookie a project server reads there. The board's session and share cookies
+On a frame hostname only the frame cookies are kept: each board's
+`__Host-cw_frame-<board>`, the cookie its frame ticket is traded for and the
+one a project server reads there, and the old name `cw_frame`, read for one
+release after the rename (review L2). The board's session and share cookies
 never travel to a frame hostname, and nor does anything a frame's page set.
 
 On the way back, a `Set-Cookie` that names a Domain is removed from the

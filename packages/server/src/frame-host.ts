@@ -253,7 +253,7 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
       // sign one, so any cookie that verifies speaks for its host page.
       let held = false;
       let appVoice = false;
-      for (const v of frameCookiesOf(req.headers.get('cookie'))) {
+      for (const v of frameCookiesOf(req.headers.get('cookie'), ws)) {
         const c = checkFrameCookie(keys.cookie, v, frameHost, ws);
         if (!c.ok) continue;
         held = true;

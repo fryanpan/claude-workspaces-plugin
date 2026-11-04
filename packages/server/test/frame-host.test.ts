@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFrameHost, frameGate, parseFrameOrigin, sameSiteHosts } from '../src/frame-host.ts';
-import { FRAME_COOKIE, checkFrameTicket } from '../src/frame-ticket.ts';
+import { checkFrameTicket, frameCookieName } from '../src/frame-ticket.ts';
 import { FRAME_HOST_SANDBOX, MOCK_FRAME_CSP } from '../src/mockup-frame.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
@@ -282,14 +282,8 @@ describe('a server with the frame hostname configured', () => {
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toBe(`/workspaces/${ws}/mockups/${mock}?v=1&cw-frame=1`);
     const set = res.headers.get('set-cookie') ?? '';
-    expect(set.startsWith(`${FRAME_COOKIE}=`)).toBe(true);
-    for (const attr of [
-      `Path=/workspaces/${ws}/`,
-      'HttpOnly',
-      'Secure',
-      'SameSite=None',
-      'Partitioned',
-    ]) {
+    expect(set.startsWith(`__Host-cw_frame-${ws}=`)).toBe(true);
+    for (const attr of ['Path=/;', 'HttpOnly', 'Secure', 'SameSite=None', 'Partitioned']) {
       expect(set).toContain(attr);
     }
     expect(set.toLowerCase()).not.toContain('domain=');
@@ -330,7 +324,7 @@ describe('a server with the frame hostname configured', () => {
 
   it('refuses a cookie value sent back as a ticket, so a cookie cannot renew itself', async () => {
     const { cookie } = await redeem();
-    const value = cookie.slice(`${FRAME_COOKIE}=`.length);
+    const value = cookie.slice(`${frameCookieName(ws)}=`.length);
     // CONTROL: the same value, sent as the cookie, holds the frame.
     expect((await onFrames(FRAME(), { 'sec-fetch-dest': 'iframe', cookie })).status).toBe(200);
     const res = await onFrames(`${FRAME()}&cw-ft=${encodeURIComponent(value)}`, {
@@ -338,6 +332,22 @@ describe('a server with the frame hostname configured', () => {
     });
     expect(res.status).toBe(404);
     expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('holds the frame on the old cw_frame name for one release', async () => {
+    const { cookie } = await redeem();
+    const value = cookie.slice(`${frameCookieName(ws)}=`.length);
+    const res = await onFrames(FRAME(), {
+      'sec-fetch-dest': 'iframe',
+      cookie: `cw_frame=${value}`,
+    });
+    expect(res.status).toBe(200);
+    // CONTROL: the value under any other name holds nothing.
+    const other = await onFrames(FRAME(), {
+      'sec-fetch-dest': 'iframe',
+      cookie: `cw_framex=${value}`,
+    });
+    expect(other.status).toBe(403);
   });
 
   it('drops a ticket from the redirect when its name is percent-encoded', async () => {
