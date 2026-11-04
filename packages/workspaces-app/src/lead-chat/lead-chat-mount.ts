@@ -372,6 +372,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     view,
     ...(opts.getContext ? { getContext: opts.getContext } : {}),
     session,
+    device: storage,
     ...(opts.meeting ? { seams: opts.meeting } : {}),
     changed: render,
     openPane: () => {

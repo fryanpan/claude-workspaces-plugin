@@ -15,6 +15,13 @@ import { makeGestureContext } from '../meeting-audio.ts';
  *   - A tap anywhere on the page is the tap a resumed iPad page waits for.
  *   - The panel that was open when the page went is open on the next one,
  *     while a meeting runs, so the notes stay in view across moves.
+ *   - The page that starts a meeting with notes goes to its notes doc once the
+ *     recording runs there, which is a page move like any other. It waits
+ *     for the socket's first `ready`, so it goes to the doc the notes
+ *     really land in (a picked doc may hand them to one of their own).
+ *   - The wizard starts on the doc this board's last meeting was started
+ *     with on this device: a stored preference per board, in local
+ *     storage, never a server setting.
  */
 import { createMeetingBotClient } from '../meeting-bot-client.ts';
 import { systemAudioOffered } from '../meeting-source.ts';
@@ -32,6 +39,7 @@ import {
   createLeadMeetingRun,
   recorderToken,
 } from './lead-chat-meeting.ts';
+import type { ModeStorage } from './lead-chat-mode.ts';
 import type { LeadChatView } from './lead-chat-view.ts';
 import {
   type Wizard,
@@ -44,6 +52,15 @@ import {
  *  page opens it again (`lead-chat-mount.ts` keeps it, meeting or not). */
 export const PANE_OPEN_KEY = 'cw.lead-chat.open';
 
+/** In this device's local storage, per board: the doc its last meeting here
+ *  was started with, which the wizard starts on next time. */
+export const lastMeetingDocKey = (workspaceId: string): string =>
+  `cw.lead-chat.meeting-doc.${workspaceId}`;
+
+/** A doc's page on the board. */
+export const boardDocPath = (workspaceId: string, docId: string): string =>
+  `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}`;
+
 export interface LeadMeetingSeams
   extends Partial<Omit<LeadMeetingRunOpts, 'workspaceId' | 'author' | 'client' | 'recorder'>> {
   /** The board's docs, for the wizard's picker. */
@@ -52,6 +69,8 @@ export interface LeadMeetingSeams
   newDoc?: (topic: string) => Promise<string | null>;
   macAudio?: boolean;
   today?: Date;
+  /** Go to another page of the board; a full load. */
+  navigate?: (path: string) => void;
   /** How a line the lead says is fetched and played; injected by tests. */
   leadVoice?: Partial<Pick<LeadLineVoiceOpts, 'fetch' | 'playbackContext'>>;
 }
@@ -65,6 +84,8 @@ export interface LeadMeetingWiringOpts {
   getContext?: () => VoiceContext | undefined;
   /** Per tab: the recorder token. */
   session: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
+  /** Per device: the doc of this board's last meeting. */
+  device?: ModeStorage | null;
   seams?: LeadMeetingSeams;
   /** Something the panel draws changed. */
   changed: () => void;
@@ -122,6 +143,10 @@ export function boardDocMinter(workspaceId: string, doFetch: Fetch = defaultFetc
 
 export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring {
   const { document: doc, client, view, author } = opts;
+  const hereDocId = (): string | undefined => {
+    const c = opts.getContext?.();
+    return c?.surface === 'doc' ? c.docId : undefined;
+  };
   const win = doc.defaultView ?? window;
   const seams = opts.seams ?? {};
   const recorder = recorderToken(opts.session);
@@ -129,6 +154,9 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
   /** The meeting this page has already tried to resume, or joined. */
   let resumed = '';
   let joined = '';
+  /** The meeting this page started, until its recording runs and the page
+   *  goes to its notes doc. */
+  let goToNotes = '';
 
   const run = createLeadMeetingRun({
     bot: (docId) => createMeetingBotClient({ docId }),
@@ -140,6 +168,16 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
     onChange: (s) => {
       seams.onChange?.(s);
       opts.changed();
+    },
+    onRecording: (docId) => {
+      seams.onRecording?.(docId);
+      const m = client.state().meeting;
+      if (!goToNotes || m?.id !== goToNotes) return;
+      goToNotes = '';
+      if (docId === hereDocId()) return;
+      (seams.navigate ?? ((path: string) => win.location.assign(path)))(
+        boardDocPath(opts.workspaceId, docId),
+      );
     },
   });
 
@@ -214,6 +252,15 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
       }
       resumed = res.meeting.id;
       joined = res.meeting.id;
+      // "No notes" has only a transcript to show, so its page stays put.
+      if (choice.notes !== 'none') {
+        goToNotes = res.meeting.id;
+        try {
+          opts.device?.setItem(lastMeetingDocKey(opts.workspaceId), docId);
+        } catch {
+          // Not stored: the next wizard starts on this page's doc.
+        }
+      }
       opts.openPane();
       await run.begin(res.meeting, {
         gesture: true,
@@ -223,16 +270,19 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
     })();
   };
 
-  const hereDocId = (): string | undefined => {
-    const c = opts.getContext?.();
-    return c?.surface === 'doc' ? c.docId : undefined;
-  };
   const here = hereDocId();
   const wizard = createWizard({
     document: doc,
     root: view.root,
     loadDocs: seams.loadDocs ?? boardDocsLoader(opts.workspaceId),
     ...(here ? { hereDocId: here } : {}),
+    lastDocId: () => {
+      try {
+        return opts.device?.getItem(lastMeetingDocKey(opts.workspaceId)) ?? null;
+      } catch {
+        return null;
+      }
+    },
     macAudio: seams.macAudio ?? systemAudioOffered(),
     ...(seams.today ? { today: seams.today } : {}),
     onStart,
