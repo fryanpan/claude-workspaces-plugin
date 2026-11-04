@@ -215,6 +215,14 @@ strip so both drive one copy.
   inside a gesture; a resumed page whose context is still suspended after
   1.5s shows "Tap to keep recording", and any tap on the page starts it.
   Chrome needs none.
+- **Starting a meeting opens its notes doc.** The page that pressed Start
+  goes to the doc the notes land in once the socket's first `ready` says the
+  recording runs there, so a picked doc that hands the notes to one of their
+  own opens the right doc. From a doc page that is the router's in-place move
+  and the recording runs on; from the board or Home it is a full page load, so
+  it resumes like any page move. "No notes" stays put. The wizard starts on
+  the doc this board's last meeting was started with on this device (local
+  storage, per board), then this page's doc, then the newest.
 - **"No notes" is `notes: false` on `start`.** The relay opens no notes
   pipeline and no handoff; the transcript is still kept, in a doc of its own.
 

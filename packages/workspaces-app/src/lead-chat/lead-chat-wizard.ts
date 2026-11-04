@@ -41,6 +41,9 @@ export interface WizardOpts {
   loadDocs: () => Promise<WizardDoc[]>;
   /** The doc this page shows, which step 1 starts on. */
   hereDocId?: string;
+  /** The doc this board's last meeting on this device was started with;
+   *  step 1 starts on it, ahead of this page's doc, while it still exists. */
+  lastDocId?: () => string | null;
   /** Offer "Mac Audio": the browser can share its audio. */
   macAudio: boolean;
   /** Today, for the new doc's default name. */
@@ -295,7 +298,12 @@ export function createWizard(opts: WizardOpts): Wizard {
         (docs) => {
           if (st !== mine) return;
           mine.docs = docs;
-          mine.doc = docs.find((d) => d.docId === opts.hereDocId) ?? docs[0] ?? null;
+          const last = opts.lastDocId?.();
+          mine.doc =
+            docs.find((d) => d.docId === last) ??
+            docs.find((d) => d.docId === opts.hereDocId) ??
+            docs[0] ??
+            null;
           // A board with no docs has nothing to pick: the new doc is the start.
           if (docs.length === 0) mine.kind = 'new';
           render();

@@ -88,6 +88,9 @@ export interface LeadMeetingRunOpts {
   /** The doc's bot client, made for the meeting's doc. */
   bot?: (docId: string) => MeetingBotClient;
   onChange?: (s: MeetingRunState) => void;
+  /** The recording runs into `docId` and the board has been told so; on
+   *  every connect, and once a bot is in its call. */
+  onRecording?: (docId: string) => void;
 }
 
 export interface LeadMeetingRun {
@@ -244,14 +247,18 @@ export function createLeadMeetingRun(opts: LeadMeetingRunOpts): LeadMeetingRun {
         // A page still waiting for its tap stays waiting: the socket is up,
         // the microphone is not.
         if (state.phase !== 'tap') set({ phase: 'recording', note: '' });
+        const into = docId;
+        const told = () => opts.onRecording?.(into);
         if (changed || moved || meeting.recorder !== opts.recorder) {
-          void opts.client.meeting('recording', opts.author, {
-            id: meeting.id,
-            meetingId: msg.meetingId,
-            recorder: opts.recorder,
-            ...(moved ? { docId, docTitle } : {}),
-          });
-        }
+          void opts.client
+            .meeting('recording', opts.author, {
+              id: meeting.id,
+              meetingId: msg.meetingId,
+              recorder: opts.recorder,
+              ...(moved ? { docId, docTitle } : {}),
+            })
+            .then(told);
+        } else told();
         break;
       }
       case 'notes_doc':
@@ -320,6 +327,7 @@ export function createLeadMeetingRun(opts: LeadMeetingRunOpts): LeadMeetingRun {
       }
     }
     set({ phase: 'recording', note: '' });
+    opts.onRecording?.(m.docId);
   }
 
   return {

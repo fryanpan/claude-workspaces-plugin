@@ -286,7 +286,10 @@ async function main(): Promise<void> {
     ] as const) {
       step(`start a meeting at ${width}`);
       const { main: page, watcher, browser } = await openBrowser(width, height);
-      const first = await go(page, at(`/docs/${doc}`));
+      // Started on the board at one size and on a doc page at the other: the
+      // first is a full page load to the notes doc, the second a move in place.
+      const startedFrom = width === 1180 ? 'board' : 'doc';
+      const first = await go(page, startedFrom === 'doc' ? at(`/docs/${doc}`) : at(''));
       await tap(page, first.button as Rect);
       const open = await until('Start a meeting in the panel', async () => {
         const r = await read(page);
@@ -307,9 +310,27 @@ async function main(): Promise<void> {
       await tap(page, step2.go as Rect);
       const n0 = ear.frames.length;
       await until('audio reaching the engine', () => (ear.frames.length > n0 + 10 ? true : null));
+      // The page goes to the doc the notes land in, as the board records it.
+      const landed = await until('the page on the notes doc', async () => {
+        const snap = (await (await fetch(at('/lead-chat'))).json()) as {
+          meeting: { docId: string; meetingId?: string } | null;
+        };
+        const notesDoc = snap.meeting?.meetingId ? snap.meeting.docId : null;
+        if (!notesDoc) return null;
+        try {
+          const path = String(await page.evaluate('location.pathname'));
+          return path === `/workspaces/${ws}/docs/${notesDoc}` ? { path, notesDoc } : null;
+        } catch {
+          return null; // between documents
+        }
+      });
       const started = await until('the meeting heading', async () => {
-        const r = await read(page);
-        return r.head ? r : null;
+        try {
+          const r = await read(page);
+          return r.head ? r : null;
+        } catch {
+          return null;
+        }
       });
       await shot(page, shots, `meeting-heading-${width}`);
 
@@ -409,6 +430,9 @@ async function main(): Promise<void> {
       const snap = (await (await fetch(at('/lead-chat'))).json()) as { meeting: unknown };
       sizes.push({
         width,
+        startedFrom,
+        landedPath: landed.path,
+        notesDoc: landed.notesDoc,
         wizard,
         headText: started.headText,
         head: started.head,

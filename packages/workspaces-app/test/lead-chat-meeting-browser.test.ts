@@ -53,6 +53,14 @@ describe.skipIf(CHROME === null)('the lead chat meeting in a browser', () => {
     }
   });
 
+  it('the page that starts the meeting goes to its notes doc, from the board and from a doc page', () => {
+    const { sizes } = result();
+    expect(sizes.map((s) => s.startedFrom)).toEqual(['board', 'doc']);
+    for (const s of sizes) {
+      expect(s.landedPath, String(s.width)).toMatch(new RegExp(`/docs/${s.notesDoc}$`));
+    }
+  });
+
   it('shows a line said in the meeting on a second tab that is only watching', () => {
     for (const s of result().sizes) {
       // The driver waits for the line on each tab and fails if it never

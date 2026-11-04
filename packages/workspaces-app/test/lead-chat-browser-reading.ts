@@ -98,6 +98,11 @@ export interface MeetingMove {
 
 export interface MeetingSizeRun {
   width: number;
+  /** The page Start was pressed on. */
+  startedFrom: 'doc' | 'board';
+  /** Where that page was once the recording ran, and the meeting's doc. */
+  landedPath: string;
+  notesDoc: string;
   wizard: Rect | null;
   headText: string;
   head: Rect | null;
