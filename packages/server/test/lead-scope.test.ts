@@ -69,6 +69,14 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${HARBORLIGHT}/lead-chat/meeting/say`,
     `/workspaces/${RIVERBEND}/lead-chat/meeting/say`,
   ],
+  // `attach_agent`, and the receipt for a comment queued for the lead; the
+  // routes hold both to the agent the board token names.
+  ['POST', `/workspaces/${HARBORLIGHT}/agents`, `/workspaces/${RIVERBEND}/agents`],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/ack`,
+    `/workspaces/${RIVERBEND}/comment-queue/cq-1/ack`,
+  ],
   // A diff review; `routes/lead-diff-scope.ts` holds the repo to the board's roots.
   ['POST', `/workspaces/${HARBORLIGHT}/attachments`, `/workspaces/${RIVERBEND}/attachments`],
   [
@@ -111,6 +119,9 @@ describe('leadScopeAllows', () => {
       ['POST', `/workspaces/${HARBORLIGHT}/mounts`],
       ['GET', `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/answer`],
       ['POST', `/workspaces/${HARBORLIGHT}/lead-chat/meeting`],
+      ['DELETE', `/workspaces/${HARBORLIGHT}/agents`],
+      ['GET', `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/ack`],
+      ['POST', `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/drain`],
       ['POST', '/api/board-tokens'],
       ['GET', `/workspaces/${HARBORLIGHT}/git/push`],
       ['POST', `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`],

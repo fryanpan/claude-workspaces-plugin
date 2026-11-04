@@ -307,6 +307,12 @@ export interface ServerHandle {
   appVoice: {
     mint(workspaceId: string, docId: string, at?: number): { token: string; expiresAt: number };
   };
+  /** The board agent tokens a board socket session holds. Exposed so a test
+   *  can send a route the bearer a walled lead's calls carry, with no MCP
+   *  call in between. Nothing outside this process can reach it. */
+  boardTokens: {
+    mintHeld(agentId: string, boardId: string): { token: string };
+  };
   docStore: DocStore;
   /** The board task store — workspaces, tasks, the transition gate. */
   tasks: TaskStore;
@@ -3647,6 +3653,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
+    boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason
     // `sweepDeadShares` is: a test drives the real thing rather than a
     // re-implementation of it.

@@ -32,6 +32,11 @@
  * - `POST /workspaces/<board>/voice-queue/<id>/answer` and `…/ack` —
  *   `answer_voice`, and the MCP child's receipt for a queued spoken request;
  *   the routes check the agent is on the board (`routes/workspace-attachments.ts`);
+ * - `POST /workspaces/<board>/agents` — `attach_agent` and the MCP child's
+ *   re-attach; the route attaches only the agent the board token names;
+ * - `POST /workspaces/<board>/comment-queue/<id>/ack` — the MCP child's
+ *   receipt for a queued comment; the route clears only a row addressed to
+ *   the agent the board token names;
  * - `POST /workspaces/<board>/lead-chat/meeting/say` — `say_in_meeting`; the
  *   route checks the agent is the board's lead;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
@@ -77,6 +82,7 @@ export function leadScopeAllows(
   const rest = match[2] ?? '';
   if (rest === 'docs') return m === 'GET' || m === 'POST';
   if (rest === 'attachments') return m === 'POST';
+  if (rest === 'agents') return m === 'POST';
   if (rest === 'git/push') return m === 'POST';
   if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
@@ -87,6 +93,7 @@ export function leadScopeAllows(
     return onBoard(workspacesOf, `task:${id}`, boardId);
   if (collection === 'agents') return AGENT_VERBS.includes(verb ?? '') && id !== '';
   if (collection === 'voice-queue') return VOICE_VERBS.includes(verb ?? '') && id !== '';
+  if (collection === 'comment-queue') return verb === 'ack' && id !== '';
   if (collection === 'lead-chat') return id === 'meeting' && verb === 'say';
   return false;
 }
