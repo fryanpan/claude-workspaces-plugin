@@ -40,6 +40,18 @@ profile per lead. A profile allows everything, then:
   `claude -p` answered and ran a Bash call with the install read only. It
   also answered with `~/.local/state/claude` read only; that folder holds
   its locks and stays writable;
+- **refuses writes, after every other rule, to the owner's program folders
+  outside home**: each folder on the owner's PATH (the launch's own and the
+  login shell's, `$SHELL -l`) and `/Applications`, walked up to the highest
+  folder above it the owner can write. On this Mac that is `/opt/homebrew`
+  and `/Applications`. The list is found at each launch and `--check`, not
+  written down (`scripts/lead-sandbox-owner-bins.ts`). Without it a lead could
+  replace `/opt/homebrew/bin/git`, first on the owner's PATH, and every owner
+  session would run the lead's code (measured 4 November under a live lead's
+  profile). The walk stops below any folder holding the home folder, a
+  `protect` folder, a lead's project or `allow` folder, or a temporary
+  folder. The cost: a lead cannot `brew install`, `npm install -g` or
+  `pip install` into Homebrew's Python;
 - **denies the config, the profiles and the prod root again** after every
   other rule, so no `allow` reopens prod and a lead cannot widen its next
   launch;
@@ -259,6 +271,7 @@ Then six rows per lead try the ways out of the wall and the keychain
 | launchd | a `launchctl submit` of `/usr/bin/true` is not loaded (launchd's own refusal; no rule of ours) | the same job submitted outside loads, and is removed at once |
 | keychain | `security find-generic-password` of a dummy item the check made (`lead-sandbox-check-harborlight`) is refused | the same read outside returns it; the item is deleted after |
 | claude install | `touch` of a new file in the folder `~/.local/bin/claude` resolves into is refused | that folder is writable (asked with `access`, so nothing is made); a file the wall let through is removed |
+| programs | one row per owner program folder found (above): `touch` of a new file in it is refused | that folder is writable (asked with `access`); a file the wall let through is removed |
 
 `open` and `osascript` are asked of the sandbox rather than driven, because
 driving them would start an app or show a window. The check starts and kills
