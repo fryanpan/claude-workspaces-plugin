@@ -95,7 +95,11 @@ while [ $# -gt 0 ]; do
 done
 exec "$@"`,
   );
+  // The release check answers nothing, so the machine runs the image's app.
   write('bun', `${record}\ncase "$*" in *bin.ts*) exec /bin/sleep 1000;; esac\nexit 0`);
+  // The health probe: no answer, unless a test says otherwise. Never the
+  // real curl: port 8787 on a developer's machine is somebody's server.
+  write('curl', 'printf 000');
   write('cloudflared', `${record}\nexec /bin/sleep 1000`);
   // Claude Code: records itself and its pid, then stays up, or exits at once
   // while the file .claude-exits exists.
