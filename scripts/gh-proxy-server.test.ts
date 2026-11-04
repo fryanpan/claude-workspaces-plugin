@@ -186,7 +186,10 @@ describe('the gh proxy', () => {
       'query PullRequestStatusChecks($id: ID!) { node(id: $id) { ... on PullRequest { number } } }';
     const r = await graphql(checks, { id: 'PR_other' });
     expect(r.status).toBe(403);
-    expect(JSON.parse(r.body).message).toContain('other/x');
+    const message = JSON.parse(r.body).message;
+    expect(message).toContain("not in a repo in riverbend's githubRepos");
+    // It does not say which repo: that would name a private repo from its id.
+    expect(message).not.toContain('other/x');
     expect(seen.map((s) => s.body.includes('GhProxyNodes'))).toEqual([true]);
     const ok = await graphql(checks, { id: 'PR_listed' });
     expect(ok.status).toBe(200);

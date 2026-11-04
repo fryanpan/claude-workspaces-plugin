@@ -186,7 +186,7 @@ export function createGhProxy(opts: GhProxyOptions): http.Server {
       if (!r) return `node ${n.id} does not resolve`;
       if (r.type !== n.type) return `node ${n.id} is a ${r.type}, not a ${n.type}`;
       if (!r.repo || !lead.repos.has(r.repo))
-        return `node ${n.id} is in ${r.repo ?? 'no repo'}, which is not in ${lead.name}'s githubRepos`;
+        return `node ${n.id} is not in a repo in ${lead.name}'s githubRepos`;
     }
     return null;
   };
