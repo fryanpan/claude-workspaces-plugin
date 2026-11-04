@@ -554,7 +554,7 @@ export async function handleAuthShareRoutes(
     // copy of the value, which otherwise validates forever. Only an id
     // off a VERIFIED cookie reaches the store, so an attacker cannot
     // grow the file with junk.
-    // Both names: a browser mid-way onto `__Host-` can hold the two.
+    // Both names: a browser signed in before `__Host-` may still hold a plain one.
     const cookieHeader = req.headers.get('cookie');
     for (const name of [HOST_SESSION_COOKIE, SESSION_COOKIE]) {
       const claims = verifyEmailSession(readCookie(cookieHeader, name), emailSessionKey());
