@@ -45,6 +45,14 @@ export class FakeSocket implements SpokenSocket {
 /** Which tab hears the reader, set by the test: hears until told otherwise. */
 export function fakeTab() {
   const tab = { hears: true, joined: false, onChange: null as ((h: boolean) => void) | null };
+  /** As the real one does: a tab out of the election hears. */
+  const release = (): void => {
+    if (!tab.joined) return;
+    tab.joined = false;
+    if (tab.hears) return;
+    tab.hears = true;
+    tab.onChange?.(true);
+  };
   const make: NonNullable<LeadVoiceOpts['listeningTab']> = (o) => {
     tab.onChange = o.onChange;
     return {
@@ -52,13 +60,9 @@ export function fakeTab() {
         tab.joined = true;
         tab.hears = true;
       },
-      leave: () => {
-        tab.joined = false;
-      },
+      leave: () => release(),
       hears: () => tab.hears,
-      destroy: () => {
-        tab.joined = false;
-      },
+      destroy: () => release(),
     };
   };
   return {

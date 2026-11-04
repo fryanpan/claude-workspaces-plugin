@@ -157,7 +157,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** Back from the back-forward cache with the socket gone: voice is off. */
   const onPageShow = (): void => {
     leaving = false;
-    if (on && !socket) halt(CLOSED, '', true);
+    // A paused tab waiting to listen holds no socket, and needs none.
+    if (on && !socket && !(st.paused && st.phase === 'listening')) halt(CLOSED, '', true);
   };
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('pageshow', onPageShow);
@@ -176,10 +177,10 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     onFirstWord: () => {},
   });
 
-  /** Only the tab the reader is on, or was on last, hears them. A question
-   *  this tab was hearing when it lost them is asked with what it heard, or
-   *  dropped with its socket when it heard nothing, so no listener is held
-   *  open for a tab the reader is not on. Back on it, the next one listens. */
+  /** Only the tab the reader is on, or was on last, hears them; on losing
+   *  them, a question ends (asked, dropped, or ended empty while the lead
+   *  still owes an answer), and a paused tab says nothing aloud, so the one
+   *  that hears never takes the speakers' answer as a question. */
   const tab = (opts.listeningTab ?? createListeningTab)({
     onChange: (hears) => {
       if (!on) return;
@@ -188,10 +189,16 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         if (st.phase === 'listening' && !forwarding) listen();
         return;
       }
+      player.stop();
       if (st.phase !== 'listening' || !forwarding) return;
       forwarding = false;
-      if (st.heard) sendMsg({ type: 'end' });
-      else if (awaiting === 0) dropSocket();
+      if (!st.heard && awaiting === 0) return dropSocket();
+      sendMsg({ type: 'end' });
+      // Asked: coming back must not start another question over it.
+      if (st.heard) {
+        set({ phase: 'working' });
+        stillWorking();
+      }
     },
   });
 
@@ -384,6 +391,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         return;
       case 'turn-end':
         forwarding = false;
+        // The empty question a paused tab ended: nothing was asked.
+        if (st.paused && !m.text) return;
         set({ phase: 'working', heard: m.text });
         stillWorking();
         return;
@@ -407,7 +416,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         // none of it goes back as a question.
         forwarding = false;
         doneWorking();
-        player.begin(m.sampleRate);
+        if (!st.paused) player.begin(m.sampleRate);
         set({ phase: 'speaking' });
         return;
       case 'audio-end':
@@ -481,8 +490,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     destroy() {
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
-      tab.destroy();
       on = false;
+      tab.destroy();
       stopCapture();
       player.stop();
       dropSocket();
