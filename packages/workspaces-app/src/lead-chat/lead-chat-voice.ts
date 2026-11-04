@@ -280,6 +280,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     const ws = socket;
     socket = null;
     queue = [];
+    awaiting = 0;
     ws?.close();
   };
 
@@ -306,6 +307,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (socket !== ws) return;
       socket = null;
       queue = [];
+      awaiting = 0;
       if (on && !leaving) halt(CLOSED);
     };
     socket = ws;
@@ -362,6 +364,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   };
 
   function onServer(m: SpokenServerMessage): void {
+    // Counted while voice is off too: the socket a stop kept is waiting for it.
+    if (m.type === 'reply' && m.route === 'agent' && !m.spoken) awaiting++;
+    if (m.type === 'reply' && m.route === LEAD_ANSWER) awaiting = Math.max(0, awaiting - 1);
     if (!on) return;
     switch (m.type) {
       case 'heard':
@@ -377,8 +382,6 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         stillWorking();
         return;
       case 'reply':
-        if (m.route === 'agent' && !m.spoken) awaiting++;
-        if (m.route === LEAD_ANSWER) awaiting = Math.max(0, awaiting - 1);
         // Nothing to say now — nothing heard, or the lead took the question
         // and answers later: the next question listens while it works. The
         // server says the lead's answer over a listener that has heard

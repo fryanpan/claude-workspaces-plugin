@@ -144,6 +144,13 @@ describe('the lead chat voice', () => {
     voice.stop();
     expect(ws.closed).toBe(false);
     expect(ws.messages().at(-1)).toEqual({ type: 'stop' });
+    // Answered while voice was off: the next stop while listening has
+    // nothing to wait for, and lets the socket go.
+    ws.serve({ type: 'reply', spoken: 'Done.', detail: [], asking: false, route: 'lead-answer' });
+    voice.start();
+    await settle();
+    voice.stop();
+    expect(ws.closed).toBe(true);
   });
 
   const cases: Array<[string, SpokenServerMessage[]]> = [
