@@ -950,10 +950,10 @@ const NAV_TAB_LABEL: Record<BoardNav, string> = {
  * The browser tab's title for a board. The workspace name leads, because that
  * is what tells two open boards apart; the pane follows, so that moving between
  * Home, Tasks and Activity is visible in the tab strip rather than only in
- * the URL.
+ * the URL. An open task or goal (`open`, its title) takes the pane's place.
  */
-export function boardTabTitle(workspaceName: string, nav: BoardNav): string {
-  return tabTitle(workspaceName, NAV_TAB_LABEL[nav]);
+export function boardTabTitle(workspaceName: string, nav: BoardNav, open?: string): string {
+  return tabTitle(workspaceName, open?.trim() ? open : NAV_TAB_LABEL[nav]);
 }
 
 /** The brief as `GET /workspaces/:id/home` ships it. */

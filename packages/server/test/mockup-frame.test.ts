@@ -154,6 +154,25 @@ describe('the frame and host helpers', () => {
     expect(plain).toContain('<title>Lemons &amp; limes</title>');
   });
 
+  it("titles the tab with the board's name, then the doc's title or else the mock's", () => {
+    const args = {
+      workspaceId: 'w-stand',
+      docId: 'd-mock',
+      html: '<title>Moorings</title>',
+      url: new URL('http://b.test/workspaces/w-stand/mockups/d-mock'),
+      items: [],
+      visitor: false,
+      leadChatHref: '/app/lead-chat.js',
+    };
+    const named = renderMockHost({ ...args, workspaceName: 'Harborlight', docTitle: 'Tides "<b>' });
+    expect(named).toContain('<title>Harborlight · Tides "&lt;b> · Workspaces</title>');
+    // The page's script keeps it current, starting from the same name.
+    expect(named).toContain('data-doc-title="Tides &quot;&lt;b&gt;"');
+    expect(renderMockHost({ ...args, workspaceName: 'Harborlight' })).toContain(
+      '<title>Harborlight · Moorings · Workspaces</title>',
+    );
+  });
+
   it("draws the board's pages beside the owner's mock, and only the link back for a share visitor", () => {
     const args = {
       workspaceId: 'board one',

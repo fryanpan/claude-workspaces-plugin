@@ -407,6 +407,7 @@ async function serveApp(
           workspaceId,
           docId: meta.docId,
           html: page,
+          docTitle: meta.title,
           url,
           items: [],
           visitor: rq.visitor,
