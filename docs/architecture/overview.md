@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · spend-alarm.ts · page-loads.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -248,12 +248,19 @@ reader (`slow-fs.ts`) uses under those roots. On macOS a path under a root
 goes through `tree-fs.ts`, which walks from the root's pinned descriptor one
 name at a time and never follows a link below it (its system calls are bound
 in `tree-fs-native.ts`); `fs-scan-contained.ts` is the folder listing done
-the same way. Every other covered path, and every path off macOS, takes the
-plain-path checks in `bound-path-checked.ts`, judged by where the open file
-really is. `guard-refused.ts` is the one error all of them throw. `git-hardening.ts` decides where the server runs no
+the same way, and `tree-fs-create.ts` holds the two calls added after it
+(is a name there, make a new file). Every other covered path, and every path
+off macOS, takes the plain-path checks in `bound-path-checked.ts`, judged by
+where the open file really is; those helpers refuse a root's file themselves,
+through `bound-root-view.ts`, a leaf module the guard registers itself in so
+the helpers can ask without importing it. `guard-refused.ts` is the one error
+all of them throw. `git-hardening.ts` decides where the server runs no
 git at all (a repository holding such a project) and the options every
 other git read passes, so a repository's settings cannot make that read
-run a program. `server-options.ts` holds
+run a program. `git-contained.ts` is the one exception: an asynchronous
+read inside a walled lead's own repository runs under a deny-default
+`sandbox-exec` profile the server writes from the root
+([lead-tree-containment](lead-tree-containment.md)). `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. `review-hold-message.ts` joins those two at the top level: it is the
@@ -1347,7 +1354,11 @@ from `widget/src/mock-host.ts`). A page on a board posts to that board's
 2,000 ms, raises through Sentry once per page type per board per five minutes,
 and `page-loads.ts` keeps one server-wide log that
 `GET /api/load-reports/slowest` reads back as the slowest load per page type
-over 24 h for the daily health check. A report from a page that was hidden
+over 24 h for the daily health check. `spend-alarm.ts` is the other alarm
+in that group: it sums the day's priced usage rows from the meeting calls
+(`meeting-notes.ts` records each into it) and raises one Sentry warning the
+day they pass `CW_SPEND_ALARM_USD`, so a project server, which is one org,
+says when its org spends too much. A report from a page that was hidden
 before it was sent carries `hidden: true` and is counted but never judged:
 a hidden tab paints nothing and its clock keeps running. Each report also
 carries the navigation's `msToResponseStart` / `msToResponseEnd`, so a slow

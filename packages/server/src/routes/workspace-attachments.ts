@@ -36,7 +36,11 @@ import { sentryWatchPlan } from '../sentry-projects.ts';
 import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX, LEAD_WRITTEN_MAX } from '../spoken-reply/lead-answer.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
-import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
+import {
+  type WorkspaceRouteRequest,
+  type WorkspaceRoutesContext,
+  leadProvedAs,
+} from './workspace-routes-context.ts';
 
 /** How far back the presence strip's unfiled-ask number looks. A week, so a
  *  quiet day does not read as a fixed problem and a bad Tuesday does not
@@ -172,17 +176,26 @@ export async function handleWorkspaceAttachments(
     });
   }
   if (wsAgentsMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = wsAgentsMatch.workspaceId;
+    // A board's own lead attaches itself, and only itself, to its board
+    // (`middleware/lead-scope.ts`); every other visitor is refused.
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const body = await safeJson(req);
     const agentId = body?.agentId;
     if (typeof agentId !== 'string' || agentId.trim().length === 0) {
       return j(400, { error: 'agentId required' });
     }
+    if (visitor && !leadProvedAs(rq, workspaceId, agentId.trim()))
+      return j(403, { error: 'a board token attaches only its own agent' });
     const runtime = body?.runtime;
     if (!isAttachmentRuntime(runtime)) {
       return j(400, { error: 'runtime must be claude-code-local | managed-agent | webhook' });
     }
+    // A walled lead is a local session: it has no reason to register a
+    // webhook or managed runtime on its seat, nor a host endpoint.
+    if (visitor && runtime !== 'claude-code-local')
+      return j(403, { error: 'a board token attaches only a claude-code-local session' });
     const res = taskStore.attachAgent(workspaceId, {
       agentId: agentId.trim(),
       // The display name the session runs under. Absent from older
@@ -194,7 +207,7 @@ export async function handleWorkspaceAttachments(
       capabilities: Array.isArray(body?.capabilities)
         ? (body.capabilities as unknown[]).filter((c): c is string => typeof c === 'string')
         : undefined,
-      endpoint: typeof body?.endpoint === 'string' ? body.endpoint : undefined,
+      endpoint: !visitor && typeof body?.endpoint === 'string' ? body.endpoint : undefined,
       // The bundle this session is running. Absent from every peer
       // older than the release that added it — which is the signal,
       // not a gap to paper over with a default.
@@ -326,9 +339,17 @@ export async function handleWorkspaceAttachments(
   // error.
   const wsCommentAckMatch = pathname.match(/^\/workspaces\/([^/]+)\/comment-queue\/([^/]+)\/ack$/);
   if (wsCommentAckMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsCommentAckMatch[1] ?? '');
+    // A board's own lead clears its own rows on its board
+    // (`middleware/lead-scope.ts`); every other visitor is refused.
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsCommentAckMatch[2] ?? '');
+    if (visitor) {
+      const row = taskStore.listQueuedComments(workspaceId).find((q) => q.id === entryId);
+      if (row && !leadProvedAs(rq, workspaceId, row.agentId))
+        return j(403, { error: 'a board token clears only its own agent’s rows' });
+    }
     const cleared = taskStore.ackComment(workspaceId, entryId);
     return j(200, { ok: true, cleared });
   }
@@ -341,8 +362,10 @@ export async function handleWorkspaceAttachments(
   // "gone because someone else drained it".
   const wsVoiceAckMatch = pathname.match(/^\/workspaces\/([^/]+)\/voice-queue\/([^/]+)\/ack$/);
   if (wsVoiceAckMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsVoiceAckMatch[1] ?? '');
+    // A board's own lead is admitted for its board (`middleware/lead-scope.ts`).
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsVoiceAckMatch[2] ?? '');
     const cleared = taskStore.ackVoiceRequest(workspaceId, entryId);
     // The receiving session has it: a lead-chat message it carried now
@@ -357,16 +380,19 @@ export async function handleWorkspaceAttachments(
     /^\/workspaces\/([^/]+)\/voice-queue\/([^/]+)\/answer$/,
   );
   if (wsVoiceAnswerMatch && req.method === 'POST') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsVoiceAnswerMatch[1] ?? '');
+    if (visitor && rq.leadBoard !== workspaceId)
+      return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsVoiceAnswerMatch[2] ?? '');
     const body = await safeJson(req);
     // Only an agent on this board answers aloud on it, proved the way its
     // own feed is: on this machine, with its token.
     const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
     if (!isValidAgentId(agentId)) return j(400, { error: 'agentId required' });
-    const allowed = authorizeAgent(req, agentId);
-    if (!allowed.ok) return j(allowed.status, allowed.body);
+    if (!leadProvedAs(rq, workspaceId, agentId)) {
+      const allowed = authorizeAgent(req, agentId);
+      if (!allowed.ok) return j(allowed.status, allowed.body);
+    }
     if (!taskStore.listAttachments(workspaceId).some((a) => a.agentId === agentId)) {
       return j(403, { error: 'not attached to this board' });
     }

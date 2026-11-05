@@ -46,6 +46,9 @@ export interface WorkspaceRoutesContext {
   /** The registered root `folderPath` resolves to, when it is one of the
    *  board's (`board-socket-roots.ts`); else null. */
   leadBindRoot: (boardId: string, folderPath: string) => string | null;
+  /** `repo` as the roots spell it, when the innermost root holding it is one
+   *  of the board's; else null (`routes/lead-diff-scope.ts`). */
+  leadDiffRepo: (boardId: string, repo: string) => string | null;
   /** The ydoc projection of the store, refreshed by hand after the writes
    *  that emit no store event (attach, unfile, archive-in-place). */
   taskProjection: TaskProjection;
@@ -72,8 +75,9 @@ export interface WorkspaceRoutesContext {
   leadChat: LeadChat;
   /** The meeting each board's lead chat is running. */
   leadChatMeetings: LeadChatMeetings;
-  /** The board's lead in that meeting: its start and the room's lines. */
-  leadMeetingFeed: LeadMeetingFeed;
+  /** The board's lead in that meeting: its start and the room's lines. Null
+   *  while the feed is off, which it is by default (`meetingLeadFeedEnabled`). */
+  leadMeetingFeed: LeadMeetingFeed | null;
   /** The voice a line the lead says into a meeting is played in, or null
    *  when this server has none (the line still shows). */
   leadMeetingVoice: SpokenVoice | null;
@@ -271,6 +275,15 @@ export interface WorkspaceRouteRequest {
   /** The board this request is that board's lead on (the admission gate's
    *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
   leadBoard?: string | null;
+  /** The agent a board token or board socket proved (the admission gate's
+   *  `boardAgent`), or null/absent. */
+  boardAgent?: { agentId: string; boardId: string } | null;
+}
+
+/** Whether `rq` is the board's own lead and proved it is `agentId`: a board
+ *  token names its agent, so no agent token is asked of it as well. */
+export function leadProvedAs(rq: WorkspaceRouteRequest, boardId: string, agentId: string): boolean {
+  return rq.leadBoard === boardId && rq.boardAgent?.agentId === agentId;
 }
 
 /**

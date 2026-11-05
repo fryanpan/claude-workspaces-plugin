@@ -43,6 +43,7 @@
     "check:architecture": "bun run scripts/architecture-freshness.ts",
     "check:imports": "bun run scripts/import-direction.ts",
     "check:outbound-fetch": "bun run scripts/outbound-fetch-audit.ts",
+    "check:tree-fs": "bun run scripts/check-tree-fs.ts",
     "check:import-cycles": "bun run scripts/import-cycles.ts",
     "check:client-boot": "bun run scripts/client-boot-check.ts",
     "check:meeting-smoke": "bun run scripts/meeting-smoke-check.ts",
@@ -80,6 +81,7 @@
     "@types/bun": "^1.1.14",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^4.1.11",
+    "graphql": "^16.14.2",
     "happy-dom": "^21.0.4",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"

@@ -32,6 +32,7 @@ import {
   realpathSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { rootView } from './bound-root-view.ts';
 import { boundFiles } from './slow-fs.ts';
 
 export const HARDENED_GIT_ARGS: readonly string[] = [
@@ -120,6 +121,9 @@ const POINTER_MAX = 4_096;
 /** A match in a small regular file, read without blocking: a pipe or a
  *  device at the path would otherwise hold the main thread. */
 export function readLine(path: string, re: RegExp, max = POINTER_MAX): string | null {
+  // It follows a link, so a path a guard covers is not read at all: a
+  // pointer there is the lead's, and `repoOf` counts the repo as barred.
+  if (rootView()?.covers(path)) return null;
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);

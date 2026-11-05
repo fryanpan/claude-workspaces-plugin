@@ -47,7 +47,8 @@ also carry no cookie, so behind Access they cannot reach the board at all.
    signed-in person who is not the owner.
 
    A frame on the frame-only hostname cannot prove anyone this way: its
-   document request carries the `cw_frame` cookie, not the board's. So the
+   document request carries the board's frame cookie
+   (`__Host-cw_frame-<board>`), not the board's session. So the
    host page, whose request does carry the reader's cookie, makes this
    decision and writes it into the frame ticket (`frame-ticket.ts`). The
    cookie the ticket is traded for keeps it, and the frame gets a token

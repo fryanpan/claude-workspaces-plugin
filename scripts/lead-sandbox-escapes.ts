@@ -1,7 +1,8 @@
 /**
  * `--check`'s rows for the ways a lead could start a process outside the
  * wall (`escapeRules` in `lead-sandbox-lib.ts`), and for the board wall
- * (`lead-sandbox-wall.ts`). Each row drives the thing
+ * (`lead-sandbox-wall.ts`), and for the tools a config opens
+ * (`lead-sandbox-tools.ts`). Each row drives the thing
  * from inside the profile and has a control outside it, so a row fails when
  * its rule is removed, not only when the probe itself breaks.
  *
@@ -13,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
+import { ADB_SERVER_PORT } from './lead-sandbox-tools.ts';
 import { BOARD_SERVER_PORTS, CONNECT_PROBE, SOCKET_CONNECT_PROBE } from './lead-sandbox-wall.ts';
 
 export interface EscapeRow {
@@ -187,7 +189,12 @@ export function keychainRow(profile: string, cwd: string): EscapeRow {
  * writable (the control, asked with `access`, so nothing is made there);
  * inside, `touch` must be refused. A stray file is removed if the wall fails.
  */
-export function installRow(profile: string, cwd: string, dir: string): EscapeRow {
+export function installRow(
+  profile: string,
+  cwd: string,
+  dir: string,
+  what = 'claude install',
+): EscapeRow {
   const probe = join(dir, '.lead-sandbox-check');
   let control = true;
   try {
@@ -203,7 +210,7 @@ export function installRow(profile: string, cwd: string, dir: string): EscapeRow
   rmSync(probe, { force: true });
   return {
     ok: control && !wrote,
-    says: `claude install: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
+    says: `${what}: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
   };
 }
 
@@ -346,5 +353,129 @@ export function boardSocketRows(
         says: `board socket: ${path} answers ${control} without the wall (the control), ${walled} inside (must be EPERM)`,
       };
     }),
+  ];
+}
+
+/**
+ * adb (`lead-sandbox-tools.ts`). A lead with it must run the SDK's `adb
+ * version`, which asks no server. Any other lead's connect to adb's port
+ * must answer `EPERM`. There is no control outside the wall: it would open a
+ * real connection to the adb server, and `EPERM` cannot come from anything
+ * but the sandbox (a port with no listener answers `ECONNREFUSED`).
+ */
+export function adbRow(
+  profile: string,
+  cwd: string,
+  hasAdb: boolean,
+  sdk: string,
+  runtime: string = probeRuntime() ?? process.execPath,
+): EscapeRow {
+  if (!hasAdb) {
+    const inside = connectFrom(runtime, profile, cwd, '127.0.0.1', ADB_SERVER_PORT);
+    return {
+      ok: inside === 'EPERM',
+      says: `adb: port ${ADB_SERVER_PORT} answers ${inside} inside (must be EPERM; the config gives no adb)`,
+    };
+  }
+  const adb = join(sdk, 'adb');
+  const r = spawnSync(SANDBOX_EXEC, ['-f', profile, adb, 'version'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  const ran = r.status === 0 && r.stdout.includes('Android Debug Bridge');
+  return {
+    ok: ran,
+    says: `adb: ${adb} version ${ran ? 'runs' : `exits ${r.status}`} inside (must run)`,
+  };
+}
+
+/**
+ * The `bun` wrapper (`lead-sandbox-tools.ts`): inside the profile, a bun
+ * started in the plugin cache must see `BUN_CONFIG_SKIP_INSTALL_PACKAGES=1`
+ * and one started in the lead's own project must not (the control).
+ */
+export function bunWrapperRow(
+  profile: string,
+  cwd: string,
+  wrapper: string,
+  pluginDir: string,
+): EscapeRow {
+  const seen = (dir: string) => {
+    const r = spawnSync(
+      SANDBOX_EXEC,
+      [
+        '-f',
+        profile,
+        wrapper,
+        '--cwd',
+        dir,
+        '-e',
+        'console.log(process.env.BUN_CONFIG_SKIP_INSTALL_PACKAGES ?? "unset")',
+      ],
+      { cwd, encoding: 'utf8', timeout: 10_000 },
+    );
+    return r.status === 0 ? r.stdout.trim() : `exit ${r.status}`;
+  };
+  const plugin = seen(pluginDir);
+  const own = seen(cwd);
+  return {
+    ok: plugin === '1' && own === 'unset',
+    says: `bun wrapper: skips the install in ${pluginDir} (${plugin}, must be 1) and not in ${cwd} (${own}, must be unset)`,
+  };
+}
+
+/** uv (`lead-sandbox-tools.ts`): inside the profile, uv must list the Pythons it installed. */
+export function uvRow(profile: string, cwd: string, env: Record<string, string>): EscapeRow {
+  const r = spawnSync(
+    SANDBOX_EXEC,
+    ['-f', profile, 'uv', 'python', 'list', '--only-installed', '--offline'],
+    { cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 20_000 },
+  );
+  return {
+    ok: r.status === 0,
+    says: `uv: python list ${r.status === 0 ? 'answers' : `exits ${r.status}`} inside (must answer)`,
+  };
+}
+
+/**
+ * gh (`gh-proxy-lead.ts`). A lead with it runs `gh api /` inside the
+ * profile, and must get the proxy's own refusal back: that shows gh reached
+ * the socket, and nothing goes to GitHub, since the proxy refuses `/`. Any
+ * other lead's connect to the socket must answer `EPERM`, while one outside
+ * any sandbox connects (the control); with no proxy running there is nothing
+ * to connect to, so that row is not run.
+ */
+export function ghRows(
+  profile: string,
+  cwd: string,
+  hasGh: boolean,
+  socket: string,
+  env: Record<string, string>,
+  runtime: string = probeRuntime() ?? process.execPath,
+): EscapeRow[] {
+  if (hasGh) {
+    const r = spawnSync(SANDBOX_EXEC, ['-f', profile, 'gh', 'api', '/'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      timeout: 20_000,
+    });
+    const reached = `${r.stdout ?? ''}${r.stderr ?? ''}`.includes('gh proxy:');
+    return [
+      {
+        ok: reached,
+        says: `gh: \`gh api /\` ${reached ? 'gets the proxy' : `exits ${r.status} without the proxy`} inside (must get the proxy at ${socket}; is git-proxy.ts running?)`,
+      },
+    ];
+  }
+  const control = socketConnectFrom(runtime, null, cwd, socket);
+  if (control !== 'connected') return [];
+  const inside = socketConnectFrom(runtime, profile, cwd, socket);
+  return [
+    {
+      ok: inside === 'EPERM',
+      says: `gh proxy: ${socket} answers ${control} without the wall (the control), ${inside} inside (must be EPERM; the config gives no gh)`,
+    },
   ];
 }

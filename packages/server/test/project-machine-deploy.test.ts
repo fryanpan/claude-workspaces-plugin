@@ -34,6 +34,7 @@ function complete(): Observed {
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
+    versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
   };
@@ -87,6 +88,7 @@ describe('plan', () => {
       volumes: 0,
       keychain: new Set(),
       lifecycle: false,
+      versioning: false,
       secrets: new Set(),
       machines: [],
     });
@@ -96,6 +98,7 @@ describe('plan', () => {
       'make-backup-key',
       'create-bucket',
       'make-writer-key',
+      'set-versioning',
       'set-lifecycle',
       'set-secrets',
       'deploy',

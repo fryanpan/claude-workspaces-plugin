@@ -22,10 +22,23 @@
  *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
  *   board must be the lead's, the folder one of the roots registered for it
  *   (`board-socket-roots.ts`), and a board create is refused;
+ * - `POST /workspaces/<board>/attachments` — a diff review
+ *   (`create_diff_review`) of a repository inside one of the board's roots;
+ *   `routes/lead-diff-scope.ts` holds the body to it;
  * - `POST /workspaces/<board>/agents/<agent>/notes`, `…/prompts` and
  *   `…/mirror` — the plugin's Stop, PermissionDenied, UserPromptSubmit,
  *   MessageDisplay and PostToolBatch hooks, and `post_status`'s untargeted
  *   form;
+ * - `POST /workspaces/<board>/voice-queue/<id>/answer` and `…/ack` —
+ *   `answer_voice`, and the MCP child's receipt for a queued spoken request;
+ *   the routes check the agent is on the board (`routes/workspace-attachments.ts`);
+ * - `POST /workspaces/<board>/agents` — `attach_agent` and the MCP child's
+ *   re-attach; the route attaches only the agent the board token names;
+ * - `POST /workspaces/<board>/comment-queue/<id>/ack` — the MCP child's
+ *   receipt for a queued comment; the route clears only a row addressed to
+ *   the agent the board token names;
+ * - `POST /workspaces/<board>/lead-chat/meeting/say` — `say_in_meeting`; the
+ *   route checks the agent is the board's lead;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
  *   of that board;
  * - `POST /workspaces/<board>/git/push` and `GET …/git/pushes/<id>` — a push
@@ -53,6 +66,8 @@ const FOLDER_BIND_PATH = '/workspaces';
 const BOARD_PATH = /^\/workspaces\/([^/]+)\/(.+)$/;
 /** What a lead's hooks post about its own session. */
 const AGENT_VERBS: readonly string[] = ['notes', 'prompts', 'mirror'];
+/** What a lead does with a spoken request queued for it. */
+const VOICE_VERBS: readonly string[] = ['answer', 'ack'];
 
 export function leadScopeAllows(
   pathname: string,
@@ -66,6 +81,8 @@ export function leadScopeAllows(
   if (!match || decoded(match[1] ?? '') !== boardId) return false;
   const rest = match[2] ?? '';
   if (rest === 'docs') return m === 'GET' || m === 'POST';
+  if (rest === 'attachments') return m === 'POST';
+  if (rest === 'agents') return m === 'POST';
   if (rest === 'git/push') return m === 'POST';
   if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
@@ -75,6 +92,9 @@ export function leadScopeAllows(
   if (collection === 'tasks' && verb === 'notes')
     return onBoard(workspacesOf, `task:${id}`, boardId);
   if (collection === 'agents') return AGENT_VERBS.includes(verb ?? '') && id !== '';
+  if (collection === 'voice-queue') return VOICE_VERBS.includes(verb ?? '') && id !== '';
+  if (collection === 'comment-queue') return verb === 'ack' && id !== '';
+  if (collection === 'lead-chat') return id === 'meeting' && verb === 'say';
   return false;
 }
 

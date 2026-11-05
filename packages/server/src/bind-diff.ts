@@ -7,7 +7,6 @@
  * getOrCreate + attach) and their writers, and the writers now live in
  * `bind-meta.ts` so neither file owns the other's rules.
  */
-import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
 import { type DocMeta, type DocType, attachmentIdOf, mediaTypeOf } from '@claude-workspaces/core';
 import {
@@ -36,8 +35,8 @@ import { MAX_SKIPPED, scanFolderReport } from './fs-scan.ts';
 import {
   type DiffFileEntry,
   diffFilesAsync,
-  resolveCommit,
-  showFile,
+  resolveCommitAsync,
+  showFileAsync,
   textLooksBinary,
 } from './git-diff.ts';
 import { boundFiles } from './slow-fs.ts';
@@ -159,7 +158,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     };
   }
   const root = resolvePath(opts.repoPath);
-  if (!existsSync(root)) return { ok: false, error: 'not-found' };
+  if (!boundFiles.guards.exists(root)) return { ok: false, error: 'not-found' };
 
   // Shape first: a spec is PERSISTED on the members for refreshWorkspace to
   // replay, so one that would blow up assignGroups must never be written.
@@ -301,8 +300,9 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     };
   }
 
-  const base = resolveCommit(root, opts.base);
-  const target = opts.target !== undefined ? resolveCommit(root, opts.target) : null;
+  // Async, so a walled lead's own repository resolves through contained git.
+  const base = await resolveCommitAsync(root, opts.base);
+  const target = opts.target !== undefined ? await resolveCommitAsync(root, opts.target) : null;
   if (!base || (opts.target !== undefined && !target)) {
     return {
       ok: false,
@@ -346,7 +346,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     let text = '';
     if (entry.status !== 'deleted') {
       if (target) {
-        text = showFile(root, target, entry.relPath) ?? '';
+        text = (await showFileAsync(root, target, entry.relPath)) ?? '';
       } else {
         // Working-tree content comes off the thread pool, under a deadline.
         // This loop runs once per changed file in a repository the caller

@@ -124,6 +124,11 @@ jobs:
       # bare fetch elsewhere in packages/server/src is a request that skipped it.
       - name: Every server request goes through the outbound guard
         run: bun run check:outbound-fetch
+      # Every module in packages/server/src and packages/core/src that can reach
+      # a file or start a process has a row saying how it stands toward a
+      # walled lead's folders (docs/architecture/lead-tree-containment.md).
+      - name: Every file-reaching module has a lead-tree row
+        run: bun run check:tree-fs
       # No runtime import cycle in packages/core/src or packages/workspaces-app/src.
       # A cycle is not an error in ESM — it just makes correctness depend on
       # evaluation order, and the bundler orders differently from vitest and

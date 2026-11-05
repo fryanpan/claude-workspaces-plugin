@@ -53,6 +53,32 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${RIVERBEND}/tasks/t-river/notes`,
   ],
   ['POST', `/workspaces/${HARBORLIGHT}/git/push`, `/workspaces/${RIVERBEND}/git/push`],
+  // The voice verbs: `answer_voice`, the queued request's receipt, `say_in_meeting`.
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/answer`,
+    `/workspaces/${RIVERBEND}/voice-queue/lc-1/answer`,
+  ],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/ack`,
+    `/workspaces/${RIVERBEND}/voice-queue/lc-1/ack`,
+  ],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/lead-chat/meeting/say`,
+    `/workspaces/${RIVERBEND}/lead-chat/meeting/say`,
+  ],
+  // `attach_agent`, and the receipt for a comment queued for the lead; the
+  // routes hold both to the agent the board token names.
+  ['POST', `/workspaces/${HARBORLIGHT}/agents`, `/workspaces/${RIVERBEND}/agents`],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/ack`,
+    `/workspaces/${RIVERBEND}/comment-queue/cq-1/ack`,
+  ],
+  // A diff review; `routes/lead-diff-scope.ts` holds the repo to the board's roots.
+  ['POST', `/workspaces/${HARBORLIGHT}/attachments`, `/workspaces/${RIVERBEND}/attachments`],
   [
     'GET',
     `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`,
@@ -89,8 +115,13 @@ describe('leadScopeAllows', () => {
       ['POST', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/reparse_from_disk`],
       ['GET', `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content/extra`],
       ['GET', `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/notes`],
-      ['POST', `/workspaces/${HARBORLIGHT}/attachments`],
+      ['GET', `/workspaces/${HARBORLIGHT}/attachments`],
       ['POST', `/workspaces/${HARBORLIGHT}/mounts`],
+      ['GET', `/workspaces/${HARBORLIGHT}/voice-queue/lc-1/answer`],
+      ['POST', `/workspaces/${HARBORLIGHT}/lead-chat/meeting`],
+      ['DELETE', `/workspaces/${HARBORLIGHT}/agents`],
+      ['GET', `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/ack`],
+      ['POST', `/workspaces/${HARBORLIGHT}/comment-queue/cq-1/drain`],
       ['POST', '/api/board-tokens'],
       ['GET', `/workspaces/${HARBORLIGHT}/git/push`],
       ['POST', `/workspaces/${HARBORLIGHT}/git/pushes/${'a'.repeat(24)}`],

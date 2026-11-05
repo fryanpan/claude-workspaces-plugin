@@ -66,6 +66,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
 import { isExcluded, normalizeExcludes } from './bind-meta.ts';
 import { containedRoot } from './fs-scan-contained.ts';
+import { containedGit, isSafeGitName } from './git-contained.ts';
 import { diffFilesAsync } from './git-diff.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 import { type Contained, listTreeSync } from './tree-fs.ts';
@@ -228,7 +229,18 @@ const LISTING_DEADLINE_MS = 3_000;
 
 /** `git ls-files` as a child process; null outside a repo or on failure. */
 async function gitListing(root: string): Promise<Set<string> | null> {
-  if (gitBarred(root)) return null;
+  if (gitBarred(root)) {
+    // A walled lead's repository: git contained, or the walk below.
+    const got = await containedGit(root, [
+      'ls-files',
+      '-z',
+      '--cached',
+      '--others',
+      '--exclude-standard',
+    ]);
+    if (!got?.ok) return null;
+    return new Set(got.stdout.split('\0').filter(isSafeGitName));
+  }
   try {
     const proc = Bun.spawn(
       [

@@ -44,6 +44,16 @@
 import type { TickScheduler } from '../pause-ticker.ts';
 import { compareSemver } from '../plugin-release.ts';
 
+/**
+ * Whether the feed runs. OFF by default since 2026-11-04, pending a redesign
+ * of the meeting: a lead sent every line took a turn per batch and spoke into
+ * the meeting unasked. `CW_MEETING_LEAD_FEED=1` turns it back on; any other
+ * value, or none, leaves it off. A "Lead, …" line reaches the lead either way.
+ */
+export function meetingLeadFeedEnabled(env: Record<string, string | undefined>): boolean {
+  return env.CW_MEETING_LEAD_FEED === '1';
+}
+
 /** The first plugin whose MCP renders these frames (`meeting-feed-line.ts`). */
 export const LEAD_MEETING_SINCE = '0.1.347';
 

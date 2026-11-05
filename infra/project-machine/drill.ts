@@ -16,11 +16,15 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { type DrillPrint, drillLimits, judgeDrill, projectConfig } from './deploy-plan.ts';
 import { deployProject, machines, tunnelAddress } from './deploy.ts';
-import { flyJson, flyOk, onMachine } from './mac-ops.ts';
+import { asCw, flyJson, flyOk, onMachine } from './mac-ops.ts';
 import { restoreMachine } from './restore-machine.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PROBE = 'bun /app/infra/project-machine/drill-probe.ts';
+/** The probe calls the server's REST, which admits cw alone (asCw). Root
+ *  makes the fixtures folder first: /data is root's, and only root writes it. */
+const SEED = `mkdir -p /data/drill-fixtures && chown cw:cw /data/drill-fixtures && ${asCw(`${PROBE} seed`)}`;
+const fingerprintCmd = (limits = '') => asCw(`${PROBE} fingerprint${limits ? ` ${limits}` : ''}`);
 
 /** The last JSON line of a command's output; `fly ssh` prints its own lines first. */
 function lastJson<T>(out: string): T {
@@ -66,8 +70,8 @@ async function main(): Promise<void> {
   await deployProject(cfg, false);
   await waitForServer(cfg.app);
   console.log(`[drill] tunnel: ${(await tunnelAddress(cfg.app)) ?? 'not in the logs'}`);
-  console.log(`[drill] seed: ${onMachine(cfg.app, `${PROBE} seed`).trim().split('\n').at(-1)}`);
-  const before = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint`));
+  console.log(`[drill] seed: ${onMachine(cfg.app, SEED).trim().split('\n').at(-1)}`);
+  const before = lastJson<DrillPrint>(onMachine(cfg.app, fingerprintCmd()));
   console.log(`[drill] before: ${summary(before)}`);
   if (before.count === 0) throw new Error('nothing to back up');
   const backup = onMachine(cfg.app, 'bash /app/infra/project-machine/backup-once.sh');
@@ -85,12 +89,12 @@ async function main(): Promise<void> {
 
   await deployProject(cfg, false);
   await waitForServer(cfg.app);
-  const empty = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint`));
+  const empty = lastJson<DrillPrint>(onMachine(cfg.app, fingerprintCmd()));
   console.log(`[drill] fresh machine before restore: ${summary(empty)}`);
   const key = await restoreMachine(cfg);
   await waitForServer(cfg.app);
   const limits = Buffer.from(JSON.stringify(drillLimits(before))).toString('base64');
-  const after = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint ${limits}`));
+  const after = lastJson<DrillPrint>(onMachine(cfg.app, fingerprintCmd(limits)));
   console.log(`[drill] restored ${key}`);
   console.log(`[drill] after: ${summary(after)}`);
   const { ok, lines } = judgeDrill(before, after);

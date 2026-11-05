@@ -28,6 +28,7 @@ function complete(cfg: ProjectConfig, extra: string[] = []): Observed {
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
+    versioning: true,
     secrets: new Set([...requiredSecrets(cfg.tunnel), ...extra]),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: cfg.vmMemoryMb }],
   };

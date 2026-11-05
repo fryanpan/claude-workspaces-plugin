@@ -70,8 +70,12 @@ forwards a board only to that origin, and answers a board any other origin
 holds with a 308 to `<its project>-<first label>.<zone>`, path and query kept. A
 board on an origin with no project label, or with two, gets a 404. So Bryan's
 stamp for the one address never reaches another machine, which could replay
-it to the Mac. Unset, every board is forwarded, as before each project had an
-application of its own; malformed, the one address routes nothing.
+it to the Mac. Unset, the Worker cannot tell which machine owns that stamp,
+so it forwards a board only while `PROJECT_ORIGINS` and `BOARD_ORIGINS` name a
+single origin between them; once a second origin appears, an unset value routes
+nothing on the one address (review M2), and the daily wall check reports it
+(`oneAddressRows`, `infra/project-machine/wall-drift.ts`). Project hostnames
+are unaffected. Malformed, the one address routes nothing.
 
 `FRAME_DOMAIN` names the frame domain, a domain that is not the one
 address's, where each project's mocks and app doors run on
@@ -110,8 +114,10 @@ or labels an event only, so a planted one can sign a reader out but reads
 nothing. That is the accepted risk in the design (decision 16). Renaming
 `lf_share` to `__Host-lf_share` would close it for share links.
 
-On a frame hostname only `cw_frame` is kept: the board's frame ticket, the one
-cookie a project server reads there. The board's session and share cookies
+On a frame hostname only the frame cookies are kept: each board's
+`__Host-cw_frame-<board>`, the cookie its frame ticket is traded for and the
+one a project server reads there, and the old name `cw_frame`, read for one
+release after the rename (review L2). The board's session and share cookies
 never travel to a frame hostname, and nor does anything a frame's page set.
 
 On the way back, a `Set-Cookie` that names a Domain is removed from the

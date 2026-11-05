@@ -275,7 +275,7 @@ export function resolveServerConfig(opts: {
   const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
   /** `CW_FEEDBACK_BOARD=<board id or name>`: see ServerOptions.feedbackBoard. */
   const feedbackBoard = env.CW_FEEDBACK_BOARD?.trim() || undefined;
-  /** `CW_LOOPBACK_ALLOWED_UIDS=0,10001`: see ServerOptions.loopbackAllowedUids. */
+  /** `CW_LOOPBACK_ALLOWED_UIDS=10001`: see ServerOptions.loopbackAllowedUids. */
   const loopbackAllowedUids = parseUidList(
     'CW_LOOPBACK_ALLOWED_UIDS',
     env.CW_LOOPBACK_ALLOWED_UIDS,
@@ -295,6 +295,13 @@ export function resolveServerConfig(opts: {
     throw new Error(
       'CW_BOARD_SOCKET_GROUP is set, so CW_LOOPBACK_ALLOWED_UIDS must name the uids to admit',
     );
+  }
+
+  /** `CW_SPEND_ALARM_USD=25`: see ServerOptions.spendAlarmUsd. */
+  const spendAlarmRaw = (env.CW_SPEND_ALARM_USD ?? '').trim();
+  const spendAlarmUsd = spendAlarmRaw === '' ? undefined : Number(spendAlarmRaw);
+  if (spendAlarmUsd !== undefined && !(Number.isFinite(spendAlarmUsd) && spendAlarmUsd > 0)) {
+    throw new Error(`CW_SPEND_ALARM_USD: ${JSON.stringify(spendAlarmRaw)} is not a dollar figure`);
   }
 
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
@@ -723,6 +730,7 @@ export function resolveServerConfig(opts: {
     loopbackSkipsAccess,
     loopbackAllowedUids,
     loopbackEdgeUids,
+    spendAlarmUsd,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,

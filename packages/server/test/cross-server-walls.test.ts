@@ -102,7 +102,12 @@ import {
   mintBoardWidgetToken,
   widgetTokenKey,
 } from '../src/auth/widget-token.ts';
-import { FRAME_COOKIE, FRAME_TICKET_PARAM, frameCookie, frameTicket } from '../src/frame-ticket.ts';
+import {
+  FRAME_TICKET_PARAM,
+  frameCookie,
+  frameCookieName,
+  frameTicket,
+} from '../src/frame-ticket.ts';
 import { signSession, verifySession } from '../src/share/link-session.ts';
 import { voiceApiToken } from '../src/voice-api/tokens.ts';
 import {
@@ -302,8 +307,9 @@ const WALLS: Wall[] = [
     async mint(s) {
       const ticket = (await frameSrc(s)).searchParams.get(FRAME_TICKET_PARAM) ?? '';
       const set = (await redeem(s, ticket)).headers.get('set-cookie') ?? '';
-      expect(set.startsWith(`${FRAME_COOKIE}=`)).toBe(true);
-      return set.slice(FRAME_COOKIE.length + 1).split(';')[0] ?? '';
+      const name = frameCookieName(s.board);
+      expect(set.startsWith(`${name}=`)).toBe(true);
+      return set.slice(name.length + 1).split(';')[0] ?? '';
     },
     accepts: async (s, token) =>
       (
@@ -311,7 +317,7 @@ const WALLS: Wall[] = [
           headers: {
             host: s.frameHost,
             'sec-fetch-dest': 'iframe',
-            cookie: `${FRAME_COOKIE}=${token}`,
+            cookie: `${frameCookieName(s.board)}=${token}`,
           },
         })
       ).status === 200,

@@ -774,7 +774,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_app',
       description:
-        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.',
+        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. A dev server that routes on root-absolute paths (Vite, a single-page app) is started under the prefix instead: attach first with servesPrefix: true, then start it with its base set to the returned prefix (Vite: --base <prefix>; a router: basename import.meta.env.BASE_URL), and the server sends it <prefix><path> unchanged. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -791,6 +791,11 @@ export const TOOL_LIST: ListToolsResult = {
           origin: {
             type: 'string',
             description: 'The dev server, e.g. http://127.0.0.1:4321. Loopback only, no path.',
+          },
+          servesPrefix: {
+            type: 'boolean',
+            description:
+              'true when the dev server serves under the board prefix this call returns (Vite started with --base <prefix>): requests reach it with the prefix kept. Omit it to keep the current setting; a new app strips the prefix.',
           },
           title: { type: 'string' },
         },

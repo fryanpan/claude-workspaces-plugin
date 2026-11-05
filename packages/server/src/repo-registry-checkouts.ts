@@ -11,10 +11,10 @@
  * Nothing here deletes. Retiring stamps `removedAt` and keeps the row, which
  * is what leaves a document reviewed in a removed worktree still resolvable.
  */
-import { existsSync } from 'node:fs';
 import { listRepoWorktrees } from './doc-key.ts';
 import { gitCommonDir } from './doc-origin-repo.ts';
 import type { RegisteredCheckout, RepoRecord, RepoRegistryFile } from './repo-registry-file.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * Record that a checkout was seen, adding the row if it is new.
@@ -94,7 +94,8 @@ export function liveCheckouts(repo: RepoRecord | undefined): string[] {
     if (common) for (const wt of listRepoWorktrees(common)) out.add(wt.root);
     for (const row of repo.checkouts) {
       if (row.removedAt !== undefined) continue;
-      if (existsSync(row.root)) out.add(row.root);
+      // Not by path under a lead's root: a link there would be followed.
+      if (boundFiles.guards.exists(row.root)) out.add(row.root);
     }
   }
   return [...out].sort();

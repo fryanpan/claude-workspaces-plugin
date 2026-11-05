@@ -353,6 +353,13 @@ export interface StoredReviewItem extends TaskReviewItem {
    * like `filedBy`.
    */
   doneWhenLineId?: string;
+  /**
+   * Which template the server last wrote on this item, as
+   * `ownerTemplateKey` digests it. A sync whose template has the same key
+   * leaves the card's words alone, so a revision the filer made to answer a
+   * hold survives a re-report of an unchanged line. Store-only.
+   */
+  ownerTemplate?: string;
 }
 
 /**

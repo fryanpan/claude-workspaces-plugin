@@ -45,6 +45,9 @@ export interface ProjectConfig {
   leadBoard?: string;
   /** Lead secrets to set again even though they exist: the ones this run named. */
   leadRefresh: string[];
+  /** The repos the lead's deploy key may be on (`--lead-repo`); the deploy
+   *  checks GitHub lists it read-only on one of these or a push repo. */
+  leadRepos?: string[];
   /** The repos the server pushes to, each with its own deploy key (`--push-repo`). */
   pushRepos?: string[];
   /** Make the push keys again even though the secret exists (`--refresh-push-keys`). */
@@ -67,6 +70,7 @@ export interface ConfigInput {
   leadBoard?: string;
   /** Set every lead secret again from its source (`--refresh-lead`). */
   refreshLead?: boolean;
+  leadRepos?: string[];
   pushRepos?: string[];
   refreshPushKeys?: boolean;
 }
@@ -133,6 +137,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
   }
   const badRepo = input.pushRepos?.find((r) => !isRepoName(r));
   if (badRepo !== undefined) throw new Error(`push repo must be owner/name, got "${badRepo}"`);
+  const badLeadRepo = input.leadRepos?.find((r) => !isRepoName(r));
+  if (badLeadRepo !== undefined)
+    throw new Error(`lead repo must be owner/name, got "${badLeadRepo}"`);
   if (input.refreshPushKeys && !input.pushRepos?.length) {
     throw new Error('--refresh-push-keys makes a key per repo, so it needs --push-repo');
   }
@@ -173,6 +180,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     },
     ...(input.leadBoard !== undefined ? { leadBoard: input.leadBoard } : {}),
     leadRefresh,
+    ...(input.leadRepos?.length ? { leadRepos: [...input.leadRepos] } : {}),
     ...(input.pushRepos?.length ? { pushRepos: [...input.pushRepos] } : {}),
     refreshPushKeys: input.refreshPushKeys === true,
   };
@@ -193,6 +201,8 @@ export interface Observed {
   /** Names of Keychain entries that exist (values are never read here). */
   keychain: ReadonlySet<string>;
   lifecycle: boolean;
+  /** Whether the bucket keeps old versions of an object (review L5). */
+  versioning: boolean;
   /** Names of the app's Fly secrets. */
   secrets: ReadonlySet<string>;
   machines: readonly ObservedMachine[];
@@ -204,6 +214,7 @@ export type Action =
   | { kind: 'make-backup-key' }
   | { kind: 'create-bucket' }
   | { kind: 'make-writer-key' }
+  | { kind: 'set-versioning' }
   | { kind: 'set-lifecycle' }
   | { kind: 'set-secrets'; names: string[] }
   | { kind: 'make-push-keys'; repos: string[] }
@@ -289,6 +300,9 @@ export function plan(
   const bucketIsNew = !obs.keychain.has(cfg.keychain.bucketAdmin);
   if (bucketIsNew) actions.push({ kind: 'create-bucket' });
   if (!obs.keychain.has(cfg.keychain.writer)) actions.push({ kind: 'make-writer-key' });
+  // Versioning first: the machine's key may overwrite a snapshot whose name
+  // it knows, and only a versioned bucket keeps the one it replaced.
+  if (bucketIsNew || !obs.versioning) actions.push({ kind: 'set-versioning' });
   if (bucketIsNew || !obs.lifecycle) actions.push({ kind: 'set-lifecycle' });
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.

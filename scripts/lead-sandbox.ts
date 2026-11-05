@@ -59,14 +59,19 @@ import {
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { projectSlugs } from '../packages/core/src/lead-wall.ts';
+import { ghProxySocket } from './gh-proxy-lead.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
+  adbRow,
   boardSocketRows,
   boardWallRows,
+  bunWrapperRow,
   escapeRows,
+  ghRows,
   installRow,
   keychainRow,
   probeRuntime,
+  uvRow,
 } from './lead-sandbox-escapes.ts';
 import { gitHooksPath, hooksPathRefusal } from './lead-sandbox-git.ts';
 import {
@@ -80,6 +85,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { withOwnerBins } from './lead-sandbox-owner-bins.ts';
 import { type RootsRegistrar, leadRoots, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
@@ -89,6 +95,7 @@ import {
   tokenService,
   turnCheck,
 } from './lead-sandbox-token.ts';
+import { ADB_SDK, ensureLeadTools, leadToolsDir, pluginDirs } from './lead-sandbox-tools.ts';
 import { defaultBoardSocketDir, wallHosts } from './lead-sandbox-wall.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
@@ -112,15 +119,18 @@ function profilePath(lead: Lead): string {
 }
 
 /**
- * For a lead that names GitHub repos: its proxy token (made once) and git
- * config, and the environment that points its git at them. Nothing for the rest.
+ * For a lead that names GitHub repos: its proxy token (made once), git
+ * config and `cw-worktree`, and the environment that points its git at them,
+ * `cw-worktree`'s folder first on `path`. Nothing for the rest.
  */
-function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, string> {
+function gitProxyFiles(lead: Lead, config: LeadSandboxConfig, path = process.env.PATH) {
   if (lead.githubRepos.length === 0) return {};
   const dir = gitProxyLeadDir(machine.home, lead.name);
-  const url = `http://127.0.0.1:${config.gitProxyPort}`;
-  return gitProxyEnv(ensureGitProxyFiles(lead.name, dir, url).gitconfig);
+  const f = ensureGitProxyFiles(lead.name, dir, `http://127.0.0.1:${config.gitProxyPort}`);
+  return { ...gitProxyEnv(f.gitconfig), PATH: path ? `${f.bin}:${path}` : f.bin };
 }
+
+const ownerMachine = (config: LeadSandboxConfig) => withOwnerBins(machine, config);
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
@@ -128,7 +138,7 @@ function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): s
   // own folders: one the lead made would be the lead's.
   mkdirSync(join(machine.home, '.claude', 'projects'), { recursive: true, mode: 0o700 });
   const path = profilePath(lead);
-  writeFileSync(path, buildProfile(lead, config, machine, guard), { mode: 0o600 });
+  writeFileSync(path, buildProfile(lead, config, ownerMachine(config), guard), { mode: 0o600 });
   return path;
 }
 
@@ -236,7 +246,13 @@ export interface LaunchDeps {
   registerRoots: RootsRegistrar;
   /** `core.hooksPath` in a project (`lead-sandbox-git.ts`); git by default. */
   hooksPathOf?: (project: string) => string | null;
+  /** Writes the lead's `bun` wrapper and caches (`lead-sandbox-tools.ts`); answers its env. */
+  leadTools?: (lead: Lead) => Record<string, string>;
 }
+
+/** The lead's tools, under the real home; the wrapper's bun is found on PATH (`bunOnPath`). */
+const realLeadTools = (lead: Lead) =>
+  ensureLeadTools(lead, machine.home, null, machine.realpath, process.env.PATH);
 
 const realDeps: LaunchDeps = {
   platform: process.platform,
@@ -252,6 +268,7 @@ const realDeps: LaunchDeps = {
 };
 
 export function main(argv: string[], deps: LaunchDeps = realDeps): number {
+  process.env.xcrun_nocache = '1'; // before any spawn: Xcode shims skip their lead-writable cache
   const { say } = deps;
   if (deps.platform !== 'darwin') {
     say('Seatbelt is macOS only.');
@@ -287,6 +304,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     return 2;
   }
   const { config } = parsed;
+  const leadTools = deps.leadTools ?? realLeadTools;
   profileDir = resolve(flag('--profiles') ?? PROFILE_DIR);
   const accountFlag = flag('--claude-account');
   const guard = [file, profileDir];
@@ -341,10 +359,14 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say(`launch refused for ${lead.name}: ${token.error}`);
       return 2;
     }
+    // Made before the profile, which resolves each path it names: a folder
+    // not made yet is written at one end of `~/.config`'s symlink only.
+    const tools = leadTools(lead);
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
     const env = {
       ...withoutBoardBearers(process.env),
-      ...gitProxyFiles(lead, config),
+      ...tools,
+      ...gitProxyFiles(lead, config, tools.PATH),
       ...boardSocketEnv(lead, config, machine.uid),
       ...token.env,
     };
@@ -360,6 +382,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     let total = 0;
     let notRun = 0;
     for (const lead of config.leads) {
+      const toolsEnv = leadTools(lead);
       const profile = writeProfile(lead, config, guard);
       const t = checkTargets(lead, config, machine);
       for (const [path, must] of [
@@ -394,7 +417,17 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         ...escapeRows(profile, cwd, machine.uid, lead.allowTmux),
         keychain,
         install,
+        adbRow(profile, cwd, lead.tools.includes('adb'), join(machine.home, ADB_SDK)),
+        bunWrapperRow(
+          profile,
+          cwd,
+          join(leadToolsDir(machine.home, lead.name), 'bin', 'bun'),
+          pluginDirs(machine.home, machine.realpath)[0] ?? '',
+        ),
+        ...(lead.tools.includes('uv') ? [uvRow(profile, cwd, toolsEnv)] : []),
+        ...ghRows(profile, cwd, lead.tools.includes('gh'), ghProxySocket(machine.uid), toolsEnv),
         ...wallRows(lead, config, guard, profile, cwd),
+        ...ownerMachine(config).ownerBins.map((d) => installRow(profile, cwd, d, 'programs')),
       ]) {
         total++;
         if (!row.ok) bad++;
@@ -409,7 +442,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         turn,
         account: account.account,
         read: deps.readToken,
-        env: { ...process.env, ...gitProxyFiles(lead, config) },
+        env: { ...process.env, ...toolsEnv, ...gitProxyFiles(lead, config, toolsEnv.PATH) },
       });
       if (!row.ran) {
         notRun++;
@@ -431,11 +464,12 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
   for (const lead of config.leads) {
     const path = profilePath(lead);
     if (write) {
+      leadTools(lead);
       writeProfile(lead, config, guard);
       gitProxyFiles(lead, config);
     } else {
       say(`# ${path}`);
-      say(buildProfile(lead, config, machine, guard));
+      say(buildProfile(lead, config, ownerMachine(config), guard));
     }
     const wrapper = ['bun', join(import.meta.dirname, 'lead-sandbox.ts'), '--config', file];
     if (profileDir !== PROFILE_DIR) wrapper.push('--profiles', profileDir);

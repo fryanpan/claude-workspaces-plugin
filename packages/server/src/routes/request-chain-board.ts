@@ -148,6 +148,7 @@ export async function serveBoardRoutes(
       url,
       scope,
       visitor: Boolean(visitor),
+      member: visitor && !boardAgent ? (gate.visitorHome?.signedInAs ?? null) : null,
       mayMintAppVoice: rq.mayMintAppVoice(),
     });
     if (handled) return handled;
@@ -167,6 +168,7 @@ export async function serveBoardRoutes(
       url,
       visitor,
       leadBoard,
+      boardAgent,
       authorFor,
       accessEmail: gate.accessEmail,
       roleFor,
@@ -387,6 +389,8 @@ export async function serveBoardRoutes(
       pathname,
       url,
       visitor,
+      leadBoard,
+      boardAgent,
       authorFor,
       accessEmail: gate.accessEmail,
       roleFor,

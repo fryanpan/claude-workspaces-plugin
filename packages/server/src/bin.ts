@@ -28,6 +28,12 @@ import { defaultUserSettingsPath } from './settings-allow-file.ts';
 // preferred trade.
 await enableDatalessMaterialization();
 
+// Every Xcode shim (`/usr/bin/git` among them) picks its binary from a
+// per-user cache in the temporary folder, which a lead under this user can
+// write. With this set, every child the server starts skips that cache.
+// See docs/architecture/lead-tree-containment.md "The git binary".
+process.env.xcrun_nocache = '1';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
 
@@ -83,6 +89,7 @@ const {
   loopbackSkipsAccess,
   loopbackAllowedUids,
   loopbackEdgeUids,
+  spendAlarmUsd,
   emailCodeSignIn,
   ownerEmail,
   trustedHosts,
@@ -280,6 +287,7 @@ while (!handle) {
       loopbackSkipsAccess,
       loopbackAllowedUids,
       loopbackEdgeUids,
+      ...(spendAlarmUsd !== undefined ? { spendAlarmUsd } : {}),
       emailCodeSignIn,
       ...(ownerEmail ? { ownerEmail } : {}),
       // Browser Sentry DSN — box config, never the repo (see ServerOptions).

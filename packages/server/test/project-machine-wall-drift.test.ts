@@ -52,7 +52,8 @@ function facts(over: Partial<MachineFacts> = {}): MachineFacts {
     server: {
       ...Object.fromEntries(EXPECTED),
       CW_LOOPBACK_SKIPS_ACCESS: '1',
-      CW_LOOPBACK_REFUSED_UIDS: '10004',
+      CW_LOOPBACK_ALLOWED_UIDS: '10001',
+      CW_LOOPBACK_EDGE_UIDS: '10002',
     },
     cloudflared: 'named',
     users: [
@@ -80,7 +81,7 @@ describe('the on-machine reader', () => {
         cmdline: ['bun', 'run', '/app/packages/server/src/bin.ts', '--port', '8787'],
         environ: () => ({
           CW_OWNER_EMAIL: OWNER,
-          CW_LOOPBACK_REFUSED_UIDS: '10004',
+          CW_LOOPBACK_ALLOWED_UIDS: '10001',
           CW_GITHUB_PUSH_TOKEN: 'fixture-token-saltmarsh',
         }),
       },
@@ -106,7 +107,7 @@ describe('the on-machine reader', () => {
 
   it('keeps only the named server settings, and the public half of the deploy key', () => {
     const f = readFacts(io());
-    expect(f.server).toEqual({ CW_OWNER_EMAIL: OWNER, CW_LOOPBACK_REFUSED_UIDS: '10004' });
+    expect(f.server).toEqual({ CW_OWNER_EMAIL: OWNER, CW_LOOPBACK_ALLOWED_UIDS: '10001' });
     expect(JSON.stringify(f)).not.toContain('fixture-token-saltmarsh');
     expect(f.cloudflared).toBe('named');
     expect(f.users).toEqual([
@@ -181,14 +182,36 @@ describe('the drift judges', () => {
     expect(JSON.stringify(rows)).not.toContain('aud-other');
   });
 
-  it('reports a lead the loopback door admits, and names who else it admits', () => {
+  it('passes a door that admits cw alone, and the tunnel only through the edge', () => {
+    const rows = uidRows('riverbend', facts());
+    expect(failing(rows)).toEqual([]);
+    expect(rows.map((r) => r.answer)).toEqual(['cw 10001', 'cwtunnel 10002']);
+  });
+
+  it('fails a door that still admits root, or admits the lead (review M3)', () => {
+    const f = facts();
+    for (const [allowed, answer] of [
+      ['0,10001', 'root 0, cw 10001'],
+      ['10001,10004', 'cw 10001, lead 10004'],
+      ['', 'off: every uid is admitted'],
+    ]) {
+      const rows = uidRows('riverbend', {
+        ...f,
+        server: { ...f.server, CW_LOOPBACK_ALLOWED_UIDS: allowed },
+      });
+      expect(failing(rows)).toEqual([`loopback admits cw alone: ${answer}`]);
+    }
+  });
+
+  it('fails an edge list that names anybody but the tunnel', () => {
     const f = facts();
     const rows = uidRows('riverbend', {
       ...f,
-      server: { ...f.server, CW_LOOPBACK_REFUSED_UIDS: '' },
+      server: { ...f.server, CW_LOOPBACK_EDGE_UIDS: '10002,10004' },
     });
-    expect(failing(rows)).toEqual(['loopback refuses the lead: uid 10004 admitted']);
-    expect(rows[1]?.answer).toBe('cwtunnel 10002, lead 10004');
+    expect(failing(rows)).toEqual([
+      'loopback admits the tunnel alone through the edge: cwtunnel 10002, lead 10004',
+    ]);
   });
 
   it('lists a push without approval as intended, and fails a policy the server cannot read', () => {

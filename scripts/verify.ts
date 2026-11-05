@@ -99,6 +99,12 @@ export const MEMBERS: Member[] = [
     ci: 'check:outbound-fetch',
   },
   {
+    id: 'check:tree-fs',
+    title: 'every module that reaches a file has a lead-tree row',
+    argv: ['check:tree-fs'],
+    ci: 'check:tree-fs',
+  },
+  {
     id: 'check:import-cycles',
     title: 'no runtime import cycles in the code a browser loads',
     argv: ['check:import-cycles'],

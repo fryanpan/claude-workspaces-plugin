@@ -1,5 +1,6 @@
 /**
- * The frame-only hostname: where the operator's own mocks and app doors run,
+ * The frame-only hostname: where the operator's own mocks and app doors, and a
+ * board member's app doors, run,
  * one hostname over from the board, so their scripts get an origin of their
  * own instead of the board's.
  *
@@ -61,13 +62,24 @@
  * and allowlisted email, with external access switched on; off the tunnel, a
  * caller on this machine that is not a browser. Off the tunnel nothing is
  * answered to a peer that is not this machine, a ticket included. The
- * widget's public scripts need nothing. A share or collaboration visitor's
- * host page never points here and mints no ticket, and their token is
- * refused if they try.
+ * widget's public scripts need nothing.
+ *
+ * A board MEMBER who opens an app door on a board hostname gets a ticket
+ * too, one that names their Access address. It is the one way a member's
+ * browser loads an app's own scripts behind Access: an opaque frame's
+ * subresources carry no cookie, so Access answers them with its sign-in
+ * page. Their cookie opens only what the membership records still give that
+ * address, judged on every request by the same lines as the member's own
+ * requests on the board (`memberDoor`, `collabScope`), so removing them ends
+ * it at once. It never grants app voice. A mock's host page still gives a
+ * member the opaque frame; a member on the share or collaboration hostname
+ * is on no board hostname and gets the opaque frame too. A member's Access
+ * token with no ticket opens nothing here.
  *
  * Off unless configured (`CW_FRAME_ORIGIN`). Unset, every frame stays opaque
  * exactly as before.
  */
+import { normalizeEmail } from '@claude-workspaces/core';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
 import {
   FRAME_TICKET_PARAM,
@@ -110,8 +122,11 @@ export type FrameProof =
   /** The widget's public scripts, which anyone may read. */
   | { kind: 'public' }
   /** A cookie that opens this board's frames on this hostname, and whether
-   *  its host page's reader may be handed an app voice token. */
-  | { kind: 'held'; appVoice: boolean }
+   *  its host page's reader may be handed an app voice token. `members` is
+   *  empty when a cookie the operator's host page started verified; otherwise
+   *  it names the board members whose host pages started the cookies, each
+   *  still to be checked against the membership records. */
+  | { kind: 'held'; appVoice: boolean; members: string[] }
   | { kind: 'none' };
 
 export interface FrameHost {
@@ -121,16 +136,19 @@ export interface FrameHost {
   isFrameHost(req: Request): boolean;
   /**
    * Where a host page should frame board `workspaceId`'s attachment, with a
-   * fresh ticket, or null for the opaque same-host frame: a share visitor's
-   * page, a page on a hostname that is not a board hostname, and the frame
-   * hostname itself. `appVoice` is the host page's `mayMintAppVoice`
-   * verdict for its reader, carried in the ticket to the frame.
+   * fresh ticket, or null for the opaque same-host frame: a visitor's page
+   * that names no member, a page on a hostname that is not a board hostname,
+   * and the frame hostname itself. `appVoice` is the host page's
+   * `mayMintAppVoice` verdict for its reader, carried in the ticket to the
+   * frame. `member` is the Access address of a visitor the board admitted as
+   * a member; their ticket names them and never carries app voice.
    */
   frameFor(
     req: Request,
     visitor: boolean,
     workspaceId: string,
     appVoice?: boolean,
+    member?: string,
   ): FrameTarget | null;
   /** What this frame hostname request proves (`FrameProof`). Run after `frameGate`. */
   prove(req: Request, pathname: string, search: URLSearchParams): FrameProof;
@@ -216,13 +234,20 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
   return {
     origin: opts.origin,
     isFrameHost,
-    frameFor: (req, visitor, workspaceId, appVoice = false) => {
-      if (visitor || isFrameHost(req)) return null;
+    frameFor: (req, visitor, workspaceId, appVoice, member) => {
+      const named = member ? normalizeEmail(member) : '';
+      if ((visitor && named === '') || isFrameHost(req)) return null;
       if (!boards.has(normalizeHost(req.headers.get('host')))) return null;
-      return {
-        origin: opts.origin,
-        ticket: mintFrameTicket(opts.keys().ticket, frameHost, workspaceId, Date.now(), appVoice),
-      };
+      const ticket = visitor
+        ? mintFrameTicket(opts.keys().ticket, frameHost, workspaceId, Date.now(), false, named)
+        : mintFrameTicket(
+            opts.keys().ticket,
+            frameHost,
+            workspaceId,
+            Date.now(),
+            appVoice ?? false,
+          );
+      return { origin: opts.origin, ticket };
     },
     prove: (req, pathname, search) => {
       if (WIDGET_SCRIPT.test(pathname)) return { kind: 'public' };
@@ -251,15 +276,18 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
       }
       // A page's script may plant a cookie beside the real one, but cannot
       // sign one, so any cookie that verifies speaks for its host page.
-      let held = false;
+      let operator = false;
       let appVoice = false;
-      for (const v of frameCookiesOf(req.headers.get('cookie'))) {
+      const members: string[] = [];
+      for (const v of frameCookiesOf(req.headers.get('cookie'), ws)) {
         const c = checkFrameCookie(keys.cookie, v, frameHost, ws);
         if (!c.ok) continue;
-        held = true;
+        if (c.member === undefined) operator = true;
+        else members.push(c.member);
         appVoice ||= c.appVoice;
       }
-      return held ? { kind: 'held', appVoice } : { kind: 'none' };
+      if (operator) return { kind: 'held', appVoice, members: [] };
+      return members.length > 0 ? { kind: 'held', appVoice: false, members } : { kind: 'none' };
     },
     frameCsp: `sandbox ${FRAME_HOST_SANDBOX}; frame-ancestors ${frameAncestors([...boards])}`,
     sameSiteBoardHosts: sameSiteHosts(frameHost, [...boards]),

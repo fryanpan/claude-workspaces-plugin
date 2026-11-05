@@ -119,6 +119,9 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
           return docId ? { surface: 'doc', docId } : undefined;
         },
         openThread: openThreadId,
+        // A meeting started here opens its notes doc in place, so the
+        // recording runs on with no reload and no tap.
+        meeting: { navigate: navigateTo },
       }),
     );
   }

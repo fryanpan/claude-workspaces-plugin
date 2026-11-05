@@ -262,6 +262,14 @@ that prefix; the dev server receives paths with it removed, its own
 proxied to `<origin>/__reload`, unbuffered. Behind Cloudflare Access
 or a share link, the frame's own stylesheets, script files and images do not
 load, because they carry no cookie; inline what a remote reviewer must see.
+A server with a frame hostname (`CW_FRAME_ORIGIN`, a project machine) frames
+the owner's and the board members' app doors there, and their files load.
+
+A Vite app, or any app that routes on root-absolute paths, runs under the
+prefix instead: attach with `servesPrefix: true` first, then start the dev
+server with that prefix as its base (`vite --base <prefix>`), and give the
+router `import.meta.env.BASE_URL` as its basename. The board then sends the
+dev server the whole path, prefix kept.
 
 ## Don'ts
 

@@ -1,5 +1,6 @@
+import { BLOCK_IDENTITY_ATTRS } from '@claude-workspaces/core/prose';
 import { Extension } from '@tiptap/core';
-import type { Node as ProseNode } from '@tiptap/pm/model';
+import { Fragment, type Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import { type Mappable, ReplaceStep, StepMap } from '@tiptap/pm/transform';
@@ -127,13 +128,20 @@ function afterBlockAt(doc: ProseNode, pos: number): number {
  * the change would have said. Every other transaction keeps its own mapping:
  * a local keystroke's map is precise about which side of an edge it landed,
  * and a diff of two documents cannot be.
+ *
+ * The diff ignores the block-identity attributes (`cwId`, `cwAuthor`). The
+ * first read of a doc's outline mints an id on every block at once, so the
+ * page gets a whole-document replace in which every block differs only by an
+ * attribute that is never drawn; diffed as it stands, that span is the whole
+ * document and the cards went with it (a lead reading the outline while
+ * Bryan typed a reply, 2026-11-04).
  */
 export function effectiveMapping(tr: Transaction): Mappable {
   const step = tr.steps.length === 1 ? tr.steps[0] : undefined;
   if (!(step instanceof ReplaceStep)) return tr.mapping;
   if (step.from !== 0 || step.to !== tr.before.content.size) return tr.mapping;
-  const before = tr.before.content;
-  const after = tr.doc.content;
+  const before = withoutIdentity(tr.before.content);
+  const after = withoutIdentity(tr.doc.content);
   const start = before.findDiffStart(after);
   if (start === null) return StepMap.empty;
   const end = before.findDiffEnd(after) ?? { a: before.size, b: after.size };
@@ -141,6 +149,30 @@ export function effectiveMapping(tr: Transaction): Mappable {
   // out by the overlap so the span is never negative.
   const overlap = Math.max(0, start - Math.min(end.a, end.b));
   return new StepMap([start, end.a + overlap - start, end.b + overlap - start]);
+}
+
+/** `frag` with every block's identity attributes cleared. Sizes are
+ *  unchanged, so a position in it is the same position in `frag`. */
+function withoutIdentity(frag: Fragment): Fragment {
+  let changed = false;
+  const out: ProseNode[] = [];
+  frag.forEach((node) => {
+    const next = nodeWithoutIdentity(node);
+    if (next !== node) changed = true;
+    out.push(next);
+  });
+  return changed ? Fragment.from(out) : frag;
+}
+
+function nodeWithoutIdentity(node: ProseNode): ProseNode {
+  if (node.isText || node.isLeaf) return node;
+  const content = withoutIdentity(node.content);
+  const held = BLOCK_IDENTITY_ATTRS.some((k) => node.attrs[k] != null);
+  if (!held && content === node.content) return node;
+  if (!held) return node.type.create(node.attrs, content, node.marks);
+  const attrs: Record<string, unknown> = { ...node.attrs };
+  for (const k of BLOCK_IDENTITY_ATTRS) if (k in attrs) attrs[k] = null;
+  return node.type.create(attrs, content, node.marks);
 }
 
 function buildDecos(

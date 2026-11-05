@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.348";
+var version2 = "0.1.350";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14225,11 +14225,18 @@ function createAliasDeprecationWarner(log = (line) => console.error(line)) {
 var warnDeprecatedAlias = createAliasDeprecationWarner();
 
 // packages/mcp/src/call-tool.ts
+var ATTACH_THEN_WATCH_TOOLS = [
+  "attach_markdown",
+  "create_review_doc",
+  "attach_mockup",
+  "bind_mock"
+];
 var NO_AUTO_WATCH_TOOLS = new Set([
   "unwatch_doc",
   "watch_doc",
   "observe_url",
-  "attach_doc"
+  "attach_doc",
+  ...ATTACH_THEN_WATCH_TOOLS
 ]);
 async function maybeAutoWatch(watchDoc, name, args) {
   if (NO_AUTO_WATCH_TOOLS.has(name))
@@ -17002,7 +17009,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_app",
-      description: "Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.",
+      description: "Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. A dev server that routes on root-absolute paths (Vite, a single-page app) is started under the prefix instead: attach first with servesPrefix: true, then start it with its base set to the returned prefix (Vite: --base <prefix>; a router: basename import.meta.env.BASE_URL), and the server sends it <prefix><path> unchanged. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17017,6 +17024,10 @@ var TOOL_LIST = {
           origin: {
             type: "string",
             description: "The dev server, e.g. http://127.0.0.1:4321. Loopback only, no path."
+          },
+          servesPrefix: {
+            type: "boolean",
+            description: "true when the dev server serves under the board prefix this call returns (Vite started with --base <prefix>): requests reach it with the prefix kept. Omit it to keep the current setting; a new app strips the prefix."
           },
           title: { type: "string" }
         },
@@ -19378,6 +19389,14 @@ function threadCreateRequest(input, author, board) {
 // packages/mcp/src/tools/docs.ts
 var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason", "taskId", "why"]);
 var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason", "taskId", "why"]);
+async function watchCreated(watchDoc, a, res) {
+  if (a.subscribe === false)
+    return;
+  const made = res?.docId;
+  const docId = typeof made === "string" && made !== "" ? made : a.docId;
+  if (typeof docId === "string" && docId !== "")
+    await watchDoc(docId);
+}
 async function handleDocsTool(name, a, ctx) {
   const {
     http,
@@ -19527,6 +19546,7 @@ async function handleDocsTool(name, a, ctx) {
         ...setId ? { setId } : {},
         ...producedBy ? { producedBy } : {}
       });
+      await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "set_doc_content": {
@@ -19559,16 +19579,18 @@ async function handleDocsTool(name, a, ctx) {
         ...sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {},
         ...title ? { title } : {}
       });
+      await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "attach_app": {
-      const { docId, origin, title } = a;
+      const { docId, origin, title, servesPrefix } = a;
       const res = await http("POST", `${board()}/apps`, {
         docId,
         origin,
         owner: CWD,
         producedBy: { agentId: AUTHOR.id },
-        ...title ? { title } : {}
+        ...title ? { title } : {},
+        ...typeof servesPrefix === "boolean" ? { servesPrefix } : {}
       });
       return ok2(res);
     }

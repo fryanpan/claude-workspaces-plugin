@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -24,8 +25,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exportBoard, importBoard } from '../../../infra/project-machine/board-bundle.ts';
+import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { startBoardSync } from '../src/bound-file-sync/board-sync.ts';
 import { loadSyncConfig, parseSyncConfig } from '../src/bound-file-sync/sync-config.ts';
+import { boundFiles } from '../src/slow-fs.ts';
 import { waitFor } from './wait-for.ts';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -320,6 +323,48 @@ describe('bound-file sync', () => {
     });
     expect(s5.synced()).toBe(false);
     expect(readFileSync(planPath, 'utf8')).toBe(before);
+    for (const s of stops.splice(0)) s();
+  }, 60_000);
+
+  it('a mirror path under a walled lead’s root that is a link writes nothing outside', async () => {
+    const leadRoot = join(scratch, 'lead-root');
+    const outside = join(scratch, 'riverbend-outside');
+    mkdirSync(leadRoot);
+    mkdirSync(outside);
+    const canary = join(outside, 'plan.md');
+    writeFileSync(canary, 'riverbend-canary-9b1e\n');
+    const linked = join(leadRoot, 'plan.md');
+    symlinkSync(canary, linked);
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(scratch, 'roots-data')));
+    expect(roots.set(boardId, [realpathSync(leadRoot)]).ok).toBe(true);
+    const remove = boundFiles.guards.add(roots);
+    const lines: string[] = [];
+    try {
+      const m = startBoardSync({
+        config: {
+          baseUrl: base,
+          workspaceId: boardId,
+          boardToken: token,
+          access: null,
+          docs: [{ docId, path: join(realpathSync(leadRoot), 'plan.md') }],
+        },
+        stateDir: join(scratch, 'state-lead'),
+        log: (line) => lines.push(line),
+        writeDelayMs: 50,
+        pollMs: 50,
+      });
+      stops.push(m.stop);
+      await m.ready;
+      await waitFor(() => (lines.some((l) => l.includes('could not write')) ? true : null), {
+        timeout: 10_000,
+        describe: 'the refused write',
+      });
+      expect(readFileSync(canary, 'utf8')).toBe('riverbend-canary-9b1e\n');
+      expect(lstatSync(linked).isSymbolicLink()).toBe(true);
+    } finally {
+      for (const s of stops.splice(0)) s();
+      remove();
+    }
   }, 60_000);
 });
 

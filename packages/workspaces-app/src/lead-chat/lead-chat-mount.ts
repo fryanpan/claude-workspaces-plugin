@@ -150,7 +150,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   };
   let hiding = false;
   let restored = false;
-  let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
+  let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '', paused: false };
   /** Voice was on on the page before: start it once the lead is known. */
   const carryVoice = (s: ReturnType<LeadChatClient['state']>): void => {
     let kept = false;
@@ -190,6 +190,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       barOut: ui.bar,
       listening: heard.phase !== 'off',
       ...(heard.phase !== 'off' ? { voice: heard.phase } : {}),
+      ...(heard.paused ? { paused: true } : {}),
       heard: heard.heard,
       notice: ui.notice || heard.notice,
       ...(meet ? { meeting: meet.model() } : {}),
@@ -372,6 +373,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     view,
     ...(opts.getContext ? { getContext: opts.getContext } : {}),
     session,
+    device: storage,
     ...(opts.meeting ? { seams: opts.meeting } : {}),
     changed: render,
     openPane: () => {

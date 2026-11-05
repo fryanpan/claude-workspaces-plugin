@@ -136,6 +136,15 @@ export interface DocMeta {
    */
   alias?: string;
   sourceUrl?: string;
+  /**
+   * An app (`type: 'app'`) whose dev server serves under the board's own
+   * prefix, `/workspaces/<ws>/apps/<id>/` — Vite started with `base` set to
+   * it, Next with `basePath`. The proxy then sends the dev server the whole
+   * path, prefix included, instead of the part after it. Set by `attach_app`
+   * (`servesPrefix`); private, like `sourceUrl`. Absent means the prefix is
+   * stripped, which is what a static site with relative links wants.
+   */
+  appServesPrefix?: boolean;
   title?: string;
   /**
    * Optional review tag. Docs that share a `setId` show up in each

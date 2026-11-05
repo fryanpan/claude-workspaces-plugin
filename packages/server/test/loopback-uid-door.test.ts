@@ -1,16 +1,16 @@
 /**
  * `middleware/loopback-uid-door.ts`: loopback TCP is admitted only from the
- * uids a project machine names (root and the server's own), the tunnel's uid
- * only for a request the edge stamped with `cf-ray`, and every other uid (the
+ * uid a project machine names (the server's own), the tunnel's uid only for
+ * a request the edge stamped with `cf-ray`, and every other uid (root, the
  * lead, the backup upload, a builder) is answered 403 before any check that
  * trusts a loopback peer, while the lead's board's shared socket still
  * serves it.
  *
  * A. The table parser finds the caller's row, on IPv4 and IPv6, and answers
  *    null when no single uid does.
- * B. A server admitting root and `cw`: their no-token owner calls are served
- *    (the control); the lead's, cwbackup's and an unlisted builder's are
- *    refused; the tunnel's is refused without `cf-ray`; an unknown caller is
+ * B. A server admitting `cw` alone: its no-token owner calls are served
+ *    (the control); root's, the lead's, cwbackup's and an unlisted builder's
+ *    are refused; the tunnel's is refused without `cf-ray`; an unknown caller is
  *    refused; and the shared board socket is mode 660 in a 710 folder.
  * C. On Linux, the real `/proc/net/tcp` reader refuses this process's own
  *    uid when it is not listed, and serves it when it is (the control).
@@ -34,7 +34,9 @@ const TUNNEL = 10002;
 const BACKUP = 10003;
 const LEAD = 10004;
 const BUILDER = 10020;
-const MACHINE = { allowed: [0, CW], edge: [TUNNEL] };
+const ROOT = 0;
+/** As entrypoint.sh configures a project machine (review M3: root is not on it). */
+const MACHINE = { allowed: [CW], edge: [TUNNEL] };
 // A group this user may give its files to, other than its own where one
 // exists, so giving the socket to it is a change the test can see.
 const GROUP = (() => {
@@ -127,13 +129,12 @@ describe('A. finding the caller in the kernel tables', () => {
   it('admits only the listed uids, and the tunnel’s only through the edge', () => {
     const at = (uid: number | null, viaEdge = false) =>
       loopbackUidDoor(MACHINE, () => uid)({ address: '127.0.0.1', port: 41000 }, 8787, viaEdge);
-    expect(at(0)).toBeNull();
     expect(at(CW)).toBeNull();
     expect(at(TUNNEL, true)).toBeNull();
     expect(at(TUNNEL)).toBe('loopback_caller_refused');
     // cf-ray is the edge's stamp for the tunnel's uid only; on anyone else's
     // request it admits nothing.
-    for (const uid of [BACKUP, LEAD, BUILDER]) {
+    for (const uid of [ROOT, BACKUP, LEAD, BUILDER]) {
       expect(at(uid)).toBe('loopback_caller_refused');
       expect(at(uid, true)).toBe('loopback_caller_refused');
     }
@@ -141,7 +142,7 @@ describe('A. finding the caller in the kernel tables', () => {
   });
 });
 
-describe('B. a server that admits only root, itself and the tunnel', () => {
+describe('B. a server that admits only itself and the tunnel', () => {
   let h: ServerHandle;
   let dataDir: string;
   let socketDir: string;
@@ -201,16 +202,14 @@ describe('B. a server that admits only root, itself and the tunnel', () => {
       body: JSON.stringify({ name: 'Saltmarsh' }),
     });
 
-  it('serves root’s and the server’s own no-token owner call (the control)', async () => {
-    for (const uid of [0, CW]) {
-      caller = uid;
-      expect((await ownerRead()).status).toBe(200);
-      expect(seen.at(-1)).toBe(h.port);
-    }
+  it('serves the server’s own no-token owner call (the control)', async () => {
+    caller = CW;
+    expect((await ownerRead()).status).toBe(200);
+    expect(seen.at(-1)).toBe(h.port);
   });
 
-  it('refuses the lead’s, the backup upload’s and an unlisted builder’s owner read and write', async () => {
-    for (const uid of [LEAD, BACKUP, BUILDER]) {
+  it('refuses root’s, the lead’s, the backup upload’s and an unlisted builder’s owner read and write', async () => {
+    for (const uid of [ROOT, LEAD, BACKUP, BUILDER]) {
       caller = uid;
       const read = await ownerRead();
       expect(read.status, `uid ${uid}`).toBe(403);
@@ -266,12 +265,12 @@ describe('B. a server that admits only root, itself and the tunnel', () => {
         arg: (_name: string, fallback?: string) => fallback,
       });
     const cfg = config({
-      CW_LOOPBACK_ALLOWED_UIDS: '0,10001',
+      CW_LOOPBACK_ALLOWED_UIDS: '10001',
       CW_LOOPBACK_EDGE_UIDS: '10002',
       CW_BOARD_SOCKET_SHARED: 'w-riverbend',
       CW_BOARD_SOCKET_GROUP: '10010',
     });
-    expect(cfg.loopbackAllowedUids).toEqual([0, CW]);
+    expect(cfg.loopbackAllowedUids).toEqual([CW]);
     expect(cfg.loopbackEdgeUids).toEqual([TUNNEL]);
     expect(cfg.boardSocketShared).toBe('w-riverbend');
     expect(cfg.boardSocketGroup).toBe(10010);

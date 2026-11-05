@@ -14,6 +14,20 @@ describe('a line said in a meeting', () => {
     expect(addressesLead('Lead,')).toBe(false);
   });
 
+  it('reaches the lead when it opens with "Claude" or "lead agent"', () => {
+    expect(addressesLead('Claude, file a task to price the slipway.')).toBe(true);
+    expect(addressesLead('Claude file a task for Riverbend.')).toBe(true);
+    expect(addressesLead('claude: what is left on Harborlight?')).toBe(true);
+    expect(addressesLead('Lead agent, what is left on Riverbend?')).toBe(true);
+    expect(addressesLead('lead agent file it under Harborlight.')).toBe(true);
+    // A mention mid-sentence is the room talking.
+    expect(addressesLead('We could ask Claude about the ferry later.')).toBe(false);
+    expect(addressesLead('Alice said the lead agent filed it.')).toBe(false);
+    expect(addressesLead('Claudette runs the Harborlight desk.')).toBe(false);
+    expect(addressesLead('Claude')).toBe(false);
+    expect(addressesLead('Lead agents are on every board.')).toBe(false);
+  });
+
   it('replaces a revised turn in place and keeps turn order', () => {
     const a = upsertMeetingLine([], { turn: 1, who: 'Bob', text: 'second', ts: 2 });
     const b = upsertMeetingLine(a, { turn: 0, who: 'Alice', text: 'first', ts: 1 });

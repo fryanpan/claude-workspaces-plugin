@@ -5,6 +5,7 @@
  */
 import { boardSocketDirError } from '../packages/server/src/board-sockets.ts';
 import { parseGitProxyPort, parseGithubRepos } from './git-proxy-lead.ts';
+import { type LeadTool, parseTools } from './lead-sandbox-tools.ts';
 
 export interface Lead {
   /** Lowercase words, for the profile's file name. */
@@ -28,6 +29,8 @@ export interface Lead {
   allowKeychain: boolean;
   /** `owner/name` repos it may fetch and push through the GitHub proxy (`git-proxy.ts`). */
   githubRepos: string[];
+  /** Tools it may use inside the wall (`lead-sandbox-tools.ts`). None by default. */
+  tools: LeadTool[];
   /**
    * Deny every board server's port and every board's socket but its own
    * (`lead-sandbox-wall.ts`). Off by default.
@@ -62,6 +65,10 @@ export interface Machine {
   uid: number;
   /** The path with every symlink resolved, or the path itself if it is missing. */
   realpath(path: string): string;
+  /** Owner-writable folders of programs outside home (`lead-sandbox-owner-bins.ts`), read only to every lead. */
+  ownerBins?: readonly string[];
+  /** Xcode's per-user cache and its folder (`xcrunCachePaths`), not writable by any lead. */
+  xcrunCache?: readonly string[];
 }
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -126,10 +133,16 @@ export function parseConfig(
       if (o[key] !== undefined && typeof o[key] !== 'boolean')
         return { ok: false, error: `${name}.${key} must be true or false` };
     const githubRepos = parseGithubRepos(o.githubRepos, name);
-    for (const p of [projects, allow, allowRead, githubRepos])
+    const tools = parseTools(o.tools, name);
+    for (const p of [projects, allow, allowRead, githubRepos, tools])
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
       return { ok: false, error: `${name}.projects must name at least one repo` };
+    if ((tools as LeadTool[]).includes('gh') && (githubRepos as string[]).length === 0)
+      return {
+        ok: false,
+        error: `${name}.tools has gh, which needs githubRepos: the repos gh may reach`,
+      };
     const boardId = o.boardId;
     if (boardId !== undefined && (typeof boardId !== 'string' || !BOARD_ID.test(boardId)))
       return { ok: false, error: `${name}.boardId must be a board id` };
@@ -148,6 +161,7 @@ export function parseConfig(
       allowTmux: o.allowTmux === true,
       allowKeychain: o.allowKeychain === true,
       githubRepos: githubRepos as string[],
+      tools: tools as LeadTool[],
       boardWall: o.boardWall === true,
       ...(typeof boardId === 'string' ? { boardId } : {}),
       ...(claudeAccount ? { claudeAccount } : {}),

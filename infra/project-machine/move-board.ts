@@ -163,7 +163,7 @@ export function syncConfig(manifest: BoardManifest, baseUrl: string, project: st
 async function flyTarget(project: string): Promise<MoveTarget> {
   const { projectConfig } = await import('./deploy-plan.ts');
   const { machines } = await import('./deploy.ts');
-  const { flyOk, keeperStage, onMachine } = await import('./mac-ops.ts');
+  const { asCw, flyOk, keeperStage, onMachine } = await import('./mac-ops.ts');
   const cfg = projectConfig({ project, imageLabel: '0'.repeat(40) });
   const PROBE = 'bun /app/infra/project-machine/board-probe.ts';
   const lastJson = <T>(out: string): T => {
@@ -247,7 +247,7 @@ async function flyTarget(project: string): Promise<MoveTarget> {
     },
     async print(boardId, limits) {
       const l = Buffer.from(JSON.stringify(limits)).toString('base64');
-      return lastJson<BoardPrint>(onMachine(cfg.app, `${PROBE} fingerprint ${boardId} ${l}`));
+      return lastJson<BoardPrint>(onMachine(cfg.app, asCw(`${PROBE} fingerprint ${boardId} ${l}`)));
     },
   };
 }

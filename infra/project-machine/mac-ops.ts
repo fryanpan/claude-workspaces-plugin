@@ -264,3 +264,27 @@ export function onMachine(app: string, command: string): string {
     `sh -c '${command.replaceAll("'", `'\\''`)}'`,
   ]);
 }
+
+/** The image's PATH, where `bun` and `setpriv` live (oven/bun's debian base). */
+const MACHINE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+
+/**
+ * `command`, for `onMachine`, run as `cw` with a clean environment. The
+ * server's loopback uid door admits `cw` alone (security review M3), so a
+ * machine tool that calls the server's REST cannot run as root, which keeps
+ * only the power to switch users. `env -i` first: a `fly ssh console` shell
+ * carries the machine's Fly secrets, and cw must never hold the tunnel token
+ * or the bucket credential (run-as.sh, MACHINE_SECRETS). The whole command,
+ * `;` and `&&` included, runs as cw. `path` is the machine's PATH; a test
+ * passes its own.
+ */
+export function asCw(command: string, path = MACHINE_PATH): string {
+  return [
+    'env -i',
+    `PATH=${path}`,
+    'HOME=/home/cw USER=cw LOGNAME=cw',
+    'CW_DATA_DIR=/data/cw BACKUP_TRANSCRIPTS_DIR=/data/claude-projects',
+    'setpriv --reuid=cw --regid=cw --init-groups --',
+    `sh -c '${command.replaceAll("'", `'\\''`)}'`,
+  ].join(' ');
+}

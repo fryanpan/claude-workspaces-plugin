@@ -489,3 +489,16 @@ export async function writeTree(c: Contained, text: string, lane: string): Promi
     closeSync(dirFd);
   }
 }
+
+/** The pieces `tree-fs-create.ts` builds on. Not for any other module:
+ *  `check:tree-fs` fails any other module that names this. */
+export const treeInternals = {
+  rootDev,
+  openNoLink,
+  openDir,
+  judge,
+  native,
+  refuseDataless,
+  FILE_OPEN,
+  TEMP_OPEN,
+};

@@ -11,8 +11,8 @@
  * per log, so the logs are compared on what the backup held (deploy-plan.ts,
  * `logFingerprint`).
  *
- * It talks to the board server on loopback only, the way the machine's own
- * health check does. `seed` refuses a data dir holding any board other than
+ * It talks to the board server on loopback only, so it runs as cw, the one
+ * uid the server admits there (`asCw`, mac-ops.ts). `seed` refuses a data dir holding any board other than
  * its own, so it can never write into a real project's board.
  */
 import {
@@ -124,9 +124,12 @@ async function seed(): Promise<void> {
   if (!existsSync(transcript)) {
     mkdirSync(join(TRANSCRIPTS, '-data-riverbend-drill'), { recursive: true });
     writeFileSync(transcript, `${TRANSCRIPT}\n`, { mode: 0o600 });
-    // Written as root over ssh; the agent's own user owns its transcripts.
-    chownSync(join(TRANSCRIPTS, '-data-riverbend-drill'), 10001, 10001);
-    chownSync(transcript, 10001, 10001);
+    // The agent's own user owns its transcripts. The drill runs this as cw
+    // (asCw), which owns them already; a run as root hands them over.
+    if (process.getuid?.() === 0) {
+      chownSync(join(TRANSCRIPTS, '-data-riverbend-drill'), 10001, 10001);
+      chownSync(transcript, 10001, 10001);
+    }
   }
   // Only worth backing up once both docs are on disk as .ydoc and both logs exist.
   const ready = () => ydocCount() >= DOCS.length && existsSync(events) && existsSync(notes);

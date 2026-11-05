@@ -38,7 +38,12 @@ Two things it can still do, which GCS's `objectCreator` role could not:
 
 - **Overwrite a snapshot whose name it knows.** S3's `PutObject` covers
   replacing an object. Names carry a random suffix and the credential
-  cannot list, so it would have to guess one.
+  cannot list, so it would have to guess one. The deploy turns versioning on
+  for the bucket (`set-versioning`), so a replaced snapshot stays as an old
+  version, and the lifecycle rule prunes old versions after the same 30
+  days. This is code only: no run has yet turned versioning on for a live
+  Tigris bucket, and a bucket that refuses it fails the deploy with the
+  API's error code.
 - **Create buckets and keys of its own, and list the org's bucket names.**
   Tigris gives every key these "default allowed operations". The keys it
   makes have no rights over this bucket. Turning them off is a switch on the

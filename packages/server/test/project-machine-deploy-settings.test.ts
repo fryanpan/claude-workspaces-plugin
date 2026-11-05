@@ -59,6 +59,7 @@ const kc = join(tmp, 'keychain');
 const state = join(tmp, 'fly');
 const flyCalls = join(tmp, 'fly-calls');
 const imported = join(tmp, 'fly-imported');
+const ghKeys = join(tmp, 'gh-keys');
 const securityCalls = join(tmp, 'security-calls');
 
 /** The outputs after Terraform made Riverbend's Access application. */
@@ -71,7 +72,7 @@ const outputs = (): TfOutputs => ({
   tunnels: {},
 });
 
-/** The bucket's lifecycle read, on loopback. */
+/** The bucket's lifecycle and versioning reads, on loopback. */
 let server: ReturnType<typeof Bun.serve>;
 
 const saved = {
@@ -87,6 +88,10 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     fetch(req) {
       const url = new URL(req.url);
+      if (url.pathname === `/${cfg.bucket}` && url.searchParams.has('versioning'))
+        return new Response(
+          '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>',
+        );
       if (url.pathname === `/${cfg.bucket}`) return new Response(lifecycleXml('snapshots/', 30));
       return new Response('not found', { status: 404 });
     },
@@ -126,6 +131,20 @@ esac
 exit 0
 `,
   );
+  // Answers `gh api repos/<owner>/<name>/keys` from the file
+  // `<owner>__<name>.json` in the stand-in GitHub folder; no file, no answer.
+  mkdirSync(ghKeys);
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/bin/sh
+[ "$1" = api ] || exit 2
+r="\${2#repos/}"; r="\${r%/keys}"
+f="${ghKeys}/$(echo "$r" | sed 's|/|__|').json"
+[ -f "$f" ] || exit 1
+cat "$f"
+`,
+  );
+  chmodSync(join(bin, 'gh'), 0o755);
   chmodSync(join(bin, 'security'), 0o755);
   chmodSync(join(bin, 'fly'), 0o755);
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
@@ -264,9 +283,17 @@ describe('machine:deploy sets the project settings', () => {
 
   const BOARD = 'w-riverbend';
   const KEY_ENTRY = 'riverbend-deploy-key';
-  const DEPLOY_KEY =
-    '-----BEGIN OPENSSH PRIVATE KEY-----\nZml4dHVyZS1kZXBsb3kta2V5LWhhcmJvcmxpZ2h0\n-----END OPENSSH PRIVATE KEY-----';
+  // A real key, so the deploy can read its public half (lead-key-check.ts).
+  spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(tmp, 'lead-key')]);
+  const DEPLOY_KEY = readFileSync(join(tmp, 'lead-key'), 'utf8').trim();
+  const LEAD_PUB = readFileSync(join(tmp, 'lead-key.pub'), 'utf8').trim();
   const ENCODED = Buffer.from(`${DEPLOY_KEY}\n`).toString('base64');
+  const LEAD_REPO = 'alice/riverbend';
+  const githubLists = (readOnly: boolean) =>
+    writeFileSync(
+      join(ghKeys, 'alice__riverbend.json'),
+      JSON.stringify([{ id: 7, key: LEAD_PUB, read_only: readOnly }]),
+    );
   const withLead = (input: Partial<Parameters<typeof projectConfig>[0]> = {}) =>
     deployProject(
       projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
@@ -292,14 +319,16 @@ describe('machine:deploy sets the project settings', () => {
   it('sets the lead’s board, sign-in and deploy key on stdin, and never prints them', async () => {
     keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
     keychain(KEY_ENTRY, `${DEPLOY_KEY}\n`);
+    githubLists(true);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
-    await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY });
+    await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY, leadRepos: [LEAD_REPO] });
     expect(readFileSync(imported, 'utf8').split('\n').filter(Boolean)).toEqual([
       `CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}`,
       `CW_LEAD_BOARD=${BOARD}`,
       `CW_LEAD_GITHUB_DEPLOY_KEY=${ENCODED}`,
     ]);
-    for (const value of [LEAD_TOKEN, ENCODED, 'Zml4dHVyZS1kZXBsb3kta2V5']) {
+    expect(output.join('\n')).toContain(`read-only on ${LEAD_REPO}`);
+    for (const value of [LEAD_TOKEN, ENCODED, DEPLOY_KEY.split('\n')[1] ?? 'x']) {
       expect(flyCallLines().join('\n')).not.toContain(value);
       expect(output.join('\n')).not.toContain(value);
     }
@@ -310,6 +339,20 @@ describe('machine:deploy sets the project settings', () => {
     expect(secretsSet(await dry({ githubDeployKey: KEY_ENTRY }))).toEqual([
       'CW_LEAD_GITHUB_DEPLOY_KEY',
     ]);
+  });
+
+  it('refuses a deploy key GitHub lets write, or one it cannot find, and sets nothing (review L4)', async () => {
+    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
+    keychain(KEY_ENTRY, `${DEPLOY_KEY}\n`);
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    const lead = { leadBoard: BOARD, githubDeployKey: KEY_ENTRY, leadRepos: [LEAD_REPO] };
+    githubLists(false);
+    await expect(withLead(lead)).rejects.toThrow(`can write to ${LEAD_REPO}`);
+    expect(existsSync(imported)).toBe(false);
+    rmSync(join(ghKeys, 'alice__riverbend.json'));
+    await expect(withLead(lead)).rejects.toThrow('could not read alice/riverbend');
+    await expect(withLead({ ...lead, leadRepos: [] })).rejects.toThrow('--lead-repo');
+    expect(existsSync(imported)).toBe(false);
   });
 
   it('sets a newly named account’s sign-in again, and --refresh-lead sets all three', async () => {
@@ -477,6 +520,7 @@ describe('plan, with the settings', () => {
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
+    versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: HEAD, memoryMb: 512 }],
   });

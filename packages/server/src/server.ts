@@ -77,7 +77,7 @@ import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './
 import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
-import { LeadMeetingFeed } from './lead-chat/meeting-feed.ts';
+import { LeadMeetingFeed, meetingLeadFeedEnabled } from './lead-chat/meeting-feed.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
@@ -166,7 +166,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { captureServerError } from './sentry.ts';
+import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
 import { buildAccessView } from './share/access-view.ts';
@@ -179,6 +179,7 @@ import { sharingOffCardPath, sharingOffDoorAllows } from './sharing-off-door.ts'
 import { boundFiles } from './slow-fs.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
+import { SpendAlarm, setSpendAlarm } from './spend-alarm.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
 import { AgentCallbacks } from './spoken-reply/agent-llm.ts';
 import type { SpokenBoard } from './spoken-reply/answer.ts';
@@ -305,6 +306,12 @@ export interface ServerHandle {
    *  can mint one at a chosen time — an expired one, or one for another doc. */
   appVoice: {
     mint(workspaceId: string, docId: string, at?: number): { token: string; expiresAt: number };
+  };
+  /** The board agent tokens a board socket session holds. Exposed so a test
+   *  can send a route the bearer a walled lead's calls carry, with no MCP
+   *  call in between. Nothing outside this process can reach it. */
+  boardTokens: {
+    mintHeld(agentId: string, boardId: string): { token: string };
   };
   docStore: DocStore;
   /** The board task store — workspaces, tasks, the transition gate. */
@@ -3090,6 +3097,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const slowLoadAlarm = new SlowLoadAlarm((message, extra) =>
     captureServerError(new Error(message), extra),
   );
+  // This org's Claude spend per day, from the calls' own usage rows
+  // (security review L3). Process-wide, because the rows are recorded deep
+  // in the meeting pipeline, which holds no server context.
+  if (opts.spendAlarmUsd !== undefined) {
+    setSpendAlarm(
+      new SpendAlarm({ thresholdUsd: opts.spendAlarmUsd, raise: captureServerWarning }),
+    );
+  }
   // Every page's judged loads, one server-wide log, so the daily health
   // check can read the slowest per page type (`routes/load-reports.ts`).
   const pageLoads = new PageLoadLog(dataDir);
@@ -3114,6 +3129,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
+    leadDiffRepo: (boardId, repo) => {
+      const c = boardSocketRoots.containedOf(repo);
+      return c && boardSocketRoots.rootsOf(boardId).includes(c.root) ? c.abs : null;
+    },
     chatAudit,
     shareLinks,
     accessProposals,
@@ -3128,7 +3147,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenTimings,
     leadChat,
     leadChatMeetings,
-    leadMeetingFeed,
+    leadMeetingFeed:
+      (opts.meetingLeadFeed ?? meetingLeadFeedEnabled(process.env)) ? leadMeetingFeed : null,
     // What the lead says into a meeting is said in the board reply's voice.
     leadMeetingVoice: spokenEngines.voices[1] ?? spokenEngines.voices[2] ?? null,
     featuresOff: opts.featuresOff ?? {},
@@ -3634,6 +3654,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
+    boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason
     // `sweepDeadShares` is: a test drives the real thing rather than a
     // re-implementation of it.

@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { NOTES_EMPTY } from '../src/lead-chat/lead-chat-meeting-view.ts';
-import { PANE_OPEN_KEY } from '../src/lead-chat/lead-chat-meeting-wiring.ts';
+import { PANE_OPEN_KEY, lastMeetingDocKey } from '../src/lead-chat/lead-chat-meeting-wiring.ts';
 import { type LeadChatMount, mountLeadChat } from '../src/lead-chat/lead-chat-mount.ts';
 import {
   ALICE,
@@ -45,6 +45,8 @@ function mount(
     meeting?: ReturnType<typeof meetingFixture> | null;
     session?: ReturnType<typeof memory>;
     author?: typeof ALICE;
+    device?: ReturnType<typeof memory>;
+    context?: { surface: 'doc'; docId: string } | { surface: 'board' };
   } = {},
 ) {
   const fake = fakeMeetingClient(opts.meeting ?? null);
@@ -53,12 +55,15 @@ function mount(
   const clock = fakeClock();
   const session = opts.session ?? memory({ [REC_KEY]: 'rec-here' });
   const minted: string[] = [];
+  const went: string[] = [];
+  /** The meeting verbs sent before each page move. */
+  const toldBefore: string[][] = [];
   mounted = mountLeadChat({
     workspaceId: 'w-harbor',
     author: opts.author ?? ALICE,
-    getContext: () => ({ surface: 'doc', docId: 'd-saltmarsh' }),
+    getContext: () => opts.context ?? { surface: 'doc', docId: 'd-saltmarsh' },
     client: fake.client,
-    storage: null,
+    storage: opts.device ?? null,
     session,
     voice: fakeVoice().seams,
     reducedMotion: () => true,
@@ -78,6 +83,10 @@ function mount(
       },
       macAudio: false,
       today: new Date(2026, 9, 29),
+      navigate: (path) => {
+        went.push(path);
+        toldBefore.push(fake.actions());
+      },
     },
   });
   const view = mounted.view;
@@ -86,7 +95,7 @@ function mount(
     if (!el) throw new Error(`nothing at ${sel}`);
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
   };
-  return { ...fake, net, mic, clock, session, minted, view, tap };
+  return { ...fake, net, mic, clock, session, minted, went, toldBefore, view, tap };
 }
 
 describe('the lead chat meeting on a page', () => {
@@ -223,5 +232,195 @@ describe('the lead chat meeting on a page', () => {
     const next = mount({ meeting: meetingFixture({ meetingId: 'm-77' }), session });
     await flush();
     expect(next.view.pane.hidden).toBe(false);
+  });
+});
+
+describe('a meeting started with notes opens its notes doc', () => {
+  /** Start from the wizard with `doc` picked, or a new doc when it is null. */
+  async function startWith(t: ReturnType<typeof mount>, doc: string | null) {
+    t.view.button.click();
+    t.view.start.click();
+    await flush();
+    if (doc) {
+      const row = [...t.view.root.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (el) => el.textContent === doc,
+      );
+      if (!row) throw new Error(`no row ${doc}`);
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    } else {
+      const r = t.view.root.querySelector<HTMLInputElement>('input[name="wk"][value="new"]');
+      if (!r) throw new Error('no new-doc option');
+      r.checked = true;
+      r.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    t.tap('[data-wiz="next"]');
+    t.tap('[data-wiz="start"]');
+    await flush();
+  }
+
+  it('goes to the picked doc once the recording runs there, with the panel kept open', async () => {
+    const session = memory({ [REC_KEY]: 'rec-here' });
+    const t = mount({ session, context: { surface: 'board' } });
+    await startWith(t, 'Harborlight plan');
+    expect(t.calls[0]?.body).toMatchObject({ docId: 'd-harbor', notes: 'existing' });
+    // Not before the socket says the recording runs.
+    expect(t.went).toEqual([]);
+    const s = t.net.last();
+    s.onopen?.();
+    s.say({ type: 'ready', meetingId: 'm-90' });
+    await flush();
+    expect(t.went).toEqual(['/workspaces/w-harbor/docs/d-harbor']);
+    // The board was told the recording runs before the page went.
+    expect(t.toldBefore[0]).toContain('recording');
+    expect(session.map.get(PANE_OPEN_KEY)).toBe('1');
+    // A reconnect later goes nowhere.
+    s.say({ type: 'ready', meetingId: 'm-90' });
+    await flush();
+    expect(t.went).toHaveLength(1);
+  });
+
+  it('goes to a doc minted in the wizard', async () => {
+    const t = mount({ context: { surface: 'board' } });
+    await startWith(t, null);
+    t.net.last().onopen?.();
+    t.net.last().say({ type: 'ready', meetingId: 'm-91' });
+    await flush();
+    expect(t.went).toEqual(['/workspaces/w-harbor/docs/d-new']);
+  });
+
+  it('goes to the doc the notes really land in when the picked one hands them on', async () => {
+    const t = mount({ context: { surface: 'board' } });
+    await startWith(t, 'Harborlight plan');
+    t.net.last().onopen?.();
+    t.net.last().say({
+      type: 'notes_doc',
+      docId: 'd-rivernote',
+      title: 'Riverbend notes',
+      url: '/workspaces/w-harbor/docs/d-rivernote',
+    });
+    const s = t.net.last();
+    s.onopen?.();
+    s.say({ type: 'ready', meetingId: 'm-92' });
+    await flush();
+    expect(t.went).toEqual(['/workspaces/w-harbor/docs/d-rivernote']);
+  });
+
+  it('stays put when the page already shows the notes doc', async () => {
+    const t = mount();
+    await startWith(t, 'Saltmarsh notes');
+    t.net.last().onopen?.();
+    t.net.last().say({ type: 'ready', meetingId: 'm-93' });
+    await flush();
+    expect(t.went).toEqual([]);
+  });
+
+  it('a page that only resumes the recording goes nowhere', async () => {
+    const t = mount({
+      meeting: meetingFixture({ meetingId: 'm-77', docId: 'd-harbor' }),
+      context: { surface: 'board' },
+    });
+    await flush();
+    t.net.last().onopen?.();
+    t.net.last().say({ type: 'ready', meetingId: 'm-77' });
+    await flush();
+    expect(t.went).toEqual([]);
+  });
+
+  it('after a move to another page, a later line still goes to the notes doc', async () => {
+    const session = memory({ [REC_KEY]: 'rec-here' });
+    const first = mount({ session, context: { surface: 'board' } });
+    await startWith(first, 'Harborlight plan');
+    first.net.last().onopen?.();
+    first.net.last().say({ type: 'ready', meetingId: 'm-94' });
+    await flush();
+    const running = first.client.state().meeting;
+    if (!running) throw new Error('no meeting');
+    window.dispatchEvent(new Event('pagehide'));
+    mounted?.destroy();
+    document.body.innerHTML = '';
+
+    // The reader moves on to a page that is not the notes doc.
+    const next = mount({
+      session,
+      meeting: { ...running, meetingId: 'm-94' },
+      context: { surface: 'doc', docId: 'd-saltmarsh' },
+    });
+    await flush();
+    const s = next.net.last();
+    expect(s.url).toContain('/docs/d-harbor/');
+    s.onopen?.();
+    expect(s.json()[0]).toMatchObject({ type: 'start', resume: 'm-94' });
+    s.say({ type: 'ready', meetingId: 'm-94' });
+    s.say({ type: 'transcript', turn: 4, text: 'The ferry leaves at nine.', final: true });
+    await flush();
+    expect(next.calls.find((c) => c.action === 'line')?.body).toMatchObject({
+      id: running.id,
+      turn: 4,
+      text: 'The ferry leaves at nine.',
+    });
+    expect(next.went).toEqual([]);
+  });
+});
+
+describe('the wizard starts on the doc of this board’s last meeting', () => {
+  it('picks the last meeting’s doc on this device ahead of this page’s doc', async () => {
+    const device = memory();
+    const t = mount({ device });
+    t.view.button.click();
+    t.view.start.click();
+    await flush();
+    const row = [...t.view.root.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      (el) => el.textContent === 'Harborlight plan',
+    );
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    t.tap('[data-wiz="next"]');
+    t.tap('[data-wiz="start"]');
+    await flush();
+    expect(device.map.get(lastMeetingDocKey('w-harbor'))).toBe('d-harbor');
+    mounted?.destroy();
+    document.body.innerHTML = '';
+
+    const next = mount({ device });
+    next.view.button.click();
+    next.view.start.click();
+    await flush();
+    expect(next.view.root.querySelector('[aria-selected="true"]')?.textContent).toBe(
+      'Harborlight plan',
+    );
+  });
+
+  it('falls back to this page’s doc when the last one is gone, and is per board', async () => {
+    const device = memory({
+      [lastMeetingDocKey('w-harbor')]: 'd-archived',
+      [lastMeetingDocKey('w-riverbend')]: 'd-harbor',
+    });
+    const t = mount({ device });
+    t.view.button.click();
+    t.view.start.click();
+    await flush();
+    expect(t.view.root.querySelector('[aria-selected="true"]')?.textContent).toBe(
+      'Saltmarsh notes',
+    );
+  });
+
+  it('a meeting with no notes is not remembered and opens no doc', async () => {
+    const device = memory();
+    const t = mount({ device, context: { surface: 'board' } });
+    t.view.button.click();
+    t.view.start.click();
+    await flush();
+    const r = t.view.root.querySelector<HTMLInputElement>('input[name="wk"][value="none"]');
+    if (!r) throw new Error('no no-notes option');
+    r.checked = true;
+    r.dispatchEvent(new Event('change', { bubbles: true }));
+    t.tap('[data-wiz="next"]');
+    t.tap('[data-wiz="start"]');
+    await flush();
+    t.net.last().onopen?.();
+    t.net.last().say({ type: 'ready', meetingId: 'm-95' });
+    await flush();
+    expect(t.calls[0]?.body).toMatchObject({ notes: 'none' });
+    expect(t.went).toEqual([]);
+    expect(device.map.size).toBe(0);
   });
 });

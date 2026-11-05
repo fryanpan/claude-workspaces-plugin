@@ -1666,7 +1666,7 @@ export class DocStore {
     // to ask the filesystem — `existsSync` on a path whose provider has
     // stopped answering parks the loop exactly as a read does. The `existsSync`
     // survives only on the boot branch, where `preread` is undefined.
-    if (preread ? !preread.exists : !existsSync(src)) {
+    if (preread ? !preread.exists : !boundFiles.guards.exists(src)) {
       // Not a park: the file answered, and it is not there. A doc bound to a
       // missing file comes back unbound at boot with no reason recorded, and
       // one reached through a deferred read must end the same way — or the
@@ -1993,6 +1993,8 @@ export class DocStore {
     init?: {
       type?: DocType;
       sourceUrl?: string;
+      /** See `DocMeta.appServesPrefix`; set on an existing doc like `sourceUrl`. */
+      appServesPrefix?: boolean;
       title?: string;
       setId?: string;
       webhookUrl?: string;
@@ -2059,6 +2061,13 @@ export class DocStore {
         !isBoardOwnedDoc(docId)
       ) {
         existing.meta.sourceUrl = init.sourceUrl;
+        this.saveToDisk(existing);
+      }
+      if (
+        init?.appServesPrefix !== undefined &&
+        init.appServesPrefix !== (existing.meta.appServesPrefix ?? false)
+      ) {
+        existing.meta.appServesPrefix = init.appServesPrefix ? true : undefined;
         this.saveToDisk(existing);
       }
       return existing;

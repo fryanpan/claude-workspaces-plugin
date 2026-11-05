@@ -51,6 +51,7 @@ function launch(boardWall: boolean, refuse: string | null = null) {
     platform: 'darwin',
     say: (line) => lines.push(line),
     readToken: (service) => (service === TOKEN_SERVICE ? STORED : null),
+    leadTools: () => ({}),
     registerRoots: (boardId, roots, slugs) => {
       registered.push([boardId, roots]);
       named.push(slugs);

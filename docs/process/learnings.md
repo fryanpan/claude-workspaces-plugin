@@ -3760,3 +3760,27 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   (`setImmediate`; a microtask is not enough). A stream whose end Bun can
   reach in the same tick is sent sized, so a control built that way cannot
   see chunking.
+
+## A lead's first outline read is a whole-document edit on every open page
+
+- On 2026-11-04 Bryan lost the caret mid-comment while a lead edited his doc,
+  after two fixes whose headless suites passed. Those suites sent the edit
+  verbs straight at the REST routes. A real lead calls `read_doc_outline`
+  first, and the first outline read gives every top-level block its `cwId`
+  in one Y transaction.
+- The page receives that as one replace of the whole document in which every
+  block differs only by an attribute that is never drawn.
+  `effectiveMapping` (`thread-decorations.ts`) diffed attributes too, so
+  every thread range collapsed, the inline reply card was dropped and
+  re-added, and focus went to `body`. At 430 the reader's next words went
+  into the doc. At 1180 the mermaid block was redrawn empty and the
+  commented words moved 312px.
+- The diff now ignores `BLOCK_IDENTITY_ATTRS`. A browser test of an edit
+  verb has to make the calls the MCP tool makes, in its order, including
+  the reads: `comment-focus-lead-verbs-driver.ts` reads the outline before
+  `replace_block` for this reason.
+- A rebuilt margin card mounts a fresh reply editor. Tiptap's `focus()`
+  waits a frame, and keys typed in that frame went into the hidden textarea
+  and were overwritten. The serializer also trimmed a trailing space, so the
+  next word ran on. The composer now takes the caret in the same task and
+  keeps a trailing space through `getMarkdown`/`setMarkdown`.

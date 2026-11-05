@@ -40,6 +40,18 @@ profile per lead. A profile allows everything, then:
   `claude -p` answered and ran a Bash call with the install read only. It
   also answered with `~/.local/state/claude` read only; that folder holds
   its locks and stays writable;
+- **refuses writes, after every other rule, to the owner's program folders
+  outside home**: each folder on the owner's PATH (the launch's own and the
+  login shell's, `$SHELL -l`) and `/Applications`, walked up to the highest
+  folder above it the owner can write. On this Mac that is `/opt/homebrew`
+  and `/Applications`. The list is found at each launch and `--check`, not
+  written down (`scripts/lead-sandbox-owner-bins.ts`). Without it a lead could
+  replace `/opt/homebrew/bin/git`, first on the owner's PATH, and every owner
+  session would run the lead's code (measured 4 November under a live lead's
+  profile). The walk stops below any folder holding the home folder, a
+  `protect` folder, a lead's project or `allow` folder, or a temporary
+  folder. The cost: a lead cannot `brew install`, `npm install -g` or
+  `pip install` into Homebrew's Python;
 - **denies the config, the profiles and the prod root again** after every
   other rule, so no `allow` reopens prod and a lead cannot widen its next
   launch;
@@ -127,7 +139,10 @@ repo still works. Every other lead is refused the keychain by default,
 because a lead that can read it reads every item there, the Cloudflare and
 Fly tokens included until the keeper's cutover. A lead that needs only git
 fetch and push to named GitHub repos lists them in `githubRepos` instead and
-keeps the keychain refused ("GitHub through the proxy", below).
+keeps the keychain refused ("GitHub through the proxy", below). One that
+also needs `gh` for its pull requests adds `"tools": ["gh"]`, and its gh
+goes through the same proxy ("gh through the proxy", below); it needs
+neither the keychain nor `~/.config/gh`.
 
 **A test lead for the board wall** sets `"boardWall": true` and its board's
 id, `"boardId": "w-…"`, in its entry. The profile then denies every board
@@ -143,9 +158,11 @@ and writes docs the owner binds in those projects, and a link the lead made
 in one, or made elsewhere and moved in, would carry the server outside it.
 `bun install` and `npm install` still work, since their links are in
 `node_modules`, and the server refuses every path through one. The server
-runs no git in a repository that holds one of the lead's projects, so the
-lead's git settings stay writable: commits, `git push -u`, `git config` and
-`git worktree add` work. The costs: a walled lead cannot check out a
+runs no git in a repository that holds one of the lead's projects. The
+lead's git settings are read only whatever the wall says (`gitCodeRegex`), so
+commits and `git push` work, while `git push -u`, `git config` and
+`git worktree add` do not; `cw-worktree` makes its worktrees ("Branches and
+pull requests from inside the wall", below). The costs: a walled lead cannot check out a
 repository whose tracked files include symlinks outside `node_modules`, and
 cannot rename or delete a `node_modules` folder; and a diff review of its
 repository, or of a repository that holds it, does not work, since that
@@ -186,6 +203,47 @@ Lead's included. The opt-out drops the tmux rules and its `--check` row, and
 nothing else. The Team Lead itself runs outside the wall and keeps starting,
 reading and sending to leads' panes as before (measured below).
 
+**A lead that drives an Android phone** lists `"tools": ["adb"]` in its
+entry. The profile then lets it read and run `~/Android/Sdk/platform-tools`,
+and not write there, and connect to adb's server on port 5037. Every other
+lead is refused that port at every address, because the server on it drives
+every phone plugged into this Mac. Measured 4 November: inside a real lead's
+profile with `adb` listed, `adb version` runs; without it, exec of the same
+binary is refused and a connect to 5037 answers `EPERM`. `--check` runs
+`adb version` inside the profile of a lead with adb, and probes 5037 inside
+every other lead's (it must be `EPERM`). It has no control outside the wall
+for that port, since the control would open a real connection to the adb
+server.
+
+**A lead that runs `uv` or `uvx`** lists `"uv"` in `tools`. The launch then
+gives it a uv cache of its own,
+`~/Library/Caches/claude-workspaces/lead-sandbox/<lead>/uv` (`UV_CACHE_DIR`
+and `UV_TOOL_DIR`), which its profile lets it write, and lets it read the
+Pythons uv installed (`~/.local/share/uv/python`), not write them. The
+owner's `~/.cache/uv` stays refused: a lead that wrote there could change a
+package the owner's next `uvx` runs. Measured 4 November: inside a lead's
+profile, `uvx applemusic-mcp` failed to start because the cache was refused
+(`failed to create directory ~/.cache/uv`), then because the Python folder
+was; with `uv` listed, the same `uvx` installed the package into the lead's
+cache and imported it. `--check` runs `uv python list` inside the profile of
+a lead with uv.
+
+**Every walled lead gets a `bun` wrapper** first on its PATH
+(`~/.config/claude-workspaces/lead-tools/<lead>/bin/bun`, which it reads and
+cannot write). A plugin MCP server such as Discord's starts with
+`bun run --cwd <plugin> start`, and its start script runs `bun install`
+first; bun relinks each package's bin on every install, the plugin cache is
+read only in the wall, so the install exited 1 (`Failed to link which:
+EPERM`) and the server never started: Claude Code reported
+`CONNECTION_CLOSED`. For a bun whose folder (`--cwd`, or the folder it runs
+in) is in `~/.claude/plugins`, the wrapper sets
+`BUN_CONFIG_SKIP_INSTALL_PACKAGES=1`, so the install exits 0 without
+writing and the server runs on the packages an unwalled session installed.
+Anywhere else it changes nothing. A plugin whose packages were never
+installed outside the wall still fails; start it once unwalled. `--check`
+asks the wrapper, inside the profile, from the plugin cache (it must skip)
+and from the lead's project (it must not).
+
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
 
@@ -213,6 +271,7 @@ Then six rows per lead try the ways out of the wall and the keychain
 | launchd | a `launchctl submit` of `/usr/bin/true` is not loaded (launchd's own refusal; no rule of ours) | the same job submitted outside loads, and is removed at once |
 | keychain | `security find-generic-password` of a dummy item the check made (`lead-sandbox-check-harborlight`) is refused | the same read outside returns it; the item is deleted after |
 | claude install | `touch` of a new file in the folder `~/.local/bin/claude` resolves into is refused | that folder is writable (asked with `access`, so nothing is made); a file the wall let through is removed |
+| programs | one row per owner program folder found (above): `touch` of a new file in it is refused | that folder is writable (asked with `access`); a file the wall let through is removed |
 
 `open` and `osascript` are asked of the sandbox rather than driven, because
 driving them would start an app or show a window. The check starts and kills
@@ -396,6 +455,7 @@ the profiles and the proxy together.
 | a repo not in that lead's `githubRepos` (GitHub's names match without case) | 403 |
 | a push that deletes a ref | 403 |
 | a push that moves the default branch other than forward (a force-push, a reset back) | 403 |
+| `POST /-/worktree` with a lead's token | a worktree of its own project, made here (below) |
 | everything else | sent to `https://github.com` with Bryan's credential |
 
 A push that creates a ref is allowed, and so is a force-push to any branch
@@ -454,6 +514,126 @@ repeats the credential reaches the client redacted.
 `sandbox-exec`: a lead with repos reaches the port and reads its token, and
 cannot write it; a lead without them reaches neither. Not run yet: a real
 push to GitHub through it.
+
+### gh through the proxy
+
+A lead with `"tools": ["gh"]` and a `githubRepos` list (the config refuses
+`gh` without one) runs `gh` for reads and pull requests on those repos. The
+git proxy's process also serves gh, on the unix socket
+`/private/tmp/cw-<uid>-gh/api.sock` (folder mode 700, socket 600), with the
+same credential, read once. The handler is `scripts/gh-proxy-server.ts`; what
+it lets through is `scripts/gh-proxy-policy.ts`.
+
+**What the launch writes**, in the lead's git-proxy folder, which it reads
+and never writes: `gh/config.yml`, with `http_unix_socket` set to the socket.
+gh 2.102 then sends every API call to the socket in plain HTTP, with
+`Host: api.github.com`. The launch sets `GH_CONFIG_DIR` to that folder,
+`GH_TOKEN` to the lead's own proxy token (the one its git sends; it also
+outranks a token the owner's shell exported), `GH_HOST=github.com` and the
+two `GH_NO_*_NOTIFIER` variables. A lead without `gh` is denied the socket in
+its profile.
+
+**What the proxy lets through:**
+
+- REST: `GET` and `HEAD` under `/repos/<listed repo>/`, except `hooks`,
+  `keys`, `invitations`, `environments`, and the secrets, variables and
+  runners folders. A redirect to GitHub's file storage (a run's logs, an
+  artifact) is followed by the proxy, without the credential; a redirect
+  back into the API is refused.
+- GraphQL: only the operations gh 2.102 sends for `gh pr view`, `list`,
+  `status`, `checks`, `create`, `comment` and `edit` (`OPERATIONS`), each
+  with its own root fields. `repository(owner, name)` must name a listed
+  repo. `search` must name exactly one listed repo with `repo:`, and no
+  `org:`, `user:` or `owner:`. Every field path must be one gh asks for
+  (`scripts/gh-proxy-fields.json`), so a walk out of a listed repo, such as
+  `author { repositories }`, is refused. `node(id)` and the id in each
+  mutation's input are resolved upstream first, and must be a pull request
+  (a repository, for `createPullRequest`) in a listed repo.
+- Mutations: `addComment` on a pull request, `createPullRequest`,
+  `updatePullRequest` with a title, body or base, and the assignee and
+  reviewer mutations gh's `pr create` and `pr edit` send. Merge, review,
+  close, labels and every repo or settings mutation are refused.
+
+A refusal is a 403 whose `message` starts `gh proxy:` and names what to add
+(the operation, the field path, the input field) if gh needs it. A newer gh
+that changes its queries is refused until its operations are added: capture
+them by pointing a gh at a stub socket, and add them to `OPERATIONS` and the
+fields file.
+
+**What it was proved against.** `scripts/gh-proxy-policy.test.ts` checks
+every operation gh 2.102 sent (`scripts/fixtures/gh-proxy/`) passes, and
+that each refusal above holds, through fragments and aliases too.
+`scripts/gh-proxy-server.test.ts` runs the handler on a real socket in front
+of a stand-in for GitHub, with a fake credential: the upstream sees the
+credential and never the lead's token, an unlisted repo's node id is refused
+after one lookup, and neither a response nor a log line holds the
+credential. `scripts/gh-proxy-wall.test.ts` runs the real `gh` inside a
+generated profile: `gh pr view` and `gh api` answer from the stand-in, an
+unlisted repo gets the proxy's refusal, and a lead without `gh` gets `EPERM`
+on the socket. `--check` runs `gh api /` inside each gh lead's profile and
+needs the proxy's refusal back, so nothing goes to GitHub. Not run yet: gh
+through it against real GitHub.
+
+### Branches and pull requests from inside the wall
+
+A lead with `githubRepos` makes a branch in a worktree of its own, commits,
+pushes and opens the pull request without leaving the wall. In a repository
+of one of its projects, after `git fetch`:
+
+```bash
+cw-worktree fix-1 fix/harbor-notes origin/main
+cd .claude/worktrees/fix-1 && git commit -am '…' && git push
+gh pr create -R Harborlight/notes --head fix/harbor-notes --base main --title '…' --body '…'
+```
+
+**Why the proxy makes the worktree.** `git worktree add` writes
+`.git/worktrees/<name>/`, whose `commondir`, `gitdir` and `config.worktree`
+can point git at a config the lead wrote, and a config can run code through
+`core.fsmonitor` or `core.hooksPath`. The wall makes those read only, so the
+lead's own `git worktree add` fails with "Operation not permitted". A clone
+of its own, in a folder it can write, would hold a config and hooks the lead
+wrote, and the server, an unwalled session or the owner would run them the
+next time they ran git there. So the lead asks the proxy, which runs as the
+owner.
+
+**What `cw-worktree` does.** The launch writes it into
+`~/.config/claude-workspaces/git-proxy/<lead>/bin/`, read only to the lead
+and first on its `PATH`. It sends `POST /-/worktree` to the proxy with the
+lead's token (on curl's stdin, never in its arguments) and the repository it
+was run in. The proxy (`scripts/git-proxy-worktree.ts`):
+
+- refuses a repository that is not at or inside one of the lead's projects
+  as the config names them (403), one whose `.git` is not a folder, a path
+  on the way through a symlink, and a name, branch or worktree that exists;
+- runs `git worktree add --no-checkout --no-track -b <branch>
+  <repo>/.claude/worktrees/<name> <base>` with `core.hooksPath=/dev/null`,
+  `core.fsmonitor=false` and none of its own `GIT_` variables, so it runs no
+  hook, and no filter a `.gitattributes` the lead wrote names;
+- checks that the worktree's `.git` file, `commondir` and `gitdir` say what
+  git writes, and that there is no `config.worktree`;
+- sets `branch.<branch>.remote` to `origin` and `.merge` to the branch
+  itself, so a plain `git push` from the worktree goes to `origin/<branch>`.
+
+`cw-worktree` then fills in the files with the lead's own git, inside the
+wall, and prints the `gh pr create` line for the branch. The worktree's
+`.git` file and git folder are read only to the lead like the rest.
+
+**Why gh needs `-R` and `--head`.** gh reads the remote's URL after git's
+`insteadOf`, which is the proxy's, so it finds no GitHub remote. `-R
+<owner/repo>` names the repository and `--head <branch>` the branch, and gh
+then asks nothing of the remotes (gh 2.102, measured 4 November 2026).
+
+**What it was proved against.** `scripts/lead-sandbox-ship.test.ts` runs a
+board-walled lead under the real `sandbox-exec`: its own `git worktree add`
+fails; `cw-worktree`, a commit and `git push` land the branch on a stand-in
+for GitHub; the project's `config`, `hooks/` and `info/`, the worktree's
+`commondir`, `gitdir` and `config.worktree`, and its `.git` file are each
+unwritable while a plain file beside them is written; the real `gh pr create`
+opens a pull request through the gh proxy, with the owner's credential seen
+only upstream; and a pull request on another repository is refused, by name
+and by a crafted node id. `scripts/git-proxy-worktree.test.ts` covers the
+refusals, the symlink checks, and that the proxy's git runs no hook while the
+owner's own does.
 
 ## Restarting the fleet's leads under it
 

@@ -260,7 +260,7 @@ describe('one Access application per project', () => {
       expect(reached).toEqual([]);
     });
 
-    it('CONTROL: without ONE_ADDRESS_ORIGIN the same request is forwarded to Riverbend', async () => {
+    it('without ONE_ADDRESS_ORIGIN the Worker forwards it to no machine (review M2)', async () => {
       reached.length = 0;
       const { ONE_ADDRESS_ORIGIN: _home, ...open } = env;
       const res = await handleBoardRequest(
@@ -270,11 +270,10 @@ describe('one Access application per project', () => {
         open,
         tunnel,
       );
-      // Riverbend now holds a copy of the one address's stamp. It answers
-      // nothing for it (the one address is on none of its lists), but the
-      // copy is what the Mac would accept, which is why the Worker redirects.
-      expect(reached).toEqual([CLOUD_ORIGIN]);
-      expect(res.status).toBe(403);
+      // Two origins and no owner named: the Worker cannot tell which machine
+      // may hold the one address's stamp, so neither gets a copy.
+      expect(reached).toEqual([]);
+      expect(res.status).toBe(404);
     });
   });
 

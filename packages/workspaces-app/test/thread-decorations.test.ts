@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { BlockIdentity } from '../src/block-identity.ts';
 import { createEditor } from '../src/editor.ts';
 import {
   ThreadDecorations,
@@ -352,6 +353,50 @@ describe('a remote update that replaces the whole document', () => {
     const { editor } = mountWithCard();
     remoteReplace(editor, CONTENT);
     expect(highlighted(editor, 't1')).toBe('brave');
+    editor.destroy();
+  });
+});
+
+describe('a remote update that only gives the blocks their ids', () => {
+  // The first read of a doc's outline mints a `cwId` on every top-level block
+  // in one transaction (`core/src/prose-outline.ts`), so the page receives a
+  // whole-document replace in which every block differs from the one before
+  // only by an attribute nobody renders.
+  function mountWithIds(): { editor: Editor; el: HTMLElement } {
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: [StarterKit.configure({ undoRedo: false }), BlockIdentity, ThreadDecorations],
+      content: '<p>Hello brave world</p><p>Second paragraph here</p><p>Third, Riverbend</p>',
+    });
+    const el = document.createElement('div');
+    el.className = 'thread';
+    el.setAttribute('data-thread-id', 't1');
+    setThreadDecorations(editor.view, {
+      ranges: [{ id: 't1', from: 7, to: 12, status: 'open' }],
+      inlineCards: [{ id: 't1', el }],
+    });
+    return { editor, el };
+  }
+
+  function mintIds(editor: Editor): void {
+    const { state } = editor;
+    const json = state.doc.toJSON() as { content: Array<{ attrs?: Record<string, unknown> }> };
+    json.content.forEach((b, i) => {
+      b.attrs = { ...(b.attrs ?? {}), cwId: `b-harbor-${i}` };
+    });
+    const doc = state.schema.nodeFromJSON(json);
+    editor.view.dispatch(state.tr.replace(0, state.doc.content.size, new Slice(doc.content, 0, 0)));
+    expect(editor.state.doc.firstChild?.attrs.cwId).toBe('b-harbor-0');
+  }
+
+  it('keeps the highlight and the card through it', () => {
+    const { editor, el } = mountWithIds();
+    mintIds(editor);
+    expect(highlighted(editor, 't1')).toBe('brave');
+    expect(el.isConnected).toBe(true);
+    expect(el.previousElementSibling?.textContent).toBe('Hello brave world');
     editor.destroy();
   });
 });
