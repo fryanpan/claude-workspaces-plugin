@@ -1,5 +1,10 @@
 import { join } from 'node:path';
-import { GitListingFailed, scanFolderPathsAsync, scanFolderPathsOrThrow } from './fs-scan.ts';
+import {
+  GitListingFailed,
+  listedByGit,
+  scanFolderPathsAsync,
+  scanFolderPathsOrThrow,
+} from './fs-scan.ts';
 import { realPathUnder } from './safe-path.ts';
 
 /**
@@ -135,6 +140,8 @@ function cachedListing(
   include: readonly string[],
   now: number,
 ): { at: number; paths: Set<string> } {
+  inUse.set(key, { root, include, at: now });
+  startKeepWarm();
   const entry = listingCache.get(key);
   if (!entry) return refreshListing(key, root, include, now, null);
   // Past the hard limit a hit waits for the rescan, as every stale hit used
@@ -174,9 +181,82 @@ function refreshInBackground(key: string, root: string, include: readonly string
     .finally(() => refreshing.delete(key));
 }
 
-/** Forget every cached listing. Tests only. */
+/**
+ * Roots a request read recently, kept fresh between requests.
+ *
+ * A hit on a listing older than `LISTING_MAX_AGE_MS` rescans before it
+ * answers, on the server's one thread. A reader who spends more than thirty
+ * seconds on one file of a diff paid that on the next: the page's companion
+ * open waited for `git ls-files`, and so did every other request on the
+ * server (36-152 ms on this repo, 2,051 ms once on a loaded Mac).
+ * So a root read in the last `LISTING_KEEP_WARM_MS` is rescanned in the
+ * background whenever it is past `LISTING_TTL_MS`, and stays well inside the
+ * limit while its reader reads. The limit itself is unchanged: a file removed
+ * or newly ignored stops being admitted within it, as before. Only a root git
+ * listed is kept warm; a plain folder is rescanned on request, as before.
+ */
+const inUse = new Map<string, { root: string; include: readonly string[]; at: number }>();
+export const LISTING_KEEP_WARM_MS = 15 * 60_000;
+/** How often keep-warm looks. An object so a test can shorten it. */
+export const KEEP_WARM_TICK = { ms: 10_000 };
+let keepWarm: ReturnType<typeof setInterval> | null = null;
+
+function startKeepWarm(): void {
+  if (keepWarm) return;
+  keepWarm = setInterval(warmListings, KEEP_WARM_TICK.ms);
+  keepWarm.unref?.();
+}
+
+/**
+ * One keep-warm pass: start a background rescan of each root read in the
+ * last `LISTING_KEEP_WARM_MS` whose listing is past `LISTING_TTL_MS`, and
+ * forget the rest. Returns how many rescans it started.
+ */
+export function warmListings(): number {
+  const now = Date.now();
+  let started = 0;
+  for (const [key, use] of inUse) {
+    if (now - use.at > LISTING_KEEP_WARM_MS) {
+      inUse.delete(key);
+      continue;
+    }
+    // Only a root git lists, plain or contained: any other is walked by a
+    // readdir on this thread, which a cloud-sync folder can hold for as long
+    // as it likes.
+    if (!listedByGit(use.root)) continue;
+    const entry = listingCache.get(key);
+    if (!entry || now - entry.at <= LISTING_TTL_MS || refreshing.has(key)) continue;
+    refreshInBackground(key, use.root, use.include);
+    started++;
+  }
+  if (inUse.size === 0 && keepWarm) {
+    clearInterval(keepWarm);
+    keepWarm = null;
+  }
+  return started;
+}
+
+/** How old `root`'s listing is at `now`, or null when there is none. Tests only. */
+export function listingAge(
+  root: string,
+  now: number,
+  include: readonly string[] = [],
+): number | null {
+  const entry = listingCache.get(listingKey(root, include));
+  return entry ? now - entry.at : null;
+}
+
+/** Is the keep-warm interval running? Tests only. */
+export function keepWarmRunning(): boolean {
+  return keepWarm !== null;
+}
+
+/** Forget every cached listing, and stop keep-warm. Tests only. */
 export function clearListingCache(): void {
   listingCache.clear();
+  inUse.clear();
+  if (keepWarm) clearInterval(keepWarm);
+  keepWarm = null;
   cacheGeneration++;
 }
 
