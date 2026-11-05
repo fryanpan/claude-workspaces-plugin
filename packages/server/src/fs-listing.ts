@@ -1,5 +1,10 @@
 import { join } from 'node:path';
-import { GitListingFailed, scanFolderPathsAsync, scanFolderPathsOrThrow } from './fs-scan.ts';
+import {
+  GitListingFailed,
+  listedByGit,
+  scanFolderPathsAsync,
+  scanFolderPathsOrThrow,
+} from './fs-scan.ts';
 import { realPathUnder } from './safe-path.ts';
 
 /**
@@ -187,7 +192,8 @@ function refreshInBackground(key: string, root: string, include: readonly string
  * So a root read in the last `LISTING_KEEP_WARM_MS` is rescanned in the
  * background whenever it is past `LISTING_TTL_MS`, and stays well inside the
  * limit while its reader reads. The limit itself is unchanged: a file removed
- * or newly ignored stops being admitted within it, as before.
+ * or newly ignored stops being admitted within it, as before. Only a root git
+ * listed is kept warm; a plain folder is rescanned on request, as before.
  */
 const inUse = new Map<string, { root: string; include: readonly string[]; at: number }>();
 export const LISTING_KEEP_WARM_MS = 15 * 60_000;
@@ -213,6 +219,9 @@ export function warmListings(): number {
       inUse.delete(key);
       continue;
     }
+    // Only a root git listed: any other is walked by a readdir on this
+    // thread, which a cloud-sync folder can hold for as long as it likes.
+    if (!listedByGit(use.root)) continue;
     const entry = listingCache.get(key);
     if (!entry || now - entry.at <= LISTING_TTL_MS || refreshing.has(key)) continue;
     refreshInBackground(key, use.root, use.include);

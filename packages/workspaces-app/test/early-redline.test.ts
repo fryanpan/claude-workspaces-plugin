@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MountContext } from '../src/mount-context.ts';
 import { openCompanionDoc } from '../src/redline/redline-app.ts';
 import {
+  dropEarlyRedlineOnFailure,
   guessLiveMarkdownMember,
   redlineRequestsFor,
   startEarlyRedline,
@@ -132,5 +133,15 @@ describe('the redline starts from the address', () => {
     );
     expect(companion).toBeNull();
     expect(socket.close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the early socket when the meta read fails, since no mount will take it', async () => {
+    const early = fakeSocket();
+    startEarlyRedline(ID, () => early);
+    answer({ docId: 'harborlight-0a1b2c3-live:edit:docs~adr~0001-testing' });
+    await expect(dropEarlyRedlineOnFailure(Promise.reject(new Error('meta')))).rejects.toThrow(
+      'meta',
+    );
+    await vi.waitFor(() => expect(early.close).toHaveBeenCalledOnce());
   });
 });

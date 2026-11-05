@@ -167,6 +167,21 @@ describe('folder listing cache', () => {
     }
   });
 
+  it('never keeps a folder git does not list warm, so no readdir runs without a request', () => {
+    clearListingCache();
+    const root = mkdtempSync(join(tmpdir(), 'fs-listing-plain-'));
+    try {
+      writeFileSync(join(root, 'Saltmarsh.md'), '# Saltmarsh\n');
+      const t0 = Date.now();
+      expect(isListedFile(root, 'Saltmarsh.md')).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(0);
+    } finally {
+      setSystemTime();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('never starts a second rescan of a root while one is running', async () => {
     clearListingCache();
     const repo = seedRepo('fs-listing-once-');

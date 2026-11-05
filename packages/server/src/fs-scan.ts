@@ -142,6 +142,7 @@ function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
  */
 export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): string[] {
   const res = gitLsFiles(root, LISTING_ARGS);
+  noteListing(root, res !== null);
   if (res !== null) {
     const out = admitGitListed(root, res, skipped);
     if (skipped) {
@@ -237,6 +238,16 @@ const REV_PARSE = (root: string) =>
 /** Forget every root's repository answer. Tests only. */
 export function clearRepoKinds(): void {
   repoKinds.clear();
+  gitListedRoots.clear();
+}
+
+/** Roots git listed when last scanned. Only these are kept warm between
+ *  requests (`fs-listing.ts`): any other root is a main-thread readdir. */
+const gitListedRoots = new Set<string>();
+export const listedByGit = (root: string): boolean => gitListedRoots.has(root);
+function noteListing(root: string, byGit: boolean): void {
+  if (byGit) gitListedRoots.add(root);
+  else gitListedRoots.delete(root);
 }
 
 const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
@@ -285,6 +296,7 @@ export async function scanFolderPathsAsync(
           );
         });
   let files: string[];
+  noteListing(root, rels !== null);
   if (rels !== null) files = admitGitListed(root, rels, null);
   else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
     files = readdirRecursive(root, root, null);

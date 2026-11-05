@@ -18,6 +18,7 @@ import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
 import {
   dropEarlyRedline,
+  dropEarlyRedlineOnFailure,
   redlineRequestsFor,
   startEarlyRedline,
 } from './redline/redline-requests.ts';
@@ -150,7 +151,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     // The answer is already in hand — every mount gets it as a value rather
     // than asking again. A mount that re-asks is editable while it waits.
     canWrite: writeAccess.canWrite,
-    fetchMeta: (docId) => docs.fetchMeta(docId),
+    fetchMeta: (docId) => dropEarlyRedlineOnFailure(docs.fetchMeta(docId)),
     connectFor: (docId, docType) => {
       const board = workspaceIdFromPath(location.pathname + location.search);
       const client = docs.connect(docId, docType, docSocketUrl(location, docId, docType, board));

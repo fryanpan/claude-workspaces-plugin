@@ -149,6 +149,14 @@ export function dropEarlyRedline(): void {
   early = null;
 }
 
+/** `meta`, closing the early socket if it rejects: no mount will take it. */
+export function dropEarlyRedlineOnFailure<T>(meta: Promise<T>): Promise<T> {
+  return meta.catch((err: unknown) => {
+    dropEarlyRedline();
+    throw err;
+  });
+}
+
 function dropRedlineRequests(requests: RedlineRequests | undefined): void {
   void requests?.socket?.then((client) => client?.close());
 }
