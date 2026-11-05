@@ -112,6 +112,8 @@ function leadMachine(extra: Record<string, string> = {}, prepare?: (volume: stri
     CW_LEAD_BOARD: BOARD,
     CW_LEAD_GITHUB_DEPLOY_KEY: Buffer.from(DEPLOY_KEY).toString('base64'),
     FLY_APP_NAME: 'cw-riverbend',
+    // The deploy names the org the token was made for (review H2).
+    CW_LEAD_TOKEN_ORG: 'riverbend',
     ...extra,
   });
   return { ...s, ...run, homes };

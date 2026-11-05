@@ -4,7 +4,7 @@
  *
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
- *       [--lead-board <boardId>] [--claude-account <label>]
+ *       [--lead-board <boardId>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
  *       [--push-repo <owner/name>]... [--refresh-push-keys]
  *       [--refresh-tunnel-token] [--tf-env prod|staging]
@@ -23,14 +23,16 @@
  *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
  *   refuses every Claude call
  *   the lead agent, when the machine has a board to lead (`--lead-board`,
- *   as CW_LEAD_BOARD): its Claude Code sign-in as CLAUDE_CODE_OAUTH_TOKEN
- *   from the Keychain's `claude-lead-oauth-token` (or, with
- *   `--claude-account <label>`, `claude-lead-oauth-token.<label>`), and the
- *   repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
+ *   as CW_LEAD_BOARD): a Claude Code sign-in made for this org alone, as
+ *   CLAUDE_CODE_OAUTH_TOKEN beside CW_LEAD_TOKEN_ORG, from one browser
+ *   approval of Bryan's (`claude setup-token`, `org-signin.ts`) the first
+ *   time the org's app holds no token made for it, and kept nowhere on the
+ *   Mac; and the repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
  *   `--github-deploy-key` names, only once GitHub lists it read-only on the
  *   `--lead-repo` or a `--push-repo` (`lead-key-check.ts`). A machine with a lead needs `--memory 2048`.
  *   Each is set once, like every secret, except that a run naming its source
- *   sets it again, and `--refresh-lead` sets all three again
+ *   sets it again, and `--refresh-lead` sets all of them again, the sign-in
+ *   with a new approval
  *   the server's push keys, one write deploy key per `--push-repo`, which
  *   the keeper makes and sets as CW_GITHUB_PUSH_KEYS (`push-keys.ts`); a
  *   classic CW_GITHUB_PUSH_TOKEN found on the app is unset
@@ -73,6 +75,7 @@ import {
   type TunnelMode,
   leadMemoryError,
   leadSecrets,
+  leadTokenDue,
   parseStorageCreate,
   plan,
   projectConfig,
@@ -92,6 +95,7 @@ import {
   keychainRead,
   secretsFromEnv,
 } from './mac-ops.ts';
+import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
 import { makePushKeysThroughKeeper } from './push-keys.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
@@ -201,6 +205,7 @@ async function observe(cfg: ProjectConfig) {
     versioning,
     secrets,
     machines: app ? machines(cfg.app) : [],
+    browser: !secretsFromEnv(),
   };
 }
 
@@ -249,6 +254,8 @@ interface RunContext {
   settings: ReadonlyMap<string, Setting>;
   /** The tunnel token, when this run has a named tunnel. */
   tunnelToken?: () => string;
+  /** The org's own sign-in, from one browser approval, asked for when first needed. */
+  leadToken: () => Promise<string>;
 }
 
 async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void> {
@@ -300,20 +307,24 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
       return;
     case 'set-secrets': {
-      const lines: string[] = [];
+      const lines = new Map<string, string>();
       for (const n of a.names) {
         const setting = ctx.settings.get(n);
         if (setting) {
-          lines.push(`${n}=${setting.value()}`);
+          lines.set(n, setting.value());
+        } else if (n === LEAD_TOKEN_SECRET) {
+          // Asked for last, so a refusal below never spends Bryan's approval.
         } else if (n !== TUNNEL_TOKEN_SECRET) {
-          lines.push(`${n}=${secretValue(cfg, n)}`);
+          lines.set(n, secretValue(cfg, n));
         } else if (ctx.tunnelToken) {
-          lines.push(`${n}=${ctx.tunnelToken()}`);
+          lines.set(n, ctx.tunnelToken());
         } else {
           throw new Error(`no source for secret ${n}`);
         }
       }
-      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input: `${lines.join('\n')}\n` });
+      if (a.names.includes(LEAD_TOKEN_SECRET)) lines.set(LEAD_TOKEN_SECRET, await ctx.leadToken());
+      const input = a.names.map((n) => `${n}=${lines.get(n)}\n`).join('');
+      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input });
       return;
     }
     case 'make-push-keys':
@@ -354,6 +365,8 @@ export interface DeployOptions {
   refreshTunnelToken?: boolean;
   /** Reads a tunnel's token; a test's stand-in. Default: Cloudflare's API. */
   tunnelToken?: (t: AppliedTunnel) => Promise<string>;
+  /** Where the browser approval's screen is shown, redacted. Default: this terminal. */
+  signInOutput?: ApprovalIo['show'];
 }
 
 /** The keeper refuses this read, because its answer is a credential. */
@@ -417,9 +430,13 @@ export async function deployProject(
     console.log(
       `[deploy] not set: ${LEAD_BOARD_SECRET}: no --lead-board, so no lead agent runs on the machine`,
     );
-  else if (!lead.includes(LEAD_TOKEN_SECRET) && !observed.secrets.has(LEAD_TOKEN_SECRET))
+  else if (lead.includes(LEAD_TOKEN_SECRET))
     console.log(
-      `[deploy] not set: ${LEAD_TOKEN_SECRET}: the Keychain has no ${cfg.keychain.leadToken}, so no lead agent runs on the machine`,
+      `[deploy]   ${LEAD_TOKEN_SECRET} from one browser approval (claude setup-token): ${cfg.project}'s own sign-in, kept nowhere on this Mac`,
+    );
+  else if (leadTokenDue(cfg, observed))
+    console.log(
+      `[deploy] not set: ${LEAD_TOKEN_SECRET}: ${cfg.project}'s own sign-in needs one browser approval, which only a run on the Mac can ask for, so no lead agent runs on the machine`,
     );
   if (
     cfg.leadRefresh.includes(LEAD_DEPLOY_KEY_SECRET) &&
@@ -440,7 +457,21 @@ export async function deployProject(
     );
   }
   if (dryRun) return actions;
-  const ctx: RunContext = { org: () => keychainRead('fly-org-slug').trim(), settings };
+  let approval: Promise<string> | undefined;
+  const ctx: RunContext = {
+    org: () => keychainRead('fly-org-slug').trim(),
+    settings,
+    leadToken: () => {
+      if (!approval)
+        console.log(
+          `[deploy] ${cfg.project}'s lead needs a Claude sign-in of its own: approve it in the browser window that opens`,
+        );
+      approval ??= approveOrgSignIn(cfg.project, {
+        show: opts.signInOutput ?? ((t) => process.stdout.write(t)),
+      });
+      return approval;
+    },
+  };
   const needsToken = actions.some(
     (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
   );
@@ -478,6 +509,12 @@ async function main(): Promise<void> {
     console.error('[deploy] --project <name> is required');
     process.exit(2);
   }
+  if (args.includes('--claude-account')) {
+    console.error(
+      "[deploy] --claude-account is gone: each org's lead gets a sign-in of its own, made with one browser approval",
+    );
+    process.exit(2);
+  }
   const cfg = projectConfig({
     project,
     imageLabel: resolveRef(arg(args, 'ref') ?? 'HEAD'),
@@ -485,7 +522,6 @@ async function main(): Promise<void> {
     volumeGb: num(arg(args, 'volume-gb')),
     vmMemoryMb: num(arg(args, 'memory')),
     tunnel: arg(args, 'tunnel') as TunnelMode | undefined,
-    claudeAccount: arg(args, 'claude-account'),
     githubDeployKey: arg(args, 'github-deploy-key'),
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),

@@ -28,16 +28,16 @@ export interface ProjectConfig {
   imageLabel: string;
   /**
    * Keychain entries, under the `claude-workspaces-secret.` prefix. The
-   * script makes the first three. `orgKey` is the org's own Anthropic key,
-   * and `leadToken` the lead agent's Claude Code sign-in; only a person can
-   * provide either, and the machine gets each only when it exists.
+   * script makes the first three. `orgKey` is the org's own Anthropic key;
+   * only a person can provide it, and the machine gets it only when it
+   * exists. The lead's Claude Code sign-in is not here: it is made for the
+   * org with one browser approval and never kept on the Mac (`org-signin.ts`).
    */
   keychain: {
     identity: string;
     bucketAdmin: string;
     writer: string;
     orgKey: string;
-    leadToken: string;
     /** The project repo's deploy key, when one was named (`--github-deploy-key`). */
     deployKey?: string;
   };
@@ -62,8 +62,6 @@ export interface ConfigInput {
   vmSize?: string;
   vmMemoryMb?: number;
   tunnel?: TunnelMode;
-  /** The `claudeAccounts` label whose Claude Code token the lead signs in with. */
-  claudeAccount?: string;
   /** The Keychain entry holding the project repo's deploy key (OpenSSH private key). */
   githubDeployKey?: string;
   /** The board the lead leads. */
@@ -77,24 +75,35 @@ export interface ConfigInput {
 
 export const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
-const ACCOUNT_LABEL = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const KEYCHAIN_ENTRY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const BOARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
- * The Keychain entry the walled lead on the Mac signs in from
- * (`scripts/lead-sandbox-token.ts`, `TOKEN_SERVICE`): the token from
- * `claude setup-token`, BASE64. A labelled account's is `<entry>.<label>`.
+ * The Fly secret the lead's Claude Code signs in with (entrypoint.sh, lead.sh):
+ * a token made for this org alone with one browser approval (`org-signin.ts`).
+ * The Mac's walled lead signs in from the Keychain's
+ * `claude-lead-oauth-token`; no org's lead is ever given that one (review H2).
  */
-export const LEAD_TOKEN_ENTRY = 'claude-lead-oauth-token';
-
-/** The Fly secret the lead's Claude Code signs in with (entrypoint.sh, lead.sh). */
 export const LEAD_TOKEN_SECRET = 'CLAUDE_CODE_OAUTH_TOKEN';
+/**
+ * The org the lead's token was made for, set in the same import as the
+ * token. The machine starts no lead whose token names another org, or none
+ * (entrypoint.sh), so a token set by hand or from the old shared sign-in is
+ * replaced on the next deploy rather than kept.
+ */
+export const LEAD_TOKEN_ORG_SECRET = 'CW_LEAD_TOKEN_ORG';
 /** The board the lead leads; its socket is the lead's one way to the server. */
 export const LEAD_BOARD_SECRET = 'CW_LEAD_BOARD';
 /** The project repo's deploy key, BASE64, which lead.sh writes to a file of the lead's. */
 export const LEAD_DEPLOY_KEY_SECRET = 'CW_LEAD_GITHUB_DEPLOY_KEY';
-export const LEAD_SECRETS = [LEAD_TOKEN_SECRET, LEAD_BOARD_SECRET, LEAD_DEPLOY_KEY_SECRET];
+export const LEAD_SECRETS = [
+  LEAD_TOKEN_SECRET,
+  LEAD_TOKEN_ORG_SECRET,
+  LEAD_BOARD_SECRET,
+  LEAD_DEPLOY_KEY_SECRET,
+];
+/** The token and the org it was made for: always set together. */
+const LEAD_TOKEN_PAIR = [LEAD_TOKEN_SECRET, LEAD_TOKEN_ORG_SECRET];
 /**
  * A machine with a lead needs this much: the lead's cgroup is capped at
  * 1280 MB (entrypoint.sh) and the server keeps the rest.
@@ -122,9 +131,6 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
   if (input.tunnel !== undefined && input.tunnel !== 'quick' && input.tunnel !== 'named') {
     throw new Error(`tunnel must be quick or named, got "${input.tunnel}"`);
   }
-  if (input.claudeAccount !== undefined && !ACCOUNT_LABEL.test(input.claudeAccount)) {
-    throw new Error(`claude account must be a-z, 0-9 and -, got "${input.claudeAccount}"`);
-  }
   if (input.githubDeployKey !== undefined && !KEYCHAIN_ENTRY.test(input.githubDeployKey)) {
     throw new Error(
       `deploy key entry must be A-Z, a-z, 0-9, ., _ and -, got "${input.githubDeployKey}"`,
@@ -147,11 +153,10 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     throw new Error('--refresh-lead sets the board again, so it needs --lead-board');
   }
   // A secret this run names a source for is set again: that is the point of
-  // naming it.
+  // naming it. `--refresh-lead` makes the org a new token, with a new approval.
   const leadRefresh = input.refreshLead
     ? [...LEAD_SECRETS]
     : [
-        ...(input.claudeAccount !== undefined ? [LEAD_TOKEN_SECRET] : []),
         ...(input.leadBoard !== undefined ? [LEAD_BOARD_SECRET] : []),
         ...(input.githubDeployKey !== undefined ? [LEAD_DEPLOY_KEY_SECRET] : []),
       ];
@@ -173,9 +178,6 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       bucketAdmin: `${app}-bucket-admin`,
       writer: `${app}-backup-writer`,
       orgKey: `${app}-anthropic-api-key`,
-      leadToken: input.claudeAccount
-        ? `${LEAD_TOKEN_ENTRY}.${input.claudeAccount}`
-        : LEAD_TOKEN_ENTRY,
       ...(input.githubDeployKey !== undefined ? { deployKey: input.githubDeployKey } : {}),
     },
     ...(input.leadBoard !== undefined ? { leadBoard: input.leadBoard } : {}),
@@ -206,6 +208,11 @@ export interface Observed {
   /** Names of the app's Fly secrets. */
   secrets: ReadonlySet<string>;
   machines: readonly ObservedMachine[];
+  /**
+   * Whether this run can ask Bryan for a browser approval: a run on the Mac
+   * can, CI cannot. A run that cannot never plans an org's sign-in.
+   */
+  browser: boolean;
 }
 
 export type Action =
@@ -252,16 +259,32 @@ export function requiredSecrets(
   ];
 }
 
+/** Whether the machine has a lead: a board to lead, named now or set before. */
+function hasLead(cfg: ProjectConfig, obs: Observed): boolean {
+  return cfg.leadBoard !== undefined || obs.secrets.has(LEAD_BOARD_SECRET);
+}
+
 /**
- * The lead's secrets the machine needs. A machine has a lead only when it has
- * a board to lead, named now or set before: a project with no board gets no
- * sign-in, even though the Mac's walled lead keeps one in the Keychain.
+ * Whether the org needs a sign-in made for it: it has a lead, and its app
+ * holds no token made for this org, or `--refresh-lead` asked for a new one.
+ * A token set before `CW_LEAD_TOKEN_ORG` existed is the shared one, so it
+ * counts as none.
+ */
+export function leadTokenDue(cfg: ProjectConfig, obs: Observed): boolean {
+  if (!hasLead(cfg, obs)) return false;
+  return !obs.secrets.has(LEAD_TOKEN_ORG_SECRET) || cfg.leadRefresh.includes(LEAD_TOKEN_SECRET);
+}
+
+/**
+ * The lead's secrets the machine needs. A project with no board gets no
+ * sign-in. The token is listed only when it is due and this run can ask for
+ * the approval that makes it.
  */
 export function leadSecrets(cfg: ProjectConfig, obs: Observed): string[] {
-  if (cfg.leadBoard === undefined && !obs.secrets.has(LEAD_BOARD_SECRET)) return [];
+  if (!hasLead(cfg, obs)) return [];
   const { deployKey } = cfg.keychain;
   return [
-    ...(obs.keychain.has(cfg.keychain.leadToken) ? [LEAD_TOKEN_SECRET] : []),
+    ...(leadTokenDue(cfg, obs) && obs.browser ? LEAD_TOKEN_PAIR : []),
     ...(cfg.leadBoard !== undefined ? [LEAD_BOARD_SECRET] : []),
     ...(deployKey !== undefined && obs.keychain.has(deployKey) ? [LEAD_DEPLOY_KEY_SECRET] : []),
   ];
@@ -271,8 +294,7 @@ export function leadSecrets(cfg: ProjectConfig, obs: Observed): string[] {
 export function leadRuns(cfg: ProjectConfig, obs: Observed): boolean {
   return (
     leadSecrets(cfg, obs).includes(LEAD_TOKEN_SECRET) ||
-    ((cfg.leadBoard !== undefined || obs.secrets.has(LEAD_BOARD_SECRET)) &&
-      obs.secrets.has(LEAD_TOKEN_SECRET))
+    (hasLead(cfg, obs) && obs.secrets.has(LEAD_TOKEN_ORG_SECRET))
   );
 }
 
@@ -305,11 +327,18 @@ export function plan(
   if (bucketIsNew || !obs.versioning) actions.push({ kind: 'set-versioning' });
   if (bucketIsNew || !obs.lifecycle) actions.push({ kind: 'set-lifecycle' });
   // A secret that exists is left alone: its value came from the Keychain
-  // entry it is named after, and that entry is only ever made once.
+  // entry it is named after, and that entry is only ever made once. The
+  // lead's token is listed only when it is due, so it is set over the old one.
   const names = [
     ...requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey), leadSecrets(cfg, obs)),
     ...settings,
-  ].filter((n) => !obs.secrets.has(n) || refresh.includes(n) || cfg.leadRefresh.includes(n));
+  ].filter(
+    (n) =>
+      !obs.secrets.has(n) ||
+      refresh.includes(n) ||
+      cfg.leadRefresh.includes(n) ||
+      LEAD_TOKEN_PAIR.includes(n),
+  );
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
   const pushKeys =
     cfg.pushRepos !== undefined && (cfg.refreshPushKeys || !obs.secrets.has(PUSH_KEYS_SECRET));

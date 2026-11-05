@@ -27,7 +27,6 @@ import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import {
   type Action,
   LEAD_SECRETS,
-  LEAD_TOKEN_ENTRY,
   type Observed,
   plan,
   projectConfig,
@@ -36,8 +35,6 @@ import {
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { SETTING_NAMES } from '../../../infra/project-machine/settings.ts';
 import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
-import { storedSecretService } from '../../../packages/core/src/secret-name.ts';
-import { TOKEN_SERVICE } from '../../../scripts/lead-sandbox-token.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..');
 const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
@@ -144,6 +141,15 @@ f="${ghKeys}/$(echo "$r" | sed 's|/|__|').json"
 cat "$f"
 `,
   );
+  // The org's browser approval (`org-signin.ts`): script(1) runs its command,
+  // and claude setup-token prints the fixture token, as the real one would.
+  writeFileSync(join(bin, 'script'), '#!/bin/sh\nshift 2\nexec "$@"\n');
+  writeFileSync(
+    join(bin, 'claude'),
+    `#!/bin/sh\n[ "$1" = setup-token ] || exit 64\nprintf 'Your OAuth token (valid for 1 year):\\r\\n${LEAD_TOKEN}\\r\\n'\n`,
+  );
+  chmodSync(join(bin, 'script'), 0o755);
+  chmodSync(join(bin, 'claude'), 0o755);
   chmodSync(join(bin, 'gh'), 0o755);
   chmodSync(join(bin, 'security'), 0o755);
   chmodSync(join(bin, 'fly'), 0o755);
@@ -298,7 +304,7 @@ describe('machine:deploy sets the project settings', () => {
     deployProject(
       projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
       false,
-      { outputs },
+      { outputs, signInOutput: () => {} },
     );
   const dry = (input: Partial<Parameters<typeof projectConfig>[0]> = {}) =>
     deployProject(
@@ -309,21 +315,20 @@ describe('machine:deploy sets the project settings', () => {
   const secretsSet = (actions: Action[]) =>
     actions.find((a) => a.kind === 'set-secrets')?.names ?? [];
 
-  it('gives a machine with no board to lead no sign-in, though the Keychain has one', async () => {
-    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
+  it('gives a machine with no board to lead no sign-in', async () => {
     flySecrets([...requiredSecrets('quick'), ...ALL]);
     expect(await run(true)).toEqual([]);
     expect(output.join('\n')).toContain('no --lead-board, so no lead agent runs');
   });
 
   it('sets the lead’s board, sign-in and deploy key on stdin, and never prints them', async () => {
-    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
     keychain(KEY_ENTRY, `${DEPLOY_KEY}\n`);
     githubLists(true);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
     await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY, leadRepos: [LEAD_REPO] });
     expect(readFileSync(imported, 'utf8').split('\n').filter(Boolean)).toEqual([
       `CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}`,
+      'CW_LEAD_TOKEN_ORG=riverbend',
       `CW_LEAD_BOARD=${BOARD}`,
       `CW_LEAD_GITHUB_DEPLOY_KEY=${ENCODED}`,
     ]);
@@ -342,7 +347,6 @@ describe('machine:deploy sets the project settings', () => {
   });
 
   it('refuses a deploy key GitHub lets write, or one it cannot find, and sets nothing (review L4)', async () => {
-    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
     keychain(KEY_ENTRY, `${DEPLOY_KEY}\n`);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
     const lead = { leadBoard: BOARD, githubDeployKey: KEY_ENTRY, leadRepos: [LEAD_REPO] };
@@ -355,19 +359,12 @@ describe('machine:deploy sets the project settings', () => {
     expect(existsSync(imported)).toBe(false);
   });
 
-  it('sets a newly named account’s sign-in again, and --refresh-lead sets all three', async () => {
-    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN}\n`);
+  it('--refresh-lead sets every lead secret again, the sign-in with a new approval', async () => {
     keychain(KEY_ENTRY, DEPLOY_KEY);
     flySecrets([...requiredSecrets('quick', false, LEAD_SECRETS), ...ALL]);
     expect(
-      projectConfig({ project: 'riverbend', imageLabel: HEAD, claudeAccount: 'work' }).keychain
-        .leadToken,
-    ).toBe(`${LEAD_TOKEN_ENTRY}.work`);
-    expect(secretsSet(await dry({ claudeAccount: 'work' }))).toEqual(['CLAUDE_CODE_OAUTH_TOKEN']);
-    expect(
       secretsSet(
         await dry({
-          claudeAccount: 'work',
           leadBoard: BOARD,
           githubDeployKey: KEY_ENTRY,
           refreshLead: true,
@@ -380,13 +377,8 @@ describe('machine:deploy sets the project settings', () => {
     ).toThrow('needs --lead-board');
   });
 
-  it('refuses a sign-in or a deploy key that is not one, without quoting it', async () => {
+  it('refuses a deploy key that is not one, without quoting it', async () => {
     flySecrets([...requiredSecrets('quick'), ...ALL]);
-    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN} riverbend`);
-    const badToken = await withLead({ leadBoard: BOARD }).catch((e: Error) => e);
-    expect(String(badToken)).toContain(`${LEAD_TOKEN_ENTRY} does not hold a token`);
-    expect(String(badToken)).not.toContain(LEAD_TOKEN);
-    keychain(LEAD_TOKEN_ENTRY, LEAD_TOKEN);
     keychain(KEY_ENTRY, 'ssh-ed25519 AAAAfixture-public-half-riverbend');
     const badKey = await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY }).catch(
       (e: Error) => e,
@@ -400,7 +392,6 @@ describe('machine:deploy sets the project settings', () => {
   });
 
   it('refuses a machine too small for its lead, before any change', async () => {
-    keychain(LEAD_TOKEN_ENTRY, LEAD_TOKEN);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
     await expect(dry({ leadBoard: BOARD, vmMemoryMb: 512 })).rejects.toThrow(
       'needs --memory 2048 or more (got 512)',
@@ -411,15 +402,11 @@ describe('machine:deploy sets the project settings', () => {
     expect(flyCallLines().some((l) => l.startsWith('secrets import'))).toBe(false);
   });
 
-  it('says no lead will run when the Keychain has no sign-in for one', async () => {
+  it('says where the sign-in comes from: one browser approval, kept nowhere on the Mac', async () => {
     await dry({ leadBoard: BOARD });
     expect(output.join('\n')).toContain(
-      `CLAUDE_CODE_OAUTH_TOKEN: the Keychain has no ${LEAD_TOKEN_ENTRY}, so no lead agent runs`,
+      'CLAUDE_CODE_OAUTH_TOKEN from one browser approval (claude setup-token)',
     );
-  });
-
-  it('reads the same Keychain item the walled lead on the Mac signs in from', () => {
-    expect(storedSecretService(LEAD_TOKEN_ENTRY)).toBe(TOKEN_SERVICE);
   });
 
   it('skips the Access settings, and says so, when the project has no Access application', async () => {
@@ -523,6 +510,7 @@ describe('plan, with the settings', () => {
     versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: HEAD, memoryMb: 512 }],
+    browser: true,
   });
 
   it('lists every setting deploy can derive', () => {
