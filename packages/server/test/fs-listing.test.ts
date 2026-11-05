@@ -15,9 +15,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  KEEP_WARM_TICK,
   LISTING_KEEP_WARM_MS,
   clearListingCache,
   isListedFile,
+  keepWarmRunning,
   listedFiles,
   listingAge,
   warmListings,
@@ -179,6 +181,29 @@ describe('folder listing cache', () => {
     } finally {
       setSystemTime();
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('the keep-warm tick rescans a root in use by itself, and stops once the root is idle', async () => {
+    clearListingCache();
+    KEEP_WARM_TICK.ms = 25;
+    const repo = seedRepo('fs-listing-tick-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      expect(keepWarmRunning()).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      // No call here starts the rescan: only the interval can.
+      await waitFor(() => (listingAge(repo, t0 + PAST_TTL_MS) ?? 1) <= 0, {
+        describe: 'the tick rescanned the root',
+      });
+      setSystemTime(new Date(t0 + LISTING_KEEP_WARM_MS + PAST_TTL_MS));
+      await waitFor(() => !keepWarmRunning(), { describe: 'the tick stopped itself' });
+    } finally {
+      KEEP_WARM_TICK.ms = 10_000;
+      setSystemTime();
+      clearListingCache();
+      rmSync(repo, { recursive: true, force: true });
     }
   });
 

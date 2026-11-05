@@ -197,12 +197,13 @@ function refreshInBackground(key: string, root: string, include: readonly string
  */
 const inUse = new Map<string, { root: string; include: readonly string[]; at: number }>();
 export const LISTING_KEEP_WARM_MS = 15 * 60_000;
-const KEEP_WARM_TICK_MS = 10_000;
+/** How often keep-warm looks. An object so a test can shorten it. */
+export const KEEP_WARM_TICK = { ms: 10_000 };
 let keepWarm: ReturnType<typeof setInterval> | null = null;
 
 function startKeepWarm(): void {
   if (keepWarm) return;
-  keepWarm = setInterval(warmListings, KEEP_WARM_TICK_MS);
+  keepWarm = setInterval(warmListings, KEEP_WARM_TICK.ms);
   keepWarm.unref?.();
 }
 
@@ -244,10 +245,17 @@ export function listingAge(
   return entry ? now - entry.at : null;
 }
 
-/** Forget every cached listing. Tests only. */
+/** Is the keep-warm interval running? Tests only. */
+export function keepWarmRunning(): boolean {
+  return keepWarm !== null;
+}
+
+/** Forget every cached listing, and stop keep-warm. Tests only. */
 export function clearListingCache(): void {
   listingCache.clear();
   inUse.clear();
+  if (keepWarm) clearInterval(keepWarm);
+  keepWarm = null;
   cacheGeneration++;
 }
 
