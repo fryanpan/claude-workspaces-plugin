@@ -148,6 +148,42 @@ describe('folder listing cache', () => {
     }
   });
 
+  it('refuses a removed file once a background rescan has run', async () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-removed-');
+    try {
+      writeFileSync(join(repo, 'Riverbend.md'), '# Riverbend\n');
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+      rmSync(join(repo, 'Riverbend.md'));
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(false);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('never starts a second rescan of a root while one is running', async () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-once-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      expect(warmListings()).toBe(0);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it('a hung git rescan times out, so the next stale hit rescans again', async () => {
     const realGit = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim();
     const fakeBin = mkdtempSync(join(tmpdir(), 'fs-listing-bin-'));
