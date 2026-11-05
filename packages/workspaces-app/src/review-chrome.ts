@@ -20,8 +20,9 @@ import {
 import { threadNeedsModal } from './long-thread.ts';
 import { type MobileReview, mountMobileReview } from './mobile-review.ts';
 import type { MountScope } from './mount-scope.ts';
+import { setPageTitle } from './page-tab-title.ts';
 import type { ReviewSurface } from './review-surface.ts';
-import { setTabTitle, tabName } from './tab-title.ts';
+import { tabName } from './tab-title.ts';
 import { type ThreadModalHandle, mountThreadModal } from './thread-modal.ts';
 import { installSlotRemeasure, sizeThreadSlots } from './thread-morph.ts';
 import { ThreadPanel, type ThreadTab } from './threads.ts';
@@ -659,12 +660,13 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     // not, and `.doc-path`'s rtl put a meeting's clock ahead of its name.
     docTitleEl.dir = labelDirection(label);
     docTitleEl.title = full;
-    // The browser tab names the DOC, not the product — otherwise every open
-    // review reads the same until it truncates. This is the one place all
-    // three surfaces resolve a label, and it re-runs per navigation and on
-    // every meta change, so the tab follows an in-place doc swap and a
-    // late-arriving title without either boot wiring it separately.
-    setTabTitle(document, tabName(full));
+    // The browser tab names the workspace, then the DOC (`page-tab-title.ts`).
+    // This is the one place all three surfaces resolve a label, and it re-runs
+    // per navigation and on every meta change, so the tab follows an in-place
+    // doc swap and a rename. A file in a diff or a folder is named by its
+    // path; any other doc by its title when it has one, so renaming it renames
+    // the tab.
+    setPageTitle(m.relPath || !m.title ? tabName(full) : m.title);
   }
   on(window.matchMedia('(max-width: 720px)'), 'change', () => renderDocLabel());
   /**
