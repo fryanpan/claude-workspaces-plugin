@@ -56,6 +56,8 @@ import {
 import { SETUP_KEY, type SpokenSocket } from '../board/spoken-reply-client.ts';
 import { makeGestureContext } from '../meeting-audio.ts';
 import { defaultOriginFacts, insecureOriginMessage } from '../voice-capture.ts';
+import { audioContext, defaultSetups, reportToPage, socketUrl } from './lead-chat-voice-io.ts';
+import { type ListeningTab, type ListeningTabOpts, createListeningTab } from './listening-tab.ts';
 
 export type LeadVoicePhase = 'off' | 'listening' | 'working' | 'speaking';
 
@@ -65,6 +67,9 @@ export interface LeadVoiceState {
   heard: string;
   /** Why voice is not running, when it stopped by itself. */
   notice: string;
+  /** Voice is on, and another of the reader's tabs hears them
+   *  (`listening-tab.ts`): this one sends nothing. */
+  paused: boolean;
 }
 
 export interface LeadVoiceOpts {
@@ -86,6 +91,8 @@ export interface LeadVoiceOpts {
   /** Where a failure is reported; omitted, the page's error reporter
    *  (Sentry, where the shell loads it). */
   report?: (err: Error) => void;
+  /** Which of the reader's tabs hears them; injected by tests. */
+  listeningTab?: (o: ListeningTabOpts) => ListeningTab;
 }
 
 export interface LeadVoice {
@@ -123,46 +130,8 @@ const LEAD_SETUPS: readonly SpokenSetup[] = [1, 2];
 const OPEN = 1;
 const MAX_HELD = 400;
 
-function voiceBase(workspaceId: string): string {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/voice`;
-}
-
-async function defaultSetups(workspaceId: string): Promise<SpokenSetup[]> {
-  try {
-    const res = await fetch(`${voiceBase(workspaceId)}/timings`, { credentials: 'same-origin' });
-    const body = res.ok ? ((await res.json()) as { setups?: SpokenSetup[] }) : null;
-    return Array.isArray(body?.setups) ? body.setups : [];
-  } catch {
-    return [];
-  }
-}
-
-function socketUrl(workspaceId: string): string {
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${location.host}${voiceBase(workspaceId)}/converse`;
-}
-
-/** Raise a voice failure where the page's error reporting sees it, without
- *  throwing into the caller. `reportError` fires the window's `error` event,
- *  which Sentry's handler (or the shell's early buffer) files. */
-function reportToPage(err: Error): void {
-  const w = window as unknown as { reportError?: (e: unknown) => void };
-  if (typeof w.reportError === 'function') w.reportError(err);
-  else
-    setTimeout(() => {
-      throw err;
-    }, 0);
-}
-
-function audioContext(): AudioContext | undefined {
-  const Ctor =
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  return Ctor ? new Ctor() : undefined;
-}
-
 export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
-  const st: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
+  const st: LeadVoiceState = { phase: 'off', heard: '', notice: '', paused: false };
   let on = false;
   let setups: SpokenSetup[] | null = null;
   let socket: SpokenSocket | null = null;
@@ -188,7 +157,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   /** Back from the back-forward cache with the socket gone: voice is off. */
   const onPageShow = (): void => {
     leaving = false;
-    if (on && !socket) halt(CLOSED, '', true);
+    // A paused tab waiting to listen holds no socket, and needs none.
+    if (on && !socket && !(st.paused && st.phase === 'listening')) halt(CLOSED, '', true);
   };
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('pageshow', onPageShow);
@@ -205,6 +175,31 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         ? opts.playbackContext()
         : ((audioContext() as unknown as PlaybackContext | undefined) ?? null),
     onFirstWord: () => {},
+  });
+
+  /** Only the tab the reader is on, or was on last, hears them; on losing
+   *  them, a question ends (asked, dropped, or ended empty while the lead
+   *  still owes an answer), and a paused tab says nothing aloud, so the one
+   *  that hears never takes the speakers' answer as a question. */
+  const tab = (opts.listeningTab ?? createListeningTab)({
+    onChange: (hears) => {
+      if (!on) return;
+      set({ paused: !hears });
+      if (hears) {
+        if (st.phase === 'listening' && !forwarding) listen();
+        return;
+      }
+      player.stop();
+      if (st.phase !== 'listening' || !forwarding) return;
+      forwarding = false;
+      if (!st.heard && awaiting === 0) return dropSocket();
+      sendMsg({ type: 'end' });
+      // Asked: coming back must not start another question over it.
+      if (st.heard) {
+        set({ phase: 'working' });
+        stillWorking();
+      }
+    },
   });
 
   const sendRaw = (d: string | Int16Array): void => {
@@ -346,6 +341,11 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       halt(NO_VOICE, '', true);
       return;
     }
+    if (!tab.hears()) {
+      forwarding = false;
+      set({ phase: 'listening', heard: '', notice: '', paused: true });
+      return;
+    }
     ensureSocket();
     const agent = opts.agent();
     const context = opts.getContext();
@@ -367,9 +367,10 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
    *  this server or origin (`quiet`), which every tap would report again. */
   function halt(notice: string, detail = '', quiet = false): void {
     on = false;
+    tab.leave();
     stopCapture();
     player.stop();
-    set({ phase: 'off', heard: '', notice });
+    set({ phase: 'off', heard: '', notice, paused: false });
     const err = new Error(`Lead chat voice stopped: ${notice}${detail ? ` (${detail})` : ''}`);
     err.name = 'LeadVoiceStopped';
     if (!quiet) (opts.report ?? reportToPage)(err);
@@ -390,6 +391,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         return;
       case 'turn-end':
         forwarding = false;
+        // The empty question a paused tab ended: nothing was asked.
+        if (st.paused && !m.text) return;
         set({ phase: 'working', heard: m.text });
         stillWorking();
         return;
@@ -413,7 +416,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         // none of it goes back as a question.
         forwarding = false;
         doneWorking();
-        player.begin(m.sampleRate);
+        if (!st.paused) player.begin(m.sampleRate);
         set({ phase: 'speaking' });
         return;
       case 'audio-end':
@@ -436,8 +439,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         return;
       }
       on = true;
+      tab.join();
       player.wake();
-      set({ phase: 'listening', heard: '', notice: '' });
+      set({ phase: 'listening', heard: '', notice: '', paused: !tab.hears() });
       // Inside the tap, before anything is awaited: the context is made and
       // resumed, and the microphone is asked for (see the header).
       const ctx = makeGestureContext();
@@ -464,13 +468,14 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     stop() {
       const asked = st.phase === 'working' || st.phase === 'speaking' || awaiting > 0;
       on = false;
+      tab.leave();
       stopCapture();
       player.stop();
       // A question still being heard is dropped with its socket. One already
       // asked keeps the socket, so the lead's answer still reaches the chat.
       if (asked) sendMsg({ type: 'stop' });
       else dropSocket();
-      set({ phase: 'off', heard: '', notice: '' });
+      set({ phase: 'off', heard: '', notice: '', paused: false });
     },
     wake() {
       const ctx = waiting;
@@ -486,6 +491,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       on = false;
+      tab.destroy();
       stopCapture();
       player.stop();
       dropSocket();

@@ -76,6 +76,8 @@ export interface LeadChatViewModel {
   listening: boolean;
   /** Where the spoken question is (`lead-chat-voice.ts`); absent is listening. */
   voice?: 'listening' | 'working' | 'speaking';
+  /** Listening is on and another of the reader's tabs hears them. */
+  paused?: boolean;
   /** What the listener has heard of the question in progress. */
   heard: string;
   /** A one-line notice: a send that failed, a blocked microphone. */
@@ -445,6 +447,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       const out = m.open || m.barOut;
       button.setAttribute('aria-expanded', String(out));
       button.dataset.listening = String(m.listening);
+      button.dataset.paused = String(m.listening && m.paused === true);
       const meetingOn = !!m.meeting?.meeting;
       // Open, the button starts and stops listening; the bar's tap puts it away.
       button.title = m.open
