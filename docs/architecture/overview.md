@@ -1118,6 +1118,20 @@ in its nav dock, the doc page floats it bottom-left, and the mock host loads
 audio reaches only this server and the listener it already uses. There is no
 browser speech recognition, because Chrome's sends the audio to Google.
 
+**Tab titles.** Every page's browser tab starts with its workspace's name,
+then the page's own name (`Harborlight · tides.md · Workspaces`), so several
+boards open at once can be told apart in a tab strip. The board composes its
+own (`boardTabTitle`, naming an open task or goal). A doc, diff or folder
+page and a mock's host page go through `page-tab-title.ts` (a new top-level
+module): the router names the board, the page names its thing, and a
+`workspace.renamed` frame on the board's stream renames the tab in place.
+The mock host's server-written `<title>` already leads with the name;
+`mock-tab-title.ts` (new, loaded by `lead-chat-page.ts`) re-reads the doc's
+title when `library.changed` says the list moved. Both readers of the board
+stream on such a page share one `EventSource` through `board-stream.ts`
+(new), so the title costs no extra connection. A share visitor's mock host
+loads neither script, so its tab keeps the name it was served with.
+
 **The lead chat's meeting.** The chat's Start a meeting runs one meeting per
 board that belongs to the board rather than to a page.
 `lead-chat/meeting.ts` (server) is one small file per board naming the notes

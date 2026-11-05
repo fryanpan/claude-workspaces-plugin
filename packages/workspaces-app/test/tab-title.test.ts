@@ -80,6 +80,16 @@ describe('boardTabTitle', () => {
   it('falls back to the product name when the workspace has no name yet', () => {
     expect(boardTabTitle('', 'tasks')).toBe(SITE_NAME);
   });
+
+  it('names an open task or goal after the workspace, in the pane’s place', () => {
+    expect(boardTabTitle('Harborlight', 'tasks', 'Paint the slipway')).toBe(
+      'Harborlight · Paint the slipway · Workspaces',
+    );
+    expect(boardTabTitle('Harborlight', 'home', 'Open the ferry')).toBe(
+      'Harborlight · Open the ferry · Workspaces',
+    );
+    expect(boardTabTitle('Harborlight', 'home', ' ')).toBe('Harborlight · Home · Workspaces');
+  });
 });
 
 /** The pre-JS shell. It is what shows while the bundle loads, and it is the
@@ -180,6 +190,22 @@ describe('an attachment names its own tab', () => {
     getMeta(ydoc).set('type', 'markdown');
     nameTab({ ydoc, labelHint: '/path/to/repo/docs/notes.md' });
     expect(document.title).toBe('notes.md · Workspaces');
+  });
+
+  it('leads with the title of a file-backed doc that has one, so a rename renames the tab', () => {
+    const ydoc = new Y.Doc();
+    getMeta(ydoc).set('type', 'markdown');
+    getMeta(ydoc).set('title', 'Riverbend tides');
+    mountChromeDom();
+    const chrome = mountReviewChrome(
+      chromeOpts({ ydoc, labelHint: '/path/to/repo/docs/tides.md' }),
+    );
+    chrome.renderDocLabel();
+    expect(document.title).toBe('Riverbend tides · Workspaces');
+    // The boots re-run the label on every meta change.
+    getMeta(ydoc).set('title', 'Saltmarsh tides');
+    chrome.renderDocLabel();
+    expect(document.title).toBe('Saltmarsh tides · Workspaces');
   });
 
   it('leads with the repo-relative path for a diff doc', () => {

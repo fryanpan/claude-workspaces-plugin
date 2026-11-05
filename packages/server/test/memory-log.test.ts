@@ -176,7 +176,7 @@ describe('the line', () => {
         'timers=9 top=routes/docs.ts:120x45 footprint=400MB peak=400MB reason=delta window=30s ' +
         'windowTop=mcp-watch.ts:88+30 activations=+35 requests=3 ' +
         'routes=GET:/api/workspaces/:id/tasks*2,POST:/api/workspaces/:id/docs/:id/threads*1 ' +
-        'heap=96MB',
+        'heap=96MB buffers=unavailable',
     );
   });
 
@@ -213,20 +213,22 @@ describe('the heap', () => {
     r.setHeap(1700);
     r.setMb(2200);
     r.advance(30_000);
-    expect(r.log.sample()).toEndWith(' heap=1700MB');
+    expect(r.log.sample()).toEndWith(' heap=1700MB buffers=unavailable');
   });
 
   it('takes the type census on the first line and then once per census interval', () => {
     const r = rig();
     const first = r.log.sample();
-    expect(first).toEndWith(' heap=96MB heapTypes=string:900,Object:400 heapStatsMs=12');
+    expect(first).toEndWith(
+      ' heap=96MB heapTypes=string:900,Object:400 heapStatsMs=12 buffers=unavailable',
+    );
     r.setTypes({ string: 950, Object: 380, Map: 5000, Structure: 1 });
     r.advance(MEMORY_PRINT_MAX_GAP_MS);
-    expect(r.log.sample()).toEndWith(' heap=96MB');
+    expect(r.log.sample()).toEndWith(' heap=96MB buffers=unavailable');
     r.advance(HEAP_TYPES_EVERY_MS - MEMORY_PRINT_MAX_GAP_MS);
     expect(r.log.sample()).toEndWith(
       ' heap=96MB heapTypes=Map:5000+5000,string:950+50,Object:380-20,Structure:1+1 ' +
-        'heapGrowth=Map:+5000,string:+50,Structure:+1 heapStatsMs=12',
+        'heapGrowth=Map:+5000,string:+50,Structure:+1 heapStatsMs=12 buffers=unavailable',
     );
   });
 
@@ -248,7 +250,7 @@ describe('the heap', () => {
     const waitMs = 900 * HEAP_TYPES_COST_MULTIPLE;
     expect(waitMs).toBeGreaterThan(HEAP_TYPES_EVERY_MS);
     r.advance(waitMs - 1);
-    expect(r.log.sample()).toEndWith(' heap=96MB');
+    expect(r.log.sample()).toEndWith(' heap=96MB buffers=unavailable');
     r.advance(1);
     r.setMb(400);
     expect(r.log.sample()).toContain(' heapTypes=');
@@ -276,7 +278,7 @@ describe('the heap', () => {
         throw new Error('no census');
       },
     });
-    expect(log.sample()).toEndWith(' heap=unavailable');
+    expect(log.sample()).toEndWith(' heap=unavailable buffers=unavailable');
   });
 
   it('reads the real heap and census under Bun by default', () => {
@@ -293,7 +295,9 @@ describe('the heap', () => {
     const held = Array.from({ length: 200_000 }, (_, i) => ({ i }));
     const line = log.sample() ?? '';
     expect(held.length).toBe(200_000);
-    expect(line).toMatch(/ heap=\d+MB heapTypes=(\w+:\d+,){4}\w+:\d+ heapStatsMs=\d+$/);
+    expect(line).toMatch(
+      / heap=\d+MB heapTypes=(\w+:\d+,){4}\w+:\d+ heapStatsMs=\d+ buffers=unavailable$/,
+    );
     expect(line).toContain('Object:');
   });
 });

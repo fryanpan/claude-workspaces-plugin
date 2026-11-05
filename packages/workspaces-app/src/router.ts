@@ -5,6 +5,7 @@ import { docIdFromPath, docIdFromPathOrNull } from './doc-path.ts';
 import { applyHuddleCrumb } from './huddle-entry.ts';
 import type { DocMeta, MountContext, MountFn } from './mount-context.ts';
 import { MountScope } from './mount-scope.ts';
+import { setPageTitle, setPageWorkspace } from './page-tab-title.ts';
 
 /**
  * The in-place file router. The review app is a single shell (sidebar +
@@ -121,6 +122,9 @@ async function swap(docId: string): Promise<void> {
   // link. After the token re-check, so a superseded navigation cannot repoint
   // the arrow at the doc that lost.
   applyBackLink(document, meta.backTo, returnItemFrom(location.search));
+  // The tab leads with the same board; the surface names the doc after it.
+  setPageTitle();
+  setPageWorkspace(meta.backTo ?? null);
   // Same reasoning, same moment: the word is chrome the next doc must not
   // inherit, and a superseded navigation must not write it.
   applyHuddleCrumb(document, meta.huddle === true, meta.huddleKind);

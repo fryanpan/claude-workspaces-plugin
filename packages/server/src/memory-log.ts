@@ -27,7 +27,12 @@ import { backgroundPasses, readHeap } from './event-loop.ts';
  *   (114 MB) and 187 ms for 12.4 M (417 MB). That is too much to pay every
  *   30 s, and a 2 GB heap could pay a second, so the census waits at least
  *   `HEAP_TYPES_COST_MULTIPLE` times its own last cost before it runs again,
- *   and the line prints what it cost (`heapStatsMs=`).
+ *   and the line prints what it cost (`heapStatsMs=`);
+ * - each printed line carries the bytes held outside the object graph
+ *   (`formatBufferCounters`). In November 2026 prod's heap grew while its object
+ *   counts stayed flat and the few growers were Uint8Arrays and array
+ *   backing stores, so the growth was in buffers, and the line named none.
+ *   Byte counts and ids only: no counter reads a byte of what a buffer holds.
  *
  * The fields the old line carried come first, in the old order, so a grep
  * written against it still reads. Cost: one syscall per sample, a Map
@@ -186,6 +191,32 @@ export class RequestTally {
   }
 }
 
+/**
+ * Where buffered bytes are, when the census says the heap grew in buffers
+ * rather than objects. `arrayBuffers` and `external` are
+ * `process.memoryUsage()`'s; the rest are what this server holds per doc.
+ */
+export interface BufferCounters {
+  arrayBuffersBytes: number;
+  externalBytes: number;
+  /** Bytes queued on every open doc socket, and the doc of the fullest one. */
+  sockets: { sumBytes: number; maxBytes: number; maxDocId: string | null };
+  /** The SSE replay channel holding the most bytes, or null when none holds any. */
+  largestReplay: { channel: string; bytes: number } | null;
+}
+
+/** `arrayBuffers=`, `external=`, `wsBuffered=`, `wsBufferedMax=`, `replayMax=`. */
+export function formatBufferCounters(b: BufferCounters): string {
+  const mb = (n: number): string => `${Math.round(n / 1024 / 1024)}MB`;
+  const s = b.sockets;
+  const r = b.largestReplay;
+  return (
+    `arrayBuffers=${mb(b.arrayBuffersBytes)} external=${mb(b.externalBytes)} ` +
+    `wsBuffered=${s.sumBytes}B wsBufferedMax=${s.maxDocId === null ? 'none' : `${s.maxBytes}B@${s.maxDocId}`} ` +
+    `replayMax=${r === null ? 'none' : `${r.bytes}B@${r.channel}`}`
+  );
+}
+
 /** The part of `DocStore.stats()` the line prints. */
 export interface MemoryLogStats {
   rssMb: number;
@@ -229,6 +260,8 @@ export interface MemoryLineInput {
   heapMb: number | null;
   /** Present on the lines that took a census. */
   census: HeapCensus | null;
+  /** Null when the counters could not be read; the line says so. */
+  buffers: BufferCounters | null;
 }
 
 /** The line itself. Space-separated `key=value`; no value holds a space. */
@@ -249,7 +282,9 @@ export function formatMemoryLine(i: MemoryLineInput): string {
     `activations=+${i.activationsDelta} requests=${i.requests.total} ` +
     `routes=${routes}${hidden > 0 ? `,+${hidden}more` : ''} ` +
     `heap=${i.heapMb === null ? 'unavailable' : `${i.heapMb}MB`}` +
-    (i.census ? ` ${formatHeapCensus(i.census)}` : '')
+    (i.census ? ` ${formatHeapCensus(i.census)}` : '') +
+    // Last, so a grep written against the heap and census fields still reads.
+    ` ${i.buffers ? formatBufferCounters(i.buffers) : 'buffers=unavailable'}`
   );
 }
 
@@ -265,6 +300,8 @@ export interface MemoryLogOptions {
   readHeapTypes?: () => HeapTypeCounts | null;
   /** The clock the census cost is measured on; `performance.now` by default. */
   perfNow?: () => number;
+  /** The per-doc buffer counters; the line says `buffers=unavailable` without them. */
+  readBuffers?: () => BufferCounters;
 }
 
 /**
@@ -336,6 +373,7 @@ export class MemoryLog {
         requests: this.requests.take(),
         heapMb: this.heapMb(),
         census: this.takeCensus(nowMs),
+        buffers: this.buffers(),
       });
       this.lastActivationsTotal = stats.activationsTotal;
       this.last = { atMs: nowMs, mb };
@@ -349,6 +387,14 @@ export class MemoryLog {
   private heapMb(): number | null {
     try {
       return Math.round(this.readHeapBytes() / 1024 / 1024);
+    } catch {
+      return null;
+    }
+  }
+
+  private buffers(): BufferCounters | null {
+    try {
+      return this.opts.readBuffers?.() ?? null;
     } catch {
       return null;
     }

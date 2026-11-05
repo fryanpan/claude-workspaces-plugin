@@ -17,9 +17,11 @@ describe('the mock host page', () => {
       leadChatHref: '/app/lead-chat-0123456789abcdef.js',
     };
     const [owner, visitor] = [false, true].map((v) => renderMockHost({ ...args, visitor: v }));
-    for (const name of ['coach', 'lead-chat']) {
+    // The lead chat's tag also carries the name the tab title starts from.
+    const extra = { coach: '', 'lead-chat': ' data-doc-title="Harborlight mock"' };
+    for (const name of ['coach', 'lead-chat'] as const) {
       expect(owner).toContain(
-        `<script type="module" src="/app/${name}-0123456789abcdef.js" data-${name}-page data-workspace-id="w-harbor" data-doc-id="d-mock"></script>`,
+        `<script type="module" src="/app/${name}-0123456789abcdef.js" data-${name}-page data-workspace-id="w-harbor" data-doc-id="d-mock"${extra[name]}></script>`,
       );
       expect(visitor).not.toContain(name);
     }
