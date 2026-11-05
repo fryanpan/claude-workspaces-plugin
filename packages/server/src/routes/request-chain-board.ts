@@ -150,6 +150,7 @@ export async function serveBoardRoutes(
       visitor: Boolean(visitor),
       member: visitor && !boardAgent ? (gate.visitorHome?.signedInAs ?? null) : null,
       mayMintAppVoice: rq.mayMintAppVoice(),
+      requestOrigin: () => policyFor(req).requestOrigin,
     });
     if (handled) return handled;
   }
