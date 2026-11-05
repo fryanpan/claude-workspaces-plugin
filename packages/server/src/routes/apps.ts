@@ -114,6 +114,12 @@ export interface AppRouteRequest {
   mayMintAppVoice: boolean;
 }
 
+/** The board's name off the record the scope resolved, for the tab title. */
+function boardName(scope: WorkspaceScope | undefined): string | undefined {
+  const name = (scope?.board as { name?: unknown } | undefined)?.name;
+  return typeof name === 'string' ? name : undefined;
+}
+
 /** `apps/<id>` and whatever follows it, off the scope's remainder. */
 const APP_ADDRESS = /^apps\/([^/]+)(?:\/(.*))?$/;
 
@@ -407,6 +413,7 @@ async function serveApp(
           workspaceId,
           docId: meta.docId,
           html: page,
+          workspaceName: boardName(rq.scope),
           docTitle: meta.title,
           url,
           items: [],
