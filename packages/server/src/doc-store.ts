@@ -1198,7 +1198,7 @@ export class DocStore {
     let maxDocId: string | null = null;
     for (const [docId, doc] of this.docs) {
       for (const ws of doc.conns) {
-        const queued = ws.getBufferedAmount();
+        const queued = ws.getBufferedAmount?.() ?? 0;
         sumBytes += queued;
         if (queued > maxBytes) {
           maxBytes = queued;

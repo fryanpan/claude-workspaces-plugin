@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
-import { type BufferCounters, MemoryLog } from '../src/memory-log.ts';
+import { type BufferCounters, MemoryLog, formatBufferCounters } from '../src/memory-log.ts';
 import { REPLAY_MAX_AGE_MS, SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 
@@ -125,8 +125,17 @@ describe('DocStore.bufferCounters', () => {
     expect(c.largestReplay?.channel).toBe('saltmarsh');
     expect(c.arrayBuffersBytes).toBeGreaterThanOrEqual(0);
     expect(c.externalBytes).toBeGreaterThanOrEqual(0);
-    // Ids and counts only: the buffered payload's words never reach the counters.
-    expect(JSON.stringify(c)).not.toContain('secret words');
+    // Ids and counts only: the buffered payload's words never reach the line.
+    const printed = formatBufferCounters(c);
+    expect(printed).toContain('replayMax=');
+    expect(printed).not.toContain('secret words');
+  });
+
+  it("puts the store's own counters on the line its sampler prints", () => {
+    store.getOrCreate('saltmarsh', { type: 'markdown', title: 'b' });
+    conns('saltmarsh').add(socket(4096));
+    const sampler = (store as unknown as { memoryLog: MemoryLog }).memoryLog;
+    expect(sampler.sample()).toContain('wsBuffered=4096B wsBufferedMax=4096B@saltmarsh');
   });
 
   it('names no doc when nothing is queued', () => {
