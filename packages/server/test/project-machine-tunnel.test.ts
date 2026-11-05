@@ -124,6 +124,7 @@ describe('the machine plan for a named tunnel', () => {
     versioning: true,
     secrets: new Set(requiredSecrets('named')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
+    browser: true,
   };
 
   it('does nothing when the token secret is set and the tunnel was not remade', () => {

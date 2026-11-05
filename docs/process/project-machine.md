@@ -247,17 +247,30 @@ Claude Code sign-in:
 
 ```bash
 bun run machine:deploy --project <project> --memory 2048 \
-  --lead-board <boardId> [--claude-account <label>] \
+  --lead-board <boardId> \
   [--github-deploy-key <keychain entry> --lead-repo <owner/name>]
 ```
 
 - `--lead-board` sets `CW_LEAD_BOARD`. Without a board no lead runs, and the
   deploy sends no sign-in, though the Mac's Keychain holds one.
-- The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`, from the Keychain item
-  `claude-lead-oauth-token`, the same one the walled lead on the Mac signs in
-  from (`scripts/lead-sandbox-token.ts`): the token `claude setup-token`
-  prints, BASE64. `--claude-account <label>` reads
-  `claude-lead-oauth-token.<label>`.
+- The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`, a token made for this org alone
+  (re-review finding H2). The first deploy of an org with a lead runs
+  `claude setup-token`, which opens Bryan's browser: one approval per org, and
+  the token lasts a year. The deploy sets it on that org's app beside
+  `CW_LEAD_TOKEN_ORG=<project>` and keeps it nowhere on the Mac, not in the
+  Keychain and not in a file; the screen the approval prints is shown with the
+  token hidden (`infra/project-machine/org-signin.ts`). A dry run asks for no
+  approval and says one is due. CI never asks: a run there sets no sign-in
+  and says why.
+- The machine starts its lead only when `CW_LEAD_TOKEN_ORG` names its own
+  org (`entrypoint.sh`), so a token set by hand, or the one every lead used
+  to share, starts no lead. The next deploy on the Mac sees no
+  `CW_LEAD_TOKEN_ORG` and asks for the org's approval.
+- The Mac's walled lead keeps its own Keychain sign-in,
+  `claude-lead-oauth-token` (`scripts/lead-sandbox-token.ts`); no org's lead
+  is given it. `--claude-account` is gone.
+- Revoke one org's sign-in at claude.ai/settings/claude-code; no other org
+  loses its lead. `--refresh-lead` then makes the org a new one.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private
   key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
   The deploy sets it only once GitHub lists it read-only: it reads the deploy
@@ -267,8 +280,8 @@ bun run machine:deploy --project <project> --memory 2048 \
 - A machine with a lead needs `--memory 2048` or more; the deploy refuses a
   smaller one.
 - Each is set once, like every secret. A run that names a source sets that
-  secret again. `--refresh-lead` also sets the default account's sign-in
-  again, and needs `--lead-board`; a deploy key is set again only when
+  secret again. `--refresh-lead` also makes the org a new sign-in, with a
+  new approval, and needs `--lead-board`; a deploy key is set again only when
   `--github-deploy-key` names it.
 
 What the lead can reach:

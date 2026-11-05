@@ -34,6 +34,7 @@ function complete(): Observed {
     versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
+    browser: true,
   };
 }
 
@@ -47,6 +48,7 @@ describe('plan: bucket versioning', () => {
       versioning: false,
       secrets: new Set(),
       machines: [],
+      browser: true,
     }).map((a) => a.kind);
     expect(kinds.indexOf('set-versioning')).toBeGreaterThan(kinds.indexOf('create-bucket'));
     expect(kinds.indexOf('set-versioning')).toBeLessThan(kinds.indexOf('set-lifecycle'));

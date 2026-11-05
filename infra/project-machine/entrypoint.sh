@@ -215,10 +215,18 @@ lead_cgroup() {
 # (MACHINE_SECRETS, run-as.sh). Root starts its supervisor again whenever it
 # exits, so the lead, which can kill its own processes, cannot stop the
 # machine: this loop, not the supervisor, is what wait -n watches.
+# The sign-in must be one made for this org alone (review H2): machine:deploy
+# sets CW_LEAD_TOKEN_ORG to the org beside the token, so a token set by hand,
+# or the sign-in every lead once shared, starts no lead until a deploy makes
+# the org its own.
+LEAD_ORG="${FLY_APP_NAME:-}"
+LEAD_ORG="${LEAD_ORG#cw-}"
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   log "CLAUDE_CODE_OAUTH_TOKEN unset: no lead agent runs"
 elif [ -z "$LEAD_BOARD" ]; then
   log "CW_LEAD_BOARD unset: no lead agent runs"
+elif [ -z "$LEAD_ORG" ] || [ "${CW_LEAD_TOKEN_ORG:-}" != "$LEAD_ORG" ]; then
+  log "the lead's sign-in was not made for ${LEAD_ORG:-this org} (CW_LEAD_TOKEN_ORG is '${CW_LEAD_TOKEN_ORG:-}'): no lead agent runs; machine:deploy on the Mac makes it one with a browser approval"
 else
   if cg=$(lead_cgroup); then
     log "the lead's memory is capped at $LEAD_MEMORY_MAX"

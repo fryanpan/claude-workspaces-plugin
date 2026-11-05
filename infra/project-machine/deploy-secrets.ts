@@ -7,6 +7,7 @@ import {
   type BucketCredential,
   LEAD_BOARD_SECRET,
   LEAD_DEPLOY_KEY_SECRET,
+  LEAD_TOKEN_ORG_SECRET,
   LEAD_TOKEN_SECRET,
   ORG_KEY_SECRET,
   type ProjectConfig,
@@ -37,7 +38,11 @@ export function secretValue(cfg: ProjectConfig, name: string): string {
     case ORG_KEY_SECRET:
       return keychainRead(cfg.keychain.orgKey).trim();
     case LEAD_TOKEN_SECRET:
-      return leadToken(cfg);
+      // Made by the org's browser approval (org-signin.ts), never read back
+      // from anywhere on the Mac.
+      throw new Error(`${name} comes only from the org's browser approval`);
+    case LEAD_TOKEN_ORG_SECRET:
+      return cfg.project;
     case LEAD_BOARD_SECRET:
       if (cfg.leadBoard === undefined) throw new Error(`no source for secret ${name}`);
       return cfg.leadBoard;
@@ -46,19 +51,6 @@ export function secretValue(cfg: ProjectConfig, name: string): string {
     default:
       throw new Error(`no source for secret ${name}`);
   }
-}
-
-/**
- * The lead's token, as one line `fly secrets import` can carry. The error
- * names the entry, never any part of the value.
- */
-function leadToken(cfg: ProjectConfig): string {
-  const token = keychainRead(cfg.keychain.leadToken).trim();
-  if (!/^[\x21-\x7e]+$/.test(token))
-    throw new Error(
-      `the Keychain entry ${cfg.keychain.leadToken} does not hold a token from \`claude setup-token\` (one line, no spaces)`,
-    );
-  return token;
 }
 
 /**

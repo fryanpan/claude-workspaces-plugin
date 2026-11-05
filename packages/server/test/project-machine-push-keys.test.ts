@@ -31,6 +31,7 @@ function complete(cfg: ProjectConfig, extra: string[] = []): Observed {
     versioning: true,
     secrets: new Set([...requiredSecrets(cfg.tunnel), ...extra]),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: cfg.vmMemoryMb }],
+    browser: true,
   };
 }
 

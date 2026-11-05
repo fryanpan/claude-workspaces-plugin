@@ -37,6 +37,7 @@ function complete(): Observed {
     versioning: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
+    browser: true,
   };
 }
 
@@ -91,6 +92,7 @@ describe('plan', () => {
       versioning: false,
       secrets: new Set(),
       machines: [],
+      browser: true,
     });
     expect(actions.map((a) => a.kind)).toEqual([
       'create-app',
