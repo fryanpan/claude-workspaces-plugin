@@ -138,9 +138,6 @@ read-only one and fails.
 | `CLOUDFLARE_API_TOKEN` | read-only token | the apply token (permissions below) |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Object Read on the state bucket | Object Read and Write on the state bucket |
 | `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | the three configs' contents (they hold the Access email lists) | |
-| `CLOUDFLARE_ACCOUNT_ID` | | names the R2 endpoint for `machine:deploy`'s output read |
-| `FLY_API_TOKEN` | | the Fly org token |
-| `CW_BOARD_OWNER_EMAIL` | | each server's `CW_OWNER_EMAIL` |
 
 The jobs hand the R2 pair to terraform as `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY`, the names the S3 backend reads. `CF_TFSTATE_BUCKET`
@@ -171,23 +168,18 @@ The router Worker's plain-text vars are hostname tables, not secrets.
 
 On the account: Access: Apps and Policies Edit, Access: Service Tokens Read,
 Access: Organizations Read, Cloudflare Tunnel Edit (`machine:deploy`'s
-tunnel token read needs it; the `deploy-machines` job uses this token), Workers Scripts Edit. On the zone: Zone Read, DNS Edit, SSL and
+tunnel token read needs it, when it runs on the Mac with this token), Workers Scripts Edit. On the zone: Zone Read, DNS Edit, SSL and
 Certificates Read, Workers Routes Edit. The plan token has the Read form of
 each.
 
-## Fly, after the apply
+## Fly is not touched here
 
-`deploy-machines` runs `bun infra/project-machine/machines.ts deploy`, which
-runs `machine:deploy` for each machine listed in `machines.json`. There,
-`machine:deploy` runs with `CW_SECRETS_FROM_ENV=1` (`mac-ops.ts`): every
-Keychain entry it would read is an environment variable instead
-(`fly-org-slug` becomes `CW_SECRET_FLY_ORG_SLUG`), the org token is
-`FLY_API_TOKEN`, and no Keychain entry can be made. So CI only updates a
-machine the Mac already made; a run that would make an app, a volume or a
-credential is refused before any change. The tunnel's id and the Access settings
-come from `terraform output` (`outputs.ts`). The tunnel's token is read from
-Cloudflare's API with `CLOUDFLARE_API_TOKEN`, only when the machine's secret
-is to be set.
+No job holds a Fly token. Project machines install the signed releases
+`.github/workflows/server-release.yml` publishes, and `machine:deploy` runs
+from the keeper (`docs/process/project-machine.md`, "Releases"). The
+`cloudflare-prod` environment's `FLY_API_TOKEN`, `CW_BOARD_OWNER_EMAIL` and
+`CLOUDFLARE_ACCOUNT_ID` were read only by the job that ran it, and nothing
+reads them now.
 
 ## Tests
 

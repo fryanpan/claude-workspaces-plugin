@@ -33,6 +33,11 @@
 #   CW_LEAD_AGENT_NAME            the lead's agent name; `<project>-lead` unless set
 #   CW_LEAD_REMOTE_CONTROL        `1` starts the lead's session with Remote Control
 #   CW_LEAD_MEMORY_MAX            the lead's cgroup memory ceiling; 1280M unless set
+#   CW_RELEASE_POLL_SECONDS       how often the machine checks for a signed release;
+#                                 300 unless set
+#   CW_RELEASE_CHANNEL_URL        where it checks; this repo's server-channel
+#                                 release unless set. Every byte is still checked
+#                                 against the key in the image
 #   CW_DEV_SERVER_CMD             the project's dev server, run as cwdev in
 #                                 /data/dev/work; none unless set
 #   CW_FRAME_ORIGIN               the project's frame hostname (read by the server), so an app's own

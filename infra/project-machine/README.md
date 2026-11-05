@@ -11,6 +11,8 @@ scripts that stand it up. How to run them is
 | `bun run machine:restore --project <name>` | the Mac | Puts the newest snapshot back onto the machine; the old data dir is moved aside |
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
 | `entrypoint.sh`, `run-as.sh` | the machine | The process tree, supervised as root: the server as `cw`, cloudflared as `cwtunnel`, the lead agent as `lead`, so no child's user holds another's secrets |
+| `release-cli.ts`, `release-store.ts`, `release-manifest.ts` | the machine | As `cwrelease`: checks for a newer release CI signed, chooses which app the server boots, and rolls back a release that did not stay up |
+| `release-publish.ts` | CI (`server-release.yml`) | Builds and signs a release; `keygen` makes the signing pair once |
 | `lead.sh` | the machine | Keeps the lead agent's Claude Code session running in tmux, and starts it again within a minute when it ends |
 | `github-known-hosts.txt` | the machine | GitHub's SSH host keys, pinned for the lead's git over SSH |
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |

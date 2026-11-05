@@ -10,12 +10,13 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and five users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent, `cwdev` for the project's dev server |
+| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and six users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent, `cwdev` for the project's dev server, `cwrelease` for the release check |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
-| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, the project's dev server as `cwdev` when one is configured, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
+| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, the project's dev server as `cwdev` when one is configured, a loopback health check, the backup loop and the release check as `cwrelease`; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
 | `lead.sh` | Keeps one Claude Code session running in a tmux session named `lead`, and starts it again when it ends (below) |
 | `github-known-hosts.txt` | GitHub's SSH host keys, installed as `/etc/ssh/ssh_known_hosts` for the lead's git |
 | `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
+| `release-cli.ts`, `release-store.ts`, `release-manifest.ts` | Checks for a newer signed release, chooses which app the server boots, and rolls a release back that did not stay up ("Releases", below) |
 | `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
 
 **What a snapshot holds.** The data dir, which carries every board's docs,
@@ -165,35 +166,65 @@ this read, because its answer is a credential. A tunnel Terraform remade has a n
 `--refresh-tunnel-token` to set it again. A machine that ran a quick tunnel
 loses its `CW_TUNNEL_MODE` secret, so it starts the named one.
 
-### Deploying from CI
+### Releases: how new code reaches a machine
 
-After each Cloudflare apply on main, `.github/workflows/cloudflare.yml` runs
-`machine:deploy` for every machine listed in
-`infra/project-machine/machines.json` (`machines.ts`). There it runs with
-`CW_SECRETS_FROM_ENV=1`: each Keychain entry it reads is an environment
-variable instead (`CW_SECRET_<ENTRY>`, upper case, `-` as `_`, plain text),
-the Fly org token is `FLY_API_TOKEN`, and the `security` command is never
-run. Only these are needed for a machine that already runs:
+CI holds no credential for any machine. It publishes a signed release for
+every commit on main that CI passed, and each machine installs it itself.
+An image change (the Dockerfile, Bun, `bun.lock`, the release key,
+`entrypoint.sh`) is still `machine:deploy`, run from the keeper.
 
-| Mac source | In CI |
-| --- | --- |
-| Keychain `fly-org-token` | `FLY_API_TOKEN` |
-| Keychain `cloudflare-api-token` (a tunnel token read only) | `CLOUDFLARE_API_TOKEN` |
-| Keychain `cw-board-owner-email` | `CW_SECRET_CW_BOARD_OWNER_EMAIL` |
-| Keychain `cloudflare-r2-tfstate` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `state/prod/backend.hcl` from the last `cf:plan` | `CLOUDFLARE_ACCOUNT_ID` (and `CF_TFSTATE_BUCKET`) |
+1. **CI builds and signs.** `.github/workflows/server-release.yml` runs after
+   CI passes on a push to main. It installs and builds the checkout the way the
+   Dockerfile does, tars the same paths (`RELEASE_PATHS` in
+   `release-publish.ts`) without the package store `node_modules/.bun`, and
+   signs a manifest naming the tarball's SHA-256 with the Ed25519 key in the
+   `server-release` environment's `CW_RELEASE_SIGNING_KEY`. Both are assets of
+   the GitHub release `server-channel`: `cw-server-<sha>.tar.gz` (the last five
+   kept) and `channel.json`. The manifest's serial is the commit's position on
+   main (`git rev-list --count --first-parent`), and CI never replaces a
+   higher serial with a lower one.
+2. **The machine checks.** Every 300 seconds (`CW_RELEASE_POLL_SECONDS`) the
+   `cwrelease` user, which holds no secret, reads `channel.json`
+   (`release-cli.ts check`). It verifies the signature against
+   `infra/project-machine/release-signing-key.pub` in the image before it
+   reads anything else, and refuses a release that is not newer than what it
+   runs, that failed here before, or that was built with another Bun or
+   another `bun.lock` (that release needs an image deploy). Otherwise it
+   downloads the tarball, checks its SHA-256 against the manifest, and exits;
+   the machine stops, and Fly's restart policy starts it again.
+3. **The boot tries it.** `entrypoint.sh` asks `release-cli.ts select` which
+   app the server runs. A downloaded release is verified again, unpacked into
+   `/data/releases/<sha>`, linked to the image's `node_modules/.bun`, and put
+   on trial. When the server answers three probes in a row, 10 seconds apart,
+   the trial becomes current and the release it replaced is kept as previous.
+4. **A bad release rolls back.** A trial still set at the next boot did not
+   stay up: its server exited, or it never answered inside the first bind's
+   240 seconds plus three missed probes. That boot marks it failed, never
+   downloads it again, and runs the current release. So a bad release costs
+   two restarts and at most about five minutes of the board; nothing has to
+   run on the Mac.
 
-The backup identity, the bucket's admin credential and the writer credential
-stay on the Mac. CI counts each as made when the Fly secret it was the source
-of is set, never reads its value, and assumes the expiry rule the Mac set with
-the bucket. So CI updates a machine the Mac made and refuses, before any
-change, one it did not: a new project's first deploy runs on the Mac. The
-org's Claude key, the lead's sign-in and its deploy key are set once by the
-Mac and left alone by CI, unless their `CW_SECRET_*` variable is given. The
-keeper (`CW_KEEPER_URL`) is not used in CI.
+The machine runs, in order of preference: a trial, the current release if it
+is newer than the image, the image's own app. `machine:deploy` writes the
+image's serial into it (`image-release.json`), so a newer image beats an older
+release on the volume. `/data/releases/state.json` holds current, previous,
+the trial and the last 20 failures with their reasons.
 
-The server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
-("The owner and Access settings", above).
+Without `release-signing-key.pub` in the image the machine never updates
+itself and logs `this machine does not update itself`. To turn it on, once:
+
+```bash
+bun infra/project-machine/release-publish.ts keygen --private-key <new file outside the repo>
+```
+
+That writes the private key (mode 600) and `release-signing-key.pub`. Put the
+private key's text in the `server-release` environment as
+`CW_RELEASE_SIGNING_KEY` (deployments from main only), commit the public key
+through a PR, and run `machine:deploy` from the keeper once for each machine,
+so each image carries the key. Rotating the key is the same steps.
+
+`infra/project-machine/machines.ts` still runs `machine:deploy` for every
+machine in `machines.json`; nothing runs it on a schedule.
 
 ### Checking it
 
@@ -203,8 +234,9 @@ fly ssh console --app cw-<project> -C \
 ```
 
 The curl answers with a JSON `liveness` field (and a 501 for the deploy
-half: a project machine is deployed by `machine:deploy`, never by pulling
-itself). Then add the project's boards under the machine's origin hostname in
+half: a project machine takes new code from signed releases, "Releases"
+above, and never from `POST /api/deploy`). `cat /data/releases/state.json`
+over the same console names the release it runs. Then add the project's boards under the machine's origin hostname in
 the router's `BOARD_ORIGINS`.
 
 ## The lead agent
