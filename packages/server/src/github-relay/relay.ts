@@ -16,13 +16,19 @@
  *     and push it (`POST /workspaces/:ws/github/events`). The board checks the
  *     same list again, so a stale copy here cannot widen what an agent hears.
  *
+ * Only the subscriptions whose repo the relay's own config lists for that
+ * board (`repos`, `relay-config.ts`) are watched or pushed. The board's
+ * server writes its list, and the broker reads with the owner's GitHub login,
+ * so without this a hostile board server could hear any repo that login can
+ * read: another org's, or the owner's own.
+ *
  * A push that fails on the network or with a 5xx stays queued, with the same
  * event id, and is sent again next pass; the board delivers an id once. A
  * push the board refuses (4xx) is dropped and logged. Nothing logged carries
  * a key or an event's text.
  */
 import { randomBytes } from 'node:crypto';
-import type { GithubSubscription } from '../github-hub.ts';
+import { type GithubSubscription, isValidRepo } from '../github-hub.ts';
 import { configuredHostFetch } from '../outbound-fetch.ts';
 import { readBrokerLine } from './broker-line.ts';
 import type { GithubRelayBoard, GithubRelayConfig } from './relay-config.ts';
@@ -156,9 +162,17 @@ export function createGithubRelay(deps: GithubRelayDeps): GithubRelay {
         return;
       }
       const body = (await res.json()) as { subscriptions?: GithubSubscription[] };
-      s.subscriptions = Array.isArray(body.subscriptions) ? body.subscriptions : [];
+      const listed = Array.isArray(body.subscriptions) ? body.subscriptions : [];
+      const { kept, outside } = withinAllowlist(listed, board.repos);
+      s.subscriptions = kept;
       s.subscriptionsAt = now();
       say(`${board.name}/subs`, null);
+      say(
+        `${board.name}/outside`,
+        outside.length === 0
+          ? null
+          : `${board.name}: not allowed for this board, so not watched: ${outside.join(', ')} (add to its "repos" in the relay config to allow)`,
+      );
     } catch {
       say(`${board.name}/subs`, `${board.name}: subscriptions unreachable; keeping the last list`);
     }
@@ -267,4 +281,20 @@ export function createGithubRelay(deps: GithubRelayDeps): GithubRelay {
       return Object.fromEntries(boards.map((s) => [s.board.name, s.session]));
     },
   };
+}
+
+/** The subscriptions whose repo `allowed` names (without case), and the repos it does not. */
+export function withinAllowlist(
+  listed: readonly GithubSubscription[],
+  allowed: readonly string[],
+): { kept: GithubSubscription[]; outside: string[] } {
+  const ok = new Set(allowed.map((r) => r.toLowerCase()));
+  const kept: GithubSubscription[] = [];
+  const outside: string[] = [];
+  for (const sub of listed) {
+    if (typeof sub?.repo === 'string' && ok.has(sub.repo.toLowerCase())) kept.push(sub);
+    // A hostile server's text is never logged: only a name shaped like a repo.
+    else outside.push(isValidRepo(sub?.repo) ? sub.repo : '(not a repo name)');
+  }
+  return { kept, outside: outside.sort() };
 }
