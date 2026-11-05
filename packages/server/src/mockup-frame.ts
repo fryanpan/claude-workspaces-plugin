@@ -263,15 +263,17 @@ function hostNav(workspaceId: string): { style: string; html: string } {
  * board's nav beside the frame instead (`hostNav`), so neither sits over the
  * mock; it loads the coach's card (`coachHref`) and the lead chat
  * (`leadChatHref`), which the sandboxed frame cannot show, and each stops
- * itself for anyone but the owner. Its script builds
- * the frame, so it can hand the frame the reader's display name before the
- * widget inside reads it (see `mock-host.ts`).
+ * itself for anyone but the owner. Its script builds the frame, so it can hand
+ * the frame the reader's name before the widget reads it (`mock-host.ts`).
  */
 export function renderMockHost(args: {
   workspaceId: string;
   docId: string;
   /** The mock's own bytes, read only for its `<title>`. */
   html: string;
+  /** The tab: the board's name, then the doc's title or else the mock's. */
+  workspaceName?: string | undefined;
+  docTitle?: string | undefined;
   url: URL;
   items: HostItem[];
   /** A share visitor, admitted by the gate; draws the link to the board. */
@@ -304,18 +306,19 @@ export function renderMockHost(args: {
       ? `<script type="module" src="${escapeAttr(args.coachHref)}" data-coach-page` +
         ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
       : '';
+  const name = args.docTitle?.trim() || title;
   const leadChat =
     args.leadChatHref && !args.visitor
       ? `<script type="module" src="${escapeAttr(args.leadChatHref)}" data-lead-chat-page` +
-        ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
+        ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"` +
+        ` data-doc-title="${escapeAttr(name)}"></script>`
       : '';
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    // `<` escaped: a browser ends <title> at `</title/>` or `</title x>`,
-    // which TITLE does not stop at, and this page is unsandboxed on the
-    // board's origin. Entities in the mock's title still read as written.
-    `<title>${title.replace(/</g, '&lt;')}</title>` +
+    // `<` escaped: a browser ends <title> at `</title/>`, which TITLE does not
+    // stop at, on this unsandboxed page. Entities still read as written.
+    `<title>${(args.workspaceName ? `${args.workspaceName} · ${name} · Workspaces` : title).replace(/</g, '&lt;')}</title>` +
     '<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}' +
     `iframe{border:0;width:100%;height:calc(100% - ${BAR_H}px);display:block}${BAR_STYLE}${boardLink.style}</style></head><body>` +
     boardLink.anchor +
