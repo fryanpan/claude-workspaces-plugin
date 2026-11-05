@@ -48,6 +48,9 @@ type BufferedEvent = {
   at: number;
   payload: SsePayload;
   toAgents?: readonly string[];
+  /** The payload's serialized size, measured the first time the memory line
+   *  asks (`largestReplay`) and never on the broadcast path. */
+  bytes?: number;
 };
 
 /**
@@ -400,6 +403,25 @@ export class SseBus {
       this.lastSweepAt = now;
       for (const key of this.replay.keys()) this.prune(key);
     }
+  }
+
+  /**
+   * The channel whose replay buffer holds the most bytes, for the memory
+   * line. Sizes are measured lazily, once per buffered frame, so a frame is
+   * serialized at most once more over its ten-minute life and the broadcast
+   * path pays nothing. A count and a channel id; no payload leaves here.
+   */
+  largestReplay(): { channel: string; bytes: number } | null {
+    let best: { channel: string; bytes: number } | null = null;
+    for (const [channel, buf] of this.replay) {
+      let bytes = 0;
+      for (const e of buf) {
+        e.bytes ??= Buffer.byteLength(JSON.stringify(e.payload));
+        bytes += e.bytes;
+      }
+      if (bytes > 0 && (best === null || bytes > best.bytes)) best = { channel, bytes };
+    }
+    return best;
   }
 
   private prune(docId: string): void {

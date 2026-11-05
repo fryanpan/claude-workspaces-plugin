@@ -414,6 +414,8 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           workspaceId,
           docId: doc.meta.docId,
           html,
+          workspaceName: taskStore.getWorkspace(workspaceId)?.name,
+          docTitle: doc.meta.title,
           url,
           // The host relays an answer only for what the frame may answer.
           items: linked

@@ -9,11 +9,14 @@
  */
 import { ensureUserIdentity } from './identity-prompt.ts';
 import { mountLeadChat } from './lead-chat/lead-chat-mount.ts';
+import { followMockTabTitle } from './mock-tab-title.ts';
 
 const tag = document.querySelector<HTMLScriptElement>('script[data-lead-chat-page]');
 const workspaceId = tag?.dataset.workspaceId;
 const docId = tag?.dataset.docId;
 if (workspaceId) {
+  // The tab's title follows a rename of the board or the doc; same pages.
+  if (docId) void followMockTabTitle({ workspaceId, docId, docTitle: tag?.dataset.docTitle ?? '' });
   const storage = {
     get: (k: string) => localStorage.getItem(k),
     set: (k: string, v: string) => localStorage.setItem(k, v),
