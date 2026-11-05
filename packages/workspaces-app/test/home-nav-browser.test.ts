@@ -77,6 +77,12 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
     expect(r.phone.coach.bottom).toBeLessThanOrEqual(r.phone.placeTop.top);
   }, 60_000);
 
+  it('no widget control is drawn over a tab', () => {
+    // CONTROL: all three controls were measured, so an empty list is a reading.
+    expect(r.phone.controls).toBe(3);
+    expect(r.phone.overTabs).toEqual([]);
+  }, 60_000);
+
   it('no entry moves or resizes as the page scrolls under it', () => {
     expect(r.phone.boxesBefore).toHaveLength(4);
     expect(r.phone.boxesAfter).toEqual(r.phone.boxesBefore);

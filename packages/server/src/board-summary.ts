@@ -7,13 +7,15 @@
  * gets one short sentence, written from that board's own last hour of events
  * — task moves, answers, and the one-line notes sessions post as they work.
  *
- * Three rules keep it cheap and honest:
+ * Four rules keep it cheap and honest:
  *
  *  - **At most once an hour per board.** A refresh is asked for on every page
  *    load and declined unless the stored sentence is an hour old, the board
  *    had events in the last hour, and no refresh for it is already out.
  *  - **Quiet boards say nothing.** A sentence older than two hours describes
  *    work that has stopped, so the page shows only the last active time.
+ *  - **Work or nothing.** A sentence about a server starting or routine ticks
+ *    is refused, and the line falls back to the last active time.
  *  - **Short or nothing.** The sentence has to fit two lines at phone width
  *    beside the time, so a reply longer than `SUMMARY_MAX_CHARS` is refused
  *    rather than clipped mid-word.
@@ -45,7 +47,17 @@ export interface BoardSummaryGenerator {
 
 export const BOARD_SUMMARY_SYSTEM = `You write one sentence saying what a project board worked on in the last hour.
 Plain words, present tense, no names of people, no counts, no markdown, no quotes.
-At most ${SUMMARY_MAX_CHARS} characters. If nothing meaningful happened, reply with an empty line.`;
+At most ${SUMMARY_MAX_CHARS} characters. If nothing meaningful happened, reply with an empty line.
+A server starting, routine ticks and heartbeats are not work: when that is all there is, reply with an empty line.`;
+
+/**
+ * A sentence about the machinery rather than the work. The model was told
+ * "nothing meaningful means an empty line" and still wrote these, so a project
+ * line read "Starting up the server and running routine ticks". Worded so a
+ * sentence about fixing start-up stays: only the idle shape is refused.
+ */
+const IDLE_SENTENCE =
+  /\b(?:starting|started|starts|booting|restarting)(?: up)?(?: the)? server\b|\b(?:routine|idle) ticks?\b|\bheartbeats?\b|\bno (?:other|real|meaningful) (?:activity|work)\b/i;
 
 /** The last hour, one line a row, oldest first. Heartbeats are not work. */
 export function boardSummaryPrompt(args: {
@@ -98,7 +110,7 @@ export function acceptBoardSummary(reply: string | null): string | null {
     .trim()
     .replace(/^"(.*)"$/, '$1');
   if (text.length < 12 || text.length > SUMMARY_MAX_CHARS) return null;
-  return text;
+  return IDLE_SENTENCE.test(text) ? null : text;
 }
 
 export class BoardSummaryStore {
@@ -156,7 +168,9 @@ export function createBoardSummaries(deps: {
   return {
     read(workspaceId) {
       const s = store.get(workspaceId);
-      return s && now() - s.at < SUMMARY_SHOW_MS ? s.text : undefined;
+      if (!s || now() - s.at >= SUMMARY_SHOW_MS) return undefined;
+      // Through the same gate, so a sentence stored before it was added goes too.
+      return acceptBoardSummary(s.text) ?? undefined;
     },
     async refresh(board) {
       const { summarizer } = deps;

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  BoardSummaryStore,
   SUMMARY_MAX_CHARS,
   acceptBoardSummary,
   boardSummaryPrompt,
@@ -84,10 +85,44 @@ describe('acceptBoardSummary', () => {
   });
 });
 
+describe('a sentence about the machinery', () => {
+  it('is refused, and a sentence about work on the same subject is kept', () => {
+    for (const idle of [
+      'Starting up the server and running routine ticks with no other activity.',
+      'Starting up the server and running routine ticks on the Riverbend board.',
+      'Server restarted; idle ticks and heartbeats only.',
+    ]) {
+      expect(acceptBoardSummary(idle)).toBeNull();
+    }
+    // CONTROL: the words alone do not refuse a sentence about real work.
+    expect(acceptBoardSummary('Fixing the server start-up crash on Riverbend.')).toBe(
+      'Fixing the server start-up crash on Riverbend.',
+    );
+  });
+});
+
 describe('createBoardSummaries', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('never shows an idle sentence stored before the gate existed', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'board-summary-'));
+    dirs.push(dataDir);
+    const clock = NOW;
+    new BoardSummaryStore(dataDir).set('w-salt', {
+      text: 'Starting up the server and running routine ticks.',
+      at: clock,
+    });
+    const summaries = createBoardSummaries({
+      dataDir,
+      summarizer: fakeApi('unused').summarizer,
+      titleOf,
+      now: () => clock,
+      readRows: () => rows,
+    });
+    expect(summaries.read('w-salt')).toBeUndefined();
   });
 
   it('refreshes at most once an hour and goes quiet after two', async () => {
