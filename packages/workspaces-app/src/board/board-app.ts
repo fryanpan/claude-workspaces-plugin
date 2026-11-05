@@ -600,7 +600,11 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     knownAgentIds,
     loadEvents: () => loadEvents(),
     loadTaskDetail: (taskId: string | null) => loadTaskDetail(taskId),
-    syncBoardUrl,
+    // Every render of the panel ends here, so the tab names what it opened.
+    syncBoardUrl: () => {
+      syncBoardUrl();
+      syncTabTitle();
+    },
     connectMarkdown: (docId) => connect(wsUrl(docId, 'markdown')),
     // Already awaited above — the description box is never live before the
     // answer, and never live after a "no".

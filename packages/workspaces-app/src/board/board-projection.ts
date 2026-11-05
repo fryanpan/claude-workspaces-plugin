@@ -146,13 +146,21 @@ export function createBoardProjection(deps: BoardProjectionDeps): BoardProjectio
   /**
    * Name the browser tab after this workspace and the pane showing in it.
    *
-   * Called from both writers of what it reads — `setNav` (the reader moved)
-   * and `readProjection` (the workspace was renamed under them) — because a
+   * Called from every writer of what it reads — `setNav` (the reader moved),
+   * the detail panel's render (a ticket opened or closed) and `readProjection`
+   * (the workspace or the open ticket was renamed under them) — because a
    * title set once at boot is wrong the moment either happens, and this page
    * never reloads.
    */
   function syncTabTitle(): void {
-    document.title = boardTabTitle(state.info?.name ?? workspaceId, state.nav);
+    // An open task or goal names the tab after the board, so a reader with
+    // three tickets open in three tabs can tell them apart.
+    const open = state.detailTaskId
+      ? state.tasks.get(state.detailTaskId)?.title
+      : state.detailGoalId
+        ? state.info?.goals.find((g) => g.id === state.detailGoalId)?.title
+        : undefined;
+    document.title = boardTabTitle(state.info?.name ?? workspaceId, state.nav, open);
   }
 
   return { readProjection, syncHeader, syncTabTitle };

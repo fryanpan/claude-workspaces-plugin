@@ -180,6 +180,9 @@ describe('attaching and serving a dev server', () => {
       const html = await r.text();
       expect(html).toContain('data-src="?v=1&amp;cw-frame=1"');
       expect(html).toContain('/widget/mock-host.js');
+      // The tab leads with the board's name, for a share visitor too, who
+      // loads no script to put it there.
+      expect(html).toMatch(/<title>Harborlight events · [^<]+ · Workspaces<\/title>/);
       // The owner's host page draws nothing over the app: the link back to
       // the board is a share visitor's (share-link-landing.test.ts).
       expect(html).not.toContain('cw-board-link');
