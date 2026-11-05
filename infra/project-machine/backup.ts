@@ -26,8 +26,9 @@
  *   BACKUP_S3_SECRET_ACCESS_KEY
  *
  * The upload is one PUT of a new key. Nothing here lists, reads or deletes,
- * so a credential with create-only permission is enough, and old snapshots
- * are pruned by the bucket's own lifecycle rule rather than by the machine.
+ * so a credential with create-only permission is enough. Nothing prunes old
+ * snapshots yet: the bucket is a Tigris snapshot bucket, which cannot expire
+ * objects, and the machine cannot delete.
  */
 import { randomBytes } from 'node:crypto';
 import { constants, closeSync, fstatSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
