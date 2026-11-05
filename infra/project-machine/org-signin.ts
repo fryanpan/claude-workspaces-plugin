@@ -29,9 +29,31 @@ import { spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-/** Any Anthropic credential on the screen: hidden whole, whatever its kind. */
-const ANY_KEY = /sk-ant-[A-Za-z0-9_-]*/g;
+/**
+ * Any Anthropic credential on the screen, hidden whole whatever its kind,
+ * with any lines it wraps onto: a run of token characters straight after one
+ * line break counts as the same token, so a wrapped tail is hidden too. A
+ * wrap leaves no blank line, so a blank line ends the token; the cost is a
+ * first word on the very next line hidden with it.
+ */
+const ANY_KEY = /sk-ant-[A-Za-z0-9_-]*(?:(?:\r\n|\r|\n)[A-Za-z0-9_-]+)*/g;
+/** The same, once what follows can no longer continue it: a blank line, or a character no token holds. */
+const DONE_KEY =
+  /sk-ant-[A-Za-z0-9_-]*(?:(?:\r\n|\r|\n)[A-Za-z0-9_-]+)*(?=[^A-Za-z0-9_\r\n-]|(?:\r\n|\r|\n)[^A-Za-z0-9_-])/g;
+/** A key still being written at the end of what has arrived, perhaps about to wrap. */
+const OPEN_KEY = /sk-ant-[A-Za-z0-9_-]*(?:(?:\r\n|\r|\n)[A-Za-z0-9_-]+)*(?:\r\n|\r|\n)?$/;
+/** An escape sequence cut off at the end of a write. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escapes are the input
+const OPEN_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*|\][^\x07\x1b]*\x1b?)?$/;
 const KEY_START = 'sk-ant-';
+/**
+ * The shortest token accepted. `claude setup-token`'s are about 108
+ * characters; a shorter match is a token the screen cut, and setting part of
+ * one would leave the lead signed out with no error.
+ */
+const MIN_TOKEN = 90;
+/** A token's line followed by one break and a line of token characters: a wrap. */
+const WRAPPED = /^(?:\r\n|\r|\n)(?!sk-ant-)[A-Za-z0-9_-]+(?:[\r\n]|$)/;
 /** The token `claude setup-token` prints. */
 const SETUP_TOKEN = /sk-ant-oat\d*-[A-Za-z0-9_-]+/g;
 const HIDDEN = '[token hidden]';
@@ -53,31 +75,41 @@ export function plainText(screen: string): string {
 
 /**
  * What a stream of screen output may show: every `sk-ant-` run replaced,
- * including one split across writes. A tail that could still become a token
- * is held until the next write settles it, or `end`.
+ * including one split across writes, broken by an escape code, or wrapped
+ * onto the next line. Escape codes are dropped first, so colour and cursor
+ * moves inside a token cannot end the run being hidden; the screen loses its
+ * colours. A tail that could still become a token, or an escape code cut off
+ * mid-way, is held until the next write settles it, or `end`.
  */
 export class Redactor {
+  private raw = '';
   private held = '';
 
   push(chunk: string): string {
-    const s = this.held + chunk;
-    // A token is complete once a character that cannot be in one follows it.
-    const masked = s.replace(/sk-ant-[A-Za-z0-9_-]*(?=[^A-Za-z0-9_-])/g, HIDDEN);
-    const cut = unsettledTail(masked);
-    this.held = masked.slice(cut);
-    return masked.slice(0, cut);
+    const s = this.raw + chunk;
+    const cut = OPEN_ESCAPE.exec(s)?.index ?? s.length;
+    this.raw = s.slice(cut);
+    return this.mask(plainText(s.slice(0, cut)));
   }
 
   end(): string {
-    const rest = this.held.replace(ANY_KEY, HIDDEN);
+    const rest = (this.held + plainText(this.raw)).replace(ANY_KEY, HIDDEN);
+    this.raw = '';
     this.held = '';
     return rest;
+  }
+
+  private mask(text: string): string {
+    const masked = (this.held + text).replace(DONE_KEY, HIDDEN);
+    const cut = unsettledTail(masked);
+    this.held = masked.slice(cut);
+    return masked.slice(0, cut);
   }
 }
 
 /** Where the text stops being safe to show: a token still being written, or a start of one. */
 function unsettledTail(s: string): number {
-  const open = /sk-ant-[A-Za-z0-9_-]*$/.exec(s);
+  const open = OPEN_KEY.exec(s);
   if (open) return open.index;
   for (let k = Math.min(KEY_START.length - 1, s.length); k > 0; k--) {
     if (KEY_START.startsWith(s.slice(-k))) return s.length - k;
@@ -88,11 +120,18 @@ function unsettledTail(s: string): number {
 /**
  * The one token on the screen, or null. A redraw prints the same token again,
  * so repeats count once; two different tokens are refused rather than guessed
- * between.
+ * between, and so is any match that is short or wraps onto the next line,
+ * because it is part of a token.
  */
 export function tokenIn(screen: string): string | null {
-  const found = [...new Set(plainText(screen).match(SETUP_TOKEN) ?? [])];
-  return found.length === 1 ? (found[0] ?? null) : null;
+  const text = plainText(screen);
+  const found = new Set<string>();
+  for (const m of text.matchAll(SETUP_TOKEN)) {
+    const after = text.slice((m.index ?? 0) + m[0].length);
+    if (m[0].length < MIN_TOKEN || WRAPPED.test(after)) return null;
+    found.add(m[0]);
+  }
+  return found.size === 1 ? ([...found][0] ?? null) : null;
 }
 
 /**
@@ -114,7 +153,13 @@ export function testRefusal(): string | null {
 export interface ApprovalIo {
   /** Where the approval's screen is shown, already redacted. */
   show: (text: string) => void;
+  /** How long the approval may take. Default ten minutes; a test's is short. */
+  limitMs?: number;
 }
+
+/** After TERM, how long before KILL; after the exit, how long the pipes may stay open. */
+const KILL_AFTER_MS = 5000;
+const CLOSE_AFTER_EXIT_MS = 1000;
 
 /**
  * Run `claude setup-token` for `project` and return the token it prints. The
@@ -124,6 +169,7 @@ export function approveOrgSignIn(project: string, io: ApprovalIo): Promise<strin
   const refusal = testRefusal();
   if (refusal) return Promise.reject(new Error(refusal));
   const interactive = process.stdin.isTTY === true;
+  const limitMs = io.limitMs ?? APPROVAL_LIMIT_MS;
   const child = spawn(
     'script',
     ['-q', '/dev/null', 'sh', '-c', 'stty rows 50 cols 400 2>/dev/null; exec claude setup-token'],
@@ -140,24 +186,49 @@ export function approveOrgSignIn(project: string, io: ApprovalIo): Promise<strin
   });
   child.stderr?.on('data', (d: string) => io.show(err.push(d)));
   return new Promise((resolve, reject) => {
-    const limit = setTimeout(() => child.kill('SIGTERM'), APPROVAL_LIMIT_MS);
-    child.on('error', (e) => {
-      clearTimeout(limit);
-      reject(new Error(`could not run claude setup-token for ${project}: ${e.message}`));
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(limit);
-      io.show(out.end() + err.end());
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let done = false;
+    const finish = (err: Error | null, token?: string) => {
+      if (done) return;
+      done = true;
+      for (const t of timers) clearTimeout(t);
       child.stdin?.end();
+      if (err) reject(err);
+      else resolve(token as string);
+    };
+    // TERM at the limit, then KILL for a UI that ignores TERM.
+    timers.push(
+      setTimeout(() => {
+        child.kill('SIGTERM');
+        timers.push(setTimeout(() => child.kill('SIGKILL'), Math.min(KILL_AFTER_MS, limitMs)));
+      }, limitMs),
+    );
+    const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+      io.show(out.end() + err.end());
       const token = tokenIn(screen);
       screen = '';
-      if (token) resolve(token);
+      if (token) finish(null, token);
       else
-        reject(
+        finish(
           new Error(
             `claude setup-token printed no token for ${project} (${signal ? `stopped by ${signal}` : `exit ${code}`}); nothing was set`,
           ),
         );
+    };
+    child.on('error', (e) =>
+      finish(new Error(`could not run claude setup-token for ${project}: ${e.message}`)),
+    );
+    // 'close' waits for the pipes, which a grandchild can hold open after the
+    // UI is gone: once the process exits, its pipes get a second to close.
+    child.on('exit', (code, signal) => {
+      timers.push(
+        setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          settle(code, signal);
+        }, CLOSE_AFTER_EXIT_MS),
+      );
     });
+    child.on('close', settle);
   });
 }

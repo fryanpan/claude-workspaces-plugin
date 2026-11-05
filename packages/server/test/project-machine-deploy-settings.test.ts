@@ -48,7 +48,8 @@ const HOST = 'riverbend-workspaces.harborlight.test';
 const ALT_HOST = 'riverbend.harborlight.test';
 const OWNER = 'alice@harborlight.test';
 const ORG_KEY = 'sk-ant-fixture-riverbend-org';
-const LEAD_TOKEN = 'sk-ant-oat-fixture-riverbend-lead';
+// As long as a real one: the approval refuses a token the screen cut short.
+const LEAD_TOKEN = `sk-ant-oat01-fixture-riverbend-lead-${'x'.repeat(72)}`;
 
 const tmp = mkdtempSync(join(tmpdir(), 'pm-deploy-settings-'));
 const bin = join(tmp, 'bin');
