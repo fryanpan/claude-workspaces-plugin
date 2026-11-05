@@ -29,7 +29,8 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configuredHostFetch } from '../outbound-fetch.ts';
-import { CALLER_HEADER } from './keeper-callers.ts';
+import { CALLER_HEADER, callerTokenPath, readCallerToken } from './keeper-callers.ts';
+import { KEEPER_URL_ENV } from './keeper-client.ts';
 import { API_HEADER } from './keeper-http.ts';
 import { PENDING_MS } from './keeper-requests.ts';
 
@@ -132,6 +133,25 @@ export function keeperCardReview(input: {
       'Your passkey belongs to the Mac, so the page opens there and not on the iPad. The page shows the exact command; approve or deny it there. This card goes away by itself once the request is approved, denied, withdrawn or expired.',
     ].join('\n\n'),
     ownerOnly: true,
+  };
+}
+
+/**
+ * The keeper the board server tells Home about, when `CW_KEEPER_URL` names
+ * one. The caller token is read on each poll, so a token the setup rotates
+ * is picked up without a restart.
+ */
+export function keeperHoldsFromEnv(
+  env: Record<string, string | undefined>,
+): { origin: string; callerToken: () => string | null } | undefined {
+  const origin = env[KEEPER_URL_ENV]?.trim();
+  if (!origin) return undefined;
+  return {
+    origin,
+    callerToken: () => {
+      const read = readCallerToken(callerTokenPath(env));
+      return 'token' in read ? read.token : null;
+    },
   };
 }
 

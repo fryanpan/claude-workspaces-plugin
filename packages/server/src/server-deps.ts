@@ -30,8 +30,8 @@ import {
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
 import { announceToBoard } from './keeper/keeper-announce.ts';
-import { callerTokenPath, readCallerToken } from './keeper/keeper-callers.ts';
 import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
+import { keeperHoldsFromEnv } from './keeper/keeper-home-card.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
 import { haikuCoverageJudge } from './notes-coverage-judge.ts';
@@ -460,26 +460,7 @@ export function createServerDeps(
     pluginRefresher,
     deployer,
     gitPushCredential,
-    keeperHolds: keeperHoldsOf(process.env),
-  };
-}
-
-/**
- * The keeper this server tells Bryan's Home about, when `CW_KEEPER_URL`
- * names one (`keeper/keeper-home-card.ts`). The caller token is read on each
- * poll, so a token the setup rotates is picked up without a restart.
- */
-function keeperHoldsOf(
-  env: Record<string, string | undefined>,
-): { origin: string; callerToken: () => string | null } | undefined {
-  const origin = env[KEEPER_URL_ENV]?.trim();
-  if (!origin) return undefined;
-  return {
-    origin,
-    callerToken: () => {
-      const read = readCallerToken(callerTokenPath(env));
-      return 'token' in read ? read.token : null;
-    },
+    keeperHolds: keeperHoldsFromEnv(process.env),
   };
 }
 

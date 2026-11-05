@@ -59,7 +59,12 @@ describe('the card', () => {
 
 describe('where the card goes', () => {
   const pending = (async () =>
-    Response.json({ id: 'x', status: 'pending', hold: 'other', summary: 's' })) as typeof fetch;
+    Response.json({
+      id: 'x',
+      status: 'pending',
+      hold: 'other',
+      summary: 's',
+    })) as unknown as typeof fetch;
 
   it('falls back to a live board when the catch-all refuses the task', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-card-units-'));

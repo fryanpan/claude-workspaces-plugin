@@ -42,6 +42,10 @@ let keeperBase: string;
 let board: ServerHandle;
 let boardBase: string;
 const said: string[] = [];
+/** No Cloudflare call is made here; one that is fails the test loudly. */
+const noCloudflare = (async () => {
+  throw new Error('no Cloudflare call expected');
+}) as unknown as typeof fetch;
 
 type QueueRow = CrossReviewQueue['items'][number] & {
   askedBy?: string;
@@ -102,7 +106,11 @@ beforeAll(async () => {
   CALLER = mintCallerToken(store);
   store.setCredential('fly-org-token', `test-fly-${crypto.randomUUID()}`);
   store.addApp('cw-harborlight');
-  keeper = serveKeeper({ store, exec: keeperExecutors({ store, flyBin, home }), port: 0 });
+  keeper = serveKeeper({
+    store,
+    exec: keeperExecutors({ store, flyBin, home, fetch: noCloudflare }),
+    port: 0,
+  });
   keeperBase = `http://127.0.0.1:${keeper.port}`;
 
   const token = 'enroll-home-card-token';
