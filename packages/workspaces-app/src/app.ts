@@ -16,7 +16,11 @@ import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
-import { startRedlineRequests } from './redline/redline-requests.ts';
+import {
+  dropEarlyRedline,
+  redlineRequestsFor,
+  startEarlyRedline,
+} from './redline/redline-requests.ts';
 import { navigateTo, remountCurrent, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
@@ -77,6 +81,11 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     page: window,
     onCopyRefused: remountCurrent,
   });
+  // A live markdown diff's address says what it is, so its companion, its
+  // socket and the redline chunk start now rather than after the meta.
+  if (startEarlyRedline(docIdFromPathOrNull(location.pathname), (url) => connect(url))) {
+    void import('./redline/redline-app.ts');
+  }
   // May this browser write at all? Asked BEFORE the name prompt, because the
   // answer decides whether that prompt should be shown: where the server
   // requires a session, "what shall we call you?" is a modal that blocks boot
@@ -221,11 +230,13 @@ const loadMarkdownMount = () => import('./doc/markdown-mount.ts');
  *  before seeing a word of a markdown doc. */
 async function mountSurface(ctx: MountContext): Promise<void> {
   if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
-    // Sent before the chunk is fetched, so the two downloads overlap.
-    const requests = startRedlineRequests(ctx);
+    // Sent before the chunk is fetched, so the two downloads overlap; for a
+    // live member they left with the page's first requests.
+    const requests = redlineRequestsFor(ctx);
     const { mountRedline } = await import('./redline/redline-app.ts');
     return mountRedline(ctx, requests);
   }
+  dropEarlyRedline();
   if (ctx.docType === 'code') {
     const { isMediaDoc, mountMedia } = await import('./media/media-app.ts');
     if (isMediaDoc(ctx)) return mountMedia(ctx);
