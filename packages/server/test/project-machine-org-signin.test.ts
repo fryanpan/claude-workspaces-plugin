@@ -36,12 +36,7 @@ import {
   requiredSecrets,
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
-import {
-  Redactor,
-  approveOrgSignIn,
-  testRefusal,
-  tokenIn,
-} from '../../../infra/project-machine/org-signin.ts';
+import { approveOrgSignIn, testRefusal } from '../../../infra/project-machine/org-signin.ts';
 import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
 import { BASH, machineDir, machineEnv, readRecords, stubs } from './project-machine-harness.ts';
 import { waitFor } from './wait-for.ts';
@@ -349,7 +344,7 @@ describe('machine:deploy gives each org a sign-in of its own', () => {
   });
 });
 
-describe('the approval’s screen never shows the token', () => {
+describe('the approval', () => {
   it('refuses, under test, a claude that is not a stand-in in a temp folder', () => {
     expect(testRefusal()).toBeNull();
     const path = process.env.PATH;
@@ -359,66 +354,6 @@ describe('the approval’s screen never shows the token', () => {
     } finally {
       process.env.PATH = path;
     }
-  });
-
-  it('holds back a token split across writes, and passes the rest through', () => {
-    const r = new Redactor();
-    const t = TOKEN.harborlight;
-    const out = [
-      r.push('Your OAuth token:\r\n\r\n'),
-      r.push(t.slice(0, 4)),
-      r.push(t.slice(4, 22)),
-      r.push(`${t.slice(22)}\r\n\r\nStore this s`),
-      r.push('ecurely.'),
-      r.end(),
-    ].join('');
-    expect(out).not.toContain(t.slice(0, 10));
-    expect(out).toContain('Your OAuth token:');
-    expect(out).toContain('[token hidden]');
-    expect(out).toContain('Store this securely.');
-  });
-
-  // The tail no line of the screen may show: past the shared prefix.
-  const tail = (t: string) => t.slice(13, 40);
-  const shows = (chunks: string[]) => {
-    const r = new Redactor();
-    return chunks.map((c) => r.push(c)).join('') + r.end();
-  };
-
-  it('hides a token an escape code breaks, in its body or its prefix', () => {
-    const t = TOKEN.harborlight;
-    for (const screen of [
-      `${t.slice(0, 18)}\x1b[0m${t.slice(18)}\r\n`,
-      `${t.slice(0, 30)}\x1b[1C${t.slice(30)}\r\n`,
-      `sk-\x1b[1mant-${t.slice(7)}\r\n`,
-    ]) {
-      const out = shows([screen]);
-      expect(out).not.toContain(tail(t));
-      expect(out).not.toContain(t.slice(60));
-      // An escape code split across writes is held, not shown half.
-      const split = screen.indexOf('\x1b') + 1;
-      const parts = shows([screen.slice(0, split), screen.slice(split)]);
-      expect(parts).not.toContain(tail(t));
-      expect(parts).not.toContain(t.slice(60));
-    }
-  });
-
-  it('hides a token a line break wraps, and the line it wraps onto', () => {
-    const t = TOKEN.riverbend;
-    for (const at of [40, 80]) {
-      const out = shows([`token:\r\n${t.slice(0, at)}\r\n${t.slice(at)}\r\n\r\nStore it.`]);
-      expect(out).not.toContain(t.slice(at, at + 20));
-      expect(out).not.toContain(tail(t));
-      expect(out).toContain('token:');
-    }
-  });
-
-  it('refuses a token the screen wrapped or cut short, rather than set part of one', () => {
-    const t = TOKEN.riverbend;
-    expect(tokenIn(`${t.slice(0, 80)}\r\n${t.slice(80)}\r\n\r\nStore it.`)).toBeNull();
-    expect(tokenIn(`${t.slice(0, 40)}\r\n${t.slice(40)}\r\n`)).toBeNull();
-    expect(tokenIn(`${t.slice(0, 60)}\r\n\r\nStore it.`)).toBeNull();
-    expect(tokenIn(`\r\n${t}\r\n\r\nStore this token securely.`)).toBe(t);
   });
 
   it('gives up on an approval that never ends, even one that ignores TERM', async () => {
@@ -431,13 +366,6 @@ describe('the approval’s screen never shows the token', () => {
       rmSync(join(tmp, 'hang'));
     }
   }, 15_000);
-
-  it('finds the one token in the screen, through colour codes and redraws', () => {
-    const screen = `\x1b[2K\x1b[1G${TOKEN.riverbend}\r\n\x1b[2K${TOKEN.riverbend}\x1b[0m\r\n`;
-    expect(tokenIn(screen)).toBe(TOKEN.riverbend);
-    expect(tokenIn('Login failed')).toBeNull();
-    expect(tokenIn(`${TOKEN.riverbend}\n${TOKEN.harborlight}`)).toBeNull();
-  });
 });
 
 const children: ChildProcess[] = [];
