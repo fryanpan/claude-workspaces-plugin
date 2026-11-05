@@ -220,8 +220,9 @@ export function warmListings(): number {
       inUse.delete(key);
       continue;
     }
-    // Only a root git listed: any other is walked by a readdir on this
-    // thread, which a cloud-sync folder can hold for as long as it likes.
+    // Only a root git lists, plain or contained: any other is walked by a
+    // readdir on this thread, which a cloud-sync folder can hold for as long
+    // as it likes.
     if (!listedByGit(use.root)) continue;
     const entry = listingCache.get(key);
     if (!entry || now - entry.at <= LISTING_TTL_MS || refreshing.has(key)) continue;

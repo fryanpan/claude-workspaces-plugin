@@ -141,8 +141,11 @@ function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
  * the listing cache can keep the answer it had (`fs-listing.ts`).
  */
 export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): string[] {
+  const barred = gitBarred(root);
   const res = gitLsFiles(root, LISTING_ARGS);
-  noteListing(root, res !== null);
+  // A walled root's walk below says nothing about its background rescan,
+  // which runs contained git: leave that verdict to the rescan.
+  if (!barred) noteListing(root, res !== null);
   if (res !== null) {
     const out = admitGitListed(root, res, skipped);
     if (skipped) {
@@ -163,7 +166,7 @@ export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): 
   // (a timeout, an exhausted buffer, "dubious ownership") would otherwise
   // list the repo's ignored `service-account.json` and `secrets.yaml`. A
   // root no git may run in (`gitBarred`) is walked, as it always was.
-  if (!gitBarred(root) && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
+  if (!barred && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
   return readdirRecursive(root, root, skipped);
 }
 
@@ -241,13 +244,17 @@ export function clearRepoKinds(): void {
   gitListedRoots.clear();
 }
 
-/** Roots git listed when last scanned. Only these are kept warm between
- *  requests (`fs-listing.ts`): any other root is a main-thread readdir. */
-const gitListedRoots = new Set<string>();
-export const listedByGit = (root: string): boolean => gitListedRoots.has(root);
+/** Whether git listed each root when last scanned. Only these are kept warm
+ *  between requests (`fs-listing.ts`): any other root is a main-thread readdir. */
+const gitListedRoots = new Map<string, boolean>();
+/**
+ * Whether a background rescan of `root` runs git rather than a readdir. A
+ * walled lead's root (`gitBarred`) that no rescan has tried yet counts: its
+ * rescan runs contained git, and only that rescan can say whether it works.
+ */
+export const listedByGit = (root: string): boolean => gitListedRoots.get(root) ?? gitBarred(root);
 function noteListing(root: string, byGit: boolean): void {
-  if (byGit) gitListedRoots.add(root);
-  else gitListedRoots.delete(root);
+  gitListedRoots.set(root, byGit);
 }
 
 const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
