@@ -14,7 +14,14 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearListingCache, isListedFile, listedFiles } from '../src/fs-listing.ts';
+import {
+  LISTING_KEEP_WARM_MS,
+  clearListingCache,
+  isListedFile,
+  listedFiles,
+  listingAge,
+  warmListings,
+} from '../src/fs-listing.ts';
 import {
   GIT_TIMEOUT,
   GitListingFailed,
@@ -98,6 +105,47 @@ describe('folder listing cache', () => {
 
     setSystemTime(new Date(Date.now() + PAST_MAX_AGE_MS));
     expect(isListedFile(root, 'report.json')).toBe(false);
+  });
+
+  it('keeps a root in use fresh, so a page opened after a long read runs no git first', async () => {
+    // A diff page opened 31s after the last one used to run `git ls-files`
+    // on the server's one thread inside its request (2s on a loaded Mac).
+    clearListingCache();
+    const repo = seedRepo('fs-listing-warm-');
+    try {
+      writeFileSync(join(repo, 'Riverbend.md'), '# Riverbend\n');
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+      // The reader is still reading: no request, only the keep-warm tick.
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+
+      rmSync(join(repo, 'Riverbend.md'));
+      setSystemTime(new Date(t0 + PAST_MAX_AGE_MS));
+      // Answered from the warm listing; a rescan in front would have refused it.
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('stops keeping a root warm once nobody has read it for a while', () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-idle-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      setSystemTime(new Date(t0 + LISTING_KEEP_WARM_MS + PAST_TTL_MS));
+      expect(warmListings()).toBe(0);
+      setSystemTime();
+      expect(listingAge(repo, t0)).toBe(0);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('a hung git rescan times out, so the next stale hit rescans again', async () => {
