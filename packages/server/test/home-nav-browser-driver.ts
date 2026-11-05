@@ -37,6 +37,7 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { type BlurReading, blurInStandalone, overTabs } from './home-phone-readers.ts';
 import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -101,6 +102,8 @@ export interface HomeNavReading {
     overTabs: string[];
     /** CONTROL: the three controls were found, so an empty list is a reading. */
     controls: number;
+    /** A text field's blur on Home loaded as a home-screen app. */
+    blur: BlurReading;
   };
   desktop: {
     display: string;
@@ -317,24 +320,6 @@ async function main(): Promise<void> {
           return { label: a.textContent.trim(), reached: !!at && a.contains(at) };
         })`);
 
-    /** Widget controls whose box meets a tab's, and how many were measured. */
-    const overTabs = () =>
-      ev<{ over: string[]; controls: number }>(`(() => {
-        const sh = document.querySelector('claude-feedback-widget')?.shadowRoot;
-        const found = ['.fab', '.fab-list:not(.fab-mic)', '.fab-mic']
-          .map((s) => [s, sh?.querySelector(s)?.getBoundingClientRect()])
-          .filter(([, r]) => r && r.width > 0);
-        const over = [];
-        for (const a of document.querySelectorAll('.home-nav .board-nav-item')) {
-          const t = a.getBoundingClientRect();
-          for (const [s, r] of found) {
-            const meets = r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top;
-            if (meets) over.push(s + ' on ' + a.textContent.trim());
-          }
-        }
-        return { over, controls: found.length };
-      })()`);
-
     step('phone: 430x932, touch');
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 430,
@@ -418,11 +403,14 @@ async function main(): Promise<void> {
     step('phone: the widget beside the bar');
     const seated = await waitFor(
       async () => {
-        const o = await overTabs();
+        const o = await overTabs(ev);
         return o.controls === 3 ? o : null;
       },
       { timeout: 15_000, describe: 'the widget controls' },
     );
+
+    step('phone: a text field blurs in a home-screen app');
+    const blur = await blurInStandalone(cdp, ev, () => open());
 
     step('phone: a workspace at 430x932');
     await open(board);
@@ -480,6 +468,7 @@ async function main(): Promise<void> {
         coach: homeCoach,
         overTabs: seated.over,
         controls: seated.controls,
+        blur,
         hits: homeHits,
       },
       desktop,

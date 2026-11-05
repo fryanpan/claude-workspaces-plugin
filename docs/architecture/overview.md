@@ -2702,6 +2702,9 @@ box is `workspaces-app/src/landing-inbox-reply.ts`, and the snooze picker,
 the key list behind `?` and the Undo toast are `landing-inbox-modals.ts`
 beside it. Bryan's Remove is a tap like snooze: the row goes to `dismissed`
 with no reason, and a new message on its thread reopens it.
+`workspaces-app/src/standalone-viewport.ts`, in the same bundle, makes iOS
+re-measure the viewport after a text field blurs in a home-screen app, because
+iOS is reported to leave it at keyboard height.
 
 **The coach** helps the owner with habits he names, in three parts. It is not a
 board feature; the one agent it reaches is its own session.

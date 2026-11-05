@@ -83,6 +83,13 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
     expect(r.phone.overTabs).toEqual([]);
   }, 60_000);
 
+  it('in a home-screen app, a text field blur re-measures and keeps the scroll', () => {
+    expect(r.phone.blur.styles).toEqual(['', 'display: none;']);
+    // CONTROL: the page was scrolled, so an equal reading is not two zeros.
+    expect(r.phone.blur.scrollBefore).toBeGreaterThan(0);
+    expect(r.phone.blur.scrollAfter).toBe(r.phone.blur.scrollBefore);
+  }, 60_000);
+
   it('no entry moves or resizes as the page scrolls under it', () => {
     expect(r.phone.boxesBefore).toHaveLength(4);
     expect(r.phone.boxesAfter).toEqual(r.phone.boxesBefore);
