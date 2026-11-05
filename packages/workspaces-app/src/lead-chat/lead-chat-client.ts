@@ -27,6 +27,7 @@ import {
   upsertLeadChatMessage,
   upsertMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
+import { boardStreamUrl, openBoardStream } from '../board-stream.ts';
 import type { VoiceContext } from '../voice-capture.ts';
 
 export interface LeadChatClientOpts {
@@ -135,8 +136,12 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     }
   };
 
+  // The page's one board stream, shared with the tab title (`board-stream.ts`).
   const stream =
-    opts.stream ?? (opts.openStream ?? ((u) => new EventSource(u)))(`${base}/events:stream`);
+    opts.stream ??
+    (opts.openStream
+      ? opts.openStream(boardStreamUrl(opts.workspaceId))
+      : openBoardStream(opts.workspaceId));
   let dropped = false;
   stream.addEventListener(LEAD_CHAT_EVENT, (ev) => {
     try {

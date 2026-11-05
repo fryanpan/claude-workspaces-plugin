@@ -2,8 +2,9 @@ import { mediaTypeOf } from '@claude-workspaces/core';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
 import { api } from '../doc-path.ts';
 import type { MountContext } from '../mount-context.ts';
+import { setPageTitle } from '../page-tab-title.ts';
 import { mobileLabel } from '../review-chrome.ts';
-import { setTabTitle, tabName } from '../tab-title.ts';
+import { tabName } from '../tab-title.ts';
 import { renderWorkspaceTree, wireWorkspaceTreeRefresh } from '../workspace-tree.ts';
 
 /**
@@ -86,5 +87,5 @@ export function mountMedia(ctx: MountContext): void {
       : relPath;
     title.title = relPath;
   }
-  setTabTitle(document, tabName(relPath));
+  setPageTitle(tabName(relPath));
 }
