@@ -133,7 +133,7 @@ import {
   LiveDocFanout,
   type LiveDocFanoutHost,
 } from './live-doc-fanout.ts';
-import { MemoryLog } from './memory-log.ts';
+import { type BufferCounters, MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
 import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
@@ -630,7 +630,10 @@ export class DocStore {
    */
   private stopped = false;
   /** The `[doc-store] mem` sampler; see memory-log.ts. */
-  private readonly memoryLog = new MemoryLog({ stats: () => this.stats() });
+  private readonly memoryLog = new MemoryLog({
+    stats: () => this.stats(),
+    readBuffers: () => this.bufferCounters(),
+  });
   private evictTicker: ReturnType<typeof setInterval> | null = null;
   /** The `?v=` each open doc's relative images are asked for with. */
   private readonly imageVersions = new DocImageVersions({
@@ -1179,6 +1182,35 @@ export class DocStore {
         (this.imageVersions.running ? 1 : 0),
       activations: files.activations,
       activationsTotal: files.activationsTotal,
+    };
+  }
+
+  /**
+   * Bytes held in buffers rather than objects, for the memory line: the
+   * process's ArrayBuffer and external totals, what every open doc socket
+   * has queued and not yet sent, and the fullest SSE replay channel. Ids and
+   * byte counts only. One `getBufferedAmount()` per open socket.
+   */
+  bufferCounters(): BufferCounters {
+    const mem = process.memoryUsage();
+    let sumBytes = 0;
+    let maxBytes = 0;
+    let maxDocId: string | null = null;
+    for (const [docId, doc] of this.docs) {
+      for (const ws of doc.conns) {
+        const queued = ws.getBufferedAmount();
+        sumBytes += queued;
+        if (queued > maxBytes) {
+          maxBytes = queued;
+          maxDocId = docId;
+        }
+      }
+    }
+    return {
+      arrayBuffersBytes: mem.arrayBuffers,
+      externalBytes: mem.external,
+      sockets: { sumBytes, maxBytes, maxDocId },
+      largestReplay: this.cfg.sse.largestReplay(),
     };
   }
 
