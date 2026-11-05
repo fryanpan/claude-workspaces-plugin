@@ -123,6 +123,16 @@ again, a host added) takes `fly secrets unset <name>` and another run.
 Volume size: 1 GB holds a board; a project with a staging site wants 20. Fly
 keeps its own daily volume snapshots for five days on top of these backups.
 
+Memory: `--memory` takes 256 to 16384 MB in steps of 256, and the deploy
+picks the CPUs. Fly lets a shared CPU hold at most 2 GB, so a machine gets
+the fewest shared CPUs that hold its memory: `shared-cpu-1x` up to 2048,
+`2x` up to 4096, `4x` up to 8192 and `8x` up to 16384
+([Fly's sizing rule](https://docs.fly.io/machines/guides-examples/machine-sizing),
+`infra/project-machine/vm-size.ts`). A lead needs 2048 or more. A machine
+that also runs a project's test suites is sized from their measured peak:
+MOI's three PRs' suites at once peaked at about 7.7 GB, so it runs on 16384,
+`shared-cpu-8x`.
+
 ### The tunnel
 
 `--tunnel quick` (the default until the Cloudflare token exists) runs a
