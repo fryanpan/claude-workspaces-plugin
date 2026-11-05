@@ -23,6 +23,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretAddCommandLine } from '../../packages/core/src/secret-line.ts';
 import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/secret-name.ts';
+import {
+  announceToBoard,
+  boardUrlFromEnv,
+} from '../../packages/server/src/keeper/keeper-announce.ts';
 import { keeperFetch } from '../../packages/server/src/keeper/keeper-client.ts';
 import { type CloudflareApi, cloudflareApi } from './cloudflare.ts';
 
@@ -105,6 +109,7 @@ export function cloudflareClient(requester: string): CloudflareApi {
     base: `${keeper}/v1/cloudflare`,
     fetchImpl: keeperFetch(keeper, {
       requester,
+      announce: announceToBoard(boardUrlFromEnv(), requester),
       onHeld: (held) => {
         console.error(`[keeper] ${held.hold} waits for Bryan's passkey: ${held.summary}`);
         console.error(`[keeper] approve at ${held.approveUrl}`);

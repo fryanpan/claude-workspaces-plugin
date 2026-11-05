@@ -233,6 +233,10 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/inbox/rows/:id/reply', 'POST'],
   ]),
 
+  // A keeper client says a request waits for Bryan's passkey; the server asks
+  // the keeper before it files a card on his Home.
+  ...family('routes/keeper-holds.ts', [['loopback-only', '/api/keeper/holds', 'POST']]),
+
   // Home's and the review page's load reports take those pages' own gate; the
   // slowest-load read is the daily health check's, on the box.
   ...family('routes/load-reports.ts', [

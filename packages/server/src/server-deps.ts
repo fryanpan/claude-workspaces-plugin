@@ -29,6 +29,8 @@ import {
   createKeychainRefreshTokenVault,
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
+import { announceToBoard } from './keeper/keeper-announce.ts';
+import { callerTokenPath, readCallerToken } from './keeper/keeper-callers.ts';
 import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
@@ -101,7 +103,9 @@ export function createServerDeps(
         // Once the keeper holds the token (`CW_KEEPER_URL`), the server reads
         // none: its Access calls are asked of the keeper, and creating an
         // application waits there for Bryan's passkey (`keeper/`).
-        ...(cfg.accessShareConfigured ? shareCloudflare(cfg.shareConfig.cfAccountId) : {}),
+        ...(cfg.accessShareConfigured
+          ? shareCloudflare(cfg.shareConfig.cfAccountId, cfg.requestedPort)
+          : {}),
       }
     : undefined;
 
@@ -456,6 +460,26 @@ export function createServerDeps(
     pluginRefresher,
     deployer,
     gitPushCredential,
+    keeperHolds: keeperHoldsOf(process.env),
+  };
+}
+
+/**
+ * The keeper this server tells Bryan's Home about, when `CW_KEEPER_URL`
+ * names one (`keeper/keeper-home-card.ts`). The caller token is read on each
+ * poll, so a token the setup rotates is picked up without a restart.
+ */
+function keeperHoldsOf(
+  env: Record<string, string | undefined>,
+): { origin: string; callerToken: () => string | null } | undefined {
+  const origin = env[KEEPER_URL_ENV]?.trim();
+  if (!origin) return undefined;
+  return {
+    origin,
+    callerToken: () => {
+      const read = readCallerToken(callerTokenPath(env));
+      return 'token' in read ? read.token : null;
+    },
   };
 }
 
@@ -467,7 +491,10 @@ export type ServerDeps = ReturnType<typeof createServerDeps>;
  * `CW_KEEPER_URL` names one, else with the Keychain's token. A held call
  * waits under the board server's 120s idle timeout for the tap.
  */
-function shareCloudflare(accountId: string | undefined): { cfApi: CfApi } | { cfApiToken: string } {
+function shareCloudflare(
+  accountId: string | undefined,
+  port: number,
+): { cfApi: CfApi } | { cfApiToken: string } {
   const keeper = process.env[KEEPER_URL_ENV]?.trim();
   if (!keeper || !accountId) return { cfApiToken: readKeychainPassword('cloudflare-api-token') };
   const fetchImpl = keeperFetch(keeper, {
@@ -475,6 +502,8 @@ function shareCloudflare(accountId: string | undefined): { cfApi: CfApi } | { cf
     waitMs: 100_000,
     onHeld: (held) =>
       console.log(stamped(`[keeper] ${held.summary} waits for a passkey: ${held.approveUrl}`)),
+    // This server's own Home: the request shows there as a card.
+    announce: announceToBoard(`http://127.0.0.1:${port}`, 'board server (sharing)'),
   });
   return {
     cfApi: new CfApi({ accountId, token: '', apiBase: `${keeper}/v1/cloudflare`, fetchImpl }),

@@ -5,11 +5,13 @@
  * `infra/project-machine/mac-ops.ts` runs `fly` with `spawnSync`, and a
  * held call can wait minutes for a tap, so it spawns this instead: the call
  * arrives on stdin as `{"args": [...], "input": "..."}`, the approval link is
- * printed to stderr (the caller's terminal), and the result is printed to
+ * printed to stderr (the caller's terminal) and the request is put on Bryan's
+ * Home (`keeper-announce.ts`), and the result is printed to
  * stdout as `{"status", "stdout", "stderr"}`. Stopped while it waits for a
  * tap (Ctrl-C), it withdraws the request first.
  */
 import { configuredHostFetch } from '../outbound-fetch.ts';
+import { announceToBoard, boardUrlFromEnv } from './keeper-announce.ts';
 import { type HeldAnswer, KEEPER_URL_ENV, keeperFly, withdrawRequest } from './keeper-client.ts';
 
 const origin = process.env[KEEPER_URL_ENV]?.trim();
@@ -29,8 +31,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     });
   });
 }
+const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'deploy script';
 const result = await keeperFly(origin, call.args, call.input, {
-  requester: process.env.FEEDBACK_AGENT_NAME?.trim() || 'deploy script',
+  requester,
+  announce: announceToBoard(boardUrlFromEnv(), requester),
   onHeld: (held) => {
     waiting = held;
     console.error(`[keeper] ${held.hold} waits for Bryan's passkey: ${held.summary}`);
