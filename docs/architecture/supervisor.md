@@ -253,6 +253,21 @@ capture: there is no hang to sample, and a boot's stack is not the question.
 A restart the limiter holds takes none either. The budgets and the limit above
 are unchanged.
 
+## On a project machine: the same budget, and a release's trial
+
+A Fly project machine has no `scripts/serve.ts`. Its `entrypoint.sh` runs the
+check: any status line from loopback is alive, the first bind gets 240s, and
+after that three misses 25s apart exit the machine, which Fly restarts. There
+is no hourly limit; Fly restarts every time.
+
+The same check decides whether a new server release stays
+([project-machine.md](../process/project-machine.md), "Releases"). During the
+first bind it probes every 10s, and three answers in a row make the release on
+trial current. A trial that is still a trial at the next boot is rolled back.
+So a release that never binds costs the same 240s plus 75s any boot gets, and
+one that crashes at once costs only the restart; either way the next boot runs
+the release before it, and the bad one is never installed again.
+
 ## Worked example: 16 September 2026
 
 Two outages the same day, about ten minutes each. They are split here by which

@@ -50,13 +50,14 @@ RUN apt-get update \
   && useradd --uid 10003 --create-home --shell /usr/sbin/nologin cwbackup \
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \
   && useradd --uid 10005 --create-home --shell /usr/sbin/nologin cwdev \
+  && useradd --uid 10006 --create-home --shell /usr/sbin/nologin cwrelease \
   && groupadd --gid 10010 cwboard \
   && groupadd --gid 10011 cwdevsrc \
   && usermod -aG cwboard cw \
   && usermod -aG cwboard lead \
   && usermod -aG cwdevsrc cwdev \
   && usermod -aG cwdevsrc lead \
-  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev
+  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev /home/cwrelease
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 # The lead clones and pushes its project's repo over SSH with a deploy key
 # (lead.sh); GitHub's host keys are pinned, not learned on first use.
@@ -68,8 +69,13 @@ ENV NODE_ENV=production \
   CW_DATA_DIR=/data/cw
 # The entrypoint stays root to supervise and starts each child as its own
 # user: the server as `cw`, cloudflared as `cwtunnel`, the backup upload as
-# `cwbackup`, the lead agent as `lead`, the dev server as `cwdev`, so no
-# child's user can read another's
-# secrets (entrypoint.sh).
+# `cwbackup`, the lead agent as `lead`, the dev server as `cwdev`, the release
+# check as `cwrelease`, so no child's user can read another's secrets
+# (entrypoint.sh).
+#
+# A release CI publishes runs against this image's packages and Bun
+# (release-store.ts), and is checked against
+# infra/project-machine/release-signing-key.pub, copied in above with the
+# rest of that folder. Changing the key, Bun or bun.lock is an image deploy.
 # `-s`: Fly's own init is PID 1, so tini registers as a subreaper to reap.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/infra/project-machine/entrypoint.sh"]

@@ -48,14 +48,14 @@
  * kept out of the state. A tunnel Terraform remade has a new token:
  * `--refresh-tunnel-token` sets it again.
  *
- * In CI (`.github/workflows/cloudflare.yml`) it runs with CW_SECRETS_FROM_ENV=1
- * and every Keychain entry handed in as an environment variable
- * (`mac-ops.ts`). There it only updates a machine the Mac already made: a
- * run that would make an app, a volume or a credential is refused.
+ * With CW_SECRETS_FROM_ENV=1 Keychain entries come from the environment
+ * (`mac-ops.ts`) and only a machine the Mac made is updated. CI never runs
+ * it: machines install signed releases (`release-cli.ts`). The image records
+ * its serial (`image-release.json`) so it beats an older release on the volume.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
- * credential comes out of the Keychain (or, in CI, the environment) into a
+ * credential comes out of the Keychain (or the environment) into a
  * child's environment or stdin.
  * Why Tigris: README.md.
  */
@@ -97,6 +97,7 @@ import {
 } from './mac-ops.ts';
 import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
 import { makePushKeysThroughKeeper } from './push-keys.ts';
+import { writeImageRelease } from './release-publish.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
 import {
@@ -223,6 +224,7 @@ function deploy(cfg: ProjectConfig): void {
       { stdio: 'inherit', env: { ...process.env, REPO, REF: cfg.imageLabel, CTX: ctx } },
     );
     if (archive.status !== 0) throw new Error('git archive failed');
+    writeImageRelease(ctx, REPO, cfg.imageLabel);
     const dir = join(ctx, 'infra', 'project-machine');
     const toml = join(dir, 'fly.toml');
     writeFileSync(toml, renderFlyToml(readFileSync(toml, 'utf8'), cfg));

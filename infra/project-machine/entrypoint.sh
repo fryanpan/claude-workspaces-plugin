@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # The project machine's one process tree: the board server on loopback, the
 # Cloudflare Tunnel it is reached through, the project's lead agent, a
-# loopback health check, and the backup loop. If any of them exits, everything stops and the machine exits,
-# and Fly's restart policy starts it again.
+# loopback health check, the backup loop and the release check. If any of them
+# exits, everything stops and the machine exits, and Fly's restart policy
+# starts it again. The release check exits on purpose when it has downloaded
+# a newer signed release, so that restart is the upgrade
+# (docs/process/project-machine.md, "Releases").
 #
 # This shell stays root and supervises; each child runs as its own user and
 # gets only the secrets it uses:
@@ -12,6 +15,8 @@
 #   cwtunnel  cloudflared, with the tunnel token and nothing else.
 #   cwbackup  the backup upload, with the bucket credential and nothing else
 #             (backup-once.sh).
+#   cwrelease the release check and the boot's choice of release
+#             (release-cli.ts), with no secret at all.
 #   lead      the lead agent's Claude Code session (lead.sh), with its own
 #             sign-in, its board's socket and its repo's deploy key, and
 #             nothing else. The server refuses its loopback TCP calls, so it
@@ -32,7 +37,8 @@ set -euo pipefail
 DATA_ROOT="${CW_MACHINE_DATA_ROOT:-/data}"
 export CW_DATA_DIR="${CW_DATA_DIR:-$DATA_ROOT/cw}"
 PORT=8787
-APP=/app
+# The image's own app. Overridable only so a test can run this off a machine.
+APP="${CW_MACHINE_APP_ROOT:-/app}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=run-as.sh
 . "$HERE/run-as.sh"
@@ -54,6 +60,13 @@ TUNNEL_UID=10002
 # 660, so the lead reaches that socket and no other, and no other user
 # reaches any.
 SOCKETS="$DATA_ROOT/boards"
+# Server releases CI published and this machine checked (release-store.ts):
+# cwrelease's, readable by all, so the server runs them and cannot change them.
+RELEASES="$DATA_ROOT/releases"
+RELEASE_CLI="$APP/infra/project-machine/release-cli.ts"
+# The public key baked into the image. Without it the machine never updates
+# itself and runs the image's app.
+RELEASE_KEY="$APP/infra/project-machine/release-signing-key.pub"
 BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
@@ -76,13 +89,13 @@ fi
 # A volume from before this rule had /data owned by cw; this takes it back.
 chown root:root "$DATA_ROOT"
 chmod 0755 "$DATA_ROOT"
-for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$DEV_ROOT"; do
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT"; do
   if [ -L "$d" ]; then
     echo "[machine] $d is a symlink; refusing to start" >&2
     exit 2
   fi
 done
-mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$DEV_ROOT"
+mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT"
 # Claude Code writes session transcripts to ~/.claude/projects. The home
 # directory is the image's and does not survive a restart, so that one
 # folder is a link onto the volume, where backup.ts snapshots it. The
@@ -92,6 +105,7 @@ ln -sfn "$TRANSCRIPTS" "$HOMES/cw/.claude/projects"
 chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude"
 chown -h lead:lead "$LEAD_ROOT"
 chown -h cw:cwboard "$SOCKETS"
+chown -h cwrelease:cwrelease "$RELEASES"
 chown -h cwdev:cwdevsrc "$DEV_ROOT"
 # Each user's folders are its own: the lead runs as another user so that it
 # cannot read the server's data dir, which holds the board's tokens and keys,
@@ -99,6 +113,7 @@ chown -h cwdev:cwdevsrc "$DEV_ROOT"
 # no doc is ever bound to a file the lead can write (docs/process/project-machine.md).
 chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT"
 chmod 0710 "$SOCKETS"
+chmod 0755 "$RELEASES"
 chmod 2770 "$DEV_ROOT"
 # Copies a restore set aside (restore-machine.ts) were 0755 before this rule.
 for d in "$DATA_ROOT"/*.before-restore-*; do
@@ -123,6 +138,20 @@ if [ -z "${BACKUP_RECIPIENT:-}" ] || [ -z "${BACKUP_S3_BUCKET:-}" ]; then
   log "BACKUP_RECIPIENT or BACKUP_S3_BUCKET unset: NO BACKUPS WILL RUN"
 fi
 
+# Which app the server runs: a release on trial, the current release, or the
+# image's own (release-store.ts). A trial still set from the last boot did
+# not stay up, so this is also where a bad release is rolled back. Any
+# failure here boots the image's app.
+release_cli() {
+  only_env PATH CW_RELEASE_CHANNEL_URL
+  run_as cwrelease bun "$RELEASE_CLI" "$@" --root "$RELEASES" --image "$APP" --public-key "$RELEASE_KEY"
+}
+SERVER_APP=$(release_cli select) || SERVER_APP=""
+if [ -z "$SERVER_APP" ] || [ ! -f "$SERVER_APP/packages/server/src/bin.ts" ]; then
+  SERVER_APP="$APP"
+fi
+log "the server runs from $SERVER_APP"
+
 pids=()
 
 # The board the lead leads. Its socket is the only one the lead may open.
@@ -137,11 +166,11 @@ fi
   export CW_BOARD_SOCKET_DIR="$SOCKETS" CW_BOARD_SOCKET_SHARED="$LEAD_BOARD" \
     CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_ALLOWED_UIDS="$CW_UID" \
     CW_LOOPBACK_EDGE_UIDS="$TUNNEL_UID"
-  run_as cw bun run "$APP/packages/server/src/bin.ts" \
+  run_as cw bun run "$SERVER_APP/packages/server/src/bin.ts" \
     --port "$PORT" --host 127.0.0.1 --no-port-walk \
     --data-dir "$CW_DATA_DIR" \
-    --widget-dist "$APP/packages/widget/dist" \
-    --workspaces-app-dist "$APP/packages/workspaces-app/dist"
+    --widget-dist "$SERVER_APP/packages/widget/dist" \
+    --workspaces-app-dist "$SERVER_APP/packages/workspaces-app/dist"
 ) &
 pids+=($!)
 
@@ -281,12 +310,28 @@ fi
 # supervisor, docs/architecture/supervisor.md), so the 403 the uid door gives
 # root's curl counts as alive. A first bind gets 240s; after
 # that, three misses 25s apart exit the machine.
+#
+# During the first bind it probes every 10s. Three answers in a row mean the
+# server stayed up, and the release it runs, if on trial, becomes current. A
+# trial that never gets there is rolled back at the next boot.
+probe() {
+  curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    -H "host: localhost:$PORT" "http://127.0.0.1:$PORT/api/deploy" || true
+}
 (
-  sleep 240
+  waited=0
+  streak=0
+  while [ "$streak" -lt 3 ] && [ "$waited" -lt 240 ]; do
+    sleep 10
+    waited=$((waited + 10))
+    if [ "$(probe)" = 000 ]; then streak=0; else streak=$((streak + 1)); fi
+  done
+  if [ "$streak" -ge 3 ]; then
+    (release_cli promote) || log "could not record the release as current"
+  fi
   misses=0
   while :; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-      -H "host: localhost:$PORT" "http://127.0.0.1:$PORT/api/deploy" || true)
+    code=$(probe)
     if [ "$code" = 000 ]; then
       misses=$((misses + 1))
       log "health: no answer on 127.0.0.1:$PORT ($misses/3)"
@@ -312,6 +357,27 @@ if [ -n "${BACKUP_RECIPIENT:-}" ] && [ -n "${BACKUP_S3_BUCKET:-}" ]; then
     done
   ) &
   pids+=($!)
+fi
+
+# The release check: every CW_RELEASE_POLL_SECONDS (300 unless set), ask the
+# channel for a newer signed release. Exit 10 means one is downloaded; this
+# loop then exits, so the machine restarts and boots it.
+if [ -f "$RELEASE_KEY" ]; then
+  (
+    poll="${CW_RELEASE_POLL_SECONDS:-300}"
+    while :; do
+      sleep "$poll"
+      status=0
+      (release_cli check) || status=$?
+      if [ "$status" = 10 ]; then
+        log "a newer release is downloaded; restarting the machine to boot it"
+        exit 0
+      fi
+    done
+  ) &
+  pids+=($!)
+else
+  log "no release key in the image: this machine does not update itself"
 fi
 
 stop() { kill -TERM "${pids[@]}" 2>/dev/null || true; wait || true; }
