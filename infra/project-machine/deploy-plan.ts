@@ -264,15 +264,20 @@ function hasLead(cfg: ProjectConfig, obs: Observed): boolean {
   return cfg.leadBoard !== undefined || obs.secrets.has(LEAD_BOARD_SECRET);
 }
 
+/** Whether the app holds a token AND the record that it was made for this org. */
+function hasOwnToken(obs: Observed): boolean {
+  return LEAD_TOKEN_PAIR.every((n) => obs.secrets.has(n));
+}
+
 /**
  * Whether the org needs a sign-in made for it: it has a lead, and its app
  * holds no token made for this org, or `--refresh-lead` asked for a new one.
- * A token set before `CW_LEAD_TOKEN_ORG` existed is the shared one, so it
- * counts as none.
+ * A token set before `CW_LEAD_TOKEN_ORG` existed is the shared one, and a
+ * marker with no token is half a sign-in, so each counts as none.
  */
 export function leadTokenDue(cfg: ProjectConfig, obs: Observed): boolean {
   if (!hasLead(cfg, obs)) return false;
-  return !obs.secrets.has(LEAD_TOKEN_ORG_SECRET) || cfg.leadRefresh.includes(LEAD_TOKEN_SECRET);
+  return !hasOwnToken(obs) || cfg.leadRefresh.includes(LEAD_TOKEN_SECRET);
 }
 
 /**
@@ -293,8 +298,7 @@ export function leadSecrets(cfg: ProjectConfig, obs: Observed): string[] {
 /** Whether a lead agent will run on the machine after this run. */
 export function leadRuns(cfg: ProjectConfig, obs: Observed): boolean {
   return (
-    leadSecrets(cfg, obs).includes(LEAD_TOKEN_SECRET) ||
-    (hasLead(cfg, obs) && obs.secrets.has(LEAD_TOKEN_ORG_SECRET))
+    leadSecrets(cfg, obs).includes(LEAD_TOKEN_SECRET) || (hasLead(cfg, obs) && hasOwnToken(obs))
   );
 }
 

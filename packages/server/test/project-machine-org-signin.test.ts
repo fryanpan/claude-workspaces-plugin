@@ -297,6 +297,14 @@ describe('machine:deploy gives each org a sign-in of its own', () => {
     expect(appEnv('harborlight')[LEAD_TOKEN_ORG_SECRET]).toBe('harborlight');
   });
 
+  it('makes a new sign-in when the app holds the org’s marker but no token', async () => {
+    flySecrets('riverbend', [...requiredSecrets('quick'), LEAD_TOKEN_ORG_SECRET, 'CW_LEAD_BOARD']);
+    queue(TOKEN.riverbend);
+    await deploy('riverbend', false, { leadBoard: undefined });
+    expect(approvalCount()).toBe(1);
+    expect(appEnv('riverbend')[LEAD_TOKEN_SECRET]).toBe(TOKEN.riverbend);
+  });
+
   it('a dry run asks for no approval and says one is due', async () => {
     const actions = await deploy('harborlight', true);
     expect(approvalCount()).toBe(0);
