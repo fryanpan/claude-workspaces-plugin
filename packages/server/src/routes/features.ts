@@ -17,6 +17,7 @@ import { chainFeatureRoutes, stopFeatures } from '../feature-module.ts';
 import type { FeatureDeps } from './feature-routes-context.ts';
 import { gitPushFeature } from './git-push-feature.ts';
 import { type InboxFeatureApi, inboxFeature } from './inbox-feature.ts';
+import { keeperHoldsFeature } from './keeper-holds-feature.ts';
 
 export type { FeatureDeps };
 
@@ -31,7 +32,7 @@ export interface ServerFeatures {
 
 export function startServerFeatures(deps: FeatureDeps): ServerFeatures {
   const inbox = inboxFeature.start(deps);
-  const started = [inbox, gitPushFeature.start(deps)];
+  const started = [inbox, gitPushFeature.start(deps), keeperHoldsFeature.start(deps)];
   return {
     routes: chainFeatureRoutes(started),
     stop: () => stopFeatures(started),

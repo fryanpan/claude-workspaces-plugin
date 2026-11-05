@@ -50,6 +50,11 @@ last step does sections 2 to 4.
 
 The passkey is tied to `localhost`, so you approve on this Mac, not on the iPad.
 
+Each request that waits for your passkey also shows on your Home as a card,
+on every device, so you see it while you are on the iPad. The card links to
+the approval page; open it on this Mac. It goes away once the request is
+approved, denied, withdrawn or expired.
+
 **Never boot out the port job** (`com.claude-workspaces.keeper-port`) except to
 uninstall. While it is loaded, no other process can serve the keeper's address.
 If it ever is unloaded, clear `localhost`'s site data again.

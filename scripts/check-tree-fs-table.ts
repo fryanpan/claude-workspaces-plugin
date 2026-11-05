@@ -114,6 +114,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/keeper/keeper-exec.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-flyconfig.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-guard.ts': 'not-in-inventory',
+  'packages/server/src/keeper/keeper-home-card.ts': 'data-dir',
   'packages/server/src/keeper/keeper-paths.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-requests.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-serve.ts': 'not-in-inventory',

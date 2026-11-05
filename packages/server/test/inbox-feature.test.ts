@@ -37,6 +37,8 @@ const deps = (): FeatureDeps => ({
   boardOfSocket: () => null,
   personRoleOn: () => null,
   agentTokenKey: () => 'k'.repeat(64),
+  ownerNoticeBoards: () => [],
+  isBoardLive: () => true,
   j,
   safeJson: async (req) => {
     try {
