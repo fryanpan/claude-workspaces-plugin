@@ -15,6 +15,8 @@ export interface DevServerFixture {
   reload(): void;
   /** How many `/__reload` streams are open right now. */
   openStreams(): number;
+  /** Every request `/echo` received that was not a GET or HEAD, in order. */
+  writes(): Array<{ method: string; body: string }>;
   stop(): Promise<void>;
 }
 
@@ -26,13 +28,14 @@ export const DEFAULT_PAGE =
 export function startDevServer(): DevServerFixture {
   let page = DEFAULT_PAGE;
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>();
+  const writes: Array<{ method: string; body: string }> = [];
   const enc = new TextEncoder();
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     // An event stream stays open for as long as the reader does.
     idleTimeout: 0,
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       switch (url.pathname) {
         case '/':
@@ -59,12 +62,22 @@ export function startDevServer(): DevServerFixture {
           return new Response('<li>Riverbend walk</li>', {
             headers: { 'content-type': 'text/html' },
           });
-        case '/echo':
-          return Response.json({
-            headers: Object.fromEntries(req.headers),
-            search: url.search,
-            method: req.method,
-          });
+        case '/echo': {
+          // `?status=` picks the answer's status, so a test can see the
+          // app's own status come back through the proxy.
+          const body = await req.text();
+          if (req.method !== 'GET' && req.method !== 'HEAD')
+            writes.push({ method: req.method, body });
+          return Response.json(
+            {
+              headers: Object.fromEntries(req.headers),
+              search: url.search,
+              method: req.method,
+              body,
+            },
+            { status: Number(url.searchParams.get('status') ?? 200) },
+          );
+        }
         case '/__reload': {
           let mine: ReadableStreamDefaultController<Uint8Array> | undefined;
           const body = new ReadableStream<Uint8Array>({
@@ -103,6 +116,7 @@ export function startDevServer(): DevServerFixture {
       }
     },
     openStreams: () => streams.size,
+    writes: () => [...writes],
     async stop() {
       for (const c of streams) {
         try {

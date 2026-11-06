@@ -321,6 +321,18 @@ export interface ServerOptions {
     runGit?: GitRunner;
   };
   /**
+   * The keeper this server tells Bryan's Home about (`keeper/keeper-home-card.ts`,
+   * `POST /api/keeper/holds`). Set from `CW_KEEPER_URL` in `server-deps.ts`;
+   * unset answers that route 501. `callerToken` reads the keeper's caller
+   * token file; tests pass the token, a fetch and a short `pollMs`.
+   */
+  keeperHolds?: {
+    origin: string;
+    callerToken: () => string | null;
+    fetchImpl?: typeof fetch;
+    pollMs?: number;
+  };
+  /**
    * Reads the machine-wide discovery slot — the file every local MCP client
    * resolves this server through — for the `liveness` field on
    * `GET /api/deploy`. See liveness.ts.

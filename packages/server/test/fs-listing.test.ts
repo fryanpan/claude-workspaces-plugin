@@ -14,7 +14,16 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearListingCache, isListedFile, listedFiles } from '../src/fs-listing.ts';
+import {
+  KEEP_WARM_TICK,
+  LISTING_KEEP_WARM_MS,
+  clearListingCache,
+  isListedFile,
+  keepWarmRunning,
+  listedFiles,
+  listingAge,
+  warmListings,
+} from '../src/fs-listing.ts';
 import {
   GIT_TIMEOUT,
   GitListingFailed,
@@ -98,6 +107,121 @@ describe('folder listing cache', () => {
 
     setSystemTime(new Date(Date.now() + PAST_MAX_AGE_MS));
     expect(isListedFile(root, 'report.json')).toBe(false);
+  });
+
+  it('keeps a root in use fresh, so a page opened after a long read runs no git first', async () => {
+    // A diff page opened 31s after the last one used to run `git ls-files`
+    // on the server's one thread inside its request (2s on a loaded Mac).
+    clearListingCache();
+    const repo = seedRepo('fs-listing-warm-');
+    try {
+      writeFileSync(join(repo, 'Riverbend.md'), '# Riverbend\n');
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+      // The reader is still reading: no request, only the keep-warm tick.
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+
+      rmSync(join(repo, 'Riverbend.md'));
+      setSystemTime(new Date(t0 + PAST_MAX_AGE_MS));
+      // Answered from the warm listing; a rescan in front would have refused it.
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('stops keeping a root warm once nobody has read it for a while', () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-idle-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      setSystemTime(new Date(t0 + LISTING_KEEP_WARM_MS + PAST_TTL_MS));
+      expect(warmListings()).toBe(0);
+      setSystemTime();
+      expect(listingAge(repo, t0)).toBe(0);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a removed file once a background rescan has run', async () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-removed-');
+    try {
+      writeFileSync(join(repo, 'Riverbend.md'), '# Riverbend\n');
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(true);
+      rmSync(join(repo, 'Riverbend.md'));
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+      expect(isListedFile(repo, 'Riverbend.md')).toBe(false);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('never keeps a folder git does not list warm, so no readdir runs without a request', () => {
+    clearListingCache();
+    const root = mkdtempSync(join(tmpdir(), 'fs-listing-plain-'));
+    try {
+      writeFileSync(join(root, 'Saltmarsh.md'), '# Saltmarsh\n');
+      const t0 = Date.now();
+      expect(isListedFile(root, 'Saltmarsh.md')).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(0);
+    } finally {
+      setSystemTime();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('the keep-warm tick rescans a root in use by itself, and stops once the root is idle', async () => {
+    clearListingCache();
+    KEEP_WARM_TICK.ms = 25;
+    const repo = seedRepo('fs-listing-tick-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      expect(keepWarmRunning()).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      // No call here starts the rescan: only the interval can.
+      await waitFor(() => (listingAge(repo, t0 + PAST_TTL_MS) ?? 1) <= 0, {
+        describe: 'the tick rescanned the root',
+      });
+      setSystemTime(new Date(t0 + LISTING_KEEP_WARM_MS + PAST_TTL_MS));
+      await waitFor(() => !keepWarmRunning(), { describe: 'the tick stopped itself' });
+    } finally {
+      KEEP_WARM_TICK.ms = 10_000;
+      setSystemTime();
+      clearListingCache();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('never starts a second rescan of a root while one is running', async () => {
+    clearListingCache();
+    const repo = seedRepo('fs-listing-once-');
+    try {
+      const t0 = Date.now();
+      expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      setSystemTime(new Date(t0 + PAST_TTL_MS));
+      expect(warmListings()).toBe(1);
+      expect(warmListings()).toBe(0);
+      setSystemTime();
+      await waitFor(() => listingAge(repo, t0 + PAST_TTL_MS) === 0);
+    } finally {
+      setSystemTime();
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('a hung git rescan times out, so the next stale hit rescans again', async () => {

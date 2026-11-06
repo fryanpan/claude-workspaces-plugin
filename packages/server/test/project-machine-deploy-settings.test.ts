@@ -7,7 +7,7 @@
  * `deployProject` runs here end to end against stand-ins: `fly` and
  * `security` on PATH are scripts that answer from files in a temp folder and
  * record every call, the Terraform outputs are a fixture, and the bucket's
- * lifecycle read is a loopback server. Nothing reaches Fly, Cloudflare,
+ * type read is a loopback server. Nothing reaches Fly, Cloudflare,
  * Tigris, the state bucket or the Keychain.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
@@ -34,7 +34,6 @@ import {
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { SETTING_NAMES } from '../../../infra/project-machine/settings.ts';
-import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..');
 const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
@@ -70,7 +69,7 @@ const outputs = (): TfOutputs => ({
   tunnels: {},
 });
 
-/** The bucket's lifecycle and versioning reads, on loopback. */
+/** The bucket's type read, on loopback. */
 let server: ReturnType<typeof Bun.serve>;
 
 const saved = {
@@ -86,11 +85,9 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     fetch(req) {
       const url = new URL(req.url);
-      if (url.pathname === `/${cfg.bucket}` && url.searchParams.has('versioning'))
-        return new Response(
-          '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>',
-        );
-      if (url.pathname === `/${cfg.bucket}`) return new Response(lifecycleXml('snapshots/', 30));
+      // A snapshot bucket, as the Mac's first run left it.
+      if (url.pathname === `/${cfg.bucket}` && url.searchParams.has('metadata'))
+        return Response.json({ type: 1 });
       return new Response('not found', { status: 404 });
     },
   });
@@ -507,8 +504,8 @@ describe('plan, with the settings', () => {
     app: true,
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
-    lifecycle: true,
-    versioning: true,
+    snapshots: true,
+    lifecycle: false,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: HEAD, memoryMb: 512 }],
     browser: true,

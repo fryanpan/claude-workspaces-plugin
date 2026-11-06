@@ -13,3 +13,9 @@
  * "a crash inside the flush window" a state the tests can still build.
  */
 if (!process.env.CW_TEST_TIMING_SCALE) process.env.CW_TEST_TIMING_SCALE = '0.1';
+
+// A keeper client tells the board server on this machine about every held
+// request (`keeper/keeper-announce.ts`), found through the discovery file. In
+// a test that is whichever server the developer's own `~/.claude` names,
+// prod included, so the suite turns it off; a test that wants it passes a URL.
+if (!process.env.CW_BOARD_URL) process.env.CW_BOARD_URL = 'off';

@@ -8,6 +8,10 @@
  * a keeper (`CW_KEEPER_URL`) the step refuses: there is no other place that
  * holds the token and may run it.
  */
+import {
+  announceToBoard,
+  boardUrlFromEnv,
+} from '../../packages/server/src/keeper/keeper-announce.ts';
 import { KEEPER_URL_ENV, keeperPushKeys } from '../../packages/server/src/keeper/keeper-client.ts';
 
 export async function makePushKeysThroughKeeper(
@@ -22,8 +26,10 @@ export async function makePushKeysThroughKeeper(
       `push deploy keys are made by the keeper, which holds the GitHub token; set ${KEEPER_URL_ENV} (docs/process/keeper.md)`,
     );
   }
+  const requester = `machine:deploy push keys for ${app}`;
   const r = await ask(origin, app, repos, {
-    requester: `machine:deploy push keys for ${app}`,
+    requester,
+    announce: announceToBoard(boardUrlFromEnv(env), requester),
     onHeld: (h) => console.log(`[deploy] approve with your passkey: ${h.approveUrl}`),
   });
   let body: { error?: string; keys?: { repo: string; id: number }[]; retired?: string[] } = {};

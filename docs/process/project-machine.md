@@ -75,9 +75,11 @@ It reads what exists and does only what is missing:
    replaced: a new one would orphan every snapshot.
 4. The Tigris bucket `cw-<project>-backups`. Its admin credential goes into
    the Keychain as `cw-<project>-bucket-admin`; the machine never gets it.
-5. The machine's write-only credential (`cw-<project>-backup-writer`), and a
-   rule on the bucket that expires snapshots after 30 days, since the machine
-   cannot delete.
+5. The machine's write-only credential (`cw-<project>-backup-writer`), and
+   the bucket made a Tigris snapshot bucket, so a snapshot the machine
+   overwrites stays readable at its earlier version. A snapshot bucket cannot
+   expire objects, so old snapshots are kept; a 30-day rule an older run set
+   is removed first, because Tigris refuses the switch while one exists.
 6. The machine's secrets, set through `fly secrets import` on stdin so no
    value is ever an argument. Each is set only when `fly secrets list` does
    not name it yet; a dry run prints each name and where its value comes

@@ -141,7 +141,11 @@ function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
  * the listing cache can keep the answer it had (`fs-listing.ts`).
  */
 export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): string[] {
+  const barred = gitBarred(root);
   const res = gitLsFiles(root, LISTING_ARGS);
+  // A walled root's walk below says nothing about its background rescan,
+  // which runs contained git: leave that verdict to the rescan.
+  if (!barred) noteListing(root, res !== null);
   if (res !== null) {
     const out = admitGitListed(root, res, skipped);
     if (skipped) {
@@ -162,7 +166,7 @@ export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): 
   // (a timeout, an exhausted buffer, "dubious ownership") would otherwise
   // list the repo's ignored `service-account.json` and `secrets.yaml`. A
   // root no git may run in (`gitBarred`) is walked, as it always was.
-  if (!gitBarred(root) && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
+  if (!barred && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
   return readdirRecursive(root, root, skipped);
 }
 
@@ -237,6 +241,20 @@ const REV_PARSE = (root: string) =>
 /** Forget every root's repository answer. Tests only. */
 export function clearRepoKinds(): void {
   repoKinds.clear();
+  gitListedRoots.clear();
+}
+
+/** Whether git listed each root when last scanned. Only these are kept warm
+ *  between requests (`fs-listing.ts`): any other root is a main-thread readdir. */
+const gitListedRoots = new Map<string, boolean>();
+/**
+ * Whether a background rescan of `root` runs git rather than a readdir. A
+ * walled lead's root (`gitBarred`) that no rescan has tried yet counts: its
+ * rescan runs contained git, and only that rescan can say whether it works.
+ */
+export const listedByGit = (root: string): boolean => gitListedRoots.get(root) ?? gitBarred(root);
+function noteListing(root: string, byGit: boolean): void {
+  gitListedRoots.set(root, byGit);
 }
 
 const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
@@ -285,6 +303,7 @@ export async function scanFolderPathsAsync(
           );
         });
   let files: string[];
+  noteListing(root, rels !== null);
   if (rels !== null) files = admitGitListed(root, rels, null);
   else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
     files = readdirRecursive(root, root, null);

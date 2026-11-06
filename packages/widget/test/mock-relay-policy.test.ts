@@ -175,12 +175,23 @@ describe('what a frame may open through the host', () => {
 
 describe("an attached app's own reads", () => {
   const APP = 'http://board.test/workspaces/w-stand/apps/d-price/';
-  it("allows this app's pages, files and reload stream, reads only", () => {
+  it("allows this app's pages, files, reload stream and saves", () => {
     expect(ok('fetch', 'GET', `${APP}menu/partial.html`)).toBe(true);
     expect(ok('fetch', 'HEAD', `${APP}prices.json`)).toBe(true);
     expect(ok('sse', 'GET', `${APP}__reload`)).toBe(true);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'put']) {
+      expect(ok('fetch', method, `${APP}api/order`), method).toBe(true);
+    }
 
-    expect(ok('fetch', 'POST', `${APP}order`)).toBe(false);
+    // A save off this app's prefix: another app, the bare ask-again address,
+    // a socket, or a method that is not a save.
+    expect(ok('fetch', 'PUT', 'http://board.test/workspaces/w-stand/apps/d-menu/api/order')).toBe(
+      false,
+    );
+    expect(ok('fetch', 'POST', 'http://board.test/workspaces/w-stand/apps/d-price')).toBe(false);
+    expect(ok('fetch', 'DELETE', `${APP}../d-menu/api/order`)).toBe(false);
+    expect(ok('fetch', 'OPTIONS', `${APP}api/order`)).toBe(false);
+    expect(ok('fetch', 'PUT', `${DOC}/threads`)).toBe(false);
     expect(ok('fetch', 'GET', 'http://board.test/workspaces/w-stand/apps/d-menu/index.html')).toBe(
       false,
     );
@@ -199,11 +210,13 @@ describe("an attached app's own reads", () => {
 });
 
 describe('the headers a relayed fetch carries', () => {
-  it('keeps content-type and accept, drops everything else, and adds the mark', () => {
+  it("keeps a body's and a save's headers, drops everything else, and adds the mark", () => {
     expect(
       relayHeaders([
         ['Content-Type', 'application/json'],
         ['accept', 'application/json'],
+        ['Idempotency-Key', 'k-1'],
+        ['if-match', '"v2"'],
         ['authorization', 'Bearer abc'],
         ['x-cw-via', 'board'],
         ['cookie', 'x=1'],
@@ -212,6 +225,8 @@ describe('the headers a relayed fetch carries', () => {
     ).toEqual([
       ['Content-Type', 'application/json'],
       ['accept', 'application/json'],
+      ['Idempotency-Key', 'k-1'],
+      ['if-match', '"v2"'],
       ['x-cw-via', 'mock-frame'],
     ]);
   });

@@ -32,6 +32,11 @@ export interface HeldAnswer {
 export interface KeeperClientOptions {
   /** Told once per held call, with the page to open. */
   onHeld?: (held: HeldAnswer) => void;
+  /**
+   * Also told once per held call: puts the request on Bryan's Home
+   * (`announceToBoard` in `keeper-announce.ts`). Must not throw or wait.
+   */
+  announce?: (held: HeldAnswer) => void;
   /** How long to wait for a tap. Default 10 minutes. */
   waitMs?: number;
   /** How long an approved command may run. Default: fly's own limit, and a minute. */
@@ -84,6 +89,7 @@ async function waitForApproval<T>(
   callerToken: string | null,
 ): Promise<Waited<T>> {
   opts.onHeld?.(held);
+  opts.announce?.(held);
   let deadline = Date.now() + (opts.waitMs ?? 10 * 60_000);
   let running = false;
   while (Date.now() < deadline) {

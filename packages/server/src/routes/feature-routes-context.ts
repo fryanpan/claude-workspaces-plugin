@@ -37,6 +37,13 @@ export interface FeatureDeps {
   ) => 'owner' | 'member' | null;
   /** The key an agent-stream token is checked against. */
   agentTokenKey: () => string;
+  /**
+   * Where the server files a notice for the owner, best first: the catch-all
+   * board, then live boards by `rankFallbackBoards` (`sharing-notice.ts`).
+   */
+  ownerNoticeBoards: () => string[];
+  /** Whether a board exists and is not retired. */
+  isBoardLive: (workspaceId: string) => boolean;
   j: (status: number, body: unknown) => Response;
   safeJson: (req: Request) => Promise<Record<string, unknown> | null>;
 }

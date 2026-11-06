@@ -32,8 +32,20 @@ export const VIA_HEADER = 'x-cw-via';
 export const VIA_PARAM = 'cw-via';
 export const VIA_VALUE = 'mock-frame';
 
-/** The only request headers a relayed fetch keeps from what the frame asked. */
-const KEPT_HEADERS = new Set(['content-type', 'accept']);
+/** The only request headers a relayed fetch keeps from what the frame asked:
+ *  what a body needs to be read, and what an attached app's save needs to be
+ *  retried safely. Never a credential; the host's own cookie rides instead. */
+const KEPT_HEADERS = new Set([
+  'content-type',
+  'accept',
+  'idempotency-key',
+  'if-match',
+  'if-unmodified-since',
+  'prefer',
+]);
+
+/** An attached app's own saves (`server/src/routes/apps.ts`), under its prefix. */
+const APP_WRITES = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
 /**
  * What the widget does to a thread on its own page. `edit-comment` and
@@ -72,8 +84,9 @@ export function relayTarget(
   const docBase = `/workspaces/${enc(scope.workspaceId)}/docs/${enc(scope.docId)}`;
   const mockBase = `/workspaces/${enc(scope.workspaceId)}/mockups/${enc(scope.docId)}`;
   // An attached dev server's own pages, files and reload stream, when the
-  // page is one (`server/src/routes/apps.ts`). Reads only, under this doc's
-  // app prefix, which the server serves for an app doc and nothing else.
+  // page is one (`server/src/routes/apps.ts`), and its saves, all under this
+  // doc's app prefix, which the server serves for an app doc and nothing
+  // else. The server decides who may save (`appWriteRefusal`).
   const appBase = `/workspaces/${enc(scope.workspaceId)}/apps/${enc(scope.docId)}/`;
   if (kind === 'ws') {
     // `app-voice` is the mock's or app's own voice and ears
@@ -98,6 +111,7 @@ export function relayTarget(
       ? u
       : null;
   }
+  if (APP_WRITES.includes(m) && p.startsWith(appBase)) return u;
   if (m !== 'POST') return null;
   if (p === `${docBase}/threads`) return u;
   const rest = p.startsWith(`${docBase}/threads/`) ? p.slice(docBase.length + 9).split('/') : [];
