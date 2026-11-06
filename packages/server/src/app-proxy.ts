@@ -152,6 +152,21 @@ export function upstreamSocketUrl(
   return u;
 }
 
+/** Every address of one app, and the bare one. */
+const APP_DOOR_PATH = /^\/workspaces\/[^/]+\/apps\/[^/]+(?:\/|$)/;
+
+/**
+ * Keep a door answer out of Cloudflare's cache, whatever the dev server said.
+ * A dev server's own caching headers are for a browser on its port, and an
+ * edge copy of an app's script outlives the file it was read from, so a reader
+ * reviews old code after a hard reload. Stamped on the finished response, so
+ * a refusal from a gate above the app routes and a 304 carry it too.
+ */
+export function withAppDoorCacheRule(pathname: string, res: Response): Response {
+  if (APP_DOOR_PATH.test(pathname)) res.headers.set('cloudflare-cdn-cache-control', 'no-store');
+  return res;
+}
+
 /** RFC 6455's subprotocol name: an HTTP token. */
 const SUBPROTOCOL = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,128}$/;
 /** The widget's token, which a door socket offers as a subprotocol. */

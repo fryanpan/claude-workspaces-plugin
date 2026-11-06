@@ -691,7 +691,9 @@ frame hands the page's `WebSocket` to the host page, so the socket opens on the
 board's origin with the reader's cookie. Nothing inside the page is rewritten,
 so the site builds its links under the prefix. The page's query reaches the dev
 server byte for byte minus the frame flag, and the host page hands its
-fragment to the frame. What this does not carry
+fragment to the frame. Every answer at an app's address carries
+`Cloudflare-CDN-Cache-Control: no-store`, stamped last in `request-chain.ts`,
+so the edge keeps no copy of an app's files, whatever the dev server said. What this does not carry
 behind a sign-in is in [security.md](security.md).
 
 **A dev server that stops answering is news for whoever can start it.** When

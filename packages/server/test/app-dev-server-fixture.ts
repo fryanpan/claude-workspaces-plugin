@@ -56,6 +56,15 @@ export function startDevServer(): DevServerFixture {
               'x-dev-kept': 'keep me',
             },
           });
+        case '/cached.js':
+          return new Response('export const version = 1;', {
+            headers: {
+              'content-type': 'text/javascript',
+              'cache-control': 'public, max-age=31536000, immutable',
+              'cloudflare-cdn-cache-control': 'public, max-age=86400',
+              etag: '"harborlight-1"',
+            },
+          });
         case '/about':
           return new Response(null, { status: 301, headers: { location: '/about/' } });
         case '/partial':

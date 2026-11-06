@@ -24,6 +24,7 @@
  * because this module cannot hold `Bun.serve`'s return value.
  */
 import { isOwnerActor } from '../actor-identity.ts';
+import { withAppDoorCacheRule } from '../app-proxy.ts';
 import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
 import { LOCAL_ONLY_REFUSAL, addressesLocalOnlySet, isOnBox } from '../attachment-privacy.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
@@ -164,9 +165,9 @@ export function createRequestChain(
     // no body for `maybeCompress` to act on anyway.
     // `undefined` means the request became a websocket — nothing to decorate.
     if (routed === undefined) return undefined;
-    const response = applyCors(
-      req,
-      refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed))),
+    const response = withAppDoorCacheRule(
+      pathname,
+      applyCors(req, refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed)))),
     );
     const elapsedMs = performance.now() - startedAt;
     if (elapsedMs >= slowRequestMs) {
