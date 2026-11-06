@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { frameRms, pcm16ToFloat } from '../src/board/spoken-reply-audio.ts';
+import { createSpokenPlayer, frameRms, pcm16ToFloat } from '../src/board/spoken-reply-audio.ts';
 import { LATE_STOP_MS, SETUP_KEY } from '../src/board/spoken-reply-client.ts';
-import { spokenHarness as harness } from './support/spoken-reply-harness.ts';
+import { fakePlayback, spokenHarness as harness } from './support/spoken-reply-harness.ts';
 
 /**
  * The spoken reply client (`board/spoken-reply-client.ts`, which the voice
@@ -331,6 +331,20 @@ describe('spoken reply', () => {
 });
 
 describe('spoken-reply audio helpers', () => {
+  it('starts a reply after the one still playing, not over it', () => {
+    const play = fakePlayback();
+    const player = createSpokenPlayer({ context: () => play.ctx, onFirstWord: () => {} });
+    const second = new Uint8Array(48_000);
+    player.begin(24_000);
+    player.push(second);
+    player.finish(() => {});
+    player.begin(24_000);
+    player.push(second);
+    const [first, next] = play.started;
+    // 48,000 bytes of PCM16 at 24 kHz is one second.
+    expect(next).toBeCloseTo((first ?? 0) + 1);
+  });
+
   it('reads loudness and little-endian PCM', () => {
     expect(frameRms(new Int16Array(4))).toBe(0);
     expect(frameRms(new Int16Array([16384, -16384]))).toBeCloseTo(0.5);

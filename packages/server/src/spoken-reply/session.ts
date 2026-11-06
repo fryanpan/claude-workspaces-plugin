@@ -177,6 +177,14 @@ export class SpokenSession {
   /** A planning doc's turn ends at a confirmed pause (`pause-gate.ts`). */
   private pause: PauseGate | null = null;
   private speaking: AbortController | null = null;
+  /** The turn being answered, from its listener's end to its last word. */
+  private answering: number | null = null;
+  /** Spoken answers waiting to be said, oldest first (`sayAside`). */
+  private asides: SpokenAnswer[] = [];
+  /** The aside being said, or null. */
+  private aside: object | null = null;
+  /** A `start` that came while an aside was said: it runs when the last ends. */
+  private startAfter: Extract<SpokenClientMessage, { type: 'start' }> | null = null;
   /** The latest turn's slow-answer cue (`filler-cue.ts`), kept for its timing row. */
   private cue: FillerCue | null = null;
 
@@ -232,6 +240,7 @@ export class SpokenSession {
         this.end();
         return;
       case 'stop':
+        this.dropAsides();
         this.stopSpeaking();
         return;
       case 'context':
@@ -285,6 +294,7 @@ export class SpokenSession {
 
   close(): void {
     this.turn++;
+    this.dropAsides();
     this.stopSpeaking();
     this.dropListener();
     this.deps.answerer.close();
@@ -294,6 +304,12 @@ export class SpokenSession {
   }
 
   private start(msg: Extract<SpokenClientMessage, { type: 'start' }>): void {
+    // A page that stops an answer says `stop` first, so this one only raced
+    // the answer's first audio; the answer goes on and the question follows.
+    if (this.aside) {
+      this.startAfter = msg;
+      return;
+    }
     if (this.deps.readOnly) {
       this.deps.sendJson({ type: 'error', message: 'Sign in to use the mic.' });
       return;
@@ -330,6 +346,7 @@ export class SpokenSession {
     else if (msg.setup === 3) this.startGemini();
     else this.startListening();
     this.sayHeldIfQuiet();
+    this.nextAside();
   }
 
   private end(): void {
@@ -353,6 +370,7 @@ export class SpokenSession {
     this.cue?.cancel();
     this.speaking?.abort();
     this.speaking = null;
+    this.aside = null;
     if (this.setup === 4) this.agentTurns?.stop();
     if (this.setup === 3) {
       this.dropAudio = true;
@@ -496,6 +514,7 @@ export class SpokenSession {
   private async finishListening(turn: number, endpointed = false): Promise<void> {
     if (turn !== this.turn || this.finishing) return;
     this.finishing = true;
+    this.answering = turn;
     const session = endpointed ? this.stt : (this.stt ?? (await this.sttOpening));
     if (turn !== this.turn) return;
     // A meeting stays heard until the next `start`, for a cut-in.
@@ -519,8 +538,10 @@ export class SpokenSession {
     const text = this.finals.join(' ').trim();
     if (this.ears) this.saying = { turn, text: cueFor(text), asks: false };
     this.deps.sendJson({ type: 'turn-end', text });
-    if (this.setup === 3) this.askEarly(text, turn);
-    else await this.answerAndSay(text, turn);
+    if (this.setup === 3) {
+      this.answering = null;
+      this.askEarly(text, turn);
+    } else await this.answerAndSay(text, turn);
   }
 
   /** A choice tapped on the page: answered as if it had been heard. */
@@ -550,6 +571,16 @@ export class SpokenSession {
   }
 
   private async answerAndSay(text: string, turn: number): Promise<void> {
+    this.answering = turn;
+    try {
+      await this.answerTurn(text, turn);
+    } finally {
+      if (this.answering === turn) this.answering = null;
+      this.nextAside();
+    }
+  }
+
+  private async answerTurn(text: string, turn: number): Promise<void> {
     const voice =
       this.setup === 1 || this.setup === 2 ? this.deps.engines.voices[this.setup] : null;
     const { answerer } = this.deps;
@@ -608,23 +639,54 @@ export class SpokenSession {
   }
 
   /** Said unasked — a failed review write, or the lead's answer arriving
-   *  later (`lead-answer.ts`); only written while the speaker talks. A page
-   *  listens again while the lead works (Bryan, 3 Nov), so a listener that
-   *  has heard nothing yet is let go for the answer, and the page opens the
-   *  next one when the answer has been said. Setups 3 and 4 speak through
+   *  later (`lead-answer.ts`). Written now, and said in the order it came: a
+   *  second answer waits for the first rather than cutting it off, and every
+   *  answer waits while the speaker talks or their question is answered. A
+   *  page listens again while the lead works (Bryan, 3 Nov), so a listener
+   *  that has heard nothing yet is let go for the answer, and the page opens
+   *  the next one when the answer has been said. Setups 3 and 4 speak through
    *  their own sessions, so an aside there borrows setup 1's or 2's voice
    *  when this server has one. */
   sayAside(answer: SpokenAnswer | null): void {
     if (!answer) return;
-    const { voices } = this.deps.engines;
-    const voice =
-      this.setup === 1 || this.setup === 2 ? voices[this.setup] : (voices[1] ?? voices[2]);
-    const listening = this.stt !== null || this.sttOpening !== null;
-    const say = voice && answer.spoken && (!listening || this.idleEars());
-    if (say) this.stopSpeaking();
-    if (say && listening) this.dropListener();
     this.deps.sendJson(replyMessage(answer));
-    if (say) void this.speak(voice, answer, ++this.turn);
+    if (answer.spoken && this.asideVoice()) this.asides.push(answer);
+    this.nextAside();
+  }
+
+  private asideVoice(): SpokenVoice | null {
+    const { voices } = this.deps.engines;
+    return this.setup === 1 || this.setup === 2 ? voices[this.setup] : (voices[1] ?? voices[2]);
+  }
+
+  /** Say the oldest waiting aside if nothing is in its way. With none left,
+   *  the question a page asked to start meanwhile begins. */
+  private nextAside(): void {
+    if (this.aside || this.speaking || this.answering === this.turn) return;
+    const listening = this.stt !== null || this.sttOpening !== null;
+    if (listening && !this.idleEars()) return;
+    const voice = this.asideVoice();
+    const answer = this.asides.shift();
+    if (!voice || !answer) {
+      const held = this.startAfter;
+      this.startAfter = null;
+      if (held) this.start(held);
+      return;
+    }
+    this.stopSpeaking();
+    if (listening) this.dropListener();
+    const mine = {};
+    this.aside = mine;
+    void this.speak(voice, answer, ++this.turn).finally(() => {
+      if (this.aside === mine) this.aside = null;
+      this.nextAside();
+    });
+  }
+
+  /** The reader stopped voice, or left: what waits to be said is not said. */
+  private dropAsides(): void {
+    this.asides = [];
+    this.startAfter = null;
   }
 
   /** A board question's listener is open and has heard not a word. */
