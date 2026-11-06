@@ -131,6 +131,7 @@ export function build(
   );
   const captures: Array<{ stops: number }> = [];
   let hostListener: ((ev: MessageEvent) => void) | null = null;
+  let wake: (() => void) | null = null;
   const env: HostEnv = {
     script,
     placeholder,
@@ -149,6 +150,9 @@ export function build(
     EventSource: HostStream as unknown as HostEnv['EventSource'],
     onMessage: (fn) => {
       hostListener = fn;
+    },
+    onWake: (fn) => {
+      wake = fn;
     },
     activated: () => opts.activated ?? true,
     startCapture: async () => {
@@ -215,6 +219,7 @@ export function build(
     announced,
     postedTo,
     hostListener: () => hostListener,
+    wake: () => wake?.(),
   };
 }
 

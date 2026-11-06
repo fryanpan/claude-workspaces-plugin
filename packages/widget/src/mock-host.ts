@@ -34,10 +34,20 @@
  *    the next load.
  * 6. puts an app's frame back under this page's door when the app's own
  *    address took it outside (`mock-door.ts`).
+ * 7. notices when the doc's socket stops carrying bytes with nothing saying so
+ *    (`mock-host-liveness.ts`), and closes it to the frame, whose widget then
+ *    reconnects and syncs what it missed.
  */
 import { backInDoor } from './mock-door.ts';
+import { type WatchedSocket, isProbeAnswer, watchSocket } from './mock-host-liveness.ts';
 import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
-import { type RelayScope, relayHeaders, relayProtocols, relayTarget } from './mock-relay-policy.ts';
+import {
+  type RelayScope,
+  isDocSocket,
+  relayHeaders,
+  relayProtocols,
+  relayTarget,
+} from './mock-relay-policy.ts';
 import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
 import { micRefusal, startPcmCapture } from './voice/voice-audio.ts';
 
@@ -80,6 +90,8 @@ export interface HostEnv {
   WebSocket: new (url: string, protocols?: string[]) => WebSocket;
   EventSource: new (url: string) => EventSource;
   onMessage: (fn: (ev: MessageEvent) => void) => void;
+  /** Called when the page may have been asleep or off the network. */
+  onWake?: (fn: () => void) => void;
   activated: () => boolean;
   startCapture: (opts: PcmCaptureOpts) => Promise<PcmCaptureStart>;
 }
@@ -121,6 +133,11 @@ export function hostMock(env: HostEnv): void {
   placeholder.replaceWith(frame);
 
   const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  // One listener for the page, however many sockets the frame has opened.
+  const wakes = new Set<() => void>();
+  env.onWake?.(() => {
+    for (const wake of wakes) wake();
+  });
 
   // The frame's drafts, filed under this doc in the page's own session. Read
   // once here and kept in step, so a keystroke costs one write, not a scan.
@@ -249,13 +266,41 @@ export function hostMock(env: HostEnv): void {
             refusal: micRefusal({ name: 'NotAllowedError' }),
           })
         : null;
-      sock.onopen = () => port.postMessage({ t: 'open', protocol: sock.protocol });
+      // Only the doc's socket answers a probe; an app's own socket is the
+      // dev server's.
+      const watched: WatchedSocket | null = isDocSocket(scope, u)
+        ? watchSocket({
+            send: (frame) => sock.send(frame),
+            // A dead socket's own close can take a minute, so the frame hears
+            // now and the socket is left to finish alone.
+            lost: () => {
+              sock.onmessage = sock.onerror = sock.onclose = null;
+              sock.close();
+              if (watched) wakes.delete(watched.probe);
+              port.postMessage({ t: 'close', code: 1006, reason: 'silent' });
+              port.close();
+            },
+          })
+        : null;
+      sock.onopen = () => {
+        port.postMessage({ t: 'open', protocol: sock.protocol });
+        if (watched) {
+          watched.start();
+          wakes.add(watched.probe);
+        }
+      };
       sock.onmessage = (x) => {
+        watched?.heard();
+        if (watched && isProbeAnswer(x.data)) return;
         mic?.serverSaid(x.data);
         port.postMessage({ t: 'msg', data: x.data }, x.data instanceof ArrayBuffer ? [x.data] : []);
       };
       sock.onerror = () => port.postMessage({ t: 'error' });
       sock.onclose = (x) => {
+        if (watched) {
+          watched.stop();
+          wakes.delete(watched.probe);
+        }
         mic?.close();
         port.postMessage({ t: 'close', code: x.code, reason: x.reason });
         port.close();
@@ -364,6 +409,13 @@ hostMock({
   WebSocket: window.WebSocket,
   EventSource: window.EventSource,
   onMessage: (fn) => window.addEventListener('message', fn),
+  onWake: (fn) => {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) fn();
+    });
+    window.addEventListener('pageshow', fn);
+    window.addEventListener('online', fn);
+  },
   activated: () => tapConfirmed(navigator),
   startCapture: startPcmCapture,
 });

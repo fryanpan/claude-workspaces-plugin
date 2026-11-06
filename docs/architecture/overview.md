@@ -600,7 +600,14 @@ the widget's board-bound fetch, WebSocket and EventSource calls to the host.
 `mock-host.ts` is the host page's script: it builds the frame, and it makes a
 call only when `mock-relay-policy.ts` (pure, tested alone) says it is this
 mock's own. `mock-door.ts` (pure, tested alone) puts an app's frame back under
-the host page's door when the app's own address took it outside. The host stamps every call it makes with `x-cw-via: mock-frame`, or
+the host page's door when the app's own address took it outside.
+`mock-host-liveness.ts` keeps the page live when the doc socket stops carrying
+bytes with nothing telling the browser, as when a tablet sleeps. The host sends
+the one-byte probe in core's `ws-probe.ts` every 20s and when the page wakes,
+`yjs-protocol.ts` answers it, and a socket silent for 5s is closed to the
+frame, whose widget reconnects and syncs what it missed. It runs only here: the
+widget bundle has no bytes for it, so a page outside a frame has no such watch.
+The host stamps every call it makes with `x-cw-via: mock-frame`, or
 `cw-via=mock-frame` on a socket. The stamp travels as `via` on the
 comment or answer it writes, and agents read it as "sent from inside the mock
 page". Nothing else changes in the data flow: the calls are the same routes
