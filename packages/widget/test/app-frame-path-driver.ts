@@ -59,6 +59,29 @@ export interface Held {
   fresh: boolean;
 }
 
+/** How an app's live reload spells the address it goes back to, in the frame
+ *  after it took the prefix off. `__door` and `__before` are read before that. */
+export const LIVE_RELOADS: Record<string, string> = {
+  /** The door, then the path: what the app means. */
+  door: '__door + location.pathname.slice(1) + location.search + location.hash',
+  /** The door, then the path with its slash: two slashes. */
+  doorSlash: '__door + location.pathname + location.search + location.hash',
+  /** No door left to read: the bare path. */
+  bare: 'location.pathname + location.search + location.hash',
+  /** A relative prefix, from a frame now at `/insights`. */
+  dot: `'.' + location.pathname + location.search + location.hash`,
+  dotSlash: `'./' + location.pathname + location.search + location.hash`,
+  /** The door, and no query, so no frame flag. */
+  noQuery: '__door + location.pathname.slice(1)',
+  /** The path as it was read before the prefix came off: the door twice. */
+  doorTwice: '__door + __before.slice(1) + location.search + location.hash',
+};
+
+/** One live reload: where the frame ended, and what the dev server was asked. */
+export interface LiveReload extends Held {
+  asked: string[];
+}
+
 export interface FrameReading {
   /** The frame on first load, the app having taken its prefix off. */
   opened: Held;
@@ -74,6 +97,9 @@ export interface FrameReading {
   pinTapped: Held;
   /** The thread's comment shows in the widget after the tap. */
   threadShown: boolean;
+  liveReloads: Record<string, LiveReload>;
+  /** The status of the app's poll, by the door and relative to the frame. */
+  versionPoll: { door: unknown; relative: unknown };
 }
 
 export interface Reading {
@@ -88,8 +114,10 @@ const appPage = `<!doctype html><html><head><meta charset="utf-8"><title>Harborl
 <body style="margin:120px 40px"><h1 id="title">Harborlight berths</h1><p id="route"></p><p id="query"></p>
 <script>
   const door = /^\\/workspaces\\/[^/]+\\/apps\\/[^/]+/.exec(location.pathname);
+  window.__door = door ? door[0] + '/' : '';
+  window.__before = location.pathname;
   if (door) {
-    history.replaceState(null, '', (location.pathname.slice(door[0].length) || '/') + location.search + location.hash);
+    history.replaceState(null, '', (location.pathname.slice(door[0].length).replace(/^\\/+/, '/') || '/') + location.search + location.hash);
   }
   document.getElementById('route').textContent = location.pathname;
   document.getElementById('query').textContent = location.search;
@@ -152,6 +180,7 @@ async function walk(
   base: string,
   prefix: string,
   doc: string,
+  asked: string[],
 ): Promise<FrameReading> {
   const frame = frameSurface(cdp, sessions);
   const see = (want: (h: Held) => boolean) => held(cdp, sessions, frame, want);
@@ -226,7 +255,29 @@ async function walk(
     (v) => v === true,
     () => false,
   );
+  step('the live reload, spelled each way');
+  const liveReloads: Record<string, LiveReload> = {};
+  let versionPoll: FrameReading['versionPoll'] = { door: null, relative: null };
+  for (const [name, address] of Object.entries(LIVE_RELOADS)) {
+    await navigate(cdp, `${base}${prefix}insights?tab=a`);
+    await ready(frame);
+    await see(onRoute);
+    if (name === 'door') {
+      const status = (url: string) => `fetch(${url}).then((r) => r.status, (e) => String(e))`;
+      versionPoll = {
+        door: await frame.eval(status(`__door + '__version'`)),
+        relative: await frame.eval(status(`'__version'`)),
+      };
+    }
+    await markDocument(frame);
+    asked.length = 0;
+    await frame.eval(`location.replace(${address})`);
+    const h = await see(reloadedOnRoute);
+    liveReloads[name] = { ...h, asked: [...asked] };
+  }
   return {
+    liveReloads,
+    versionPoll,
     opened,
     reloaded: reloadedHeld,
     reloadedBare,
@@ -273,13 +324,22 @@ async function main(): Promise<void> {
       if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
       return (await res.json()) as Record<string, unknown>;
     };
+    const asked: string[] = [];
     dev = Bun.serve({
       port: 0,
       hostname: '127.0.0.1',
-      fetch: () =>
-        new Response(appPage, {
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        asked.push(path);
+        if (path === '/__version') return new Response('1');
+        // A router that knows its routes and nothing else.
+        if (path !== '/' && path !== '/insights') {
+          return new Response('dev server says Not found', { status: 404 });
+        }
+        return new Response(appPage, {
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-        }),
+        });
+      },
     });
     const agent = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' };
     const ws = String(
@@ -319,7 +379,7 @@ async function main(): Promise<void> {
       }[];
 
     // 127.0.0.1 is not one of the frame hostname's board hosts: opaque frame.
-    const opaque = await walk(cdp, sessions, threads, api, opaqueApp.prefix, opaqueApp.doc);
+    const opaque = await walk(cdp, sessions, threads, api, opaqueApp.prefix, opaqueApp.doc, asked);
     const frameHost = await walk(
       cdp,
       sessions,
@@ -327,6 +387,7 @@ async function main(): Promise<void> {
       `http://${BOARD_HOST}:${port}`,
       framedApp.prefix,
       framedApp.doc,
+      asked,
     );
     const top = await fetch(`${api}/insights?cw-frame=1`, {
       headers: { 'sec-fetch-dest': 'document' },

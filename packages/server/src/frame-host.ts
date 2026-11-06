@@ -321,7 +321,7 @@ const APP_PATH = /^\/workspaces\/[^/]+\/apps\/[^/]+(?:\/.*)?$/;
 const WIDGET_SCRIPT = /^\/widget\/[\w.-]+\.js$/;
 
 /** What an app's files may be loaded as. Not `empty` (a script's own fetch),
- *  `document`, `iframe` without the frame flag, or `serviceworker`. */
+ *  `document`, `iframe` or `serviceworker`. */
 const SUBRESOURCE_DESTS = new Set([
   'script',
   'style',
@@ -363,6 +363,8 @@ export function frameGate(
   if (APP_PATH.test(pathname)) {
     if (dest === null) return { ok: true };
     if (framed) return dest === 'iframe' ? { ok: true } : { ok: false, status: 404 };
+    // A frame back at the door with no frame flag: an app's address lost it.
+    if (dest === 'iframe') return { ok: false, status: 404, left: true };
     // A file only to a page on this hostname: another project's frame is
     // the same site, and would otherwise get this project's cookie with it.
     const site = req.headers.get('sec-fetch-site');
@@ -401,7 +403,9 @@ export function frameLeftResponse(ancestors: string): Response {
  * Fetch metadata decides, and a page cannot change it. The board's own frames
  * are `same-origin` navigations and an opaque frame's are not; a frame on
  * `/workspaces/` is the board's or a door's, whatever the app's script did,
- * and `/s/` is a share link, which answers any frame that follows it.
+ * and `/s/` is a share link, which answers any frame that follows it. The one
+ * address under `/workspaces/` that has left is an app door with no frame
+ * flag, which would be served as a bare sandbox with no script allowed.
  * A top-level visit, a fetch and curl are `document`, `empty` and nothing, and
  * get what they always got.
  */
@@ -410,8 +414,28 @@ export function leftBoardDoor(req: Request, pathname: string): boolean {
     (req.method === 'GET' || req.method === 'HEAD') &&
     req.headers.get('sec-fetch-dest') === 'iframe' &&
     req.headers.get('sec-fetch-site') !== 'same-origin' &&
-    !/^\/(?:workspaces|s)\//.test(pathname)
+    (!/^\/(?:workspaces|s)\//.test(pathname) ||
+      (APP_PATH.test(pathname) && new URL(req.url).searchParams.get(MOCK_FRAME_PARAM) !== '1'))
   );
+}
+
+/**
+ * A read of a door whose path holds the door again goes to the path after it,
+ * or null for any other request. An app that read its path before taking the
+ * prefix off, and puts the prefix back on a reload, asks for this; the dev
+ * server has no such page. The target is the server's own prefix and what
+ * follows the repeat, so it stays under this door.
+ */
+export function repeatedDoorRedirect(
+  method: string,
+  tail: string,
+  prefix: string,
+  search: string,
+): Response | null {
+  const door = prefix.slice(1);
+  if ((method !== 'GET' && method !== 'HEAD') || !tail.startsWith(door)) return null;
+  const rest = tail.slice(door.length).replace(/^\/+/, '');
+  return new Response(null, { status: 302, headers: { location: `${prefix}${rest}${search}` } });
 }
 
 /** The refusal's response. Plain, and the same for every reason. */

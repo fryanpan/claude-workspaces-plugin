@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 // Types only: importing a value would run the driver in this process.
-import type { FrameReading, Reading } from './app-frame-path-driver.ts';
+import type { FrameReading, LiveReload, Reading } from './app-frame-path-driver.ts';
 
 /** The browser these cases may launch, or null to skip them. */
 const CHROME = chromeForSuite();
@@ -73,6 +73,20 @@ describe.skipIf(CHROME === null)('an app that takes the prefix off its own addre
       expect([after.app, after.route]).toEqual([true, '/insights']);
       expect(after.query).toContain('tab=b');
       expect(frame().threadShown).toBe(true);
+    });
+  });
+
+  describe.each(frames)('a live reload in %s', (_name, frame) => {
+    const spellings = ['door', 'doorSlash', 'bare', 'dot', 'dotSlash', 'noQuery', 'doorTwice'];
+    it.each(spellings)('stays on the app when the address is spelled %s', (name) => {
+      const after = frame().liveReloads[name] as LiveReload;
+      expect(after.text ?? '').toBe('');
+      expect([after.app, after.route]).toEqual([true, '/insights']);
+      expect(after.asked.at(-1)).toBe('/insights');
+    });
+
+    it("CONTROL: the app's poll answers by the door", () => {
+      expect(frame().versionPoll.door).toBe(200);
     });
   });
 

@@ -27,6 +27,11 @@ describe('a frame back under its door', () => {
     );
   });
 
+  it('adds only the flag to an address already at this door', () => {
+    expect(back(`${DOOR}insights?tab=a`)).toBe(`${FRAME}${DOOR}insights?tab=a&cw-frame=1`);
+    expect(back(DOOR.slice(0, -1))).toBe(`${FRAME}${DOOR.slice(0, -1)}?cw-frame=1`);
+  });
+
   it('keeps a pin restore’s thread in the query', () => {
     expect(back('/insights?tab=b&cw-frame=1&cw-goto=t1')).toBe(
       `${FRAME}${DOOR}insights?tab=b&cw-frame=1&cw-goto=t1`,
@@ -41,6 +46,7 @@ describe('a frame back under its door', () => {
       '/.%2E/d-other/',
       '/..\\d-other/',
       '/insights/../../d-other/',
+      `${DOOR}../d-other/`,
     ]) {
       expect(back(left), left).toBeNull();
     }

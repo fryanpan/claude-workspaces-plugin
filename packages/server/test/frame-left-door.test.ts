@@ -11,7 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { frameGate, frameLeftResponse, leftBoardDoor } from '../src/frame-host.ts';
+import {
+  frameGate,
+  frameLeftResponse,
+  leftBoardDoor,
+  repeatedDoorRedirect,
+} from '../src/frame-host.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
 const iframe = (site: string) => ({ 'sec-fetch-dest': 'iframe', 'sec-fetch-site': site });
@@ -43,9 +48,21 @@ describe('which requests left the door', () => {
       ok: false,
       status: 405,
     });
-    // A door's own path without the frame flag is a door's business.
+  });
+
+  it('on the frame hostname: a frame at a door that lost its frame flag', () => {
     const door = '/workspaces/w-1/apps/d-1/insights';
+    const none = new URLSearchParams();
     expect(frameGate(on(door, iframe('same-origin')), door, none)).toEqual({
+      ok: false,
+      status: 404,
+      left: true,
+    });
+    const flagged = new URLSearchParams('cw-frame=1');
+    expect(frameGate(on(door, iframe('same-origin')), door, flagged)).toEqual({ ok: true });
+    // A mock's address is one page, and its refusal stays plain.
+    const mock = '/workspaces/w-1/mockups/d-1';
+    expect(frameGate(on(mock, iframe('same-origin')), mock, none)).toEqual({
       ok: false,
       status: 404,
     });
@@ -55,12 +72,18 @@ describe('which requests left the door', () => {
     expect(leftBoardDoor(on('/insights', iframe('cross-site')), '/insights')).toBe(true);
     expect(leftBoardDoor(on('/', iframe('none')), '/')).toBe(true);
     expect(leftBoardDoor(on('/insights', { 'sec-fetch-dest': 'iframe' }), '/insights')).toBe(true);
+    const door = '/workspaces/w-1/apps/d-1/x';
+    expect(leftBoardDoor(on(door, iframe('cross-site')), door)).toBe(true);
   });
 
   it("on the board's hostname: nothing else, the board's own frames included", () => {
     const refused: [Request, string][] = [
       [on('/insights', iframe('same-origin')), '/insights'],
-      [on('/workspaces/w-1/apps/d-1/x', iframe('cross-site')), '/workspaces/w-1/apps/d-1/x'],
+      [
+        on('/workspaces/w-1/apps/d-1/x?cw-frame=1', iframe('cross-site')),
+        '/workspaces/w-1/apps/d-1/x',
+      ],
+      [on('/workspaces/w-1/mockups/d-1', iframe('cross-site')), '/workspaces/w-1/mockups/d-1'],
       [on('/s/link-1', iframe('cross-site')), '/s/link-1'],
       [on('/insights', { 'sec-fetch-dest': 'document' }), '/insights'],
       [on('/insights', { 'sec-fetch-dest': 'empty' }), '/insights'],
@@ -86,6 +109,27 @@ describe('the page such a frame gets', () => {
     const script = /<script>(.*)<\/script>/.exec(body)?.[1] ?? '';
     const hash = new Bun.CryptoHasher('sha256').update(script).digest('base64');
     expect(csp).toContain(`'sha256-${hash}'`);
+  });
+});
+
+describe('a door repeated in its own path', () => {
+  const PREFIX = '/workspaces/w-1/apps/d-1/';
+  const to = (method: string, tail: string, search = '') =>
+    repeatedDoorRedirect(method, tail, PREFIX, search)?.headers.get('location') ?? null;
+
+  it('goes to the path after the repeat, query unchanged, under the same door', () => {
+    expect(to('GET', 'workspaces/w-1/apps/d-1/insights', '?tab=a&cw-frame=1')).toBe(
+      `${PREFIX}insights?tab=a&cw-frame=1`,
+    );
+    expect(to('HEAD', 'workspaces/w-1/apps/d-1//insights')).toBe(`${PREFIX}insights`);
+    expect(to('GET', 'workspaces/w-1/apps/d-1///evil.test/')).toBe(`${PREFIX}evil.test/`);
+  });
+
+  it('leaves everything else: a real path, another door, a write', () => {
+    expect(to('GET', 'insights')).toBeNull();
+    expect(to('GET', '/insights')).toBeNull();
+    expect(to('GET', 'workspaces/w-1/apps/d-2/insights')).toBeNull();
+    expect(to('POST', 'workspaces/w-1/apps/d-1/insights')).toBeNull();
   });
 });
 
