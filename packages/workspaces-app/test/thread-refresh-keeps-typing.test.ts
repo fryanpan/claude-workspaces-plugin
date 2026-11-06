@@ -161,7 +161,10 @@ describe('a reply landing on the inline card being typed in', () => {
       resolveRange: () => ({ from: 1, to: 5 }),
       renderCard: (t, draft) => panel.renderThread(t, draft),
       // The surface swaps the cards in the flow, as a widget decoration does.
-      surface: { setInlineCards: (cards) => flow.replaceChildren(...cards.map((c) => c.el)) },
+      surface: {
+        setInlineCards: (cards) => flow.replaceChildren(...cards.map((c) => c.el)),
+        scrollToPos: () => {},
+      },
       setActive: (id) => panel.setActive(id),
       revealInSheet: () => {},
       openSheet: () => {},
