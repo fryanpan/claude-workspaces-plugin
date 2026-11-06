@@ -9,6 +9,7 @@ import {
   isComposerFocused,
   setComposerEditorLoader,
 } from '../src/md-composer.ts';
+import { mountMobileReview } from '../src/mobile-review.ts';
 import { ThreadPanel, type ThreadPanelOpts } from '../src/threads.ts';
 
 /**
@@ -131,6 +132,59 @@ describe('a background refresh while typing a reply (plain textarea)', () => {
 
     panel.setThreads([withReply(t1)]);
     expect(document.activeElement).toBe(outside);
+  });
+});
+
+describe('a reply landing on the inline card being typed in', () => {
+  it('keeps focus, caret and draft in the rebuilt card', () => {
+    setComposerEditorLoader(() => new Promise<ComposerEditorModule>(() => {}));
+    const t1 = makeThread({
+      id: 't1',
+      comments: [comment(alice, 'first thread')],
+      anchor: {
+        kind: 'text-range',
+        startRel: new Uint8Array(),
+        endRel: new Uint8Array(),
+        snippet: { text: 'the anchor' },
+      } as Thread['anchor'],
+    });
+    let threads = [t1];
+    const { panel } = mountPanel();
+    panel.setThreads(threads);
+    panel.setActive('t1');
+    const flow = document.createElement('div');
+    document.body.appendChild(flow);
+    cleanups.push(() => flow.remove());
+    const mobile = mountMobileReview({
+      inlineVisible: () => true,
+      threads: () => threads,
+      resolveRange: () => ({ from: 1, to: 5 }),
+      renderCard: (t, draft) => panel.renderThread(t, draft),
+      // The surface swaps the cards in the flow, as a widget decoration does.
+      surface: { setInlineCards: (cards) => flow.replaceChildren(...cards.map((c) => c.el)) },
+      setActive: (id) => panel.setActive(id),
+      revealInSheet: () => {},
+      openSheet: () => {},
+      closeSheet: () => {},
+      isSheetOpen: () => false,
+    });
+    mobile.refresh();
+
+    const inlineBox = () => flow.querySelector('textarea') as HTMLTextAreaElement;
+    const ta = inlineBox();
+    ta.value = 'half a thought';
+    ta.focus();
+    ta.setSelectionRange(6, 6);
+    expect(document.activeElement, 'focus never landed — the rest is vacuous').toBe(ta);
+
+    threads = [withReply(t1)];
+    mobile.refresh();
+
+    const rebuilt = inlineBox();
+    expect(rebuilt).not.toBe(ta); // positive control: the card WAS rebuilt
+    expect(rebuilt.value).toBe('half a thought');
+    expect(document.activeElement).toBe(rebuilt);
+    expect(rebuilt.selectionStart).toBe(6);
   });
 });
 
