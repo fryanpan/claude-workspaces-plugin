@@ -400,7 +400,8 @@ export function frameLeftResponse(ancestors: string): Response {
  * Whether a request on a board's own hostname is a frame that left its door.
  * Fetch metadata decides, and a page cannot change it. The board's own frames
  * are `same-origin` navigations and an opaque frame's are not; a frame on
- * `/workspaces/` is the board's or a door's, whatever the app's script did.
+ * `/workspaces/` is the board's or a door's, whatever the app's script did,
+ * and `/s/` is a share link, which answers any frame that follows it.
  * A top-level visit, a fetch and curl are `document`, `empty` and nothing, and
  * get what they always got.
  */
@@ -409,7 +410,7 @@ export function leftBoardDoor(req: Request, pathname: string): boolean {
     (req.method === 'GET' || req.method === 'HEAD') &&
     req.headers.get('sec-fetch-dest') === 'iframe' &&
     req.headers.get('sec-fetch-site') !== 'same-origin' &&
-    !pathname.startsWith('/workspaces/')
+    !/^\/(?:workspaces|s)\//.test(pathname)
   );
 }
 

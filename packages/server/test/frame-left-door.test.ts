@@ -61,6 +61,7 @@ describe('which requests left the door', () => {
     const refused: [Request, string][] = [
       [on('/insights', iframe('same-origin')), '/insights'],
       [on('/workspaces/w-1/apps/d-1/x', iframe('cross-site')), '/workspaces/w-1/apps/d-1/x'],
+      [on('/s/link-1', iframe('cross-site')), '/s/link-1'],
       [on('/insights', { 'sec-fetch-dest': 'document' }), '/insights'],
       [on('/insights', { 'sec-fetch-dest': 'empty' }), '/insights'],
       [on('/insights', {}), '/insights'],
