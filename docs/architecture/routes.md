@@ -60,6 +60,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/github-push-keys` | POST | `routes/github-hub.ts` | loopback-only |  |
 | `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/keeper/holds` | POST | `routes/keeper-holds.ts` | loopback-only |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
 | `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |

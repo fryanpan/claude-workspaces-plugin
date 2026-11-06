@@ -106,6 +106,11 @@ export async function mountRedline(
 
   // The base text this file is compared against, awaited before mounting so
   // the surface boots straight into the redline.
+  // The companion's socket may already be open (`redline-requests.ts`). A
+  // branch below that never shows the companion closes it; this is the
+  // backstop for one that is still connecting when the reader leaves.
+  const releaseSocket = (): void => void requests.socket?.then((c) => c?.close());
+  scope.onCleanup(releaseSocket);
   const diffInfo = await requests.diff;
   if (scope.disposed) return; // navigated away during the fetch
 
@@ -119,7 +124,7 @@ export async function mountRedline(
     // code view when the companion can't be opened (pinned, no workspace,
     // server error).
     if (mode === 'file' && ctx.workspaceId && !ctx.diffTarget) {
-      const mounted = await mountEditableFileView(ctx, requests.companion);
+      const mounted = await mountEditableFileView(ctx, requests.companion, requests.socket);
       if (scope.disposed) return;
       if (mounted) {
         if (diffInfo?.baseText != null) wireToggle(docId, 'file', scope, true);
@@ -129,6 +134,7 @@ export async function mountRedline(
     // Pass the persisted choice through: mountCode defaults diff docs to
     // unified-diff mode, so a restored 'file' selection would otherwise paint
     // the File button active over a diff surface.
+    releaseSocket();
     await mountCode(ctx, mode === 'file' ? 'file' : 'diff');
     // A navigation that superseded us during mountCode's in-flight fetch already
     // disposed this scope and hid the toggle; wireToggle would re-show it,
@@ -164,8 +170,9 @@ export async function mountRedline(
     workspaceId: ctx.workspaceId,
     diffStatus: diffInfo.status,
   })
-    ? await openCompanionDoc(ctx, requests.companion)
+    ? await openCompanionDoc(ctx, requests.companion, requests.socket)
     : null;
+  if (!companion) releaseSocket();
   if (scope.disposed) return;
 
   // Both surfaces fire onSelectionChange synchronously during construction —
@@ -388,12 +395,16 @@ export interface CompanionDoc {
 export async function openCompanionDoc(
   ctx: MountContext,
   request: Promise<OpenedCompanion | null> = requestCompanion(ctx),
+  socket?: Promise<FeedbackClient | null>,
 ): Promise<CompanionDoc | null> {
   const opened = await request;
-  if (!opened) return null;
-  if (ctx.scope.disposed) return null; // navigated away — don't open a socket
-  const wsUrl = docSocketUrl(location, opened.docId, 'markdown');
-  const client = connect(wsUrl);
+  // Opened beside the request, so its handshake ran while this chunk loaded.
+  const early = socket ? await socket : null;
+  if (!opened || ctx.scope.disposed) {
+    early?.close(); // navigated away — don't keep (or open) a socket
+    return null;
+  }
+  const client = early ?? connect(docSocketUrl(location, opened.docId, 'markdown'));
   ctx.scope.onCleanup(() => client.close());
   return { docId: opened.docId, client, sourceUrl: opened.meta?.sourceUrl ?? '' };
 }
@@ -407,10 +418,11 @@ export async function openCompanionDoc(
 async function mountEditableFileView(
   ctx: MountContext,
   request: Promise<OpenedCompanion | null>,
+  socket?: Promise<FeedbackClient | null>,
 ): Promise<boolean> {
   const mountMarkdown = getMarkdownMount();
   if (!mountMarkdown) return false;
-  const companion = await openCompanionDoc(ctx, request);
+  const companion = await openCompanionDoc(ctx, request, socket);
   if (ctx.scope.disposed) return true; // navigated away — report handled
   if (!companion) return false;
   await mountMarkdown({

@@ -5,6 +5,7 @@
  *
  *   POST /workspaces/<ws>/apps            attach a loopback dev server
  *   GET  /workspaces/<ws>/apps/<id>/<p>   the app's page or file at <p>
+ *   POST|PUT|PATCH|DELETE …/apps/<id>/<p> a write the app itself answers
  *   POST /workspaces/<ws>/apps/<id>       ask the agent again to start it
  *
  * The last is the waiting page's "Ask again" (`app-waiting-page.ts`). It is
@@ -28,14 +29,17 @@
  * server's reload event stream reaches the page as it is written. Nothing
  * inside the page is rewritten: the site builds its links under the prefix.
  *
- * Access is decided above this module and nowhere in it. The host guard
- * admits a share or collab visitor to `apps/<id>/…` only for an app filed on
- * the board in the path, and GET only; the workspace-scope middleware has
- * already refused an app that is not on this board. The ask-again POST is
- * the one write a member may make here, admitted by the same case in the
- * host guard; it sends a fixed notice and `AppOutages.askAgain` holds it to
- * one per two minutes. So nothing here reads the visitor to decide access;
- * it is read once, to draw the host page's link back to the board.
+ * Reads are decided above this module. The host guard admits a share or
+ * collab visitor to `apps/<id>/…` only for an app filed on the board in the
+ * path; the workspace-scope middleware has already refused an app that is
+ * not on this board. The ask-again POST sends a fixed notice and
+ * `AppOutages.askAgain` holds it to one per two minutes.
+ *
+ * Writes under the slash are decided here, because the host guard cannot
+ * tell a share-link visitor from a member: `appWriteRefusal` (`app-proxy.ts`)
+ * admits only the owner and signed-in members, from the board's own origin.
+ * The app's script sends them through the host page's relay
+ * (`widget/src/mock-relay-policy.ts`), so they carry that origin.
  */
 import type { DocMeta, DocType } from '@claude-workspaces/core';
 import type { AppVoiceSeed } from '@claude-workspaces/core/app-voice';
@@ -43,7 +47,10 @@ import { assetHref } from '@claude-workspaces/core/asset-manifest';
 import { EMBED_PARAM } from '@claude-workspaces/core/board-embeds';
 import type { AppOutages } from '../app-outage.ts';
 import {
+  APP_WRITE_METHODS,
   appPrefix,
+  appWriteRefusal,
+  appWriterOf,
   isHtmlResponse,
   parseLoopbackOrigin,
   relayedResponseHeaders,
@@ -112,6 +119,9 @@ export interface AppRouteRequest {
   /** Whether the frame served to this reader carries an app voice token
    *  (`app-voice/gate.ts`). */
   mayMintAppVoice: boolean;
+  /** The origin this request was served on, for the write rule's `Origin`
+   *  check (`policyFor(req).requestOrigin`). */
+  requestOrigin: () => string;
 }
 
 /** The board's name off the record the scope resolved, for the tab title. */
@@ -158,8 +168,18 @@ export async function handleAppRoutes(
   const m = scope?.rest.match(APP_ADDRESS);
   if (!scope || !m) return undefined;
   if (req.method === 'POST' && m[2] === undefined) return askAgain(ctx, m[1] ?? '');
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return ctx.j(405, { error: 'method_not_allowed', allowed: ['GET', 'HEAD'] });
+  if (APP_WRITE_METHODS.has(req.method)) {
+    const refused = appWriteRefusal({
+      writer: appWriterOf(rq.visitor, rq.member),
+      origin: req.headers.get('origin'),
+      boardOrigin: rq.requestOrigin(),
+    });
+    if (refused) return ctx.j(403, refused);
+  } else if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return ctx.j(405, {
+      error: 'method_not_allowed',
+      allowed: ['GET', 'HEAD', ...APP_WRITE_METHODS],
+    });
   }
   return serveApp(ctx, rq, scope.workspaceId, m[1] ?? '', m[2]);
 }
@@ -365,11 +385,13 @@ async function serveApp(
   const target = upstreamUrl(origin, tail, url.search, upstreamBase(meta, workspaceId, meta.docId));
   if (!target) return j(400, { error: 'path_outside_app' });
 
+  const writes = APP_WRITE_METHODS.has(req.method);
   let up: Response;
   try {
     up = await attachedAppFetch(target, {
       method: req.method,
       headers: upstreamRequestHeaders(req.headers),
+      ...(writes ? { body: await req.arrayBuffer() } : {}),
       redirect: 'manual',
       // A reader who closes the page closes the upstream request too, which
       // is what ends a proxied event stream rather than leaving it open.
@@ -387,6 +409,8 @@ async function serveApp(
       reason: err instanceof Error ? err.message : String(err),
       ...(meta.producedBy?.agentId ? { attachedBy: meta.producedBy.agentId } : {}),
     });
+    // A save answered with a page would read as success to a script.
+    if (writes) return j(APP_DOWN_STATUS, { error: 'app_not_running' });
     return waitingResponse(ctx, workspaceId, meta, prefix);
   }
   ctx.appOutages.answered(meta.docId);

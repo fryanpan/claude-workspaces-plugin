@@ -2460,6 +2460,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // routes at the position Incoming Messages held in the chain, and its stop.
   // Started HERE, where the inbox's route context was built — the first
   // family moved behind them, and the last of its readers to exist.
+  /** A board that exists and is not retired: where an owner notice may sit. */
+  const isBoardLive = (workspaceId: string): boolean => {
+    const w = taskStore.getWorkspace(workspaceId);
+    return w !== undefined && !isRetired(w);
+  };
+  /** Live boards for an owner notice when the catch-all refuses it, best first. */
+  const ownerNoticeFallbacks = (): string[] =>
+    rankFallbackBoards(
+      taskStore.listWorkspaces().map((w) => ({
+        id: w.id,
+        retired: isRetired(w),
+        shared: boardIsShared(w.id),
+        activeAt: lastBoardActivityAt(w, taskStore.listTasks(w.id)),
+      })),
+    );
   const features = startServerFeatures({
     dataDir,
     opts,
@@ -2476,6 +2491,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       return shareLinks.roleOf(workspaceId, person.email);
     },
     agentTokenKey: agentTokenKeyFor,
+    ownerNoticeBoards: () => {
+      const first = defaultBoardWorkspaceId();
+      return [first, ...ownerNoticeFallbacks().filter((b) => b !== first)];
+    },
+    isBoardLive,
     j,
     safeJson,
   });
@@ -2861,19 +2881,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const sharingNotice = new SharingNotice({
     dataDir,
     boardId: defaultBoardWorkspaceId,
-    isBoardLive: (workspaceId) => {
-      const w = taskStore.getWorkspace(workspaceId);
-      return w !== undefined && !isRetired(w);
-    },
-    fallbackBoards: () =>
-      rankFallbackBoards(
-        taskStore.listWorkspaces().map((w) => ({
-          id: w.id,
-          retired: isRetired(w),
-          shared: boardIsShared(w.id),
-          activeAt: lastBoardActivityAt(w, taskStore.listTasks(w.id)),
-        })),
-      ),
+    isBoardLive,
+    fallbackBoards: ownerNoticeFallbacks,
     getTask: (taskId) => taskStore.getTask(taskId),
     createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
     addAccessReviewItem: (taskId, change, why, o) =>

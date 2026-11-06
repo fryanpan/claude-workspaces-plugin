@@ -1037,17 +1037,26 @@ export function shareScopeAllows(
            * dev server and nothing else on the machine. The attach itself,
            * `POST …/apps`, is not under this case and stays refused.
            *
-           * One write: `POST …/apps/<id>`, the bare address with no slash
-           * after the id, is the waiting page's "Ask again". A member who
-           * finds the app down is the reader that page is for; the POST
-           * carries no input, sends a fixed notice to the agent already told,
-           * and is held to one per outage per two minutes
-           * (`AppOutages.askAgain`). Nothing under the slash is writable.
+           * `POST …/apps/<id>`, the bare address with no slash after the
+           * id, is the waiting page's "Ask again". A member who finds the
+           * app down is the reader that page is for; the POST carries no
+           * input, sends a fixed notice to the agent already told, and is
+           * held to one per outage per two minutes (`AppOutages.askAgain`).
+           *
+           * A write under the slash (POST, PUT, PATCH, DELETE) is the app's
+           * own save, and is admitted here for the same app only. Which
+           * visitor may make it is NOT decided here, because this function
+           * cannot tell a share-link visitor from a member: `routes/apps.ts`
+           * asks `appWriteRefusal` (`app-proxy.ts`), which refuses the
+           * share-link visitor and any write from another origin.
            */
           case 'apps':
             return (
               insideSharedWorkspace(memberId) &&
-              (method === 'GET' || method === 'HEAD' || (method === 'POST' && idEnd === -1))
+              (method === 'GET' ||
+                method === 'HEAD' ||
+                (method === 'POST' && idEnd === -1) ||
+                (idEnd !== -1 && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)))
             );
           /**
            * A task row. Resolved as `task:<rowId>` — the id a board holds a
