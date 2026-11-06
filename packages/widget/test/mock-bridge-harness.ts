@@ -104,8 +104,10 @@ export function build(
     /** The frame is on the frame-only hostname, with real storage of its own. */
     frameOrigin?: string;
     frameStorage?: Storage;
-    /** The frame has reloaded itself: the host's seed is gone, the browser's record is not. */
-    reloadedInside?: string;
+    /** The host page's own path, which names the app door it holds. */
+    pagePath?: string;
+    /** A reload: `window.name` was spent, and the browser names the parent. */
+    reloaded?: { ancestorOrigins?: string[]; referrer?: string };
   } = {},
 ) {
   const session = opts.session ?? sessionStore();
@@ -132,7 +134,12 @@ export function build(
   const env: HostEnv = {
     script,
     placeholder,
-    location: { host: 'harborlight.test', protocol: 'http:', hash: opts.hash ?? '' },
+    location: {
+      host: 'harborlight.test',
+      protocol: 'http:',
+      hash: opts.hash ?? '',
+      ...(opts.pagePath ? { pathname: opts.pagePath } : {}),
+    },
     storage: () => ({
       getItem: (k: string) => (k === 'feedback-user-name' ? 'Sample Reader' : null),
     }),
@@ -159,12 +166,20 @@ export function build(
     throw new DOMException('opaque origin', 'SecurityError');
   };
   const win = {
-    name: opts.reloadedInside ? '' : (frame?.name ?? ''),
+    name: opts.reloaded ? '' : (frame?.name ?? ''),
     location: Object.assign(new URL(`${opts.frameOrigin ?? BOARD}${MOCK}?cw-frame=1`), {
       replace,
-      ...(opts.reloadedInside ? { ancestorOrigins: [opts.reloadedInside] } : {}),
+      ...(opts.reloaded?.ancestorOrigins ? { ancestorOrigins: opts.reloaded.ancestorOrigins } : {}),
     }),
-    document,
+    document: opts.reloaded
+      ? new Proxy(document, {
+          get: (t, k) => {
+            if (k === 'referrer') return opts.reloaded?.referrer ?? '';
+            const v = Reflect.get(t, k);
+            return typeof v === 'function' ? v.bind(t) : v;
+          },
+        })
+      : document,
     fetch: nativeFetch,
     WebSocket: NativeSocket,
     EventSource: NativeSocket,

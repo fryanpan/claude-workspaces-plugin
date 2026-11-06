@@ -157,11 +157,18 @@ describe('what the frame hostname answers', () => {
     for (const dest of ['script', 'style', 'image', 'font', 'worker']) {
       expect(verdict(`${APP}/assets/tides.js`, dest)).toEqual({ ok: true });
     }
-    // A script's own fetch, a top-level visit, a frame without the flag, and
-    // a service worker that would sit under every attachment on the origin.
-    for (const dest of ['empty', 'document', 'iframe', 'serviceworker', 'object', 'embed']) {
+    // A script's own fetch, a top-level visit, and a service worker that
+    // would sit under every attachment on the origin.
+    for (const dest of ['empty', 'document', 'serviceworker', 'object', 'embed']) {
       expect(verdict(`${APP}/assets/tides.js`, dest)).toEqual({ ok: false, status: 404 });
     }
+    // A frame without the flag is refused too, and told to ask its host page
+    // (`frame-left-door.test.ts`).
+    expect(verdict(`${APP}/assets/tides.js`, 'iframe')).toEqual({
+      ok: false,
+      status: 404,
+      left: true,
+    });
     expect(verdict(`${APP}/?cw-frame=1`, 'document')).toEqual({ ok: false, status: 404 });
   });
 

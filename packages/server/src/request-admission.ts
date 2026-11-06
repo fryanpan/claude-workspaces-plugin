@@ -42,7 +42,13 @@ import { normalizeEmail } from '@claude-workspaces/core';
 import type { DocMeta, DocType } from '@claude-workspaces/core';
 import { agentBearerOf } from './auth/agent-token.ts';
 import { type BoardAgentClaims, boardAgentBearerOf } from './auth/board-agent-token.ts';
-import { type FrameHost, frameGate, frameGateRefusal } from './frame-host.ts';
+import {
+  type FrameHost,
+  frameGate,
+  frameGateRefusal,
+  frameLeftResponse,
+  leftBoardDoor,
+} from './frame-host.ts';
 import { memberBoards, memberHomeResponse, notAMemberResponse, wantsPage } from './member-home.ts';
 import { admitBoardAgent } from './middleware/board-agent-door.ts';
 import { admitBoardSocket } from './middleware/board-socket-door.ts';
@@ -579,7 +585,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       if (frameHost?.isFrameHost(req)) {
         const search = new URL(req.url).searchParams;
         const verdict = frameGate(req, pathname, search);
-        if (!verdict.ok) return frameGateRefusal(verdict.status);
+        if (!verdict.ok) {
+          return verdict.left ? frameHost.frameLeft() : frameGateRefusal(verdict.status);
+        }
         const viaTunnel = req.headers.has('cf-ray');
         // Through the tunnel is external reach, so the master switch covers
         // it, a frame ticket included.
@@ -682,6 +690,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       if (decision.kind === 'deny') {
         return j(403, { error: 'unknown_host' });
       }
+      // Ahead of every door below: the frame of any reader may land here,
+      // and these fixed bytes tell nobody anything (`frame-host.ts`).
+      if (leftBoardDoor(req, pathname)) return frameLeftResponse("'self'");
       // --- External-access master switch ---
       // AHEAD of both auth paths on purpose: while sharing is off, a live
       // Access JWT, an unexpired session cookie and no credential at all

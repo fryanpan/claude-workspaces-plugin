@@ -65,7 +65,7 @@ import { APP_DOWN_HEADER, renderAppWaiting } from '../app-waiting-page.ts';
 import type { BrowserSentryConfig } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
-import type { FrameHost } from '../frame-host.ts';
+import { type FrameHost, repeatedDoorRedirect } from '../frame-host.ts';
 import { type WorkspaceScope, restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -381,6 +381,8 @@ async function serveApp(
   if (tail === undefined) {
     return new Response(null, { status: 302, headers: { location: `${prefix}${url.search}` } });
   }
+  const repeated = repeatedDoorRedirect(req.method, tail, prefix, url.search);
+  if (repeated) return repeated;
   const target = upstreamUrl(origin, tail, url.search, upstreamBase(meta, workspaceId, meta.docId));
   if (!target) return j(400, { error: 'path_outside_app' });
 
