@@ -191,9 +191,11 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
     deviceScaleFactor: 1,
     mobile: width <= 1100,
   });
-  // A returning reader on a Voice first device: the first tap listens.
+  // A returning reader on a Voice first device: the first tap listens. Every
+  // load is a fresh tab: a page unloading with voice on writes the key that
+  // carries it on, so clearing it from the page loses that race on a slow run.
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `try { localStorage.setItem('feedback-user-name', 'Alice'); localStorage.setItem('cw.lead-chat.mode', 'voice'); } catch {}`,
+    source: `try { sessionStorage.clear(); localStorage.setItem('feedback-user-name', 'Alice'); localStorage.setItem('cw.lead-chat.mode', 'voice'); } catch {}`,
   });
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: RECORD_PLAYBACK });
   return cdp;
@@ -298,13 +300,9 @@ async function main(): Promise<void> {
       for (const way of ['quiet', 'slow', 'talking'] as const) {
         step(`${way} at ${width}`);
         chunkGapMs = CHUNK_GAP_MS[way];
-        // A fresh tab state for each case: voice is not carried on from the last.
-        for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
-          const loaded = cdp.once('Page.loadEventFired');
-          await cdp.send('Page.navigate', { url: docUrl });
-          await loaded;
-        }
+        const loaded = cdp.once('Page.loadEventFired');
+        await cdp.send('Page.navigate', { url: docUrl });
+        await loaded;
         const button = await until(
           'the agent button',
           async () => (await cdp.evaluate(BUTTON)) as XY | null,
