@@ -176,7 +176,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/agents/:agentId/heartbeat` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/apps` | POST | `routes/apps.ts` | trusted-local |  |
 | `/workspaces/:ws/apps/:docId` | GET, HEAD | `routes/apps.ts` | share-scope |  |
-| `/workspaces/:ws/apps/:docId/*` | GET, HEAD | `routes/apps.ts` | share-scope |  |
+| `/workspaces/:ws/apps/:docId/*` | GET, HEAD | `routes/apps.ts` | share-scope | A websocket upgrade at this address is answered by `routes/upgrade-stream.ts` through `routes/app-socket.ts`, behind the same gate as the page. |
 | `/workspaces/:ws/attachments` | GET, POST | `routes/workspaces-create-read.ts` | trusted-local |  |
 | `/workspaces/:ws/attachments/:setId` | DELETE | `routes/archive.ts` | trusted-local |  |
 | `/workspaces/:ws/attachments/:setId` | GET | `routes/shell-static.ts` | share-scope |  |
