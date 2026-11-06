@@ -448,6 +448,57 @@ describe('the tailnet widget door', () => {
     });
   });
 
+  describe('a dev page attached to its board as an app', () => {
+    const app = 'harborlight-insights';
+    /** The page, on another port of the host the board answers on. */
+    const portPage = `https://${DOOR}:10000`;
+    const threads = (board: string) => `/workspaces/${board}/docs/${app}/threads`;
+
+    beforeAll(async () => {
+      const attached = await fetch(`${base}/workspaces/${boardA}/apps`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ docId: app, origin: 'http://127.0.0.1:8796' }),
+      });
+      expect(attached.status).toBe(200);
+    });
+
+    it('signs in on another port of the host and posts as the signed-in person', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const socket = await doorSocket(base, `/workspaces/${boardA}/docs/${app}/y`, token, portPage);
+      expect(socket.status).toBe(101);
+      const posted = await onDoor(base, threads(boardA), {
+        method: 'POST',
+        origin: portPage,
+        token,
+        body: threadBody,
+      });
+      expect(posted.status).toBe(200);
+      const { thread } = (await posted.json()) as {
+        thread: { comments: Array<{ author: { id: string } }> };
+      };
+      expect(thread.comments[0]?.author.id).toBe(emailIdentityId(OPERATOR_EMAIL));
+    });
+
+    it('keeps the token to its one board and its one page origin', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const otherBoard = await mintFor(base, boardB, portPage);
+      const post = { method: 'POST', body: threadBody };
+      const elsewhere = { ...post, token, origin: `https://${DOOR}:10001` };
+      expect((await onDoor(base, threads(boardA), elsewhere)).status).toBe(401);
+      const wrong = { ...post, token: otherBoard, origin: portPage };
+      expect((await onDoor(base, threads(boardA), wrong)).status).toBe(403);
+    });
+
+    it('mints nothing for a page that is not on this machine', async () => {
+      for (const origin of ['https://harborlight.test:10000', `https://${DOOR}.evil.example`]) {
+        const res = await mint(base, { origin, workspaceId: boardA });
+        expect(res.status, origin).toBe(401);
+        expect(((await res.json()) as { token?: string }).token).toBeUndefined();
+      }
+    });
+  });
+
   describe('one page origin', () => {
     it('refuses the token from another origin, or from none', async () => {
       const path = `/workspaces/${boardA}/docs/${docA}/threads`;

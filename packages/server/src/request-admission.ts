@@ -39,7 +39,7 @@
  * the identity setup genuinely sits between them.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
-import type { DocMeta } from '@claude-workspaces/core';
+import type { DocMeta, DocType } from '@claude-workspaces/core';
 import { agentBearerOf } from './auth/agent-token.ts';
 import { type BoardAgentClaims, boardAgentBearerOf } from './auth/board-agent-token.ts';
 import { type FrameHost, frameGate, frameGateRefusal } from './frame-host.ts';
@@ -59,6 +59,7 @@ import {
 } from './middleware/host-guard.ts';
 import { recallCallbackAllows } from './middleware/recall-callback-gate.ts';
 import { widgetDoorRoute, widgetDoorSignInBody } from './middleware/widget-door.ts';
+import { isPageDoc } from './page-thread.ts';
 import { localHostnames } from './public-host.ts';
 import { type BoardRole } from './share/board-role.ts';
 import { collabMemberKey } from './share/collab-member-key.ts';
@@ -265,7 +266,7 @@ export interface RequestAdmissionContext {
     origin: string | null,
   ) => { identity: { id: string }; workspaceId: string; sessionBound: boolean } | null;
   /** A doc's type, or undefined for a doc this server does not hold. */
-  docTypeOf: (docId: string) => string | undefined;
+  docTypeOf: (docId: string) => DocType | undefined;
   /** The peer address of a request. A forward reference on purpose: the Bun
    *  server is bound below this factory and is only ever asked per request. */
   requestAddress: (req: Request) => string | undefined;
@@ -930,12 +931,13 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           if (route.workspaceId !== grant.workspaceId) {
             return j(403, { error: 'out_of_widget_scope' });
           }
-          // And only a WIDGET doc on it — a mockup or dev page, or one that
-          // does not exist yet (the widget's socket creates it). A bound
-          // markdown doc's prose is not what a page's comment button needs,
-          // so a token lifted from that page cannot read it.
+          // And only a WIDGET doc on it — a page the widget runs on, which
+          // is a mockup, a dev server attached as an app, or one that does
+          // not exist yet (the widget's socket creates it). A bound markdown
+          // doc's prose is not what a page's comment button needs, so a token
+          // lifted from that page cannot read it.
           const type = docTypeOf(route.docId);
-          if (type !== undefined && type !== 'mockup') {
+          if (type !== undefined && !isPageDoc(type)) {
             return j(403, { error: 'out_of_widget_scope' });
           }
         }
