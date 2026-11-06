@@ -27,7 +27,8 @@ A mock exists so a person can act on it and comment on it. Each step leaves a pr
 
 While a person reviews the mock, one agent answers each comment at once and lands the tweak within about a minute ("Land tweaks within a minute while a person reviews" in `claude-workspaces:working-in-a-workspace`).
 
-- Reply on the thread, then edit the file the mock serves from. Run steps 3 and 4 afterwards, in a background agent.
+- Reply on the thread, then edit the file the mock serves from.
+- Give slower work to background agents, including steps 3 and 4, which run after the tweak lands.
 - If the page runs from a branch, make the tweak in a throwaway worktree off the top of the stack. Port it back into the right branch when the review ends.
 - Load the served mock after each tweak. If live reload does not show the change, treat that as a bug: fix it or report it.
 
