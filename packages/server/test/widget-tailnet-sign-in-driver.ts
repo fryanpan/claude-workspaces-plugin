@@ -25,13 +25,7 @@ import { join } from 'node:path';
 import { createServer as tlsServer } from 'node:tls';
 import { emailIdentityId } from '@claude-workspaces/core';
 import { type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, pageSocketUrl, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -39,6 +33,7 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
+import { waitFor } from './wait-for.ts';
 
 const TAG = 'claude-feedback-widget';
 const SHADOW = `document.querySelector('${TAG}').shadowRoot`;
@@ -127,14 +122,13 @@ function pageHtml(board: string): string {
 </body></html>`;
 }
 
+/** The value `read` comes to, or null with the reason on stderr: a step that
+ *  never happens is a reading, and the run goes on to report the rest. */
 async function poll<T>(what: string, read: () => Promise<T | null> | T | null): Promise<T | null> {
-  for (let i = 0; i < 100; i++) {
-    const v = await read();
-    if (v !== null && v !== undefined && v !== false) return v;
-    await sleep(100);
-  }
-  process.stderr.write(`never happened: ${what}\n`);
-  return null;
+  return waitFor(read, { timeout: 10_000, interval: 100, describe: what }).catch(() => {
+    process.stderr.write(`never happened: ${what}\n`);
+    return null;
+  });
 }
 
 async function main(): Promise<void> {
