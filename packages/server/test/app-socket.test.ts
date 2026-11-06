@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isAppSocketRequest } from '../src/routes/app-socket.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import {
   RELOAD_TOKEN,
@@ -18,6 +19,25 @@ import {
 } from './app-reload-server-fixture.ts';
 import { type OpenedSocket, handshakeStatus, nextFrame, openSocket } from './app-socket-client.ts';
 import { waitFor } from './wait-for.ts';
+
+describe('which requests are an app socket', () => {
+  const at = (method: string, upgrade: boolean) =>
+    new Request('http://localhost/workspaces/w-1/apps/site/ws', {
+      method,
+      headers: upgrade ? { upgrade: 'WebSocket' } : {},
+    });
+  const SOCKET_PATH = '/workspaces/w-1/apps/site/ws';
+
+  it('claims a GET with the header, and neither half alone', () => {
+    expect(isAppSocketRequest(at('GET', true), SOCKET_PATH)).toBe(true);
+    expect(isAppSocketRequest(at('GET', false), SOCKET_PATH)).toBe(false);
+    expect(isAppSocketRequest(at('POST', true), SOCKET_PATH)).toBe(false);
+  });
+
+  it('leaves the bare address to the page, which redirects it', () => {
+    expect(isAppSocketRequest(at('GET', true), '/workspaces/w-1/apps/site')).toBe(false);
+  });
+});
 
 describe('an app socket through the board', () => {
   let handle: ServerHandle;

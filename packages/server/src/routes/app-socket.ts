@@ -80,10 +80,13 @@ export interface AppSocketRequest {
   shareMember: string | null;
 }
 
-/** Is this an app's socket? The same address with no upgrade is its page. */
+/** Is this an app's socket? The same address with no upgrade is its page,
+ *  and a write with the header on it is still a write. */
 export function isAppSocketRequest(req: Request, pathname: string): boolean {
   return (
-    req.headers.get('upgrade')?.toLowerCase() === 'websocket' && APP_SOCKET_PATH.test(pathname)
+    req.method === 'GET' &&
+    req.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
+    APP_SOCKET_PATH.test(pathname)
   );
 }
 
