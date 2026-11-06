@@ -56,6 +56,27 @@ describe('BoardSocketRoots', () => {
     expect(new BoardSocketRoots(path).rootsOf('w-harbor')).toEqual([riverbend]);
   });
 
+  it('reads a relative path from where the server runs, and always answers', () => {
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'relative')));
+    expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
+    // Each of these climbed forever: dirname('.') is '.', so neither the `/`
+    // stop nor a root ever came.
+    for (const path of ['', 'notes.md', 'docs/notes.md']) {
+      expect(roots.covers(path), path).toBe(false);
+      expect(roots.containedOf(path), path).toBeNull();
+    }
+    expect(roots.holdsRoot('.')).toBe(false);
+    // Run from inside a root, the same spelling names a file the lead holds.
+    const from = process.cwd();
+    process.chdir(harborlight);
+    try {
+      expect(roots.covers('docs/notes.md')).toBe(true);
+      expect(roots.containedOf('docs/notes.md')?.root).toBe(harborlight);
+    } finally {
+      process.chdir(from);
+    }
+  });
+
   it('guards every bound file under a root, whoever bound it', () => {
     const lead = join(root, 'harbor-guard');
     mkdirSync(join(lead, 'docs'), { recursive: true });
