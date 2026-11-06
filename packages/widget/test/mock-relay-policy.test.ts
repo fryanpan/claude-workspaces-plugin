@@ -11,7 +11,12 @@
  * Fixtures are fictional — a lemonade stand's price board.
  */
 import { describe, expect, it } from 'vitest';
-import { type RelayScope, relayHeaders, relayTarget } from '../src/mock-relay-policy.ts';
+import {
+  type RelayScope,
+  relayHeaders,
+  relayProtocols,
+  relayTarget,
+} from '../src/mock-relay-policy.ts';
 
 const SCOPE: RelayScope = {
   host: 'board.test',
@@ -206,6 +211,32 @@ describe("an attached app's own reads", () => {
     expect(ok('sse', 'GET', 'http://elsewhere.test/workspaces/w-stand/apps/d-price/__reload')).toBe(
       false,
     );
+  });
+});
+
+describe("an app's own socket", () => {
+  const APP_SOCKET = 'http://board.test/workspaces/w-stand/apps/d-price/';
+
+  it("allows this app's prefix, marked, with its query untouched", () => {
+    const u = relayTarget(SCOPE, 'ws', 'GET', `${APP_SOCKET}?token=abc&sourceUrl=kept`);
+    expect(u?.searchParams.get('token')).toBe('abc');
+    expect(u?.searchParams.get('sourceUrl')).toBe('kept');
+    expect(u?.searchParams.get('cw-via')).toBe('mock-frame');
+  });
+
+  it("refuses another app's socket, and one that climbs out of this app", () => {
+    expect(ok('ws', 'GET', 'http://board.test/workspaces/w-stand/apps/d-menu/')).toBe(false);
+    expect(ok('ws', 'GET', 'http://board.test/workspaces/w-other/apps/d-price/')).toBe(false);
+    expect(ok('ws', 'GET', `${APP_SOCKET}../d-menu/`)).toBe(false);
+    expect(ok('ws', 'GET', 'http://board.test/workspaces/w-stand/apps/d-price')).toBe(false);
+  });
+
+  it("offers an app's subprotocols, and none on a board socket", () => {
+    const app = new URL(APP_SOCKET);
+    expect(relayProtocols(SCOPE, app, ['vite-hmr'])).toEqual(['vite-hmr']);
+    expect(relayProtocols(SCOPE, app, ['wt2.token', 'a b', 7, 'vite-ping'])).toEqual(['vite-ping']);
+    expect(relayProtocols(SCOPE, app, 'vite-hmr')).toEqual([]);
+    expect(relayProtocols(SCOPE, new URL(`${DOC}/y`), ['vite-hmr'])).toEqual([]);
   });
 });
 

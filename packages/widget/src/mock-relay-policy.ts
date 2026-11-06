@@ -89,6 +89,12 @@ export function relayTarget(
   // else. The server decides who may save (`appWriteRefusal`).
   const appBase = `/workspaces/${enc(scope.workspaceId)}/apps/${enc(scope.docId)}/`;
   if (kind === 'ws') {
+    // An attached app's own socket, a framework's reload channel. Its query
+    // is the app's, so only the mark is added.
+    if (p.startsWith(appBase)) {
+      u.searchParams.set(VIA_PARAM, VIA_VALUE);
+      return u;
+    }
     // `app-voice` is the mock's or app's own voice and ears
     // (`server/src/app-voice/`). It opens only with the token the server
     // wrote into this mock's frame, which names this doc; the host adds
@@ -127,6 +133,20 @@ export function relayTarget(
     }
   }
   return null;
+}
+
+/** An HTTP token, which a subprotocol's name must be; a widget token is not one to pass. */
+const SUBPROTOCOL = /^(?!wt[12]\.)[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,128}$/;
+
+/**
+ * The subprotocols the host offers for a relayed socket. Only an app's own
+ * socket has any: every board socket's protocol is the host's to choose, and
+ * on those it carries a credential.
+ */
+export function relayProtocols(scope: RelayScope, u: URL, asked: unknown): string[] {
+  const appBase = `/workspaces/${enc(scope.workspaceId)}/apps/${enc(scope.docId)}/`;
+  if (!u.pathname.startsWith(appBase) || !Array.isArray(asked)) return [];
+  return asked.filter((p): p is string => typeof p === 'string' && SUBPROTOCOL.test(p));
 }
 
 /** The request headers a relayed fetch sends: the kept few, plus the mark. */

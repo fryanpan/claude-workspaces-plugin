@@ -41,14 +41,20 @@ export class HostSocket {
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;
   onclose: ((e: { code: number; reason: string }) => void) | null = null;
-  constructor(readonly url: string) {
+  protocol = '';
+  closedWith: Array<[number | undefined, string | undefined]> = [];
+  constructor(
+    readonly url: string,
+    readonly protocols?: string[],
+  ) {
     HostSocket.made.push(this);
   }
   send(d: unknown) {
     this.sent.push(d);
   }
-  close() {
+  close(code?: number, reason?: string) {
     this.closed += 1;
+    this.closedWith.push([code, reason]);
   }
 }
 
@@ -98,6 +104,8 @@ export function build(
     /** The frame is on the frame-only hostname, with real storage of its own. */
     frameOrigin?: string;
     frameStorage?: Storage;
+    /** The frame has reloaded itself: the host's seed is gone, the browser's record is not. */
+    reloadedInside?: string;
   } = {},
 ) {
   const session = opts.session ?? sessionStore();
@@ -151,12 +159,16 @@ export function build(
     throw new DOMException('opaque origin', 'SecurityError');
   };
   const win = {
-    name: frame?.name ?? '',
-    location: Object.assign(new URL(`${opts.frameOrigin ?? BOARD}${MOCK}?cw-frame=1`), { replace }),
+    name: opts.reloadedInside ? '' : (frame?.name ?? ''),
+    location: Object.assign(new URL(`${opts.frameOrigin ?? BOARD}${MOCK}?cw-frame=1`), {
+      replace,
+      ...(opts.reloadedInside ? { ancestorOrigins: [opts.reloadedInside] } : {}),
+    }),
     document,
     fetch: nativeFetch,
     WebSocket: NativeSocket,
     EventSource: NativeSocket,
+    SharedWorker: class {},
     EventTarget: PlainTarget,
     dispatchEvent: (ev: Event) => announced.push(ev.type) > 0,
     parent: {

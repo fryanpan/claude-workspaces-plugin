@@ -280,6 +280,16 @@ Why: Comment events arrive only between turns. A long turn holds every new comme
 
 Why: Two answers on one thread make the person read twice and choose between agents.
 
+#### Land tweaks within a minute while a person reviews
+
+- While a person reviews a doc or a mock, one agent answers each comment at once and lands the tweak within about a minute. Land it before any review pass, and before any stack of branches merges.
+- Edit a doc with the doc edit tools, and a mock in the file that serves it. Make a change to code in a throwaway worktree off the top of the stack.
+- When the review ends, port each change back into the right branch of the stack.
+- Give slower work to background agents, so this agent stays free for the next comment.
+- Load the served page after each tweak. If live reload does not show the change, treat that as a bug: fix it or report it.
+
+Why: Fast turnaround keeps the focused attention of the person on the review.
+
 #### Keep one place to work together
 
 - When a person asks for changes on a doc or a mockup, change that same doc or mockup. For a mockup, edit the file that serves it. A reload shows the change.

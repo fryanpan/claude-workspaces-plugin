@@ -55,6 +55,7 @@ const BOARD_RULES = [
   'Find the questions that a status check does not show',
   'Reply on the thread before you fix',
   'Let one agent answer each thread',
+  'Land tweaks within a minute while a person reviews',
   'Keep one place to work together',
 ];
 const LAST_RULE_END = 'Why: The person must never look for the place where the work moved.';

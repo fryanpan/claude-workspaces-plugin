@@ -7,11 +7,13 @@ import {
   LOOPBACK_RULE,
   appPrefix,
   isHtmlResponse,
+  offeredSubprotocols,
   parseLoopbackOrigin,
   relayedLocation,
   relayedResponseHeaders,
   upstreamBase,
   upstreamRequestHeaders,
+  upstreamSocketUrl,
   upstreamUrl,
 } from '../src/app-proxy.ts';
 
@@ -111,6 +113,40 @@ describe('upstreamUrl', () => {
     expect(upstreamUrl(ORIGIN, '//evil.example/x', '', PREFIX)?.href).toBe(
       `${ORIGIN}${PREFIX}evil.example/x`,
     );
+  });
+});
+
+describe('upstreamSocketUrl', () => {
+  it("is the page's address on the ws scheme, with the app's query", () => {
+    expect(upstreamSocketUrl(ORIGIN, '', '?token=a%2Bb', '/workspaces/w/apps/a/')?.href).toBe(
+      'ws://127.0.0.1:4321/workspaces/w/apps/a/?token=a%2Bb',
+    );
+  });
+  it("takes off the host page's mark, however it is spelled", () => {
+    expect(upstreamSocketUrl(ORIGIN, '__hmr', '?cw-via=mock-frame&t=1')?.href).toBe(
+      'ws://127.0.0.1:4321/__hmr?t=1',
+    );
+    expect(upstreamSocketUrl(ORIGIN, '__hmr', '?t=1&cw%2Dvia=mock-frame')?.href).toBe(
+      'ws://127.0.0.1:4321/__hmr?t=1',
+    );
+  });
+  it('refuses what upstreamUrl refuses', () => {
+    expect(upstreamSocketUrl(ORIGIN, '%2F%2Fevil.example/', '')).toBeNull();
+    expect(upstreamSocketUrl(ORIGIN, '..%2Fother', '')).toBeNull();
+  });
+});
+
+describe('offeredSubprotocols', () => {
+  it('reads a list, and nothing is an empty list', () => {
+    expect(offeredSubprotocols('vite-hmr, graphql-ws')).toEqual(['vite-hmr', 'graphql-ws']);
+    expect(offeredSubprotocols(null)).toEqual([]);
+  });
+  it("keeps a reader's widget token off the dev server", () => {
+    expect(offeredSubprotocols('wt2.abc, vite-hmr, wt1.def')).toEqual(['vite-hmr']);
+  });
+  it('drops what is not a protocol name, and caps the list', () => {
+    expect(offeredSubprotocols('a b, c\u0000d, ok')).toEqual(['ok']);
+    expect(offeredSubprotocols(Array(20).fill('p').join(','))).toHaveLength(8);
   });
 });
 
