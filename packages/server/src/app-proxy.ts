@@ -33,7 +33,7 @@
  * the built URL must still name the bound origin.
  */
 
-import { searchWithoutFrameParam } from './mockup-frame.ts';
+import { WRITE_VIA_SOCKET_PARAM, queryParamName, searchWithoutFrameParam } from './mockup-frame.ts';
 
 /** The origin an app may be bound to, or why not. */
 export type LoopbackOrigin = { ok: true; origin: string } | { ok: false; error: string };
@@ -65,6 +65,9 @@ export function parseLoopbackOrigin(raw: unknown, ownPort?: number): LoopbackOri
   }
   return { ok: true, origin: `http://${u.hostname}:${u.port}` };
 }
+
+/** `apps/<id>` and whatever follows it, off a board scope's remainder. */
+export const APP_ADDRESS = /^apps\/([^/]+)(?:\/(.*))?$/;
 
 /** The address a board serves an app under, with its trailing slash. */
 export function appPrefix(workspaceId: string, docId: string): string {
@@ -126,6 +129,47 @@ export function upstreamUrl(
   if (u.origin !== origin) return null;
   u.search = searchWithoutFrameParam(search);
   return u;
+}
+
+/**
+ * The upstream address for a socket: `upstreamUrl`, on the `ws:` scheme, with
+ * the host page's relay mark taken off. Everything else in the query is the
+ * app's: Vite's client proves itself with `?token=`.
+ */
+export function upstreamSocketUrl(
+  origin: string,
+  rawTail: string,
+  search: string,
+  base = '/',
+): URL | null {
+  const kept = search
+    .replace(/^\?/, '')
+    .split('&')
+    .filter((part) => queryParamName(part) !== WRITE_VIA_SOCKET_PARAM)
+    .join('&');
+  const u = upstreamUrl(origin, rawTail, kept === '' ? '' : `?${kept}`, base);
+  if (u) u.protocol = 'ws:';
+  return u;
+}
+
+/** RFC 6455's subprotocol name: an HTTP token. */
+const SUBPROTOCOL = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,128}$/;
+/** The widget's token, which a door socket offers as a subprotocol. */
+const WIDGET_TOKEN = /^wt[12]\./;
+/** More than any framework offers; the rest of the list is not forwarded. */
+const MAX_SUBPROTOCOLS = 8;
+
+/**
+ * The subprotocols the dev server is offered, off a handshake's header.
+ * A widget token is the reader's credential and stays on this side, for the
+ * reason their cookie does.
+ */
+export function offeredSubprotocols(header: string | null): string[] {
+  return (header ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => SUBPROTOCOL.test(s) && !WIDGET_TOKEN.test(s))
+    .slice(0, MAX_SUBPROTOCOLS);
 }
 
 /**

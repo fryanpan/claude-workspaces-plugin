@@ -378,10 +378,12 @@ export function createRequestChain(
         anyoneProven: () => provenIdentityFor() !== null,
         widgetDoorGrant,
         widgetTokenProved: widgetIdentity !== null,
+        appMember: visitor && !gate.boardAgent ? (gate.visitorHome?.signedInAs ?? null) : null,
       });
       if (streamed) {
-        if (streamed.kind === 'upgraded') return undefined;
-        return streamed.response;
+        const settled = streamed.kind === 'dialing' ? await streamed.outcome : streamed;
+        if (settled.kind === 'upgraded') return undefined;
+        return settled.response;
       }
 
       // ── The workspace scope ── see middleware/workspace-scope.ts.
