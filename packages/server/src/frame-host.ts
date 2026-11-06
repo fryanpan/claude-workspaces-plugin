@@ -76,9 +76,24 @@
  * is on no board hostname and gets the opaque frame too. A member's Access
  * token with no ticket opens nothing here.
  *
+ * ── A frame that left its door ──
+ *
+ * A router with no base path needs its own address to read `/insights`, so its
+ * script takes the door's prefix off with `history.replaceState`. The frame's
+ * address is then outside the door: its own `location.reload()`, or a faded pin
+ * going to the address the widget stored, asks this server for `/insights`.
+ * Nothing in that request names the door. The app may have dropped the query,
+ * and the `Referer` is the frame's own stripped address, or nothing in an
+ * opaque frame (measured in Chromium on both frames). Only the host page knows
+ * which door it holds, so such a frame gets `frameLeftResponse`: fixed bytes,
+ * no redirect, a script that tells the page holding it the address it asked
+ * for. `mock-door.ts` in the widget puts that address back under the host
+ * page's own door and points the frame there.
+ *
  * Off unless configured (`CW_FRAME_ORIGIN`). Unset, every frame stays opaque
  * exactly as before.
  */
+import { createHash } from 'node:crypto';
 import { normalizeEmail } from '@claude-workspaces/core';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
 import {
@@ -154,6 +169,8 @@ export interface FrameHost {
   prove(req: Request, pathname: string, search: URLSearchParams): FrameProof;
   /** The frame response's policy on the frame hostname. */
   readonly frameCsp: string;
+  /** What a frame that left its door gets on this hostname. */
+  frameLeft(): Response;
   /** The board hostnames this frame hostname shares a domain with. */
   readonly sameSiteBoardHosts: readonly string[];
 }
@@ -290,12 +307,13 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
       return members.length > 0 ? { kind: 'held', appVoice: false, members } : { kind: 'none' };
     },
     frameCsp: `sandbox ${FRAME_HOST_SANDBOX}; frame-ancestors ${frameAncestors([...boards])}`,
+    frameLeft: () => frameLeftResponse(frameAncestors([...boards])),
     sameSiteBoardHosts: sameSiteHosts(frameHost, [...boards]),
   };
 }
 
 /** The frame hostname's refusal: the same bytes whatever was asked. */
-export type FrameGateVerdict = { ok: true } | { ok: false; status: 404 | 405 };
+export type FrameGateVerdict = { ok: true } | { ok: false; status: 404 | 405; left?: boolean };
 
 const MOCK_FRAME_PATH = /^\/workspaces\/[^/]+\/mockups\/[^/]+$/;
 const APP_PATH = /^\/workspaces\/[^/]+\/apps\/[^/]+(?:\/.*)?$/;
@@ -351,7 +369,48 @@ export function frameGate(
     if (site !== null && site !== 'same-origin') return { ok: false, status: 404 };
     return SUBRESOURCE_DESTS.has(dest) ? { ok: true } : { ok: false, status: 404 };
   }
-  return { ok: false, status: 404 };
+  return dest === 'iframe' ? { ok: false, status: 404, left: true } : { ok: false, status: 404 };
+}
+
+/** The whole of the script `frameLeftResponse` runs. */
+const FRAME_LEFT_SCRIPT =
+  "parent.postMessage({cw:'frame-left',to:location.pathname+location.search+location.hash},'*')";
+const FRAME_LEFT_HASH = createHash('sha256').update(FRAME_LEFT_SCRIPT).digest('base64');
+
+/**
+ * The page a frame gets when it asked for an address outside every door. The
+ * bytes are the same whatever was asked and whoever asked, so it needs no
+ * proof. It is a 404, with no storage and no reach beyond telling its parent
+ * its own address, and only `ancestors` may hold it.
+ */
+export function frameLeftResponse(ancestors: string): Response {
+  return new Response(`<!doctype html><title>Moving</title><script>${FRAME_LEFT_SCRIPT}</script>`, {
+    status: 404,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy':
+        `sandbox allow-scripts; default-src 'none'; script-src 'sha256-${FRAME_LEFT_HASH}'; ` +
+        `frame-ancestors ${ancestors}`,
+    },
+  });
+}
+
+/**
+ * Whether a request on a board's own hostname is a frame that left its door.
+ * Fetch metadata decides, and a page cannot change it. The board's own frames
+ * are `same-origin` navigations and an opaque frame's are not; a frame on
+ * `/workspaces/` is the board's or a door's, whatever the app's script did.
+ * A top-level visit, a fetch and curl are `document`, `empty` and nothing, and
+ * get what they always got.
+ */
+export function leftBoardDoor(req: Request, pathname: string): boolean {
+  return (
+    (req.method === 'GET' || req.method === 'HEAD') &&
+    req.headers.get('sec-fetch-dest') === 'iframe' &&
+    req.headers.get('sec-fetch-site') !== 'same-origin' &&
+    !pathname.startsWith('/workspaces/')
+  );
 }
 
 /** The refusal's response. Plain, and the same for every reason. */

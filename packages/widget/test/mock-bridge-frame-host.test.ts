@@ -24,6 +24,24 @@ describe('a frame on the frame-only hostname', () => {
     expect(new Set(f.postedTo)).toEqual(new Set([BOARD]));
   });
 
+  it("still posts to the board's page after a reload spent the seed", async () => {
+    const byAncestor = build({
+      frameOrigin: FRAMES,
+      frameStorage: own(),
+      reloaded: { ancestorOrigins: [BOARD], referrer: 'http://elsewhere.test/' },
+    });
+    await byAncestor.w.fetch(`${FRAMES}${THREADS}`);
+    expect(new Set(byAncestor.postedTo)).toEqual(new Set([BOARD]));
+
+    const byReferrer = build({
+      frameOrigin: FRAMES,
+      frameStorage: own(),
+      reloaded: { referrer: `${BOARD}/` },
+    });
+    await byReferrer.w.fetch(`${FRAMES}${THREADS}`);
+    expect(new Set(byReferrer.postedTo)).toEqual(new Set([BOARD]));
+  });
+
   it("has the board's own call made for it, by path, on the board's hostname", async () => {
     const f = build({ frameOrigin: FRAMES, frameStorage: own() });
     const r = await f.w.fetch(`${FRAMES}${THREADS}`, { method: 'POST', body: '{}' });

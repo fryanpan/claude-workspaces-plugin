@@ -599,7 +599,8 @@ part of `widget.iife.js`. `mock-bridge.ts` runs first in the frame and hands
 the widget's board-bound fetch, WebSocket and EventSource calls to the host.
 `mock-host.ts` is the host page's script: it builds the frame, and it makes a
 call only when `mock-relay-policy.ts` (pure, tested alone) says it is this
-mock's own. It stamps every call it makes with `x-cw-via: mock-frame`, or
+mock's own. `mock-door.ts` (pure, tested alone) puts an app's frame back under
+the host page's door when the app's own address took it outside. The host stamps every call it makes with `x-cw-via: mock-frame`, or
 `cw-via=mock-frame` on a socket. The stamp travels as `via` on the
 comment or answer it writes, and agents read it as "sent from inside the mock
 page". Nothing else changes in the data flow: the calls are the same routes

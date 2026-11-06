@@ -32,7 +32,10 @@
  *    opened (`cfw:seen:<doc>`, `comment-seen-store.ts`) in this page's
  *    `localStorage`, for this doc's key alone and capped, and seeds it into
  *    the next load.
+ * 6. puts an app's frame back under this page's door when the app's own
+ *    address took it outside (`mock-door.ts`).
  */
+import { backInDoor } from './mock-door.ts';
 import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
 import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
 import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
@@ -65,7 +68,7 @@ const SEEN_MAX = 64 * 1024;
 export interface HostEnv {
   script: HTMLScriptElement | null;
   placeholder: HTMLIFrameElement | null;
-  location: { host: string; protocol: string; hash?: string };
+  location: { host: string; protocol: string; hash?: string; pathname?: string };
   storage: () => Pick<Storage, 'getItem'>;
   /** Where the seen record is written: the page's own `localStorage`. */
   keep?: () => Pick<Storage, 'setItem' | 'removeItem'>;
@@ -185,12 +188,18 @@ export function hostMock(env: HostEnv): void {
       body?: ArrayBuffer | null;
       k?: unknown;
       v?: unknown;
+      to?: unknown;
     };
     const port = ev.ports[0];
     if (m?.cw === 'draft') return keepDraft(m.k, m.v);
     if (m?.cw === 'seen') return keepSeen(m.k, m.v);
     if (m?.cw === 'comments-state') return barState(m as { open?: unknown; fresh?: unknown });
     if (m?.cw === 'drafts') return port?.postMessage([...mine]);
+    if (m?.cw === 'frame-left') {
+      const back = backInDoor(frame.src, location.pathname ?? '', m.to);
+      if (back) frame.src = back;
+      return;
+    }
     if (!port || m?.cw !== 'relay' || typeof m.url !== 'string') return;
 
     if (m.kind === 'fetch') {

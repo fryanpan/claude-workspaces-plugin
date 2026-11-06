@@ -30,6 +30,31 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+describe('a frame that left its app door', () => {
+  const DOOR = '/workspaces/w-harbor/apps/d-berths/';
+  const left = (b: ReturnType<typeof build>, to: unknown, source = b.frame?.contentWindow) =>
+    b.hostListener()?.({ source, data: { cw: 'frame-left', to }, ports: [] } as never);
+
+  it('goes back under the door the page holds', () => {
+    const b = build({ pagePath: `${DOOR}insights` });
+    left(b, '/insights?tab=a');
+    expect(new URL(b.frame?.src ?? '').pathname).toBe(`${DOOR}insights`);
+    expect(new URL(b.frame?.src ?? '').search).toBe('?tab=a&cw-frame=1');
+  });
+
+  it('stays where it is for a message from anywhere else, an escape, or a mock', () => {
+    const b = build({ pagePath: `${DOOR}insights` });
+    const before = b.frame?.getAttribute('src');
+    left(b, '/insights', {} as WindowProxy);
+    left(b, '/../d-other/');
+    expect(b.frame?.getAttribute('src')).toBe(before);
+    const mock = build({ pagePath: '/workspaces/w-harbor/mockups/d-moorings' });
+    const was = mock.frame?.getAttribute('src');
+    left(mock, '/insights');
+    expect(mock.frame?.getAttribute('src')).toBe(was);
+  });
+});
+
 describe('the frame is made by the host', () => {
   it("loads the server's frame address, named with the reader's stored name, which the frame then reads", () => {
     expect(h.frame?.getAttribute('src')).toBe('?v=2&cw-frame=1');

@@ -93,8 +93,15 @@ export function installBridge(window: Window & typeof globalThis): void {
   }
   // The page holding this frame. On the board's hostname that is this
   // address's own origin; on the frame-only hostname (`server/src/
-  // frame-host.ts`) it is another one, which the host names in the seed.
-  const boardOrigin = originOf(seed[BOARD_ORIGIN]) ?? here.origin;
+  // frame-host.ts`) it is another one, which the host names in the seed. A
+  // reload of the frame has no seed, because `window.name` was spent on the
+  // first load, so then the browser says who holds it. Firefox has no
+  // `ancestorOrigins`, and there the referrer names the page that framed it.
+  const boardOrigin =
+    originOf(seed[BOARD_ORIGIN]) ??
+    originOf(location.ancestorOrigins?.[0]) ??
+    originOf(document.referrer) ??
+    here.origin;
   delete seed[BOARD_ORIGIN];
 
   /** A URL on this board, or null for anywhere else. */
