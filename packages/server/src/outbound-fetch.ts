@@ -27,7 +27,8 @@
  *    for the purposes named in `LoopbackPurpose`: a dev server attached for
  *    review, and this server calling itself. The host must be written as
  *    loopback (`127.0.0.1`, `localhost`, `[::1]`); nothing is resolved, and it
- *    follows no redirect either.
+ *    follows no redirect either. `loopbackSocket` is the same rule for a
+ *    websocket, which `fetch` cannot open.
  *
  * `bun run check:outbound-fetch` fails on a reference to the global `fetch`
  * anywhere in `packages/server/src` but here. One request it cannot see:
@@ -446,4 +447,20 @@ export function loopbackFetch(purpose: LoopbackPurpose): GuardedFetch {
     }
     return globalThis.fetch(url.href, { ...init, redirect: 'manual' });
   });
+}
+
+/**
+ * A websocket to a loopback origin, for one named purpose. The same rule as
+ * `loopbackFetch`, spelled for the `ws:` scheme. A websocket client follows no
+ * redirect, and this one sends no header the caller did not name.
+ */
+export function loopbackSocket(
+  purpose: LoopbackPurpose,
+  url: URL,
+  protocols: readonly string[],
+): WebSocket {
+  if (url.protocol !== 'ws:' || !LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new OutboundRefused(url.href, 'host', `${url.host} is not loopback (${purpose})`);
+  }
+  return new WebSocket(url.href, [...protocols]);
 }

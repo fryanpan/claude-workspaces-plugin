@@ -662,7 +662,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/apps.ts', [
     ['trusted-local', '/workspaces/:ws/apps', 'POST'],
     ['share-scope', '/workspaces/:ws/apps/:docId', 'GET HEAD'],
-    ['share-scope', '/workspaces/:ws/apps/:docId/*', 'GET HEAD'],
+    [
+      'share-scope',
+      '/workspaces/:ws/apps/:docId/*',
+      'GET HEAD',
+      'A websocket upgrade at this address is answered by `routes/upgrade-stream.ts` through `routes/app-socket.ts`, behind the same gate as the page.',
+    ],
   ]),
 
   ...family('routes/shell-static.ts', [

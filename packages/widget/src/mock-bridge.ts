@@ -252,12 +252,20 @@ export function installBridge(window: Window & typeof globalThis): void {
       // biome-ignore lint/correctness/noConstructorReturn: a socket to anywhere else is the real one
       if (!u) return new NativeWS(url, protocols) as unknown as RelayWS;
       this.url = String(url);
-      const port = open({ kind: 'ws', url: pathOf(u) });
+      const asked = protocols === undefined ? [] : [protocols].flat();
+      const port = open({ kind: 'ws', url: pathOf(u), protocols: asked });
       this.port = port;
       port.onmessage = (e) => {
-        const d = e.data as { t: string; data?: unknown; code?: number; reason?: string };
+        const d = e.data as {
+          t: string;
+          data?: unknown;
+          code?: number;
+          reason?: string;
+          protocol?: string;
+        };
         if (d.t === 'open') {
           this.readyState = 1;
+          this.protocol = d.protocol ?? '';
           emit(this, new Event('open'));
         } else if (d.t === 'msg') {
           const data =
@@ -318,6 +326,12 @@ export function installBridge(window: Window & typeof globalThis): void {
   }
   Object.assign(RelayWS.prototype, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
   window.WebSocket = RelayWS as unknown as typeof WebSocket;
+  // A shared worker has no bridge: its sockets are the browser's own, and
+  // neither this frame's origin nor the frame hostname gets one to the board.
+  // An opaque origin cannot start one at all. So the frame has none, and a
+  // client that looks first runs in the page: Vite's waits for a restarted
+  // dev server in one when it can (client.mjs, `waitForSuccessfulPing`).
+  Reflect.deleteProperty(window, 'SharedWorker');
 
   // --- EventSource ---
   const NativeES = window.EventSource;

@@ -37,7 +37,7 @@
  */
 import { backInDoor } from './mock-door.ts';
 import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
-import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
+import { type RelayScope, relayHeaders, relayProtocols, relayTarget } from './mock-relay-policy.ts';
 import type { PcmCaptureOpts, PcmCaptureStart } from './voice/voice-audio.ts';
 import { micRefusal, startPcmCapture } from './voice/voice-audio.ts';
 
@@ -77,7 +77,7 @@ export interface HostEnv {
   /** Where the frame's drafts are kept: the page's own `sessionStorage`. */
   session: () => Storage;
   fetch: (path: string, init: RequestInit) => Promise<Response>;
-  WebSocket: new (url: string) => WebSocket;
+  WebSocket: new (url: string, protocols?: string[]) => WebSocket;
   EventSource: new (url: string) => EventSource;
   onMessage: (fn: (ev: MessageEvent) => void) => void;
   activated: () => boolean;
@@ -183,6 +183,7 @@ export function hostMock(env: HostEnv): void {
       cw?: string;
       kind?: string;
       url?: string;
+      protocols?: unknown;
       method?: string;
       headers?: [string, string][];
       body?: ArrayBuffer | null;
@@ -234,7 +235,9 @@ export function hostMock(env: HostEnv): void {
         port.postMessage({ t: 'close', code: 1008, reason: 'mock_relay_refused' });
         return;
       }
-      const sock = new env.WebSocket(`${wsBase}${u.pathname}${u.search}`);
+      const url = `${wsBase}${u.pathname}${u.search}`;
+      const protocols = relayProtocols(scope, u, m.protocols);
+      const sock = protocols.length ? new env.WebSocket(url, protocols) : new env.WebSocket(url);
       sock.binaryType = 'arraybuffer';
       // Only the voice socket carries a microphone (`mock-host-mic.ts`).
       const mic = u.pathname.endsWith('/voice')
@@ -246,7 +249,7 @@ export function hostMock(env: HostEnv): void {
             refusal: micRefusal({ name: 'NotAllowedError' }),
           })
         : null;
-      sock.onopen = () => port.postMessage({ t: 'open' });
+      sock.onopen = () => port.postMessage({ t: 'open', protocol: sock.protocol });
       sock.onmessage = (x) => {
         mic?.serverSaid(x.data);
         port.postMessage({ t: 'msg', data: x.data }, x.data instanceof ArrayBuffer ? [x.data] : []);
@@ -258,17 +261,27 @@ export function hostMock(env: HostEnv): void {
         port.close();
       };
       port.onmessage = (x) => {
-        const d = x.data as { t: string; on?: unknown; data?: string | ArrayBuffer | Blob };
+        const d = x.data as {
+          t: string;
+          on?: unknown;
+          data?: string | ArrayBuffer | Blob;
+          code?: number;
+          reason?: string;
+        };
         if (d.t === 'mic') mic?.ask(d.on === true);
         else if (d.t === 'send' && sock.readyState === 1 && d.data !== undefined) {
           if (mic && !mic.passes(d.data)) return;
           sock.send(d.data);
         }
-        // The frame's close code is not passed on: a browser throws on most
-        // of them, and the server has nothing to learn from it.
+        // The frame's close code is passed on where a browser allows one
+        // (1000, 3000-4999): an app's dev server may read it.
         else if (d.t === 'close') {
           mic?.close();
-          sock.close();
+          try {
+            sock.close(d.code, d.reason);
+          } catch {
+            sock.close();
+          }
         }
       };
       return;

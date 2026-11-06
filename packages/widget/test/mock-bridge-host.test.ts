@@ -169,6 +169,30 @@ describe('sockets', () => {
     );
   });
 
+  it("carries an app socket's subprotocol, and its close code, as a framework needs", async () => {
+    const appSocket = new h.w.WebSocket(
+      'ws://harborlight.test:/workspaces/w-harbor/apps/d-moorings/?token=tide',
+      'vite-hmr',
+    );
+    await vi.waitFor(() => expect(HostSocket.made).toHaveLength(1));
+    const sock = HostSocket.made[0] as HostSocket;
+    expect(sock.protocols).toEqual(['vite-hmr']);
+    const u = new URL(sock.url);
+    expect(u.pathname).toBe('/workspaces/w-harbor/apps/d-moorings/');
+    expect(u.searchParams.get('token')).toBe('tide');
+
+    sock.protocol = 'vite-hmr';
+    sock.onopen?.();
+    await vi.waitFor(() => expect(appSocket.readyState).toBe(1));
+    expect(appSocket.protocol).toBe('vite-hmr');
+    appSocket.close(4100, 'tab closed');
+    await vi.waitFor(() => expect(sock.closedWith).toEqual([[4100, 'tab closed']]));
+  });
+
+  it('leaves the frame no shared worker, whose socket would have no bridge', () => {
+    expect('SharedWorker' in h.w).toBe(false);
+  });
+
   it('closes a socket on another doc as refused, and leaves one off the board alone', async () => {
     const ws = new h.w.WebSocket('ws://harborlight.test/workspaces/w-harbor/docs/d-other/y');
     const code = await new Promise((r) => {
