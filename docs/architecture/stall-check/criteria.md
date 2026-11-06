@@ -110,7 +110,9 @@ today's code fails is flagged.
 
 - **Must:** record one verdict per live board per cadence, off the same
   snapshot the wake reads, persisted so a restart resumes the window; expose
-  it on one owner-side route and one log line.
+  it on one owner-side route and one log line; read a stalled row the way the
+  wake does, so a standing declared wait is a `declaredWaits` record and not a
+  FAIL, and a lapsed one is a FAIL.
 - **Must never:** file anything, wake anybody, appear on a board, or be
   reachable by a share visitor.
 - **Measured by:** its own unit tests, and the verdict history itself: a
