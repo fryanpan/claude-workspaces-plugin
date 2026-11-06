@@ -18,7 +18,7 @@
  * read off the server's own store.
  */
 import { type ChildProcess, execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { type Server, connect as netConnect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,17 +84,17 @@ async function buildWidget(dist: string): Promise<void> {
   renameSync(join(dist, 'widget-iife.js'), join(dist, 'widget.iife.js'));
 }
 
-function selfSigned(dir: string): { key: string; cert: string } {
-  const key = join(dir, 'edge.key');
-  const cert = join(dir, 'edge.crt');
-  execFileSync(
+/** One throwaway certificate. Both PEM blocks arrive on stdout, and TLS takes
+ *  from that text the block each field asks for. */
+function selfSigned(): { key: string; cert: string } {
+  const pem = execFileSync(
     'openssl',
-    'req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=edge'
-      .split(' ')
-      .concat(['-keyout', key, '-out', cert]),
-    { stdio: 'ignore' },
+    'req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=edge -keyout /dev/stdout -out /dev/stdout'.split(
+      ' ',
+    ),
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
   );
-  return { key: readFileSync(key, 'utf8'), cert: readFileSync(cert, 'utf8') };
+  return { key: pem, cert: pem };
 }
 
 /** `tailscale serve`: TLS on the tailnet name, bytes through to a local port. */
@@ -179,7 +179,7 @@ async function main(): Promise<void> {
       });
       if (!attached.ok) throw new Error(`attach_app failed: ${attached.status}`);
     }
-    const tls = selfSigned(dir);
+    const tls = selfSigned();
     // The Cloudflare edge for the operator's host: the person is signed in to
     // Access, so every request arrives with the assertion and a `cf-ray`.
     edge = Bun.serve({
