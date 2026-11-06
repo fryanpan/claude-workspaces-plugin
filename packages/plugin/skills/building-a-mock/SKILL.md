@@ -23,6 +23,15 @@ A mock exists so a person can act on it and comment on it. Each step leaves a pr
 4. **Run a UX walk in a subagent**, using the `ux-review` skill as `qa-delegate` describes (team-lead-fleet). Give it the URL, persona and states. A severe finding goes back to step 2.
 5. **Hand off.** **REQUIRED SUB-SKILL:** `claude-workspaces:handing-off-for-review`. Answer on the reader's existing thread on the mock and revise your existing item ("Keep one place to work together" in `claude-workspaces:working-in-a-workspace`). Widget details: `claude-workspaces:embedding-widget`.
 
+## Land tweaks while a person reviews
+
+While a person reviews the mock, one agent answers each comment at once and lands the tweak within about a minute ("Land tweaks within a minute while a person reviews" in `claude-workspaces:working-in-a-workspace`).
+
+- Reply on the thread, then edit the file the mock serves from.
+- Give slower work to background agents, including steps 3 and 4, which run after the tweak lands.
+- If the page runs from a branch, make the tweak in a throwaway worktree off the top of the stack. Port it back into the right branch when the review ends.
+- Load the served mock after each tweak. If live reload does not show the change, treat that as a bug: fix it or report it.
+
 ## Keep the reader's place when a round lands
 
 When you save the file, an open page swaps in the new round without reloading. The frame's query, hash and scroll stay as they were. Your scripts run again from the start, so a reader on an inner screen goes back to the first one unless the mock saves and restores its state:
@@ -58,3 +67,4 @@ When you save the file, an open page swaps in the new round without reloading. T
 | "No time for the render check" | It takes 30 seconds; a mock with no widget costs a round. |
 | "A local screenshot, `observe_url` or a curl 200 proves it" | Only the served route has the widget; `observe_url` is an event stream; a 200 is the host page, not the mock. |
 | "I'll do the UX pass myself" | A builder can't sign off their own work. |
+| "I'll hold this tweak for the next round" | The person is reading now. Land it within a minute. |
