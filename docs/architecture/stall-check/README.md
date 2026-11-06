@@ -80,8 +80,9 @@ so it is named once and then stops driving that clock (`clockRows` in
 `stall-nudge.ts`) until the wait's identity changes — the item held again, a
 second question, or the wait cleared. A task with a standing `declare_wait`
 is not a STALL finding (`withoutStandingWaits` takes it off `stalled` and off
-nothing else): it is never listed as stopped, and rides along on a wake that
-fired for something else only as a declared wait. It can still be a finding
+nothing else, for the wake and the verdict alike): it is never listed as
+stopped, reads PASS, and rides along on a wake that fired for something else
+only as a declared wait. It can still be a finding
 for another reason — an unfiled ask, or a lifted blockage its wait was
 declared BEFORE and so says nothing about — and then the wake it arrives on is
 its own. The tick after the wait lapses it is a stall finding again, carrying
@@ -204,10 +205,19 @@ Approved 2026-09-08, each step one PR, no stopgaps.
 `GET /workspaces/<id>/keep-moving` returns the latest verdict and a week of
 history. Each verdict is PASS or FAIL with the tasks behind it: `stalled`,
 `unfiled`, `unreadable`, `held` (items past the window), `escalated` (items
-the board filed to the owner in the last day) and `ungatedUi` (tasks built past
-the UI gate), plus two RECORDS rather than findings — `waiting`, the tasks a
-filed item excuses, each with the item's address, and `awaitingPerson`, the
-tasks a person owns with nothing on their queue. Neither counts toward FAIL.
+the board filed to the owner in the last day), `ungatedUi` (tasks built past
+the UI gate) and `unresumed` (tasks whose blockage lifted with nothing done
+since), plus three RECORDS rather than findings — `waiting`, the tasks a
+filed item excuses, each with the item's address; `declaredWaits`, the tasks
+off `stalled` while a declared wait stands, each with its words, `since` and
+`until`; and `awaitingPerson`, the tasks a person owns with nothing on their
+queue. None of the three counts toward FAIL.
+
+A declared wait is an agent's claim the board cannot check, so read `since` on
+that line: one declaration lasts at most eight hours, but renewing it keeps
+`since` and keeps the verdict at PASS. The verdict takes the wake's filter
+because of 6 November 2026: all 6 verdicts in 24 hours read FAIL over the same
+4 tasks, each with a standing wait, so a real failure looked like a quiet day.
 The target is PASS on every run and `escalated` at zero. The log line is
 `[keep-moving] ws=<id> verdict=PASS|FAIL …` with the same counts.
 `CW_KEEP_MOVING_HOURS` sets the cadence; the default is four.

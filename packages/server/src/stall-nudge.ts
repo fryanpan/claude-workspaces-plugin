@@ -802,8 +802,9 @@ function parseStamp(stamp: string): {
 }
 
 /**
- * The board as the wake reads it: every STALLED row carrying a declared wait
- * that has not lapsed is taken off `stalled`, and its id handed back.
+ * The board as the wake and the verdict read it: every STALLED row carrying a
+ * declared wait that has not lapsed is taken off `stalled`, and its id handed
+ * back.
  *
  * A standing wait is not a finding. It used to be one: the row stayed on
  * `stalled`, so a board whose only quiet rows were waiting woke its lead once,
@@ -822,7 +823,7 @@ function parseStamp(stamp: string): {
  * `unfiled` is left alone on purpose — see `clockRows` for why a sentence
  * about waiting on something else cannot excuse a question filed nowhere.
  */
-function withoutStandingWaits(board: StallSnapshot): {
+export function withoutStandingWaits(board: StallSnapshot): {
   board: StallSnapshot;
   waited: ReadonlySet<string>;
 } {
@@ -959,7 +960,8 @@ export class StallNudger {
       live.add(snapshot.workspaceId);
       // Both readers below see the board with its declared waits taken off
       // `stalled` — see `withoutStandingWaits`. The snapshot itself is left
-      // whole, because the keep-moving measurement reads it too.
+      // whole: the keep-moving measurement takes the same filter itself, so
+      // that it can also record which rows the filter took.
       const { board, waited } = withoutStandingWaits(snapshot);
       this.forgetWhileWaiting(board.workspaceId, waited);
       // Every reader here sees the same `unfiled` list, because the gate no

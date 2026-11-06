@@ -400,7 +400,8 @@ moves no boundary either. It writes one field on a task — what an agent
 declared the row is waiting on when the thing is NOT on the board, with the
 time the declaration lapses — and the Keep-moving group is its only reader:
 `stall-gate.ts` annotates the rows it names with the declarer's words, and
-`stall-nudge.ts` stops escalating a stalled row while the declaration stands.
+`stall-nudge.ts` stops escalating a stalled row while the declaration stands,
+a filter `keep-moving-verdict.ts` shares so the row does not read as a FAIL.
 The direction is one way, Board written and Keep-moving read, which is why the
 new module sits beside the store rather than inside the group that consumes
 it. Nothing about dispatch changes: a declared wait alters what the wake

@@ -19,7 +19,10 @@
  *
  * What a verdict reads, all from `StallSnapshot`:
  *
- *   stalled     rows that should be moving and are not
+ *   stalled     rows that should be moving and are not, less any row with a
+ *               standing declared wait: the wake does not call that row a
+ *               stall, so neither does this (`withoutStandingWaits`). It is a
+ *               FAIL again on the tick the wait lapses
  *   unfiled     rows whose agent said it waits on a person, with nothing on
  *               that person's queue — an ask the agent can still file
  *   waiting     rows waiting on a person WITH the ask on that person's queue,
@@ -43,7 +46,12 @@
  *               the work was waiting on is already in and nobody read it as
  *               an event
  *
- * And one line that is NOT a finding and may never become one:
+ * And two lines that are NOT findings and may never become ones:
+ *
+ *   declaredWaits  rows off `stalled` because their declared wait stands,
+ *               with its words and its `since`, which survives a renewal, so
+ *               a wait renewed for days reads as days. The wait is an agent's
+ *               claim the board cannot check, so it stays on the record
  *
  *   awaitingPerson  rows the BOARD says a person owns, with nothing on that
  *               person's queue. Nobody has an act to perform: an agent cannot
@@ -65,7 +73,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { FiledItemAddress } from './keep-moving.ts';
-import type { StallSnapshot } from './stall-nudge.ts';
+import { type StallSnapshot, withoutStandingWaits } from './stall-nudge.ts';
 
 /** Default: four hours, the cadence the old report ran on. */
 export const KEEP_MOVING_CADENCE_DEFAULT_MS = 4 * 60 * 60_000;
@@ -90,6 +98,9 @@ export interface KeepMovingVerdict {
   awaitingPerson: string[];
   /** Rows excused by a filed ask, and the address of every ask excusing each. */
   waiting: Array<{ id: string; waitingOn: FiledItemAddress[] }>;
+  /** Rows taken off `stalled` by a standing declared wait — a record, never a
+   *  finding. Absent from a verdict recorded before this line existed. */
+  declaredWaits: Array<{ id: string; what: string; since: number; until: number }>;
   unreadable: string[];
   /** Held review items older than the window — the item ids. */
   held: string[];
@@ -126,7 +137,11 @@ export function keepMovingVerdictFor(
   const held = (snapshot.held ?? [])
     .filter((h) => h.heldMs > opts.heldOverMs)
     .map((h) => h.reviewItemId);
-  const stalled = snapshot.stalled.map((r) => r.id);
+  const { board, waited } = withoutStandingWaits(snapshot);
+  const stalled = board.stalled.map((r) => r.id);
+  const declaredWaits = (snapshot.declaredWaits ?? [])
+    .filter((w) => waited.has(w.id))
+    .map(({ id, what, since, until }) => ({ id, what, since, until }));
   const unfiled = snapshot.unfiled.map((r) => r.id);
   const awaitingPerson = (snapshot.awaitingPerson ?? []).map((r) => r.id);
   const waiting = (snapshot.waiting ?? []).map((r) => ({ id: r.id, waitingOn: [...r.waitingOn] }));
@@ -150,6 +165,7 @@ export function keepMovingVerdictFor(
     unfiled,
     awaitingPerson,
     waiting,
+    declaredWaits,
     unreadable,
     held,
     escalated: opts.escalated,
@@ -201,7 +217,7 @@ export class KeepMovingRecorder {
         `[keep-moving] ws=${verdict.workspaceId} verdict=${verdict.verdict} ` +
           `considered=${verdict.considered} stalled=${verdict.stalled.length} ` +
           `unfiled=${verdict.unfiled.length} awaiting-person=${verdict.awaitingPerson.length} ` +
-          `waiting=${verdict.waiting.length} ` +
+          `waiting=${verdict.waiting.length} declared-waits=${verdict.declaredWaits.length} ` +
           `unreadable=${verdict.unreadable.length} ` +
           `held=${verdict.held.length} escalated=${verdict.escalated} ` +
           `ungated-ui=${verdict.ungatedUi.length} unresumed=${verdict.unresumed.length}`,

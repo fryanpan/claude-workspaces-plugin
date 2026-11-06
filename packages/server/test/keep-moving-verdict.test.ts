@@ -11,7 +11,8 @@ import {
   KeepMovingRecorder,
   keepMovingVerdictFor,
 } from '../src/keep-moving-verdict.ts';
-import type { HeldItemRow, StalledRow } from '../src/stall-gate.ts';
+import type { TaskRow } from '../src/keep-moving.ts';
+import { type HeldItemRow, type StalledRow, evaluateStalls } from '../src/stall-gate.ts';
 import type { StallSnapshot } from '../src/stall-nudge.ts';
 
 const T0 = Date.UTC(2026, 8, 8, 12, 0, 0);
@@ -161,6 +162,122 @@ describe('what a verdict says', () => {
   });
 });
 
+describe('a declared wait and the verdict', () => {
+  const LAPSES_AT = T0 + HOUR;
+
+  /** A task quiet for two hours at T0, on a dispatchable band. */
+  function task(id: string, over: Partial<TaskRow> = {}): TaskRow {
+    return {
+      id,
+      title: `Rebuild the ${id} index`,
+      status: 'in-progress',
+      goal: 'g1',
+      createdAt: T0 - 2 * HOUR,
+      transitions: [{ ts: T0 - 2 * HOUR, to: 'in-progress' }],
+      ownerKind: 'agent',
+      ...over,
+    };
+  }
+
+  function waiting(id: string, until = LAPSES_AT): TaskRow {
+    const externalWait = {
+      what: 'the Riverbend queue to drain',
+      since: T0 - HOUR,
+      declaredAt: T0 - HOUR,
+      until,
+      by: 'Index Keeper',
+    };
+    return task(id, { externalWait });
+  }
+
+  /** The gate's own reading of the rows, shaped the way the wiring shapes it,
+   *  so a lapse is decided by `until` and never set by the test. */
+  function gated(tasks: TaskRow[], now: number): StallSnapshot {
+    const verdict = evaluateStalls({
+      tasks,
+      events: [],
+      reviewItems: [],
+      bands: { dispatchable: new Set(['g1']), ownerBand: new Set(['decisions']) },
+      now,
+    });
+    return board('w-1', {
+      stalled: verdict.stalled,
+      unfiled: verdict.unfiled,
+      declaredWaits: verdict.declaredWaits,
+      considered: verdict.considered,
+      undetermined: verdict.undetermined,
+    });
+  }
+
+  it('is PASS when every stalled row carries a standing wait, and records the waits', () => {
+    const snapshot = gated([waiting('t-a'), waiting('t-b')], T0);
+    // The control: the gate did read both rows as stalled, so a PASS here is
+    // the verdict excusing them rather than the fixture being too young.
+    expect(snapshot.stalled.map((r) => r.id).sort()).toEqual(['t-a', 't-b']);
+
+    const v = keepMovingVerdictFor(snapshot, T0, quiet);
+    expect(v.verdict).toBe('PASS');
+    expect(v.stalled).toEqual([]);
+    expect(v.declaredWaits.map((w) => w.id).sort()).toEqual(['t-a', 't-b']);
+    expect(v.declaredWaits[0]).toMatchObject({
+      what: 'the Riverbend queue to drain',
+      since: T0 - HOUR,
+      until: LAPSES_AT,
+    });
+  });
+
+  it('is FAIL on the tick the wait lapses, naming the row', () => {
+    const tasks = [waiting('t-a')];
+    expect(keepMovingVerdictFor(gated(tasks, LAPSES_AT - 1), LAPSES_AT - 1, quiet).verdict).toBe(
+      'PASS',
+    );
+
+    const v = keepMovingVerdictFor(gated(tasks, LAPSES_AT), LAPSES_AT, quiet);
+    expect(v).toMatchObject({ verdict: 'FAIL', stalled: ['t-a'], declaredWaits: [] });
+  });
+
+  it('is FAIL for a wait whose lapse time cannot be read', () => {
+    const v = keepMovingVerdictFor(gated([waiting('t-a', Number.NaN)], T0), T0, quiet);
+    expect(v).toMatchObject({ verdict: 'FAIL', stalled: ['t-a'], declaredWaits: [] });
+  });
+
+  it('is FAIL for a stalled row beside a waiting one, and names only that row', () => {
+    const v = keepMovingVerdictFor(gated([waiting('t-a'), task('t-b')], T0), T0, quiet);
+    expect(v).toMatchObject({ verdict: 'FAIL', stalled: ['t-b'] });
+    expect(v.declaredWaits.map((w) => w.id)).toEqual(['t-a']);
+  });
+
+  it('excuses no finding but the stall: an unfiled row with a standing wait is FAIL', () => {
+    const wait = {
+      id: 't-a',
+      title: 'row t-a',
+      what: 'the Riverbend queue to drain',
+      since: T0 - HOUR,
+      until: LAPSES_AT,
+      by: 'Index Keeper',
+    };
+    const v = keepMovingVerdictFor(
+      board('w-1', { unfiled: [row('t-a', 'waiting-unfiled')], declaredWaits: [wait] }),
+      T0,
+      quiet,
+    );
+    expect(v).toMatchObject({ verdict: 'FAIL', unfiled: ['t-a'], declaredWaits: [] });
+  });
+
+  it('counts the waits on the log line', () => {
+    const lines: string[] = [];
+    const r = new KeepMovingRecorder({
+      cadenceMs: CADENCE,
+      escalatedSince: () => 0,
+      say: (l) => lines.push(l),
+    });
+    r.observe([gated([waiting('t-a')], T0)], T0);
+    expect(lines[0]).toContain('verdict=PASS');
+    expect(lines[0]).toContain('stalled=0');
+    expect(lines[0]).toContain('declared-waits=1');
+  });
+});
+
 describe('once per board per cadence, and no more', () => {
   const recorder = () =>
     new KeepMovingRecorder({ cadenceMs: CADENCE, escalatedSince: () => 0, say: () => {} });
@@ -223,7 +340,7 @@ describe('once per board per cadence, and no more', () => {
     });
     r.observe([board('w-1', { stalled: [row('t-a')], unfiled: [row('t-b')] })], T0);
     expect(lines).toEqual([
-      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 awaiting-person=0 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0 unresumed=0',
+      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 awaiting-person=0 waiting=0 declared-waits=0 unreadable=0 held=0 escalated=0 ungated-ui=0 unresumed=0',
     ]);
   });
 });
