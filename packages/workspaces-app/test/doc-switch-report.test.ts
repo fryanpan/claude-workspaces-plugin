@@ -76,6 +76,24 @@ describe('a file switch in a diff', () => {
     expect(calls[0]?.body.msToMount).toBeLessThan(320);
   });
 
+  it('waits for a surface that finishes drawing after its mount', async () => {
+    const report = loadedPage();
+    report.navigated();
+    const next = mountOf('diff');
+    let drawn: () => void = () => {};
+    next.ctx.contentDrawn = new Promise((resolve) => {
+      drawn = resolve;
+    });
+    report.mounted(next.ctx);
+    next.sync();
+    await vi.advanceTimersByTimeAsync(700);
+    expect(calls).toHaveLength(0);
+    drawn();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body.msToContent).toBeGreaterThanOrEqual(700);
+  });
+
   it('reports each switch, not only the first', () => {
     const report = loadedPage();
     for (let i = 0; i < 3; i++) {

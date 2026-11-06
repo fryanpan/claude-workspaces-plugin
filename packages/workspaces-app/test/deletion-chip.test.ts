@@ -98,3 +98,19 @@ describe('live markup — mobile deletion chip decoration', () => {
     expect(chip.dataset.lfDelText).toContain('Secret gone text.');
   });
 });
+
+describe('waiting for the markup', () => {
+  it('resolves once the scheduled comparison has landed', async () => {
+    const { surface } = mount('Alpha.\n\nRemoved paragraph.\n\nBravo.\n', 'Alpha.\n\nBravo.\n', 20);
+    expect(surface.getDeletions()).toHaveLength(0);
+    await surface.nextMarkup();
+    expect(surface.getDeletions()).toHaveLength(1);
+  });
+
+  it('resolves with nothing scheduled, so a doc that never changes cannot hold it', async () => {
+    const { surface } = mount('Alpha.\n', 'Alpha.\n', 0);
+    await tick();
+    await surface.nextMarkup();
+    expect(surface.getDeletions()).toHaveLength(0);
+  });
+});

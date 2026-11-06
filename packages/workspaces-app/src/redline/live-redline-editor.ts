@@ -30,6 +30,9 @@ export interface LiveRedlineSurface extends ReviewSurface {
   getDeletions: () => RedlineDeletion[];
   /** Force a synchronous markup recompute (bypasses the debounce). */
   refresh: () => void;
+  /** Resolves when the recompute now scheduled has landed, or, when none is
+   *  scheduled, once its debounce has passed with nothing landing. */
+  nextMarkup: () => Promise<void>;
   /** The underlying Tiptap handle — the mount uses it for doc inspection. */
   handle: EditorHandle;
 }
@@ -63,7 +66,14 @@ export interface CreateLiveRedlineEditorOpts {
   editable?: boolean;
 }
 
+/** Past the debounce, how long `nextMarkup` waits for a recompute. Timers run
+ *  in due order, so a scheduled recompute always runs first, however long it
+ *  takes. */
+const MARKUP_WAIT_SLACK_MS = 100;
+
 export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): LiveRedlineSurface {
+  const debounceMs = opts.debounceMs ?? 300;
+  const markupWaiters: Array<() => void> = [];
   // The live side is the serializer's output, which pads table cells and
   // rewrites delimiter rows. Diff against the base in that same form, or a
   // hand-written table reads as replaced whenever anything else changed.
@@ -82,7 +92,10 @@ export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): Live
         baseText,
         isAdded: opts.isAdded ?? false,
         ydoc: opts.ydoc,
-        debounceMs: opts.debounceMs ?? 300,
+        debounceMs,
+        onMarkup: () => {
+          for (const resolve of markupWaiters.splice(0)) resolve();
+        },
       }),
     ],
   });
@@ -102,6 +115,11 @@ export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): Live
         : computeLiveMarkup(baseText, state.doc, getProseFragment(opts.ydoc));
       view.dispatch(state.tr.setMeta(liveMarkupKey, result));
     },
+    nextMarkup: () =>
+      new Promise((resolve) => {
+        markupWaiters.push(resolve);
+        setTimeout(resolve, debounceMs + MARKUP_WAIT_SLACK_MS);
+      }),
     destroy: () => handle.destroy(),
     handle,
   };

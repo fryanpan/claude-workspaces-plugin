@@ -37,7 +37,7 @@ function setIgnoreWhitespacePref(on: boolean): void {
 
 /** Resolves at the doc's first sync, or once its socket has closed, so a doc
  *  with no connection still mounts on whatever it holds. */
-function contentArrived(client: MountContext['client']): Promise<void> {
+export function contentArrived(client: MountContext['client']): Promise<void> {
   return new Promise((resolve) => {
     client.onReady(resolve);
     client.onStatus((status) => {

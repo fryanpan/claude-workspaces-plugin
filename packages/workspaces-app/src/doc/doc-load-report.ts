@@ -20,7 +20,8 @@
  * the page load report. Each one is timed from the click to the same stamp: its
  * mount done AND its ydoc synced, on the next frame. A diff mounts only after
  * its first sync and first diff (`code-app.ts`), so the main thread's time is
- * inside the number.
+ * inside the number. A redline finishes after its mount, so it hands over
+ * `ctx.contentDrawn` and the stamp waits for that too.
  */
 import type { MountContext } from '../mount-context.ts';
 import {
@@ -70,10 +71,14 @@ export function startDocLoadReport(boardId: string | null): DocLoadReport {
         fileSwitch = null;
       } else if (clock) {
         clock.mounted();
-        ctx.client.onReady(() => {
+        const show = (): void => {
           if (ctx.scope.disposed || fileSwitch !== clock) return;
           fileSwitch = null;
           clock.contentShown();
+        };
+        ctx.client.onReady(() => {
+          if (ctx.contentDrawn) void ctx.contentDrawn.then(show);
+          else show();
         });
       }
       const report = pending;
