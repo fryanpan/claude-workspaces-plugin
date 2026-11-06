@@ -1,5 +1,12 @@
 import { type Thread, threadRenderKey } from '@claude-workspaces/core';
-import { type KeptAnswerField, keptAnswerFields, restoreAnswerFields } from './composer-keep.ts';
+import {
+  type KeptAnswerField,
+  type KeptComposerFocus,
+  keptAnswerFields,
+  keptComposerFocus,
+  restoreAnswerFields,
+  restoreComposerFocus,
+} from './composer-keep.ts';
 import { anchoredThreads } from './doc/resolved-visibility.ts';
 import { focusMarkdownComposer } from './md-composer.ts';
 import type { InlineThreadCard, ReviewSurface } from './review-surface.ts';
@@ -147,6 +154,11 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     // Answer fields carried out of cards rebuilt below; focus can only go back
     // once the new card is in the document, after `setInlineCards`.
     const keptAnswers: Array<{ el: HTMLElement; kept: KeptAnswerField[] }> = [];
+    // The same for the caret. A new comment on the thread being typed in
+    // rebuilds this card, and a focused box leaving the document drops focus
+    // to `body`: the words already typed stayed, and every key after them went
+    // nowhere (a reply cut off at "And then", 2026-11-04).
+    let keptFocus: { el: HTMLElement; kept: KeptComposerFocus } | null = null;
     for (const t of list) {
       const r = opts.resolveRange(t.id);
       if (!r) continue;
@@ -159,8 +171,10 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
         // reason: someone else's reply must not wipe what you were typing.
         const draft = entry?.el.querySelector<HTMLTextAreaElement>('textarea')?.value;
         const answers = entry ? keptAnswerFields(entry.el) : [];
+        const focus = entry ? keptComposerFocus(entry.el) : null;
         const el = opts.renderCard(t, draft || undefined);
         if (answers.length > 0) keptAnswers.push({ el, kept: answers });
+        if (focus) keptFocus = { el, kept: focus };
         el.classList.add('cw-inline-card');
         // A widget decoration is outside the document's content model, but
         // nothing stops native editing INSIDE the injected DOM unless the
@@ -186,6 +200,7 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     // are actually in the document, or every inline card renders as a header
     // and a footer with nothing between them.
     for (const c of cards) if (c.el.isConnected) sizeThreadSlots(c.el);
+    if (keptFocus?.el.isConnected) restoreComposerFocus(keptFocus.el, keptFocus.kept);
   }
 
   function centreCard(el: HTMLElement): void {
