@@ -72,9 +72,12 @@ import { wireBoardShortcuts } from './board-shortcuts.ts';
 import { createTaskDetailLoads } from './board-task-detail.ts';
 import {
   type BoardLocation,
+  type BoardSettingsPlace,
   buildBoardUrl,
   goalShareUrl,
   historyStep,
+  libraryHref,
+  libraryPlaceOf,
   parseBoardLocation,
   resourceOf,
   taskShareUrl,
@@ -425,6 +428,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     location,
   });
 
+  /** Where settings is open, once its view exists (`settingsView`, below). */
+  let settingsPlace = (): BoardSettingsPlace | null => null;
   /** The board state the URL names, read whole. `renderDetail`'s task-wins
    *  rule and the walkthrough's "-1 means closed" are folded in here so the
    *  address never claims a panel the screen is not showing. */
@@ -437,6 +442,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       thread: panel ? state.detailThreadId : null,
       item: state.walkIndex >= 0 ? state.walkKey : null,
       archived: state.showArchived,
+      tab: state.detailTaskId && state.detailTab === 'activity' ? 'activity' : null,
+      settings: settingsPlace(),
     };
   }
 
@@ -454,6 +461,9 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
    * rewrites to the clean board URL instead. (`?task=` was replaceState-only
    * for exactly that fear; the marker is what makes push safe.)
    */
+  /** Told when the address names a new place; the room hears it. Assigned
+   *  once the presence wiring exists, below. */
+  let addressMoved: () => void = () => {};
   function syncBoardUrl(): void {
     // While popstate applies an entry, the URL is the input, not the output.
     // While a boot ?item= waits for its queue, the renders that have not
@@ -473,6 +483,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     } else if (url !== here) {
       history.replaceState(history.state, '', url);
     }
+    addressMoved();
   }
 
   /**
@@ -486,7 +497,9 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     try {
       setNav(loc.nav, false);
       setShowArchived(loc.archived);
+      showSettingsAt(loc.settings);
       state.detailTaskId = loc.task;
+      state.detailTab = loc.tab ?? 'comments';
       state.detailGoalId = loc.goal;
       state.detailThreadId = loc.thread;
       if (loc.item) {
@@ -504,7 +517,11 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       applyingHistory = false;
     }
     urlLoc = loc;
+    addressMoved();
   }
+
+  /** Open or close the settings page as an address says. Assigned with it. */
+  let showSettingsAt: (place: BoardSettingsPlace | null) => void = () => {};
 
   // ── The Home pane ───────────────────────────────────────────────────────
   const { renderHomeRegion, loadHome } = createBoardHomeRegion({
@@ -529,7 +546,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     send,
     navigate: (href) => location.assign(href),
     history,
-    here: () => location.href,
+    here: (list, place) => libraryHref(location.href, list, place),
+    requestedPlace: () => libraryPlaceOf(location.search),
     takeRequestedOpen: () => {
       const url = new URL(location.href);
       const wanted = url.searchParams.get('open');
@@ -784,7 +802,16 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     membersChanged: () => membersChanged?.(),
     estimatesChanged: () => estimatesChanged?.(),
     location,
+    // A followed spot on this board: the place it names, as Back would.
+    showPath: (path) => {
+      if (`${location.pathname}${location.search}` !== path) history.pushState(null, '', path);
+      pendingBootItem = null;
+      pendingBootGoal = null;
+      bootThreadPending = false;
+      applyHistoryLocation();
+    },
   });
+  addressMoved = live.moved;
 
   // Controls.
   // Home / Tasks / Library / Activity — pushState every way, and the back
@@ -844,18 +871,21 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     onClose: () => {
       state.settingsOpen = false;
       renderSettingsPanel();
+      syncBoardUrl();
     },
     onNav: (nav) => {
       state.settingsOpen = false;
       renderSettingsPanel();
       setNav(nav);
     },
+    onType: () => syncBoardUrl(),
   });
+  settingsPlace = () => (state.settingsOpen ? (settingsView.type() ?? 'list') : null);
   // A width change between the two bands must not strand a reader on a pane
   // whose nav has just gone — the subnav is drawn on one band and the row
   // list on the other.
   narrowBand?.addEventListener('change', () => settingsView.bandChanged());
-  ({ membersChanged, estimatesChanged } = wireBoardSettingsPanel({
+  const settingsPanel = wireBoardSettingsPanel({
     document,
     el,
     workspaceId,
@@ -867,12 +897,28 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     isOpen: () => state.settingsOpen,
     setOpen: (open) => {
       state.settingsOpen = open;
+      if (!open) syncBoardUrl();
     },
     renderSettingsPanel,
-    onOpen: () => settingsView.open(),
+    onOpen: () => {
+      settingsView.open();
+      syncBoardUrl();
+    },
     href: () => location.href,
     estimatesShown: () => estimatesShown(state.info),
-  }));
+  });
+  ({ membersChanged, estimatesChanged } = settingsPanel);
+  showSettingsAt = (place) => {
+    if (!place) {
+      if (!state.settingsOpen) return;
+      state.settingsOpen = false;
+      renderSettingsPanel();
+      return;
+    }
+    settingsPanel.openSettings();
+    settingsView.show(place === 'list' ? null : place);
+  };
+  if (bootLoc.settings) showSettingsAt(bootLoc.settings);
 
   // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
   leadChat = mountLeadChat({

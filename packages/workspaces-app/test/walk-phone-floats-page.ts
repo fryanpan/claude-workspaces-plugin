@@ -204,6 +204,8 @@ async function paint(queue: ReviewItem[]) {
     thread: null,
     item: null,
     archived: false,
+    tab: null,
+    settings: null,
   });
   state.secretsGate = 'open';
   const currentQueue = (): ReviewQueue => ({ items, total: items.length, blocking: 0 });

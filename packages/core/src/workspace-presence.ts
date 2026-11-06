@@ -26,14 +26,22 @@ export const PERSON_SPOT_FIELD = 'spot';
 /** The server's record of where each agent pointed, keyed by agent id. */
 export const AGENT_SPOTS_FIELD = 'agentSpots';
 
-/** Which kind of page a spot is on. */
-export type SpotSurface = 'board' | 'doc' | 'whiteboard';
+/** Which kind of page a spot is on. A mock is a doc that opens on its own
+ *  host page (`/workspaces/<ws>/mockups/<id>`), not the doc page, and so
+ *  does an app, whose spot also carries the page of it as `path`. */
+export type SpotSurface = 'board' | 'doc' | 'whiteboard' | 'mock';
 
 /**
  * One place in the workspace. `docId` names the page (absent on the board);
  * at most one of the rest names the place on it: a block of a doc (the
  * planning voice's `agentFocus` shape — `blockId` and the words), a thread,
- * or a point on a whiteboard's canvas.
+ * a point on a whiteboard's canvas, or a phrase alone (`quote`, found by
+ * its words).
+ *
+ * Two more ride beside any of those. `path` is the page's own address, path
+ * and query, for a page `docId` cannot name: a board tab, a task or goal
+ * panel, a review item, a page of an app. `scroll` is how far down the page the
+ * view is, from 0 (top) to 1 (bottom), for a page with no block to name.
  */
 export interface PresenceSpot {
   surface: SpotSurface;
@@ -43,6 +51,8 @@ export interface PresenceSpot {
   threadId?: string;
   x?: number;
   y?: number;
+  path?: string;
+  scroll?: number;
 }
 
 /** An agent's spot: where it pointed, and a counter that grows per point. */
@@ -51,7 +61,11 @@ export interface AgentSpot extends PresenceSpot {
   seq: number;
 }
 
-const SURFACES = new Set<SpotSurface>(['board', 'doc', 'whiteboard']);
+const SURFACES = new Set<SpotSurface>(['board', 'doc', 'whiteboard', 'mock']);
+/** A path on this origin, with its query: no scheme, no `//` host, no `..`,
+ *  no backslash. Which paths a follower may open is `spotHref`'s decision. */
+const PATH = /^\/(?![/\\])[A-Za-z0-9/_.~:?=&%+-]{0,400}$/;
+const QUOTE_MAX = 500;
 /** Ids here are doc, block and thread ids: short, no control characters. */
 const ID = /^[A-Za-z0-9:_.~-]{1,200}$/;
 const finite = (v: unknown): v is number =>
@@ -73,13 +87,19 @@ export function parseSpot(raw: unknown): PresenceSpot | null {
   }
   if (typeof r.blockId === 'string' && ID.test(r.blockId)) {
     out.blockId = r.blockId;
-    if (typeof r.quote === 'string') out.quote = r.quote.slice(0, 500);
+    if (typeof r.quote === 'string') out.quote = r.quote.slice(0, QUOTE_MAX);
   } else if (typeof r.threadId === 'string' && ID.test(r.threadId)) {
     out.threadId = r.threadId;
   } else if (finite(r.x) && finite(r.y)) {
     out.x = r.x;
     out.y = r.y;
+  } else if (typeof r.quote === 'string' && r.quote.trim()) {
+    out.quote = r.quote.slice(0, QUOTE_MAX);
   }
+  if (typeof r.path === 'string' && PATH.test(r.path) && !r.path.includes('..')) {
+    out.path = r.path;
+  }
+  if (typeof r.scroll === 'number' && r.scroll >= 0 && r.scroll <= 1) out.scroll = r.scroll;
   return out;
 }
 

@@ -1316,7 +1316,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDoc: (docId) => boardsForDoc(docId),
     boardAwareness: (workspaceId) =>
       docStore.peek(workspaceDocId(workspaceId))?.peekAwareness() ?? null,
-    surfaceOf: (docId) => (docStore.peekMeta(docId)?.type === 'whiteboard' ? 'whiteboard' : 'doc'),
     listening: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
   });
   {
@@ -1331,7 +1330,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     onLiveDocEvent = (docId, payload) => {
       stallDocEvent(docId, payload);
       leadRanks.onDocEvent(docId, payload);
-      agentSpots.onDocEvent(docId, payload);
     };
   }
   // One queue over every board, in project order, and the ledger that records
@@ -3137,6 +3135,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    agentSpots,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
     leadDiffRepo: (boardId, repo) => {
       const c = boardSocketRoots.containedOf(repo);

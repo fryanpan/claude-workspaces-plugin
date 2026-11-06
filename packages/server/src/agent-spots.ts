@@ -1,21 +1,20 @@
 /**
  * Where each agent is pointing, in the workspace's presence room.
  *
- * An agent's presence is the spot it chose to point at by a verb, never its
- * last edit (Bryan, 15 Oct; `@claude-workspaces/core/workspace-presence`).
- * Two verbs point today:
+ * An agent's presence is only where it directs its followers, never where it
+ * is working (Bryan, 2026-11-04; `@claude-workspaces/core/workspace-presence`).
+ * An agent can be busy in many places at once, so its comments and edits move
+ * nobody. Three verbs point:
  *
- *  - a comment — `create_thread` / `post_reply`, any door that ends in a
- *    `thread.created` or `thread.replied` an agent wrote. A comment is how an
- *    agent says "this", so it is where the agent is.
+ *  - `point_at` (`routes/workspace-point.ts`): any page of one board, a
+ *    thread, or a place in a doc or mock, with nothing written.
  *  - a whiteboard `point` (`routes/whiteboard-routes.ts`), which also moves
  *    the canvas's own pointer.
  *  - the planning voice's cursor (`agentFocus`, `spoken-reply/interview-docs.ts`),
  *    the words it is asking about.
  *
- * Every edit verb — find-and-replace, block edits, a drawing without `point`
- * — goes through none of this, which is what "its edits elsewhere draw
- * nothing" means in code.
+ * Every other verb — a comment, find-and-replace, block edits, a drawing
+ * without `point` — goes through none of this.
  *
  * The record is kept here, per board, and published as the server's own
  * awareness state on the board doc (`ws:<id>`) under `AGENT_SPOTS_FIELD`,
@@ -24,7 +23,6 @@
  * published to when its room next opens (`restore`), so a follower who
  * arrives after the agent pointed still finds it.
  */
-import type { WebhookPayload } from '@claude-workspaces/core';
 import {
   AGENT_SPOTS_FIELD,
   type AgentSpot,
@@ -32,41 +30,11 @@ import {
 } from '@claude-workspaces/core/workspace-presence';
 import type * as awarenessProtocol from 'y-protocols/awareness';
 
-/** What an agent is, for this module: the one shape that fails closed. */
-export function isAgentAuthorId(id: unknown): id is string {
-  return typeof id === 'string' && (id.startsWith('agent-') || id === 'known-agent');
-}
-
-/** The spot a thread event points at, when an agent wrote its comment. */
-export function spotFromThreadEvent(
-  payload: WebhookPayload,
-  surfaceOf: (docId: string) => PresenceSpot['surface'],
-): { agentId: string; spot: PresenceSpot & { name: string } } | null {
-  const p = payload as {
-    event?: string;
-    docId?: string;
-    threadId?: string;
-    comment?: { author?: { id?: unknown; name?: unknown } };
-    thread?: { comments?: Array<{ author?: { id?: unknown; name?: unknown } }> };
-  };
-  if (p.event !== 'thread.created' && p.event !== 'thread.replied') return null;
-  // A created frame carries no `comment`: the opener is the thread's first.
-  const author = p.comment?.author ?? p.thread?.comments?.[0]?.author;
-  if (!p.docId || !p.threadId || !isAgentAuthorId(author?.id)) return null;
-  const name = typeof author?.name === 'string' && author.name ? author.name : author.id;
-  return {
-    agentId: author.id,
-    spot: { surface: surfaceOf(p.docId), docId: p.docId, threadId: p.threadId, name },
-  };
-}
-
 export interface AgentSpotsDeps {
   /** The boards a doc is filed on. */
   boardsForDoc: (docId: string) => Iterable<string>;
   /** The board doc's awareness, if the board doc is resident; never hydrates. */
   boardAwareness: (workspaceId: string) => awarenessProtocol.Awareness | null;
-  /** What kind of page a doc opens as. */
-  surfaceOf: (docId: string) => PresenceSpot['surface'];
   /** Whether the agent holds its event stream on the board right now. */
   listening: (workspaceId: string, agentId: string) => boolean;
 }
@@ -83,8 +51,9 @@ export interface AgentSpots {
     spot: (PresenceSpot & { name: string }) | null,
     opts?: { held?: boolean },
   ): void;
-  /** The doc-event hook: an agent's comment is a point. */
-  onDocEvent(docId: string, payload: WebhookPayload): void;
+  /** Point `agentId` at a spot on one board: a board page, or a doc filed
+   *  on it. */
+  pointOn(workspaceId: string, agentId: string, spot: PresenceSpot & { name: string }): void;
   /** A board's room opened: publish what its agents last pointed at. */
   restore(workspaceId: string, awareness: awarenessProtocol.Awareness): void;
   /** An agent's stream opened or closed on a board: its spot shows or goes. */
@@ -109,25 +78,28 @@ export function createAgentSpots(deps: AgentSpotsDeps): AgentSpots {
     );
     awareness.setLocalStateField(AGENT_SPOTS_FIELD, Object.fromEntries(present));
   };
+  const pointOn = (
+    workspaceId: string,
+    agentId: string,
+    spot: (PresenceSpot & { name: string }) | null,
+    opts?: { held?: boolean },
+  ): void => {
+    const spots = latest.get(workspaceId) ?? new Map<string, AgentSpot>();
+    const prev = spots.get(agentId)?.seq ?? 0;
+    if (spot) spots.set(agentId, { ...spot, seq: prev + 1 });
+    else spots.delete(agentId);
+    if (opts?.held && spot) held.add(heldKey(workspaceId, agentId));
+    else if (opts?.held) held.delete(heldKey(workspaceId, agentId));
+    latest.set(workspaceId, spots);
+    const awareness = deps.boardAwareness(workspaceId);
+    if (awareness) publish(workspaceId, awareness);
+  };
   const point: AgentSpots['point'] = (docId, agentId, spot, opts) => {
-    for (const workspaceId of deps.boardsForDoc(docId)) {
-      const spots = latest.get(workspaceId) ?? new Map<string, AgentSpot>();
-      const prev = spots.get(agentId)?.seq ?? 0;
-      if (spot) spots.set(agentId, { ...spot, seq: prev + 1 });
-      else spots.delete(agentId);
-      if (opts?.held && spot) held.add(heldKey(workspaceId, agentId));
-      else if (opts?.held) held.delete(heldKey(workspaceId, agentId));
-      latest.set(workspaceId, spots);
-      const awareness = deps.boardAwareness(workspaceId);
-      if (awareness) publish(workspaceId, awareness);
-    }
+    for (const workspaceId of deps.boardsForDoc(docId)) pointOn(workspaceId, agentId, spot, opts);
   };
   return {
     point,
-    onDocEvent(docId, payload) {
-      const hit = spotFromThreadEvent(payload, deps.surfaceOf);
-      if (hit) point(docId, hit.agentId, hit.spot);
-    },
+    pointOn: (workspaceId, agentId, spot) => pointOn(workspaceId, agentId, spot),
     streamsChanged(workspaceId) {
       const awareness = latest.has(workspaceId) ? deps.boardAwareness(workspaceId) : null;
       if (awareness) publish(workspaceId, awareness);

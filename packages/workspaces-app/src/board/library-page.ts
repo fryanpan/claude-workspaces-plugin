@@ -53,9 +53,11 @@ export interface LibraryPageDeps {
   ) => Promise<{ ok: boolean; status: number; data: Record<string, unknown> | null }>;
   /** Go to a page — `location.assign` in the browser. */
   navigate: (href: string) => void;
-  history: Pick<BootHistory, 'pushState' | 'back' | 'state'>;
-  /** The page's own address, for the history entry "See all" pushes. */
-  here: () => string;
+  history: Pick<BootHistory, 'pushState' | 'replaceState' | 'back' | 'state'>;
+  /** The page's own address at an inner page: a full list, or one location. */
+  here: (list: string | null, place: string | null) => string;
+  /** The inner page the address names when the page arrives. */
+  requestedPlace?: () => { list: string | null; place: string | null };
   /**
    * A file the address asks to open (`?open=<path>`, how a run-output item on
    * Home links a file), taken off the address so Back does not open it again.
@@ -355,23 +357,29 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     }
     const more = target.closest<HTMLElement>('.library-more');
     if (more) {
-      // A history entry of its own, on the same address: Back (or a phone's
-      // back swipe) then lands on the Library front page, because arriving
-      // at the Library always shows it.
-      deps.history.pushState({ libraryList: more.dataset.list }, '', deps.here());
-      showList(more.dataset.list === 'files' ? 'files' : 'meetings');
+      // A history entry of its own: Back (or a phone's back swipe) lands on
+      // the Library front page, and the address names the list, so a reload
+      // or a shared link opens it.
+      const which = more.dataset.list === 'files' ? 'files' : 'meetings';
+      deps.history.pushState({ libraryList: which }, '', deps.here(which, null));
+      showList(which);
       return;
     }
     const at = target.closest<HTMLElement>('.library-place[data-place]');
     if (at) {
-      deps.history.pushState({ libraryPlace: at.dataset.place }, '', deps.here());
+      const where = at.dataset.place ?? null;
+      deps.history.pushState({ libraryPlace: where }, '', deps.here(null, where));
       showList('main', at.dataset.place ?? null);
       return;
     }
     if (target.closest('.library-back')) {
       const state = deps.history.state as { libraryList?: string; libraryPlace?: string } | null;
-      if (state?.libraryList || state?.libraryPlace) deps.history.back();
-      else showList('main');
+      if (state?.libraryList || state?.libraryPlace) {
+        deps.history.back();
+      } else {
+        deps.history.replaceState(null, '', deps.here(null, null));
+        showList('main');
+      }
       return;
     }
     const row = target.closest<HTMLAnchorElement>('.library-row[data-open]');
@@ -405,8 +413,10 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       // Read before the first await: the board rewrites its address as it
       // boots, and the question would be gone by the time the list arrived.
       const wanted = deps.takeRequestedOpen?.() ?? null;
-      list = 'main';
-      place = null;
+      // The inner page the address names, or the front page.
+      const at = deps.requestedPlace?.() ?? { list: null, place: null };
+      list = at.list === 'files' || at.list === 'meetings' ? at.list : 'main';
+      place = at.place;
       render();
       const next = await deps.fetchJson<LibraryPayload>(`${base}/items`);
       failed = next === null;

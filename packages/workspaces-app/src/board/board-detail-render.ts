@@ -457,6 +457,8 @@ export interface DetailHandlers {
    * nothing is worse than its absence.
    */
   onCopyLink?: (task: BoardTask) => void;
+  /** The reader switched tabs: the address names the one open. */
+  onTabChange?: (tab: 'comments' | 'activity') => void;
   /**
    * Set when the open task is a human-owned open task other work waits on —
    * the row `humanBlockerRows` derives for it, handed down by the app. The

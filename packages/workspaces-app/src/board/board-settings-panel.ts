@@ -77,6 +77,8 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   membersChanged(): void;
   /** The board doc moved: repaint the Show estimates row from it. */
   estimatesChanged(): void;
+  /** Open the page, as its button does. */
+  openSettings(): void;
 } {
   const { document, el, workspaceId, author, user, fetchJson, send, showToast } = deps;
   /**
@@ -349,5 +351,6 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       if (deps.isOpen()) void members.changed();
     },
     estimatesChanged: () => showEstimates.paint(deps.estimatesShown()),
+    openSettings,
   };
 }

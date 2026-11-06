@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.351";
+var version2 = "0.1.352";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -16718,6 +16718,42 @@ var TOOL_LIST = {
           }
         },
         required: ["workspaceId", "queueId", "text"]
+      }
+    },
+    {
+      name: "point_at",
+      description: "Point anyone following you at a place on the board, and write nothing there: no comment, no edit. Name exactly one place: path (a page of the board, relative to it, such as 'home', 'library', 'activity', 'home?item=<review item key>', '?task=<id>&tab=activity', 'library?list=files', '?settings=notifications', or '/review' for the review queue and '/' for the workspaces list), taskId or goalId (its panel, at threadId when given), or docId (a doc, mock, app, diff or folder file on the board, at threadId, blockId, a phrase in quote, or scroll from 0 for the top to 1 for the bottom; x and y on a whiteboard). Use it to show the person you are talking to what you mean, before or while you answer. This is the only way to move your followers: your comments and edits never move them, since you may be working in many places at once.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board to point on." },
+          path: {
+            type: "string",
+            description: "A page of the board, relative to it: 'home', 'tasks', 'library', 'activity', 'home?item=<key>', '?task=<id>&tab=activity', 'library?list=files', '?settings=prompts'. Or '/review' for the review queue or '/' for the workspaces list. Any path also takes scroll."
+          },
+          taskId: { type: "string", description: "A task: opens its panel." },
+          goalId: { type: "string", description: "A goal: opens its panel." },
+          docId: {
+            type: "string",
+            description: "A doc, mock, app, whiteboard, or a file of a diff or folder on the board."
+          },
+          threadId: {
+            type: "string",
+            description: "A thread on the task, goal or doc named, opened where it is."
+          },
+          blockId: { type: "string", description: "A block of the doc, centred on screen." },
+          quote: {
+            type: "string",
+            description: "Words in the doc or mock, found and centred on screen. At most 500 characters."
+          },
+          scroll: {
+            type: "number",
+            description: "How far down the doc or page: 0 is the top, 1 the bottom."
+          },
+          x: { type: "number", description: "Whiteboard canvas x." },
+          y: { type: "number", description: "Whiteboard canvas y." }
+        },
+        required: ["workspaceId"]
       }
     },
     {
@@ -21562,6 +21598,47 @@ async function handleWorkspaceTool(name, a, ctx) {
         delivered: res.delivered === true,
         ...res.delivered === true ? {} : { note: "No page is waiting for this answer. Post it on the task or a thread." }
       });
+    }
+    case "point_at": {
+      const { workspaceId } = a;
+      if (!workspaceId)
+        return err2("workspaceId is required");
+      const place = {};
+      for (const k of ["path", "docId", "taskId", "goalId", "threadId", "blockId"]) {
+        const v = a[k];
+        if (typeof v === "string" && v.trim())
+          place[k] = v.trim();
+      }
+      if (typeof a.quote === "string" && a.quote.trim())
+        place.quote = a.quote.trim();
+      for (const k of ["scroll", "x", "y"]) {
+        if (typeof a[k] === "number")
+          place[k] = a[k];
+      }
+      try {
+        const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
+          agentId: AUTHOR.id,
+          agentName: AUTHOR.name,
+          ...place
+        });
+        return ok2({
+          pointed: true,
+          spot: res.spot,
+          note: "Anyone following you is taken there now. Nothing was written."
+        });
+      } catch (e) {
+        const m = String(e).match(/→ (400|403|404): (.*)$/s);
+        if (!m)
+          throw e;
+        const error2 = (() => {
+          try {
+            return JSON.parse(m[2] ?? "").error;
+          } catch {
+            return;
+          }
+        })();
+        return ok2({ pointed: false, error: error2 ?? `refused (${m[1]})` });
+      }
     }
     case "say_in_meeting": {
       const { workspaceId, text } = a;

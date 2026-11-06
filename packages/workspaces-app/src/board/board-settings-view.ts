@@ -299,6 +299,8 @@ export interface SettingsViewEnv {
   onClose(): void;
   /** Leave settings for one of the board's own pages. */
   onNav(nav: BoardNav): void;
+  /** The reader chose another pane: the address names it. */
+  onType?(): void;
   /** The Prompts pane, when the board mounted one. Absent in a test that
    *  drives only the two panes the page paints itself. */
   prompts?: SettingsPromptsPane;
@@ -313,6 +315,8 @@ export interface SettingsViewHandle {
   /** Re-paint after a band change, so nobody is left on a pane whose nav has
    *  gone — or, on the phone, on a subnav that is no longer drawn. */
   bandChanged(): void;
+  /** Show one pane, or null for the list of them, as an address says. */
+  show(next: SettingsType): void;
 }
 
 /** What the topbar calls each pane, on the band that names one. */
@@ -382,6 +386,7 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
     // to is settled before `paint` asks for it.
     if (next === 'prompts') prompts?.showList();
     paint();
+    env.onType?.();
   }
 
   /** Leave for the board itself. The page goes first so the caret lands on a
@@ -433,6 +438,7 @@ export function mountBoardSettingsView(env: SettingsViewEnv): SettingsViewHandle
       setType(narrow() ? null : 'board');
     },
     type: () => type,
+    show: setType,
     bandChanged(): void {
       if (!narrow() && type === null) setType('board');
       else paint();
