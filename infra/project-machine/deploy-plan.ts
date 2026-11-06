@@ -9,6 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
+import { vmSizeFor } from './vm-size.ts';
 
 export type TunnelMode = 'quick' | 'named';
 
@@ -125,9 +126,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
   if (!Number.isInteger(volumeGb) || volumeGb < 1 || volumeGb > 50) {
     throw new Error(`volume size must be 1-50 GB, got ${volumeGb}`);
   }
-  if (!Number.isInteger(vmMemoryMb) || vmMemoryMb < 256 || vmMemoryMb > 4096) {
-    throw new Error(`memory must be 256-4096 MB, got ${vmMemoryMb}`);
-  }
+  const derivedSize = vmSizeFor(vmMemoryMb);
   if (input.tunnel !== undefined && input.tunnel !== 'quick' && input.tunnel !== 'named') {
     throw new Error(`tunnel must be quick or named, got "${input.tunnel}"`);
   }
@@ -168,7 +167,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     region: input.region ?? 'sjc',
     volumeName: 'cw_data',
     volumeGb,
-    vmSize: input.vmSize ?? 'shared-cpu-1x',
+    vmSize: input.vmSize ?? derivedSize,
     vmMemoryMb,
     bucket: `${app}-backups`,
     tunnel: input.tunnel ?? 'quick',
