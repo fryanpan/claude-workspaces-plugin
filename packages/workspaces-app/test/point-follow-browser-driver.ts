@@ -72,7 +72,7 @@ async function main(): Promise<void> {
     for (const [width, height] of SIZES) {
       step(`agent at ${width}`);
       const firstPerson = await openPerson(width, height, {
-        anonId: `firstPerson${width}`,
+        anonId: `first-person${width}`,
         name: 'Alice',
         ws,
         follow: 'a-agent-house-lead',
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
 
       step(`person at ${width}`);
       const secondPerson = await openPerson(width, height, {
-        anonId: `secondPerson${width}`,
+        anonId: `second-person${width}`,
         name: 'Bob',
         ws,
       });
