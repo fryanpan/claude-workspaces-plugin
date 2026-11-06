@@ -59,8 +59,7 @@ describe.skipIf(CHROME === null)('the lead’s written answer, in the chat', () 
     }
   }, 60_000);
 
-  it('says the answer was delivered only while a page waited for it', () => {
-    for (const c of result().cases)
-      expect(c.delivered, `${c.width} ${c.way}`).toBe(c.way !== 'left');
+  it('says the answer was delivered, because the wait follows the speaker to their next page', () => {
+    for (const c of result().cases) expect(c.delivered, `${c.width} ${c.way}`).toBe(true);
   }, 60_000);
 });

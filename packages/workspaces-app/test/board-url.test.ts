@@ -4,6 +4,8 @@ import {
   buildBoardUrl,
   goalShareUrl,
   historyStep,
+  libraryHref,
+  libraryPlaceOf,
   parseBoardLocation,
   resourceOf,
   taskShareUrl,
@@ -16,6 +18,8 @@ const at = (over: Partial<BoardLocation>): BoardLocation => ({
   thread: null,
   item: null,
   archived: false,
+  tab: null,
+  settings: null,
   ...over,
 });
 
@@ -62,6 +66,44 @@ describe('parseBoardLocation', () => {
   });
 });
 
+describe('the places inside a tab', () => {
+  it('reads a tab only on a task panel, and only a tab that exists', () => {
+    expect(parseBoardLocation('/workspaces/w1', '?tab=activity').tab).toBeNull();
+    expect(parseBoardLocation('/workspaces/w1', '?task=t1&tab=activity').tab).toBe('activity');
+    expect(parseBoardLocation('/workspaces/w1', '?task=t1&tab=nope').tab).toBeNull();
+  });
+
+  it('reads no settings pane that does not exist', () => {
+    expect(parseBoardLocation('/workspaces/w1', '?settings=nope').settings).toBeNull();
+  });
+
+  it('keeps the Library inner page on the Library and drops it elsewhere', () => {
+    const search = '?list=files&place=doc';
+    expect(buildBoardUrl('w1', at({ nav: 'library' }), search)).toBe(
+      '/workspaces/w1/library?list=files&place=doc',
+    );
+    expect(buildBoardUrl('w1', at({ nav: 'home' }), search)).toBe('/workspaces/w1/home');
+  });
+
+  it('writes a Library inner page over the last one, and reads it back', () => {
+    const here = 'https://board.test/workspaces/w1/library?list=files&as=me';
+    expect(libraryHref(here, null, 'doc')).toBe('/workspaces/w1/library?as=me&place=doc');
+    expect(libraryHref(here, null, null)).toBe('/workspaces/w1/library?as=me');
+    expect(libraryPlaceOf('?list=files')).toEqual({ list: 'files', place: null });
+  });
+
+  it('makes settings a place Back returns from, and a pane change no entry', () => {
+    expect(historyStep(at({}), at({ settings: 'board' }))).toBe('push');
+    expect(historyStep(at({ settings: 'board' }), at({ settings: 'prompts' }))).toBe('replace');
+    expect(historyStep(at({ settings: 'board' }), at({}))).toBe('close');
+    expect(historyStep(at({ task: 't1', settings: 'board' }), at({ task: 't1' }))).toBe('close');
+  });
+
+  it('makes a panel tab a rewrite of the same panel', () => {
+    expect(historyStep(at({ task: 't1' }), at({ task: 't1', tab: 'activity' }))).toBe('replace');
+  });
+});
+
 describe('buildBoardUrl', () => {
   it('round-trips every field', () => {
     const cases: BoardLocation[] = [
@@ -72,6 +114,12 @@ describe('buildBoardUrl', () => {
       at({ goal: 'g1', thread: 'th2' }),
       at({ nav: 'home', item: 'task-thread:task:t1:th' }),
       at({ archived: true }),
+      at({ task: 't1', tab: 'activity' }),
+      at({ settings: 'board' }),
+      at({ settings: 'notifications' }),
+      at({ settings: 'prompts' }),
+      at({ settings: 'list' }),
+      at({ task: 't1', settings: 'board' }),
     ];
     for (const loc of cases) {
       const url = buildBoardUrl('w1', loc);

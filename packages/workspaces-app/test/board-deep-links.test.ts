@@ -26,7 +26,16 @@ function deepLinks(over: Partial<Parameters<typeof createBoardDeepLinks>[0]> = {
   let queue: ReviewQueue = reviewQueue([], [], Date.now());
   const api = createBoardDeepLinks({
     state,
-    bootLoc: { nav: 'home', task: null, goal: null, thread: null, item: null, archived: false },
+    bootLoc: {
+      nav: 'home',
+      task: null,
+      goal: null,
+      thread: null,
+      item: null,
+      archived: false,
+      tab: null,
+      settings: null,
+    },
     location: {
       search,
       get href() {
@@ -114,6 +123,8 @@ describe('createBoardDeepLinks', () => {
         thread: null,
         item: 'k-gone',
         archived: false,
+        tab: null,
+        settings: null,
       },
     });
     d.state.walkKey = 'k-gone';
@@ -126,7 +137,16 @@ describe('createBoardDeepLinks', () => {
     // Until it is released, `renderDetail` must not close an unconfirmed goal
     // the way it closes one that genuinely left the board.
     const d = deepLinks({
-      bootLoc: { nav: 'tasks', task: null, goal: 'g-1', thread: null, item: null, archived: false },
+      bootLoc: {
+        nav: 'tasks',
+        task: null,
+        goal: 'g-1',
+        thread: null,
+        item: null,
+        archived: false,
+        tab: null,
+        settings: null,
+      },
     });
     expect(d.goalClaimReleased()).toBe(false);
     vi.advanceTimersByTime(WALK_HANDOFF_DEADLINE_MS);
@@ -144,6 +164,8 @@ describe('createBoardDeepLinks', () => {
         thread: null,
         item: null,
         archived: false,
+        tab: null,
+        settings: null,
       },
     });
     vi.advanceTimersByTime(WALK_HANDOFF_DEADLINE_MS);
@@ -159,7 +181,16 @@ describe('createBoardDeepLinks', () => {
     });
     deepLinks({
       state,
-      bootLoc: { nav: 'tasks', task: 't-1', goal: null, thread: null, item: null, archived: false },
+      bootLoc: {
+        nav: 'tasks',
+        task: 't-1',
+        goal: null,
+        thread: null,
+        item: null,
+        archived: false,
+        tab: null,
+        settings: null,
+      },
     });
     vi.advanceTimersByTime(WALK_HANDOFF_DEADLINE_MS);
     expect(state.detailTaskId).toBe('t-1');

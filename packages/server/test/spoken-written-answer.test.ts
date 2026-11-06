@@ -74,12 +74,12 @@ describe('a spoken answer with a written one', () => {
     const ws = await post('/workspaces', { name: 'Harborlight' });
     boardId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     handle.tasks.attachAgent(boardId, {
-      agentId: 'harborlight-lead',
+      agentId: 'house-lead',
       agentName: 'Harborlight Lead',
       runtime: 'claude-code-local',
     });
-    handle.tasks.setLeadAgent(boardId, 'harborlight-lead', { actor: BRYAN });
-    lead = await agentStream(base, boardId, 'harborlight-lead');
+    handle.tasks.setLeadAgent(boardId, 'house-lead', { actor: BRYAN });
+    lead = await agentStream(base, boardId, 'house-lead');
   });
 
   afterAll(async () => {
@@ -108,7 +108,7 @@ describe('a spoken answer with a written one', () => {
         type: 'start',
         setup: 1,
         mode: 'hold',
-        agent: 'harborlight-lead',
+        agent: 'house-lead',
         author: BRYAN,
         context: { surface: 'board', chatOpen: true },
       }),
@@ -124,7 +124,7 @@ describe('a spoken answer with a written one', () => {
     const written =
       'It shipped at 14:02. The release names the merge commit, and the health check reads healthy.';
     const res = await post(`/workspaces/${boardId}/voice-queue/${asked?.queueId}/answer`, {
-      agentId: 'harborlight-lead',
+      agentId: 'house-lead',
       text: spoken,
       written,
     });
@@ -163,7 +163,7 @@ describe('a spoken answer with a written one', () => {
         type: 'start',
         setup: 1,
         mode: 'hold',
-        agent: 'harborlight-lead',
+        agent: 'house-lead',
         author: BRYAN,
       }),
     );
@@ -188,15 +188,15 @@ describe('a spoken answer with a written one', () => {
     });
     await answer('riverbend-peer');
     expect((await chat()).some((m) => m.text === written)).toBe(false);
-    // No page waits for it now, so nothing says it; the chat still keeps it.
-    expect(await (await answer('harborlight-lead')).json()).toEqual({ ok: true, delivered: false });
+    // The wait is the speaker's, so their next page says it; the chat keeps it now.
+    expect(await (await answer('house-lead')).json()).toEqual({ ok: true, delivered: true });
     const kept = (await chat()).find((m) => m.text === written);
     expect(kept).toMatchObject({ role: 'agent', written: true });
   });
 
   it('refuses a written answer that is not a string or is over the cap', async () => {
     const path = `/workspaces/${boardId}/voice-queue/vq-x/answer`;
-    const lead = { agentId: 'harborlight-lead', text: 'Fine.' };
+    const lead = { agentId: 'house-lead', text: 'Fine.' };
     expect((await post(path, { ...lead, written: 7 })).status).toBe(400);
     expect((await post(path, { ...lead, written: 'a'.repeat(LEAD_WRITTEN_MAX + 1) })).status).toBe(
       400,

@@ -450,6 +450,46 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'point_at',
+      description:
+        "Point anyone following you at a place on the board, and write nothing there: no comment, no edit. Name exactly one place: path (a page of the board, relative to it, such as 'home', 'library', 'activity', 'home?item=<review item key>', '?task=<id>&tab=activity', 'library?list=files', '?settings=notifications', or '/review' for the review queue and '/' for the workspaces list), taskId or goalId (its panel, at threadId when given), or docId (a doc, mock, app, diff or folder file on the board, at threadId, blockId, a phrase in quote, or scroll from 0 for the top to 1 for the bottom; x and y on a whiteboard). Use it to show the person you are talking to what you mean, before or while you answer. This is the only way to move your followers: your comments and edits never move them, since you may be working in many places at once.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board to point on.' },
+          path: {
+            type: 'string',
+            description:
+              "A page of the board, relative to it: 'home', 'tasks', 'library', 'activity', 'home?item=<key>', '?task=<id>&tab=activity', 'library?list=files', '?settings=prompts'. Or '/review' for the review queue or '/' for the workspaces list. Any path also takes scroll.",
+          },
+          taskId: { type: 'string', description: 'A task: opens its panel.' },
+          goalId: { type: 'string', description: 'A goal: opens its panel.' },
+          docId: {
+            type: 'string',
+            description:
+              'A doc, mock, app, whiteboard, or a file of a diff or folder on the board.',
+          },
+          threadId: {
+            type: 'string',
+            description: 'A thread on the task, goal or doc named, opened where it is.',
+          },
+          blockId: { type: 'string', description: 'A block of the doc, centred on screen.' },
+          quote: {
+            type: 'string',
+            description:
+              'Words in the doc or mock, found and centred on screen. At most 500 characters.',
+          },
+          scroll: {
+            type: 'number',
+            description: 'How far down the doc or page: 0 is the top, 1 the bottom.',
+          },
+          x: { type: 'number', description: 'Whiteboard canvas x.' },
+          y: { type: 'number', description: 'Whiteboard canvas y.' },
+        },
+        required: ['workspaceId'],
+      },
+    },
+    {
       name: 'say_in_meeting',
       description:
         "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. It shows in the meeting on every page and is played aloud in the room at once, so it can talk over whoever is speaking. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running or you are not the board's lead.",

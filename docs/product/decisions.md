@@ -871,10 +871,12 @@ What that means in the product:
 - **A person's presence is one spot on one page.** With several tabs open,
   it is the spot in the tab they used last. On a doc it is the block they are
   reading or the thread they have open; on a whiteboard it is their pointer.
-- **An agent's presence is the spot it points at with a verb.** Today that is
-  a comment it writes (`create_thread`, `post_reply`), a whiteboard
-  `point`, or the planning voice's cursor on the words it is asking about.
-  Its edits draw nothing anywhere.
+- **An agent's presence is only where it directs its followers.** That is
+  `point_at`, a whiteboard `point`, or the planning voice's cursor on the
+  words it is asking about. Its comments and edits draw nothing anywhere: an
+  agent can be working in many places at once, so following it never goes
+  where it is working. (Bryan, 2026-11-04, narrowing this entry: until then
+  a comment the agent wrote also moved it. Review item r-l0a8mOKl8UBa.)
 - **Following moves your view to that spot within a second**, onto another
   page of the workspace when that is where the spot is. A long-press on a
   presence circle starts or stops it, on the board, a doc or a whiteboard.

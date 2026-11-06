@@ -39,6 +39,10 @@
  * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it. The
  * socket that closes as this page unloads is that move, not a stop, so it
  * is neither said nor reported.
+ *
+ * A LATE ANSWER IS STILL SAID. Voice that stopped by itself plays what the lead
+ * owes, and a socket dropped while it owes something reopens to collect it
+ * (`LeadAnswers.adopt`). Only the reader's own stop leaves an answer silent.
  */
 import {
   type SpokenClientMessage,
@@ -48,67 +52,27 @@ import {
 } from '@claude-workspaces/core/spoken-reply';
 import {
   type PlaybackContext,
-  type SpokenCaptureOpts,
-  type SpokenCaptureStart,
   createSpokenPlayer,
   startSpokenCapture,
 } from '../board/spoken-reply-audio.ts';
 import { SETUP_KEY, type SpokenSocket } from '../board/spoken-reply-client.ts';
 import { makeGestureContext } from '../meeting-audio.ts';
 import { defaultOriginFacts, insecureOriginMessage } from '../voice-capture.ts';
+import {
+  type LeadVoice,
+  type LeadVoiceOpts,
+  type LeadVoiceState,
+  NO_SOUND,
+  NO_VOICE,
+  OWED_RETRIES,
+  OWED_RETRY_MS,
+  TAP_TO_LISTEN,
+} from './lead-chat-voice-api.ts';
 import { audioContext, defaultSetups, reportToPage, socketUrl } from './lead-chat-voice-io.ts';
-import { type ListeningTab, type ListeningTabOpts, createListeningTab } from './listening-tab.ts';
+import { createListeningTab } from './listening-tab.ts';
 
-export type LeadVoicePhase = 'off' | 'listening' | 'working' | 'speaking';
+export * from './lead-chat-voice-api.ts';
 
-export interface LeadVoiceState {
-  phase: LeadVoicePhase;
-  /** What the listener has heard of the question so far. */
-  heard: string;
-  /** Why voice is not running, when it stopped by itself. */
-  notice: string;
-  /** Voice is on, and another of the reader's tabs hears them
-   *  (`listening-tab.ts`): this one sends nothing. */
-  paused: boolean;
-}
-
-export interface LeadVoiceOpts {
-  workspaceId: string;
-  author: { id: string; name: string; kind?: string };
-  getContext(): unknown;
-  /** The lead's agent id, read at each question. */
-  agent(): string | undefined;
-  onChange(s: LeadVoiceState): void;
-  /** `GET …/voice/timings`'s setups; injected by tests. */
-  fetchSetups?: () => Promise<SpokenSetup[]>;
-  openSocket?: (url: string) => SpokenSocket;
-  startCapture?: (opts: SpokenCaptureOpts) => Promise<SpokenCaptureStart>;
-  playbackContext?: () => PlaybackContext | null;
-  /** The page's origin facts; a test passes a secure one. */
-  blocked?: () => string | null;
-  /** Where the board mic keeps its chosen setup; omitted, this page's own. */
-  storage?: Pick<Storage, 'getItem'> | null;
-  /** Where a failure is reported; omitted, the page's error reporter
-   *  (Sentry, where the shell loads it). */
-  report?: (err: Error) => void;
-  /** Which of the reader's tabs hears them; injected by tests. */
-  listeningTab?: (o: ListeningTabOpts) => ListeningTab;
-}
-
-export interface LeadVoice {
-  /** Voice on. `gesture: false` is a page carrying voice on from the page
-   *  before, outside any tap; omitted, this is the reader's tap. */
-  start(how?: { gesture: boolean }): void;
-  /** A tap anywhere on the page: starts a context that waits for one, and
-   *  says whether there was one. */
-  wake(): boolean;
-  stop(): void;
-  state(): LeadVoiceState;
-  destroy(): void;
-}
-
-export const NO_VOICE = 'Voice is not set up on this server. Type to your lead instead.';
-export const NO_SOUND = 'The microphone is sending no sound. Tap the agent button to try again.';
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
 /** Said, and reported, when the voice socket closes while the page stays. */
@@ -121,8 +85,6 @@ const CLOSED = 'The connection closed. Tap the mic to try again.';
 export const WORKING_MS = 30_000;
 /** The route of the lead's later answer (`spoken-reply/lead-answer.ts`). */
 const LEAD_ANSWER = 'lead-answer';
-/** Said while a carried-on voice waits for the tap its context needs. */
-export const TAP_TO_LISTEN = 'Tap anywhere to keep listening.';
 /** How long a context started outside a tap has to run before the chat asks
  *  for one. */
 const TAP_WAIT_MS = 600;
@@ -144,6 +106,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let sentContext = '';
   /** Questions the lead took and has not answered yet. */
   let awaiting = 0;
+  /** The reader pressed stop: nothing more is said until they turn it on. */
+  let hushed = false;
+  /** An answer is being said on a page whose voice stopped by itself. */
+  let answering = false;
+  /** Tries left to reopen a dropped socket for an owed answer. */
+  let owedTries = OWED_RETRIES;
+  let owedTimer: ReturnType<typeof setTimeout> | null = null;
   let workTimer: ReturnType<typeof setTimeout> | null = null;
   let soundTimer: ReturnType<typeof setTimeout> | null = null;
   /** A context started outside a tap that is not running yet. */
@@ -300,13 +269,14 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     );
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
+      owedTries = OWED_RETRIES;
       const pending = queue;
       queue = [];
       for (const d of pending) ws.send(d);
     };
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {
-        if (on) player.push(new Uint8Array(ev.data));
+        if (on || (answering && !hushed)) player.push(new Uint8Array(ev.data));
         return;
       }
       const m = typeof ev.data === 'string' ? parseSpokenServerMessage(ev.data) : null;
@@ -316,8 +286,17 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       if (socket !== ws) return;
       socket = null;
       queue = [];
-      awaiting = 0;
+      const owed = awaiting > 0 && !leaving && !hushed;
+      if (!owed) awaiting = 0;
       if (on && !leaving) halt(CLOSED);
+      // A new socket collects what the lead owes; the microphone stays off.
+      if (owed && owedTries > 0) {
+        owedTries--;
+        owedTimer = setTimeout(() => {
+          owedTimer = null;
+          if (!socket) ensureSocket();
+        }, OWED_RETRY_MS);
+      }
     };
     socket = ws;
   };
@@ -380,11 +359,28 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     if (on) listen();
   };
 
+  /** The lead's answer reaching a page whose voice stopped by itself: the
+   *  reader did not ask for silence, so it is said. It waits out no listener,
+   *  because with voice off none is open. */
+  function sayWhileOff(m: SpokenServerMessage): void {
+    if (hushed) return;
+    if (m.type === 'reply' && m.route === LEAD_ANSWER && m.spoken) answering = true;
+    if (!answering) return;
+    if (m.type === 'audio-start') player.begin(m.sampleRate);
+    if (m.type === 'audio-end') {
+      answering = false;
+      player.finish(() => {});
+    }
+  }
+
   function onServer(m: SpokenServerMessage): void {
     // Counted while voice is off too: the socket a stop kept is waiting for it.
     if (m.type === 'reply' && m.route === 'agent' && !m.spoken) awaiting++;
     if (m.type === 'reply' && m.route === LEAD_ANSWER) awaiting = Math.max(0, awaiting - 1);
-    if (!on) return;
+    if (!on) {
+      sayWhileOff(m);
+      return;
+    }
     switch (m.type) {
       case 'heard':
         if (st.phase === 'listening') set({ heard: m.text });
@@ -439,6 +435,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
         return;
       }
       on = true;
+      hushed = false;
       tab.join();
       player.wake();
       set({ phase: 'listening', heard: '', notice: '', paused: !tab.hears() });
@@ -468,6 +465,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     stop() {
       const asked = st.phase === 'working' || st.phase === 'speaking' || awaiting > 0;
       on = false;
+      hushed = true;
+      answering = false;
       tab.leave();
       stopCapture();
       player.stop();
@@ -491,6 +490,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       on = false;
+      if (owedTimer) clearTimeout(owedTimer);
       tab.destroy();
       stopCapture();
       player.stop();

@@ -32,6 +32,7 @@ import { browserStorage } from '../boot-env.ts';
 import { mountCoachCard } from '../coach-card.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { startPageLoadReport } from '../page-load-report.ts';
+import { keepFollowingHere } from '../presence/carried-follow.ts';
 import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
 import { fetchWriteAccess, installWriteGateNotice, readSessionBody } from '../signin/write-gate.ts';
 import {
@@ -335,4 +336,5 @@ async function boot(): Promise<void> {
   }
 }
 
+keepFollowingHere();
 void boot();

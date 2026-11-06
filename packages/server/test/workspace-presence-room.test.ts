@@ -6,10 +6,12 @@
  * presence-only socket, announces its spot, and a page already open on the
  * board hears it — without the doc page ever being sent the board's content.
  *
- * An agent is the spot it points at by a verb: a comment it writes, or a
- * whiteboard `point`. Its edits draw nothing. `seq` grows by one per point,
- * so "an edit moved nothing" is read as the NEXT point arriving at exactly
- * one more than the last, rather than as a silence.
+ * An agent is only where it directs its followers: `point_at`, or a
+ * whiteboard `point`. Its comments and its edits draw nothing — an agent
+ * works in many places at once, and following it never goes where it is
+ * working (Bryan, 2026-11-04). `seq` grows by one per point, so "a comment
+ * moved nothing" is read as the NEXT point arriving at exactly one more than
+ * the last, rather than as a silence.
  *
  * Real server, real `/y` sockets, port 0, a temp data dir, invented names.
  */
@@ -180,12 +182,31 @@ describe('the workspace presence room', () => {
     expect(Y.encodeStateAsUpdate(docPage.ydoc)).toEqual(Y.encodeStateAsUpdate(new Y.Doc()));
   });
 
-  it("an agent's comment is its spot, its edit draws nothing, and its whiteboard point moves it", async () => {
+  it("an agent's point_at and whiteboard point move it; its comment and its edit draw nothing", async () => {
     const { base, ws, post, room, docId } = await boot();
+    handle?.tasks.attachAgent(ws, {
+      agentId: AGENT.id,
+      agentName: AGENT.name,
+      runtime: 'claude-code-local',
+    });
     const follower = joinRoom(room(true), base);
     closers.push(follower, await agentStream(base, ws, AGENT.id));
     await follower.ready;
 
+    const pointed = await post(`/workspaces/${ws}/point`, {
+      agentId: AGENT.id,
+      agentName: AGENT.name,
+      docId,
+      quote: 'quay opens',
+    });
+    expect(pointed.status).toBe(200);
+    await waitFor(() => agentSpot(follower, AGENT.id)?.quote === 'quay opens', {
+      describe: "the agent's point_at as its spot",
+    });
+    const atPoint = agentSpot(follower, AGENT.id);
+    expect(atPoint).toMatchObject({ surface: 'doc', docId, name: 'Harborlight' });
+
+    // A comment is the agent working, not directing its followers.
     const created = await post(`/workspaces/${ws}/docs/harbour/threads/by_find`, {
       author: AGENT,
       text: 'This is the line I mean.',
@@ -193,12 +214,14 @@ describe('the workspace presence room', () => {
     });
     expect(created.status).toBe(200);
     const { thread } = (await created.json()) as { thread: { id: string } };
-    await waitFor(() => agentSpot(follower, AGENT.id)?.threadId === thread.id, {
-      describe: "the agent's comment as its spot",
-    });
-    const atComment = agentSpot(follower, AGENT.id);
-    expect(atComment).toMatchObject({ surface: 'doc', docId, name: 'Harborlight' });
-
+    expect(
+      (
+        await post(`/workspaces/${ws}/docs/harbour/threads/${thread.id}/comments`, {
+          author: AGENT,
+          text: 'And a reply.',
+        })
+      ).status,
+    ).toBe(200);
     // An edit elsewhere in the doc: written, and not a point.
     const edit = await post(`/workspaces/${ws}/docs/harbour/find_and_replace`, {
       author: AGENT,
@@ -206,15 +229,6 @@ describe('the workspace presence room', () => {
       replace: 'first light',
     });
     expect(edit.status).toBe(200);
-    // A person's reply on the agent's thread is not the agent pointing either.
-    expect(
-      (
-        await post(`/workspaces/${ws}/docs/harbour/threads/${thread.id}/comments`, {
-          author: PERSON,
-          text: 'Agreed.',
-        })
-      ).status,
-    ).toBe(200);
     // A drawing without `point` is an edit too.
     const board = await post(`/workspaces/${ws}/whiteboards`, { title: 'Quay plan' });
     const { docId: wb } = (await board.json()) as { docId: string };
@@ -222,7 +236,7 @@ describe('the workspace presence room', () => {
       post(`/workspaces/${ws}/docs/${wb}/whiteboard`, { author: AGENT, ...body });
     expect((await draw({ shapes: [{ id: 'q', kind: 'box', x: 0, y: 0 }] })).status).toBe(200);
 
-    // The next point lands one past the comment: nothing in between moved it.
+    // The next point lands one past point_at: nothing in between moved it.
     expect((await draw({ shapes: [], point: { x: 320, y: 140 } })).status).toBe(200);
     await waitFor(() => agentSpot(follower, AGENT.id)?.surface === 'whiteboard', {
       describe: "the agent's whiteboard point as its spot",
@@ -232,28 +246,33 @@ describe('the workspace presence room', () => {
       docId: wb,
       x: 320,
       y: 140,
-      seq: (atComment?.seq ?? 0) + 1,
+      seq: (atPoint?.seq ?? 0) + 1,
     });
   });
 
   it('a page that opens the room after the agent pointed still finds it, until the agent leaves', async () => {
-    const { base, post, ws, room } = await boot();
+    const { base, post, ws, room, docId } = await boot();
     const stream = await agentStream(base, ws, AGENT.id);
     closers.push(stream);
-    // Nobody is in the board's room when the agent comments.
-    const created = await post(`/workspaces/${ws}/docs/harbour/threads/by_find`, {
-      author: AGENT,
-      text: 'Start here.',
-      find: 'quay opens',
+    handle?.tasks.attachAgent(ws, {
+      agentId: AGENT.id,
+      agentName: AGENT.name,
+      runtime: 'claude-code-local',
     });
-    expect(created.status).toBe(200);
-    const { thread } = (await created.json()) as { thread: { id: string } };
+    // Nobody is in the board's room when the agent points.
+    const pointed = await post(`/workspaces/${ws}/point`, {
+      agentId: AGENT.id,
+      agentName: AGENT.name,
+      docId,
+      threadId: 'th-start',
+    });
+    expect(pointed.status).toBe(200);
 
     const late = joinRoom(room(true), base);
     closers.push(late);
     await late.ready;
-    await waitFor(() => agentSpot(late, AGENT.id)?.threadId === thread.id, {
-      describe: "the agent's earlier comment, heard by a page that joined after it",
+    await waitFor(() => agentSpot(late, AGENT.id)?.threadId === 'th-start', {
+      describe: "the agent's earlier point, heard by a page that joined after it",
     });
 
     // The agent's session ends: its spot goes with it.

@@ -90,6 +90,8 @@ export interface CodeSurface extends ReviewSurface {
   /** The whole line under the cursor as a line-snapped anchor selection —
    *  lets a bare click (empty selection) comment on its line. */
   getCursorLineRel: () => { start: Uint8Array; end: Uint8Array; snippet: string } | null;
+  /** Centre the first place the file says `words`; false when it does not. */
+  scrollToText: (words: string) => boolean;
   /** Where the comment pill belongs, in viewport pixels: the right edge of
    *  the last selected character, or of the cursor line's last character
    *  when nothing is selected. `range` says which. Null for an empty line or
@@ -543,6 +545,12 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
     },
     getViewMode() {
       return viewMode;
+    },
+    scrollToText(words) {
+      const at = view.state.doc.toString().indexOf(words);
+      if (at < 0) return false;
+      view.dispatch({ effects: EditorView.scrollIntoView(at, { y: 'center' }) });
+      return true;
     },
     getCursorLineRel() {
       const pos = view.state.selection.main.head;

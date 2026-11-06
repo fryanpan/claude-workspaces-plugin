@@ -1,50 +1,23 @@
 /**
- * `agent-spots.ts` on its own: which thread events are an agent pointing,
- * and that one agent's point never erases another's.
+ * `agent-spots.ts` on its own: one agent's point never erases another's, a
+ * point waits for a board whose room is not open, and only an agent holding
+ * its stream is drawn. That a comment is not a point is
+ * `workspace-presence-room.test.ts`, over the real server.
  */
 import { describe, expect, it } from 'bun:test';
-import type { WebhookPayload } from '@claude-workspaces/core';
 import { AGENT_SPOTS_FIELD, parseAgentSpots } from '@claude-workspaces/core/workspace-presence';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { createAgentSpots, spotFromThreadEvent } from '../src/agent-spots.ts';
+import { createAgentSpots } from '../src/agent-spots.ts';
 
-const asDoc = () => 'doc' as const;
-const frame = (event: string, author: { id: string; name: string }, inComment: boolean) =>
-  ({
-    event,
-    docId: 'd-harbour',
-    threadId: 't-1',
-    ...(inComment ? { comment: { author } } : { thread: { comments: [{ author }] } }),
-  }) as unknown as WebhookPayload;
+const at = { surface: 'doc' as const, docId: 'd-harbour', threadId: 't-1', name: 'X' };
 
 describe('agent spots', () => {
-  it('reads an agent comment as a point, from a reply or an opener', () => {
-    const agent = { id: 'agent-harborlight', name: 'Harborlight' };
-    expect(spotFromThreadEvent(frame('thread.replied', agent, true), asDoc)).toEqual({
-      agentId: 'agent-harborlight',
-      spot: { surface: 'doc', docId: 'd-harbour', threadId: 't-1', name: 'Harborlight' },
-    });
-    expect(spotFromThreadEvent(frame('thread.created', agent, false), asDoc)?.agentId).toBe(
-      'agent-harborlight',
-    );
-    expect(spotFromThreadEvent(frame('thread.resolved', agent, true), asDoc)).toBeNull();
-  });
-
-  it('never reads a person as an agent, whatever their id shape', () => {
-    for (const id of ['user-1h6', 'anon-e5s', 'known-reader']) {
-      expect(
-        spotFromThreadEvent(frame('thread.replied', { id, name: 'Alice' }, true), asDoc),
-      ).toBeNull();
-    }
-  });
-
   it("keeps each agent's entry, and counts every point", () => {
     const aw = new Awareness(new Y.Doc());
     const spots = createAgentSpots({
       boardsForDoc: () => ['w-open'],
       boardAwareness: () => aw,
-      surfaceOf: asDoc,
       listening: () => true,
     });
     spots.point('wb', 'agent-a', { surface: 'whiteboard', docId: 'wb', x: 1, y: 2, name: 'Alice' });
@@ -63,10 +36,9 @@ describe('agent spots', () => {
     const spots = createAgentSpots({
       boardsForDoc: () => ['w-open', 'w-closed'],
       boardAwareness: (w) => (w === 'w-open' ? open : null),
-      surfaceOf: asDoc,
       listening: () => true,
     });
-    spots.onDocEvent('d-harbour', frame('thread.replied', { id: 'agent-x', name: 'X' }, true));
+    spots.point('d-harbour', 'agent-x', at);
     expect(
       parseAgentSpots(open.getLocalState()?.[AGENT_SPOTS_FIELD]).get('agent-x')?.threadId,
     ).toBe('t-1');
@@ -77,10 +49,9 @@ describe('agent spots', () => {
     const spots = createAgentSpots({
       boardsForDoc: () => ['w-later'],
       boardAwareness: () => null,
-      surfaceOf: asDoc,
       listening: () => true,
     });
-    spots.onDocEvent('d-harbour', frame('thread.replied', { id: 'agent-x', name: 'X' }, true));
+    spots.point('d-harbour', 'agent-x', at);
     const later = new Awareness(new Y.Doc());
     spots.restore('w-later', later);
     expect(
@@ -100,7 +71,6 @@ describe('agent spots', () => {
     const spots = createAgentSpots({
       boardsForDoc: () => ['w-1'],
       boardAwareness: () => aw,
-      surfaceOf: asDoc,
       listening: (_w, id) => live.has(id),
     });
     spots.point('d', 'agent-a', { surface: 'doc', docId: 'd', threadId: 't', name: 'Alice' });

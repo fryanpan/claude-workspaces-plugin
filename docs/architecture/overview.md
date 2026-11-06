@@ -662,25 +662,37 @@ frame its own agent caused (`self-authored.ts`). Comments on a whiteboard are
 not wired yet.
 
 **Presence is one room per workspace, and following leads across its
-pages.** The rule is in [decisions](../product/decisions.md) (2026-10-15): a
-person is one spot, an agent is the spot it points at by a verb. The room is
+pages.** The rule is in [decisions](../product/decisions.md) (2026-10-15,
+narrowed 2026-11-04): a person is one spot, the place they are; an agent is
+only where it directs its followers, never where it is working. The room is
 the board doc's own awareness, `ws:<id>`. The board page holds it with its full
 socket; a doc page and a whiteboard page join it with `?presence=1`, a socket
 that `yjs-protocol.ts` syncs against an empty doc, so awareness flows both ways
 and none of the board's megabyte does. Each page announces `user` and its
 person's `spot` (core's `workspace-presence.ts`). The server announces no
 `user`; its own state carries `agentSpots`, one entry per agent, written by
-`agent-spots.ts` when an agent's comment lands (the `onDocEvent` hook), a
+`agent-spots.ts` when an agent calls `point_at` (`routes/workspace-point.ts`:
+a board page, a panel, a thread, the review queue, the workspaces list, or a
+thread, block, phrase or scroll in a doc, mock, app, diff or folder file), a
 whiteboard `point` is set, or the planning voice moves its cursor
 (`agentFocus`, through `voicePointer` in `spoken-reply/interview-docs.ts`), and
-never by an edit. The voice holds no event stream, so its entry is drawn while
+never by a comment or an edit. The voice holds no event stream, so its entry is drawn while
 its cursor is on a doc rather than while a stream is open. In the app, `presence/` holds
 the shared half: `follow-model.ts` resolves a chip's key to a spot,
 `follower.ts` takes the view there (scrolls on the same page, opens another,
 keeps the follow in `sessionStorage` across the load, ends on the reader's own
 input), `page-presence.ts` draws the board's presence circles on a doc or
 whiteboard page, and `doc-spot.ts` reads and shows a block or thread in the
-markdown editor. The board's own follow is the same follower.
+markdown editor. The other surfaces plug into the same slot
+(`doc-spot-slot.ts`): `flat-doc-spot.ts` serves code, diffs and redlines, which
+have no blocks, so a spot there is a scroll, a phrase or a thread, and
+`page-scroll.ts` finds what scrolls a page that has no block to name.
+`mock-presence.ts` does this for a mock's or an app's host page, through
+`mock-where.ts` in the widget, the half inside the sandboxed frame. The review
+queue and the workspaces list belong to no board, so
+`carried-follow.ts` checks `sessionStorage` for a follow arriving at that
+address, and only then loads the room (`off-board-presence.ts`). The board's own
+follow is the same follower.
 
 **An attached dev server is served like a mock, from the board's own
 address.** An agent runs a site's dev server on a loopback port and binds it
@@ -1041,9 +1053,10 @@ server, `routes/upgrade-stream.ts` hands `WS /workspaces/<ws>/voice/converse`
 to `spoken-reply/` (a new top-level server directory): `relay.ts` keeps one
 `session.ts` per socket, `answer.ts` cuts the router's answer into a spoken and
 a written part and adds the one question the router lacks ("which goal?"),
-`lead-answer.ts` holds each socket's requests to the lead until the lead
-answers through `POST /workspaces/<ws>/voice-queue/<id>/answer` (MCP
-`answer_voice`) and says that answer on the socket that asked,
+`lead-answer.ts` holds each person's requests to the lead for 30 minutes until
+the lead answers through `POST /workspaces/<ws>/voice-queue/<id>/answer` (MCP
+`answer_voice`), and says that answer on the socket that asked or, when that
+one closed, on the next socket that person opens on the board,
 `tts.ts` and `gemini-live.ts` are the vendor adapters, `keys.ts` reads their
 keys from the Keychain at runtime, and `timings.ts` logs each answer's delay
 from the end of the question to the first spoken word per setup. Setup 4 runs

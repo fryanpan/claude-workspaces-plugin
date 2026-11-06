@@ -108,13 +108,39 @@ export function spotOfParticipant(
   return null;
 }
 
+/**
+ * Whether `path` is a page a follow may open: one on this board, or the
+ * review queue or the workspaces list (`/`). Presence is whatever a page or
+ * agent set, so another board's address, or this one's as a prefix of a
+ * longer id, is refused.
+ */
+function pathOnBoard(workspaceId: string, path: string): boolean {
+  const board = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  if (path.startsWith(board) && /^(?:[/?]|$)/.test(path.slice(board.length))) return true;
+  return /^\/review(?:[/?]|$)/.test(path) || /^\/(?:\?|$)/.test(path);
+}
+
+/**
+ * Whether `path` is a page the board itself draws — a tab, with a panel,
+ * thread or review item on it — so a board page can show it in place
+ * rather than load it. A mock, an app door or the review queue is a page of
+ * its own.
+ */
+export function isBoardPagePath(workspaceId: string, path: string): boolean {
+  const board = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  if (!path.startsWith(board)) return false;
+  return /^(?:\/(?:home|tasks|library|activity))?\/?(?:\?.*)?$/.test(path.slice(board.length));
+}
+
 /** The address a spot's page opens at. */
 export function spotHref(workspaceId: string, spot: PresenceSpot): string {
   const board = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  const thread = spot.threadId ? `?thread=${encodeURIComponent(spot.threadId)}` : '';
+  if (spot.path && pathOnBoard(workspaceId, spot.path)) return `${spot.path}${thread}`;
   if (spot.surface === 'board' || !spot.docId) return board;
   const id = encodeURIComponent(spot.docId);
   if (spot.surface === 'whiteboard') return `${board}/whiteboards/${id}`;
-  const thread = spot.threadId ? `?thread=${encodeURIComponent(spot.threadId)}` : '';
+  if (spot.surface === 'mock') return `${board}/mockups/${id}${thread}`;
   return `${board}/docs/${id}${thread}`;
 }
 
@@ -127,6 +153,9 @@ export function spotKey(spot: PresenceSpot): string {
     spot.threadId ?? '',
     spot.x ?? '',
     spot.y ?? '',
+    spot.quote ?? '',
+    spot.path ?? '',
+    spot.scroll ?? '',
     (spot as Partial<AgentSpot>).seq ?? '',
   ]);
 }

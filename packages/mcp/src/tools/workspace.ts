@@ -819,6 +819,45 @@ export async function handleWorkspaceTool(
           : { note: 'No page is waiting for this answer. Post it on the task or a thread.' }),
       });
     }
+    case 'point_at': {
+      // A pointer and nothing else: whoever follows this agent is taken to
+      // the place, and nothing is written there. The server checks every id
+      // is on the board; its refusal comes back as an answer, not an error.
+      const { workspaceId } = a as { workspaceId?: string };
+      if (!workspaceId) return err('workspaceId is required');
+      const place: Record<string, unknown> = {};
+      for (const k of ['path', 'docId', 'taskId', 'goalId', 'threadId', 'blockId'] as const) {
+        const v = a[k];
+        if (typeof v === 'string' && v.trim()) place[k] = v.trim();
+      }
+      if (typeof a.quote === 'string' && a.quote.trim()) place.quote = a.quote.trim();
+      for (const k of ['scroll', 'x', 'y'] as const) {
+        if (typeof a[k] === 'number') place[k] = a[k];
+      }
+      try {
+        const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
+          agentId: AUTHOR.id,
+          agentName: AUTHOR.name,
+          ...place,
+        })) as { spot?: unknown };
+        return ok({
+          pointed: true,
+          spot: res.spot,
+          note: 'Anyone following you is taken there now. Nothing was written.',
+        });
+      } catch (e) {
+        const m = String(e).match(/→ (400|403|404): (.*)$/s);
+        if (!m) throw e;
+        const error = (() => {
+          try {
+            return (JSON.parse(m[2] ?? '') as { error?: string }).error;
+          } catch {
+            return undefined;
+          }
+        })();
+        return ok({ pointed: false, error: error ?? `refused (${m[1]})` });
+      }
+    }
     case 'say_in_meeting': {
       // The lead speaks into the meeting its board's chat is running. The
       // server checks that this session is the board's lead and that a

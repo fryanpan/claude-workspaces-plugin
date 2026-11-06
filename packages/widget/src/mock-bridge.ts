@@ -49,6 +49,7 @@
  * before anything the mock declares. The work is `installBridge`, handed the
  * frame's window so a test can hand it a stand-in.
  */
+import { type MockAt, reportWhere, showAt } from './mock-where.ts';
 
 /** The seed key the host names its own origin under (`mock-host.ts`). */
 const BOARD_ORIGIN = 'cw:board-origin';
@@ -392,7 +393,9 @@ export function installBridge(window: Window & typeof globalThis): void {
       if (ev.source === window.parent && d?.cw === 'comments') {
         window.dispatchEvent(new Event('cw-comments'));
       }
+      if (ev.source === window.parent && d?.cw === 'at') showAt(d as MockAt);
     });
+    reportWhere(boardOrigin);
   }
 
   // --- A link to one thread ---

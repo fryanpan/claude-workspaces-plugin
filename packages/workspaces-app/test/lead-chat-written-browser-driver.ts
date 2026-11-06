@@ -12,8 +12,8 @@
  * - `open`: the panel is open. The written part must show within 1s.
  * - `closed`: voice is on in the bar and the panel is shut. It must be there
  *   when the reader opens the panel.
- * - `left`: the reader moved to another page before the answer came, so no
- *   socket is waiting for it. It must be there when they open the chat.
+ * - `left`: the reader moved to another page before the answer came, so the
+ *   asking socket is gone. It must be there when they open the chat.
  *
  * Each time the driver then taps the link and records where the tap went.
  * No real device and no billed engine: Chrome's fake microphone, muted

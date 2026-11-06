@@ -127,12 +127,15 @@ export const CHOICE_WINDOW_MS = 30_000;
 
 /** The params a message link may carry: the ones a board, doc or mock page
  *  writes to name what is open on it. */
-const LINK_PARAMS = new Set(['task', 'goal', 'thread', 'item']);
+const LINK_PARAMS = new Set(['task', 'goal', 'thread', 'item', 'tab', 'settings', 'list', 'place']);
+/** A tab, a settings pane or a Library page: a short plain word or key. */
+const PLACE_PARAMS = new Set(['tab', 'settings', 'list', 'place']);
+const LINK_PLACE = /^[A-Za-z0-9:_.~/-]{1,200}$/;
 /** The longest link an agent's event carries. A longer one is cut back to
  *  the next less specific thing on the same page rather than dropped. */
 const LINK_MAX = 600;
 /** Which param goes first when a link is too long: most specific first. */
-const LINK_TRIM = ['item', 'thread', 'task', 'goal'] as const;
+const LINK_TRIM = ['place', 'list', 'settings', 'tab', 'item', 'thread', 'task', 'goal'] as const;
 
 /**
  * The page link a message was sent from, when it is a relative path on
@@ -153,6 +156,7 @@ export function messageLink(raw: unknown, workspaceId: string): string | undefin
   for (const [name, value] of url.searchParams) {
     if (!LINK_PARAMS.has(name)) return undefined;
     if (name === 'item' && !itemOnBoard(value, workspaceId)) return undefined;
+    if (PLACE_PARAMS.has(name) && !LINK_PLACE.test(value)) return undefined;
   }
   return href.length <= LINK_MAX ? href : shortLink(url, workspaceId);
 }

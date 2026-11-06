@@ -1,7 +1,5 @@
 import { connect } from '@claude-workspaces/core';
 import { estimatesShown } from '@claude-workspaces/core/show-estimates';
-import type { BootLocation } from '../boot-env.ts';
-import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
 /**
  * Everything that makes the board move without anybody touching it: the two
  * ydoc observers, the awareness feed the presence strip reads, the SSE
@@ -19,6 +17,10 @@ import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connec
  * is stale now". Crossing the two would paint a peer's transition twice, from
  * two sources.
  */
+import { PERSON_SPOT_FIELD, type PresenceSpot } from '@claude-workspaces/core/workspace-presence';
+import type { BootLocation } from '../boot-env.ts';
+import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
+import { messageLinkOf } from '../lead-chat/lead-chat-link.ts';
 import { staleTaskLinkStatuses } from '../link-titles.ts';
 import {
   type FollowStorage,
@@ -26,6 +28,12 @@ import {
   createFollower,
   stopOnOwnInput,
 } from '../presence/follower.ts';
+import {
+  onPageScroll,
+  pageScroller,
+  scrollFraction,
+  scrollToFraction,
+} from '../presence/page-scroll.ts';
 import type { BoardState } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
 import { ACTIVITY_REFRESH_EVENTS } from './board-presence-model.ts';
@@ -83,12 +91,30 @@ export interface BoardLiveDeps {
   location: Pick<BootLocation, 'assign' | 'pathname' | 'search'>;
   /** Where a follow is kept across pages; `sessionStorage` on the page. */
   followStorage?: FollowStorage;
+  /** Open `path`, a page of this board, in place: the tab, panel, thread or
+   *  review item it names, as Back and Forward do. */
+  showPath: (path: string) => void;
 }
+
+/** What can scroll on the board, the panel over it first. */
+const BOARD_SCROLL_ROOTS = [
+  '#board-detail:not(.hidden)',
+  '#board-goal-detail:not(.hidden)',
+  '#board-settings-view:not(.hidden)',
+  '#board-walkthrough:not(.hidden)',
+  '#board-home:not(.hidden)',
+  '.board-col',
+] as const;
 
 /** Returns the board's feed so the lead chat listens on it rather than
  *  opening a second connection to the same URL, and the follower the
  *  presence chips arm. */
-export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follower: Follower } {
+export function wireBoardLive(deps: BoardLiveDeps): {
+  stream: EventSource;
+  follower: Follower;
+  /** The board's address changed: tell the room where this person is now. */
+  moved: () => void;
+} {
   const {
     workspaceId,
     user,
@@ -153,6 +179,19 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     repaintGuard.schedule(repaintWorkspaceRegions);
   });
 
+  // Where this person is on the board: the tab, and the panel, thread or
+  // review item open on it, as the address names them (`messageLinkOf`).
+  const scroller = () => pageScroller(document, BOARD_SCROLL_ROOTS);
+  const here = (): PresenceSpot => {
+    const scroll = scrollFraction(scroller());
+    return {
+      surface: 'board',
+      path:
+        messageLinkOf(deps.location.pathname, deps.location.search) ??
+        `/workspaces/${encodeURIComponent(workspaceId)}`,
+      ...(scroll === undefined ? {} : { scroll }),
+    };
+  };
   client.awareness.setLocalState({
     // `id` rides along because the presence strip has to know WHO, and a
     // display name cannot answer that — two people called Alex would be one
@@ -162,21 +201,35 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     // exactly the two things the strip's row key must get right.
     user: { id: user.id, name: user.name, color: user.color },
     surface: 'board',
+    [PERSON_SPOT_FIELD]: here(),
     lastActive: Date.now(),
   });
+  const moved = (): void => {
+    const cur = client.awareness.getLocalState() ?? {};
+    const spot = here();
+    const was = cur[PERSON_SPOT_FIELD] as PresenceSpot | undefined;
+    if (was?.path === spot.path && was?.scroll === spot.scroll) return;
+    client.awareness.setLocalState({ ...cur, [PERSON_SPOT_FIELD]: spot, lastActive: Date.now() });
+  };
+  onPageScroll(document, moved);
   client.awareness.on('update', () => renderPresenceRegion());
   // Follow (§2.7): when the followed person's or agent's spot moves, ours
   // does too — onto any page of the workspace (`presence/follower.ts`). The
   // key names the PARTICIPANT, not one of their connections, so a follow
-  // survives the followed person reloading. The board has no place on it to
-  // scroll to, so a spot on the board itself shows nothing.
+  // survives the followed person reloading. A spot on the board itself is
+  // its address: the tab, panel, thread or item, opened in place.
   const follower = createFollower({
     room: client.awareness,
     workspaceId,
-    here: () => ({ surface: 'board' }),
+    here,
     address: () => location.pathname + location.search,
     go: (href) => location.assign(href),
-    show: () => {},
+    show: (spot) => {
+      if (spot.path) deps.showPath(spot.path);
+      // On the next frame: the path may have just shown another tab.
+      const { scroll } = spot;
+      if (scroll !== undefined) requestAnimationFrame(() => scrollToFraction(scroller(), scroll));
+    },
     storage: deps.followStorage ?? sessionStorage,
     onChange: (key) => {
       state.followedKey = key;
@@ -184,6 +237,8 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     },
   });
   state.followedKey = follower.key();
+  // The room may have answered before this ran; no later change would say so.
+  follower.refresh();
   stopOnOwnInput(window, follower, (target) =>
     target instanceof Element ? target.closest('#board-people') !== null : false,
   );
@@ -338,5 +393,5 @@ export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource; follo
     onStatus: streamStatus,
     onView: (view) => renderLiveStaleNotice(staleNotice, view),
   });
-  return { stream: es, follower };
+  return { stream: es, follower, moved };
 }

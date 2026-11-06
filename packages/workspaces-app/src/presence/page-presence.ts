@@ -22,8 +22,9 @@ export interface PagePresenceDeps {
   here: PresenceSpot;
   connect: (url: string) => FeedbackClient;
   origin: { protocol: string; host: string };
-  /** The element the chips render into (it gets the board's strip classes). */
-  host: HTMLElement;
+  /** The element the chips render into (it gets the board's strip classes);
+   *  null on a page that follows without drawing chips (a mock's host). */
+  host: HTMLElement | null;
   address: () => string;
   go: (href: string) => void;
   show: (spot: PresenceSpot) => void;
@@ -76,27 +77,33 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
       followedKey: follower.key(),
     };
   };
-  deps.host.classList.add('board-presence', 'board-people');
-  const unmount = mountPresenceIsland(
-    deps.host,
-    {
-      // A tap goes there once; a long-press keeps going there.
-      onTap: (chip) => follower.jump(chip.key),
-      onLongPress: (chip) => {
-        const next = follower.key() === chip.key ? null : chip.key;
-        follower.follow(next);
-        deps.notify?.(
-          next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
-        );
+  const { host } = deps;
+  const unmount = host ? mountChips(host) : () => {};
+  function mountChips(el: HTMLElement): () => void {
+    el.classList.add('board-presence', 'board-people');
+    const off = mountPresenceIsland(
+      el,
+      {
+        // A tap goes there once; a long-press keeps going there.
+        onTap: (chip) => follower.jump(chip.key),
+        onLongPress: (chip) => {
+          const next = follower.key() === chip.key ? null : chip.key;
+          follower.follow(next);
+          deps.notify?.(
+            next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
+          );
+        },
+        onOverflow: (hidden) =>
+          deps.notify?.(`Also here: ${hidden.map((c) => c.label).join(', ')}`),
       },
-      onOverflow: (hidden) => deps.notify?.(`Also here: ${hidden.map((c) => c.label).join(', ')}`),
-    },
-    { compact: true },
-  );
-  awareness.on('change', paint);
-  paint();
-  stopOnOwnInput(deps.inputTarget, follower, (el) =>
-    el instanceof Element ? deps.host.contains(el) : false,
+      { compact: true },
+    );
+    awareness.on('change', paint);
+    paint();
+    return off;
+  }
+  stopOnOwnInput(deps.inputTarget, follower, (target) =>
+    target instanceof Element && host ? host.contains(target) : false,
   );
 
   let timer: ReturnType<typeof setTimeout> | null = null;

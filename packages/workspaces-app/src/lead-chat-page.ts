@@ -6,10 +6,15 @@
  * only for the board's owner.
  *
  * Its own entry, like `coach-page.ts`: the host page carries no app bundle.
+ * It also joins the board's presence room, so a follow that leads here keeps
+ * going, and a message sent here names the section and thread open in the
+ * frame.
  */
+import { connect } from '@claude-workspaces/core';
 import { ensureUserIdentity } from './identity-prompt.ts';
 import { mountLeadChat } from './lead-chat/lead-chat-mount.ts';
 import { followMockTabTitle } from './mock-tab-title.ts';
+import { joinMockPresence, mockHere } from './presence/mock-presence.ts';
 
 const tag = document.querySelector<HTMLScriptElement>('script[data-lead-chat-page]');
 const workspaceId = tag?.dataset.workspaceId;
@@ -23,11 +28,34 @@ if (workspaceId) {
   };
   // The host page is not where anybody is asked their name: the signed-in
   // identity, or the one this browser already chose.
-  void ensureUserIdentity(null, storage, { suppressNamePrompt: true }).then((user) =>
+  void ensureUserIdentity(null, storage, { suppressNamePrompt: true }).then((user) => {
     mountLeadChat({
       workspaceId,
       author: { id: user.id, name: user.name, kind: user.kind },
-      getContext: () => (docId ? { surface: 'doc', docId } : undefined),
-    }),
-  );
+      getContext: () => {
+        if (!docId) return undefined;
+        const { heading, threadId } = mockHere();
+        return {
+          surface: 'doc',
+          docId,
+          ...(heading ? { visibleHeading: heading } : {}),
+          ...(threadId ? { threadId } : {}),
+        };
+      },
+      openThread: () => mockHere().threadId ?? null,
+    });
+    // A mock's or an app's page is in the board's presence room, so a follow
+    // carries on here (`presence/mock-presence.ts`).
+    if (docId) {
+      joinMockPresence({
+        workspaceId,
+        docId,
+        user,
+        connect,
+        win: window,
+        frame: () => document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
+        ...(location.pathname.includes('/apps/') ? { path: location.pathname } : {}),
+      });
+    }
+  });
 }

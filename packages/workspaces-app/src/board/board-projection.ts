@@ -58,7 +58,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     chatAudit: null,
     detailTaskId: bootLoc.task,
     doneWhenRefusal: null,
-    detailTab: 'comments',
+    detailTab: bootLoc.tab ?? 'comments',
     detailGoalId: bootLoc.goal,
     detailThreadId: bootLoc.thread,
     discussion: { loading: false, threads: [] },

@@ -126,7 +126,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
         author: { id: user.id, name: user.name, kind: user.kind },
         getContext: () => {
           const docId = docIdFromPathOrNull(location.pathname);
-          return docId ? { surface: 'doc', docId } : undefined;
+          if (!docId) return undefined;
+          // The section on screen, when this doc's presence has read one.
+          const section = docSection?.docId === docId ? docSection.heading : undefined;
+          return { surface: 'doc', docId, ...(section ? { visibleHeading: section } : {}) };
         },
         openThread: openThreadId,
         // A meeting started here opens its notes doc in place, so the
@@ -180,6 +183,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   });
 }
 
+/** The section heading on screen in a doc, for a voice message's context;
+ *  kept current by the doc's presence (`presence/doc-spot.ts`). */
+let docSection: { docId: string; heading: string | undefined } | null = null;
+
 /**
  * The doc page in the workspace's presence room. Its own chunk, like the lead
  * chat: it is never the page's content. A doc → doc follow swaps the mount in
@@ -194,7 +201,7 @@ async function joinDocPagePresence(
   if (!host) return null;
   const [{ joinPagePresence }, docSpot, { showToast }] = await Promise.all([
     import('./presence/page-presence.ts'),
-    import('./presence/doc-spot.ts'),
+    import('./presence/doc-spot-slot.ts'),
     import('./doc/chrome-dom.ts'),
   ]);
   const { location } = env;
@@ -213,9 +220,11 @@ async function joinDocPagePresence(
     inputTarget: env.window,
     notify: showToast,
   });
-  docSpot.onDocSpotMove((spot) => {
+  docSpot.onDocSpotMove((spot, heading) => {
     const current = docIdFromPathOrNull(location.pathname);
-    if (current) presence.moveTo({ surface: 'doc', docId: current, ...spot });
+    if (!current) return;
+    presence.moveTo({ surface: 'doc', docId: current, ...spot });
+    docSection = { docId: current, heading };
   });
   return presence;
 }

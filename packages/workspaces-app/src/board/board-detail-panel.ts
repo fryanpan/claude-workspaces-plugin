@@ -427,8 +427,9 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
     if (!task) state.discussionTaskId = null;
     // Every way the panel closes — the X, a goal opening over it, the task
     // being archived under it — lands here with no task; the next open
-    // starts on Comments unless its opener says otherwise.
-    if (!task) state.detailTab = 'comments';
+    // starts on Comments unless its opener says otherwise. A task not loaded
+    // yet is not a close: a reload at `?tab=activity` keeps its tab.
+    if (!state.detailTaskId) state.detailTab = 'comments';
     // The audit rows the Activity tab renders. Fetched on open rather than at
     // boot: a reader who never opens a ticket never needs them, and the
     // workspace Activity VIEW has always fetched them the same lazy way.
@@ -479,6 +480,10 @@ export function createBoardDetailPanel(deps: BoardDetailDeps): BoardDetailPanel 
         ? bandOfGoal(goalBandIds(state.info?.goals ?? []), task.goal)
         : undefined,
       handlers: {
+        onTabChange: (tab) => {
+          state.detailTab = tab;
+          syncBoardUrl();
+        },
         onClose: () => {
           state.detailTaskId = null;
           state.detailTab = 'comments';

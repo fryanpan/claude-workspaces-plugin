@@ -33,13 +33,25 @@ export interface BoardLocation {
   item: string | null;
   /** The board's restore-list filter (`?view=archived`). */
   archived: boolean;
+  /** The open task panel's tab, when it is not the default Comments. */
+  tab: 'activity' | null;
+  /** The settings page and its pane, or the phone's list of panes (`list`). */
+  settings: BoardSettingsPlace | null;
 }
+
+/** What `?settings=` may say. */
+export type BoardSettingsPlace = 'board' | 'notifications' | 'prompts' | 'list';
+const SETTINGS_PLACES = new Set<string>(['board', 'notifications', 'prompts', 'list']);
 
 /** Params that belong to the reader's session rather than to the place, so
  *  every URL this module builds carries them forward. `walk`/`then` are
  *  deliberately NOT here: the handoff is one-shot, and reasserting it would
  *  re-open a walkthrough the reader closed on the next reload. */
 const CARRIED_PARAMS = ['as'];
+
+/** The Library's inner pages (`library-page.ts`), which it writes itself.
+ *  They mean something on the Library alone, so they ride along there only. */
+const LIBRARY_PARAMS = ['list', 'place'];
 
 export function parseBoardLocation(pathname: string, search: string): BoardLocation {
   const nav = navFromPath(pathname);
@@ -48,6 +60,7 @@ export function parseBoardLocation(pathname: string, search: string): BoardLocat
   const goal = task ? null : params.get('goal');
   const thread = task || goal ? params.get('thread') : null;
   const item = nav === 'home' ? params.get('item') : null;
+  const settings = params.get('settings');
   return {
     nav,
     task,
@@ -55,6 +68,9 @@ export function parseBoardLocation(pathname: string, search: string): BoardLocat
     thread,
     item,
     archived: params.get('view') === 'archived',
+    tab: task && params.get('tab') === 'activity' ? 'activity' : null,
+    settings:
+      settings !== null && SETTINGS_PLACES.has(settings) ? (settings as BoardSettingsPlace) : null,
   };
 }
 
@@ -69,11 +85,19 @@ export function buildBoardUrl(workspaceId: string, loc: BoardLocation, carryFrom
     const v = current.get(name);
     if (v !== null) params.set(name, v);
   }
+  if (loc.nav === 'library') {
+    for (const name of LIBRARY_PARAMS) {
+      const v = current.get(name);
+      if (v !== null) params.set(name, v);
+    }
+  }
   if (loc.task) params.set('task', loc.task);
   else if (loc.goal) params.set('goal', loc.goal);
   if ((loc.task || loc.goal) && loc.thread) params.set('thread', loc.thread);
+  if (loc.task && loc.tab) params.set('tab', loc.tab);
   if (loc.nav === 'home' && loc.item) params.set('item', loc.item);
   if (loc.archived) params.set('view', 'archived');
+  if (loc.settings) params.set('settings', loc.settings);
   const q = params.toString();
   return `${navPath(workspaceId, loc.nav)}${q ? `?${q}` : ''}`;
 }
@@ -85,6 +109,7 @@ export function buildBoardUrl(workspaceId: string, loc: BoardLocation, carryFrom
  * over it takes over as the thing Back should close first.
  */
 export function resourceOf(loc: BoardLocation): string | null {
+  if (loc.settings) return 'settings';
   if (loc.task) return `task:${loc.task}`;
   if (loc.goal) return `goal:${loc.goal}`;
   if (loc.nav === 'home' && loc.item) return 'walk';
@@ -105,11 +130,29 @@ export type HistoryStep = 'push' | 'replace' | 'close';
  */
 export function historyStep(prev: BoardLocation, next: BoardLocation): HistoryStep {
   if (prev.nav !== next.nav) return 'push';
+  // Settings covers whatever was open; leaving it uncovers that, as Back does.
+  if (prev.settings && !next.settings) return 'close';
   const from = resourceOf(prev);
   const to = resourceOf(next);
   if (from === to) return 'replace';
   if (to === null) return 'close';
   return 'push';
+}
+
+/** The Library's address at one of its inner pages: a full list, or the docs
+ *  in one location. `here` is the page's current address. */
+export function libraryHref(here: string, list: string | null, place: string | null): string {
+  const url = new URL(here, 'https://board.invalid');
+  for (const name of LIBRARY_PARAMS) url.searchParams.delete(name);
+  if (list) url.searchParams.set('list', list);
+  if (place) url.searchParams.set('place', place);
+  return `${url.pathname}${url.search}`;
+}
+
+/** The inner page an address names: `list` or `place`, or neither. */
+export function libraryPlaceOf(search: string): { list: string | null; place: string | null } {
+  const params = new URLSearchParams(search);
+  return { list: params.get('list'), place: params.get('place') };
 }
 
 /**

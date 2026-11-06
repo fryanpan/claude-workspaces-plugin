@@ -231,4 +231,25 @@ describe('following', () => {
     expect(p.shown.length).toBe(before);
     expect(p.went).toEqual([]);
   });
+
+  it('keeps following while the reader talks to the agent', () => {
+    const p = page({ surface: 'board', path: `/workspaces/${WS}` });
+    const target = new EventTarget();
+    stopOnOwnInput(target, p.follower, () => false);
+    // A press or a key on the agent's button or chat: shadow DOM retargets
+    // it to the host, which carries `data-lead-chat`.
+    const inChat = (name: string, selector: string | null) => {
+      const ev = new Event(name);
+      const el = { closest: (sel: string) => (sel === selector ? {} : null) };
+      Object.defineProperty(ev, 'target', { value: el });
+      target.dispatchEvent(ev);
+    };
+    p.follower.follow('a-agent-harbor');
+    inChat('pointerdown', '[data-lead-chat]');
+    inChat('keydown', '[data-lead-chat]');
+    expect(p.follower.key()).toBe('a-agent-harbor');
+    // Positive control: the same press anywhere else ends it.
+    inChat('pointerdown', null);
+    expect(p.follower.key()).toBeNull();
+  });
 });

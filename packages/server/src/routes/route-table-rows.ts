@@ -337,6 +337,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/lead-chat', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/lead-chat/meeting', 'POST'],
   ]),
+  ...family('routes/workspace-point.ts', [['trusted-local', '/workspaces/:ws/point', 'POST']]),
 
   // Who has access, and at what level. The LIST is a member's — everything in
   // a workspace is available to everyone in it — and the writes are the

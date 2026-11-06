@@ -6,8 +6,10 @@ import { docSocketUrl } from '../doc-path.ts';
 import type { ChromeSelection } from '../doc/anchor-body.ts';
 import { el } from '../doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from '../doc/chrome-panels.ts';
+import { openThreadId } from '../doc/open-thread.ts';
 import type { MountContext } from '../mount-context.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { wireFlatDocSpot } from '../presence/flat-doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { mountReviewChrome } from '../review-chrome.ts';
 import type { ReviewSurface } from '../review-surface.ts';
@@ -366,6 +368,25 @@ export async function mountRedline(
     commentPill.classList.add('hidden');
     commentPill.classList.remove('caret');
   }
+  // Where the person here is, for the workspace's presence room.
+  wireFlatDocSpot({
+    docId,
+    document,
+    openThread: openThreadId,
+    revealThread: (id) => chrome.revealThread(id),
+    find: (quote) => {
+      const root = document.getElementById('editor');
+      if (!root) return false;
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (!n.textContent?.includes(quote)) continue;
+        n.parentElement?.scrollIntoView({ block: 'center' });
+        return true;
+      }
+      return false;
+    },
+    scope,
+  });
   scope.listen(commentPill, 'mousedown', (ev) => ev.preventDefault());
   scope.listen(commentPill, 'click', () => chrome.openComposer());
 

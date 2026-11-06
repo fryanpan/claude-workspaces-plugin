@@ -8,11 +8,11 @@
  * does not follow.
  *
  * The server keeps a link only when it is a path on the same board with no
- * param but these four (`messageLink` in `packages/server/src/voice.ts`).
+ * param but these (`messageLink` in `packages/server/src/voice.ts`).
  */
 import type { VoiceContext } from '../voice-capture.ts';
 
-const KEPT = ['task', 'goal', 'thread', 'item'] as const;
+const KEPT = ['task', 'goal', 'thread', 'item', 'tab', 'settings', 'list', 'place'] as const;
 
 /**
  * The page's link, or undefined off a board's pages. `openThread`: a string
