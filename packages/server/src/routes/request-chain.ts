@@ -31,6 +31,7 @@ import {
   crossOriginCredentialedWrite,
   isAllowedBrowserOrigin,
 } from '../middleware/browser-origin.ts';
+import { refusedWriteLine } from '../middleware/refused-write-log.ts';
 import {
   type WorkspaceScope,
   memberAddressed,
@@ -164,6 +165,8 @@ export function createRequestChain(
     // no body for `maybeCompress` to act on anyway.
     // `undefined` means the request became a websocket — nothing to decorate.
     if (routed === undefined) return undefined;
+    const refused = await refusedWriteLine(req, routed, policyFor);
+    if (refused) console.error(refused);
     const response = applyCors(
       req,
       refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed))),

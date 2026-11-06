@@ -8,7 +8,7 @@
  * right token, so nothing passes on a server that refuses everything.
  * Fixtures are fictional hosts and names; the repo is public.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -488,6 +488,35 @@ describe('the tailnet widget door', () => {
       expect((await onDoor(base, threads(boardA), elsewhere)).status).toBe(401);
       const wrong = { ...post, token: otherBoard, origin: portPage };
       expect((await onDoor(base, threads(boardA), wrong)).status).toBe(403);
+    });
+
+    it('logs which gate refused a write, with no token, person or path', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const lines: string[] = [];
+      const spy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(' '));
+      });
+      try {
+        // A markdown doc stays off the door, so this write is refused.
+        const refused = await onDoor(base, `/workspaces/${boardA}/docs/notes/threads`, {
+          method: 'POST',
+          origin: portPage,
+          token,
+          body: threadBody,
+        });
+        expect(refused.status).toBe(403);
+        const landed = await onDoor(base, threads(boardA), {
+          method: 'POST',
+          origin: portPage,
+          token,
+          body: threadBody,
+        });
+        expect(landed.status).toBe(200);
+      } finally {
+        spy.mockRestore();
+      }
+      const refusals = lines.filter((l) => l.startsWith('[refused-write]'));
+      expect(refusals).toEqual(['[refused-write] POST status=403 gate=out_of_widget_scope']);
     });
 
     it('mints nothing for a page that is not on this machine', async () => {
