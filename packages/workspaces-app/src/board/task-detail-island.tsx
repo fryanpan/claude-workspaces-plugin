@@ -3,7 +3,7 @@ import { judgeReasonClause } from '@claude-workspaces/core';
 import type { EffortCalibration } from '@claude-workspaces/core/goal-effort';
 import { signal } from '@preact/signals';
 import { type ComponentChildren, Fragment, type RefObject, render } from 'preact';
-import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { type MutableRef, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
 /**
  * The task detail panel — the ticket a reader opens to answer something — as a
@@ -114,8 +114,8 @@ export interface TaskDetailView {
   task: BoardTask | null;
   /** The task's comments, as fetched. Absent while the app has not asked. */
   discussion?: TaskDiscussion;
-  /** Which tab the panel OPENS on — read once, when the panel for this task
-   *  mounts; the reader's own switches win after that. Absent means
+  /** Which tab the panel is on, as the address says; the reader's own switch
+   *  writes the address (`onTabChange`) and so comes back here. Absent means
    *  Comments. The Home activity pane's title tap asks for Activity, since
    *  the reader was already looking at what happened to the task. */
   tab?: DetailTab;
@@ -1196,6 +1196,14 @@ function TaskDetailPanel(props: {
   const slotRef = useRef<HTMLDivElement | null>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<DetailTab>(props.initialTab ?? 'comments');
+  // The address can change the tab under an open panel: Back, or a follow. Only
+  // a CHANGE counts: on mount this effect would undo a click made before it ran.
+  const addressedTab = useRef(props.initialTab);
+  useEffect(() => {
+    if (props.initialTab === addressedTab.current) return;
+    addressedTab.current = props.initialTab;
+    setTab(props.initialTab ?? 'comments');
+  }, [props.initialTab]);
   // Full screen is a preference of the READER, not of the task, so it lives on
   // the container and survives both a repaint and a move to another task.
   const [full, setFull] = useState(host.classList.contains('board-detail--full'));
@@ -1572,6 +1580,7 @@ function TaskDetailPanel(props: {
             aria-selected={tab === t.id ? 'true' : 'false'}
             onClick={() => {
               setTab(t.id);
+              handlers.onTabChange?.(t.id);
               // Where the reader lands after switching, and it is not
               // "wherever the scrollbar ends up": hiding the taller panel
               // shortens the content under the scroll position, so the browser

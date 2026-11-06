@@ -656,7 +656,10 @@ export class SpokenSession {
 
   private asideVoice(): SpokenVoice | null {
     const { voices } = this.deps.engines;
-    return this.setup === 1 || this.setup === 2 ? voices[this.setup] : (voices[1] ?? voices[2]);
+    // A socket reopened only to hear an answer has had no `start`.
+    return (
+      (this.setup === 1 || this.setup === 2 ? voices[this.setup] : null) ?? voices[1] ?? voices[2]
+    );
   }
 
   /** Say the oldest waiting aside if nothing is in its way. With none left,

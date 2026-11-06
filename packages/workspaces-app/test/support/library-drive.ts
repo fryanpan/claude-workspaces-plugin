@@ -5,6 +5,7 @@
  *
  * All fixtures synthetic.
  */
+import { libraryHref } from '../../src/board/board-url.ts';
 import type { LibraryPayload } from '../../src/board/library-model.ts';
 import { type LibraryPage, createLibraryPage } from '../../src/board/library-page.ts';
 import { fakeHistory } from '../boot-harness.ts';
@@ -55,7 +56,7 @@ export function driveLibrary(
     },
     navigate: (href) => navigated.push(href),
     history,
-    here: () => `https://board.test/workspaces/${WS}/library`,
+    here: (list, place) => libraryHref(`https://board.test/workspaces/${WS}/library`, list, place),
     takeRequestedOpen: () => {
       const wanted = opts.requestedOpen ?? null;
       opts.requestedOpen = undefined;

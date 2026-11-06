@@ -132,6 +132,8 @@ describe('a save the store refuses names the field', () => {
       thread: null,
       item: null,
       archived: false,
+      tab: null,
+      settings: null,
     });
     return createBoardReviewController({
       author: { id: 'u-owner', name: 'Board Owner', kind: 'known', color: '#888888' },

@@ -62,13 +62,39 @@ export interface SpokenReplyRelayDeps {
   newId?: () => string;
 }
 
+/**
+ * Who a socket speaks for, for handing its lead answers to the next page that
+ * person opens: the proven identity, or the owner on a local page that proved
+ * nobody. A read-only page or a category author speaks for nobody in
+ * particular, so its waits end with it.
+ */
+function heirOf(ws: SpokenWs): string | null {
+  const proven = ws.data.author;
+  if (proven && !isCategoryAuthor(proven)) return `id:${proven.id}`;
+  if (!proven && ws.data.readOnly !== true) return 'local-owner';
+  return null;
+}
+
 export class SpokenReplyRelay {
   private readonly sessions = new WeakMap<SpokenWs, SpokenSession>();
+  /** The sockets open now, oldest first; a WeakMap cannot be walked. */
+  private readonly open = new Set<SpokenWs>();
+  /** Where each session's lead answers are said: itself, until a page
+   *  change hands its waits to the next session (`LeadAnswers.adopt`). */
+  private readonly sayOn = new WeakMap<object, { session: SpokenSession }>();
   /** Which socket waits for which lead answer. */
   private readonly leads: LeadAnswers;
 
   constructor(private readonly deps: SpokenReplyRelayDeps) {
     this.leads = deps.leads ?? new LeadAnswers();
+  }
+
+  /** The session saying `session`'s answers now: itself, or the one its
+   *  person's later pages handed them to. */
+  private heldBy(session: SpokenSession): SpokenSession {
+    let at = session;
+    for (let next = this.sayOn.get(at); next; next = this.sayOn.get(at)) at = next.session;
+    return at;
   }
 
   /** Which setups this server can run — none unless the engines were built. */
@@ -122,7 +148,7 @@ export class SpokenReplyRelay {
             session,
             (a, text) => {
               conversation?.replied(queueId, text);
-              session.sayLead(queueId, a);
+              this.heldBy(session).sayLead(queueId, a);
             },
             from,
           ),
@@ -145,7 +171,11 @@ export class SpokenReplyRelay {
       },
     });
     this.sessions.set(ws, session);
+    this.open.add(ws);
     session.open();
+    // A page change: what this person's last page was waiting for is said here.
+    const heir = heirOf(ws);
+    if (heir) this.takeOver(workspaceId, heir, session);
   }
 
   onText(ws: SpokenWs, text: string): void {
@@ -159,8 +189,30 @@ export class SpokenReplyRelay {
   onClose(ws: SpokenWs): void {
     const session = this.sessions.get(ws);
     session?.close();
-    if (session) this.leads.drop(session);
+    const heir = heirOf(ws);
+    if (session) this.leads.orphan(session, heir);
+    // The next page's socket can open before the last page's has closed, when
+    // its opening found nothing to take. Only a socket opened since: an older
+    // one is another tab of theirs, not where they went.
+    const workspaceId = ws.data.workspaceId ?? '';
+    let since = false;
+    let next: SpokenSession | undefined;
+    for (const other of this.open) {
+      if (other === ws) since = true;
+      else if (since && heirOf(other) === heir && (other.data.workspaceId ?? '') === workspaceId) {
+        next = this.sessions.get(other) ?? next;
+      }
+    }
     this.sessions.delete(ws);
+    this.open.delete(ws);
+    if (heir && next) this.takeOver(workspaceId, heir, next);
+  }
+
+  /** `session` takes every wait a closed socket of `heir` left on the board. */
+  private takeOver(workspaceId: string, heir: string, session: SpokenSession): void {
+    this.leads.adopt(workspaceId, heir, session, (old) => {
+      this.sayOn.set(old, { session });
+    });
   }
 
   /** The lead's answer to a spoken request: said on the socket or into the

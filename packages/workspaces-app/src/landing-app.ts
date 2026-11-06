@@ -25,6 +25,7 @@ import { startInbox } from './landing-inbox.ts';
 import { startLandingLive } from './landing-live.ts';
 import './meeting-banner.ts';
 import { startPageLoadReport } from './page-load-report.ts';
+import { keepFollowingHere } from './presence/carried-follow.ts';
 import { wireStandaloneViewportHeal } from './standalone-viewport.ts';
 
 // The list is server-rendered, so it is on screen by the time this module
@@ -36,6 +37,7 @@ if (document.querySelector('#coach')) mountCoachCard({ page: 'home' });
 startCoach();
 startInbox();
 startLandingLive();
+keepFollowingHere();
 const leadDock = document.querySelector<HTMLElement>(
   '.home-nav > .board-nav-dock[data-lead-board]',
 );

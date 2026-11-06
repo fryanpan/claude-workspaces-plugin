@@ -39,7 +39,6 @@ function boardRoom() {
   const spots = createAgentSpots({
     boardsForDoc: () => [WS],
     boardAwareness: () => room,
-    surfaceOf: () => 'doc',
     // No agent holds a stream here: the voice is shown on its cursor alone.
     listening: () => false,
   });

@@ -14,7 +14,13 @@
  * welcome while they are watching.
  */
 import { type PresenceSpot, samePage } from '@claude-workspaces/core/workspace-presence';
-import { type RoomStates, spotHref, spotKey, spotOfParticipant } from './follow-model.ts';
+import {
+  type RoomStates,
+  isBoardPagePath,
+  spotHref,
+  spotKey,
+  spotOfParticipant,
+} from './follow-model.ts';
 
 /** The slice of a Yjs awareness this reads. */
 export interface FollowRoom {
@@ -94,7 +100,15 @@ export function createFollower(deps: FollowerDeps): Follower {
 
   /** Take this view to `spot`; a follow rides along to the next page. */
   const goTo = (spot: PresenceSpot, following: string | null): void => {
-    if (samePage(spot, deps.here())) {
+    // A board spot names its page by address: the board shows its own tabs
+    // and panels in place, and anything else is another page. The queue and
+    // the workspaces list hold a follow but draw none of them.
+    const same =
+      spot.surface === 'board'
+        ? isBoardPagePath(deps.workspaceId, deps.address()) &&
+          (!spot.path || isBoardPagePath(deps.workspaceId, spot.path))
+        : samePage(spot, deps.here());
+    if (same) {
       deps.show(spot);
       return;
     }
@@ -136,15 +150,21 @@ export function createFollower(deps: FollowerDeps): Follower {
 
 /**
  * End the follow when the reader moves on their own. A press on the presence
- * strip is how a follow is armed and changed, so it is not one of these.
+ * strip is how a follow is armed and changed, so it is not one of these; nor
+ * is talking to the agent through its button or chat (`data-lead-chat`, the
+ * shadow host an event inside it is retargeted to), which is how a person
+ * following the lead asks it where to go next.
  */
 export function stopOnOwnInput(
   target: Pick<EventTarget, 'addEventListener'>,
   follower: Follower,
   isStrip: (el: EventTarget | null) => boolean,
 ): void {
+  const inAgentChat = (el: EventTarget | null): boolean =>
+    // Duck-typed: the target may be a text node or a non-DOM EventTarget.
+    !!(el as { closest?: (s: string) => unknown } | null)?.closest?.('[data-lead-chat]');
   const stop = (ev: Event): void => {
-    if (!follower.key() || isStrip(ev.target)) return;
+    if (!follower.key() || isStrip(ev.target) || inAgentChat(ev.target)) return;
     follower.follow(null);
   };
   for (const name of ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const) {

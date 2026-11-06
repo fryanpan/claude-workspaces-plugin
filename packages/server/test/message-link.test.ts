@@ -70,8 +70,18 @@ describe('the link a message carries to its agent', () => {
       thread: null,
       item: null,
       archived: false,
+      tab: null,
+      settings: null,
       ...loc,
     });
+
+  it('names the task tab, the settings pane and the Library page, and nothing else', () => {
+    const B = `/workspaces/${boardId}`;
+    expect(pageLink(`${B}?task=t-1&tab=activity&utm=x`)).toBe(`${B}?task=t-1&tab=activity`);
+    expect(pageLink(`${B}?settings=notifications`)).toBe(`${B}?settings=notifications`);
+    expect(pageLink(`${B}/library?list=files`)).toBe(`${B}/library?list=files`);
+    expect(pageLink(`${B}/library?place=Saltmarsh`)).toBe(`${B}/library?place=Saltmarsh`);
+  });
 
   /** The review item the board's Home walkthrough has open. `?item=` holds
    *  the board's own key for it (`board-review-model.ts`), which names no

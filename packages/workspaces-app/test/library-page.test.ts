@@ -211,7 +211,7 @@ describe('the Library front page', () => {
     expect(history.entries).toEqual([
       {
         kind: 'push',
-        url: `https://board.test/workspaces/${WS}/library`,
+        url: `/workspaces/${WS}/library?list=meetings`,
         state: { libraryList: 'meetings' },
       },
     ]);

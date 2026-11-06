@@ -35,6 +35,8 @@ function controller(): ReturnType<typeof createBoardReviewController> {
     thread: null,
     item: null,
     archived: false,
+    tab: null,
+    settings: null,
   });
   return createBoardReviewController({
     author: { id: 'u-owner', name: 'Board Owner', kind: 'known', color: '#888888' },

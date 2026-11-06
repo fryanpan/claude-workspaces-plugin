@@ -3,7 +3,9 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
 import { api } from '../doc-path.ts';
 import { el } from '../doc/chrome-dom.ts';
+import { openThreadId } from '../doc/open-thread.ts';
 import type { MountContext } from '../mount-context.ts';
+import { wireFlatDocSpot } from '../presence/flat-doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { mountReviewChrome } from '../review-chrome.ts';
 import { lockDocToReading } from '../signin/write-gate.ts';
@@ -217,6 +219,15 @@ export async function mountCode(
   // CodeMirror manages its own scroller inside #editor; the tracker reads
   // scroll depth from editorMount and listens for interaction at the window.
   scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
+  // Where the person here is, for the workspace's presence room.
+  wireFlatDocSpot({
+    docId,
+    document,
+    openThread: openThreadId,
+    revealThread: (id) => chrome.revealThread(id),
+    find: (quote) => surface.scrollToText(quote),
+    scope,
+  });
   void syncDeviceContext(browserDeviceEnv(browserStorage), { mayAsk: false });
 
   // --- diff ↔ whole-file toggle ---------------------------------------------

@@ -1,4 +1,5 @@
 import type { DocType, User } from '@claude-workspaces/core';
+import type { AgentSpots } from '../agent-spots.ts';
 import type { AgentWatches } from '../agent-watches.ts';
 import type { AttachMountsBrief } from '../attach-mounts.ts';
 import type { AttachmentPrivacyStore } from '../attachment-privacy.ts';
@@ -83,6 +84,8 @@ export interface WorkspaceRoutesContext {
   leadMeetingVoice: SpokenVoice | null;
   /** What the pages say about features this server's profile turned off. */
   featuresOff: FeaturesOff;
+  /** Where each agent points, in its boards' presence rooms. */
+  agentSpots: AgentSpots;
   /** Whether this request speaks for `agentId`: on this machine, with its
    *  token (`auth/agent-token.ts`), the check the agent's own feed uses.
    *  `requireToken` holds a route to the token whatever the server's
