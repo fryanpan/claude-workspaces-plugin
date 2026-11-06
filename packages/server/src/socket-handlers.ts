@@ -36,6 +36,7 @@ import type { User, WriteVia } from '@claude-workspaces/core';
  */
 import type { WebSocketHandler } from 'bun';
 import type { Awareness } from 'y-protocols/awareness';
+import type { AppSocketLink } from './app-socket-link.ts';
 import type { AppVoiceRelay } from './app-voice/relay.ts';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { SocketEditor } from './edit-sessions.ts';
@@ -87,7 +88,7 @@ export interface SocketHandlersContext {
  */
 export type UpgradeData = {
   docId: string;
-  kind?: 'yjs' | 'audio' | 'recall' | 'voice' | 'spoken' | 'app-voice';
+  kind?: 'yjs' | 'audio' | 'recall' | 'voice' | 'spoken' | 'app-voice' | 'app';
   /** The board a voice socket was addressed under — its clips' URLs need it. */
   workspaceId?: string;
   token?: string;
@@ -104,6 +105,9 @@ export type UpgradeData = {
    *  display name or a body's claim (`spoken-reply/meeting-ask.ts`). */
   ownerProven?: boolean;
   via?: WriteVia;
+  /** An attached app's socket: the connection to its dev server, already
+   *  open when the upgrade ran (`app-socket-link.ts`). */
+  appLink?: AppSocketLink;
 };
 
 /**
@@ -135,6 +139,12 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
     perMessageDeflate: true,
     open(ws) {
       if (ws.data.kind === 'recall') return;
+      if (ws.data.kind === 'app') {
+        // In no doc's `conns`, so a revoked share reaches it only from here.
+        docStore.trackShareSocket(ws);
+        ws.data.appLink?.attach(ws);
+        return;
+      }
       if (ws.data.kind === 'spoken') {
         // Tracked for the reason the voice socket is: it spends an engine
         // while open and joins no doc's `conns`.
@@ -185,6 +195,11 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         if (typeof message === 'string' && ws.data.token) {
           recallRelay.onSocketText(ws.data.token, message);
         }
+        return;
+      }
+      if (ws.data.kind === 'app') {
+        // A reader may watch the app reload; only a writer may speak to it.
+        if (!ws.data.readOnly) ws.data.appLink?.fromClient(message);
         return;
       }
       if (ws.data.kind === 'spoken') {
@@ -255,6 +270,11 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (ws.data.kind === 'recall') {
         // NOT the end of the meeting — see RecallMeetingRelay.onSocketClose.
         if (ws.data.token) recallRelay.onSocketClose(ws.data.token);
+        return;
+      }
+      if (ws.data.kind === 'app') {
+        docStore.untrackShareSocket(ws);
+        ws.data.appLink?.clientClosed(code, reason);
         return;
       }
       if (ws.data.kind === 'spoken') {

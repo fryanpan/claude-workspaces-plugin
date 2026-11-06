@@ -1,9 +1,9 @@
 /**
  * ── Upgrade and stream: this request wants a connection, not a response ──
  *
- * Six blocks answering one question. Three websocket upgrades — Recall
- * dialling us with a bot's words, a doc's live meeting audio, and `/y/`
- * editing — and three SSE openers — one agent's whole watch set, one
+ * Blocks answering one question. Websocket upgrades — Recall dialling us
+ * with a bot's words, a doc's live meeting audio, `/y/` editing and an attached
+ * app's own socket — and three SSE openers — one agent's whole watch set, one
  * workspace's thread events, one doc's. Every one of them ends with a
  * long-lived connection rather than a body, and every one of them has to
  * decide at the handshake what that connection is allowed to do, because
@@ -50,6 +50,7 @@ import {
   SHARED_IDENTITY_MESSAGE,
   isValidAgentId,
 } from '../agent-watches.ts';
+import { appWriterOf } from '../app-proxy.ts';
 import { refuseAppVoice } from '../app-voice/gate.ts';
 import { authorizeAgentCaller } from '../auth/agent-token.ts';
 import type { DocStore } from '../doc-store.ts';
@@ -68,6 +69,7 @@ import { channelForWatchKey, openAgentMuxStream } from '../sse-mux.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
+import { isAppSocketRequest, openAppSocket } from './app-socket.ts';
 
 /** The id a reconnecting SSE client last saw: the `Last-Event-ID` header a
  *  native EventSource sends back by itself once frames carry `id:` lines,
@@ -85,7 +87,12 @@ export interface UpgradeStreamContext {
    *  forward reference — `Bun.serve` has not returned when this factory is
    *  composed — and it is narrowed so this module can take a connection over
    *  and nothing else. */
-  server: { upgrade: (req: Request, options: { data: UpgradeData }) => boolean };
+  server: {
+    upgrade: (
+      req: Request,
+      options: { data: UpgradeData; headers?: Record<string, string> },
+    ) => boolean;
+  };
   /** Doc store: what an address resolves to, and whether it exists at all. */
   docStore: DocStore;
   /** The boards, for whether a workspace-level stream has a channel. */
@@ -197,6 +204,9 @@ export interface UpgradeStreamRequest {
    *  person. A token is bound to the page origin it was minted for, so it is
    *  the credential a widget on another origin brings, where a cookie is not. */
   widgetTokenProved: boolean;
+  /** The Access address of a visitor admitted as a board member, or null:
+   *  the same value an app's write is judged by (`appWriteRefusal`). */
+  appMember?: string | null;
 }
 
 /**
@@ -205,9 +215,21 @@ export interface UpgradeStreamRequest {
  * `null` — no block here claimed it, so the caller carries on exactly as the
  * run did in place. `response` — an answer to send, whether that is a
  * refusal or an opened SSE stream. `upgraded` — the socket has taken the
- * connection over, and `fetch` must return `undefined`.
+ * connection over, and `fetch` must return `undefined`. `dialing` — an app's
+ * socket, which opens only once its dev server has answered, so the outcome
+ * is one of the other two, later.
  */
-export type StreamOutcome = null | { kind: 'response'; response: Response } | { kind: 'upgraded' };
+export type StreamOutcome =
+  | null
+  | { kind: 'response'; response: Response }
+  | { kind: 'upgraded' }
+  | { kind: 'dialing'; outcome: Promise<SettledStream> };
+
+/** A stream outcome that needs nothing more awaited. */
+export type SettledStream = { kind: 'response'; response: Response } | { kind: 'upgraded' };
+
+const settledStream = (answered: Response | undefined): SettledStream =>
+  answered === undefined ? { kind: 'upgraded' } : { kind: 'response', response: answered };
 
 export interface UpgradeStream {
   serveUpgradeAndStreamRoutes: (addressed: UpgradeStreamRequest) => StreamOutcome;
@@ -307,6 +329,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     anyoneProven,
     widgetDoorGrant,
     widgetTokenProved,
+    appMember,
   }: UpgradeStreamRequest): StreamOutcome => {
     // A page on another origin sends the reader's cookie with every socket it
     // opens: a dev server on another port is same-site, and a handshake has
@@ -335,7 +358,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
     // only place those three become the named outcome.
-    const answered = ((): Response | undefined | null => {
+    const answered = ((): Response | undefined | null | Promise<Response | undefined> => {
       // --- WebSocket upgrade: Recall dialling US with a bot's words ---
       //
       // NO Origin check, unlike `/audio/` and `/y/` below. That guard exists
@@ -520,6 +543,26 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });
         return undefined;
+      }
+
+      // --- WebSocket upgrade: an attached app's own socket ---
+      // `/workspaces/<ws>/apps/<id>/<path>` with an `Upgrade` header, so a
+      // framework's reload channel (Vite's HMR) reaches its dev server. Only
+      // an upgrade is claimed: the same address without one is the app's page,
+      // further down the chain. `routes/app-socket.ts` holds the gate.
+      if (isAppSocketRequest(req, pathname)) {
+        return openAppSocket(
+          { server, docStore, isValidDocId, workspacesOfMember, taskStore, policyFor, j },
+          {
+            req,
+            url,
+            pathname,
+            writer: appWriterOf(visitor !== null, appMember ?? null),
+            mustSignIn: requireSignInToWrite && provedNobody(),
+            shareId: visitorShareId,
+            shareMember: visitorMemberKey,
+          },
+        );
       }
 
       // --- WebSocket upgrade: the BOARD's own room ---
@@ -780,7 +823,10 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
       return null;
     })();
     if (answered === null) return null;
-    return answered === undefined ? { kind: 'upgraded' } : { kind: 'response', response: answered };
+    if (answered instanceof Promise) {
+      return { kind: 'dialing', outcome: answered.then(settledStream) };
+    }
+    return settledStream(answered);
   };
 
   return { serveUpgradeAndStreamRoutes };

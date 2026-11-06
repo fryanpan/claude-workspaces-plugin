@@ -71,6 +71,9 @@
         "y-protocols": "^1.0.6",
         "yjs": "^13.6.20",
       },
+      "devDependencies": {
+        "vite": "6.4.2",
+      },
     },
     "packages/workspaces-app": {
       "name": "@claude-workspaces/workspaces-app",

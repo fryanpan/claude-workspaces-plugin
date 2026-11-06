@@ -28,6 +28,7 @@
  * the reader. Everything else passes through as bytes, streamed, so the dev
  * server's reload event stream reaches the page as it is written. Nothing
  * inside the page is rewritten: the site builds its links under the prefix.
+ * A websocket under the same prefix is `routes/app-socket.ts`.
  *
  * Reads are decided above this module. The host guard admits a share or
  * collab visitor to `apps/<id>/…` only for an app filed on the board in the
@@ -47,6 +48,7 @@ import { assetHref } from '@claude-workspaces/core/asset-manifest';
 import { EMBED_PARAM } from '@claude-workspaces/core/board-embeds';
 import type { AppOutages } from '../app-outage.ts';
 import {
+  APP_ADDRESS,
   APP_WRITE_METHODS,
   appPrefix,
   appWriteRefusal,
@@ -129,9 +131,6 @@ function boardName(scope: WorkspaceScope | undefined): string | undefined {
   const name = (scope?.board as { name?: unknown } | undefined)?.name;
   return typeof name === 'string' ? name : undefined;
 }
-
-/** `apps/<id>` and whatever follows it, off the scope's remainder. */
-const APP_ADDRESS = /^apps\/([^/]+)(?:\/(.*))?$/;
 
 /** How long an attach waits to learn whether the dev server answers. */
 const PROBE_MS = 1500;
