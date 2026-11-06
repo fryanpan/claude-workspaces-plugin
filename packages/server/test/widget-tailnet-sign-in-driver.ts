@@ -13,12 +13,13 @@
  * Spawned by `packages/widget/test/widget-tailnet-sign-in-browser.test.ts`, which reads the JSON
  * this prints on its last line.
  *
- * audit: no-text — nothing here reads a source file, a bundle or a
- * stylesheet; every value it returns was measured in a running browser or
- * read off the server's own store.
+ * The one file it reads is the certificate it just wrote. Nothing here reads a
+ * source file, a bundle or a stylesheet; every value it returns was measured
+ * in a running browser or read off the server's own store.
  */
+// audit: no-text
 import { type ChildProcess, execFileSync } from 'node:child_process';
-import { mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { type Server, connect as netConnect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,17 +85,24 @@ async function buildWidget(dist: string): Promise<void> {
   renameSync(join(dist, 'widget-iife.js'), join(dist, 'widget.iife.js'));
 }
 
-/** One throwaway certificate. Both PEM blocks arrive on stdout, and TLS takes
- *  from that text the block each field asks for. */
+/** One throwaway certificate, in its own directory. Written to files because
+ *  openssl on Linux cannot reopen `/dev/stdout` when stdout is a pipe. */
 function selfSigned(): { key: string; cert: string } {
-  const pem = execFileSync(
-    'openssl',
-    'req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=edge -keyout /dev/stdout -out /dev/stdout'.split(
-      ' ',
-    ),
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-  );
-  return { key: pem, cert: pem };
+  const dir = mkdtempSync(join(tmpdir(), 'widget-tailnet-tls-'));
+  try {
+    const key = join(dir, 'edge.key');
+    const cert = join(dir, 'edge.crt');
+    execFileSync(
+      'openssl',
+      'req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=edge'
+        .split(' ')
+        .concat(['-keyout', key, '-out', cert]),
+      { stdio: 'ignore' },
+    );
+    return { key: readFileSync(key, 'utf8'), cert: readFileSync(cert, 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** `tailscale serve`: TLS on the tailnet name, bytes through to a local port. */
