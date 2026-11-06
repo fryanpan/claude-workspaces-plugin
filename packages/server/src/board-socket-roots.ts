@@ -320,6 +320,8 @@ export class BoardSocketRoots {
    * name is spelled as typed and not kept, so it is asked again.
    */
   private spell(dir: string, links = 0): string | null {
+    // A relative path never reaches `/`; it names what the process would open.
+    if (!isAbsolute(dir)) return this.spell(resolve(dir), links);
     if (dir === '/' || this.under(dir)) return dir;
     const hit = this.spellings.get(dir);
     if (hit !== undefined) {
