@@ -8,7 +8,7 @@
  * Two orgs, Harborlight and Riverbend, are deployed end to end against
  * stand-ins: `fly`, `security`, `script` and `claude` on PATH are scripts that
  * answer from files in a temp folder and record every call, and the buckets'
- * lifecycle reads are a loopback server. The `claude` stand-in is the browser
+ * type reads are a loopback server. The `claude` stand-in is the browser
  * approval: each call counts as one, and it prints the token the way
  * `claude setup-token` does. Nothing reaches Fly, Tigris, the Keychain or
  * Anthropic, and no browser opens.
@@ -37,7 +37,6 @@ import {
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { approveOrgSignIn, testRefusal } from '../../../infra/project-machine/org-signin.ts';
-import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
 import { BASH, machineDir, machineEnv, readRecords, stubs } from './project-machine-harness.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -88,11 +87,9 @@ beforeAll(() => {
     hostname: '127.0.0.1',
     fetch(req) {
       const url = new URL(req.url);
-      if (url.searchParams.has('versioning'))
-        return new Response(
-          '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>',
-        );
-      return new Response(lifecycleXml('snapshots/', 30));
+      // A snapshot bucket, as the Mac's first run left it.
+      if (url.searchParams.has('metadata')) return Response.json({ type: 1 });
+      return new Response('not found', { status: 404 });
     },
   });
   mkdirSync(bin);
@@ -331,8 +328,8 @@ describe('machine:deploy gives each org a sign-in of its own', () => {
       app: true,
       volumes: 1,
       keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
-      lifecycle: true,
-      versioning: true,
+      snapshots: true,
+      lifecycle: false,
       secrets: new Set(requiredSecrets('quick')),
       machines: [{ id: 'm1', state: 'started', imageTag: HEAD, memoryMb: 2048 }],
       browser: false,

@@ -1,9 +1,9 @@
 /**
  * The Tigris calls `deploy.ts` makes with the bucket's admin credential:
- * mint the machine's write-only key, turn on versioning (the key may overwrite
- * a snapshot whose name it knows, and the bucket keeps the version it
- * replaced), and set the rule that prunes old snapshots and old versions (the
- * machine cannot delete, so the bucket must).
+ * mint the machine's write-only key, and make the bucket a snapshot bucket
+ * (the key may overwrite a snapshot whose name it knows, and a snapshot
+ * bucket keeps the version it replaced). Nothing prunes old snapshots yet:
+ * a snapshot bucket cannot expire objects, and the machine cannot delete.
  *
  * No value read here is ever printed. Errors carry the API's error code and
  * message, which name the request, never a key.
@@ -125,78 +125,89 @@ function lifecycleUrl(cred: BucketCredential, bucket: string): string {
   return `${cred.endpoint.replace(/\/$/, '')}/${bucket}?lifecycle=`;
 }
 
-export function lifecycleXml(prefix: string, days: number): string {
-  return `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration><Rule><ID>expire-snapshots</ID><Filter><Prefix>${prefix}</Prefix></Filter><Status>Enabled</Status><Expiration><Days>${days}</Days></Expiration><NoncurrentVersionExpiration><NoncurrentDays>${days}</NoncurrentDays></NoncurrentVersionExpiration></Rule></LifecycleConfiguration>`;
-}
-
-/** Whether the bucket already expires objects under `prefix` after `days`. */
-export async function hasLifecycle(
-  cred: BucketCredential,
-  bucket: string,
-  prefix: string,
-  days: number,
-): Promise<boolean> {
+/**
+ * Whether the bucket holds any lifecycle rule. Tigris refuses to make a
+ * bucket a snapshot bucket while one exists, and a snapshot bucket cannot
+ * expire anything, so the deploy removes the rule an older run set.
+ */
+export async function hasLifecycle(cred: BucketCredential, bucket: string): Promise<boolean> {
   const res = await s3(cred, 'GET', lifecycleUrl(cred, bucket));
   const text = await res.text();
   if (res.status === 404) return false;
   if (!res.ok)
     throw new Error(`GetBucketLifecycle: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
-  return (
-    text.includes(`<Prefix>${prefix}</Prefix>`) &&
-    text.includes(`<Days>${days}</Days>`) &&
-    text.includes(`<NoncurrentDays>${days}</NoncurrentDays>`) &&
-    text.includes('<Status>Enabled</Status>')
-  );
+  return text.includes('<Rule>');
 }
 
-export async function setLifecycle(
-  cred: BucketCredential,
-  bucket: string,
-  prefix: string,
-  days: number,
-): Promise<void> {
-  const body = lifecycleXml(prefix, days);
-  const md5 = createHash('md5').update(body).digest('base64');
-  const res = await s3(cred, 'PUT', lifecycleUrl(cred, bucket), body, {
-    'content-md5': md5,
-    'content-type': 'application/xml',
-  });
-  if (!res.ok) {
+export async function deleteLifecycle(cred: BucketCredential, bucket: string): Promise<void> {
+  const res = await s3(cred, 'DELETE', lifecycleUrl(cred, bucket));
+  if (!res.ok && res.status !== 404) {
     const text = await res.text();
-    throw new Error(`PutBucketLifecycle: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
+    throw new Error(`DeleteBucketLifecycle: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
   }
 }
 
-function versioningUrl(cred: BucketCredential, bucket: string): string {
-  return `${cred.endpoint.replace(/\/$/, '')}/${bucket}?versioning=`;
-}
+/**
+ * Tigris's own bucket settings: `GET /<bucket>?metadata` reads them and
+ * `PATCH /<bucket>` with a JSON body changes them, signed as S3 calls. These
+ * are the requests Tigris's SDK makes for `getBucketInfo` and
+ * `enableSnapshot` (`@tigrisdata/storage`, `bucket/info.ts` and
+ * `bucket/set/type.ts`), where a bucket's `type` is 0 for Regular and 1 for
+ * Snapshot.
+ */
+const SNAPSHOT_TYPE = 1;
 
-export function versioningXml(): string {
-  return '<?xml version="1.0" encoding="UTF-8"?><VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>';
+function bucketUrl(cred: BucketCredential, bucket: string, query = ''): string {
+  return `${cred.endpoint.replace(/\/$/, '')}/${bucket}${query}`;
 }
 
 /**
- * Whether the bucket keeps old versions (security review L5). A bucket that
- * never had versioning answers with no Status; a suspended one keeps nothing
- * new, so both read as off.
+ * Whether the bucket keeps what an overwrite replaced (security review L5).
+ * Tigris does not implement PutBucketVersioning (it answers 501); a snapshot
+ * bucket keeps every version instead, and any past moment can be read back
+ * with `X-Tigris-Snapshot-Version: <unix ns>` and copied over the current
+ * object. Only a DeleteObject naming a version removes one, and the
+ * machine's key may only put.
  */
-export async function hasVersioning(cred: BucketCredential, bucket: string): Promise<boolean> {
-  const res = await s3(cred, 'GET', versioningUrl(cred, bucket));
+export async function hasSnapshots(cred: BucketCredential, bucket: string): Promise<boolean> {
+  const res = await s3(cred, 'GET', bucketUrl(cred, bucket, '?metadata='));
   const text = await res.text();
-  if (!res.ok)
-    throw new Error(`GetBucketVersioning: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
-  return xmlValue(text, 'Status') === 'Enabled';
+  if (!res.ok) throw new Error(`GetBucketInfo: HTTP ${res.status}: ${errorCode(text)}`);
+  let info: unknown;
+  try {
+    info = JSON.parse(text);
+  } catch {
+    throw new Error('GetBucketInfo: the answer was not JSON');
+  }
+  return (info as { type?: unknown } | null)?.type === SNAPSHOT_TYPE;
 }
 
-export async function setVersioning(cred: BucketCredential, bucket: string): Promise<void> {
-  const body = versioningXml();
-  const md5 = createHash('md5').update(body).digest('base64');
-  const res = await s3(cred, 'PUT', versioningUrl(cred, bucket), body, {
-    'content-md5': md5,
-    'content-type': 'application/xml',
+export async function enableSnapshots(cred: BucketCredential, bucket: string): Promise<void> {
+  const body = JSON.stringify({ type: SNAPSHOT_TYPE });
+  const res = await s3(cred, 'PATCH', bucketUrl(cred, bucket), body, {
+    'content-type': 'application/json',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`PutBucketVersioning: HTTP ${res.status}: ${xmlValue(text, 'Code') ?? ''}`);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`UpdateBucket (snapshots): HTTP ${res.status}: ${errorCode(text)}`);
+  // The SDK treats a 200 whose body says `status: error` as a refusal too.
+  let answer: { status?: unknown; message?: unknown } | null = null;
+  try {
+    answer = JSON.parse(text);
+  } catch {
+    return;
+  }
+  if (answer?.status === 'error')
+    throw new Error(`UpdateBucket (snapshots): ${String(answer.message ?? 'refused')}`);
+}
+
+/** The error's code from an XML or JSON answer, never its whole body. */
+function errorCode(text: string): string {
+  const xml = xmlValue(text, 'Code');
+  if (xml) return xml;
+  try {
+    const j = JSON.parse(text) as { code?: unknown; error?: { code?: unknown } } | null;
+    return String(j?.code ?? j?.error?.code ?? '');
+  } catch {
+    return '';
   }
 }

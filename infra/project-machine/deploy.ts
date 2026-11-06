@@ -103,11 +103,11 @@ import { generateSnapshotKeys } from './snapshot.ts';
 import {
   attachPolicy,
   createAccessKey,
+  deleteLifecycle,
+  enableSnapshots,
   ensurePolicy,
   hasLifecycle,
-  hasVersioning,
-  setLifecycle,
-  setVersioning,
+  hasSnapshots,
 } from './tigris.ts';
 import {
   type AppliedTunnel,
@@ -118,7 +118,6 @@ import {
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
-const KEEP_DAYS = 30;
 
 function arg(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -188,22 +187,21 @@ async function observe(cfg: ProjectConfig) {
       (n): n is string => n !== undefined && (keychainHas(n) || inferred(n)),
     ),
   );
-  // The lifecycle rule and versioning are read with the bucket's admin
-  // credential, which CI does not hold; the Mac set both when it made the
-  // bucket, or on its first run since.
+  // The bucket's type and lifecycle rule are read with its admin credential,
+  // which CI does not hold; the Mac made it a snapshot bucket when it made
+  // the bucket, or on its first run since, and removed the rule then.
   const admin = keychainHas(cfg.keychain.bucketAdmin);
-  const lifecycle = admin
-    ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
+  const snapshots = admin
+    ? await hasSnapshots(bucketAdmin(cfg), cfg.bucket)
     : inferred(cfg.keychain.bucketAdmin);
-  const versioning = admin
-    ? await hasVersioning(bucketAdmin(cfg), cfg.bucket)
-    : inferred(cfg.keychain.bucketAdmin);
+  // A snapshot bucket holds no rule, so it is not read again.
+  const lifecycle = admin && !snapshots ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket) : false;
   return {
     app,
     volumes,
     keychain,
+    snapshots,
     lifecycle,
-    versioning,
     secrets,
     machines: app ? machines(cfg.app) : [],
     browser: !secretsFromEnv(),
@@ -302,11 +300,11 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       keychainCreate(cfg.keychain.writer, JSON.stringify(key));
       return;
     }
-    case 'set-versioning':
-      await setVersioning(bucketAdmin(cfg), cfg.bucket);
+    case 'remove-lifecycle':
+      await deleteLifecycle(bucketAdmin(cfg), cfg.bucket);
       return;
-    case 'set-lifecycle':
-      await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
+    case 'enable-snapshots':
+      await enableSnapshots(bucketAdmin(cfg), cfg.bucket);
       return;
     case 'set-secrets': {
       const lines = new Map<string, string>();

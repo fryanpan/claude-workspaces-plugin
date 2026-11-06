@@ -1,6 +1,6 @@
 /**
  * AWS Signature Version 4, for the two calls Bun's S3 client cannot make:
- * Tigris's IAM API (the write-only key) and a bucket's lifecycle rule.
+ * Tigris's IAM API (the write-only key) and a bucket's settings.
  * Pure: the caller supplies the clock, so the test can use AWS's published
  * example and expect its published signature.
  */

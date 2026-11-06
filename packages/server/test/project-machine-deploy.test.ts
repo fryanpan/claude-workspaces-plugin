@@ -23,7 +23,6 @@ import {
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { signRequest } from '../../../infra/project-machine/sigv4.ts';
 import { generateSnapshotKeys, recipientOf } from '../../../infra/project-machine/snapshot.ts';
-import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
 
 const SHA = 'a'.repeat(40);
 const cfg = projectConfig({ project: 'riverbend-test', imageLabel: SHA });
@@ -33,8 +32,8 @@ function complete(): Observed {
     app: true,
     volumes: 1,
     keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
-    lifecycle: true,
-    versioning: true,
+    snapshots: true,
+    lifecycle: false,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
     browser: true,
@@ -88,8 +87,8 @@ describe('plan', () => {
       app: false,
       volumes: 0,
       keychain: new Set(),
+      snapshots: false,
       lifecycle: false,
-      versioning: false,
       secrets: new Set(),
       machines: [],
       browser: true,
@@ -100,8 +99,7 @@ describe('plan', () => {
       'make-backup-key',
       'create-bucket',
       'make-writer-key',
-      'set-versioning',
-      'set-lifecycle',
+      'enable-snapshots',
       'set-secrets',
       'deploy',
     ]);
@@ -146,8 +144,8 @@ describe('plan', () => {
   });
 
   it('never makes a second key pair or bucket over existing Keychain entries', () => {
-    const obs = { ...complete(), lifecycle: false };
-    expect(plan(cfg, obs)).toEqual([{ kind: 'set-lifecycle' }]);
+    const obs = { ...complete(), snapshots: false };
+    expect(plan(cfg, obs)).toEqual([{ kind: 'enable-snapshots' }]);
   });
 
   it('sets the org Anthropic key only once a person has put one in the Keychain', () => {
@@ -278,13 +276,6 @@ describe('what goes to Fly and Tigris', () => {
         },
       ],
     });
-  });
-
-  it('expires snapshots under the prefix after the given days', () => {
-    const xml = lifecycleXml('snapshots/', 30);
-    expect(xml).toContain('<Prefix>snapshots/</Prefix>');
-    expect(xml).toContain('<Days>30</Days>');
-    expect(xml).toContain('<Status>Enabled</Status>');
   });
 
   it("signs a request exactly as AWS's published SigV4 example does", () => {

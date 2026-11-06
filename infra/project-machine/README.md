@@ -38,11 +38,22 @@ Two things it can still do, which GCS's `objectCreator` role could not:
 
 - **Overwrite a snapshot whose name it knows.** S3's `PutObject` covers
   replacing an object. Names carry a random suffix and the credential
-  cannot list, so it would have to guess one. The deploy turns versioning on
-  for the bucket (`set-versioning`), so a replaced snapshot stays as an old
-  version, and the lifecycle rule prunes old versions after the same 30
-  days. This is code only: no run has yet turned versioning on for a live
-  Tigris bucket, and a bucket that refuses it fails the deploy with the
+  cannot list, so it would have to guess one. Tigris does not implement
+  `PutBucketVersioning` (it answers 501, which stopped a real deploy on
+  4 November 2026), so the deploy makes the bucket a Tigris snapshot bucket
+  instead (`enable-snapshots`). A snapshot bucket keeps every version: a
+  replaced snapshot is read back with `X-Tigris-Snapshot-Version: <unix ns>`
+  set to any moment before the overwrite, and restored with a `CopyObject`
+  carrying the same header. Only a `DeleteObject` naming a version removes
+  one, and the machine's key may only put. Tigris refuses the switch while a
+  lifecycle rule exists, so the deploy removes the 30-day rule an older run
+  set (`remove-lifecycle`) first. **A snapshot bucket cannot expire objects,
+  so nothing prunes old snapshots now**; pruning would have to run on the
+  Mac with the admin key. The calls are the ones Tigris's own SDK makes
+  (`PATCH /<bucket>` with `{"type":1}`, read back from
+  `GET /<bucket>?metadata`). This is code only: no run has yet converted a
+  live bucket, and whether the admin key `fly storage create` made may
+  change the bucket's type is untested. A refusal fails the deploy with the
   API's error code.
 - **Create buckets and keys of its own, and list the org's bucket names.**
   Tigris gives every key these "default allowed operations". The keys it
