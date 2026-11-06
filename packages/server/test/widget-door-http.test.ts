@@ -8,7 +8,7 @@
  * right token, so nothing passes on a server that refuses everything.
  * Fixtures are fictional hosts and names; the repo is public.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -445,6 +445,86 @@ describe('the tailnet widget door', () => {
       expect(read.status).toBe(403);
       const socket = await doorSocket(base, `/workspaces/${boardA}/docs/notes/y`, tokenA);
       expect(socket.status).toBe(403);
+    });
+  });
+
+  describe('a dev page attached to its board as an app', () => {
+    const app = 'harborlight-insights';
+    /** The page, on another port of the host the board answers on. */
+    const portPage = `https://${DOOR}:10000`;
+    const threads = (board: string) => `/workspaces/${board}/docs/${app}/threads`;
+
+    beforeAll(async () => {
+      const attached = await fetch(`${base}/workspaces/${boardA}/apps`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ docId: app, origin: 'http://127.0.0.1:8796' }),
+      });
+      expect(attached.status).toBe(200);
+    });
+
+    it('signs in on another port of the host and posts as the signed-in person', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const socket = await doorSocket(base, `/workspaces/${boardA}/docs/${app}/y`, token, portPage);
+      expect(socket.status).toBe(101);
+      const posted = await onDoor(base, threads(boardA), {
+        method: 'POST',
+        origin: portPage,
+        token,
+        body: threadBody,
+      });
+      expect(posted.status).toBe(200);
+      const { thread } = (await posted.json()) as {
+        thread: { comments: Array<{ author: { id: string } }> };
+      };
+      expect(thread.comments[0]?.author.id).toBe(emailIdentityId(OPERATOR_EMAIL));
+    });
+
+    it('keeps the token to its one board and its one page origin', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const otherBoard = await mintFor(base, boardB, portPage);
+      const post = { method: 'POST', body: threadBody };
+      const elsewhere = { ...post, token, origin: `https://${DOOR}:10001` };
+      expect((await onDoor(base, threads(boardA), elsewhere)).status).toBe(401);
+      const wrong = { ...post, token: otherBoard, origin: portPage };
+      expect((await onDoor(base, threads(boardA), wrong)).status).toBe(403);
+    });
+
+    it('logs which gate refused a write, with no token, person or path', async () => {
+      const token = await mintFor(base, boardA, portPage);
+      const lines: string[] = [];
+      const spy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(' '));
+      });
+      try {
+        // A markdown doc stays off the door, so this write is refused.
+        const refused = await onDoor(base, `/workspaces/${boardA}/docs/notes/threads`, {
+          method: 'POST',
+          origin: portPage,
+          token,
+          body: threadBody,
+        });
+        expect(refused.status).toBe(403);
+        const landed = await onDoor(base, threads(boardA), {
+          method: 'POST',
+          origin: portPage,
+          token,
+          body: threadBody,
+        });
+        expect(landed.status).toBe(200);
+      } finally {
+        spy.mockRestore();
+      }
+      const refusals = lines.filter((l) => l.startsWith('[refused-write]'));
+      expect(refusals).toEqual(['[refused-write] POST status=403 gate=out_of_widget_scope']);
+    });
+
+    it('mints nothing for a page that is not on this machine', async () => {
+      for (const origin of ['https://harborlight.test:10000', `https://${DOOR}.evil.example`]) {
+        const res = await mint(base, { origin, workspaceId: boardA });
+        expect(res.status, origin).toBe(401);
+        expect(((await res.json()) as { token?: string }).token).toBeUndefined();
+      }
     });
   });
 

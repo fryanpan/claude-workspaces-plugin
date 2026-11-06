@@ -38,7 +38,9 @@
  *    tells the widget to offer sign-in, and where to; with one they answer.
  * 3. One doc's comment routes and its two sockets, under the board the token
  *    names: `threads` (read and post), a thread's `comments`, `answer`,
- *    `resolve`, `reopen`, `edit-comment` and `reanchor`, and `y`.
+ *    `resolve`, `reopen`, `edit-comment` and `reanchor`, and `y`. The doc is a
+ *    page the widget runs on (`isPageDoc`): a mockup, an attached app, or one
+ *    the widget's socket is about to create.
  * 4. The same doc's voice feedback: the `voice` socket the recorder streams
  *    into, and one recording, `voice-feedback/seg-<N>.wav`. The recordings
  *    are the speaker's own voice, so they keep the board token every other
