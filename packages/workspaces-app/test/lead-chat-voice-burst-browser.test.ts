@@ -57,9 +57,7 @@ describe.skipIf(CHROME === null)('four spoken answers back to back', () => {
     const r = result();
     for (const c of r.cases) {
       const order = [...c.chunks].sort((a, b) => a.at - b.at).map((x) => x.answer);
-      expect(order, name(c)).toEqual(
-        [1, 2, 3, 4].flatMap((n) => Array(r.chunksPerAnswer).fill(n)),
-      );
+      expect(order, name(c)).toEqual([1, 2, 3, 4].flatMap((n) => Array(r.chunksPerAnswer).fill(n)));
       expect(
         c.chunks.filter((x) => !x.ended || x.stopped),
         name(c),
