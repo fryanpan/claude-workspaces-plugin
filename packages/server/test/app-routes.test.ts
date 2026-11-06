@@ -270,15 +270,17 @@ describe('attaching and serving a dev server', () => {
       expect(r.headers.get('location')).toBe(`${prefix}?v=2`);
     });
 
-    it('refuses a path that would leave the app, and a write', async () => {
+    it('refuses a path that would leave the app, and a write from no page', async () => {
       // A dot segment is folded by the URL parser before any route sees it,
       // so it names another address and never reaches the dev server.
       const climbed = await get(`${prefix}%2e%2e/echo`);
       expect(climbed.status).toBe(404);
       expect(await climbed.text()).not.toContain('headers');
       expect((await get(`${prefix}%2F%2Fevil.example/`)).status).toBe(400);
+      // Writes pass through only from the board's own page (app-writes.test.ts).
       const put = await fetch(`${base}${prefix}echo`, { method: 'POST', headers: LOCAL() });
-      expect(put.status).toBe(405);
+      expect(put.status).toBe(403);
+      expect(dev.writes()).toEqual([]);
     });
 
     it("404s another board's app under this board's path", async () => {

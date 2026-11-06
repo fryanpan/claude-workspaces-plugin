@@ -130,13 +130,19 @@ export function upstreamUrl(
 
 /**
  * The request headers the dev server is sent: what content negotiation,
- * caching and a resumed event stream need, and nothing that identifies the
- * reader. Their cookie, Access assertion and any token stay on this side.
+ * caching, a resumed event stream and a write need, and nothing that
+ * identifies the reader. Their cookie, Access assertion and any token stay on this side.
  */
 const FORWARDED_REQUEST = [
   'accept',
   'accept-language',
   'cache-control',
+  // What a write needs the app to read its body and retry it safely.
+  'content-language',
+  'content-type',
+  'idempotency-key',
+  'if-unmodified-since',
+  'prefer',
   'if-match',
   'if-modified-since',
   'if-none-match',
@@ -225,4 +231,62 @@ export function relayedLocation(location: string, origin: string, prefix: string
 export function isHtmlResponse(headers: Headers): boolean {
   const type = headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
   return type === 'text/html' || type === 'application/xhtml+xml';
+}
+
+/** The methods that write to an attached app, under `apps/<id>/…`. */
+export const APP_WRITE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Who is asking to write to an attached app. `owner` is any caller the board
+ * did not admit as a visitor: the owner's own browser, signed in, or a caller
+ * on this machine. `member` is a visitor admitted by a board membership with
+ * an Access address. Everyone else, a share-link visitor and a board agent's
+ * token included, is `outsider`.
+ */
+export type AppWriter =
+  | { kind: 'owner' }
+  | { kind: 'member'; email: string }
+  | { kind: 'outsider' };
+
+/** Who a write comes from: the board's `visitor` flag and, for a visitor
+ *  admitted by membership, their Access address. */
+export function appWriterOf(visitor: boolean, member: string | null): AppWriter {
+  if (!visitor) return { kind: 'owner' };
+  return member ? { kind: 'member', email: member } : { kind: 'outsider' };
+}
+
+export interface AppWriteRefusal {
+  error: 'app_write_not_member' | 'app_write_cross_origin';
+  message: string;
+}
+
+/**
+ * Whether this write may reach the app, or why not. The one place the rule
+ * lives, so a change to it (owner only, or a per-app setting) is made here.
+ *
+ * Today: the owner and the board's signed-in members may write; a share-link
+ * visitor may not. And only from a page on the board's own origin: `Origin`
+ * must equal the origin this request was served on, exactly. A write with no
+ * `Origin` is refused too. Every browser sends one on a non-GET fetch, so its
+ * absence means a caller that is not a page, and such a caller can reach the
+ * dev server on loopback itself.
+ */
+export function appWriteRefusal(input: {
+  writer: AppWriter;
+  origin: string | null;
+  boardOrigin: string;
+}): AppWriteRefusal | null {
+  if (input.writer.kind === 'outsider') {
+    return {
+      error: 'app_write_not_member',
+      message: "Only the board's signed-in members can save to this app.",
+    };
+  }
+  if (input.origin === null || input.origin !== input.boardOrigin) {
+    return {
+      error: 'app_write_cross_origin',
+      message: "A write to this app must come from a page on the board's own address.",
+    };
+  }
+  return null;
 }
