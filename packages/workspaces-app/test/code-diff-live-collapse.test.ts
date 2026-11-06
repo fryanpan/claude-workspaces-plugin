@@ -21,10 +21,10 @@ afterEach(() => {
 });
 
 /** A diff of BASE against BASE with line 40 changed, editable or not. */
-function mount(editable: boolean) {
+function mount(editable: boolean, base = BASE) {
   const ydoc = new Y.Doc();
   const content = getContent(ydoc);
-  content.insert(0, BASE.replace('const buoy40 = 40;', 'const buoy40 = 400;'));
+  content.insert(0, base.replace('const buoy40 = 40;', 'const buoy40 = 400;'));
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   const surface = createCodeEditor({
@@ -32,7 +32,7 @@ function mount(editable: boolean) {
     ydoc,
     sourceUrl: 'app.js',
     editable,
-    diff: { baseText: BASE },
+    diff: { baseText: base },
     initialViewMode: 'diff',
   });
   open.push(() => {
@@ -76,4 +76,17 @@ describe('collapsed unchanged lines on a live diff', () => {
       expect(bars()).toEqual(['23 unchanged lines', '7 unchanged lines']);
     });
   }
+});
+
+describe('a file past the size the stock diff can compare', () => {
+  const LARGE = `${Array.from({ length: 6000 }, (_, i) => `const buoy${i} = ${i};`).join('\n')}\n`;
+
+  it('shows the edited line among collapsed lines, and follows a live save', () => {
+    const { bars, save, view } = mount(false, LARGE);
+    expect(LARGE.length).toBeGreaterThan(100_000);
+    expect(bars()).toEqual(['37 unchanged lines', '5957 unchanged lines']);
+    save('const buoy3000 = 3000;', 'const buoy3000 = 30000;');
+    expect(view.state.doc.toString()).toContain('buoy3000 = 30000');
+    expect(bars()).toEqual(['37 unchanged lines', '2953 unchanged lines', '2997 unchanged lines']);
+  });
 });

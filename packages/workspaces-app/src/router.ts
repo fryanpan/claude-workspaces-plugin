@@ -33,6 +33,9 @@ export interface RouterOpts {
    *  passed to every mount, for the same reason `user` is: a surface that has
    *  to ask for itself is a surface that is live while it asks. */
   canWrite: boolean;
+  /** The reader went to another document: a sidebar click, a link, or the
+   *  browser's back and forward. Not the remount of the document on screen. */
+  onNavigate?: () => void;
 }
 
 let opts: RouterOpts | null = null;
@@ -151,6 +154,7 @@ async function swap(docId: string): Promise<void> {
 export function navigateTo(url: string): void {
   const path = toSameOriginPath(url);
   history.pushState(null, '', path);
+  opts?.onNavigate?.();
   void swap(docIdOf(path));
 }
 
@@ -189,7 +193,10 @@ export function startRouter(routerOpts: RouterOpts): () => void {
     ev.preventDefault();
     navigateTo(href);
   };
-  const onPop = (): void => void swap(docIdOf(location.pathname));
+  const onPop = (): void => {
+    routerOpts.onNavigate?.();
+    void swap(docIdOf(location.pathname));
+  };
   // Final page unload: dispose the live mount so the socket closes cleanly.
   const onUnload = (): void => currentScope?.dispose();
 

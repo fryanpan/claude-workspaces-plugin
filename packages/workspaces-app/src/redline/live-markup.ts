@@ -291,6 +291,8 @@ export interface LiveMarkupOptions {
   ydoc: Y.Doc | null;
   /** Recompute delay after a doc change. */
   debounceMs: number;
+  /** Called after each recompute has landed in the editor. */
+  onMarkup?: () => void;
 }
 
 /**
@@ -340,6 +342,7 @@ export const LiveMarkup = Extension.create<LiveMarkupOptions>({
               timer = null;
               if (view.isDestroyed) return;
               view.dispatch(view.state.tr.setMeta(liveMarkupKey, compute(view.state.doc)));
+              opts.onMarkup?.();
             }, opts.debounceMs);
           };
           // Initial compute: the Collaboration binding populates the doc

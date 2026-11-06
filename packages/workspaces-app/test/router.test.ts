@@ -1,7 +1,7 @@
 import type { FeedbackClient } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DocMeta, MountContext } from '../src/mount-context.ts';
-import { startRouter } from '../src/router.ts';
+import { remountCurrent, startRouter } from '../src/router.ts';
 
 // A stub client — the router registers close() on the scope; nothing here
 // touches a real socket.
@@ -42,6 +42,36 @@ beforeEach(() => {
 });
 
 describe('router', () => {
+  it('names a navigation to its listener, and not the remount of the same doc', async () => {
+    sidebar('<li><a href="/workspaces/w-1/docs/b">b</a></li>');
+    let navigations = 0;
+    let mounts = 0;
+    stop = startRouter({
+      user: { id: 'u', name: 'U', kind: 'known', color: '#000' },
+      canWrite: true,
+      fetchMeta: async () => meta,
+      connectFor: () => stubClient(),
+      mountFor: () => {
+        mounts++;
+      },
+      onNavigate: () => {
+        navigations++;
+      },
+    });
+    await flush();
+    expect(navigations).toBe(0);
+    document.querySelector<HTMLAnchorElement>('#set-pane a')?.click();
+    await flush();
+    expect(navigations).toBe(1);
+    remountCurrent();
+    await flush();
+    expect(mounts).toBe(3);
+    expect(navigations).toBe(1);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await flush();
+    expect(navigations).toBe(2);
+  });
+
   /**
    * The session answer reaches every mount as a VALUE.
    *

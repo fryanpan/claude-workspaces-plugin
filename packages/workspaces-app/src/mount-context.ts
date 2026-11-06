@@ -64,6 +64,9 @@ export interface MountContext extends DocMeta {
    * compiler is what checks it rather than a reviewer.
    */
   canWrite: boolean;
+  /** Set by a surface that finishes drawing after its mount returns, and
+   *  resolved when it has. A file switch's report waits for it. */
+  contentDrawn?: Promise<void>;
 }
 
 /** A per-doc mount. Registers its teardown on `ctx.scope` (listeners via

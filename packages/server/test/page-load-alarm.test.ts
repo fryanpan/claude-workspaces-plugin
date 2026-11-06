@@ -81,7 +81,7 @@ function rig(clock = { now: T0 }) {
 const SLOW = PAGE_LOAD_BUDGET_MS + 3_260;
 
 describe('a slow load on a board page raises once, naming its page type', () => {
-  for (const page of ['board', 'doc', 'mock', 'diff', 'folder'] as const) {
+  for (const page of ['board', 'doc', 'mock', 'diff', 'folder', 'diff-switch'] as const) {
     it(`${page}`, async () => {
       const { raised, postToBoard } = rig();
       // A fast one first: the positive control that the route reaches the
@@ -123,7 +123,7 @@ describe('a slow load on a page with no board raises once, naming its page type'
 describe('content that never arrives', () => {
   it('raises on every page type, as the worst case rather than as no reading', async () => {
     const { raised, postToBoard, postBoardless } = rig();
-    for (const page of ['board', 'doc', 'mock', 'diff', 'folder'] as const) {
+    for (const page of ['board', 'doc', 'mock', 'diff', 'folder', 'diff-switch'] as const) {
       await postToBoard({ page, msToBoot: 500 });
     }
     for (const page of ['home', 'review'] as const) await postBoardless({ page, msToBoot: 500 });
@@ -133,6 +133,7 @@ describe('content that never arrives', () => {
       'mock',
       'diff',
       'folder',
+      'diff-switch',
       'home',
       'review',
     ]);

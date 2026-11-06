@@ -39,7 +39,15 @@
  */
 import { asBackgroundWrite } from './signin/write-gate.ts';
 
-export type PageType = 'board' | 'home' | 'review' | 'doc' | 'mock' | 'diff' | 'folder';
+export type PageType =
+  | 'board'
+  | 'home'
+  | 'review'
+  | 'doc'
+  | 'mock'
+  | 'diff'
+  | 'folder'
+  | 'diff-switch';
 
 export interface PageLoadReportInput {
   page: PageType;
@@ -74,6 +82,20 @@ export function postPageLoadReport(
   // What the network actually moved: "slow because big" and "slow because
   // far" need different fixes, and the report should tell them apart.
   const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+  sendReport(workspaceId, {
+    page,
+    msToBoot,
+    ...(msToContent !== null ? { msToContent } : {}),
+    ...fields,
+    ...navigationFields(),
+    ...(seen.hidden ? { hidden: true, hiddenMs: seen.hiddenMs } : {}),
+    resourceCount: resources.length,
+    transferBytes: resources.reduce((sum, r) => sum + (r.transferSize || 0), 0),
+    decodedBytes: resources.reduce((sum, r) => sum + (r.decodedBodySize || 0), 0),
+  });
+}
+
+function sendReport(workspaceId: string | null, report: Record<string, unknown>): void {
   // Nobody asked for this POST — it is telemetry about the load that just
   // happened. Marked, so that a signed-out reader gets the standing bar
   // rather than a modal demanding they sign in to do something they never
@@ -83,17 +105,7 @@ export function postPageLoadReport(
     void fetch(loadReportUrl(workspaceId), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        page,
-        msToBoot,
-        ...(msToContent !== null ? { msToContent } : {}),
-        ...fields,
-        ...navigationFields(),
-        ...(seen.hidden ? { hidden: true, hiddenMs: seen.hiddenMs } : {}),
-        resourceCount: resources.length,
-        transferBytes: resources.reduce((sum, r) => sum + (r.transferSize || 0), 0),
-        decodedBytes: resources.reduce((sum, r) => sum + (r.decodedBodySize || 0), 0),
-      }),
+      body: JSON.stringify(report),
     }).catch(() => {});
   });
 }
@@ -152,6 +164,67 @@ export function startPageLoadReport(opts: {
       // waiting for one would report the reader's delay as the page's.
       if (document.visibilityState === 'hidden') send(Math.round(performance.now()));
       else requestAnimationFrame(() => send(Math.round(performance.now())));
+    },
+  };
+}
+
+export interface FileSwitchClock {
+  /** The new file's surface has mounted. */
+  mounted(): void;
+  /** The new file is on the page. Stamped on the next frame, like a load. */
+  contentShown(): void;
+  /** The reader left before it arrived, so nothing is sent. */
+  abandon(): void;
+}
+
+/**
+ * Time one file switch inside an open diff, from the click to the new file on
+ * screen.
+ *
+ * Its stamps run from the click, not from navigation start, so `msToBoot` is
+ * zero: the server judges a report only when that stamp is present. The
+ * navigation and resource fields stay off it, because they describe the page's
+ * own load, long past. Hidden time is what this switch saw, not what the page
+ * has seen since it opened.
+ */
+export function startFileSwitchReport(opts: {
+  workspaceId: string;
+  deadlineMs?: number;
+  hidden?: HiddenClock;
+}): FileSwitchClock {
+  const hidden = opts.hidden ?? pageHiddenClock();
+  const startedAt = performance.now();
+  const hiddenBefore = hidden.read().hiddenMs;
+  const startedHidden = document.visibilityState === 'hidden';
+  const sinceClick = (): number => Math.round(performance.now() - startedAt);
+  let msToMount: number | null = null;
+  let done = false;
+  const send = (msToContent: number | null): void => {
+    if (done) return;
+    done = true;
+    clearTimeout(deadline);
+    const hiddenMs = hidden.read().hiddenMs - hiddenBefore;
+    sendReport(opts.workspaceId, {
+      page: 'diff-switch',
+      msToBoot: 0,
+      ...(msToContent !== null ? { msToContent } : {}),
+      ...(msToMount !== null ? { msToMount } : {}),
+      ...(startedHidden || hiddenMs > 0 ? { hidden: true, hiddenMs } : {}),
+    });
+  };
+  const deadline = setTimeout(() => send(null), opts.deadlineMs ?? PAGE_LOAD_DEADLINE_MS);
+  return {
+    mounted() {
+      msToMount ??= sinceClick();
+    },
+    contentShown() {
+      if (done) return;
+      if (document.visibilityState === 'hidden') send(sinceClick());
+      else requestAnimationFrame(() => send(sinceClick()));
+    },
+    abandon() {
+      done = true;
+      clearTimeout(deadline);
     },
   };
 }

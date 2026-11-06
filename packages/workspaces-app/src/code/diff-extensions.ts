@@ -4,11 +4,11 @@ import {
   type DiffConfig,
   getChunks,
   getOriginalDoc,
-  presentableDiff,
   unifiedMergeView,
 } from '@codemirror/merge';
 import type { Extension, Text } from '@codemirror/state';
 import { EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter } from '@codemirror/view';
+import { lineFirstDiff } from './line-first-diff.ts';
 import { liveCollapseUnchanged } from './live-collapse.ts';
 
 /**
@@ -29,7 +29,8 @@ import { liveCollapseUnchanged } from './live-collapse.ts';
  * as a Chunk's — `A` is the base document, `B` the target.
  */
 /** Cap on @codemirror/merge's expensive exact diff; beyond it the library
- *  falls back to a coarser algorithm. */
+ *  falls back to a coarser algorithm, so a large file goes through
+ *  `lineFirstDiff` instead. */
 export const DIFF_SCAN_LIMIT = 2000;
 
 export interface HiddenRegion {
@@ -122,21 +123,22 @@ export interface WhitespaceFilter {
  * rather than discarded, because they still describe a real size difference
  * between the two documents and `oldLineForPos` has to account for it.
  *
- * `enabled: false` returns the stock config and an always-empty `hidden`,
- * so the toggle costs nothing and can't drift from the default behaviour.
+ * `enabled: false` keeps every change and an always-empty `hidden`, so the
+ * toggle costs nothing and can't drift from the default behaviour.
  */
 export function whitespaceFilter(opts: {
   scanLimit: number;
   enabled: boolean;
 }): WhitespaceFilter {
   let hidden: readonly HiddenRegion[] = [];
+  const changes = (a: string, b: string) => lineFirstDiff(a, b, opts.scanLimit);
   if (!opts.enabled) {
-    return { diffConfig: { scanLimit: opts.scanLimit }, hidden };
+    return { diffConfig: { scanLimit: opts.scanLimit, override: changes }, hidden };
   }
   const override = (a: string, b: string): readonly Change[] => {
     const next: HiddenRegion[] = [];
     const kept: Change[] = [];
-    for (const c of presentableDiff(a, b, { scanLimit: opts.scanLimit })) {
+    for (const c of changes(a, b)) {
       // Whole lines, not the slice — see expandToLines. Then the literal
       // guard, because inside a string a space IS content.
       const ok =
@@ -350,7 +352,8 @@ export function diffMergeExtensions(cfg: DiffViewConfig): Extension[] {
     unifiedMergeView({
       original: cfg.baseText,
       mergeControls: false,
-      diffConfig: cfg.filter?.diffConfig ?? { scanLimit: DIFF_SCAN_LIMIT },
+      diffConfig: (cfg.filter ?? whitespaceFilter({ scanLimit: DIFF_SCAN_LIMIT, enabled: false }))
+        .diffConfig,
     }),
     // Not the library's `collapseUnchanged`: that one expands a whole
     // collapsed stretch when a live save lands in it (live-collapse.ts).

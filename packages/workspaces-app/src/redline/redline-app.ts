@@ -1,5 +1,5 @@
 import { type FeedbackClient, connect, suggestOps } from '@claude-workspaces/core';
-import { mountCode } from '../code/code-app.ts';
+import { contentArrived, mountCode } from '../code/code-app.ts';
 import { isEditableRedlineMember } from '../code/editable-policy.ts';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
 import { docSocketUrl } from '../doc-path.ts';
@@ -233,6 +233,11 @@ export async function mountRedline(
     });
   surfaceReady = true;
   scope.onCleanup(() => surface.destroy());
+  // The text and its markup arrive after this mount returns: the companion
+  // syncs, then the markup debounce runs the comparison.
+  if (liveSurface && companion) {
+    ctx.contentDrawn = contentArrived(companion.client).then(() => liveSurface.nextMarkup());
+  }
 
   // The chrome has to agree with the surface. Signed out this said
   // "Editing: notes.md" and "All changes saved" over an editor that would
