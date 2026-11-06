@@ -34,7 +34,17 @@
  */
 
 /** Every page that reports its load, by the word its report names it with. */
-export const PAGE_TYPES = ['board', 'home', 'review', 'doc', 'mock', 'diff', 'folder'] as const;
+export const PAGE_TYPES = [
+  'board',
+  'home',
+  'review',
+  'doc',
+  'mock',
+  'diff',
+  'folder',
+  // A file switch inside an open diff: no page loads, the reader still waits.
+  'diff-switch',
+] as const;
 export type PageType = (typeof PAGE_TYPES)[number];
 
 /** The pages on no board. They post to `/api/load-reports`; every other page
@@ -50,6 +60,7 @@ const CONTENT_WORD: Record<PageType, string> = {
   mock: 'mock',
   diff: 'diff',
   folder: 'file',
+  'diff-switch': 'next file',
 };
 
 /**

@@ -1378,7 +1378,9 @@ the review page, a doc, a mock, a diff and a folder each post one report per
 page load naming the page type and the ms to its main content
 (`workspaces-app/src/page-load-report.ts`; the doc bundle's three page types
 are told apart in `doc/doc-load-report.ts`, and the mock's host page reports
-from `widget/src/mock-host.ts`). A page on a board posts to that board's
+from `widget/src/mock-host.ts`). A file switch inside an open diff loads no
+page, so each one reports for itself as the page type `diff-switch`, timed from
+the click to the next file on screen. A page on a board posts to that board's
 `/workspaces/:ws/load-reports`; Home and `/review` post to `/api/load-reports`
 (`routes/load-reports.ts`). `slow-load-alarm.ts` judges every report against
 2,000 ms, raises through Sentry once per page type per board per five minutes,

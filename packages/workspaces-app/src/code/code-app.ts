@@ -35,6 +35,17 @@ function setIgnoreWhitespacePref(on: boolean): void {
   }
 }
 
+/** Resolves at the doc's first sync, or once its socket has closed, so a doc
+ *  with no connection still mounts on whatever it holds. */
+function contentArrived(client: MountContext['client']): Promise<void> {
+  return new Promise((resolve) => {
+    client.onReady(resolve);
+    client.onStatus((status) => {
+      if (status === 'closed') resolve();
+    });
+  });
+}
+
 /**
  * Mount the read-only code / diff review surface. All thread/composer/drawer
  * wiring lives in the shared review chrome (review-chrome.ts); this file
@@ -94,6 +105,14 @@ export async function mountCode(
       // fall through to whole-file mode
     }
     if (scope.disposed) return; // navigated away during the fetch
+  }
+  // The editor is built once, with the file's text in it. Built empty, the
+  // merge view compares the base with nothing, draws the whole base as one
+  // deletion, and compares again when the text lands: on a large file those
+  // two extra passes are the slow part of a file switch.
+  if (diffInfo?.baseText != null) {
+    await contentArrived(client);
+    if (scope.disposed) return;
   }
 
   // The File view of a LIVE working-tree diff member is a real editor — the

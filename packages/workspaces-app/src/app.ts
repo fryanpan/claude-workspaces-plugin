@@ -151,6 +151,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     // The answer is already in hand — every mount gets it as a value rather
     // than asking again. A mount that re-asks is editable while it waits.
     canWrite: writeAccess.canWrite,
+    onNavigate: reportLoad.navigated,
     fetchMeta: (docId) => dropEarlyRedlineOnFailure(docs.fetchMeta(docId)),
     connectFor: (docId, docType) => {
       const board = workspaceIdFromPath(location.pathname + location.search);
@@ -163,10 +164,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       // editor has loaded (mountMarkdownAfterPaint); every other surface
       // draws its content inside its mount.
       const paintsFirst = ctx.docType === 'markdown';
-      if (paintsFirst) reportLoad(ctx);
+      if (paintsFirst) reportLoad.mounted(ctx);
       presence?.moveTo({ surface: 'doc', docId: ctx.docId });
       await mountSurface(ctx);
-      if (!paintsFirst) reportLoad(ctx);
+      if (!paintsFirst) reportLoad.mounted(ctx);
       // A follow that brought this doc here shows its spot now the doc is up.
       presence?.follower.refresh();
       void joinPresence();
