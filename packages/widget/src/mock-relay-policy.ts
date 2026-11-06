@@ -58,6 +58,10 @@ const THREAD_VERBS = ['comments', 'answer', 'resolve', 'reopen', 'edit-comment',
 
 const enc = encodeURIComponent;
 
+/** Whether `u` is this doc's own editing socket, the one the widget syncs on. */
+export const isDocSocket = (scope: RelayScope, u: URL): boolean =>
+  u.pathname === `/workspaces/${enc(scope.workspaceId)}/docs/${enc(scope.docId)}/y`;
+
 /**
  * The address the host should call, or null to refuse. `raw` is whatever URL
  * the frame named; it is parsed here, so `..`, a different host and an

@@ -1,3 +1,4 @@
+import { MSG_PROBE } from '@claude-workspaces/core/ws-probe';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as awarenessProtocol from 'y-protocols/awareness';
@@ -13,6 +14,7 @@ import { captureServerError } from './sentry.ts';
  *   0 = sync  (see y-protocols/sync)
  *   1 = awareness (see y-protocols/awareness)
  *   2 = reset (server → client; this file, below)
+ *   3 = probe (either way; `core/src/ws-probe.ts`)
  */
 
 export const MSG_SYNC = 0;
@@ -268,6 +270,11 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
         for (const id of after) {
           if (!before.has(id)) ws_state.knownClientIds.add(id);
         }
+        return;
+      }
+      case MSG_PROBE: {
+        encoding.writeVarUint(enc, MSG_PROBE);
+        ws.sendBinary(encoding.toUint8Array(enc), true);
         return;
       }
       default:
