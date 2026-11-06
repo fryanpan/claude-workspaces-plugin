@@ -4,8 +4,8 @@
  * Every surface that shows thread cards repaints by clearing its container
  * and building fresh nodes — the drawer on any display-relevant change to ANY
  * thread, the balloon margin on any editor transaction, the modal and the
- * inline card when their thread changes. Each of them already carries the draft's WORDS across the
- * rebuild; none of them carried the caret or the scroll position, so a peer's
+ * inline card when their thread changes. Each of them already carries the
+ * draft's WORDS across the rebuild; none of them carried the caret or the scroll position, so a peer's
  * reply landing over the websocket dropped focus to `body` (dismissing the
  * iPad keyboard) and let the emptied pane clamp its scrollTop to 0 — the
  * "typing a comment and suddenly I'm at the top" bug.
