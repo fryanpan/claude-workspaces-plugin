@@ -17,10 +17,13 @@
  * card approves nothing. It is filed `ownerOnly`, so no agent, share visitor
  * or mock page can answer it either (`refuseOwnerOnlyWrite`).
  *
- * The server then asks the keeper again every `pollMs` and withdraws the card
+ * The server then asks the keeper again every `POLL_MS` and withdraws the card
  * once the request is running, done, denied, withdrawn or expired, or once
  * the keeper no longer knows it. Each open card's poll token is kept in
- * `keeper-cards.json`, mode 600, so a restart keeps watching it.
+ * `keeper-cards.json`, mode 600, so a restart keeps watching it. The polls run
+ * only while a card is open, and each is bounded by `ASK_MS`: one the keeper
+ * never answered used to hold the sweep for good, which left every card on
+ * Home after its request had finished.
  *
  * The cards sit on one standing task on the owner's catch-all board, or on
  * the best live board when that one is retired, as the sharing notice does
@@ -40,6 +43,16 @@ export const KEEPER_CARD_TASK_TITLE = 'Keeper requests waiting for your passkey'
 
 const ID = /^[A-Za-z0-9_-]{16,64}$/;
 
+/**
+ * How often an open card asks the keeper. The card must leave an open Home
+ * within 1s of the approval, and this is the one part of that budget a poll
+ * chooses: 250 here, 250 for `LANDING_COALESCE_MS`, 100 for the page's own
+ * debounce, and what is left for the page to re-read `/`.
+ */
+const POLL_MS = 250;
+/** How long one poll may take. Past it the keeper counts as not answering. */
+const ASK_MS = 2000;
+
 /** What the keeper answers a poll with. */
 interface KeeperView {
   status: string;
@@ -58,6 +71,7 @@ export interface KeeperHomeCardDeps {
     callerToken: () => string | null;
     fetchImpl?: typeof fetch;
     pollMs?: number;
+    askMs?: number;
   };
   /** Boards to file on, best first; the first that takes the task wins. */
   boards: () => string[];
@@ -167,6 +181,8 @@ export class KeeperHomeCards {
   private readonly inflight = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
+  /** Whether the keeper's silence has been logged, so a poll logs it once. */
+  private silent = false;
 
   constructor(private readonly deps: KeeperHomeCardDeps) {
     this.path = join(deps.dataDir, KEEPER_CARDS_FILENAME);
@@ -241,17 +257,25 @@ export class KeeperHomeCards {
     if (this.sweeping) return;
     this.sweeping = true;
     try {
-      for (const [id, card] of Object.entries(this.state.open)) {
-        const view = await this.ask(id, card.pollToken);
-        if (view === 'unreachable') {
-          // A keeper that is down may come back; a card past the keeper's own
-          // lifetime for a request cannot still be waiting.
-          if (this.now() - card.at > PENDING_MS) this.withdraw(id, 'The request expired.');
-          continue;
-        }
-        if (view === null) this.withdraw(id, 'The keeper no longer has this request.');
-        else if (view.status !== 'pending') this.withdraw(id, `The request is ${view.status}.`);
+      const asked = await Promise.all(
+        Object.entries(this.state.open).map(async ([id, card]) => {
+          const view = await this.ask(id, card.pollToken);
+          if (view === 'unreachable') {
+            // A keeper that is down may come back; a card past the keeper's
+            // own lifetime for a request cannot still be waiting.
+            if (this.now() - card.at > PENDING_MS) this.withdraw(id, 'The request expired.');
+            return false;
+          }
+          if (view === null) this.withdraw(id, 'The keeper no longer has this request.');
+          else if (view.status !== 'pending') this.withdraw(id, `The request is ${view.status}.`);
+          return true;
+        }),
+      );
+      const silent = asked.includes(false);
+      if (silent && !this.silent) {
+        this.say('[keeper] the keeper did not answer a poll, so Home cards stay until it does');
       }
+      this.silent = silent;
     } finally {
       this.sweeping = false;
     }
@@ -267,16 +291,17 @@ export class KeeperHomeCards {
     this.timer = setInterval(() => {
       if (Object.keys(this.state.open).length === 0) return this.stop();
       void this.sweep();
-    }, this.deps.keeper.pollMs ?? 2000);
+    }, this.deps.keeper.pollMs ?? POLL_MS);
   }
 
   private withdraw(id: string, reason: string): void {
     const card = this.state.open[id];
     if (!card) return;
-    this.deps.withdrawReviewItem(card.taskId, card.itemId, {
+    const res = this.deps.withdrawReviewItem(card.taskId, card.itemId, {
       actor: { ...KEEPER_CARD_ACTOR },
       reason,
     });
+    if (!res.ok) this.say(`[keeper] Home card ${card.itemId} was not withdrawn: ${reason}`);
     delete this.state.open[id];
     this.save();
   }
@@ -291,6 +316,7 @@ export class KeeperHomeCards {
           ...(token ? { [CALLER_HEADER]: token } : {}),
           'x-cw-keeper-poll': pollToken,
         },
+        signal: AbortSignal.timeout(this.deps.keeper.askMs ?? ASK_MS),
       });
       if (res.status === 404) return null;
       if (!res.ok) return 'unreachable';
