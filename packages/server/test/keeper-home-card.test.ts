@@ -11,12 +11,22 @@
  *   linking to the keeper's own approval page for that request;
  * - approving on that page lets the waiting `keeperFly` return the command's
  *   output, and the card goes away;
+ * - the card leaves Home within 1s of the approval, at the production poll
+ *   interval, while the approved command is still running;
  * - a request the requester withdraws loses its card too;
  * - a post naming a request the keeper does not have files nothing, and one
  *   through the edge, from a browser or with a bad id is refused.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CrossReviewQueue } from '../src/cross-review-queue.ts';
@@ -42,6 +52,8 @@ let keeperBase: string;
 let board: ServerHandle;
 let boardBase: string;
 const said: string[] = [];
+const started = join(tmp, 'command-started');
+const release = join(tmp, 'command-release');
 /** No Cloudflare call is made here; one that is fails the test loudly. */
 const noCloudflare = (async () => {
   throw new Error('no Cloudflare call expected');
@@ -96,7 +108,19 @@ beforeAll(async () => {
   mkdirSync(home, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
   const flyBin = join(tmp, 'fly');
-  writeFileSync(flyBin, '#!/bin/bash\ncat >/dev/null\necho "ran $1 $2"\n');
+  // `cw-riverbend` holds its command open until the test releases it, so a
+  // test can tell "approved" from "finished".
+  writeFileSync(
+    flyBin,
+    `#!/bin/bash
+cat >/dev/null
+if [ "$4" = "cw-riverbend" ]; then
+  : > "${started}"
+  while [ ! -e "${release}" ]; do /bin/sleep 0.02; done
+fi
+echo "ran $1 $2"
+`,
+  );
   chmodSync(flyBin, 0o755);
   const dir = join(tmp, 'store');
   mkdirSync(dir, { mode: 0o700 });
@@ -106,6 +130,7 @@ beforeAll(async () => {
   CALLER = mintCallerToken(store);
   store.setCredential('fly-org-token', `test-fly-${crypto.randomUUID()}`);
   store.addApp('cw-harborlight');
+  store.addApp('cw-riverbend');
   keeper = serveKeeper({
     store,
     exec: keeperExecutors({ store, flyBin, home, fetch: noCloudflare }),
@@ -219,6 +244,104 @@ describe('a held keeper request on Home', () => {
     const mode = statSync(join(dataDir, KEEPER_CARDS_FILENAME)).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+});
+
+describe('the card at the production poll interval', () => {
+  let live: ServerHandle;
+  let polls = 0;
+  const liveDir = join(tmp, 'live-data');
+
+  beforeAll(() => {
+    mkdirSync(liveDir, { recursive: true });
+    live = createServer({
+      port: 0,
+      dataDir: liveDir,
+      keeperHolds: {
+        origin: keeperBase,
+        callerToken: () => CALLER,
+        // No `pollMs`: this suite is about the interval production runs.
+        fetchImpl: (async (url: string, init?: RequestInit) => {
+          const res = await fetch(url, init);
+          polls += 1;
+          return res;
+        }) as typeof fetch,
+      },
+    });
+  });
+  afterAll(async () => {
+    await live?.stop();
+  });
+
+  it('leaves Home within 1s of the approval, while the command still runs', async () => {
+    const liveBase = `http://127.0.0.1:${live.port}`;
+    const controller = new AbortController();
+    const stream = await fetch(`${liveBase}/landing/events:stream`, {
+      headers: { accept: 'text/event-stream' },
+      signal: controller.signal,
+    });
+    let frames = '';
+    const reader = stream.body?.getReader();
+    void (async () => {
+      for (;;) {
+        const chunk = await reader?.read().catch(() => undefined);
+        if (!chunk || chunk.done) return;
+        frames += new TextDecoder().decode(chunk.value);
+      }
+    })();
+    const landingFrames = () => frames.split('landing.changed').length - 1;
+    // `/` draws the queue as counts, so the bar is what the card puts there.
+    const homeShowsCard = async () =>
+      (await (await fetch(`${liveBase}/`)).text()).includes('Review Items for You');
+    const cards = async () => {
+      const q = (await (await fetch(`${liveBase}/api/review-queue`)).json()) as {
+        items: QueueRow[];
+      };
+      return q.items.filter((i) => i.askedBy === 'Keeper');
+    };
+
+    let approveUrl = '';
+    const waiting = keeperFly(keeperBase, ['ssh', 'console', '--app', 'cw-riverbend'], 'x', {
+      callerToken: CALLER,
+      pollMs: 20,
+      onHeld: (h) => {
+        approveUrl = h.approveUrl;
+      },
+      announce: announceToBoard(liveBase, 'Riverbend Agent', { say: (l) => said.push(l) }),
+    });
+    await waitFor(async () => (await cards()).length === 1, { describe: 'the card filed' });
+    await waitFor(() => landingFrames() >= 1, { describe: 'the frame for the filed card' });
+    expect(await homeShowsCard()).toBe(true);
+    const filedFrames = landingFrames();
+
+    // The worst case: approve just after a poll, so a full interval is left.
+    const seen = polls;
+    await waitFor(() => polls > seen, { timeout: 4000, interval: 2, describe: 'a poll' });
+    // The 1s starts before the tap reaches the keeper, so it covers all of it.
+    const tapped = approveAt(approveUrl);
+    try {
+      await Promise.all([
+        waitFor(async () => (await cards()).length === 0, {
+          timeout: 1000,
+          describe: 'the card withdrawn within 1s of the approval',
+        }),
+        waitFor(() => landingFrames() > filedFrames, {
+          timeout: 1000,
+          describe: 'landing.changed on the open Home within 1s of the approval',
+        }),
+        waitFor(async () => !(await homeShowsCard()), {
+          timeout: 1000,
+          describe: 'the card gone from the Home page within 1s of the approval',
+        }),
+      ]);
+      // Still running: the card follows the approval, not the command's end.
+      await waitFor(() => existsSync(started), { describe: 'the command started' });
+    } finally {
+      writeFileSync(release, '');
+      controller.abort();
+    }
+    expect((await tapped).status).toBe(200);
+    expect(await waiting).toMatchObject({ status: 0, stdout: 'ran ssh console\n' });
+  }, 15_000);
 });
 
 describe('a post the keeper does not back', () => {

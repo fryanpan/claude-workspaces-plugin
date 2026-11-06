@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardUrlFromEnv } from '../src/keeper/keeper-announce.ts';
 import { KeeperHomeCards, keeperCardReview } from '../src/keeper/keeper-home-card.ts';
+import { waitFor } from './wait-for.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -107,5 +108,86 @@ describe('where the card goes', () => {
     expect(again).toEqual({ status: 200, itemId: 'item-1' });
     expect(filed).toEqual(['task-1']);
     cards.stop();
+  });
+});
+
+describe('a poll the keeper never answers', () => {
+  const ID = 'c'.repeat(32);
+  const TOKEN = 'd'.repeat(32);
+
+  /** Cards over a stand-in keeper; `answer` decides each poll's reply. */
+  function cardsOver(
+    answer: (nth: number, signal: AbortSignal | null | undefined) => Promise<Response>,
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), 'keeper-cards-hung-'));
+    dirs.push(dir);
+    const withdrawn: string[] = [];
+    const said: string[] = [];
+    let nth = 0;
+    const cards = new KeeperHomeCards({
+      dataDir: dir,
+      keeper: {
+        origin: 'http://127.0.0.1:40123',
+        callerToken: () => 'caller',
+        pollMs: 10,
+        askMs: 30,
+        fetchImpl: ((_url: string, init?: RequestInit) => {
+          nth += 1;
+          return answer(nth, init?.signal);
+        }) as typeof fetch,
+      },
+      boards: () => ['board-harborlight'],
+      isBoardLive: () => true,
+      getTask: () => undefined,
+      createTask: () => ({ ok: true, task: { id: 't-card' } }),
+      addReviewItem: () => ({ ok: true, item: { id: 'r-card' } }),
+      withdrawReviewItem: (_t, itemId, o) => {
+        withdrawn.push(`${itemId}: ${o.reason}`);
+        return { ok: true };
+      },
+      say: (l) => said.push(l),
+    });
+    return { cards, withdrawn, said };
+  }
+  const pending = () => Response.json({ status: 'pending', hold: 'token.move', summary: 'x' });
+  /** Never answers until its signal aborts, as a wedged relay would. */
+  const hang = (signal: AbortSignal | null | undefined) =>
+    new Promise<Response>((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+
+  it('does not stop the sweep, so the card still clears once the keeper answers', async () => {
+    const { cards, withdrawn, said } = cardsOver((nth, signal) => {
+      if (nth === 1) return Promise.resolve(pending());
+      if (nth === 2) return hang(signal);
+      return Promise.resolve(Response.json({ status: 'done' }));
+    });
+    try {
+      expect((await cards.announce({ id: ID, pollToken: TOKEN, requester: 'Alice' })).status).toBe(
+        201,
+      );
+      await waitFor(() => withdrawn.length === 1, { describe: 'the card withdrawn' });
+      expect(withdrawn).toEqual(['r-card: The request is done.']);
+      expect(cards.openCards()).toEqual({});
+      expect(said.filter((l) => l.includes('did not answer'))).toHaveLength(1);
+    } finally {
+      cards.stop();
+    }
+  });
+
+  it('keeps the card and logs once while the keeper stays silent', async () => {
+    const { cards, withdrawn, said } = cardsOver((nth) =>
+      Promise.resolve(nth === 1 ? pending() : new Response('no', { status: 500 })),
+    );
+    try {
+      await cards.announce({ id: ID, pollToken: TOKEN, requester: 'Alice' });
+      await cards.sweep();
+      await cards.sweep();
+      expect(withdrawn).toEqual([]);
+      expect(Object.keys(cards.openCards())).toEqual([ID]);
+      expect(said.filter((l) => l.includes('did not answer'))).toHaveLength(1);
+    } finally {
+      cards.stop();
+    }
   });
 });
