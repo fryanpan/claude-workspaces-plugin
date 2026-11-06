@@ -37,6 +37,7 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { type BlurReading, blurInStandalone, overTabs } from './home-phone-readers.ts';
 import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -97,6 +98,12 @@ export interface HomeNavReading {
     coach: { top: number; bottom: number };
     /** Each tab, and whether a tap at its centre reaches it. */
     hits: Array<{ label: string; reached: boolean }>;
+    /** Widget controls drawn over a tab, as `control on tab`. */
+    overTabs: string[];
+    /** CONTROL: the three controls were found, so an empty list is a reading. */
+    controls: number;
+    /** A text field's blur on Home loaded as a home-screen app. */
+    blur: BlurReading;
   };
   desktop: {
     display: string;
@@ -393,6 +400,18 @@ async function main(): Promise<void> {
     const homeCoach = await coachCard();
     const homeHits = await hits();
 
+    step('phone: the widget beside the bar');
+    const seated = await waitFor(
+      async () => {
+        const o = await overTabs(ev);
+        return o.controls === 3 ? o : null;
+      },
+      { timeout: 15_000, describe: 'the widget controls' },
+    );
+
+    step('phone: a text field blurs in a home-screen app');
+    const blur = await blurInStandalone(cdp, ev, () => open());
+
     step('phone: a workspace at 430x932');
     await open(board);
     const workspace = await look();
@@ -447,6 +466,9 @@ async function main(): Promise<void> {
         boxesAfter,
         taps,
         coach: homeCoach,
+        overTabs: seated.over,
+        controls: seated.controls,
+        blur,
         hits: homeHits,
       },
       desktop,
