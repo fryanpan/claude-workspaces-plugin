@@ -89,6 +89,11 @@ export interface FrameReading {
   reloaded: Held;
   /** The same, with the query dropped from the address before the reload. */
   reloadedBare: Held;
+  /** Opened at the door's root, with the flag off the address and a
+   *  `pushState` to a route, then reloaded by the page's script. */
+  pushedThenScript: Held;
+  /** The same, with the navigation started by no page, as a reader's reload is. */
+  pushedThenBrowser: Held;
   /** The context the widget stored for a comment made in this frame. */
   storedContext: string | null;
   /** The pin's state on the page the thread was not made at. */
@@ -205,6 +210,35 @@ async function walk(
   await frame.eval(`(history.replaceState(null, '', '/insights'), location.reload())`);
   const reloadedBare = await see(reloadedOnRoute);
 
+  step('at the root with no flag, an in-app navigation, and each kind of reload');
+  const pushed = async (reload: () => Promise<unknown>): Promise<Held> => {
+    await navigate(cdp, `${base}${prefix}`);
+    await ready(frame);
+    await see((h) => h.route === '/');
+    await markDocument(frame);
+    await frame.eval(
+      `(history.replaceState(null, '', '/'), history.pushState(null, '', '/insights'), 1)`,
+    );
+    await reload();
+    return see(reloadedOnRoute);
+  };
+  const pushedThenScript = await pushed(() => frame.eval('location.reload()'));
+  // CDP's `Page.reload` refuses a sub-frame, so this is the nearest it has: a
+  // navigation of the frame to its own address that no page started.
+  const pushedThenBrowser = await pushed(async () => {
+    const url = (await frame.eval('location.href')) as string;
+    for (const sessionId of [...sessions]) {
+      await cdp.send('Page.enable', {}, sessionId).catch(() => {});
+      const tree = (await cdp.send('Page.getFrameTree', {}, sessionId).catch(() => null)) as {
+        frameTree?: { frame?: { id?: string; url?: string } };
+      } | null;
+      const at = tree?.frameTree?.frame;
+      if (at?.id && at.url === url) {
+        await cdp.send('Page.navigate', { url, frameId: at.id }, sessionId);
+      }
+    }
+  });
+
   step('comment at one query, open another, tap the faded pin');
   await navigate(cdp, `${base}${prefix}insights?tab=b`);
   await ready(frame);
@@ -281,6 +315,8 @@ async function walk(
     opened,
     reloaded: reloadedHeld,
     reloadedBare,
+    pushedThenScript,
+    pushedThenBrowser,
     storedContext,
     pinDimmed,
     pinTapped,

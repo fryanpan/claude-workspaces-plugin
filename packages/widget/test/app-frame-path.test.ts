@@ -23,8 +23,8 @@ const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'app-frame-path-driver.ts');
 /** A widget build, one launch and two walks of three steps each. */
-const SUITE_MS = 170_000;
-const SPAWN_MS = 160_000;
+const SUITE_MS = 280_000;
+const SPAWN_MS = 270_000;
 
 let reading: Reading;
 
@@ -58,6 +58,18 @@ describe.skipIf(CHROME === null)('an app that takes the prefix off its own addre
 
     it('shows the app at the same path when the address had dropped its query too', () => {
       const after = frame().reloadedBare;
+      expect(after.text).toBeNull();
+      expect([after.app, after.route, after.query]).toEqual([true, '/insights', '?cw-frame=1']);
+    });
+
+    it('shows the app after an in-app navigation from a root address with no flag, reloaded by a script', () => {
+      const after = frame().pushedThenScript;
+      expect(after.text).toBeNull();
+      expect([after.app, after.route, after.query]).toEqual([true, '/insights', '?cw-frame=1']);
+    });
+
+    it('shows the app after the same navigation when the browser reloads the frame', () => {
+      const after = frame().pushedThenBrowser;
       expect(after.text).toBeNull();
       expect([after.app, after.route, after.query]).toEqual([true, '/insights', '?cw-frame=1']);
     });
