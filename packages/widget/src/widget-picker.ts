@@ -129,9 +129,13 @@ export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   // the finger was, by then the phone panel's Cancel. So a press on the page
   // is cancelled at each step; its touchend is what stops a finger's click.
   // Our own chrome is left alone, or its fields could not be focused at all.
+  // Cancelling is not enough for the page: a row's handler or a router still
+  // hears a cancelled click. Stopped here, in capture on the window, it never
+  // reaches the app.
   const onDown = (ev: Event) => {
-    if (!pressIsOurs(ev) || (ev.composedPath()[0] as Element).closest?.('.saved'))
-      ev.preventDefault();
+    const page = !pressIsOurs(ev);
+    if (page) ev.stopPropagation();
+    if (page || (ev.composedPath()[0] as Element).closest?.('.saved')) ev.preventDefault();
   };
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
@@ -203,10 +207,10 @@ export function exitFeedbackMode(el: FeedbackWidgetEl): void {
 }
 
 /** One node of a press's path: is this the widget's own chrome? */
-function isOwnChromeNode(node: EventTarget | undefined): boolean {
-  const el = node as Element | undefined;
+function isOwnChromeNode(node: EventTarget | null | undefined): boolean {
+  const el = node as Element | null | undefined;
   if (el?.nodeType !== 1) return false;
-  return el.tagName === TAG.toUpperCase() || el.hasAttribute?.(IGNORE_ATTR) === true;
+  return el.tagName === TAG.toUpperCase() || el.hasAttribute(IGNORE_ATTR);
 }
 
 /**
@@ -236,8 +240,7 @@ function isOwnChromeNode(node: EventTarget | undefined): boolean {
  */
 function pressIsOurs(ev: Event): boolean {
   const path = ev.composedPath();
-  if (path.length > 0) return path.some(isOwnChromeNode);
-  return isOwnChromeNode(ev.target ?? undefined);
+  return (path.length ? path : [ev.target]).some(isOwnChromeNode);
 }
 
 function hitTest(ev: MouseEvent): HTMLElement | null {
