@@ -1,8 +1,11 @@
 /**
  * The GitHub relay between an isolated broker and two real board servers.
  *
- * Harborlight's board subscribes to `harborlight/app`; Riverbend's to
- * `riverbend/site`, and to `harborlight/app` for CI only. Each board's push
+ * Harborlight's board subscribes to `harborlight/app`, and also names
+ * `riverbend/site`, Riverbend's repo, which the relay's config does not allow
+ * Harborlight: a server writes its own list, so that is what a hostile one
+ * would do. Riverbend's subscribes to `riverbend/site`, and to
+ * `harborlight/app` for CI only. Each board's push
  * key is minted on its own server from loopback, as the lead would, and
  * handed to the relay through a stand-in for the Keychain. The broker is
  * `fake-github-broker.ts` on a free port: nothing here reaches GitHub, and
@@ -10,7 +13,8 @@
  *
  * What this proves: a merge on `harborlight/app` reaches the agent on
  * Harborlight's board and not the agent on Riverbend's, a CI line reaches
- * both, and after the broker restarts on the same port — forgetting every
+ * both, Riverbend's repo is never watched for Harborlight and its issue
+ * never reaches Harborlight, and after the broker restarts on the same port — forgetting every
  * session — the relay registers again and the next event still arrives.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -31,6 +35,12 @@ const MERGE =
   '🔀 PR #7 merged on `harborlight/app`: **Harborlight search**\nhttps://github.com/harborlight/app/pull/7';
 const CI = '✅ CI **success** on `harborlight/app` (`main` @ 1a2b3c4)';
 const RIVER = '🆕 New issue on `riverbend/site`: **Saltmarsh map is blank**';
+
+/** What the Mac's relay config allows each board to hear. */
+const ALLOWED: Record<string, string[]> = {
+  Harborlight: ['harborlight/app'],
+  Riverbend: ['riverbend/site', 'harborlight/app'],
+};
 
 interface Side {
   name: string;
@@ -95,7 +105,12 @@ describe('the GitHub relay between a broker and two boards', () => {
 
   beforeAll(async () => {
     broker = startFakeBroker();
-    sides.push(await side('Harborlight', [{ repo: 'harborlight/app', kinds: ['merge', 'ci'] }]));
+    sides.push(
+      await side('Harborlight', [
+        { repo: 'harborlight/app', kinds: ['merge', 'ci'] },
+        { repo: 'riverbend/site', kinds: ['issue'] },
+      ]),
+    );
     sides.push(
       await side('Riverbend', [
         { repo: 'riverbend/site', kinds: ['issue'] },
@@ -112,6 +127,7 @@ describe('the GitHub relay between a broker and two boards', () => {
               baseUrl: `http://127.0.0.1:${s.handle.port}`,
               workspaceId: s.board,
               pushKeyService: `cw-github-push-${s.name.toLowerCase()}`,
+              repos: ALLOWED[s.name],
             },
           ]),
         ),
@@ -170,6 +186,9 @@ describe('the GitHub relay between a broker and two boards', () => {
       describe: 'the issue frame on Riverbend',
     });
     expect(githubFrames(harbor())).not.toContain(RIVER);
+    expect(
+      logs.some((l) => l.startsWith('harborlight: not allowed') && l.includes('riverbend/site')),
+    ).toBe(true);
   });
 
   it('registers again after the broker restarts and forgets every session', async () => {

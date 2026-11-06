@@ -16,8 +16,16 @@
  *    "baseUrl": "https://<project>-workspaces.<zone>",
  *    "workspaceId": "<the board's id on that server>",
  *    "pushKeyService": "<Keychain service holding the gp1>",
- *    "serviceToken": {"clientId": "<…>.access", "secretService": "<Keychain service>"}}}}
+ *    "serviceToken": {"clientId": "<…>.access", "secretService": "<Keychain service>"},
+ *    "repos": ["<owner>/<repo>"]}}}
  * ```
+ *
+ * `repos` is the only list of repos the relay watches for that board. The
+ * board's own subscription list is written on the board's server, so a
+ * hostile server could name any repo the owner's GitHub login can read; the
+ * relay watches and pushes only the subscriptions this list also names
+ * (matched without case, as GitHub matches names). It is required: a board
+ * with no list is refused, and `[]` hears nothing.
  *
  * `broker` must be plain http on a loopback host: the broker answers on this
  * machine only. A board's `baseUrl` may be plain http only on a loopback
@@ -25,6 +33,7 @@
  * closed: one bad part refuses the whole file.
  */
 import { readFileSync, statSync } from 'node:fs';
+import { isValidRepo } from '../github-hub.ts';
 
 export interface GithubRelayBoard {
   name: string;
@@ -33,6 +42,8 @@ export interface GithubRelayBoard {
   workspaceId: string;
   pushKey: string;
   serviceToken: { clientId: string; clientSecret: string } | null;
+  /** The only repos this board may hear, as the owner wrote them. */
+  repos: string[];
 }
 
 export interface GithubRelayConfig {
@@ -111,7 +122,13 @@ export function parseGithubRelayConfig(
       } else if (!baseUrl.startsWith('http://')) {
         throw new Error(`${name} is not on loopback, so it needs a serviceToken`);
       }
-      boards.push({ name, baseUrl, workspaceId: r.workspaceId, pushKey, serviceToken });
+      if (!Array.isArray(r.repos) || r.repos.some((repo) => !isValidRepo(repo))) {
+        throw new Error(
+          `${name}.repos must list the owner/name repos this board may hear ([] for none)`,
+        );
+      }
+      const repos = r.repos as string[];
+      boards.push({ name, baseUrl, workspaceId: r.workspaceId, pushKey, serviceToken, repos });
     }
     return { broker, boards };
   } catch (err) {

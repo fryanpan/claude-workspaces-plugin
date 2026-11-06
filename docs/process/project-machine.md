@@ -481,8 +481,14 @@ the rest on the Mac.
       "baseUrl": "https://<project>-workspaces.<zone>",
       "workspaceId": "<board id>",
       "pushKeyService": "cw-<project>-github-push",
-      "serviceToken": {"clientId": "<client id>.access", "secretService": "cw-<project>-access-secret"}}}}
+      "serviceToken": {"clientId": "<client id>.access", "secretService": "cw-<project>-access-secret"},
+      "repos": ["<owner>/<repo>"]}}}
    ```
+
+   `repos` lists the only repos this board may hear, and it is required. The
+   board's own subscription list is written on the machine, so the relay
+   watches only the subscriptions this list also names; any other is logged
+   by name and never watched. Name only the org's own repos here.
 
 5. **Restart the relay** so it reads the Keychain again:
    `bun packages/server/src/github-relay/relay-bin.ts`. It logs

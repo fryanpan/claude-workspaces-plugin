@@ -22,6 +22,7 @@ const board = (over: Record<string, unknown> = {}) => ({
   workspaceId: 'w-harbor',
   pushKeyService: 'cw-github-push-harbor',
   serviceToken: { clientId: 'relay.access', secretService: 'cw-harbor-access' },
+  repos: ['harborlight/app'],
   ...over,
 });
 
@@ -73,6 +74,7 @@ describe('the relay config', () => {
           workspaceId: 'w-harbor',
           pushKey: KEY,
           serviceToken: { clientId: 'relay.access', clientSecret: 'the-access-secret' },
+          repos: ['harborlight/app'],
         },
       ],
     });
@@ -95,6 +97,9 @@ describe('the relay config', () => {
       { boards: { harbor: board({ pushKeyService: 'cw-harbor-access' }) } },
     ],
     ['a bad board id', { boards: { harbor: board({ workspaceId: '../w' }) } }],
+    ['a board with no repo list', { boards: { harbor: board({ repos: undefined }) } }],
+    ['a repo list that is not a list', { boards: { harbor: board({ repos: 'harborlight/app' }) } }],
+    ['a repo that is not owner/name', { boards: { harbor: board({ repos: ['../etc'] }) } }],
   ])('refuses %s', (_why, raw) => {
     expect(parseGithubRelayConfig(JSON.stringify(raw), secret)).toHaveProperty('error');
   });
@@ -108,6 +113,88 @@ describe('the relay config', () => {
     expect(loadGithubRelayConfig(path, secret)).toHaveProperty('error');
     chmodSync(path, 0o600);
     expect(loadGithubRelayConfig(path, secret)).not.toHaveProperty('error');
+  });
+});
+
+describe('a repo the board lists that the Mac does not allow it', () => {
+  /**
+   * The board's server writes its own subscription list, so a hostile one can
+   * name any repo the owner's GitHub login can read. The relay watches and
+   * pushes only the repos its own config allows that board.
+   */
+  async function run(allowed: string[]) {
+    const registered: string[][] = [];
+    const watched: string[] = [];
+    const pushed: string[] = [];
+    let session: string | null = null;
+    let queued = [
+      '🔀 PR #1 merged on `harborlight/app`: **Ours**',
+      '💬 Mention on `riverbend/private`: **Not yours**',
+    ];
+    const fetch = async (url: string, init: RequestInit) => {
+      const path = new URL(url).pathname;
+      const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      if (path === '/state')
+        return Response.json({
+          sessions: session ? [{ id: session, repos: registered.flat() }] : [],
+        });
+      if (path === '/register') {
+        registered.push(body.repos as string[]);
+        session = 's1';
+        return Response.json({ id: 's1' });
+      }
+      if (path === '/watch') {
+        watched.push(body.repo as string);
+        return Response.json({});
+      }
+      if (path === '/poll') {
+        const events = queued;
+        queued = [];
+        return Response.json({ events });
+      }
+      if (path.endsWith('/github/subscriptions')) {
+        return Response.json({
+          subscriptions: [
+            { repo: 'harborlight/app', kinds: ['merge'] },
+            { repo: 'Riverbend/Private', kinds: ['mention'] },
+          ],
+        });
+      }
+      pushed.push(String(body.repo));
+      return new Response('{}', { status: 200 });
+    };
+    const config = parseGithubRelayConfig(
+      JSON.stringify({ boards: { harbor: board({ repos: allowed }) } }),
+      secret,
+    );
+    if ('error' in config) throw new Error(config.error);
+    const logs: string[] = [];
+    const relay = createGithubRelay({ config, fetch, log: (l) => logs.push(l) });
+    await relay.pollOnce();
+    await relay.pollOnce();
+    return { registered, watched, pushed, logs };
+  }
+
+  it('is never watched and its events never reach the board', async () => {
+    const r = await run(['harborlight/app']);
+    expect(r.registered).toEqual([['harborlight/app']]);
+    expect(r.watched).toEqual([]);
+    expect(r.pushed).toEqual(['harborlight/app']);
+    expect(
+      r.logs.filter((l) => l.includes('Riverbend/Private') && l.includes('not allowed')),
+    ).toHaveLength(1);
+  });
+
+  it('is watched once the config allows it, matched as GitHub does, without case', async () => {
+    const r = await run(['harborlight/app', 'riverbend/private']);
+    expect(r.registered).toEqual([['harborlight/app', 'Riverbend/Private']]);
+    expect(r.pushed.sort()).toEqual(['harborlight/app', 'riverbend/private']);
+  });
+
+  it('leaves a board whose allowlist is empty watching nothing', async () => {
+    const r = await run([]);
+    expect(r.registered).toEqual([]);
+    expect(r.pushed).toEqual([]);
   });
 });
 
