@@ -146,14 +146,23 @@ export interface CaptureHealth {
  * its graph after `getUserMedia` resolves, which is outside the gesture.
  * Made here, synchronously in the click, the context is already allowed to
  * run by the time the graph is attached to it. The widget's voice capture
- * does the same (`makeContext`).
+ * does the same (`makeContext`). `sampleRate` is for a caller that already
+ * knows the mic's rate; a browser that refuses it gives the default.
  */
-export function makeGestureContext(): AudioContext | undefined {
+export function makeGestureContext(sampleRate?: number): AudioContext | undefined {
   const Ctor =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const made = (): AudioContext | undefined => {
+    if (!Ctor) return undefined;
+    try {
+      return sampleRate ? new Ctor({ sampleRate }) : new Ctor();
+    } catch {
+      return new Ctor();
+    }
+  };
   try {
-    const ctx = Ctor ? new Ctor() : undefined;
+    const ctx = made();
     void ctx?.resume().catch(() => {});
     return ctx;
   } catch {

@@ -11,6 +11,7 @@
  * a page carrying voice on from the page before, outside any tap.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PlaybackContext } from '../src/board/spoken-reply-audio.ts';
 import {
   type LeadVoice,
   NO_SOUND,
@@ -221,6 +222,19 @@ describe('the lead chat voice, carried on from the page before', () => {
     speak();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+  });
+
+  it('wakes the speaker’s context in that tap too, or the answer would not play', async () => {
+    vi.useFakeTimers();
+    const speaker = new FakeContext();
+    const { voice } = make({
+      playbackContext: () => speaker as unknown as PlaybackContext,
+    });
+    carry(voice);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(speaker.state).toBe('suspended');
+    tapPage(voice);
+    expect(speaker.resumedInTap).toBe(true);
   });
 
   it('still says so when the mic sends no sound after that tap', async () => {

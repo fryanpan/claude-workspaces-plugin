@@ -1,0 +1,134 @@
+/**
+ * The lead chat voice's microphone: one capture for as long as voice is on,
+ * the clock that says it sends no sound, and the tap a page with no gesture
+ * behind it may need (the reasons are in `lead-chat-voice.ts`).
+ */
+import type { SpokenCapture } from '../board/spoken-reply-audio.ts';
+import { startSpokenCapture } from '../board/spoken-reply-audio.ts';
+import { makeGestureContext } from '../meeting-audio.ts';
+import type { LeadVoiceOpts } from './lead-chat-voice-api.ts';
+
+/** How long an open mic may send nothing before voice stops and says so. */
+const NO_SOUND_MS = 5_000;
+/** How long a context started outside a tap has to run before the chat asks
+ *  for one. */
+const TAP_WAIT_MS = 600;
+
+export interface LeadMicOpts {
+  startCapture: LeadVoiceOpts['startCapture'];
+  onFrame(pcm: Int16Array): void;
+  /** The mic would not open; the words to say. */
+  onRefused(message: string): void;
+  /** The mic stayed silent; what the track and the context reported. */
+  onSilent(detail: string): void;
+  /** A tap would start the audio: ask for one. */
+  askForTap(): void;
+}
+
+export interface LeadMic {
+  /** Open the mic on a context the tap made, or, with `carried`, a context no
+   *  tap has reached. */
+  open(ctx: AudioContext | undefined, carried: boolean): void;
+  /** Inside a tap: start what was waiting for one. False if nothing was. */
+  wake(): boolean;
+  stop(): void;
+}
+
+export function createLeadMic(opts: LeadMicOpts): LeadMic {
+  let capture: SpokenCapture | null = null;
+  let gen = 0;
+  let soundTimer: ReturnType<typeof setTimeout> | null = null;
+  let tapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A context started outside a tap that is not running yet. */
+  let waiting: AudioContext | null = null;
+  /** Voice started with no tap, and the one it may ask for has not come. */
+  let tapDue = false;
+
+  const clear = (): void => {
+    gen++;
+    if (soundTimer) clearTimeout(soundTimer);
+    soundTimer = null;
+    if (tapTimer) clearTimeout(tapTimer);
+    tapTimer = null;
+    waiting = null;
+    capture?.stop();
+    capture = null;
+  };
+
+  const start = (ctx: AudioContext | undefined): void => {
+    const mine = gen;
+    let frames = 0;
+    void (opts.startCapture ?? startSpokenCapture)({
+      ...(ctx ? { context: ctx } : {}),
+      onFrame: (pcm) => {
+        frames++;
+        if (mine === gen) opts.onFrame(pcm);
+      },
+    }).then((r) => {
+      if (mine !== gen) {
+        if (r.ok) r.capture.stop();
+        return;
+      }
+      if (!r.ok) {
+        opts.onRefused(r.message);
+        return;
+      }
+      capture = r.capture;
+      const diag = r.capture.diag;
+      // An open mic that makes no frame is a context that never ran — unless
+      // it is waiting for the reader's tap, which restarts this clock.
+      const noSound = (): void => {
+        soundTimer = null;
+        if (mine !== gen || frames > 0) return;
+        if (waiting) {
+          soundTimer = setTimeout(noSound, NO_SOUND_MS);
+          return;
+        }
+        // A context that says it runs, on a page no tap has reached: the tap
+        // can still rebuild the graph, so ask for it before giving up.
+        if (ctx && tapDue) {
+          waiting = ctx;
+          opts.askForTap();
+          soundTimer = setTimeout(noSound, NO_SOUND_MS);
+          return;
+        }
+        // What the mic's track and the graph's context said, so the report
+        // answers why (`AudioPump.diag`).
+        opts.onSilent(diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
+      };
+      soundTimer = setTimeout(noSound, NO_SOUND_MS);
+    });
+  };
+
+  return {
+    open(ctx, carried) {
+      tapDue = carried;
+      start(ctx);
+      if (!carried || !ctx) return;
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        // Closed: the graph moved to a context at the mic's rate, which runs.
+        if (ctx.state === 'running' || ctx.state === 'closed') return;
+        waiting = ctx;
+        opts.askForTap();
+      }, TAP_WAIT_MS);
+    },
+    wake() {
+      const ctx = waiting;
+      if (!ctx) return false;
+      waiting = null;
+      tapDue = false;
+      const micRate = capture?.offRate?.();
+      if (micRate) {
+        clear();
+        // Made here, inside the tap, at the rate the mic delivers.
+        start(makeGestureContext(micRate));
+      } else {
+        // Inside the gesture: the one call Safari lets start the context.
+        void ctx.resume().catch(() => {});
+      }
+      return true;
+    },
+    stop: clear,
+  };
+}
