@@ -3784,3 +3784,16 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   and were overwritten. The serializer also trimmed a trailing space, so the
   next word ran on. The composer now takes the caret in the same task and
   keeps a trailing space through `getMarkdown`/`setMarkdown`.
+
+## A browser resamples each audio buffer alone, so PCM chunks at the voice's rate click at every join
+
+- A 24 kHz `AudioBuffer` on a 48 kHz context is resampled by itself and its
+  last sample is held. In headless Chromium, the voice pushed in 20 ms chunks
+  differed from the same voice pushed whole by 0.159 of full scale, all of it
+  at the joins, on a test tone with a 5 kHz partial. Whole buffers matched.
+- `createSpokenPlayer` now resamples with core's `createResampler`, which
+  keeps its phase across chunks, and starts each buffer on a whole frame. The
+  same comparison reads under 3e-8 at 48 and 44.1 kHz. WebKit was not
+  measured; on these buffers it has no resampling left to do.
+- `voice-speak.ts` and `app-voice-entry.ts` in the widget still schedule
+  buffers at the voice's rate.

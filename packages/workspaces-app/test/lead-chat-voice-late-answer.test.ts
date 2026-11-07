@@ -18,6 +18,7 @@ import { type FakeSocket, fakeVoice } from './lead-chat-voice-fakes.ts';
 function speakers() {
   const played = { sounds: 0 };
   const context = {
+    sampleRate: 24_000,
     currentTime: 0,
     state: 'running',
     resume: async () => {},
