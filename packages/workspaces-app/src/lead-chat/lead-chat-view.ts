@@ -334,12 +334,17 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     dock.docked(docking ? dock.width(vw) : null);
   };
 
-  // Full screen, a page in the navbar beneath moves the chat out of its way
-  // (`LEAVE_EVENT`: the mount closes it, or keeps voice on in the bar).
+  // Full screen, a page in the navbar beneath or a link in the chat moves the
+  // chat out of the page's way (`LEAVE_EVENT`: the mount closes it, or keeps
+  // voice on in the bar). A link's page loads with the chat as it left it.
   const onNavTap = (e: Event): void => {
     if (pane.hidden || !pane.classList.contains('lc-sheet')) return;
-    const item = (e.target as Element | null)?.closest?.('.board-nav-item');
-    if (item && !item.closest('.board-nav-dock')) pane.dispatchEvent(new Event(LEAVE_EVENT));
+    const target = e.composedPath()[0] as Element | undefined;
+    const item = target?.closest?.('.board-nav-item');
+    const link = target?.closest?.('.lc-list a[href]:not([target])');
+    if (link || (item && !item.closest('.board-nav-dock'))) {
+      pane.dispatchEvent(new Event(LEAVE_EVENT));
+    }
   };
   doc.addEventListener('click', onNavTap, true);
   tools.addEventListener('click', () => {

@@ -52,8 +52,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { WriteVia } from '@claude-workspaces/core';
-import { BOARD_NAV_ICONS, BOARD_NAV_TABS, boardNavPath } from '@claude-workspaces/core/board-nav';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
+import { NAV_BAR_H, NAV_RAIL_W, hostNav } from './board-host-nav.ts';
 import { FRAME_TICKET_PARAM } from './frame-ticket.ts';
 import { isWithinRoot } from './safe-path.ts';
 
@@ -217,43 +217,13 @@ const BAR = (title: string): string =>
   '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
   '<span>Comments</span><span class="cw-new" data-cw-new hidden></span></button></div>';
 
-/**
- * The board's four pages, for the owner's host page: a rail on the left above
- * 1100px, a bar along the foot at or under it, the frame taking the rest. A
- * mock is a page of the board like any other, so the way to the board's
- * other pages is where it is on them (`BOARD_NAV_TABS` in core, which the
- * board's own rail draws from). Plain links: the host carries no app bundle.
- * Classed `board-nav` as well, which is how the lead chat's sheet finds the
- * bar it has to stop above.
- */
-const NAV_RAIL_W = 58;
-const NAV_BAR_H = 54;
 /** The bar above the frame (`BAR`), which the rail sits beside. */
 const BAR_H = 44;
-function hostNav(workspaceId: string): { style: string; html: string } {
-  const links = BOARD_NAV_TABS.map(
-    (t) =>
-      `<a href="${escapeAttr(boardNavPath(workspaceId, t.nav))}" title="${t.label}">` +
-      `${BOARD_NAV_ICONS[t.nav]}<span>${t.label}</span></a>`,
-  ).join('');
-  return {
-    style:
-      '.cw-host-nav{position:fixed;z-index:800;display:flex;box-sizing:border-box;background:#f6f8fa;' +
-      'font:600 11px/14px -apple-system,BlinkMacSystemFont,system-ui,sans-serif}' +
-      '.cw-host-nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;' +
-      'color:#57606a;text-decoration:none;-webkit-tap-highlight-color:transparent}' +
-      '.cw-host-nav a:hover{color:#1f2328}.cw-host-nav svg{width:20px;height:20px;display:block}' +
-      `@media (min-width:1101px){.cw-host-nav{top:0;left:0;bottom:0;width:${NAV_RAIL_W}px;flex-direction:column;` +
-      'padding:8px 0;gap:2px;border-right:1px solid #d1d9e0}.cw-host-nav a{height:54px}' +
-      `.cw-bar{margin-left:${NAV_RAIL_W}px}` +
-      `iframe{margin-left:${NAV_RAIL_W}px;width:calc(100% - ${NAV_RAIL_W}px)}}` +
-      `@media (max-width:1100px){:root{--doc-dock-h:${NAV_BAR_H}px}.cw-host-nav{left:0;right:0;bottom:0;` +
-      `height:calc(${NAV_BAR_H}px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);` +
-      'border-top:1px solid #d1d9e0}.cw-host-nav a{flex:1}' +
-      `iframe{height:calc(100% - ${BAR_H}px - ${NAV_BAR_H}px - env(safe-area-inset-bottom,0px))}}`,
-    html: `<nav class="cw-host-nav board-nav" aria-label="Workspace pages">${links}</nav>`,
-  };
-}
+/** The bar and the frame make room for the board's nav (`board-host-nav.ts`). */
+const NAV_ROOM =
+  `@media (min-width:1101px){.cw-bar{margin-left:${NAV_RAIL_W}px}` +
+  `iframe{margin-left:${NAV_RAIL_W}px;width:calc(100% - ${NAV_RAIL_W}px)}}` +
+  `@media (max-width:1100px){iframe{height:calc(100% - ${BAR_H}px - ${NAV_BAR_H}px - env(safe-area-inset-bottom,0px))}}`;
 
 /**
  * The host page. It draws the board's bar and one frame under it — and, for a
@@ -294,7 +264,7 @@ export function renderMockHost(args: {
   const title = TITLE.exec(args.html)?.[1]?.trim() ?? '';
   const boardLink = args.visitor
     ? BOARD_LINK(args.workspaceId)
-    : (({ style, html }) => ({ style, anchor: html }))(hostNav(args.workspaceId));
+    : (({ style, html }) => ({ style: style + NAV_ROOM, anchor: html }))(hostNav(args.workspaceId));
   const items = JSON.stringify(args.items.map((i) => [i.taskId, i.reviewItemId]));
   const sandbox = args.frame ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
   const src = args.frame

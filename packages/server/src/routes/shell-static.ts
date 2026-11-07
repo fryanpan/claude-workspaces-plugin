@@ -693,7 +693,12 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           );
         }
         const page = renderWhiteboardShell(
-          { workspaceId: wsSeg, docId: canonical, title: whiteboard.title ?? 'Whiteboard' },
+          {
+            workspaceId: wsSeg,
+            docId: canonical,
+            title: whiteboard.title ?? 'Whiteboard',
+            visitor: visitor !== null,
+          },
           browserSentry,
           readAppAssetManifest(markdownAppDist),
         );

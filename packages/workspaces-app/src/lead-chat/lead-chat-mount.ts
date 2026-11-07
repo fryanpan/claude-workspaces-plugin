@@ -26,8 +26,9 @@
  * flag, and `VOICE_ON_KEY` while the page is listening. The next page opens
  * the same bar or panel and starts listening again without a tap where the
  * browser allows it (`start({ gesture: false })`), and asks for one tap
- * where it does not (iOS Safari). On a phone the side nav's pages move the
- * full-screen panel out of the way into the bar rather than closing the chat.
+ * where it does not (iOS Safari). On a phone the side nav's pages and a link
+ * in the chat move the full-screen panel out of the way into the bar rather
+ * than closing the chat, so the page is what the reader sees.
  *
  * The button is drawn only for a reader who may talk to the lead — the
  * board's owner — so nobody else is offered a composer that refuses.
@@ -369,6 +370,11 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const onPageTap = (): void => {
     woke = voice.wake();
   };
+  /** Excalidraw's canvas cancels a touch on iOS, so that tap never becomes a
+   *  click. The agent button's tap always does, and decides what it meant. */
+  const onPageTouch = (e: Event): void => {
+    if (!e.composedPath().includes(host)) voice.wake();
+  };
   const onHidePage = (): void => {
     hiding = true;
   };
@@ -381,6 +387,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.close.addEventListener('click', closeAll);
   view.pane.addEventListener(LEAVE_EVENT, onLeave);
   doc.addEventListener('click', onPageTap, true);
+  doc.addEventListener('touchend', onPageTouch, true);
   win.addEventListener('pagehide', onHidePage);
   win.addEventListener('pageshow', onShowPage);
   view.send.addEventListener('click', () => void sendTyped());
@@ -436,6 +443,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       client.close();
       doc.removeEventListener('keydown', onKey);
       doc.removeEventListener('click', onPageTap, true);
+      doc.removeEventListener('touchend', onPageTouch, true);
       win.removeEventListener('pagehide', onHidePage);
       win.removeEventListener('pageshow', onShowPage);
       win.removeEventListener('resize', onResize);

@@ -4,7 +4,9 @@ import { connect } from '@claude-workspaces/core';
  *
  * Connects to the doc socket, announces who is here, and mounts the canvas
  * once the scene has synced. Excalidraw arrives through a dynamic import, so
- * the header paints and the socket opens while it downloads.
+ * the header paints and the socket opens while it downloads. The chat with
+ * the board's lead mounts as it does on a doc page, so opening a whiteboard
+ * keeps the conversation, voice included (`lead-chat-mount.ts`).
  *
  * The rules this page keeps:
  *  - It writes to the shared scene only when no gesture is in progress, so a
@@ -56,6 +58,16 @@ async function boot(): Promise<void> {
     },
     { suppressNamePrompt: true },
   );
+  // Its own chunk, and never waited for: it is not the page's content.
+  if (workspaceId) {
+    void import('../lead-chat/lead-chat-mount.ts').then(({ mountLeadChat }) =>
+      mountLeadChat({
+        workspaceId,
+        author: { id: user.id, name: user.name, kind: user.kind },
+        getContext: () => ({ surface: 'doc', docId }),
+      }),
+    );
+  }
   const client = connect(docSocketUrl(location, docId, 'whiteboard', workspaceId));
   const { ydoc, awareness } = client;
   awareness.setLocalStateField('user', { name: user.name, color: user.color });
@@ -154,7 +166,7 @@ async function joinRoom(
   user: { id: string; name: string; color: string },
   canvas: () => CanvasHandle | null,
 ) {
-  const host = document.getElementById('wb-people');
+  const host = document.getElementById('doc-people');
   if (!host) return null;
   const { joinPagePresence } = await import('../presence/page-presence.ts');
   return joinPagePresence({

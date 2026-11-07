@@ -12,6 +12,7 @@ class HTMLRewriterProbe {
   readonly body: Record<string, string> = {};
   readonly stylesheets: string[] = [];
   readonly scripts: string[] = [];
+  readonly navLinks: string[] = [];
   title = '';
   constructor(readonly html: string) {}
   async read(): Promise<this> {
@@ -31,6 +32,11 @@ class HTMLRewriterProbe {
           this.scripts.push(el.getAttribute('src') ?? '');
         },
       })
+      .on('nav.board-nav a', {
+        element: (el) => {
+          this.navLinks.push(el.getAttribute('href') ?? '');
+        },
+      })
       .on('#wb-title', {
         text: (t) => {
           this.title += t.text;
@@ -43,9 +49,25 @@ class HTMLRewriterProbe {
 }
 
 describe('the whiteboard shell', () => {
+  it('links to the board’s four pages for the owner, and draws none for a share visitor', async () => {
+    const shell = { workspaceId: 'board one', docId: 'd-ferry', title: 'Ferry' };
+    const owner = await parse(renderWhiteboardShell({ ...shell, visitor: false }, null)).read();
+    const visitor = await parse(renderWhiteboardShell({ ...shell, visitor: true }, null)).read();
+    expect(owner.navLinks).toEqual([
+      '/workspaces/board%20one/home',
+      '/workspaces/board%20one',
+      '/workspaces/board%20one/library',
+      '/workspaces/board%20one/activity',
+    ]);
+    expect(visitor.navLinks).toEqual([]);
+  });
+
   it('names the doc and board for the bundle, and escapes the title', async () => {
     const page = await parse(
-      renderWhiteboardShell({ workspaceId: 'w-1', docId: 'd-ferry', title: 'Ferry <flow>' }, null),
+      renderWhiteboardShell(
+        { workspaceId: 'w-1', docId: 'd-ferry', title: 'Ferry <flow>', visitor: false },
+        null,
+      ),
     ).read();
     expect(page.body['data-workspace-id']).toBe('w-1');
     expect(page.body['data-doc-id']).toBe('d-ferry');
@@ -55,7 +77,7 @@ describe('the whiteboard shell', () => {
 
   it('loads the shared chrome first and the token layer last', async () => {
     const page = await parse(
-      renderWhiteboardShell({ workspaceId: 'w', docId: 'd', title: 't' }, null, {
+      renderWhiteboardShell({ workspaceId: 'w', docId: 'd', title: 't', visitor: false }, null, {
         'whiteboard.js': 'whiteboard.abc123.js',
       }),
     ).read();

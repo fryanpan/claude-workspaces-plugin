@@ -16,6 +16,9 @@ html:has(body.whiteboard-body) {
 body.whiteboard-body {
   margin: 0;
   height: 100dvh;
+  /* Room for the board's nav, which the shell sets the sizes of. */
+  box-sizing: border-box;
+  padding: 0 0 var(--wb-nav-foot, 0px) var(--wb-nav-left, 0px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -23,37 +26,34 @@ body.whiteboard-body {
   font-family: var(--sans);
   color: var(--fg);
   background: var(--bg);
+  /* The agent button sits in Excalidraw's foot row, right of zoom and undo,
+     where the selection panel above them does not reach. */
+  --lc-agent-left: calc(var(--wb-nav-left, 0px) + 238px);
 }
-.wb-bar {
+/* Excalidraw's phone layout fills that row, so the button rises above it.
+   Read off Excalidraw's own class, because it picks the layout from the
+   canvas's size, which the docked chat changes, and not the screen's. */
+body.whiteboard-body:has(.excalidraw--mobile) {
+  --lc-agent-left: calc(var(--wb-nav-left, 0px) + 12px);
+  --voice-rail-lift: 52px;
+}
+/* The doc page's #topbar, whose rules are in styles.css. There it is a grid
+   track of 48px; here the page is a flex column, so it takes the same height
+   itself. */
+.whiteboard-body #topbar {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 44px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  height: 48px;
+  box-sizing: border-box;
 }
-.wb-bar .back-link {
-  min-width: 36px;
-  min-height: 36px;
-  display: inline-flex;
+/* A title beside the 44px phone arrow, where a baseline would pin it high. */
+.whiteboard-body .doc-crumb {
   align-items: center;
-  justify-content: center;
-}
-.wb-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Sized for a long line so a name arriving does not move the title. */
 .wb-presence {
   flex: none;
   width: 16em;
-  max-width: 45%;
+  max-width: 100%;
   text-align: right;
   color: var(--fg-muted);
   font-size: 13px;
@@ -66,6 +66,12 @@ body.whiteboard-body {
   flex: 1 1 auto;
   min-height: 0;
   touch-action: none;
+}
+/* The docked chat stands beside the page rather than over it: the canvas
+   resizes to what is left, and the bar keeps who is here in view. */
+html[data-lc-docked] .whiteboard-body #topbar,
+html[data-lc-docked] .wb-stage {
+  margin-right: var(--lc-dock-w, 0px);
 }
 .wb-canvas {
   position: absolute;
