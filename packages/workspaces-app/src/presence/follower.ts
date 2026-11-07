@@ -108,11 +108,13 @@ export function createFollower(deps: FollowerDeps): Follower {
         ? isBoardPagePath(deps.workspaceId, deps.address()) &&
           (!spot.path || isBoardPagePath(deps.workspaceId, spot.path))
         : samePage(spot, deps.here());
-    if (same) {
+    const href = spotHref(deps.workspaceId, spot);
+    // The queue and the list are a page of their own, so they are not `same`,
+    // and loading the address already open would repeat on every load.
+    if (same || href === deps.address()) {
       deps.show(spot);
       return;
     }
-    const href = spotHref(deps.workspaceId, spot);
     if (following) write({ key: following, arriving: href });
     deps.go(href);
   };

@@ -9,6 +9,7 @@
  * `doc-spot.ts` is the markdown editor's counterpart.
  */
 import type { PresenceSpot } from '@claude-workspaces/core/workspace-presence';
+import { onOpenThreadChange } from '../doc/open-thread.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { docSpotMoved, setDocSpotHandle } from './doc-spot-slot.ts';
 import { onPageScroll, pageScroller, scrollFraction, scrollToFraction } from './page-scroll.ts';
@@ -62,5 +63,6 @@ export function wireFlatDocSpot(opts: {
   };
   scope.onCleanup(setDocSpotHandle({ docId: opts.docId, show }));
   scope.onCleanup(onPageScroll(document, report));
+  scope.onCleanup(onOpenThreadChange(report));
   report();
 }

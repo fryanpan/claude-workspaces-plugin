@@ -26,6 +26,7 @@ import {
   LEAD,
   SIZES,
   bootBoard,
+  closePerson,
   deadline,
   navigate,
   openPerson,
@@ -235,7 +236,7 @@ async function main(): Promise<void> {
           visibleHeading: heard.context?.visibleHeading ?? null,
         });
       }
-      firstPerson.close();
+      await closePerson(firstPerson);
 
       step(`handover at ${width}`);
       await board.point({ path: 'library' });
@@ -280,7 +281,7 @@ async function main(): Promise<void> {
         heardOnNewPage,
         tapped,
       });
-      secondPerson.close();
+      await closePerson(secondPerson);
     }
     const run: FollowVoiceRun = {
       workspaceId: ws,

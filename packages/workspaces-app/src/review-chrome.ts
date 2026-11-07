@@ -7,7 +7,7 @@ import { el } from './doc/chrome-dom.ts';
 import { wireResizeHandle } from './doc/chrome-panels.ts';
 import type { ComposerSlot } from './doc/composer-slot.ts';
 import { labelDirection, wireDocRename } from './doc/doc-rename.ts';
-import { setOpenThreadReader } from './doc/open-thread.ts';
+import { openThreadChanged, setOpenThreadReader } from './doc/open-thread.ts';
 import { wireReviewComposer } from './doc/review-composer.ts';
 import { createThreadActions } from './doc/thread-actions.ts';
 import { createThreadProjection } from './doc/thread-projection.ts';
@@ -487,6 +487,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
       // thread, or nothing. The modal is a view of ONE thread and the panel's
       // selection is the authority, so it follows rather than argues.
       if (id !== threadModal.openThreadId()) threadModal.close();
+      openThreadChanged();
     },
     onThreadClick: (id) => engageThread(id),
     isNew: (t) => seen.isNew(t),

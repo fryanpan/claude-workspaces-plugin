@@ -24,6 +24,7 @@ import {
   MOCK_PHRASE,
   SIZES,
   bootBoard,
+  closePerson,
   deadline,
   docView,
   navigate,
@@ -168,6 +169,10 @@ async function main(): Promise<void> {
       );
       await run('agent board from a mock', { path: 'tasks' }, B);
       await run('agent review queue', { path: '/review' }, '/review');
+      // A page the agent's spot already names must not load itself again.
+      await run('agent review queue holds still', null, '/review', undefined, () =>
+        Bun.sleep(1000),
+      );
 
       step(`person at ${width}`);
       const secondPerson = await openPerson(width, height, {
@@ -228,8 +233,8 @@ async function main(): Promise<void> {
           );
         },
       );
-      secondPerson.close();
-      firstPerson.close();
+      await closePerson(secondPerson);
+      await closePerson(firstPerson);
     }
     const run: PointFollowRun = { workspaceId: ws, steps };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

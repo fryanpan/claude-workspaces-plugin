@@ -11,6 +11,7 @@ import {
   ADDRESS,
   SIZES,
   bootBoard,
+  closePerson,
   deadline,
   navigate,
   openPerson,
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
         const reloaded = (await firstPerson.evaluate(ADDRESS)) as string;
         steps.push({ width, name: tab.name, address, shown, reloaded, shownAfterReload });
       }
-      firstPerson.close();
+      await closePerson(firstPerson);
     }
     const run: BoardTabsRun = {
       workspaceId: ws,
