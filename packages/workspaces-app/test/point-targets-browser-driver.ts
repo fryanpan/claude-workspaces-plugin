@@ -20,6 +20,7 @@ import {
   MOCK_PHRASE,
   SIZES,
   bootBoard,
+  closePerson,
   deadline,
   docView,
   navigate,
@@ -314,8 +315,8 @@ async function main(): Promise<void> {
         onSettings,
         async () => (await firstPerson.evaluate(settingsScrolled)) === true,
       );
-      secondPerson.close();
-      firstPerson.close();
+      await closePerson(secondPerson);
+      await closePerson(firstPerson);
     }
     process.stdout.write(
       `\n${JSON.stringify({ workspaceId: ws, steps } satisfies PointTargetsRun)}\n`,

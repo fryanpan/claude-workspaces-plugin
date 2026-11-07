@@ -6,6 +6,7 @@
  */
 import type { PresenceSpot } from '@claude-workspaces/core/workspace-presence';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openThreadChanged } from '../src/doc/open-thread.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { onDocSpotMove, showDocSpot } from '../src/presence/doc-spot-slot.ts';
 import { wireFlatDocSpot } from '../src/presence/flat-doc-spot.ts';
@@ -50,6 +51,21 @@ describe('a page with no blocks', () => {
     surface: 'doc',
     docId: 'd-quay',
     ...more,
+  });
+
+  it('reports a thread opened with no scroll', () => {
+    let open: string | null = null;
+    wireFlatDocSpot({
+      docId: 'd-quay',
+      document,
+      openThread: () => open,
+      revealThread: () => {},
+      scope,
+    });
+    expect(said.at(-1)).toEqual({});
+    open = 'th-1';
+    openThreadChanged();
+    expect(said.at(-1)).toEqual({ threadId: 'th-1' });
   });
 
   it('scrolls to a fraction, and reports where its person is', () => {

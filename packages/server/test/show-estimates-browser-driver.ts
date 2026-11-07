@@ -307,9 +307,19 @@ async function main(): Promise<void> {
     ).catch(() => undefined);
     const toggle = await ev<{ found: boolean; editable: boolean }>(tabA, toggleExpr);
     const clickToggle = `(() => { document.getElementById('board-show-estimates')?.click(); return true; })()`;
+    // The box is disabled until its write answers, and the other tab can see
+    // the change before that answer gets here. A click then does nothing.
+    const toggleFree = `!document.getElementById('board-show-estimates')?.disabled`;
+    const press = async (): Promise<void> => {
+      await waitFor(() => ev<boolean>(tabA, toggleFree), {
+        timeout: 10_000,
+        describe: 'the box free',
+      }).catch(() => undefined);
+      await ev(tabA, clickToggle);
+    };
     const flip = async (other: Cdp, expr: string): Promise<FlipReading> => {
       const startedOpposite = !(await ev<boolean>(other, expr));
-      await ev(tabA, clickToggle);
+      await press();
       const t0 = Date.now();
       const within1s = await waitFor(async () => ev<boolean>(other, expr), {
         timeout: 1_000,
@@ -332,7 +342,7 @@ async function main(): Promise<void> {
     }).catch(() => undefined);
     const flipOff = await flip(tabB, `!${handsOn}`);
     // Back on for the shown readings, through the same row.
-    await ev(tabA, clickToggle);
+    await press();
     await waitFor(
       async () => {
         const r = await fetch(`${local}/workspaces/${ws}/settings`);

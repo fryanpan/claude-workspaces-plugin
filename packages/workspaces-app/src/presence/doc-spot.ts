@@ -19,6 +19,7 @@
 import { BLOCK_ID_ATTR } from '@claude-workspaces/core/prose';
 import type { PresenceSpot } from '@claude-workspaces/core/workspace-presence';
 import { centreIn, focusRange } from '../doc/agent-focus.ts';
+import { onOpenThreadChange } from '../doc/open-thread.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { type DocPlace, docSpotMoved, setDocSpotHandle } from './doc-spot-slot.ts';
@@ -122,6 +123,7 @@ export function wireDocSpot(opts: {
     }, SETTLE_MS);
   };
   scroller.addEventListener('scroll', settle, { passive: true });
+  scope.onCleanup(onOpenThreadChange(settle));
   scope.onCleanup(() => {
     if (timer) clearTimeout(timer);
     scroller.removeEventListener('scroll', settle);

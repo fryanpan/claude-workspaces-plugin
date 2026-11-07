@@ -24,6 +24,7 @@ import {
   MOCK_PHRASE,
   SIZES,
   bootBoard,
+  closePerson,
   deadline,
   docView,
   navigate,
@@ -232,8 +233,8 @@ async function main(): Promise<void> {
           );
         },
       );
-      secondPerson.close();
-      firstPerson.close();
+      await closePerson(secondPerson);
+      await closePerson(firstPerson);
     }
     const run: PointFollowRun = { workspaceId: ws, steps };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

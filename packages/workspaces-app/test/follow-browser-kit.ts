@@ -91,6 +91,7 @@ export interface Board {
 }
 
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
+const browserOf = new WeakMap<Cdp, { proc: ChildProcess; profile: string }>();
 let handle: ServerHandle | undefined;
 let dir = '';
 
@@ -232,6 +233,7 @@ export async function openPerson(
     },
   );
   const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
+  browserOf.set(cdp, b);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -249,6 +251,18 @@ export async function openPerson(
     source: `try { ${set('feedback-anon-id', who.anonId)} ${set('feedback-user-name', who.name)} ${who.voice ? set('cw.lead-chat.mode', 'voice') : ''} ${follow} } catch {}`,
   });
   return cdp;
+}
+
+/**
+ * Ends a person's browser. Closing only the debugging socket leaves their tab
+ * on the board: it goes on following the lead, and every driver's person
+ * speaks as the same local owner, so a tab left from the 1180 round can take
+ * the 430 round's spoken answer.
+ */
+export async function closePerson(cdp: Cdp): Promise<void> {
+  cdp.close();
+  const browser = browserOf.get(cdp);
+  if (browser) await stopBrowser(browser.proc, browser.profile);
 }
 
 export async function navigate(cdp: Cdp, url: string): Promise<void> {
