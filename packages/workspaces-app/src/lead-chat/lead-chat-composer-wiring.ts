@@ -1,20 +1,19 @@
 /**
  * What the composer's controls do: add a file by the sheet, by paste or by a
- * drop, open the sheets, and pick a model. The chat's send and listen stay in
+ * drop, and open the sheet. The chat's send and listen stay in
  * `lead-chat-mount.ts`, which passes them in.
  *
  * Dragging files over the composer outlines it (`.lc-drag`): an outline takes
  * no room, so nothing moves. A drag that holds no files, such as selected
  * text, is left to the browser.
  */
-import type { LeadEffort, LeadModelAlias } from '@claude-workspaces/core/lead-chat';
 import { type Attachments, createAttachments } from './lead-chat-attachments.ts';
 import type { LeadChatClient } from './lead-chat-client.ts';
 import type { Composer } from './lead-chat-composer.ts';
 
 export interface ComposerWiringOpts {
   composer: Composer;
-  client: Pick<LeadChatClient, 'uploadFile' | 'pickModel'>;
+  client: Pick<LeadChatClient, 'uploadFile'>;
   /** Redraw the chat. */
   onChange(): void;
   onNotice(text: string): void;
@@ -54,7 +53,6 @@ export function wireComposer(opts: ComposerWiringOpts): ComposerWiring {
   c.photosTile.addEventListener('click', () => c.photos.click());
   c.filesTile.addEventListener('click', () => c.files.click());
   c.plus.addEventListener('click', () => c.sheet('add'));
-  c.chip.addEventListener('click', () => c.sheet('model'));
   c.scrim.addEventListener('click', () => c.sheet(null));
   for (const close of c.closers) close.addEventListener('click', () => c.sheet(null));
   c.mic.addEventListener('click', () => opts.toggleListening());
@@ -88,25 +86,6 @@ export function wireComposer(opts: ComposerWiringOpts): ComposerWiring {
     e.preventDefault();
     attachments.add(e.dataTransfer?.files ?? []);
   });
-
-  const pick = async (choice: { model?: LeadModelAlias; effort?: LeadEffort }): Promise<void> => {
-    const res = await client.pickModel(choice);
-    if (!res.ok) {
-      // The chat's status line sits behind the sheet.
-      c.sheet(null);
-      opts.onNotice(
-        res.error === 'owner-proof-required'
-          ? 'Sign in as the board’s owner to switch the lead.'
-          : 'The lead stays as it is. Check the connection and try again.',
-      );
-    }
-  };
-  for (const [model, row] of c.modelRows) {
-    row.addEventListener('click', () => void pick({ model }));
-  }
-  for (const [effort, row] of c.effortRows) {
-    row.addEventListener('click', () => void pick({ effort }));
-  }
 
   return {
     attachments,

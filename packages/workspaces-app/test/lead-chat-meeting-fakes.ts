@@ -158,7 +158,6 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
       leadLineFns.push(fn);
     },
     uploadFile: async () => ({ ok: false, error: 'offline' }),
-    pickModel: async () => ({ ok: true }),
     loadOlder: async () => {},
     async send(text, author, _context, via) {
       const m: LeadChatMessage = {

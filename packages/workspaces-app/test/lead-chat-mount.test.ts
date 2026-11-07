@@ -39,7 +39,6 @@ function fakeClient(canTalk = true) {
     },
     onLeadLine: () => {},
     uploadFile: async () => ({ ok: false, error: 'offline' }),
-    pickModel: async () => ({ ok: true }),
     loadOlder: async () => {},
     async send(text, author, context, via) {
       sent.push({ text, via, context });

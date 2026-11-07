@@ -63,6 +63,7 @@ describe.skipIf(CHROME === null)('the composer, in a real browser', () => {
         'Send',
       ]);
       expect(c.rowOverflows, String(c.width)).toBe(false);
+      expect(c.chipOpenedNothing, String(c.width)).toBe(true);
       expect(c.chipAfter, String(c.width)).toEqual(c.chipBefore);
       expect(c.chipText, String(c.width)).toContain('Sonnet 5.5');
     }

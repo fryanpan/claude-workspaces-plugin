@@ -1130,9 +1130,10 @@ the board's data, the owner uploads through `routes/workspace-lead-chat-files.ts
 and the lead reads one with the MCP tool `read_chat_attachment`, because a
 walled lead cannot open the data folder. The composer's model chip reads
 `lead-chat/lead-model.ts`, which the lead's hooks keep current through
-`kind: 'model'` on `routes/lead-mirror.ts`. A pick from
-`routes/workspace-lead-chat-model.ts` is typed into the lead's tmux pane
-between turns by `lead-chat/pane.ts`; security.md has what limits that.
+`kind: 'model'` on `routes/lead-mirror.ts`, and it opens nothing. Switching
+from the board is off: `routes/workspace-lead-chat-model.ts` answers 409
+`model-switch-off`, and `lead-chat/pane.ts` is built but never called;
+security.md says why.
 The panel draws the lead's messages with the comments' escape-first
 markdown renderer (`comment-markdown.ts`, which gains pipe tables and an
 opt-in link for a bare URL) and a person's own as plain text.

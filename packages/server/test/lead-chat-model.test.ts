@@ -1,17 +1,17 @@
 /**
- * Switching the lead's model from the board: when a pick is sent, who may
- * make one, and that an open page sees the change. The terminal is a fake
- * runner, so no test here can reach a real pane.
+ * The lead's model on the board: what its hooks report, that an open page sees
+ * it, and that switching is off, so nothing reaches a pane. The terminal is a
+ * fake, so no test here can reach a real pane.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { agentIdForName } from '@claude-workspaces/core/identity';
 import type { LeadChatModelFrame } from '@claude-workspaces/core/lead-chat';
 import { leadModelLabel } from '@claude-workspaces/core/lead-chat';
 import { type LeadModelPick, LeadModels } from '../src/lead-chat/lead-model.ts';
-import type { PaneSend } from '../src/lead-chat/pane.ts';
+import { leadChatLogPath } from '../src/lead-chat/log.ts';
 import { pageStream } from './lead-chat-page-stream.ts';
 import { type ShareProofServer, post, startShareProofServer } from './share-proof-harness.ts';
 import { waitFor } from './wait-for.ts';
@@ -20,7 +20,7 @@ setDefaultTimeout(30_000);
 
 const BOARD = 'w-harbor';
 
-function models(answers: PaneSend[] = []) {
+function models() {
   const dir = mkdtempSync(join(tmpdir(), 'cw-lead-model-'));
   const sent: LeadModelPick[] = [];
   const frames: LeadChatModelFrame[] = [];
@@ -31,122 +31,52 @@ function models(answers: PaneSend[] = []) {
       pane: {
         send: async (_id, pick) => {
           sent.push(pick);
-          return answers.shift() ?? { ok: true };
+          return { ok: true };
         },
       },
       broadcast: (_ws, f) => frames.push(f),
     });
-  return { m: make(), make, sent, frames, cleanup: () => rmSync(dir, { recursive: true }) };
+  /** The file a server built before switching went off left behind. */
+  const seed = (held: unknown) => {
+    const log = leadChatLogPath(dir, BOARD);
+    if (!log) throw new Error('no path for the board');
+    const path = log.replace(/\.lead-chat\.jsonl$/, '.lead-model.json');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(held));
+    return path;
+  };
+  return { m: make(), make, seed, sent, frames, cleanup: () => rmSync(dir, { recursive: true }) };
 }
 
 describe('LeadModels', () => {
-  it('holds a pick while the lead works and sends it when the turn ends', async () => {
+  it('sends nothing for a pick left on disk, and drops it at the turn end', async () => {
     const t = models();
-    t.m.turnStarted(BOARD);
-    const held = await t.m.pick(BOARD, { model: 'opus' });
-    expect(held.pending).toEqual({ model: 'opus' });
+    const path = t.seed({ model: 'opus', effort: 'high', pending: { model: 'haiku' } });
+    const m = t.make();
+    m.turnStarted(BOARD);
+    m.turnEnded(BOARD);
+    expect(m.read(BOARD)).toEqual({ model: 'opus', effort: 'high' });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ model: 'opus', effort: 'high' });
+    expect(t.frames.at(-1)?.state).toEqual({ model: 'opus', effort: 'high' });
     expect(t.sent).toEqual([]);
-    t.m.turnEnded(BOARD);
-    await waitFor(() => t.sent.length === 1);
-    expect(t.sent).toEqual([{ model: 'opus' }]);
-    await waitFor(() => t.m.read(BOARD).pending === undefined);
-    expect(t.m.read(BOARD).model).toBe('opus');
     t.cleanup();
   });
 
-  it('sends nothing until a hook has said the lead is between turns', async () => {
+  it('sends nothing when a new session starts over a pick left on disk', async () => {
     const t = models();
-    await t.m.pick(BOARD, { effort: 'high' });
+    t.seed({ pending: { effort: 'max' }, problem: 'asking' });
+    const m = t.make();
+    m.observed(BOARD, { model: 'claude-fable-5-1', started: true });
+    expect(m.read(BOARD)).toEqual({ model: 'claude-fable-5-1' });
     expect(t.sent).toEqual([]);
-    t.m.observed(BOARD, { started: true });
-    await waitFor(() => t.sent.length === 1);
     t.cleanup();
   });
 
-  it('sends at once when the lead is idle, and merges two picks made in a turn', async () => {
+  it('a hook’s report survives a restart', () => {
     const t = models();
-    t.m.turnEnded(BOARD);
-    await t.m.pick(BOARD, { effort: 'low' });
-    expect(t.sent).toEqual([{ effort: 'low' }]);
-    t.m.turnStarted(BOARD);
-    await t.m.pick(BOARD, { model: 'haiku' });
-    await t.m.pick(BOARD, { effort: 'max' });
-    t.m.turnEnded(BOARD);
-    await waitFor(() => t.sent.length === 2);
-    expect(t.sent[1]).toEqual({ model: 'haiku', effort: 'max' });
-    t.cleanup();
-  });
-
-  it('keeps a pick a question stopped, and retries it at the next turn end', async () => {
-    const t = models([{ ok: false, problem: 'asking' }]);
-    t.m.turnEnded(BOARD);
-    const asked = await t.m.pick(BOARD, { model: 'opus' });
-    expect(asked).toMatchObject({ pending: { model: 'opus' }, problem: 'asking' });
-    t.m.turnEnded(BOARD);
-    await waitFor(() => t.sent.length === 2);
-    await waitFor(() => t.m.read(BOARD).problem === undefined);
-    t.cleanup();
-  });
-
-  it('drops a pick with no terminal to go to, and says why', async () => {
-    const t = models([{ ok: false, problem: 'no-terminal' }]);
-    t.m.turnEnded(BOARD);
-    const s = await t.m.pick(BOARD, { model: 'opus' });
-    expect(s.pending).toBeUndefined();
-    expect(s.problem).toBe('no-terminal');
-    expect(s.model).toBeUndefined();
-    t.m.turnEnded(BOARD);
-    expect(t.sent).toHaveLength(1);
-    t.cleanup();
-  });
-
-  it('a hook’s report replaces what was sent, and survives a restart', async () => {
-    const t = models();
-    t.m.turnEnded(BOARD);
-    await t.m.pick(BOARD, { model: 'opus' });
-    expect(t.m.read(BOARD).model).toBe('opus');
     t.m.observed(BOARD, { model: 'claude-opus-5-5', effort: 'high' });
     const again = t.make();
     expect(again.read(BOARD)).toEqual({ model: 'claude-opus-5-5', effort: 'high' });
-    t.cleanup();
-  });
-
-  it('sends a pick made while another send is out', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cw-lead-model-'));
-    const sent: LeadModelPick[] = [];
-    let release: () => void = () => {};
-    const m = new LeadModels({
-      dataDir: dir,
-      leadOf: () => ({ agentId: 'harborlight-lead' }),
-      pane: {
-        send: async (_id, pick) => {
-          sent.push(pick);
-          if (sent.length === 1) await new Promise<void>((r) => (release = r));
-          return { ok: true };
-        },
-      },
-      broadcast: () => {},
-    });
-    m.turnEnded(BOARD);
-    const first = m.pick(BOARD, { model: 'opus' });
-    await waitFor(() => sent.length === 1);
-    await m.pick(BOARD, { model: 'haiku' });
-    release();
-    await first;
-    await waitFor(() => sent.length === 2);
-    expect(sent[1]?.model).toBe('haiku');
-    await waitFor(() => m.read(BOARD).pending === undefined);
-    rmSync(dir, { recursive: true });
-  });
-
-  it('after a restart, holds a pick until a hook says the lead is between turns', async () => {
-    const t = models();
-    t.m.turnEnded(BOARD);
-    const again = t.make();
-    await again.pick(BOARD, { model: 'opus' });
-    expect(t.sent).toEqual([]);
-    again.turnEnded(BOARD);
-    await waitFor(() => t.sent.length === 1);
     t.cleanup();
   });
 
@@ -178,7 +108,7 @@ describe('the route', () => {
   const VISITOR = 'visitor@harborlight.test';
   const LEAD = 'Harborlight Lead';
   const LEAD_ID = agentIdForName(LEAD);
-  const typed: string[][] = [];
+  const ran: string[][] = [];
   let s: ShareProofServer;
   const path = () => `${s.scope}/lead-chat/model`;
 
@@ -187,12 +117,7 @@ describe('the route', () => {
       leadPane: {
         wait: async () => {},
         run: async (argv) => {
-          const verb = argv[1];
-          if (verb === 'send-keys') typed.push(argv);
-          if (verb === 'list-panes') return { code: 0, stdout: '%7 100\n' };
-          if (verb === '-axww') return { code: 0, stdout: '100 1 zsh\n101 100 claude\n' };
-          if (verb === 'eww') return { code: 0, stdout: `claude CW_AGENT_NAME=${LEAD}` };
-          if (verb === 'display-message') return { code: 0, stdout: '0\n' };
+          ran.push(argv);
           return { code: 0, stdout: '' };
         },
       },
@@ -203,15 +128,17 @@ describe('the route', () => {
 
   afterAll(() => s.stop());
 
-  it('refuses every caller but the owner on the board’s page, before any lead', async () => {
+  it('refuses every caller but the owner with a 403, and the owner with the switch off', async () => {
     expect((await s.local(path(), post({ model: 'opus' }))).status).toBe(403);
     expect((await s.visitor(VISITOR, path(), post({ model: 'opus' }))).status).toBe(403);
     expect((await s.owner(path(), post({ model: 'opus' }), {})).status).toBe(403);
-    expect((await s.owner(path(), post({ model: 'opus' }))).status).toBe(409);
-    expect(typed).toEqual([]);
+    const off = await s.owner(path(), post({ model: 'opus' }));
+    expect(off.status).toBe(409);
+    expect(((await off.json()) as { error: string }).error).toBe('model-switch-off');
+    expect(ran).toEqual([]);
   });
 
-  it('takes only allowlisted values, and sends them to the lead’s pane', async () => {
+  it('shows an open page what the hooks report, and reaches no terminal', async () => {
     s.handle.tasks.attachAgent(s.board, {
       agentId: LEAD_ID,
       agentName: LEAD,
@@ -220,17 +147,6 @@ describe('the route', () => {
     s.handle.tasks.setLeadAgent(s.board, LEAD_ID, {
       actor: { id: 'known-bryan', name: 'Bryan', kind: 'known' },
     });
-    for (const bad of [
-      {},
-      { model: 'opus; rm -rf /' },
-      { effort: 'high\n/exit' },
-      { model: 'claude-opus-5-5' },
-      { model: 'opus', effort: 'turbo' },
-    ]) {
-      expect((await s.owner(path(), post(bad))).status).toBe(400);
-    }
-    expect(typed).toEqual([]);
-
     const base = `http://127.0.0.1:${s.handle.port}`;
     const page = await pageStream(base, s.board);
     const agent = await pageStream(base, s.board, LEAD_ID);
@@ -243,20 +159,18 @@ describe('the route', () => {
     await waitFor(() => page.events.includes('lead-chat.model'), { timeout: 1000 });
     expect(agent.events).not.toContain('lead-chat.model');
 
-    const res = await s.owner(path(), post({ model: 'sonnet', effort: 'high' }));
-    expect(res.status).toBe(200);
-    expect(typed).toEqual([
-      ['tmux', 'send-keys', '-t', '%7', '-l', '--', '/effort high'],
-      ['tmux', 'send-keys', '-t', '%7', 'Enter'],
-      ['tmux', 'send-keys', '-t', '%7', '-l', '--', '/model sonnet'],
-      ['tmux', 'send-keys', '-t', '%7', 'Enter'],
-    ]);
+    // With a lead between turns, every body gets the same answer.
+    for (const body of [{}, { model: 'sonnet', effort: 'high' }, { model: 'opus; rm -rf /' }]) {
+      const res = await s.owner(path(), post(body));
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toBe('model-switch-off');
+    }
+    expect(ran).toEqual([]);
 
-    // The next turn's reports replace what was sent.
-    await report({ kind: 'model', model: 'claude-sonnet-5-5' });
+    await report({ kind: 'model', effort: 'high' });
     const snap = await (await s.owner(`${s.scope}/lead-chat`)).json();
     expect((snap as { leadModel: unknown }).leadModel).toEqual({
-      model: 'claude-sonnet-5-5',
+      model: 'claude-fable-5-1',
       effort: 'high',
     });
     page.close();
