@@ -13,10 +13,7 @@ export const CHANNEL_AUTHOR_ID = 'lead-channel';
 
 /** What the lead reads about a message's files: one line each, with the id
  *  `read_chat_attachment` takes. */
-export function attachmentLines(
-  workspaceId: string,
-  files: readonly LeadChatAttachment[],
-): string {
+export function attachmentLines(workspaceId: string, files: readonly LeadChatAttachment[]): string {
   if (files.length === 0) return '';
   const lines = files.map(
     (f) =>

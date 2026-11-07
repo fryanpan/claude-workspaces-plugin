@@ -103,6 +103,63 @@ const FILE_TYPE_MAX = 100;
 /** A stored file's id: `cryptoId('lf')`. */
 export const LEAD_CHAT_FILE_ID = /^lf-[A-Za-z0-9_-]{8,40}$/;
 
+/**
+ * The models and efforts the board may switch a lead to. These two lists are
+ * all that can ever reach the lead's terminal (`server/src/lead-chat/pane.ts`):
+ * a page sends an alias or a level, and anything else is refused.
+ */
+export const LEAD_MODELS = [
+  { alias: 'fable', label: 'Fable 5.1', note: 'For the hardest, longest work' },
+  { alias: 'opus', label: 'Opus 5.5', note: 'Most capable for hard work' },
+  { alias: 'sonnet', label: 'Sonnet 5.5', note: 'Fast and capable for everyday work' },
+  { alias: 'haiku', label: 'Haiku 5.5', note: 'Fastest for quick answers' },
+] as const;
+export type LeadModelAlias = (typeof LEAD_MODELS)[number]['alias'];
+
+export const LEAD_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type LeadEffort = (typeof LEAD_EFFORTS)[number];
+
+export const isLeadModelAlias = (v: unknown): v is LeadModelAlias =>
+  LEAD_MODELS.some((m) => m.alias === v);
+export const isLeadEffort = (v: unknown): v is LeadEffort => LEAD_EFFORTS.includes(v as LeadEffort);
+
+/** Why a switch did not happen. */
+export type LeadModelProblem =
+  | 'no-terminal' // no tmux here, or no pane runs this board's lead
+  | 'many-terminals' // more than one does, so the board will not guess
+  | 'asking' // the terminal is waiting on an answer; retried when the turn ends
+  | 'send-failed';
+
+/** What the board knows of its lead's model and effort. */
+export interface LeadModelState {
+  /** A model id its session reported, or the alias last sent to it. */
+  model?: string;
+  effort?: string;
+  /** Picked and not yet sent: it goes when the lead's turn ends. */
+  pending?: { model?: LeadModelAlias; effort?: LeadEffort };
+  problem?: LeadModelProblem;
+}
+
+/** The board-stream event a change to that rides. Pages only. */
+export const LEAD_CHAT_MODEL_EVENT = 'lead-chat.model';
+
+export interface LeadChatModelFrame {
+  event: typeof LEAD_CHAT_MODEL_EVENT;
+  workspaceId: string;
+  state: LeadModelState;
+}
+
+/** "Opus 5.5" for `opus` or `claude-opus-5-5`; null for a name it cannot read. */
+export function leadModelLabel(model: string | undefined): string | null {
+  if (!model) return null;
+  const known = LEAD_MODELS.find((m) => m.alias === model);
+  if (known) return known.label;
+  const m = model.match(/^claude-(fable|opus|sonnet|haiku)-(\d{1,2})(?:-(\d{1,2}))?(?:\D|-|$)/);
+  if (!m) return null;
+  const family = (m[1] ?? '').replace(/^./, (c) => c.toUpperCase());
+  return `${family} ${m[2]}${m[3] ? `.${m[3]}` : ''}`;
+}
+
 /** Where a page and an MCP child read a stored file. */
 export function leadChatFilePath(workspaceId: string, fileId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/files/${encodeURIComponent(fileId)}`;
@@ -137,6 +194,9 @@ export interface LeadChatSnapshot {
   /** The meeting this chat is running, or null. Absent from a server built
    *  before meetings, which reads as none. */
   meeting?: LeadChatMeeting | null;
+  /** The lead's model and effort. Absent from a server built before the
+   *  picker, which reads as unknown. */
+  leadModel?: LeadModelState;
 }
 
 /**

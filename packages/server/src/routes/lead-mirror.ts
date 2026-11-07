@@ -7,6 +7,8 @@
  *   the session is writing, carrying the whole message so far.
  * - `{ kind: 'tools', calls: [{ name, input, output?, failed? }] }`: the
  *   tool calls of one batch.
+ * - `{ kind: 'model', model?, effort?, started? }`: what the session runs on,
+ *   for the lead chat's model chip (`lead-chat/lead-model.ts`).
  *
  * The hook has already reduced every string the way it reduces a turn note
  * (`note-redact.ts`); this route bounds them. A session that is not the
@@ -20,6 +22,7 @@ import {
   LEAD_CHAT_TOOL_INPUT_MAX,
   LEAD_CHAT_TOOL_OUTPUT_MAX,
   type LeadChatToolCall,
+  isLeadEffort,
 } from '@claude-workspaces/core/lead-chat';
 import { SHARED_IDENTITY_ERROR, SHARED_IDENTITY_MESSAGE } from '../agent-watches.ts';
 import { isSharedAgentName } from '../chat-audit.ts';
@@ -32,6 +35,22 @@ const MESSAGE_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const INDEX_MAX = 1_000_000;
 const TEXT_MAX = LEAD_CHAT_MAX_CHARS * 2;
 const CALLS_MAX = 50;
+
+/** What a hook may say a session runs on: shown to the owner, never run. */
+const MODEL_ID = /^claude-[a-z0-9-]{1,60}(\[1m\])?$/;
+
+export function parseModelReport(
+  raw: Record<string, unknown>,
+): { model?: string; effort?: string; started?: boolean } | null {
+  const { model, effort, started } = raw;
+  if (model !== undefined && (typeof model !== 'string' || !MODEL_ID.test(model))) return null;
+  if (effort !== undefined && !isLeadEffort(effort)) return null;
+  return {
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof effort === 'string' ? { effort } : {}),
+    ...(started === true ? { started: true } : {}),
+  };
+}
 
 /** A text flush, or null when malformed. */
 export function parseMirroredText(raw: Record<string, unknown>): MirroredText | null {
@@ -98,6 +117,11 @@ export async function handleLeadMirrorRoute(
     const calls = parseToolCalls(raw.calls);
     if (!calls) return j(400, { error: 'bad-calls' });
     mirrored = ctx.leadSessionMirror.tools(boardId, agent, calls);
+  } else if (raw.kind === 'model') {
+    const report = parseModelReport(raw);
+    if (!report) return j(400, { error: 'bad-model' });
+    mirrored = ctx.leadChatMirror.isLead(boardId, agent);
+    if (mirrored) ctx.leadModels.observed(boardId, report);
   } else {
     return j(400, { error: 'bad-kind' });
   }

@@ -68,6 +68,8 @@ export interface LeadChatDeps {
   leadOf(workspaceId: string): LeadChatLead | null;
   /** Send a frame to the board's pages only. */
   broadcast(workspaceId: string, frame: LeadChatFrame): void;
+  /** Told when the lead's session starts and ends a turn. */
+  turn?(workspaceId: string, phase: 'start' | 'end'): void;
   newId(): string;
   now?: () => number;
 }
@@ -280,6 +282,7 @@ export class LeadChat {
     if (!this.isLead(workspaceId, agentName)) return false;
     const started = this.now();
     this.turnStart.set(workspaceId, started);
+    this.deps.turn?.(workspaceId, 'start');
     if (p.typed) {
       if (!p.text) return false;
       return this.record(workspaceId, {
@@ -322,6 +325,7 @@ export class LeadChat {
    */
   mirrorTurnEnd(workspaceId: string, agentName: string, text: string): boolean {
     if (!this.isLead(workspaceId, agentName)) return false;
+    this.deps.turn?.(workspaceId, 'end');
     const list = this.messages(workspaceId);
     // Only what this turn took: a message acked mid-turn waits for the next.
     const began = this.turnStart.get(workspaceId) ?? Number.POSITIVE_INFINITY;

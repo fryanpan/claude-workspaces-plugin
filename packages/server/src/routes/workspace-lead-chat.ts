@@ -27,6 +27,7 @@ import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
 import { handleLeadChatFiles } from './workspace-lead-chat-files.ts';
+import { handleLeadChatModel } from './workspace-lead-chat-model.ts';
 import {
   type WorkspaceRouteRequest,
   type WorkspaceRoutesContext,
@@ -40,6 +41,9 @@ export async function handleWorkspaceLeadChat(
   const { req, pathname, scope, visitor, authorFor, requireOwner } = rq;
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/files(\/|$)/.test(pathname)) {
     return handleLeadChatFiles(ctx, rq);
+  }
+  if (scope && /^\/workspaces\/[^/]+\/lead-chat\/model$/.test(pathname)) {
+    return handleLeadChatModel(ctx, rq, scope.workspaceId);
   }
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting\/say$/.test(pathname)) {
     if (req.method !== 'POST') return undefined;
@@ -77,6 +81,7 @@ export async function handleWorkspaceLeadChat(
     return ctx.j(200, {
       ...ctx.leadChat.snapshot(workspaceId),
       meeting: ctx.leadChatMeetings.current(workspaceId),
+      leadModel: ctx.leadModels.read(workspaceId),
       canTalk: !denied,
     });
   }
