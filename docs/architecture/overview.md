@@ -643,6 +643,11 @@ copy with the higher `version` wins, then the lower `versionNonce`
 (`incomingWins` in core's `whiteboard-scene.ts`). That is Excalidraw's own
 reconcile rule, so the server, every page and every agent converge on the same
 scene. A delete is a newer copy with `isDeleted` set, never a removed key.
+A page writes after its gesture ends and after its socket returns, so an agent's
+`replace` raises every version it writes by `REPLACE_VERSION_STEP`, past any copy
+an open tab still holds, and the board ends as the replace left it. Yjs settles
+two concurrent writes by client id, not by version, so the server puts back a
+copy the rule says should have won (`keepWinningCopies`, `whiteboard/scene.ts`).
 `/workspaces/<ws>/whiteboards/<id>` serves `whiteboard/page-shell.ts`, and the
 page is its own bundle, `whiteboard.js`. It is the one place the app runs real
 React, because Excalidraw needs it; React and Excalidraw load behind one
@@ -655,9 +660,9 @@ Excalidraw's foot row, and the docked chat takes width from the canvas down to
 what its desktop layout needs (`data-lc-page-min`, read by `lead-chat-dock.ts`)
 (`whiteboard.css`). The page writes to the
 scene only when no gesture is in progress, so a half-drawn stroke never
-reaches anyone, and it holds back a remote copy of an element the person is
-still drawing or dragging until they let go (`whiteboard/scene-sync.ts` in the
-app). Agents draw through `POST …/docs/<id>/whiteboard`
+reaches anyone. It holds back a remote copy of an element the person is still
+drawing, and every remote change while they move a selection, until they let go
+(`whiteboard/scene-sync.ts` in the app). Agents draw through `POST …/docs/<id>/whiteboard`
 (`routes/whiteboard-routes.ts`), which turns boxes, ellipses, arrows and text
 into elements (`whiteboard/elements.ts` on the server) and can set the one
 spot the agent points at. That pointer lives in the server's awareness state
