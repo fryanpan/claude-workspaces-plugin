@@ -38,7 +38,15 @@
  * stays suspended, so instead of stopping with `NO_SOUND` the chat asks for
  * one tap (`TAP_TO_LISTEN`), and `wake()` inside that tap starts it. The
  * socket that closes as this page unloads is that move, not a stop, so it
- * is neither said nor reported.
+ * is neither said nor reported. A refresh takes the same path.
+ *
+ * That tap rebuilds the capture on a context made inside it, as a first tap
+ * does, when the graph sits at another rate than the mic (a headset on a page
+ * no tap reached) or when a context said it ran and delivered nothing for
+ * `NO_SOUND_MS`. The second is what CLAUDE-WORKSPACES-T reported: running,
+ * mic and context both at 48 kHz, no block and no empty render. Why such a
+ * graph never renders is not known; the report now says which part stayed
+ * silent (`AudioPump.diag`). The tap also wakes the speaker's context.
  *
  * A LATE ANSWER IS STILL SAID. Voice that stopped by itself plays what the lead
  * owes, and a socket dropped while it owes something reopens to collect it
@@ -50,11 +58,7 @@ import {
   type SpokenSetup,
   parseSpokenServerMessage,
 } from '@claude-workspaces/core/spoken-reply';
-import {
-  type PlaybackContext,
-  createSpokenPlayer,
-  startSpokenCapture,
-} from '../board/spoken-reply-audio.ts';
+import { type PlaybackContext, createSpokenPlayer } from '../board/spoken-reply-audio.ts';
 import { SETUP_KEY, type SpokenSocket } from '../board/spoken-reply-client.ts';
 import { makeGestureContext } from '../meeting-audio.ts';
 import { defaultOriginFacts, insecureOriginMessage } from '../voice-capture.ts';
@@ -69,12 +73,11 @@ import {
   TAP_TO_LISTEN,
 } from './lead-chat-voice-api.ts';
 import { audioContext, defaultSetups, reportToPage, socketUrl } from './lead-chat-voice-io.ts';
+import { createLeadMic } from './lead-chat-voice-mic.ts';
 import { createListeningTab } from './listening-tab.ts';
 
 export * from './lead-chat-voice-api.ts';
 
-/** How long an open mic may send nothing before voice stops and says so. */
-const NO_SOUND_MS = 5_000;
 /** Said, and reported, when the voice socket closes while the page stays. */
 const CLOSED = 'The connection closed. Tap the mic to try again.';
 /** How long a question may show working with nothing said before the next
@@ -85,9 +88,6 @@ const CLOSED = 'The connection closed. Tap the mic to try again.';
 export const WORKING_MS = 30_000;
 /** The route of the lead's later answer (`spoken-reply/lead-answer.ts`). */
 const LEAD_ANSWER = 'lead-answer';
-/** How long a context started outside a tap has to run before the chat asks
- *  for one. */
-const TAP_WAIT_MS = 600;
 const LEAD_SETUPS: readonly SpokenSetup[] = [1, 2];
 const OPEN = 1;
 const MAX_HELD = 400;
@@ -98,8 +98,6 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let setups: SpokenSetup[] | null = null;
   let socket: SpokenSocket | null = null;
   let queue: Array<string | Int16Array> = [];
-  let capture: { stop(): void } | null = null;
-  let gen = 0;
   /** A question is listening: the mic's frames go up. */
   let forwarding = false;
   /** The context the server holds for this question, as sent. */
@@ -114,10 +112,6 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let owedTries = OWED_RETRIES;
   let owedTimer: ReturnType<typeof setTimeout> | null = null;
   let workTimer: ReturnType<typeof setTimeout> | null = null;
-  let soundTimer: ReturnType<typeof setTimeout> | null = null;
-  /** A context started outside a tap that is not running yet. */
-  let waiting: AudioContext | null = null;
-  let tapTimer: ReturnType<typeof setTimeout> | null = null;
   /** The page is unloading: its socket closing is the move, not a stop. */
   let leaving = false;
   const onPageHide = (): void => {
@@ -191,17 +185,22 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     }, WORKING_MS);
   };
 
+  const mic = createLeadMic({
+    startCapture: opts.startCapture,
+    onFrame: (pcm) => {
+      if (!forwarding) return;
+      keepContext();
+      sendRaw(pcm);
+    },
+    onRefused: (message) => halt(message),
+    onSilent: (detail) => halt(NO_SOUND, detail),
+    askForTap: () => set({ notice: TAP_TO_LISTEN }),
+  });
+
   const stopCapture = (): void => {
-    gen++;
     forwarding = false;
     doneWorking();
-    if (soundTimer) clearTimeout(soundTimer);
-    soundTimer = null;
-    if (tapTimer) clearTimeout(tapTimer);
-    tapTimer = null;
-    waiting = null;
-    capture?.stop();
-    capture = null;
+    mic.stop();
   };
 
   /** The reader moved while the question listens — opened a review item,
@@ -212,46 +211,6 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     if (now === sentContext) return;
     sentContext = now;
     sendMsg({ type: 'context', context });
-  };
-
-  /** Open the mic for as long as voice is on, on a context the tap made. */
-  const openMic = (ctx: AudioContext | undefined): void => {
-    const mine = gen;
-    let frames = 0;
-    void (opts.startCapture ?? startSpokenCapture)({
-      ...(ctx ? { context: ctx } : {}),
-      onFrame: (pcm) => {
-        frames++;
-        if (mine !== gen || !forwarding) return;
-        keepContext();
-        sendRaw(pcm);
-      },
-    }).then((r) => {
-      if (mine !== gen) {
-        if (r.ok) r.capture.stop();
-        return;
-      }
-      if (!r.ok) {
-        halt(r.message);
-        return;
-      }
-      capture = r.capture;
-      const diag = r.capture.diag;
-      // An open mic that makes no frame is a context that never ran — unless
-      // it is waiting for the reader's tap, which restarts this clock.
-      const noSound = (): void => {
-        soundTimer = null;
-        if (mine !== gen || frames > 0) return;
-        if (waiting) {
-          soundTimer = setTimeout(noSound, NO_SOUND_MS);
-          return;
-        }
-        // What the mic's track and the graph's context said, so the report
-        // answers why (`AudioPump.diag`).
-        halt(NO_SOUND, diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
-      };
-      soundTimer = setTimeout(noSound, NO_SOUND_MS);
-    });
   };
 
   const dropSocket = (): void => {
@@ -441,16 +400,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'listening', heard: '', notice: '', paused: !tab.hears() });
       // Inside the tap, before anything is awaited: the context is made and
       // resumed, and the microphone is asked for (see the header).
-      const ctx = makeGestureContext();
-      openMic(ctx);
-      if (how?.gesture === false && ctx) {
-        tapTimer = setTimeout(() => {
-          tapTimer = null;
-          if (!on || ctx.state === 'running') return;
-          waiting = ctx;
-          set({ notice: TAP_TO_LISTEN });
-        }, TAP_WAIT_MS);
-      }
+      mic.open(makeGestureContext(), how?.gesture === false);
       const go = (): void => {
         if (!on) return;
         if (pickSetup() === null) halt(NO_VOICE, '', true);
@@ -477,11 +427,9 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'off', heard: '', notice: '', paused: false });
     },
     wake() {
-      const ctx = waiting;
-      if (!ctx || !on) return false;
-      waiting = null;
-      // Inside the gesture: the one call Safari lets start the context.
-      void ctx.resume().catch(() => {});
+      if (!on || !mic.wake()) return false;
+      // The speaker's context waits for the same tap.
+      player.wake();
       set({ notice: '' });
       return true;
     },

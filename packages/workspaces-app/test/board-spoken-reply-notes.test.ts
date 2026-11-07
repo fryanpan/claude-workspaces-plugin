@@ -53,11 +53,13 @@ describe('spoken reply notes', () => {
     // Point 1's note arrives with point 0 still playing: it waits.
     h.socket.reply({ type: 'note', point: 1, text: 'Waiting on you: “approve the mock”' });
     h.socket.audio(new Array(2400).fill(4000));
-    h.tick(879);
-    await vi.advanceTimersByTimeAsync(879);
+    // The wait is 880 ms to within a float's rounding, so it is held to a
+    // millisecond either side.
+    h.tick(878);
+    await vi.advanceTimersByTimeAsync(878);
     expect(unlanded()).toEqual([false, true]);
-    h.tick(1);
-    await vi.advanceTimersByTimeAsync(1);
+    h.tick(2);
+    await vi.advanceTimersByTimeAsync(2);
     expect(unlanded()).toEqual([false, false]);
     // Landing changed which rows show, not which elements are there.
     expect([...h.panel.root.querySelectorAll('.vr-body *')]).toEqual(layout);

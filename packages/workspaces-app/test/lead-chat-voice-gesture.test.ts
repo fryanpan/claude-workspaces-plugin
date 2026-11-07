@@ -11,6 +11,7 @@
  * a page carrying voice on from the page before, outside any tap.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PlaybackContext } from '../src/board/spoken-reply-audio.ts';
 import {
   type LeadVoice,
   NO_SOUND,
@@ -221,6 +222,57 @@ describe('the lead chat voice, carried on from the page before', () => {
     speak();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+  });
+
+  it('wakes the speaker’s context in that tap too, or the answer would not play', async () => {
+    vi.useFakeTimers();
+    const speaker = new FakeContext();
+    const { voice } = make({
+      playbackContext: () => speaker as unknown as PlaybackContext,
+    });
+    carry(voice);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(speaker.state).toBe('suspended');
+    tapPage(voice);
+    expect(speaker.resumedInTap).toBe(true);
+  });
+
+  it('rebuilds the whole capture in the tap when a running context delivered nothing', async () => {
+    // The shape CLAUDE-WORKSPACES-T reported: running, at the mic's own rate,
+    // with no block and no empty render.
+    vi.useFakeTimers();
+    FakeContext.runsWithoutTap = true;
+    const reports: Error[] = [];
+    const { voice, captureCtx, speak } = make({ report: (e) => reports.push(e) });
+    carry(voice);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: TAP_TO_LISTEN });
+    expect(reports).toHaveLength(0);
+    tapPage(voice);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(captureCtx).toHaveLength(2);
+    expect(captureCtx[1]).not.toBe(captureCtx[0]);
+    const second = captureCtx[1] as unknown as FakeContext;
+    expect(second.madeInTap).toBe(true);
+    expect(second.resumedInTap).toBe(true);
+    speak();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(reports).toHaveLength(0);
+  });
+
+  it('stops and reports how it started when the rebuilt capture is silent too', async () => {
+    vi.useFakeTimers();
+    FakeContext.runsWithoutTap = true;
+    const reports: Error[] = [];
+    const { voice } = make({ report: (e) => reports.push(e) });
+    carry(voice);
+    await vi.advanceTimersByTimeAsync(6_000);
+    tapPage(voice);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'off', notice: NO_SOUND });
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.message).toContain('started without a tap, reopened in a tap');
   });
 
   it('still says so when the mic sends no sound after that tap', async () => {

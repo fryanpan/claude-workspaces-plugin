@@ -179,6 +179,12 @@ export function trackFacts(stream: MediaStream): TrackFacts {
   };
 }
 
+/** Whether the track is alive now, and muted, for an error report. */
+function liveTrack(stream: MediaStream): string {
+  const t = stream.getAudioTracks?.()[0];
+  return `${t?.readyState ?? 'gone'}${t?.muted ? ', muted' : ''}`;
+}
+
 /** How long a context made for the track's rate may take to start running
  *  before the caller's is kept instead. */
 const REBUILD_WAIT_MS = 500;
@@ -240,8 +246,11 @@ export type AudioPumpFactory = (stream: MediaStream, context?: AudioContext) => 
  */
 const WORKLET_SOURCE = `
 class MeetingPcmProcessor extends AudioWorkletProcessor {
-  constructor() { super(); this.empty = 0; }
+  constructor() { super(); this.empty = 0; this.ran = false; this.port.postMessage('made'); }
   process(inputs) {
+    // Once, on the first render: tells a processor that exists from one the
+    // graph ever called.
+    if (!this.ran) { this.ran = true; this.port.postMessage('rendering'); }
     const channel = inputs[0] && inputs[0][0];
     // A copy, not the view: the render quantum's buffer is reused, so a
     // reference posted across the port would be rewritten before it is read.
@@ -291,6 +300,9 @@ export async function createAudioPump(
   const source = ctx.createMediaStreamSource(stream);
   let blocks = 0;
   let empty = 0;
+  let path = 'worklet';
+  /** How far the processor got, as it said on its port. */
+  let processor = 'not heard from';
   const pump: AudioPump = {
     sampleRate: ctx.sampleRate,
     onBlock: null,
@@ -302,6 +314,9 @@ export async function createAudioPump(
         `context ${ctx.state} at ${ctx.sampleRate} Hz${rebuilt ? ', made for the track' : ''}`,
         `track ${track.sampleRate ?? '?'} Hz, ${track.channelCount ?? '?'} ch, ${track.device} device`,
         `${blocks} blocks, ${empty} renders without input`,
+        `${path}, processor ${processor}`,
+        `clock ${Math.round(ctx.currentTime * 100) / 100} s`,
+        `track ${liveTrack(stream)}`,
       ].join('; '),
   };
   const block = (samples: Float32Array): void => {
@@ -315,6 +330,7 @@ export async function createAudioPump(
     const node = new AudioWorkletNode(ctx, 'meeting-pcm');
     node.port.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data === 'number') empty = ev.data;
+      else if (typeof ev.data === 'string') processor = ev.data;
       else block(ev.data as Float32Array);
     };
     source.connect(node);
@@ -326,6 +342,7 @@ export async function createAudioPump(
     };
     return pump;
   } catch {
+    path = 'script processor';
     const node = ctx.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 1, 1);
     const mute = ctx.createGain();
     mute.gain.value = 0;

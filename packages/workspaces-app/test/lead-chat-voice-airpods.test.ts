@@ -14,7 +14,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SPEECH_RMS, frameRms } from '../src/board/spoken-reply-audio.ts';
-import { type LeadVoice, NO_SOUND, createLeadVoice } from '../src/lead-chat/lead-chat-voice.ts';
+import {
+  type LeadVoice,
+  NO_SOUND,
+  TAP_TO_LISTEN,
+  createLeadVoice,
+} from '../src/lead-chat/lead-chat-voice.ts';
 import { fakeVoice } from './lead-chat-voice-fakes.ts';
 
 const ME = { id: 'known-bryan', name: 'Bryan', kind: 'known' };
@@ -167,6 +172,76 @@ const sentFrames = (fake: ReturnType<typeof fakeVoice>): Int16Array[] =>
   fake.socket().sent.filter((d): d is Int16Array => d instanceof Int16Array);
 
 describe('the lead chat voice with a headset mic at another rate', () => {
+  /** A refresh with voice on: the page starts the mic with no tap, then the
+   *  reader taps once, as the chat asks. */
+  function carriedVoice(reports: Error[]) {
+    const fake = fakeVoice();
+    const seams = { ...fake.seams };
+    seams.startCapture = undefined;
+    voice = createLeadVoice({
+      ...seams,
+      report: (e) => reports.push(e),
+      workspaceId: 'w-harbor',
+      author: ME,
+      getContext: () => ({ surface: 'board' }),
+      agent: () => 'harborlight-lead',
+      onChange: () => {},
+    });
+    voice.start({ gesture: false });
+    return { fake, voice };
+  }
+  const tapPage = (v: LeadVoice): void => {
+    inTap = true;
+    try {
+      v.wake();
+    } finally {
+      inTap = false;
+    }
+  };
+
+  it('after a refresh, the tap starts a context at the mic’s rate and the sound reaches the listener', async () => {
+    vi.useFakeTimers();
+    capturingMayPlay = false;
+    const reports: Error[] = [];
+    const { fake, voice } = carriedVoice(reports);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(voice.state().notice).toBe(TAP_TO_LISTEN);
+    tapPage(voice);
+    await vi.advanceTimersByTimeAsync(0);
+    fake.socket().open();
+    renderAll(60);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(reports).toEqual([]);
+    expect(voice.state().phase).toBe('listening');
+    expect(sentFrames(fake).length).toBeGreaterThan(0);
+    expect(FakeContext.made.some((c) => c.sampleRate === 24_000 && c.state === 'running')).toBe(
+      true,
+    );
+  });
+
+  it('after a refresh on a context that runs at the wrong rate, asks for the tap instead of stopping', async () => {
+    vi.useFakeTimers();
+    capturingMayPlay = false;
+    const reports: Error[] = [];
+    const { fake, voice } = carriedVoice(reports);
+    await vi.advanceTimersByTimeAsync(0);
+    // The context made on load runs once the page captures, but later than
+    // the try at a context at the mic's rate, which was let go.
+    await vi.advanceTimersByTimeAsync(550);
+    capturingMayPlay = true;
+    for (const c of FakeContext.made) void c.resume();
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: TAP_TO_LISTEN });
+    expect(reports).toEqual([]);
+    tapPage(voice);
+    await vi.advanceTimersByTimeAsync(0);
+    fake.socket().open();
+    renderAll(60);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(sentFrames(fake).length).toBeGreaterThan(0);
+  });
+
   it('sends the headset’s sound to the listener when the mic runs at 24 kHz and the tap’s context at 48 kHz', async () => {
     vi.useFakeTimers();
     const reports: Error[] = [];
@@ -219,6 +294,8 @@ describe('the lead chat voice with a headset mic at another rate', () => {
     expect(msg).toContain('context running at 48000 Hz');
     expect(msg).toContain('track 24000 Hz, 1 ch, default device');
     expect(msg).toContain('0 blocks, 150 renders without input');
+    expect(msg).toContain('worklet, processor not heard from');
+    expect(msg).toContain('started in a tap');
     expect(msg).not.toContain('Riverbend');
   });
 });

@@ -54,6 +54,7 @@ export function fakePlayback() {
   const started: number[] = [];
   let stopped = 0;
   const ctx = {
+    sampleRate: 24_000,
     currentTime: 1,
     state: 'running',
     resume: async () => {},

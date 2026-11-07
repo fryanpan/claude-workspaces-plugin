@@ -15,6 +15,7 @@ import {
   createAudioPump,
   createResampler,
   floatToPcm16,
+  trackFacts,
 } from '@claude-workspaces/core';
 
 /** A frame at or above this RMS (of full scale) counts as speech. With the
@@ -55,6 +56,9 @@ export interface SpokenCapture {
   stop(): void;
   /** One line for an error report (`AudioPump.diag`). */
   diag?(): string;
+  /** The mic's rate when the graph runs at another, which on iOS delivers
+   *  no audio (`graphContext`); otherwise null. */
+  offRate?(): number | null;
 }
 
 export interface SpokenCaptureOpts {
@@ -116,6 +120,10 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
     ok: true,
     capture: {
       diag: () => pump.diag?.() ?? '',
+      offRate: () => {
+        const mic = trackFacts(stream).sampleRate;
+        return mic && mic !== pump.sampleRate ? mic : null;
+      },
       stop() {
         pump.onBlock = null;
         pump.stop();
@@ -128,6 +136,7 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
 
 /** The slice of an AudioContext the player uses — a fake in tests. */
 export interface PlaybackContext {
+  readonly sampleRate: number;
   readonly currentTime: number;
   readonly state: string;
   resume(): Promise<void>;
@@ -165,11 +174,32 @@ export interface SpokenPlayerOpts {
 /** A little headroom so the first buffer is not scheduled in the past. */
 const LEAD_S = 0.03;
 
+/** How long a chunk that follows a gap takes to rise from silence. */
+const RAMP_S = 0.004;
+
+/**
+ * The player resamples to the context's rate itself, and schedules every
+ * buffer on a whole frame. A browser given a buffer at the voice's 24 kHz
+ * resamples each buffer alone and holds its last sample, which clicks at
+ * every join: 0.16 of full scale on a voice with a 5 kHz partial, measured in
+ * Chromium (`spoken-player-joins-browser.test.ts`). `createResampler` carries
+ * its phase across chunks, so the chunks' sizes leave no mark.
+ */
+function rampUp(samples: Float32Array, frames: number): void {
+  const n = Math.min(frames, samples.length);
+  for (let i = 0; i < n; i++) samples[i] = (samples[i] ?? 0) * (i / n);
+}
+
 export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
   const now = opts.now ?? (() => performance.now());
   let rate = 24_000;
   let ctx: PlaybackContext | null = null;
-  let playAt = 0;
+  /** The next free frame on the context's clock. */
+  let playFrame = 0;
+  /** This reply's resampler, built once the context's rate is known. */
+  let resample: ((block: Float32Array) => Float32Array) | null = null;
+  /** A byte left over when a chunk ended halfway through a sample. */
+  let oddByte: Uint8Array | null = null;
   let sources: AudioBufferSourceNode[] = [];
   let heardFirst = false;
   let doneTimer: ReturnType<typeof setTimeout> | null = null;
@@ -179,6 +209,20 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
   const clearDone = (): void => {
     if (doneTimer) clearTimeout(doneTimer);
     doneTimer = null;
+  };
+
+  /** Whole samples only: a voice's chunk may end halfway through one. */
+  const withoutOddByte = (bytes: Uint8Array): Uint8Array => {
+    let all = bytes;
+    if (oddByte) {
+      all = new Uint8Array(oddByte.length + bytes.length);
+      all.set(oddByte);
+      all.set(bytes, oddByte.length);
+      oddByte = null;
+    }
+    if (all.length % 2 === 0) return all;
+    oddByte = all.slice(-1);
+    return all.subarray(0, -1);
   };
 
   return {
@@ -193,20 +237,30 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       // iOS marks a context woken by the tap `interrupted` once the mic takes
       // the audio session; while the page captures it may run again.
       if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => {});
-      // `playAt` stays: a reply that follows one still playing starts after it.
+      // `playFrame` stays: a reply that follows one still playing starts after it.
+      resample = null;
+      oddByte = null;
       heardFirst = false;
       active = true;
     },
     push(bytes) {
       if (!active || !ctx) return;
-      const samples = pcm16ToFloat(bytes);
+      const whole = withoutOddByte(bytes);
+      if (whole.length === 0) return;
+      const sampleRate = ctx.sampleRate;
+      const continuing = resample !== null;
+      resample ??= createResampler(rate, sampleRate);
+      const samples = new Float32Array(resample(pcm16ToFloat(whole)));
       if (samples.length === 0) return;
-      const buf = ctx.createBuffer(1, samples.length, rate);
+      const earliest = Math.round((ctx.currentTime + LEAD_S) * sampleRate);
+      if (continuing && earliest > playFrame) rampUp(samples, RAMP_S * sampleRate);
+      const startFrame = Math.max(playFrame, earliest);
+      const t = startFrame / sampleRate;
+      const buf = ctx.createBuffer(1, samples.length, sampleRate);
       buf.copyToChannel(samples, 0);
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
-      const t = Math.max(playAt, ctx.currentTime + LEAD_S);
       src.start(t);
       sources.push(src);
       src.onended = () => {
@@ -215,7 +269,7 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       if (!heardFirst || marks.length > 0) {
         const i = firstAudible(samples);
         if (i >= 0) {
-          const audibleAt = now() + (t + i / rate - ctx.currentTime) * 1000;
+          const audibleAt = now() + (t + i / sampleRate - ctx.currentTime) * 1000;
           if (!heardFirst) {
             heardFirst = true;
             opts.onFirstWord(audibleAt);
@@ -225,11 +279,11 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
           for (const m of met) m(audibleAt);
         }
       }
-      playAt = t + samples.length / rate;
+      playFrame = startFrame + samples.length;
     },
     finish(onDone) {
       clearDone();
-      const left = ctx ? Math.max(0, playAt - ctx.currentTime) : 0;
+      const left = ctx ? Math.max(0, playFrame / ctx.sampleRate - ctx.currentTime) : 0;
       doneTimer = setTimeout(() => {
         doneTimer = null;
         active = false;
@@ -245,7 +299,9 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
         } catch {}
       }
       sources = [];
-      playAt = 0;
+      playFrame = 0;
+      resample = null;
+      oddByte = null;
       marks = [];
     },
     mark(onStart) {
