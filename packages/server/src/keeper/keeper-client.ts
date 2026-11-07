@@ -256,7 +256,6 @@ export async function keeperMoveGrant(
   origin: string,
   app: string,
   board: string,
-  secrets: readonly string[],
   opts: KeeperClientOptions = {},
 ): Promise<CloudflareResult> {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
@@ -268,7 +267,7 @@ export async function keeperMoveGrant(
       ...apiHeaders(caller.token),
       ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
     },
-    body: JSON.stringify({ app, board, secrets }),
+    body: JSON.stringify({ app, board }),
   });
   if (!res.headers.has(HELD_HEADER)) {
     const text = await res.text().catch(() => '');

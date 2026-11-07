@@ -47,8 +47,6 @@ export type Verdict =
       setup?: boolean;
       /** A fly call's argv, which a move grant reads (`keeper-grants.ts`). */
       args?: readonly string[];
-      /** The names a `fly secrets import` sets (`inputNames`). */
-      secrets?: readonly string[] | null;
     }
   | { kind: 'refused'; reason: string };
 

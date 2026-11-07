@@ -46,7 +46,6 @@ import {
   classifyMoveGrant,
   grantCovers,
 } from './keeper-grants.ts';
-import { inputNames } from './keeper-move-steps.ts';
 import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import { type HoldKind, type Verdict, classifyCloudflare, classifyFly } from './keeper-policy.ts';
 import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
@@ -128,7 +127,7 @@ export type Submitted =
 export const PENDING_MS = 60 * 60_000;
 /** A finished request's result stays readable for this long. */
 export const RESULT_MS = 15 * 60_000;
-const MAX_HELD = 100;
+export const MAX_HELD = 100;
 /** Pages open on one request at once; a new one pushes the oldest out. */
 const MAX_PAGES = 8;
 
@@ -167,6 +166,8 @@ export function createKeeperRequests(deps: {
   const log = deps.log ?? (() => {});
   const held = new Map<string, HeldRequest>();
   let grants: Grant[] = [];
+  /** The last covered call of each app; the next one runs after it. */
+  const lanes = new Map<string, Promise<void>>();
 
   const sweep = () => {
     const t = now();
@@ -193,7 +194,7 @@ export function createKeeperRequests(deps: {
       : call.type === 'push-keys'
         ? classifyPushKeys(call.app, call.repos, deps.store.apps())
         : call.type === 'move-grant'
-          ? classifyMoveGrant(call.app, call.board, call.secrets, deps.store.apps())
+          ? classifyMoveGrant(call.app, call.board, deps.store.apps())
           : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
@@ -267,8 +268,8 @@ export function createKeeperRequests(deps: {
       log(`project ${r.app} created; setup grant open for 30 minutes`);
     }
     if (r.call.type === 'move-grant') {
-      const { app: target, board, secrets } = r.call;
-      grants.push({ scope: 'fly', target, board, secrets, expiresAt: now() + MOVE_GRANT_MS });
+      const { app: target, board } = r.call;
+      grants.push({ scope: 'fly', target, board, expiresAt: now() + MOVE_GRANT_MS });
       log(`move of ${board} onto ${target}: grant open for 30 minutes`);
     }
     if (r.hold === 'access.open' && r.call.type === 'cloudflare') {
@@ -316,13 +317,7 @@ export function createKeeperRequests(deps: {
         verdict.kind === 'held' &&
         call.type !== 'push-keys' &&
         call.type !== 'move-grant' &&
-        grantCovers(
-          grants,
-          call.type,
-          call.type === 'fly' ? { ...verdict, secrets: inputNames(call.input) } : verdict,
-          cfPath,
-          now(),
-        );
+        grantCovers(grants, call.type, verdict, cfPath, now());
       if (verdict.kind === 'routine' || (covered && call.type === 'cloudflare')) {
         log(`ran ${requester}: ${verdict.summary}`);
         return {
@@ -330,10 +325,10 @@ export function createKeeperRequests(deps: {
           result: await run(call, paths && 'configs' in paths ? paths.configs : []),
         };
       }
-      const open = [...held.values()].filter((r) => r.status === 'pending').length;
-      if (!covered && open >= MAX_HELD) {
-        return { outcome: 'refused', reason: 'too many requests are waiting' };
-      }
+      const open = [...held.values()].filter(
+        (r) => r.status === 'pending' || r.status === 'running',
+      ).length;
+      if (open >= MAX_HELD) return { outcome: 'refused', reason: 'too many requests are waiting' };
       const request: HeldRequest = {
         id: token(),
         pollToken: token(),
@@ -354,7 +349,14 @@ export function createKeeperRequests(deps: {
       if (covered) {
         log(`ran ${requester}: ${verdict.summary}`);
         // An upload or an import can outlast a client's fetch, so nothing waits on it here.
-        void execute(request);
+        // One at a time per app: a second upload must not replace what an import is reading.
+        request.status = 'running';
+        const app = request.app as string;
+        const next = (lanes.get(app) ?? Promise.resolve()).then(() => execute(request));
+        lanes.set(app, next);
+        void next.finally(() => {
+          if (lanes.get(app) === next) lanes.delete(app);
+        });
         return { outcome: 'started', request };
       }
       log(`held ${request.id} for ${request.requester}: ${verdict.hold} ${verdict.summary}`);

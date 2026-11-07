@@ -81,9 +81,6 @@ import {
   projectConfig,
   quickTunnelUrl,
   renderFlyToml,
-  secretsImportArgs,
-  secretsUnsetArgs,
-  volumeCreateArgs,
   writeOnlyPolicy,
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
@@ -267,7 +264,18 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       flyOk(['apps', 'create', cfg.app, '--org', ctx.org(), '--network', cfg.network]);
       return;
     case 'create-volume':
-      flyOk(volumeCreateArgs(cfg));
+      flyOk([
+        'volumes',
+        'create',
+        cfg.volumeName,
+        '--app',
+        cfg.app,
+        '--region',
+        cfg.region,
+        '--size',
+        String(cfg.volumeGb),
+        '--yes',
+      ]);
       return;
     case 'make-backup-key':
       keychainCreate(cfg.keychain.identity, generateSnapshotKeys().identity);
@@ -316,7 +324,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       }
       if (a.names.includes(LEAD_TOKEN_SECRET)) lines.set(LEAD_TOKEN_SECRET, await ctx.leadToken());
       const input = a.names.map((n) => `${n}=${lines.get(n)}\n`).join('');
-      flyOk(secretsImportArgs(cfg.app), { input });
+      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input });
       return;
     }
     case 'make-push-keys':
@@ -324,7 +332,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
         console.log(`[deploy]   ${line}`);
       return;
     case 'unset-secrets':
-      flyOk(secretsUnsetArgs(cfg.app, a.names));
+      flyOk(['secrets', 'unset', ...a.names, '--app', cfg.app, '--stage']);
       return;
     case 'deploy':
       deploy(cfg);

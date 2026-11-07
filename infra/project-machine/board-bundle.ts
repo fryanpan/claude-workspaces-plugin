@@ -29,10 +29,14 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  constants,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -127,7 +131,7 @@ const isRec = (v: unknown): v is Json => typeof v === 'object' && v !== null && 
 const ofBoard = (boardId: string) => (r: unknown) => isRec(r) && r.workspaceId === boardId;
 
 /** This board's entries in one shared file, or undefined when it has none. */
-function pick(rule: MergeRule, text: string, boardId: string): unknown {
+export function pick(rule: MergeRule, text: string, boardId: string): unknown {
   if (rule.kind === 'jsonl') {
     const lines = text.split('\n').filter((l) => {
       if (!l.trim()) return false;
@@ -192,8 +196,8 @@ function ownedPaths(dataDir: string, boardId: string, docIds: readonly string[])
   return [...own, ...docs].filter((p) => existsSync(join(dataDir, p)));
 }
 
-/** Every doc id the board owns or links. */
-function boardDocIds(record: Json, boardId: string): string[] {
+/** Every doc id a board's record names, safe as a file name or not. */
+function recordDocIds(record: Json, boardId: string): string[] {
   const ws = isRec(record.workspace) ? record.workspace : {};
   const linked = Array.isArray(ws.docIds) ? ws.docIds.filter((d) => typeof d === 'string') : [];
   const rows = [
@@ -203,7 +207,12 @@ function boardDocIds(record: Json, boardId: string): string[] {
   const rowDocs = rows.flatMap((r) =>
     isRec(r) && typeof r.id === 'string' ? [`task:${r.id}`] : [],
   );
-  const ids = [...new Set([`ws:${boardId}`, ...rowDocs, ...(linked as string[])])];
+  return [...new Set([`ws:${boardId}`, ...rowDocs, ...(linked as string[])])];
+}
+
+/** Every doc id the board owns or links. */
+function boardDocIds(record: Json, boardId: string): string[] {
+  const ids = recordDocIds(record, boardId);
   const bad = ids.find((d) => !DOC_ID.test(d));
   if (bad !== undefined) throw new MoveRefused(`doc id is not safe as a file name: ${bad}`);
   return ids;
@@ -320,11 +329,50 @@ function entries(dir: string, rel = ''): string[] {
   });
 }
 
-/** A bundle file's bytes, refusing anything but a plain file. */
+/**
+ * A bundle file's bytes, refusing anything but a plain file. The kind is read
+ * off the open file, so nothing can replace it between the check and the read.
+ */
 function plainFile(path: string, shown: string): Buffer {
-  if (!lstatSync(path).isFile())
-    throw new MoveRefused(`bundle entry is not a plain file: ${shown}`);
-  return readFileSync(path);
+  const notPlain = () => new MoveRefused(`bundle entry is not a plain file: ${shown}`);
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    throw notPlain();
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw notPlain();
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** A listed file's bytes, which match what the manifest says of them. */
+function listedFile(bundleDir: string, f: BundleFile): Buffer {
+  const bytes = plainFile(join(bundleDir, 'files', f.path), f.path);
+  if (sha(bytes) !== f.sha256) throw new MoveRefused(`bundle file altered: ${f.path}`);
+  return bytes;
+}
+
+/**
+ * The record decides which board a doc belongs to, so a manifest may name only
+ * what its record names, and a record only its own board and board doc.
+ */
+function checkRecord(m: BoardManifest, record: unknown, path: string): void {
+  const ws = isRec(record) ? record.workspace : undefined;
+  if (!isRec(record) || !isRec(ws) || ws.id !== m.boardId)
+    throw new MoveRefused(`${path} is not the record of board ${m.boardId}`);
+  if (ws.notesHome !== undefined)
+    throw new MoveRefused(`${path} carries a path on another machine (notesHome)`);
+  const ids = boardDocIds(record, m.boardId);
+  const foreign = ids.find((d) => d.startsWith('ws:') && d !== `ws:${m.boardId}`);
+  if (foreign !== undefined) throw new MoveRefused(`${path} names another board's doc: ${foreign}`);
+  const same = (a: string[], b: string[]) =>
+    JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...b].sort());
+  if (!same(m.docIds, ids))
+    throw new MoveRefused('the manifest and the board record list different docs');
 }
 
 /**
@@ -365,19 +413,15 @@ export function readBundle(bundleDir: string): BoardManifest {
   const stray = entries(root).find((p) => !listed.has(p));
   if (stray !== undefined) throw new MoveRefused(`the manifest does not list ${stray}`);
   const record = join('workspaces', `${m.boardId}.tasks.json`);
+  if (!listed.has(record)) throw new MoveRefused(`the bundle has no record for ${m.boardId}`);
   for (const f of m.files) {
-    const bytes = plainFile(join(bundleDir, 'files', f.path), f.path);
-    if (sha(bytes) !== f.sha256) throw new MoveRefused(`bundle file altered: ${f.path}`);
+    const bytes = listedFile(bundleDir, f);
     // The export removes both; one that is back would bind the board to a path on the target.
     const ydoc = new Uint8Array(bytes);
     if (f.path.endsWith('.ydoc') && withoutPrivateMeta(ydoc) !== ydoc) {
       throw new MoveRefused(`${f.path} carries a path on another machine`);
     }
-    if (f.path === record) {
-      const ws = (JSON.parse(bytes.toString('utf8')) as Json).workspace;
-      if (isRec(ws) && ws.notesHome !== undefined)
-        throw new MoveRefused(`${f.path} carries a path on another machine (notesHome)`);
-    }
+    if (f.path === record) checkRecord(m, JSON.parse(bytes.toString('utf8')), f.path);
   }
   if (!isRec(m.merges)) throw new MoveRefused('bundle merges are malformed');
   for (const [k, add] of Object.entries(m.merges)) {
@@ -451,10 +495,39 @@ function writeAtomic(path: string, body: string | Uint8Array, mode: number): voi
 }
 
 /**
+ * Copies `files` into `dataDir`. Each is read again and hashed here, so what
+ * lands is what the manifest says, whatever replaced the folder since the check.
+ */
+export function writeListedFiles(
+  bundleDir: string,
+  dataDir: string,
+  files: readonly BundleFile[],
+): void {
+  for (const f of files) writeAtomic(join(dataDir, f.path), listedFile(bundleDir, f), 0o600);
+}
+
+/** A doc of the bundle that a board already on the target lists. */
+function docOfAnotherBoard(m: BoardManifest, dataDir: string): string | undefined {
+  const theirs = new Set(
+    readdirSync(join(dataDir, 'workspaces'))
+      .filter((n) => n.endsWith('.tasks.json'))
+      .flatMap((n) =>
+        recordDocIds(
+          readJson(join(dataDir, 'workspaces', n)) as Json,
+          n.slice(0, -'.tasks.json'.length),
+        ),
+      ),
+  );
+  return m.docIds.find((d) => theirs.has(d));
+}
+
+/**
  * Puts a bundle's board into `dataDir`. The server on `dataDir` must be
  * stopped, since it holds the shared files in memory and would write over
  * the merge. Refuses, having written nothing, when the target already holds
- * the board, any of its files, or an entry for it in a shared file.
+ * the board, any of its files, an entry for it in a shared file, or a doc
+ * another board lists. A bundle changed during the writes refuses there, and
+ * the board record, which goes last, is not written.
  */
 export function importBoard(
   bundleDir: string,
@@ -470,6 +543,8 @@ export function importBoard(
   if (holdsBoard(dataDir, m.boardId)) {
     throw new MoveRefused(`the target already holds board ${m.boardId}`);
   }
+  const claimed = docOfAnotherBoard(m, dataDir);
+  if (claimed !== undefined) throw new MoveRefused(`another board on the target lists ${claimed}`);
   const taken = m.files.filter((f) => existsSync(join(dataDir, f.path))).map((f) => f.path);
   if (taken.length) throw new MoveRefused(`the target already has ${taken.join(', ')}`);
   // Every merge is computed before anything is written, so a clash refuses cleanly.
@@ -494,8 +569,6 @@ export function importBoard(
     ...m.files.filter((f) => f.path === record),
   ];
   for (const w of writes) writeAtomic(w.path, w.body, w.mode);
-  for (const f of ordered) {
-    writeAtomic(join(dataDir, f.path), readFileSync(join(bundleDir, 'files', f.path)), 0o600);
-  }
+  writeListedFiles(bundleDir, dataDir, ordered);
   return m;
 }

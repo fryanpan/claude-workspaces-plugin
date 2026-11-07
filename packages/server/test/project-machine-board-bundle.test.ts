@@ -22,8 +22,10 @@ import { join } from 'node:path';
 import * as Y from 'yjs';
 import {
   exportBoard,
+  holdsBoard,
   importBoard,
   readBundle,
+  writeListedFiles,
 } from '../../../infra/project-machine/board-bundle.ts';
 
 const scratch = mkdtempSync(join(tmpdir(), 'cw-board-bundle-'));
@@ -186,6 +188,7 @@ describe('a bundle that was not written by exportBoard', () => {
 
   const manifestOf = (bundle: string) =>
     JSON.parse(readFileSync(join(bundle, 'manifest.json'), 'utf8')) as {
+      docIds: string[];
       files: { path: string; sha256: string; bytes: number }[];
       merges: Record<string, unknown>;
     };
@@ -272,6 +275,113 @@ describe('a bundle that was not written by exportBoard', () => {
     const extra = fresh('extra');
     writeFileSync(join(extra.bundle, 'files', 'stray.ydoc'), 'x');
     expect(() => importBoard(extra.bundle, extra.to)).toThrow(/does not list/);
+  });
+
+  /** Adds a file to a bundle and lists it, as a hand-made bundle would. */
+  function add(bundle: string, path: string, bytes: Uint8Array): void {
+    writeFileSync(join(bundle, 'files', path), bytes);
+    const m = manifestOf(bundle);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    m.files.push({ path, sha256, bytes: bytes.length });
+    saveManifest(bundle, m);
+  }
+
+  const recordPath = `workspaces/${board}.tasks.json`;
+  const recordOf = (docIds: string[], id = board) =>
+    Buffer.from(JSON.stringify({ workspace: { id, name: 'Harborlight', docIds }, tasks: [] }));
+
+  it('refuses a manifest naming a doc its record does not', () => {
+    const { bundle, to } = fresh('doc-mismatch');
+    const m = manifestOf(bundle);
+    m.docIds.push(`ws:${other}`);
+    saveManifest(bundle, m);
+    add(bundle, `ws:${other}.ydoc`, new Uint8Array([0]));
+    expect(() => importBoard(bundle, to, board)).toThrow(/list different docs/);
+    expect(holdsBoard(to, other)).toBe(false);
+  });
+
+  it("refuses a record that names another board's doc", () => {
+    const { bundle, to } = fresh('foreign-ws');
+    const m = manifestOf(bundle);
+    m.docIds.push(`ws:${other}`);
+    saveManifest(bundle, m);
+    replace(bundle, recordPath, recordOf([`ws:${other}`]));
+    add(bundle, `ws:${other}.ydoc`, new Uint8Array([0]));
+    expect(() => importBoard(bundle, to, board)).toThrow(/another board's doc/);
+    expect(holdsBoard(to, other)).toBe(false);
+  });
+
+  it('refuses a record of another board, and a bundle with no record', () => {
+    const wrong = fresh('wrong-record');
+    replace(wrong.bundle, recordPath, recordOf([], other));
+    expect(() => importBoard(wrong.bundle, wrong.to)).toThrow(/not the record of board/);
+
+    const none = fresh('no-record');
+    const m = manifestOf(none.bundle);
+    m.files = m.files.filter((f) => f.path !== recordPath);
+    saveManifest(none.bundle, m);
+    rmSync(join(none.bundle, 'files', recordPath));
+    expect(() => importBoard(none.bundle, none.to)).toThrow(/no record/);
+  });
+
+  it('refuses a doc another board on the target lists, and only that one', () => {
+    const claim = (name: string, theirs: string) => {
+      const { bundle, to } = fresh(name);
+      const m = manifestOf(bundle);
+      m.docIds.push('harborlight-plan');
+      saveManifest(bundle, m);
+      replace(bundle, recordPath, recordOf(['harborlight-plan']));
+      mkdirSync(join(to, 'workspaces'));
+      writeFileSync(
+        join(to, 'workspaces', `${other}.tasks.json`),
+        JSON.stringify({ workspace: { id: other, docIds: [theirs] }, tasks: [] }),
+      );
+      return { bundle, to };
+    };
+    const taken = claim('claimed', 'harborlight-plan');
+    expect(() => importBoard(taken.bundle, taken.to)).toThrow(/another board on the target/);
+    expect(holdsBoard(taken.to, board)).toBe(false);
+
+    const free = claim('unclaimed', 'riverbend-plan');
+    importBoard(free.bundle, free.to);
+    expect(holdsBoard(free.to, board)).toBe(true);
+  });
+
+  describe('a bundle replaced after it was checked', () => {
+    const ydoc = `ws:${board}.ydoc`;
+    const checked = (name: string) => {
+      const { bundle, to } = fresh(name);
+      const f = manifestOf(bundle).files.find((x) => x.path === ydoc);
+      if (!f) throw new Error('no board doc in the bundle');
+      return { bundle, to, files: [f], live: join(bundle, 'files', ydoc) };
+    };
+
+    it('writes the file when nothing replaced it', () => {
+      const { bundle, to, files } = checked('swap-control');
+      writeListedFiles(bundle, to, files);
+      expect(readFileSync(join(to, ydoc))).toEqual(readFileSync(join(bundle, 'files', ydoc)));
+    });
+
+    it('refuses a file that became a symlink', () => {
+      const { bundle, to, files, live } = checked('swap-link');
+      const secret = join(scratch, 'swap-secret');
+      writeFileSync(secret, 'fixture secret');
+      rmSync(live);
+      symlinkSync(secret, live);
+      expect(() => writeListedFiles(bundle, to, files)).toThrow(/not a plain file/);
+      expect(existsSync(join(to, ydoc))).toBe(false);
+    });
+
+    it('refuses a file whose folder became a symlink, by its hash', () => {
+      const { bundle, to, files } = checked('swap-dir');
+      const secrets = join(scratch, 'swap-dir-secrets');
+      mkdirSync(secrets);
+      writeFileSync(join(secrets, ydoc), 'fixture secret');
+      renameSync(join(bundle, 'files'), join(scratch, 'swap-dir-old'));
+      symlinkSync(secrets, join(bundle, 'files'));
+      expect(() => writeListedFiles(bundle, to, files)).toThrow(/altered/);
+      expect(existsSync(join(to, ydoc))).toBe(false);
+    });
   });
 
   it('refuses a share link whose id is already on the target', () => {

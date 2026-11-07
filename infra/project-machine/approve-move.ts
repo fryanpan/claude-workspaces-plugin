@@ -2,13 +2,12 @@
 /**
  * Asks for one passkey that covers one board's whole move.
  *
- *   bun run machine:approve-move --board <id> --project <name> [--secrets A,B]
+ *   bun run machine:approve-move --board <id> --project <name>
  *
- * Run it first, then `machine:deploy`, `machine:wall-report` and
- * `machine:move-board` within 30 minutes. The approval page lists every step
- * it covers (`keeper-move-steps.ts`). An image is a tap of its own, and so is
- * an import of any secret `--secrets` does not name. It waits until the owner
- * answers.
+ * Run it on a machine that already has this commit's image, then run
+ * `machine:wall-report` and `machine:move-board` within 30 minutes. The
+ * approval page lists every step it covers (`keeper-move-steps.ts`). A deploy
+ * and its secrets are taps of their own. It waits until the owner answers.
  */
 import {
   announceToBoard,
@@ -35,8 +34,7 @@ if (!origin) {
 }
 const { app } = projectConfig({ project, imageLabel: '0'.repeat(40) });
 const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'approve-move';
-const secrets = at('secrets')?.split(',').filter(Boolean) ?? [];
-const result = await keeperMoveGrant(origin, app, board, secrets, {
+const result = await keeperMoveGrant(origin, app, board, {
   requester,
   announce: announceToBoard(boardUrlFromEnv(), requester),
   onHeld: (held) => {

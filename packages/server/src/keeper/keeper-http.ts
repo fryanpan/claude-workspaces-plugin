@@ -189,6 +189,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       if (
         path === '/v1/fly' ||
         path === '/v1/move-grant' ||
+        path === '/v1/push-keys' ||
         path.startsWith('/v1/cloudflare/') ||
         (path.startsWith('/v1/requests/') && (method === 'GET' || method === 'DELETE'))
       ) {
@@ -232,7 +233,6 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
           type: 'move-grant',
           app: body.app as string,
           board: body.board as string,
-          secrets: (body.secrets ?? []) as string[],
         };
         return answer(await requests.submit(call, requester));
       }

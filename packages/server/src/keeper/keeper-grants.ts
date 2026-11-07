@@ -10,7 +10,7 @@
  * An Access grant comes from opening an Access application and covers that
  * application's policies.
  */
-import { BOARD_ID, SECRET_NAME, moveSteps } from './keeper-move-steps.ts';
+import { BOARD_ID, moveSteps } from './keeper-move-steps.ts';
 import type { Verdict } from './keeper-policy.ts';
 import { APP_NAME } from './keeper-store.ts';
 
@@ -18,8 +18,6 @@ export interface MoveGrantCall {
   type: 'move-grant';
   app: string;
   board: string;
-  /** Secret names the approval page lists; an import of any other is held. */
-  secrets: string[];
 }
 
 /** A grant one approval opened: later held requests it covers run without a tap. */
@@ -30,22 +28,14 @@ export interface Grant {
   expiresAt: number;
   /** Set on a move grant: the one board it was opened for. */
   board?: string;
-  /** On a move grant: the secret names the page listed. */
-  secrets?: readonly string[];
 }
 
 export const SETUP_GRANT_MS = 30 * 60_000;
 export const MOVE_GRANT_MS = 30 * 60_000;
 export const ACCESS_GRANT_MS = 10 * 60_000;
-const MAX_SECRETS = 32;
 
 /** Hold for a tap, or refuse: never routine, and never covered by a grant. */
-export function classifyMoveGrant(
-  app: unknown,
-  board: unknown,
-  secrets: unknown,
-  apps: readonly string[],
-): Verdict {
+export function classifyMoveGrant(app: unknown, board: unknown, apps: readonly string[]): Verdict {
   if (typeof app !== 'string' || !APP_NAME.test(app)) {
     return { kind: 'refused', reason: 'app must be a Fly app name' };
   }
@@ -54,10 +44,6 @@ export function classifyMoveGrant(
   }
   if (typeof board !== 'string' || !BOARD_ID.test(board)) {
     return { kind: 'refused', reason: 'board must be a board id' };
-  }
-  const named = Array.isArray(secrets) && secrets.length <= MAX_SECRETS;
-  if (!named || !secrets.every((n) => typeof n === 'string' && SECRET_NAME.test(n))) {
-    return { kind: 'refused', reason: `secrets must list at most ${MAX_SECRETS} secret names` };
   }
   return {
     kind: 'held',
@@ -80,7 +66,7 @@ export function grantCovers(
     if (scope === 'fly') {
       if (verdict.hold === 'project.create' || verdict.app !== g.target) return false;
       if (g.board === undefined) return verdict.setup === true;
-      return moveSteps(g.board, g.secrets).some((step) => step.covers(verdict, g.target));
+      return moveSteps(g.board).some((step) => step.covers(verdict, g.target));
     }
     // A grant on an Access app covers writes to that app and its policies,
     // never a new app: that is a new `access.open` and a new tap.

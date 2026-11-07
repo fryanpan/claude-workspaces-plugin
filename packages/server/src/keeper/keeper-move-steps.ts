@@ -15,9 +15,8 @@
  * Those strings run the probes in the machine's image, so they are only as
  * fixed as the image. That is why `fly deploy` is not a step: a requester
  * that could deploy without a tap could replace a probe, and a listed
- * command would then be a root shell that answers to it. For the same reason
- * secrets are covered only with `--stage`, which changes nothing on the
- * machine until a deploy, and that deploy is a tap.
+ * command would then be a root shell that answers to it. Secrets and volumes
+ * are not steps either: they exist for a deploy, which is a tap anyway.
  *
  * This file imports nothing: it runs in the keeper, on the Mac and on the
  * machine.
@@ -25,9 +24,6 @@
 
 export const BOARD_ID = /^w-[A-Za-z0-9_-]{6,64}$/;
 const BASE64_WORD = /^[A-Za-z0-9+/]+={0,2}$/;
-export const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/** `projectConfig` allows no bigger volume. */
-const MAX_VOLUME_GB = 50;
 
 const BOARD_PROBE = 'bun /app/infra/project-machine/board-probe.ts';
 export const WALL_PROBE = 'bun /app/infra/project-machine/wall-probe.ts';
@@ -80,16 +76,6 @@ export function moveCommands(board: string) {
 /** A held fly call as the keeper classified it. */
 export interface HeldFly {
   args?: readonly string[];
-  setup?: boolean;
-  /** The names its stdin sets, or null when a line of it is not `NAME=value`. */
-  secrets?: readonly string[] | null;
-}
-
-/** The names a `fly secrets import` stdin sets, or null if any line hides what it sets. */
-export function inputNames(input: string | undefined): string[] | null {
-  const lines = (input ?? '').split('\n').filter((l) => l !== '');
-  const names = lines.map((l) => (l.includes('=') ? (l.split('=', 1)[0] as string) : ''));
-  return names.every((n) => SECRET_NAME.test(n)) ? names : null;
 }
 
 export interface MoveStep {
@@ -130,49 +116,10 @@ function withWord(label: string, word: string, build: (w: string) => string): Mo
   };
 }
 
-/**
- * Every step a move grant for `board` covers. Anything else stays held.
- * `secrets` are the names the owner saw: an import of any other is held.
- */
-export function moveSteps(board: string, secrets: readonly string[] = []): MoveStep[] {
+/** Every step a move grant for `board` covers. Anything else stays held. */
+export function moveSteps(board: string): MoveStep[] {
   const c = moveCommands(board);
-  const importStep: MoveStep = {
-    label: 'Stage these secrets, which take effect at the next deploy',
-    shown: `fly secrets import --stage: ${secrets.join(', ')}`,
-    covers: (call) => {
-      const a = call.args ?? [];
-      const names = call.secrets;
-      return (
-        call.setup === true &&
-        starts(a, 'secrets', 'import') &&
-        a.includes('--stage') &&
-        Array.isArray(names) &&
-        names.length > 0 &&
-        names.every((n) => secrets.includes(n))
-      );
-    },
-  };
   return [
-    {
-      label: 'Create the project volume',
-      shown: `fly volume create <name> --region <region> --size <1-${MAX_VOLUME_GB}> --yes`,
-      covers: (call) => {
-        const a = call.args ?? [];
-        const at = a.indexOf('--size');
-        const gb = at === -1 ? Number.NaN : Number(a[at + 1]);
-        const sized = Number.isInteger(gb) && gb >= 1 && gb <= MAX_VOLUME_GB;
-        return call.setup === true && (a[0] ?? '').startsWith('volume') && sized;
-      },
-    },
-    ...(secrets.length ? [importStep] : []),
-    {
-      label: 'Stage the removal of secrets',
-      shown: 'fly secrets unset <names> --stage',
-      covers: (call) => {
-        const a = call.args ?? [];
-        return starts(a, 'secrets', 'unset') && a.includes('--stage');
-      },
-    },
     exactly('Check the machine does not hold the board', c.holds),
     exactly('Make the root-only upload folder', c.prepare),
     {
@@ -190,7 +137,7 @@ export function moveSteps(board: string, secrets: readonly string[] = []): MoveS
       },
     },
     exactly('Hold services off', c.holdOff),
-    exactly('Unpack and import the bundle', c.importBundle),
+    exactly('Unpack and import the bundle, with its share rows', c.importBundle),
     exactly('Remove the upload and let services start', c.release),
     exactly('Ask whether the server answers', c.serving),
     withWord('Fingerprint the board', 'base64 line limits', c.fingerprint),

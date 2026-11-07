@@ -10,19 +10,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  projectConfig,
-  secretsImportArgs,
-  secretsUnsetArgs,
-  volumeCreateArgs,
-} from '../../../infra/project-machine/deploy-plan.ts';
 import { type MoveOps, flyTarget } from '../../../infra/project-machine/move-board.ts';
 import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import { keeperFly, keeperMoveGrant } from '../src/keeper/keeper-client.ts';
 import { MOVE_GRANT_MS, grantCovers } from '../src/keeper/keeper-grants.ts';
 import { machineShell, moveCommands, moveSteps } from '../src/keeper/keeper-move-steps.ts';
 import { classifyFly } from '../src/keeper/keeper-policy.ts';
-import type { Executors } from '../src/keeper/keeper-requests.ts';
+import { type Executors, MAX_HELD } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
 import { TestPasskey } from './keeper-authenticator.ts';
@@ -34,10 +28,13 @@ const OTHER = 'cw-riverbend';
 const BOARD = 'w-fixture1';
 const tmp = mkdtempSync(join(tmpdir(), 'keeper-move-'));
 const ran: string[][] = [];
+/** Every stand-in fly call that has begun, finished or not. */
+const entered: string[][] = [];
 /** While set, every stand-in fly call waits for it. */
 let gate: Promise<void> | null = null;
 const exec: Executors = {
   fly: async (args) => {
+    entered.push(args);
     if (gate) await gate;
     ran.push(args);
     return { status: 0, stdout: '{"holds":false}\n', stderr: '' };
@@ -81,11 +78,11 @@ const pollView = async (held: Record<string, string | boolean>) => {
   return (await res.json()) as { status: string; result?: { stdout: string } };
 };
 
-const askGrant = async (app: string, board: string, secrets: string[] = []) => {
+const askGrant = async (app: string, board: string) => {
   const res = await fetch(`${base}/v1/move-grant`, {
     method: 'POST',
     headers: apiHeaders(),
-    body: JSON.stringify({ app, board, secrets }),
+    body: JSON.stringify({ app, board }),
   });
   return { status: res.status, body: (await res.json()) as Record<string, string> };
 };
@@ -112,9 +109,9 @@ async function tap(id: string): Promise<Response> {
 }
 
 /** One approved grant, on a fresh keeper clock so grants of earlier cases are dead. */
-async function granted(app = APP, board = BOARD, secrets: string[] = []): Promise<void> {
+async function granted(app = APP, board = BOARD): Promise<void> {
   clock += MOVE_GRANT_MS + 1;
-  const r = await askGrant(app, board, secrets);
+  const r = await askGrant(app, board);
   expect(r.status).toBe(202);
   expect((await tap(r.body.id as string)).status).toBe(200);
 }
@@ -168,6 +165,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   ran.length = 0;
+  entered.length = 0;
 });
 
 describe('asking for a move grant', () => {
@@ -209,6 +207,24 @@ describe('asking for a move grant', () => {
   });
 });
 
+describe('the same gate on push keys', () => {
+  const ask = (headers: Record<string, string>) =>
+    fetch(`${base}/v1/push-keys`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ app: APP, repos: ['Harborlight/notes'] }),
+    });
+
+  it('refuses a request without the API header or the caller token', async () => {
+    expect((await ask({})).status).toBe(403);
+    expect((await ask({ 'x-cw-keeper': '1' })).status).toBe(401);
+  });
+
+  it('CONTROL: a request carrying both reaches the keeper', async () => {
+    expect((await ask(apiHeaders())).status).toBe(202);
+  });
+});
+
 describe('what one approval covers', () => {
   it('CONTROL: without a grant, a listed step waits for the passkey', async () => {
     clock += MOVE_GRANT_MS + 1;
@@ -218,10 +234,7 @@ describe('what one approval covers', () => {
 
   it('listed steps run on the granted app with no further tap', async () => {
     await granted();
-    const cfg = projectConfig({ project: 'harborlight', imageLabel: '0'.repeat(40) });
     const listed = [
-      secretsUnsetArgs(APP, ['OLD_NAME']),
-      volumeCreateArgs(cfg),
       consoleCall(c.holds),
       consoleCall(c.fingerprint('eyJhIjoxfQ==')),
       consoleCall('bun /app/infra/project-machine/wall-probe.ts mint'),
@@ -246,6 +259,9 @@ describe('what one approval covers', () => {
       ['ssh', 'sftp', 'get', '/data/cw/share-cookie.key', join(tmp, 'k'), '--app', APP],
       DEPLOY,
       ['secrets', 'set', 'A=b', '--app', APP],
+      ['secrets', 'import', '--app', APP, '--stage'],
+      ['secrets', 'unset', 'OLD_NAME', '--app', APP, '--stage'],
+      ['volumes', 'create', 'cw_data', '--app', APP, '--size', '1', '--yes'],
       ['secrets', 'import', '--app', APP],
       ['secrets', 'unset', 'OLD_NAME', '--app', APP],
       ['machine', 'destroy', 'm1', '--app', APP, '--force'],
@@ -315,51 +331,6 @@ describe('what one approval covers', () => {
   });
 });
 
-describe('secrets and sizes', () => {
-  const importArgs = secretsImportArgs(APP);
-
-  it('the page names the secrets, and an import of those runs', async () => {
-    clock += MOVE_GRANT_MS + 1;
-    const r = await askGrant(APP, BOARD, ['TUNNEL_NAME']);
-    expect(await (await fetch(`${base}/approve/${r.body.id}`)).text()).toContain('TUNNEL_NAME');
-    expect((await tap(r.body.id as string)).status).toBe(200);
-    expect(await outcome(importArgs, 'TUNNEL_NAME=fixture\n')).toBe('ran');
-  });
-
-  it('an import of a name the page did not list is held', async () => {
-    await granted(APP, BOARD, ['TUNNEL_NAME']);
-    expect(await outcome(importArgs, 'OTHER_NAME=fixture\n')).toBe('held');
-    expect(await outcome(['secrets', 'import', '--app', APP], 'TUNNEL_NAME=a\n')).toBe('held');
-    expect(await outcome(importArgs, 'TUNNEL_NAME=a\nOTHER_NAME=b\n')).toBe('held');
-    expect(await outcome(importArgs, 'TUNNEL_NAME=a\nnot a name line\n')).toBe('held');
-    expect(await outcome(importArgs, '')).toBe('held');
-  });
-
-  it('with no names listed, no import is covered', async () => {
-    await granted();
-    expect(await outcome(importArgs, 'TUNNEL_NAME=fixture\n')).toBe('held');
-  });
-
-  it('a volume over the cap is held', async () => {
-    await granted();
-    const volume = (gb: string) => [
-      'volume',
-      'create',
-      'cw_data',
-      '--app',
-      APP,
-      '--region',
-      'sjc',
-      '--size',
-      gb,
-      '--yes',
-    ];
-    expect(await outcome(volume('50'))).toBe('ran');
-    expect(await outcome(volume('51'))).toBe('held');
-    expect(await outcome(['volume', 'create', 'cw_data', '--app', APP, '--yes'])).toBe('held');
-  });
-});
-
 describe('a covered call that takes long', () => {
   it('answers at once and reports through the poll, so no client fetch waits on it', async () => {
     await granted();
@@ -379,6 +350,62 @@ describe('a covered call that takes long', () => {
     await waitFor(() => pollView(body).then((v) => v.status === 'done'));
     expect((await pollView(body)).result?.stdout).toContain('holds');
     gate = null;
+  });
+
+  /** Starts a covered call and returns its answer without waiting for it to finish. */
+  const start = async (args: string[]) => {
+    const r = await fetch(`${base}/v1/fly`, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ args }),
+    });
+    return { status: r.status, body: (await r.json()) as Record<string, string | boolean> };
+  };
+
+  it('runs one at a time on an app, while another app runs beside it', async () => {
+    await granted();
+    const onOther = await askGrant(OTHER, BOARD);
+    expect((await tap(onOther.body.id as string)).status).toBe(200);
+    let finish = () => {};
+    gate = new Promise((r) => {
+      finish = r;
+    });
+    const first = await start(consoleCall(c.importBundle));
+    const second = await start(consoleCall(c.prepare));
+    const beside = await start(consoleCall(c.holds, OTHER));
+    // The other app reaching the stand-in shows the gate is not what holds the second call.
+    await waitFor(() => entered.length === 2);
+    expect(entered).toEqual([consoleCall(c.importBundle), consoleCall(c.holds, OTHER)]);
+    expect((await pollView(second.body)).status).toBe('running');
+    finish();
+    gate = null;
+    for (const r of [first, second, beside]) {
+      await waitFor(() => pollView(r.body).then((v) => v.status === 'done'));
+    }
+    expect(entered[2]).toEqual(consoleCall(c.prepare));
+  });
+
+  it('stops starting calls once the keeper is holding as many as it may', async () => {
+    await granted();
+    let finish = () => {};
+    gate = new Promise((r) => {
+      finish = r;
+    });
+    const started: Record<string, string | boolean>[] = [];
+    let refused = false;
+    for (let i = 0; i <= MAX_HELD && !refused; i++) {
+      const r = await start(consoleCall(c.holds));
+      refused = r.status === 403;
+      if (!refused) started.push(r.body);
+    }
+    expect(refused).toBe(true);
+    expect(started.length).toBeGreaterThan(0);
+    finish();
+    gate = null;
+    for (const body of started) {
+      await waitFor(() => pollView(body).then((v) => v.status === 'done'));
+    }
+    expect(await outcome(consoleCall(c.holds))).toBe('ran');
   });
 
   it('tells nobody to tap', async () => {
@@ -445,7 +472,7 @@ console.log('finished');
 
 describe('the move script under one grant', () => {
   it('reaches the end of a move with no held request', async () => {
-    const asked = keeperMoveGrant(ORIGIN(), APP, BOARD, [], {
+    const asked = keeperMoveGrant(ORIGIN(), APP, BOARD, {
       callerToken: CALLER,
       pollMs: 5,
       onHeld: (held) => void tap(held.id),

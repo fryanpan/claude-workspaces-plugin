@@ -548,34 +548,3 @@ export function judgeDrill(
   );
   return { ok: rows.every((r) => r.b > 0 && r.a === r.b && r.same), lines };
 }
-
-/** `fly secrets import`, which reads `NAME=value` lines on stdin. */
-export const secretsImportArgs = (app: string): string[] => [
-  'secrets',
-  'import',
-  '--app',
-  app,
-  '--stage',
-];
-
-export const secretsUnsetArgs = (app: string, names: readonly string[]): string[] => [
-  'secrets',
-  'unset',
-  ...names,
-  '--app',
-  app,
-  '--stage',
-];
-
-export const volumeCreateArgs = (cfg: ProjectConfig): string[] => [
-  'volumes',
-  'create',
-  cfg.volumeName,
-  '--app',
-  cfg.app,
-  '--region',
-  cfg.region,
-  '--size',
-  String(cfg.volumeGb),
-  '--yes',
-];
