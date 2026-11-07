@@ -24,6 +24,11 @@ const allows = (path: string, method: string) =>
 
 /** Each new path, on Harborlight and the same path on Riverbend. */
 const CASES: Array<[string, string, string]> = [
+  [
+    'GET',
+    `/workspaces/${HARBORLIGHT}/lead-chat/files/lf-AAAAaaaaBBBB`,
+    `/workspaces/${RIVERBEND}/lead-chat/files/lf-AAAAaaaaBBBB`,
+  ],
   ['GET', `/workspaces/${HARBORLIGHT}/docs`, `/workspaces/${RIVERBEND}/docs`],
   // A file bind; `routes/docs.ts` holds the file to the board's roots.
   ['POST', `/workspaces/${HARBORLIGHT}/docs`, `/workspaces/${RIVERBEND}/docs`],

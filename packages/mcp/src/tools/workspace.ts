@@ -29,6 +29,7 @@ import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { declareWorkspaceLead } from '../declare-lead.ts';
 import { sayRefusal } from '../meeting-feed-line.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
+import { readChatAttachment } from './chat-attachment.ts';
 
 /** What the workspace tools read out of `mcp.ts`. */
 export interface WorkspaceToolContext {
@@ -788,6 +789,10 @@ export async function handleWorkspaceTool(
           ? 'Off this board: list_agents no longer shows you, and a restart will not re-attach or re-watch it. attach_agent brings you back.'
           : 'You had no attachment here; the board stream is closed and its watch dropped all the same.',
       });
+    }
+    case 'read_chat_attachment': {
+      const { workspaceId, fileId } = a as { workspaceId?: string; fileId?: string };
+      return readChatAttachment(ctx, workspaceId, fileId);
     }
     case 'answer_voice': {
       const { workspaceId, queueId, text, written, minute } = a as {

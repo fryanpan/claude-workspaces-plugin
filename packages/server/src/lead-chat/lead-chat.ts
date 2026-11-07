@@ -32,6 +32,7 @@ import { agentIdForName } from '@claude-workspaces/core/identity';
 import {
   LEAD_CHAT_EVENT,
   LEAD_CHAT_PAGE,
+  type LeadChatAttachment,
   type LeadChatCursor,
   type LeadChatFrame,
   type LeadChatHistoryPage,
@@ -48,7 +49,17 @@ import {
   sentAck,
 } from '../spoken-reply/agent-conversation.ts';
 import type { VoiceContext } from '../voice-prompt.ts';
-import { LEAD_CHAT_KEEP, type LeadChatLog, type StoredLeadChatMessage } from './log.ts';
+import { LEAD_CHAT_KEEP, type LeadChatLog } from './log.ts';
+import {
+  CHANNEL_AUTHOR_ID,
+  type StoredMessage,
+  TERMINAL_AUTHOR_ID,
+  attachmentLines,
+  closingRowOf,
+  isMirrored,
+  publicMessage,
+  withoutStreaming,
+} from './message-shape.ts';
 
 export interface LeadChatDeps {
   log: LeadChatLog;
@@ -71,6 +82,8 @@ export interface MirroredPrompt {
    *  line of it, and the queue row it delivered, when it was one. */
   channel?: { author?: string; text: string; queueId?: string };
 }
+
+export { CHANNEL_AUTHOR_ID, TERMINAL_AUTHOR_ID };
 
 export type LeadChatPost =
   | { ok: true; message: LeadChatMessage }
@@ -141,6 +154,7 @@ export class LeadChat {
     text: string,
     context?: VoiceContext,
     via: 'chat' | 'voice' = 'chat',
+    attachments: readonly LeadChatAttachment[] = [],
   ): LeadChatPost {
     const lead = this.deps.leadOf(workspaceId);
     const history = this.history(workspaceId);
@@ -152,6 +166,7 @@ export class LeadChat {
       ts: this.now(),
       via,
       state: 'no-lead',
+      ...(attachments.length > 0 ? { attachments: [...attachments] } : {}),
     };
     if (lead) {
       const queueId = this.deps.newId();
@@ -160,7 +175,7 @@ export class LeadChat {
         workspaceId,
         route: 'agent',
         to: lead.agentId,
-        transcript: text,
+        transcript: `${text}${attachmentLines(workspaceId, attachments)}`.trim(),
         ack: sentAck(lead.name),
         queueId,
         conversationId: `lead-chat-${workspaceId}`,
@@ -458,43 +473,4 @@ export class LeadChat {
       message: publicMessage(m),
     });
   }
-}
-
-/** The Stop note's closing row for these words (one may be cut shorter). */
-function closingRowOf(list: readonly StoredMessage[], text: string): StoredMessage | undefined {
-  const words = text.trim();
-  if (!words) return undefined;
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i];
-    if (!m) continue;
-    if (m.role === 'person' && m.via !== 'channel') return undefined;
-    if (m.role !== 'agent' || !m.turnEnd || m.via === 'terminal') continue;
-    const said = m.text.trim();
-    if (said === words || said.startsWith(words) || words.startsWith(said)) return m;
-    return undefined;
-  }
-  return undefined;
-}
-
-function withoutStreaming(m: StoredMessage): StoredMessage {
-  const { streaming: _streaming, ...rest } = m;
-  return rest;
-}
-
-type StoredMessage = StoredLeadChatMessage;
-
-/** Who a mirrored terminal prompt and a mirrored board event are by. */
-export const TERMINAL_AUTHOR_ID = 'lead-terminal';
-export const CHANNEL_AUTHOR_ID = 'lead-channel';
-
-/** A row the lead's own session put here, which the lead is never handed
- *  back as conversation. */
-function isMirrored(m: LeadChatMessage): boolean {
-  return m.via === 'terminal' || m.via === 'channel' || m.turnEnd === true;
-}
-
-/** What a page is handed: never the queue id, which only the lead answers by. */
-function publicMessage(m: StoredMessage): LeadChatMessage {
-  const { queueId: _queueId, sentTo: _sentTo, ...rest } = m;
-  return rest;
 }

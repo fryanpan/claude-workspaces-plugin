@@ -180,7 +180,7 @@ async function uploadImage(ctx: DocRoutesContext, rq: DocResourceRouteRequest): 
 }
 
 /** The body, or null as soon as it passes `cap` — a long upload is not read to the end. */
-async function readCapped(req: Request, cap: number): Promise<Uint8Array | null> {
+export async function readCapped(req: Request, cap: number): Promise<Uint8Array | null> {
   if (Number(req.headers.get('content-length') ?? 0) > cap) return null;
   const reader = req.body?.getReader();
   if (!reader) return new Uint8Array(0);

@@ -75,6 +75,7 @@ import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
+import { LeadChatFiles } from './lead-chat/files.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
 import { LeadMeetingFeed, meetingLeadFeedEnabled } from './lead-chat/meeting-feed.ts';
@@ -1565,6 +1566,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
     newId: () => cryptoId('lc'),
   });
+  const leadChatFiles = new LeadChatFiles(dataDir, () => cryptoId('lf'));
   // What the lead's session writes mid-turn and the tools it calls.
   const leadSessionMirror = new LeadSessionMirror(leadChat, () => cryptoId('lc'));
   // The meeting a board's lead chat runs (`lead-chat/meeting.ts`), on the
@@ -3154,6 +3156,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenRelay,
     spokenTimings,
     leadChat,
+    leadChatFiles,
     leadChatMeetings,
     leadMeetingFeed:
       (opts.meetingLeadFeed ?? meetingLeadFeedEnabled(process.env)) ? leadMeetingFeed : null,

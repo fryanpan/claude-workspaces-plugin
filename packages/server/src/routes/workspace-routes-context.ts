@@ -11,6 +11,7 @@ import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { LeadChat } from '../lead-chat/lead-chat.ts';
 import type { LeadMeetingFeed } from '../lead-chat/meeting-feed.ts';
+import type { LeadChatFiles } from '../lead-chat/files.ts';
 import type { LeadChatMeetings } from '../lead-chat/meeting.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -74,6 +75,8 @@ export interface WorkspaceRoutesContext {
   spokenTimings: SpokenTimings;
   /** The board's chat with its lead: the log, and the answers it waits on. */
   leadChat: LeadChat;
+  /** The photos and files people sent the board's lead. */
+  leadChatFiles: LeadChatFiles;
   /** The meeting each board's lead chat is running. */
   leadChatMeetings: LeadChatMeetings;
   /** The board's lead in that meeting: its start and the room's lines. Null

@@ -74,6 +74,38 @@ export interface LeadChatMessage {
   /** On the lead's answer to something said aloud: `text` is the written
    *  part `answer_voice` gave, which nobody heard, so the chat shows it. */
   written?: true;
+  /** On a person's message: the photos and files sent with it. A message
+   *  with attachments may have no words. */
+  attachments?: LeadChatAttachment[];
+}
+
+/**
+ * A photo or file a person sent to the lead, as the server stored it
+ * (`server/src/lead-chat/files.ts`). The server read `type` and `image` off
+ * the bytes; neither comes from the browser.
+ */
+export interface LeadChatAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  /** A raster image, which a page draws as a thumbnail. */
+  image?: true;
+}
+
+/** The largest photo or file one upload may be: a long phone video is
+ *  refused, and a phone photo or a large PDF fits. */
+export const LEAD_CHAT_FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** The most photos and files one message may carry. */
+export const LEAD_CHAT_FILES_PER_MESSAGE = 8;
+const FILE_NAME_MAX = 160;
+const FILE_TYPE_MAX = 100;
+/** A stored file's id: `cryptoId('lf')`. */
+export const LEAD_CHAT_FILE_ID = /^lf-[A-Za-z0-9_-]{8,40}$/;
+
+/** Where a page and an MCP child read a stored file. */
+export function leadChatFilePath(workspaceId: string, fileId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/files/${encodeURIComponent(fileId)}`;
 }
 
 /** A tool call as the lead's terminal shows it, reduced by the hook the way
@@ -280,6 +312,32 @@ export interface LeadChatFrame {
   message: LeadChatMessage;
 }
 
+/** A stored file's description, or null when it is not one. */
+export function parseLeadChatAttachment(raw: unknown): LeadChatAttachment | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { id, name, type, size, image } = raw as Record<string, unknown>;
+  const ok = str(id, 100);
+  const label = str(name, FILE_NAME_MAX);
+  const kind = str(type, FILE_TYPE_MAX);
+  if (!ok || !LEAD_CHAT_FILE_ID.test(ok) || !label || !kind) return null;
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return null;
+  return {
+    id: ok,
+    name: label,
+    type: kind,
+    size,
+    ...(image === true ? { image: true as const } : {}),
+  };
+}
+
+function parseAttachments(raw: unknown): LeadChatAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .slice(0, LEAD_CHAT_FILES_PER_MESSAGE)
+    .map(parseLeadChatAttachment)
+    .filter((a): a is LeadChatAttachment => a !== null);
+}
+
 const STATES: readonly string[] = ['sent', 'queued', 'received', 'done', 'answered', 'no-lead'];
 const VIAS: readonly string[] = ['chat', 'voice', 'terminal', 'channel'];
 
@@ -292,11 +350,13 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const m = raw as Record<string, unknown>;
   const id = str(m.id, 200);
-  const text = str(m.text, LEAD_CHAT_MAX_CHARS * 2);
+  const attachments = parseAttachments(m.attachments);
+  // Only a message that carries files may have no words.
+  const text = attachments.length > 0 && m.text === '' ? '' : str(m.text, LEAD_CHAT_MAX_CHARS * 2);
   const a = m.author as Record<string, unknown> | undefined;
   const authorId = str(a?.id, 200);
   const authorName = str(a?.name, 200);
-  if (!id || !text || !authorId || !authorName) return null;
+  if (!id || text === null || !authorId || !authorName) return null;
   if (m.role !== 'person' && m.role !== 'agent') return null;
   if (typeof m.ts !== 'number' || !Number.isFinite(m.ts)) return null;
   const state = typeof m.state === 'string' && STATES.includes(m.state) ? m.state : undefined;
@@ -318,6 +378,7 @@ export function parseLeadChatMessage(raw: unknown): LeadChatMessage | null {
     ...(tool ? { tool } : {}),
     ...(m.streaming === true ? { streaming: true as const } : {}),
     ...(m.written === true ? { written: true as const } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
 }
 

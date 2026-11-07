@@ -39,6 +39,9 @@
  *   the agent the board token names;
  * - `POST /workspaces/<board>/lead-chat/meeting/say` — `say_in_meeting`; the
  *   route checks the agent is the board's lead;
+ * - `GET /workspaces/<board>/lead-chat/files/<id>` — `read_chat_attachment`:
+ *   a photo or file a person sent this board's lead, which the lead's own
+ *   walls keep it from reading on the server's disk;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
  *   of that board;
  * - `POST /workspaces/<board>/git/push` and `GET …/git/pushes/<id>` — a push
@@ -85,6 +88,7 @@ export function leadScopeAllows(
   if (rest === 'agents') return m === 'POST';
   if (rest === 'git/push') return m === 'POST';
   if (/^git\/pushes\/[a-f0-9]{24}$/.test(rest)) return m === 'GET';
+  if (/^lead-chat\/files\/[^/]+$/.test(rest)) return m === 'GET';
   const parts = rest.split('/').map(decoded);
   if (parts.length !== 3 || m !== 'POST') return false;
   const [collection, id = '', verb] = parts;
