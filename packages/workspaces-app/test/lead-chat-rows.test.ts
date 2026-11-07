@@ -9,7 +9,7 @@
 import type { LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ModeStorage } from '../src/lead-chat/lead-chat-mode.ts';
-import { messageState } from '../src/lead-chat/lead-chat-rows.ts';
+import { drawMessage, messageState } from '../src/lead-chat/lead-chat-rows.ts';
 import {
   type LeadChatView,
   type LeadChatViewModel,
@@ -339,5 +339,43 @@ describe('a tool call’s line', () => {
     expect(
       [...(q('.lc-tool .lc-row-body')?.querySelectorAll('pre') ?? [])].map((p) => p.textContent),
     ).toEqual([input, 'ok']);
+  });
+});
+
+describe('a message with files', () => {
+  const ctx = {
+    doc: document,
+    workspaceId: 'w-harbor',
+    meId: BRYAN.id,
+    lead: LEAD,
+    open: new Set<string>(),
+    showWorking: false,
+    liveWorking: null,
+    markdown: (m: LeadChatMessage) => m.text,
+    messages: [],
+  };
+
+  it('shows a photo as a thumbnail and a file as a link, and no empty bubble', () => {
+    const row = drawMessage(
+      ctx,
+      msg({
+        id: 'p1',
+        role: 'person',
+        author: BRYAN,
+        text: '',
+        state: 'sent',
+        attachments: [
+          { id: 'lf-aaaaaaaa', name: 'berth.png', type: 'image/png', size: 12, image: true },
+          { id: 'lf-bbbbbbbb', name: 'tide<b>.csv', type: 'application/octet-stream', size: 2048 },
+        ],
+      }),
+    ) as HTMLElement;
+    const img = row.querySelector('.lc-thumbs img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/workspaces/w-harbor/lead-chat/files/lf-aaaaaaaa');
+    expect(img.alt).toBe('berth.png');
+    const file = row.querySelector('.lc-sent-file') as HTMLAnchorElement;
+    expect(file.textContent).toBe('tide<b>.csv2 KB');
+    expect(file.querySelector('b b')).toBeNull();
+    expect((row.querySelector('.lc-msg-text') as HTMLElement).hidden).toBe(true);
   });
 });

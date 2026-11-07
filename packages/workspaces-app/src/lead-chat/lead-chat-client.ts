@@ -15,6 +15,8 @@ import {
   LEAD_CHAT_EVENT,
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
+  LEAD_CHAT_MODEL_EVENT,
+  type LeadChatAttachment,
   type LeadChatFrame,
   type LeadChatHistoryPage,
   type LeadChatMeeting,
@@ -22,7 +24,11 @@ import {
   type LeadChatMeetingLine,
   type LeadChatMeetingLineFrame,
   type LeadChatMessage,
+  type LeadChatModelFrame,
   type LeadChatRead,
+  type LeadEffort,
+  type LeadModelAlias,
+  type LeadModelState,
   compareLeadChatEntries,
   upsertLeadChatMessage,
   upsertMeetingLine,
@@ -56,6 +62,9 @@ export type MeetingAnswer =
   | { ok: true; meeting?: LeadChatMeeting; message?: string; lead?: 'sign-in' }
   | { ok: false; error: string };
 
+export type UploadResult = { ok: true; file: LeadChatAttachment } | { ok: false; error: string };
+export type ModelPickResult = { ok: true } | { ok: false; error: string };
+
 export type SendResult = { ok: true; message: LeadChatMessage } | { ok: false; error: string };
 
 export interface LeadChatClient {
@@ -69,7 +78,12 @@ export interface LeadChatClient {
     author: { id: string; name: string; kind?: string },
     context: VoiceContext | undefined,
     via: 'chat' | 'voice',
+    attachments?: readonly string[],
   ): Promise<SendResult>;
+  /** Store a file under the board, ready for a send to carry its id. */
+  uploadFile(file: File): Promise<UploadResult>;
+  /** Switch the lead's model or effort (`lead-chat/lead-model.ts`). */
+  pickModel(pick: { model?: LeadModelAlias; effort?: LeadEffort }): Promise<ModelPickResult>;
   /** One verb on the board's meeting (`start`, `recording`, `line`, `join`,
    *  `end`); a meeting it answers with is applied before this resolves. */
   /** Read the page of messages before the oldest one held, when there is
@@ -103,6 +117,11 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   };
   const apply = (m: LeadChatMessage): void => {
     state = { ...state, messages: upsertLeadChatMessage(state.messages, m) };
+    changed();
+  };
+
+  const setLeadModel = (leadModel: LeadModelState): void => {
+    state = { ...state, leadModel };
     changed();
   };
 
@@ -173,6 +192,15 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       // A frame this page cannot read changes nothing.
     }
   });
+  stream.addEventListener(LEAD_CHAT_MODEL_EVENT, (ev) => {
+    try {
+      const frame = JSON.parse((ev as MessageEvent).data) as LeadChatModelFrame;
+      if (frame.workspaceId !== opts.workspaceId) return;
+      setLeadModel(frame.state);
+    } catch {
+      // A frame this page cannot read changes nothing.
+    }
+  });
   stream.addEventListener('error', () => {
     dropped = true;
   });
@@ -222,13 +250,56 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       leadLines.push(fn);
     },
     loadOlder,
-    async send(text, author, context, via) {
+    async uploadFile(file) {
+      try {
+        const q = `name=${encodeURIComponent(file.name || 'Pasted image')}`;
+        const res = await doFetch(`${base}/lead-chat/files?${q}`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: file,
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          file?: LeadChatAttachment;
+          error?: string;
+        };
+        if (!res.ok || !body.file) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+        return { ok: true, file: body.file };
+      } catch {
+        return { ok: false, error: 'offline' };
+      }
+    },
+    async pickModel(pick) {
+      try {
+        const res = await doFetch(`${base}/lead-chat/model`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(pick),
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          state?: LeadModelState;
+          error?: string;
+        };
+        if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+        if (body.state) setLeadModel(body.state);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'offline' };
+      }
+    },
+    async send(text, author, context, via, attachments) {
       try {
         const res = await doFetch(`${base}/lead-chat`, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, author, via, ...(context ? { context } : {}) }),
+          body: JSON.stringify({
+            text,
+            author,
+            via,
+            ...(context ? { context } : {}),
+            ...(attachments?.length ? { attachments } : {}),
+          }),
         });
         const body = (await res.json().catch(() => ({}))) as {
           message?: LeadChatMessage;

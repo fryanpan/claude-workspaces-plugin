@@ -6,6 +6,7 @@
 import {
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
+  LEAD_CHAT_MODEL_EVENT,
   type LeadChatMessage,
 } from '@claude-workspaces/core/lead-chat';
 import { describe, expect, it } from 'vitest';
@@ -127,6 +128,26 @@ describe('the lead chat client', () => {
       message: msg('m-post', 'hello', 50, { state: 'sent' }),
     });
     expect(client.state().messages).toHaveLength(1);
+  });
+
+  it('shows the lead’s model from the read, and each change from the stream', async () => {
+    const { client, stream } = setup([
+      { lead: null, messages: [], canTalk: true, leadModel: { model: 'claude-opus-5-5' } },
+    ]);
+    await settle();
+    expect(client.state().leadModel?.model).toBe('claude-opus-5-5');
+    stream().fire(LEAD_CHAT_MODEL_EVENT, {
+      event: LEAD_CHAT_MODEL_EVENT,
+      workspaceId: 'w-harbor',
+      state: { model: 'sonnet', pending: { effort: 'low' } },
+    });
+    expect(client.state().leadModel).toEqual({ model: 'sonnet', pending: { effort: 'low' } });
+    stream().fire(LEAD_CHAT_MODEL_EVENT, {
+      event: LEAD_CHAT_MODEL_EVENT,
+      workspaceId: 'w-other',
+      state: { model: 'haiku' },
+    });
+    expect(client.state().leadModel?.model).toBe('sonnet');
   });
 
   it('reads again when a dropped stream comes back, and not on its first open', async () => {
