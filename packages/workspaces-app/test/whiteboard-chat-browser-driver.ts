@@ -85,7 +85,12 @@ async function comparePages(
   const docTab = await openFresh();
   await navigate(docTab, `${board.base}${B}/docs/${board.docId}`);
   await agentButton(docTab);
-  const docPage = await read<PageRead>(docTab, PAGE);
+  // The shell's arrow says "/" until the doc's meta lands (`applyBackLink`),
+  // which the chat's mount does not wait for.
+  const docPage = await until('the doc page’s arrow on its board', async () => {
+    const page = await read<PageRead>(docTab, PAGE);
+    return page.bar?.back === B ? page : null;
+  });
   await shot(docTab, `doc-${width}`);
   const docChat = await chatAfterTap(docTab);
   await closePerson(docTab);
