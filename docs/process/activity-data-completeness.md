@@ -143,10 +143,14 @@ as long as it is up; `--write` refuses unless it can take that lock, and names
 the pid holding it. A dry run ignores the lock — reading is not writing.
 
 ```
-launchctl kill SIGTERM gui/$(id -u)/com.fryanpan.claude-workspaces   # stop
+launchctl bootout gui/$(id -u)/com.fryanpan.claude-workspaces        # stop
 bun run activity:repair-owner ./data --write
-launchctl kickstart -k gui/$(id -u)/com.fryanpan.claude-workspaces   # start
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist   # start
 ```
+
+It has to be `bootout`. A signal alone no longer stops the service: launchd
+relaunches it about 10 seconds later ([supervisor.md](../architecture/supervisor.md),
+"A stop signal nobody asked for").
 
 The lock is per data dir, so a staging server on its own throwaway dir never
 blocks a repair of prod's. It is advisory for the server — a leftover lock file

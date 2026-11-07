@@ -222,7 +222,7 @@ if (import.meta.main) {
     console.log('not assumed — the run refuses if anything holds the activity-writer lock.');
   } else if (stats.refusedLockHeldBy) {
     console.error('\nNothing was written. Stop the process named above and run again:');
-    console.error('  launchctl kill SIGTERM gui/$(id -u)/com.fryanpan.claude-workspaces');
+    console.error('  launchctl bootout gui/$(id -u)/com.fryanpan.claude-workspaces');
     process.exitCode = 1;
   }
 }

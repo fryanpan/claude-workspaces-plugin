@@ -49,6 +49,7 @@ import {
 import { DEPLOY_RESTART_EXIT_CODE } from '../packages/server/src/deploy-restart.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
 import { resolveStartContract } from '../packages/server/src/start-contract.ts';
+import { STOP_SIGNALS, stopExitCode, stopLogLine } from '../packages/server/src/supervisor-stop.ts';
 
 /**
  * A supervisor diagnostic, with the clock the log file does not provide.
@@ -83,6 +84,20 @@ function arg(name: string): string | undefined {
   return undefined;
 }
 const noWatch = args.includes('--no-watch');
+
+// Armed first, because the boot below can run for minutes and a signal with no
+// handler kills this process, which launchd's KeepAlive does not promise to
+// relaunch. `stopWith` exits until there are children to stop.
+let stopWith: (code: number) => void = (code) => process.exit(code);
+for (const sig of STOP_SIGNALS) {
+  process.on(sig, () => {
+    const code = stopExitCode(sig, noWatch);
+    const line = stopLogLine(sig, code);
+    if (line) note(line);
+    stopWith(code);
+  });
+}
+
 // The bind address, passed through to the server. Unset keeps Bun's wildcard,
 // which the tailnet and LAN addresses need; `--host 127.0.0.1` keeps the
 // server on this machine only.
@@ -320,9 +335,9 @@ const serverArgs = [
   // and a `bun run staging` that fast-forwarded it and bounced the launchd
   // service would be the same class of accident as building bundles there.
   //
-  // Note what enabling this presumes and what it does not: the restart is a
-  // `launchctl kickstart` of the supervised job, which re-reads the plist
-  // launchd already has. It does not reinstall the plist, so the environment
+  // Note what enabling this presumes and what it does not: the restart is
+  // launchd relaunching the supervised job, which re-reads the plist launchd
+  // already has. It does not reinstall the plist, so the environment
   // baked in at install time (CW_PUBLIC_BASE_URL) is carried across a deploy
   // untouched. Changing that is still `scripts/launchd/install.sh`.
   ...(noWatch ? ['--deploy'] : []),
@@ -388,9 +403,9 @@ const stillRunning = (): ChildProcess[] =>
   children().filter((p) => p.exitCode === null && p.signalCode === null);
 
 /** Tear down children + discovery file and exit. `code` decides whether
- *  launchd (KeepAlive: SuccessfulExit=false) respawns us: exit 0 on an
- *  intentional stop (SIGINT/SIGTERM) so we stay down, exit 1 when a child
- *  died or the server went unbound so a fresh, bound server comes up. */
+ *  launchd (KeepAlive: SuccessfulExit=false) respawns us: non-zero always in
+ *  prod, whether a child died, the server went unbound or a stop signal
+ *  arrived (supervisor-stop.ts); 0 only for a stop in a developer's terminal. */
 function cleanup(code: number): void {
   if (cleaningUp) return;
   cleaningUp = true;
@@ -449,8 +464,7 @@ server.on('exit', (code) => {
   setTimeout(() => cleanup(1), FAST_CRASH_HOLD_MS);
 });
 mdApp?.on('exit', () => cleanup(1));
-// Intentional stop → exit 0, no respawn.
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => cleanup(0));
+stopWith = cleanup;
 
 // Health watchdog (prod only). The failure that took prod down was the
 // server process staying ALIVE but no longer LISTENING (a --watch reload
