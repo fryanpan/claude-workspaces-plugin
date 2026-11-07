@@ -514,7 +514,10 @@ bun run machine:move-board --board <id> --project <project> [--dry-run]
 ```
 
 Run on the Mac, after `machine:deploy` has put this commit's image on the
-machine (the importer, `board-probe.ts`, ships in the image). It keeps every
+machine (the importer, `board-probe.ts`, ships in the image). With the keeper,
+`bun run machine:approve-move --board <id> --project <project>` first asks one
+passkey for the deploy, the wall check and the move ("One passkey for a board
+move" in [keeper.md](keeper.md)). It keeps every
 id, so `/workspaces/<id>/…` links work once the router sends the board to the
 machine. In order:
 

@@ -14,6 +14,7 @@
     "machine:network-wall": "bun run infra/project-machine/network-wall.ts",
     "machine:wall-report": "bun run infra/project-machine/wall-report.ts",
     "machine:move-board": "bun run infra/project-machine/move-board.ts",
+    "machine:approve-move": "bun run infra/project-machine/approve-move.ts",
     "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",
     "cf:apply": "bun run infra/cloudflare/run.ts apply",

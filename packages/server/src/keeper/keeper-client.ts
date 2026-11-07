@@ -241,3 +241,35 @@ export async function keeperPushKeys(
   const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
   return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
 }
+
+/**
+ * Ask for one board's move grant on `app` (`keeper-grants.ts`). Always a tap.
+ * The call returns once the owner approved or denied.
+ */
+export async function keeperMoveGrant(
+  origin: string,
+  app: string,
+  board: string,
+  opts: KeeperClientOptions = {},
+): Promise<CloudflareResult> {
+  const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
+  const caller = callerOf(opts);
+  const res = await doFetch(`${origin}/v1/move-grant`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...apiHeaders(caller.token),
+      ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
+    },
+    body: JSON.stringify({ app, board }),
+  });
+  if (!res.headers.has(HELD_HEADER)) {
+    const text = await res.text().catch(() => '');
+    const status = res.ok ? 502 : res.status;
+    const reason = res.ok ? 'the keeper opened a move grant without a tap' : text.slice(0, 300);
+    return { status, body: JSON.stringify({ error: reason }) };
+  }
+  const held = (await res.json()) as HeldAnswer;
+  const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
+  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+}

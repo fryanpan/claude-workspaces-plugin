@@ -176,6 +176,34 @@ project machine. Store it once, piping it in so it is never an argument:
 `machine:deploy --push-repo` then asks the keeper for the keys, and each
 request waits for your passkey with every repo listed on the page.
 
+## One passkey for a board move
+
+Moving a board takes one approval. Run this first:
+
+```bash
+bun run machine:approve-move --board <id> --project <project>
+```
+
+It waits for your passkey. The approval page names the app and the board and
+lists every step it covers: the project's volume, setting and removing
+secrets, its image, and the exact commands of the move and the wall check.
+For 30 minutes those steps run on that one app without another tap. Run
+`machine:deploy`, `machine:wall-report --projects <project>` and
+`machine:move-board` inside that window. The steps are in
+`packages/server/src/keeper/keeper-move-steps.ts`, which the scripts also
+build their commands from.
+
+Each of these still needs its own tap: creating the app, the bucket, push
+keys, any shell command not on the list, a destroy, and any step on another
+project. So a wall report across several projects holds for each other
+project. A new project takes one tap to create and one for the move, because
+a move grant opens only on an app the keeper made or adopted.
+
+**The image step is the widest one.** A machine runs its image as root with
+its secrets, and the keeper cannot check that the build folder is the commit
+it says it is. So for those 30 minutes a caller could put any image on that
+one machine. The page says this.
+
 ## 5. Retire the old tokens
 
 ```bash

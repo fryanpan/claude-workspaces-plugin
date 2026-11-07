@@ -30,23 +30,24 @@
  * project's volume and its secrets. Its image (`fly deploy`), a bucket, a
  * shell and a destroy are a tap each. An `access.open` that succeeds records
  * the new Access application (so revoking it later needs no tap) and opens a
- * 10-minute grant on it, so its policy can be written. Every other held
- * request is one tap each.
+ * 10-minute grant on it, so its policy can be written. A `move.grant` runs
+ * nothing itself and opens a 30-minute grant on one app for one board's listed
+ * steps (`keeper-move-steps.ts`). Every other held request is one tap each.
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { flyConfigFiles, flyConfigsOf } from './keeper-flyconfig.ts';
-import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import {
   ACCESS_GRANT_MS,
   type Grant,
-  type HoldKind,
+  MOVE_GRANT_MS,
+  type MoveGrantCall,
   SETUP_GRANT_MS,
-  type Verdict,
-  classifyCloudflare,
-  classifyFly,
+  classifyMoveGrant,
   grantCovers,
-} from './keeper-policy.ts';
+} from './keeper-grants.ts';
+import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
+import { type HoldKind, type Verdict, classifyCloudflare, classifyFly } from './keeper-policy.ts';
 import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
 import { stageFlyPaths } from './keeper-stage.ts';
 import type { KeeperStore } from './keeper-store.ts';
@@ -82,7 +83,7 @@ export interface CloudflareCall {
   body?: string;
 }
 
-export type KeeperCall = FlyCall | CloudflareCall | PushKeysCall;
+export type KeeperCall = FlyCall | CloudflareCall | PushKeysCall | MoveGrantCall;
 export type KeeperResult = FlyResult | CloudflareResult;
 
 export interface Executors {
@@ -188,7 +189,9 @@ export function createKeeperRequests(deps: {
       ? classifyFly(call.args, deps.store.apps())
       : call.type === 'push-keys'
         ? classifyPushKeys(call.app, call.repos, deps.store.apps())
-        : classifyCloudflare(call.method, call.path, deps.store.accessApps());
+        : call.type === 'move-grant'
+          ? classifyMoveGrant(call.app, call.board, deps.store.apps())
+          : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
   const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
@@ -205,6 +208,7 @@ export function createKeeperRequests(deps: {
   /** `configs` are the ones cleaned at submit: what the owner saw is what fly reads. */
   const run = async (call: KeeperCall, configs: Configs): Promise<KeeperResult> => {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
+    if (call.type === 'move-grant') return { status: 200, body: '{"granted":true}' };
     if (call.type === 'push-keys') {
       if (!deps.exec.pushKeys) throw new Error('this keeper cannot make push keys');
       return deps.exec.pushKeys(call.app, call.repos);
@@ -259,6 +263,11 @@ export function createKeeperRequests(deps: {
       grants.push({ scope: 'fly', target: r.app, expiresAt: now() + SETUP_GRANT_MS });
       log(`project ${r.app} created; setup grant open for 30 minutes`);
     }
+    if (r.call.type === 'move-grant') {
+      const { app: target, board } = r.call;
+      grants.push({ scope: 'fly', target, board, expiresAt: now() + MOVE_GRANT_MS });
+      log(`move of ${board} onto ${target}: grant open for 30 minutes`);
+    }
     if (r.hold === 'access.open' && r.call.type === 'cloudflare') {
       const id = accessAppId((result as CloudflareResult).body);
       if (id) {
@@ -285,9 +294,12 @@ export function createKeeperRequests(deps: {
       }
       const cfPath = call.type === 'cloudflare' ? call.path : null;
       // A push key is a write key to a repo the requester named: always a tap.
+      // A move grant is asked for by name, so no grant can answer for it.
       if (
         verdict.kind === 'routine' ||
-        (call.type !== 'push-keys' && grantCovers(grants, call.type, verdict, cfPath, now()))
+        (call.type !== 'push-keys' &&
+          call.type !== 'move-grant' &&
+          grantCovers(grants, call.type, verdict, cfPath, now()))
       ) {
         log(`ran ${requester}: ${verdict.summary}`);
         return {

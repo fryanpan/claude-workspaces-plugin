@@ -40,12 +40,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { BOARD_ID } from '../../packages/server/src/keeper/keeper-move-steps.ts';
 import { withoutPrivateMeta } from '../../packages/server/src/private-meta.ts';
 
 export const BUNDLE_FORMAT = 'cw-board-bundle-1';
 
 /** A board id as the server mints and checks them. */
-export const BOARD_ID = /^w-[A-Za-z0-9_-]{6,64}$/;
+export { BOARD_ID };
 /** A doc id that is safe as one file name: no slash, no `..`. */
 const DOC_ID = /^(?!\.)[A-Za-z0-9:._-]{1,200}$/;
 

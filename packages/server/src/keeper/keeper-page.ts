@@ -7,6 +7,7 @@
  * not be framed, so no other page can lay a button over "Approve".
  */
 import { randomBytes } from 'node:crypto';
+import { moveSteps } from './keeper-move-steps.ts';
 import { type HoldKind, shellQuote } from './keeper-policy.ts';
 import { type HeldRequest, secretNames } from './keeper-requests.ts';
 
@@ -20,6 +21,8 @@ const WHAT: Record<HoldKind, string> = {
     'Puts a secret on a machine, or opens a shell on it as root. A shell can read and change every secret the machine holds.',
   'access.open':
     'Creates a Cloudflare Access application. Approving also lets its policy, which says who may sign in, be written in the next 10 minutes.',
+  'move.grant':
+    'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. A project, a bucket, a push key and a destroy are a tap each.',
   other: 'A change the keeper does not run without you.',
 };
 
@@ -110,6 +113,12 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
         `<dt>Fly config it uses</dt><dd><code>${escapeHtml(c.path)}</code><pre>${escapeHtml(c.toml)}</pre></dd>`,
       );
     }
+  } else if (r.call.type === 'move-grant') {
+    details.push(`<dt>Board</dt><dd>${escapeHtml(r.call.board)}</dd>`);
+    const steps = moveSteps(r.call.board).map(
+      (s) => `<li>${escapeHtml(s.label)}<pre>${escapeHtml(s.shown)}</pre></li>`,
+    );
+    details.push(`<dt>Every step this covers</dt><dd><ol id="steps">${steps.join('')}</ol></dd>`);
   } else if (r.call.type === 'push-keys') {
     const repos = r.call.repos.map((x) => `<li><code>${escapeHtml(x)}</code></li>`);
     details.push(

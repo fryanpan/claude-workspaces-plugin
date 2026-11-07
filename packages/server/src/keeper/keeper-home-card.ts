@@ -115,6 +115,7 @@ const HOLD_WORDS: Record<string, string> = {
   'project.create': 'create a project',
   'token.move': 'move a credential',
   'access.open': 'open an Access application',
+  'move.grant': 'move a board',
 };
 
 /**

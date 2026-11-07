@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moveCommands } from '../../packages/server/src/keeper/keeper-move-steps.ts';
 import { BOARD_ID, type BoardManifest, MoveRefused, exportBoard } from './board-bundle.ts';
 import {
   type BoardLimits,
@@ -159,13 +160,40 @@ export function syncConfig(manifest: BoardManifest, baseUrl: string, project: st
   };
 }
 
-/** The project machine, over `fly ssh`. */
-async function flyTarget(project: string): Promise<MoveTarget> {
-  const { projectConfig } = await import('./deploy-plan.ts');
+/** The fly calls a move makes, which a test replaces. */
+export interface MoveOps {
+  flyOk(args: string[]): string;
+  onMachine(app: string, command: string): string;
+  keeperStage(prefix: string): { dir: string; share(path: string): void; done(): void };
+  machines(app: string): { id: string; state: string }[];
+  /** Packs `bundleDir` into the file `tgz`. */
+  pack(bundleDir: string, tgz: string): void;
+  sleep(ms: number): Promise<void>;
+}
+
+async function realOps(): Promise<MoveOps> {
   const { machines } = await import('./deploy.ts');
-  const { asCw, flyOk, keeperStage, onMachine } = await import('./mac-ops.ts');
-  const cfg = projectConfig({ project, imageLabel: '0'.repeat(40) });
-  const PROBE = 'bun /app/infra/project-machine/board-probe.ts';
+  const { flyOk, keeperStage, onMachine } = await import('./mac-ops.ts');
+  return {
+    flyOk: (args) => flyOk(args),
+    onMachine,
+    keeperStage,
+    machines,
+    pack(bundleDir, tgz) {
+      const tar = spawnSync(
+        'tar',
+        ['--no-mac-metadata', '--no-xattrs', '-czf', tgz, '-C', bundleDir, '.'],
+        { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } },
+      );
+      if (tar.status !== 0) throw new Error('tar failed');
+    },
+    sleep: (ms) => Bun.sleep(ms),
+  };
+}
+
+/** The project machine, over `fly ssh`. Every command is a step of the move grant. */
+export function flyTarget(app: string, ops: MoveOps): MoveTarget {
+  const { flyOk, onMachine, keeperStage, machines } = ops;
   const lastJson = <T>(out: string): T => {
     const line = out
       .trim()
@@ -176,70 +204,54 @@ async function flyTarget(project: string): Promise<MoveTarget> {
     return JSON.parse(line) as T;
   };
   const machine = () => {
-    const m = machines(cfg.app).find((x) => x.state !== 'destroyed');
-    if (!m) throw new Error(`${cfg.app} has no machine; run machine:deploy first`);
+    const m = machines(app).find((x) => x.state !== 'destroyed');
+    if (!m) throw new Error(`${app} has no machine; run machine:deploy first`);
     return m;
   };
   const started = async (id: string) => {
     for (let i = 0; i < 60; i++) {
-      if (machines(cfg.app).find((x) => x.id === id)?.state === 'started') return;
-      await Bun.sleep(2000);
+      if (machines(app).find((x) => x.id === id)?.state === 'started') return;
+      await ops.sleep(2000);
     }
     throw new Error(`machine ${id} did not start`);
   };
-  const serving = async () => {
+  const serving = async (command: string) => {
     for (let i = 0; i < 60; i++) {
-      const code = onMachine(
-        cfg.app,
-        "curl -s -o /dev/null -w '%{http_code}' -H 'host: localhost:8787' http://127.0.0.1:8787/api/deploy || true",
-      ).trim();
+      const code = onMachine(app, command).trim();
       if (/\d{3}$/.test(code) && !code.endsWith('000')) return;
-      await Bun.sleep(2000);
+      await ops.sleep(2000);
     }
     throw new Error('the board server never answered on loopback');
   };
   return {
-    describe: cfg.app,
+    describe: app,
     async holds(boardId) {
-      return lastJson<{ holds: boolean }>(onMachine(cfg.app, `${PROBE} holds ${boardId}`)).holds;
+      return lastJson<{ holds: boolean }>(onMachine(app, moveCommands(boardId).holds)).holds;
     },
     async importBundle(bundleDir, boardId) {
+      const c = moveCommands(boardId);
       const m = machine();
-      const stage = keeperStage(`${cfg.app}-move-`);
+      const stage = keeperStage(`${app}-move-`);
       try {
         const tgz = join(stage.dir, 'bundle.tgz');
-        const tar = spawnSync(
-          'tar',
-          ['--no-mac-metadata', '--no-xattrs', '-czf', tgz, '-C', bundleDir, '.'],
-          { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } },
-        );
-        if (tar.status !== 0) throw new Error('tar failed');
+        ops.pack(bundleDir, tgz);
         stage.share(tgz);
         // Root-only, so the cw user never reads the board's share rows off the upload.
-        const up = `/data/board-import-${boardId}`;
-        onMachine(cfg.app, `if [ -e ${up} ]; then rm -r ${up}; fi; mkdir -m 700 ${up}`);
-        flyOk(['ssh', 'sftp', 'put', tgz, `${up}/bundle.tgz`, '--app', cfg.app]);
+        onMachine(app, c.prepare);
+        flyOk(['ssh', 'sftp', 'put', tgz, c.upload, '--app', app]);
         try {
-          console.log(`[move-board] ${cfg.app}: holding services off`);
-          onMachine(cfg.app, 'touch /data/maintenance');
-          flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
+          console.log(`[move-board] ${app}: holding services off`);
+          onMachine(app, c.holdOff);
+          flyOk(['machine', 'restart', m.id, '--app', app]);
           await started(m.id);
-          console.log(
-            onMachine(
-              cfg.app,
-              `mkdir ${up}/b && tar --no-same-owner --no-same-permissions -xzf ${up}/bundle.tgz -C ${up}/b && ${PROBE} import ${up}/b`,
-            )
-              .trim()
-              .split('\n')
-              .at(-1),
-          );
+          console.log(onMachine(app, c.importBundle).trim().split('\n').at(-1));
         } finally {
           // Imported, refused or cut short, the machine serves again, the server
           // can read every file the import wrote as root, and the upload is gone.
-          onMachine(cfg.app, `chown -R cw:cw /data/cw; rm -r ${up}; rm -f /data/maintenance`);
-          flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
+          onMachine(app, c.release);
+          flyOk(['machine', 'restart', m.id, '--app', app]);
           await started(m.id);
-          await serving();
+          await serving(c.serving);
         }
       } finally {
         stage.done();
@@ -247,7 +259,7 @@ async function flyTarget(project: string): Promise<MoveTarget> {
     },
     async print(boardId, limits) {
       const l = Buffer.from(JSON.stringify(limits)).toString('base64');
-      return lastJson<BoardPrint>(onMachine(cfg.app, asCw(`${PROBE} fingerprint ${boardId} ${l}`)));
+      return lastJson<BoardPrint>(onMachine(app, moveCommands(boardId).fingerprint(l)));
     },
   };
 }
@@ -270,7 +282,9 @@ async function main(): Promise<void> {
       join(homedir(), 'Library', 'Application Support', 'claude-workspaces', 'data'),
     base: at('source-url') ?? 'http://127.0.0.1:8787',
   };
-  const target = await flyTarget(project);
+  const { projectConfig } = await import('./deploy-plan.ts');
+  const { app } = projectConfig({ project, imageLabel: '0'.repeat(40) });
+  const target = flyTarget(app, await realOps());
   const r = await moveBoard({ boardId, source, target, dryRun: args.includes('--dry-run') });
   const out = at('sync-config');
   if (out) {

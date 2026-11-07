@@ -8,7 +8,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } fr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type StatFn, chainProblems, keeperStartProblems } from '../src/keeper/keeper-guard.ts';
-import { classifyCloudflare, classifyFly, grantCovers } from '../src/keeper/keeper-policy.ts';
+import { grantCovers } from '../src/keeper/keeper-grants.ts';
+import { classifyCloudflare, classifyFly } from '../src/keeper/keeper-policy.ts';
 import { openKeeperStore } from '../src/keeper/keeper-store.ts';
 
 const APPS = ['cw-harborlight'];
