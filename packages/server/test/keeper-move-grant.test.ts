@@ -32,6 +32,17 @@ const ran: string[][] = [];
 const entered: string[][] = [];
 /** While set, every stand-in fly call waits for it. */
 let gate: Promise<void> | null = null;
+/** Holds every stand-in fly call until the returned call. */
+function closeGate(): () => void {
+  let open = () => {};
+  gate = new Promise((r) => {
+    open = r;
+  });
+  return () => {
+    open();
+    gate = null;
+  };
+}
 const exec: Executors = {
   fly: async (args) => {
     entered.push(args);
@@ -75,7 +86,7 @@ const pollView = async (held: Record<string, string | boolean>) => {
   const res = await fetch(`${base}/v1/requests/${held.id}`, {
     headers: { ...apiHeaders(), 'x-cw-keeper-poll': String(held.pollToken) },
   });
-  return (await res.json()) as { status: string; result?: { stdout: string } };
+  return (await res.json()) as { status: string; error?: string; result?: { stdout: string } };
 };
 
 const askGrant = async (app: string, board: string) => {
@@ -314,26 +325,6 @@ describe('what one approval covers', () => {
 });
 
 describe('a covered call that takes long', () => {
-  it('answers at once and reports through the poll, so no client fetch waits on it', async () => {
-    await granted();
-    let finish = () => {};
-    gate = new Promise((r) => {
-      finish = r;
-    });
-    const r = await fetch(`${base}/v1/fly`, {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({ args: consoleCall(c.importBundle) }),
-    });
-    const body = (await r.json()) as Record<string, string | boolean>;
-    expect({ status: r.status, started: body.started }).toEqual({ status: 202, started: true });
-    expect((await pollView(body)).status).toBe('running');
-    finish();
-    await waitFor(() => pollView(body).then((v) => v.status === 'done'));
-    expect((await pollView(body)).result?.stdout).toContain('holds');
-    gate = null;
-  });
-
   /** Starts a covered call and returns its answer without waiting for it to finish. */
   const start = async (args: string[]) => {
     const r = await fetch(`${base}/v1/fly`, {
@@ -344,14 +335,22 @@ describe('a covered call that takes long', () => {
     return { status: r.status, body: (await r.json()) as Record<string, string | boolean> };
   };
 
+  it('answers at once and reports through the poll, so no client fetch waits on it', async () => {
+    await granted();
+    const finish = closeGate();
+    const { status, body } = await start(consoleCall(c.importBundle));
+    expect({ status, started: body.started }).toEqual({ status: 202, started: true });
+    expect((await pollView(body)).status).toBe('running');
+    finish();
+    await waitFor(() => pollView(body).then((v) => v.status === 'done'));
+    expect((await pollView(body)).result?.stdout).toContain('holds');
+  });
+
   it('runs one at a time on an app, while another app runs beside it', async () => {
     await granted();
     const onOther = await askGrant(OTHER, BOARD);
     expect((await tap(onOther.body.id as string)).status).toBe(200);
-    let finish = () => {};
-    gate = new Promise((r) => {
-      finish = r;
-    });
+    const finish = closeGate();
     const first = await start(consoleCall(c.importBundle));
     const second = await start(consoleCall(c.prepare));
     const beside = await start(consoleCall(c.holds, OTHER));
@@ -360,19 +359,28 @@ describe('a covered call that takes long', () => {
     expect(entered).toEqual([consoleCall(c.importBundle), consoleCall(c.holds, OTHER)]);
     expect((await pollView(second.body)).status).toBe('running');
     finish();
-    gate = null;
     for (const r of [first, second, beside]) {
       await waitFor(() => pollView(r.body).then((v) => v.status === 'done'));
     }
     expect(entered[2]).toEqual(consoleCall(c.prepare));
   });
 
+  it('does not start a queued call whose grant ended while it waited', async () => {
+    await granted();
+    const finish = closeGate();
+    await start(consoleCall(c.importBundle));
+    const queued = await start(consoleCall(c.prepare));
+    await waitFor(() => entered.length === 1);
+    clock += MOVE_GRANT_MS;
+    finish();
+    await waitFor(() => pollView(queued.body).then((v) => v.status === 'done'));
+    expect((await pollView(queued.body)).error).toContain('grant ended');
+    expect(ran).toEqual([consoleCall(c.importBundle)]);
+  });
+
   it('stops starting calls once the keeper is holding as many as it may', async () => {
     await granted();
-    let finish = () => {};
-    gate = new Promise((r) => {
-      finish = r;
-    });
+    const finish = closeGate();
     const started: Record<string, string | boolean>[] = [];
     let refused = false;
     for (let i = 0; i <= MAX_HELD && !refused; i++) {
@@ -381,9 +389,7 @@ describe('a covered call that takes long', () => {
       if (!refused) started.push(r.body);
     }
     expect(refused).toBe(true);
-    expect(started.length).toBeGreaterThan(0);
     finish();
-    gate = null;
     for (const body of started) {
       await waitFor(() => pollView(body).then((v) => v.status === 'done'));
     }

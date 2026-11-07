@@ -199,7 +199,8 @@ bun run machine:approve-move --board <id> --project <project>
 It waits for your passkey. The approval page names the app and the board and
 lists every step it covers: the exact commands of the move and the wall check,
 and the upload to that board's folder. For 30 minutes those steps run on that
-one app without another tap, one at a time. Run `machine:wall-report --projects
+one app without another tap, one at a time, and a step still queued when the
+30 minutes end does not start. Run `machine:wall-report --projects
 <project>` and `machine:move-board` inside that window. The steps are in
 `packages/server/src/keeper/keeper-move-steps.ts`, which the scripts also build
 their commands from.

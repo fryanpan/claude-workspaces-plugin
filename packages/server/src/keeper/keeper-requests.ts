@@ -352,7 +352,13 @@ export function createKeeperRequests(deps: {
         // One at a time per app: a second upload must not replace what an import is reading.
         request.status = 'running';
         const app = request.app as string;
-        const next = (lanes.get(app) ?? Promise.resolve()).then(() => execute(request));
+        const next = (lanes.get(app) ?? Promise.resolve()).then(() => {
+          // A call that queued behind others may reach its turn after the grant ended.
+          if (grantCovers(grants, call.type, verdict, cfPath, now())) return execute(request);
+          request.error = 'the grant ended before this step could start';
+          request.status = 'done';
+          request.call = stripInput(request.call);
+        });
         lanes.set(app, next);
         void next.finally(() => {
           if (lanes.get(app) === next) lanes.delete(app);
