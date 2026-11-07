@@ -226,27 +226,26 @@ export function abbreviateHome(path: string, home: string): string {
  * spare the reader. One segment is not always enough: `client/docs/README.md`
  * beside `server/docs/README.md` would leave both rows reading
  * `docs/README.md`, which is the ambiguity again with more words.
+ *
+ * One pass per folder level over only the paths still tied, so a load stays
+ * linear: comparing every pair held the server for 2s at 6,500 rows.
  */
 export function displayNames(relPaths: readonly string[]): Map<string, string> {
-  const paths = [...new Set(relPaths)];
-  const parts = new Map(paths.map((rel) => [rel, rel.split('/').filter((s) => s && s !== '.')]));
-  const label = (rel: string, depth: number): string => {
-    const segs = parts.get(rel) ?? [rel];
-    return segs.slice(-depth).join('/');
-  };
-  const out = new Map<string, string>();
-  for (const rel of paths) {
-    const mine = parts.get(rel) ?? [rel];
-    let depth = 1;
-    while (
-      depth < mine.length &&
-      paths.some((o) => o !== rel && label(o, depth) === label(rel, depth))
-    ) {
-      depth += 1;
+  const paths = [...new Set(relPaths)].map((rel) => ({
+    rel,
+    segs: rel.split('/').filter((s) => s && s !== '.'),
+    label: '',
+  }));
+  let tied = paths;
+  for (let depth = 1; tied.length > 0; depth += 1) {
+    const counts = new Map<string, number>();
+    for (const path of tied) {
+      path.label = path.segs.slice(-depth).join('/');
+      counts.set(path.label, (counts.get(path.label) ?? 0) + 1);
     }
-    out.set(rel, label(rel, depth));
+    tied = tied.filter((path) => path.segs.length > depth && (counts.get(path.label) ?? 0) > 1);
   }
-  return out;
+  return new Map(paths.map((path) => [path.rel, path.label]));
 }
 
 /** One project file the listing offers, with the mount it was found through
