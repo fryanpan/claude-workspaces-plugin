@@ -16,9 +16,14 @@ COPY demos ./demos
 COPY infra/project-machine ./infra/project-machine
 # The server imports the board router's path parser from here.
 COPY infra/board-router-worker ./infra/board-router-worker
+# Root owns /app and the server reads it as `cw`, so every user must be able to
+# read it. A build through the keeper arrives with its folders at 0700
+# (keeper-stage.ts), which root's own checks pass and `cw` cannot enter; the
+# last step here sets the modes whatever the build folder's were.
 RUN bun install --frozen-lockfile \
   && bun run packages/widget/scripts/build.ts \
-  && bun run packages/workspaces-app/scripts/build.ts
+  && bun run packages/workspaces-app/scripts/build.ts \
+  && chmod -R a+rX /app
 
 FROM cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c AS cloudflared
 
