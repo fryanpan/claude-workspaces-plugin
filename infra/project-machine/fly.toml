@@ -10,11 +10,13 @@
 #   CW_SENTRY_SERVER_DSN          optional
 #   CW_ORG_ANTHROPIC_API_KEY      this org's own Anthropic key; without it every
 #                                 Claude call is refused (project-profile.ts)
-#   CLAUDE_CODE_OAUTH_TOKEN       the lead agent's Claude Code sign-in, made for
-#                                 this org alone with one browser approval
-#                                 (org-signin.ts); kept nowhere on the Mac
-#   CW_LEAD_TOKEN_ORG             the org that sign-in was made for; a lead
-#                                 starts only when it names this app's org
+#   CLAUDE_CODE_OAUTH_TOKEN       the lead agent's Claude Code sign-in: a token
+#                                 from the central list (token-list.ts), or with
+#                                 an empty list one browser approval's
+#                                 (org-signin.ts)
+#   CW_LEAD_TOKEN_ORG             the org that sign-in was set for: its name, or
+#                                 for a listed token a digest of org, label and
+#                                 token; a lead starts only when it matches
 #   CW_LEAD_BOARD                 the board the lead leads; without it and the
 #                                 sign-in no lead runs (entrypoint.sh)
 #   CW_LEAD_GITHUB_DEPLOY_KEY     the project repo's deploy key, BASE64; only the

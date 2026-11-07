@@ -2,8 +2,9 @@
 # The project's lead agent: one long-lived Claude Code session in a tmux
 # session named `lead`, run as the `lead` user. entrypoint.sh starts
 # `lead.sh supervise` as that user, with an environment of its own: the
-# Claude Code sign-in (CLAUDE_CODE_OAUTH_TOKEN), its board's socket
-# (CW_BOARD_SOCKET), the agent's name (CW_AGENT_NAME) and, when the project
+# Claude Code sign-in (CLAUDE_CODE_OAUTH_TOKEN) and its label on the central
+# list (CW_LEAD_TOKEN_LABEL), its board's socket (CW_BOARD_SOCKET), the
+# agent's name (CW_AGENT_NAME) and, when the project
 # has one, the repo's deploy key (CW_LEAD_GITHUB_DEPLOY_KEY), and none of the
 # machine's other secrets. Root starts this again if it exits.
 #
@@ -49,6 +50,18 @@ prepare() {
       "$WORK" >"$HOME/.claude.json" || return 1
   fi
   deploy_key || return 1
+  usage_report
+}
+
+# What machine:tokens reads (token-usage.ts): the token's label, which this
+# run only has if the entrypoint accepted the marker, and the status line
+# command that keeps the session's rate limits (lead-usage.ts). A failure here
+# costs a reading, not the lead.
+usage_report() {
+  printf '%s\n' "${CW_LEAD_TOKEN_LABEL:-}" >"$LEAD_ROOT/token-label" ||
+    log "could not record the token's label"
+  printf '{"statusLine":{"type":"command","command":"bun %s/infra/project-machine/lead-usage.ts"}}\n' \
+    "$APP" >"$HOME/.claude/settings.json" || log "could not set the status line"
 }
 
 # The project repo's read-only deploy key, for git over SSH. It arrives

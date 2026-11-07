@@ -265,8 +265,10 @@ bun run machine:deploy --project <project> --memory 2048 \
 
 - `--lead-board` sets `CW_LEAD_BOARD`. Without a board no lead runs, and the
   deploy sends no sign-in, though the Mac's Keychain holds one.
-- The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`, a token made for this org alone
-  (re-review finding H2). The first deploy of an org with a lead runs
+- The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`. A deploy takes it from the central
+  list when the list holds a token (see [The central token list](#the-central-token-list)),
+  and asks for no sign-in. With an empty list it is a token made for this org
+  alone (re-review finding H2): the first deploy of an org with a lead runs
   `claude setup-token`, which opens Bryan's browser: one approval per org, and
   the token lasts a year. The deploy sets it on that org's app beside
   `CW_LEAD_TOKEN_ORG=<project>` and keeps it nowhere on the Mac, not in the
@@ -275,14 +277,20 @@ bun run machine:deploy --project <project> --memory 2048 \
   approval and says one is due. CI never asks: a run there sets no sign-in
   and says why.
 - The machine starts its lead only when `CW_LEAD_TOKEN_ORG` names its own
-  org (`entrypoint.sh`), so a token set by hand, or the one every lead used
-  to share, starts no lead. The next deploy on the Mac sees no
-  `CW_LEAD_TOKEN_ORG` and asks for the org's approval.
+  org or, for a listed token, holds a digest of its org, the label and that
+  exact token (`entrypoint.sh`). So a token with no marker, or one set over a
+  listed marker, starts no lead. A token set by hand over an org-name marker
+  still does. The next deploy on the Mac sees no
+  `CW_LEAD_TOKEN_ORG` and sets a listed token, or asks for the org's approval.
 - The Mac's walled lead keeps its own Keychain sign-in,
   `claude-lead-oauth-token` (`scripts/lead-sandbox-token.ts`); no org's lead
   is given it. `--claude-account` is gone.
-- Revoke one org's sign-in at claude.ai/settings/claude-code; no other org
-  loses its lead. `--refresh-lead` then makes the org a new one.
+- Revoke a sign-in made for one org at claude.ai/settings/claude-code; no other
+  org loses its lead. `--refresh-lead` then makes the org a new one. With
+  tokens on the list, `--refresh-lead` must name one with `--claude-token`.
+- `--claude-token <label>` picks a listed token and sets it again on a run
+  that names it. Without it a deploy that needs a token takes the first listed,
+  and only a deploy of an image holding this code can set one.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private
   key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
   The deploy sets it only once GitHub lists it read-only: it reads the deploy
@@ -361,6 +369,68 @@ Detach with `Ctrl-b d`; exiting Claude Code ends the session, and the
 supervisor starts another. `fly secrets set CW_LEAD_REMOTE_CONTROL=1` starts
 each session with Remote Control, named after the agent (the flag is in the
 pinned Claude Code build).
+
+## The central token list
+
+Long-lived Claude tokens live in one list on the Mac, so a new project signs in
+with no browser approval and a project can be moved between tokens to manage
+usage.
+
+**The list holds only accounts Bryan owns, never another person's** (his
+answer on the board, 2026-11-07: "My own accounts"). Anthropic's terms bar
+routing work through another person's account. Whether moving work between
+accounts one person owns is allowed is not settled by anything published: the
+text does not address it, and it bars acts that "bypass or interfere with"
+product restrictions without saying whether usage limits count.
+
+Each token is a Keychain entry `claude-token-list-<n>` holding a label, the
+token and the day it was added (`infra/project-machine/token-list.ts`). Read a
+label, never a value:
+
+| Step | Command |
+|---|---|
+| See the list | `bun run machine:tokens list` |
+| Add the account signed in to this Mac's browser | `bun run machine:tokens add --label <name>` |
+| Add a token already made | `bun run machine:tokens add --label <name> --stdin` |
+| Read each token's usage | `bun run machine:tokens usage [--project <name>]` |
+| Move a project | `bun run machine:tokens move --project <name> --to <label>` |
+
+- A label is a name for an account, not an address: a-z, 0-9 and `-`.
+- A deploy that needs a token takes the first listed one, or the label
+  `--claude-token` names. It sets the token and a marker
+  (`listed:<label>:<sha256 of org, label and token>`) in `CW_LEAD_TOKEN_ORG`.
+- **A move** is `fly secrets import` without `--stage`, which sets both and
+  restarts the machine in one call. The board is down for a boot and the lead
+  resumes its conversation. The move then waits until the machine reports the
+  new label. That shows the machine took the token, not that Claude accepted
+  it. Through the keeper that is two taps on an app the keeper created: the
+  import and the `fly ssh console`. A live setup grant covers the import, and
+  on any other app the two reads before it are a tap each. It refuses, before
+  any change, a project with no lead or a machine on an image older than this
+  code, whose entrypoint would read the marker as another org's and start no
+  lead. Deploy that project first. A move off a token made for one org leaves
+  that token live for up to a year, so revoke it.
+- **Usage** comes from Claude Code's status line. `lead.sh` installs
+  `lead-usage.ts` as the lead's status line command, which keeps
+  `rate_limits` (5-hour and 7-day percentages and end times) in
+  `/data/lead/usage.json`. `machine:tokens usage` reads that file as the `lead`
+  user over `fly ssh console`, one tap per project through the keeper. It shows
+  each listed token's newest reading from the projects on it now, so a token
+  no project runs on has no reading. The file is the lead's to write, so a
+  steered lead can misreport its own token.
+- **Unproven: whether `rate_limits` appears for a session signed in with
+  `CLAUDE_CODE_OAUTH_TOKEN`.** The docs do not say, and give it only on Pro,
+  Max and Ultra plans, after a session's first answer. The first real read
+  answers it: `the status line ran on <project>, with no rate_limits so far`,
+  after the lead's first answer, means it does not. The undocumented OAuth usage endpoint is not used.
+- **Sharing a token gives up per-org revocation.** Every project on a listed
+  token holds the same value. A lead can spend or send away its own sign-in
+  (`docs/architecture/security.md`), so a token leaked from one project works
+  for all of them, and revoking it stops every lead on it until each is moved.
+- **Retire a token** by moving its projects off, revoking it at
+  claude.ai/settings/claude-code, and removing its entry:
+  `security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.claude-token-list-<n>`.
+  A setup token lasts a year; `machine:tokens list` shows when each runs out.
 
 Still unchecked on a real machine: whether a `setup-token` sign-in allows
 Remote Control; whether Claude Code asks anything on its first run that the
