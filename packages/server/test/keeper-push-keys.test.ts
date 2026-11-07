@@ -269,6 +269,12 @@ describe('a push-key request through the keeper', () => {
   });
   afterAll(() => keeper?.stop());
 
+  it('refuses a request without the API header or the caller token', async () => {
+    const body = { app: APP, repos: REPOS };
+    expect((await post('/v1/push-keys', body, {})).status).toBe(403);
+    expect((await post('/v1/push-keys', body, { 'x-cw-keeper': '1' })).status).toBe(401);
+  });
+
   it('waits for the owner’s passkey, shows every repo, and runs only then', async () => {
     const res = await post('/v1/push-keys', { app: APP, repos: REPOS }, api());
     expect(res.status).toBe(202);

@@ -124,6 +124,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         pollToken: s.request.pollToken,
         hold: s.request.hold,
         summary: s.request.summary,
+        ...(s.outcome === 'started' ? { started: true } : {}),
         approveUrl: `${origin}/approve/${s.request.id}`,
       },
       { [HELD_HEADER]: '1' },
@@ -187,6 +188,8 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       // ── The agent API ───────────────────────────────────────────────────
       if (
         path === '/v1/fly' ||
+        path === '/v1/move-grant' ||
+        path === '/v1/push-keys' ||
         path.startsWith('/v1/cloudflare/') ||
         (path.startsWith('/v1/requests/') && (method === 'GET' || method === 'DELETE'))
       ) {
@@ -221,6 +224,15 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
           type: 'push-keys',
           app: body.app as string,
           repos: body.repos as string[],
+        };
+        return answer(await requests.submit(call, requester));
+      }
+      if (method === 'POST' && path === '/v1/move-grant') {
+        const body = await readJson(req);
+        const call: KeeperCall = {
+          type: 'move-grant',
+          app: body.app as string,
+          board: body.board as string,
         };
         return answer(await requests.submit(call, requester));
       }

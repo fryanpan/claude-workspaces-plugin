@@ -18,6 +18,7 @@ scripts that stand it up. How to run them is
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |
 | `store-uploader.ts`, `store-upload.ts` | any machine running sessions | Every 5 minutes, sends the new lines of each Claude Code transcript and analytics log to the transcript store, each sealed to its board's key; local-only boards never leave. Not installed anywhere yet |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
+| `bun run machine:approve-move --board <id> --project <name>` | the Mac | Asks one passkey that covers that board's wall check and move on that project for 30 minutes (`docs/process/keeper.md`). |
 | `bun run machine:move-board --board <id> --project <name>` | the Mac | Moves one board onto the machine with the same ids (`board-bundle.ts`, `board-print.ts`), and archives the Mac's copy only when both fingerprints match |
 | `board-probe.ts` | the machine | The move's importer and fingerprint, on loopback |
 | `bun run machine:tokens` (`tokens.ts`, `token-list.ts`, `token-move.ts`, `token-usage.ts`) | the Mac | The central list of long-lived Claude tokens, of accounts Bryan owns only: add one, read each token's usage, move a project to another (`docs/process/project-machine.md`) |
