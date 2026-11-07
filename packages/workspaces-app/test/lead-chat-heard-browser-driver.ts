@@ -68,6 +68,9 @@ export interface HeardRun {
   /** The line before a word was heard, saying "Listening…". */
   idle: LineRead;
   steps: LineRead[];
+  /** The bar at 1180 only: a line that fits, then the same line on a page
+   *  narrowed to 430 with no new word heard. */
+  narrowed?: { before: LineRead; after: LineRead };
 }
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
@@ -265,6 +268,26 @@ async function main(): Promise<void> {
             }),
           );
         }
+        let narrowed: HeardRun['narrowed'];
+        if (place === 'bar' && width === 1180) {
+          const fits = 'ferry08';
+          const before = await until('a line that fits', async () => {
+            hear?.({ turn: 0, text: wordsTo(8), final: false });
+            const r = (await cdp.evaluate(READ_LINE(place, fits))) as LineRead | null;
+            return r?.lastVisible && r.firstVisible ? r : null;
+          });
+          await cdp.send('Emulation.setDeviceMetricsOverride', {
+            width: 430,
+            height,
+            deviceScaleFactor: 1,
+            mobile: false,
+          });
+          const after = await until('the fade after the page narrowed', async () => {
+            const r = (await cdp.evaluate(READ_LINE(place, fits))) as LineRead | null;
+            return r && r.fade !== 'none' ? r : null;
+          });
+          narrowed = { before, after };
+        }
         if (shots) {
           const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
             data: string;
@@ -274,7 +297,7 @@ async function main(): Promise<void> {
             Buffer.from(png.data, 'base64'),
           );
         }
-        runs.push({ width, place, idle, steps });
+        runs.push({ width, place, idle, steps, ...(narrowed ? { narrowed } : {}) });
         cdp.close();
         // A browser left open keeps listening, and its listener would take `hear`.
         const open = browsers.pop();

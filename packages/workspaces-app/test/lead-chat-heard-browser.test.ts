@@ -76,4 +76,11 @@ describe.skipIf(CHROME === null)('the heard line in a browser', () => {
       }
     }
   }, 60_000);
+
+  it('measures the fade again when the chat narrows between words', () => {
+    const narrowed = runs.find((r) => r.narrowed)?.narrowed;
+    expect(narrowed?.before.fade).toBe('none');
+    expect(narrowed?.after.firstVisible).toBe(false);
+    expect(narrowed?.after.lastVisible).toBe(true);
+  }, 60_000);
 });
