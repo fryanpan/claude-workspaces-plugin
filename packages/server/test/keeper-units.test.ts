@@ -7,8 +7,9 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { grantCovers } from '../src/keeper/keeper-grants.ts';
 import { type StatFn, chainProblems, keeperStartProblems } from '../src/keeper/keeper-guard.ts';
-import { classifyCloudflare, classifyFly, grantCovers } from '../src/keeper/keeper-policy.ts';
+import { classifyCloudflare, classifyFly } from '../src/keeper/keeper-policy.ts';
 import { openKeeperStore } from '../src/keeper/keeper-store.ts';
 
 const APPS = ['cw-harborlight'];

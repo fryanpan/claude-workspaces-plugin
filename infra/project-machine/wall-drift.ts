@@ -9,11 +9,12 @@
  * exists, so a changed Access audience, a widened CW_PROXIED_TRUSTED_EMAILS
  * or a hand-set `fly secrets` value would otherwise drift with nobody told.
  */
+import { WALL_PROBE } from '../../packages/server/src/keeper/keeper-move-steps.ts';
 import type { StaticVars } from '../cloudflare/vars.ts';
 import type { MachineFacts } from './machine-facts.ts';
 import { SETTING_NAMES } from './settings.ts';
 
-export const PROBE = 'bun /app/infra/project-machine/wall-probe.ts';
+export const PROBE = WALL_PROBE;
 export const appFor = (project: string): string => `cw-${project}`;
 
 /** The last JSON line of a command's output; `fly ssh` prints its own lines first. */

@@ -32,8 +32,8 @@ async function run(cmd: string | undefined, a: string | undefined, b: string | u
         'refusing to import while the server runs: touch /data/maintenance and restart',
       );
     }
-    if (!a) throw new Error('import <bundle dir>');
-    const m = importBoard(a, DATA);
+    if (!a) throw new Error('import <bundle dir> <board>');
+    const m = importBoard(a, DATA, board(b));
     return { imported: m.boardId, files: m.files.length };
   }
   if (cmd === 'fingerprint') {

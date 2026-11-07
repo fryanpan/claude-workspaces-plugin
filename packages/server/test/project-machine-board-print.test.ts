@@ -101,6 +101,45 @@ describe('a listed doc the server does not have', () => {
   });
 });
 
+describe('the share rows of a moved board', () => {
+  const rows = (...links: [string, string][]) =>
+    JSON.stringify({
+      links: links.map(([linkId, workspaceId]) => ({ linkId, workspaceId, redemptions: [] })),
+      members: [],
+      audiences: [],
+    });
+  const printOf = async (name: string, shareLinks: string, shares: unknown[]) => {
+    const dir = join(scratch, `shares-${name}`);
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'share-links.json'), shareLinks);
+    writeFileSync(join(dir, 'shares.json'), JSON.stringify(shares));
+    return boardPrint(loopbackGet(fakeServer({})), dir, BOARD);
+  };
+  const OTHER = 'w-River09';
+  const share = { shareId: 's-1', workspaceId: BOARD };
+
+  it('match whatever other boards hold', async () => {
+    const before = await printOf('source', rows(['l-1', BOARD], ['l-2', OTHER]), [share]);
+    const after = await printOf('target', rows(['l-1', BOARD], ['l-3', OTHER]), [
+      share,
+      { shareId: 's-2', workspaceId: OTHER },
+    ]);
+    expect(before.shares.count).toBe(2);
+    expect(judgeMove(before, after).ok).toBe(true);
+  });
+
+  it('fail the move when an import planted a link or a share', async () => {
+    const before = await printOf('plain', rows(['l-1', BOARD]), [share]);
+    const link = await printOf('link', rows(['l-1', BOARD], ['l-planted', BOARD]), [share]);
+    const verdict = judgeMove(before, link);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lines.find((l) => l.includes('shares'))).toStartWith('FAIL shares: 2 -> 3');
+    const planted = { shareId: 's-planted', workspaceId: BOARD };
+    const row = await printOf('share', rows(['l-1', BOARD]), [share, planted]);
+    expect(judgeMove(before, row).ok).toBe(false);
+  });
+});
+
 describe('the export of a board with a dangling doc id', () => {
   const sourceDir = join(scratch, 'source');
   const targetDir = join(scratch, 'target');

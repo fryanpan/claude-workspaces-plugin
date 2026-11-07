@@ -1,7 +1,7 @@
 /**
  * One board's fingerprint, read the way a person and an agent read it: its
- * docs' text, every thread and comment on its docs and rows, its tasks, and
- * its two append-only logs. `move-board.ts` takes one on the source before
+ * docs' text, every thread and comment on its docs and rows, its tasks, its
+ * share rows, and its two append-only logs. `move-board.ts` takes one on the source before
  * the export and one on the target after the import, and archives the source
  * only when they match. It runs on the Mac against the source and, through
  * `board-probe.ts`, on the machine against the target, both on loopback.
@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MERGES, pick } from './board-bundle.ts';
 import { type LogFingerprint, logFingerprint } from './deploy-plan.ts';
 
 export interface Part {
@@ -26,6 +27,8 @@ export interface BoardPrint {
   docs: Part;
   threads: Part;
   tasks: Part;
+  /** Link, member, audience and share rows: who an import lets in after a move grant ends. */
+  shares: Part;
   events: LogFingerprint;
   notes: LogFingerprint;
   /** Listed doc ids the server has neither content nor threads for. */
@@ -39,6 +42,19 @@ const hex = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 function part(lines: string[]): Part {
   return { count: lines.length, sha256: hex([...lines].sort().join('\n')) };
+}
+
+/** The board's rows in the two files that say who may reach it. */
+function shareRows(dataDir: string, boardId: string): string[] {
+  return MERGES.filter((r) => r.file === 'share-links.json' || r.file === 'shares.json').flatMap(
+    (rule) => {
+      const path = join(dataDir, rule.file);
+      if (!existsSync(path)) return [];
+      const got = pick(rule, readFileSync(path, 'utf8'), boardId) ?? [];
+      const rows = Array.isArray(got) ? got : Object.values(got as object).flat();
+      return rows.map((r) => `${rule.file}\t${JSON.stringify(r)}`);
+    },
+  );
 }
 
 type Call = (path: string) => Promise<Record<string, unknown>>;
@@ -133,6 +149,7 @@ export async function boardPrint(
     docs: part(docs),
     threads: part(threads),
     tasks: part(tasks),
+    shares: part(shareRows(dataDir, boardId)),
     events: log('.events.jsonl', limits.events),
     notes: log('.agent-notes.jsonl', limits.notes),
     dangling,
@@ -148,7 +165,7 @@ export function boardLimits(before: BoardPrint): BoardLimits {
 export function judgeMove(before: BoardPrint, after: BoardPrint): { ok: boolean; lines: string[] } {
   const rows = [
     { what: 'name', b: 1, a: 1, same: before.name === after.name, sha: hex(before.name) },
-    ...(['docs', 'threads', 'tasks'] as const).map((k) => ({
+    ...(['docs', 'threads', 'tasks', 'shares'] as const).map((k) => ({
       what: k,
       b: before[k].count,
       a: after[k].count,

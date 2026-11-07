@@ -27,6 +27,8 @@ export interface HeldAnswer {
   hold: string;
   summary: string;
   approveUrl: string;
+  /** A grant covered the call: it is already running, and needs no tap. */
+  started?: boolean;
 }
 
 export interface KeeperClientOptions {
@@ -88,10 +90,14 @@ async function waitForApproval<T>(
   doFetch: typeof fetch,
   callerToken: string | null,
 ): Promise<Waited<T>> {
-  opts.onHeld?.(held);
-  opts.announce?.(held);
-  let deadline = Date.now() + (opts.waitMs ?? 10 * 60_000);
-  let running = false;
+  // A grant covered it: it is running, and nobody needs to be told to tap.
+  if (!held.started) {
+    opts.onHeld?.(held);
+    opts.announce?.(held);
+  }
+  const runLimit = () => Date.now() + (opts.runMs ?? FLY_TIMEOUT_MS + 60_000);
+  let running = held.started === true;
+  let deadline = running ? runLimit() : Date.now() + (opts.waitMs ?? 10 * 60_000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, opts.pollMs ?? 1000));
     const res = await doFetch(`${origin}/v1/requests/${held.id}`, {
@@ -109,7 +115,7 @@ async function waitForApproval<T>(
     // Approved: the tap wait no longer applies, the run's own limit does.
     if (view.status === 'running' && !running) {
       running = true;
-      deadline = Date.now() + (opts.runMs ?? FLY_TIMEOUT_MS + 60_000);
+      deadline = runLimit();
     }
   }
   if (running) {
@@ -235,6 +241,38 @@ export async function keeperPushKeys(
     const text = await res.text().catch(() => '');
     const status = res.ok ? 502 : res.status;
     const reason = res.ok ? 'the keeper ran a push-key request without a tap' : text.slice(0, 300);
+    return { status, body: JSON.stringify({ error: reason }) };
+  }
+  const held = (await res.json()) as HeldAnswer;
+  const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
+  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+}
+
+/**
+ * Ask for one board's move grant on `app` (`keeper-grants.ts`). Always a tap.
+ * The call returns once the owner approved or denied.
+ */
+export async function keeperMoveGrant(
+  origin: string,
+  app: string,
+  board: string,
+  opts: KeeperClientOptions = {},
+): Promise<CloudflareResult> {
+  const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
+  const caller = callerOf(opts);
+  const res = await doFetch(`${origin}/v1/move-grant`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...apiHeaders(caller.token),
+      ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
+    },
+    body: JSON.stringify({ app, board }),
+  });
+  if (!res.headers.has(HELD_HEADER)) {
+    const text = await res.text().catch(() => '');
+    const status = res.ok ? 502 : res.status;
+    const reason = res.ok ? 'the keeper opened a move grant without a tap' : text.slice(0, 300);
     return { status, body: JSON.stringify({ error: reason }) };
   }
   const held = (await res.json()) as HeldAnswer;

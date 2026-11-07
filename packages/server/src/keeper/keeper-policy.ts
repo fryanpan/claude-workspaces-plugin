@@ -21,6 +21,8 @@
  * list of what may not can. A Cloudflare call this file does not name is
  * held.
  *
+ * What one approval opens afterwards is `keeper-grants.ts`.
+ *
  * **Refused**: a request whose answer would hand a credential to the
  * requester, which no approval makes safe because the requester is an agent.
  * `fly auth` prints the token, `fly tokens` mints new ones, `fly orgs`
@@ -32,7 +34,7 @@
  */
 import { APP_NAME } from './keeper-store.ts';
 
-export type HoldKind = 'project.create' | 'token.move' | 'access.open' | 'other';
+export type HoldKind = 'project.create' | 'token.move' | 'access.open' | 'move.grant' | 'other';
 
 export type Verdict =
   | { kind: 'routine'; app: string | null; summary: string }
@@ -43,6 +45,8 @@ export type Verdict =
       summary: string;
       /** A project-setup command a setup grant on `app` may run without a tap. */
       setup?: boolean;
+      /** A fly call's argv, which a move grant reads (`keeper-grants.ts`). */
+      args?: readonly string[];
     }
   | { kind: 'refused'; reason: string };
 
@@ -357,7 +361,7 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
         reason: `fly deploy takes one build folder and only --${Object.keys(DEPLOY.flags).join(', --')}`,
       };
     }
-    return { kind: 'held', hold: 'other', app, summary, setup: false };
+    return { kind: 'held', hold: 'other', app, summary, setup: false, args: argv };
   }
   if (app !== null && apps.includes(app) && matches(argv, ROUTINE_ON_OURS)) {
     return { kind: 'routine', app, summary };
@@ -380,7 +384,7 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
     return { kind: 'held', hold: 'project.create', app: name, summary };
   }
   const setup = app !== null && matches(argv, SETUP_ON_GRANTED);
-  return { kind: 'held', hold: held.hold, app, summary, setup };
+  return { kind: 'held', hold: held.hold, app, summary, setup, args: argv };
 }
 
 const CF_PATH = /^\/[A-Za-z0-9_.\-/]*$/;
@@ -457,41 +461,4 @@ export function classifyCloudflare(
     return { kind: 'routine', app: null, summary };
   }
   return { kind: 'held', hold: 'other', app: null, summary };
-}
-
-/** A grant one approval opened: later held requests it covers run without a tap. */
-export interface Grant {
-  /** A Fly app (`fly`), or a Cloudflare path prefix (`cloudflare`). */
-  scope: 'fly' | 'cloudflare';
-  target: string;
-  expiresAt: number;
-}
-
-export const SETUP_GRANT_MS = 30 * 60_000;
-export const ACCESS_GRANT_MS = 10 * 60_000;
-
-/** Whether a live grant covers this held request. */
-export function grantCovers(
-  grants: readonly Grant[],
-  scope: 'fly' | 'cloudflare',
-  verdict: Extract<Verdict, { kind: 'held' }>,
-  cfPath: string | null,
-  now: number,
-): boolean {
-  return grants.some((g) => {
-    if (g.scope !== scope || g.expiresAt <= now) return false;
-    if (scope === 'fly') {
-      // Only a listed setup command, on exactly the app the grant was opened on.
-      return (
-        verdict.setup === true && verdict.hold !== 'project.create' && verdict.app === g.target
-      );
-    }
-    // A grant on an Access app covers writes to that app and its policies,
-    // never a new app: that is a new `access.open` and a new tap.
-    const pathname = (cfPath ?? '').split('?', 1)[0] ?? '';
-    return (
-      verdict.hold !== 'access.open' &&
-      (pathname === g.target || pathname.startsWith(`${g.target}/`))
-    );
-  });
 }
