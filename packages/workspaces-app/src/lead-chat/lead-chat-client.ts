@@ -3,10 +3,11 @@
  * message, and hear every change on the board's own stream.
  *
  * The stream frame carries the whole message, so a change is applied in
- * place with no read. A stream that dropped and came back may have missed
- * frames, so a reconnect reads the conversation again — the frames are
- * transient (`lead-chat/lead-chat.ts` on the server) and a gap is never
- * replayed.
+ * place with no read. The frames are transient (`lead-chat/lead-chat.ts` on
+ * the server) and a gap is never replayed, so the conversation is read again
+ * whenever a stream comes up that may have missed one: after a drop, and on
+ * the first open of a stream that was still connecting when the first read
+ * went out. A message written between that read and that open is in neither.
  *
  * The first read holds the latest page; `loadOlder` pages back from the
  * oldest message shown until the server says there is nothing before it.
@@ -156,7 +157,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     (opts.openStream
       ? opts.openStream(boardStreamUrl(opts.workspaceId))
       : openBoardStream(opts.workspaceId));
-  let dropped = false;
+  // Not OPEN yet: this page cannot hear a frame until it is.
+  let dropped = stream.readyState !== 1;
   stream.addEventListener(LEAD_CHAT_EVENT, (ev) => {
     try {
       const frame = JSON.parse((ev as MessageEvent).data) as LeadChatFrame;

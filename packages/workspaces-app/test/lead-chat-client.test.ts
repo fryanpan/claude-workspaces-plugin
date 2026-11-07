@@ -1,7 +1,7 @@
 /**
  * The lead chat's page client: it reads the board's conversation, applies a
  * frame from the board stream in place, folds the POST's own answer in once,
- * and reads again when a dropped stream comes back.
+ * and reads again when a stream it could not yet hear comes up.
  */
 import {
   LEAD_CHAT_MEETING_EVENT,
@@ -15,6 +15,8 @@ import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 class FakeStream {
   listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
   closed = false;
+  /** CONNECTING, as a stream opened for this client is. */
+  readyState = 0;
   constructor(readonly url: string) {}
   addEventListener(type: string, fn: (ev: MessageEvent) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
@@ -150,19 +152,56 @@ describe('the lead chat client', () => {
     expect(client.state().leadModel?.model).toBe('sonnet');
   });
 
-  it('reads again when a dropped stream comes back, and not on its first open', async () => {
+  it('shows a message written after its first read and before its stream opened', async () => {
+    // The answer lands in the gap: too late for the first read, too early for
+    // a frame, because the server replays nothing to a first connection.
     const { client, calls, stream } = setup([
+      { lead: null, messages: [], canTalk: true },
+      { lead: null, messages: [msg('in-the-gap', 'the written answer', 5)], canTalk: true },
+    ]);
+    await settle();
+    expect(client.state().messages).toEqual([]);
+    stream().fire('open');
+    await settle();
+    expect(calls).toHaveLength(2);
+    expect(client.state().messages.map((m) => m.id)).toEqual(['in-the-gap']);
+  });
+
+  it('reads once on a stream that was already open, which has no gap', async () => {
+    const shared = new FakeStream('shared');
+    shared.readyState = 1;
+    let reads = 0;
+    createLeadChatClient({
+      workspaceId: 'w-harbor',
+      stream: shared as unknown as EventSource,
+      fetch: (async () => {
+        reads++;
+        return new Response(JSON.stringify({ lead: null, messages: [], canTalk: true }));
+      }) as unknown as typeof fetch,
+    });
+    await settle();
+    expect(reads).toBe(1);
+    // Frames from here on arrive in order; only a drop can lose one.
+    shared.fire('error');
+    shared.fire('open');
+    await settle();
+    expect(reads).toBe(2);
+  });
+
+  it('reads again when a dropped stream comes back', async () => {
+    const { client, calls, stream } = setup([
+      { lead: null, messages: [], canTalk: true },
       { lead: null, messages: [], canTalk: true },
       { lead: null, messages: [msg('missed', 'while away', 5)], canTalk: true },
     ]);
     await settle();
     stream().fire('open');
     await settle();
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     stream().fire('error');
     stream().fire('open');
     await settle();
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(client.state().messages.map((m) => m.id)).toEqual(['missed']);
     client.close();
     expect(stream().closed).toBe(true);
