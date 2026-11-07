@@ -148,6 +148,8 @@ interface Page {
   cdp: Cdp;
   read: () => Promise<LeadVerbsReading>;
   settle: () => Promise<LeadVerbsReading>;
+  /** Run a scroll, then wait for the margin to restack against it. */
+  scrollAndRestack: (scroll: string) => Promise<void>;
   tap: (x: number, y: number) => Promise<void>;
 }
 
@@ -220,6 +222,12 @@ async function openPage(
         diagramHeight: diagram ? Math.round(diagram.getBoundingClientRect().height) : null,
       };
     };
+    // The margin redraws every leader line each time it restacks, and it
+    // restacks 100ms after a scroll stops, so this counts its passes.
+    window.__restacks = 0;
+    new MutationObserver(() => {
+      window.__restacks += 1;
+    }).observe(document.querySelector('.cw-leader-overlay'), { childList: true });
     return true;
   })()`);
   const read = async () => (await cdp.evaluate('__read()')) as LeadVerbsReading;
@@ -229,6 +237,17 @@ async function openPage(
     settle: async () => {
       await cdp.evaluate('__settled()');
       return read();
+    },
+    scrollAndRestack: async (scroll) => {
+      // In one evaluate, so a pass already due cannot count as this one.
+      const passes = await cdp.evaluate(
+        `(() => { const passes = window.__restacks; ${scroll}; return passes; })()`,
+      );
+      // No column at phone width: the box sits in the doc's flow.
+      if (touch) return;
+      await until('the margin to restack after the scroll', async () =>
+        (await cdp.evaluate(`window.__restacks > ${passes}`)) ? true : null,
+      );
     },
     tap: async (x, y) => {
       if (touch) {
@@ -367,7 +386,9 @@ async function scenario(
       typed,
     });
     if (edit.scrollAway) {
-      await page.cdp.evaluate(home);
+      // The reading the next step starts from is the box at rest. Before the
+      // restack it is still where the last scroll left it.
+      await page.scrollAndRestack(home);
       await page.settle();
     }
   }
