@@ -112,7 +112,6 @@ export const LAYER_STYLES = `
 .lc-tools-toggle .lc-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
 .lc-tools-toggle[aria-pressed="true"] .lc-sw { background: var(--accent, #2e7dd7); }
 .lc-tools-toggle[aria-pressed="true"] .lc-sw::after { left: 12px; }
-.lc-tools-count { min-width: 4ch; text-align: left; font-variant-numeric: tabular-nums; }
 .lc-state { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin: 3px 2px 0; font-size: 12px; white-space: normal; color: var(--fg-muted, #57606a); }
 .lc-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #c8ccd1; }
 .lc-state[data-s="received"] .lc-dot { background: var(--accent, #2e7dd7); }

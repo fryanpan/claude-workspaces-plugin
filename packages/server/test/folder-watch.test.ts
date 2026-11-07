@@ -304,6 +304,7 @@ describe('folder watch decisions', () => {
 
   it('a timer on a folder that disappears refreshes once, not on every tick', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'folder-watch-gone-'));
+    const moved = `${folder}-moved`;
     writeFileSync(join(folder, 'README.md'), '# Harborlight\n');
     let refreshes = 0;
     let passes = 0;
@@ -323,7 +324,10 @@ describe('folder watch decisions', () => {
     try {
       watches.sync('set-1', 1);
       await waitFor(() => refreshes === 1);
-      rmSync(folder, { recursive: true, force: true });
+      // A rename, so the folder goes in one step. `rmSync` empties it first,
+      // and a pass that lists the empty folder has seen a real change of its
+      // own, which makes a second refresh correct and this count wrong.
+      renameSync(folder, moved);
       // Gone is news once: the refresh is what drops the review's files.
       await waitFor(() => refreshes === 2);
       const after = passes;
@@ -332,6 +336,7 @@ describe('folder watch decisions', () => {
     } finally {
       watches.dispose();
       rmSync(folder, { recursive: true, force: true });
+      rmSync(moved, { recursive: true, force: true });
     }
   });
 

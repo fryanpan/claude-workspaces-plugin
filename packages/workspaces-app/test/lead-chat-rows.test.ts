@@ -2,7 +2,7 @@
  * What each entry of the lead chat looks like, driven through the real
  * panel: a tool call is one terminal-style line that opens to its input and
  * output; tool calls and board events are hidden but for the one the lead is
- * on now, until the header's Tool use toggle shows them all, and the choice
+ * on now, until the header's Show tool use toggle shows them all, and the choice
  * is kept; an answer to something said aloud is a bubble whose words open on
  * a tap; a person's message says where it got to.
  */
@@ -72,7 +72,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** Storage with the Tool use toggle already on. */
+/** Storage with the Show tool use toggle already on. */
 function showingTools(): ReturnType<typeof memory> {
   const m = memory();
   m.map.set('cw.lead-chat.tools', 'show');
@@ -119,7 +119,7 @@ describe('the lead chat’s entries', () => {
     expect(q('.lc-tool .lc-row-body')).toBeNull();
   });
 
-  it('shows every tool call and board event behind one toggle, counting them, and keeps the choice', () => {
+  it('shows every tool call and board event behind one toggle with no count, and keeps the choice', () => {
     const storage = memory();
     const first = open(CONVO, storage);
     // Off by default: the convo ends on a typed prompt, so nothing working shows.
@@ -127,15 +127,14 @@ describe('the lead chat’s entries', () => {
     expect(first.q('.lc-tool')).toBeNull();
     const toggle = first.q('.lc-tools-toggle');
     expect(toggle?.hidden).toBe(false);
-    expect(toggle?.textContent).toContain('Tool use');
+    expect(toggle?.textContent).toBe('Show tool use');
     expect(toggle?.getAttribute('aria-pressed')).toBe('false');
-    expect(first.q('.lc-tools-count')?.textContent).toBe('(2)');
     toggle?.click();
     expect(first.q('.lc-chan .lc-row-kind')?.textContent).toBe('Board event');
     expect(first.q('.lc-chan .lc-row-head')?.textContent).toContain('Riverbend:');
     expect(first.q('.lc-tool')).not.toBeNull();
     expect(first.q('.lc-tools-toggle')?.getAttribute('aria-pressed')).toBe('true');
-    expect(first.q('.lc-tools-count')?.textContent).toBe('');
+    expect(first.q('.lc-tools-toggle')?.textContent).toBe('Show tool use');
     // Ordinary messages show either way.
     expect(first.root.querySelector('.lc-msg[data-message-id="k5"]')).not.toBeNull();
     view?.destroy();
@@ -238,7 +237,7 @@ describe('the one working row shown while the toggle is off', () => {
     v.render({ ...model, messages: [asked, t1, t2] });
     expect(shown(root)).toEqual(['t22']);
     expect(root.querySelector('.lc-tool .lc-row-head')?.textContent).toContain('harborlight.md');
-    expect(root.querySelector('.lc-tools-count')?.textContent).toBe('(1)');
+    expect(root.querySelector('.lc-tools-toggle')?.textContent).toBe('Show tool use');
 
     // A board event the session takes mid-turn is the newest working row too.
     const c3 = msg({
@@ -259,19 +258,19 @@ describe('the one working row shown while the toggle is off', () => {
       'It is in docs/plans.',
     );
     expect(root.querySelector('.lc-msg[data-message-id="p20"]')).not.toBeNull();
-    expect(root.querySelector('.lc-tools-count')?.textContent).toBe('(3)');
+    expect(root.querySelector('.lc-tools-toggle')?.textContent).toBe('Show tool use');
   });
 
-  it('keeps the toggle where it was as its count comes and goes', () => {
+  it('keeps the same toggle and words as the hidden rows change', () => {
     const t1 = tool('t31', 'Bash', 'git status');
     const { q, model, v } = open([asked, t1]);
     const toggle = q('.lc-tools-toggle');
-    // Nothing hidden yet: the count is empty but the toggle still shows.
-    expect(q('.lc-tools-count')?.textContent).toBe('');
+    // Nothing hidden yet: the live row shows, and so does the toggle.
     expect(toggle?.hidden).toBe(false);
+    expect(toggle?.textContent).toBe('Show tool use');
     v.render({ ...model, messages: [asked, t1, msg({ id: 'a32', text: 'Clean.' })] });
-    expect(q('.lc-tools-count')?.textContent).toBe('(1)');
     expect(q('.lc-tools-toggle')).toBe(toggle);
+    expect(toggle?.textContent).toBe('Show tool use');
   });
 });
 

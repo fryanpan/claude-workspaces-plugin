@@ -298,7 +298,7 @@ async function main(): Promise<void> {
           ' const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; };' +
           ` const h2 = sr.querySelector('.lc-title h2'); const h2lh = parseFloat(getComputedStyle(h2).lineHeight);` +
           ` const h2r = h2.getBoundingClientRect(); const room = sr.querySelector('.lc-close').getBoundingClientRect().left;` +
-          ` return lab.textContent === 'Tool use' && lab.getBoundingClientRect().height <= lh * 1.5` +
+          ` return lab.textContent === 'Show tool use' && lab.getBoundingClientRect().height <= lh * 1.5` +
           ` && h2.textContent === 'Chat with Lead Agent' && h2r.height <= h2lh * 1.5` +
           ' && h2.scrollWidth <= h2.clientWidth && h2r.right <= room' +
           ` && Math.abs(mid(h2) - mid(sr.querySelector('.lc-close'))) < 8` +
@@ -310,10 +310,8 @@ async function main(): Promise<void> {
       // Off: the board event is hidden, the tool call the lead is on shows.
       const before = await inLayer<number>(cdp, chanCount);
       const toolsBefore = await inLayer<number>(cdp, toolCount);
-      const count = await inLayer<string>(
-        cdp,
-        `return sr.querySelector('.lc-tools-count').textContent;`,
-      );
+      const toggleState = `const t = sr.querySelector('.lc-tools-toggle'); return [t.textContent, t.getAttribute('aria-pressed')];`;
+      const off = await inLayer<string[]>(cdp, toggleState);
       const boxOff = await inLayer<string>(cdp, toggleBox);
       await shot('lead-chat-working');
       await tapIn(cdp, '.lc-tools-toggle');
@@ -322,6 +320,7 @@ async function main(): Promise<void> {
         return n > 0 ? n : null;
       }).catch(() => 0);
       const boxOn = await inLayer<string>(cdp, toggleBox);
+      const on = await inLayer<string[]>(cdp, toggleState);
       await shot('lead-chat-tool-use-on');
       await tapIn(cdp, '.lc-tools-toggle');
       const after = await until('board events hidden again', async () => {
@@ -464,7 +463,7 @@ async function main(): Promise<void> {
       widths.push({
         width,
         tool: { head, open, expanded },
-        channel: { before, toolsBefore, count, shown, after, headerFits, boxOff, boxOn },
+        channel: { before, toolsBefore, off, on, shown, after, headerFits, boxOff, boxOn },
         latestMoved,
         toolGoneOnReply,
         voice: { closedText, label, words },

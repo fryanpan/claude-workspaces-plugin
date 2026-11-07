@@ -16,7 +16,7 @@
  * it fills the screen down to the board's navbar, which pins to the bottom
  * with the agent button at its right (`html[data-lc-full]`); a page tapped
  * there closes the chat. Each entry is drawn by `lead-chat-rows.ts`; the
- * header's Tool use toggle shows every tool call and board event of the
+ * header's Show tool use toggle shows every tool call and board event of the
  * lead's session, which are otherwise hidden but for the one it is on now,
  * and that choice is kept on the device too.
  *
@@ -46,7 +46,7 @@ import {
 } from './lead-chat-meeting-view.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
-import { drawMessage, hiddenWorkingCount, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
+import { drawMessage, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 import { drawBarLines, drawStatus } from './lead-chat-tail.ts';
 
@@ -129,7 +129,7 @@ export interface LeadChatViewOpts {
    *  floated at the page's foot. */
   buttonHost: HTMLElement;
   placement: 'dock' | 'float';
-  /** Where the dock's width and the Tool use toggle are kept. */
+  /** Where the dock's width and the Show tool use toggle are kept. */
   storage?: ModeStorage | null;
 }
 
@@ -196,8 +196,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   tools.type = 'button';
   const sw = make(doc, 'span', 'lc-sw');
   sw.setAttribute('aria-hidden', 'true');
-  const toolsCount = make(doc, 'span', 'lc-tools-count');
-  tools.append(sw, make(doc, 'span', '', 'Tool use'), toolsCount);
+  tools.title = 'Show tool use and board events';
+  tools.append(sw, make(doc, 'span', '', 'Show tool use'));
   // Two rows that keep their size: the heading, the lead's name and Close,
   // then the header's actions. One row left the heading a few pixels.
   const acts = make(doc, 'div', 'lc-head-acts');
@@ -362,12 +362,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   });
 
   const renderWorkingToggle = (m: LeadChatViewModel): void => {
-    const on = dock.showWorking();
-    const n = hiddenWorkingCount(m.messages);
     tools.hidden = !m.messages.some(isWorkingRow);
-    tools.setAttribute('aria-pressed', String(on));
-    tools.title = on ? 'Hide tool use and board events' : 'Show tool use and board events';
-    toolsCount.textContent = on || n === 0 ? '' : `(${n})`;
+    tools.setAttribute('aria-pressed', String(dock.showWorking()));
   };
 
   const renderList = (m: LeadChatViewModel, keepScroll = false): void => {
