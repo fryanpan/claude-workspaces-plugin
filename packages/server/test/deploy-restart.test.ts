@@ -88,7 +88,9 @@ describe('a deploy restart', () => {
 });
 
 describe('any other stop', () => {
-  test('exits 0, so KeepAlive leaves the job down', async () => {
+  // The server's own exit, for a server run with no supervisor. Under launchd
+  // the job is the supervisor: supervisor-stop-signal.test.ts.
+  test('exits 0 when the server is the job', async () => {
     const job = fakeLaunchd('idle');
     await waitFor(() => job.starts().length === 1, { describe: 'the job to start' });
     job.runs[0]?.kill('SIGTERM');

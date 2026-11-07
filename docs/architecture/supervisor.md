@@ -226,6 +226,47 @@ changed inputs still refuse and back off (`dependency-install.ts`). A restart wh
 survives now logs that pid and its `ps` state (`supervisor-reap.ts`), because past that point the
 kernel, not the supervisor, is what keeps the port held.
 
+## A stop signal nobody asked for
+
+launchd relaunches this job only on a non-zero exit, so a supervisor that exits
+0 on a signal stays down. On 6 November about 16:47 PT prod's supervisor took a
+SIGTERM, exited 0, and port 8787 refused until somebody ran kickstart. Nobody
+knows who sent it, and nothing in the process can find out.
+
+So under `--no-watch` a stop signal always exits non-zero, at 128 + the signal
+number: 143 for SIGTERM, 129 for SIGHUP, 130 for SIGINT
+(`supervisor-stop.ts`). The supervisor stops its child first as it always did,
+so the server's graceful shutdown still flushes documents. launchd relaunches
+after `ThrottleInterval`, 10s, and the err log carries the line
+`[supervisor] stop signal SIGTERM`. Read `launchctl print` for
+`last exit code = 143` and a higher `runs` count.
+
+| What arrived | What happens |
+| --- | --- |
+| SIGTERM to the supervisor, from anyone | exits 143, launchd relaunches |
+| The same during the boot (install, port wait, builds) | exits 143, once any synchronous install or build has returned |
+| SIGTERM to the server child alone | the child exits 0, the supervisor exits 1, launchd relaunches. This was already true. |
+| `POST /api/deploy` | the server signals itself, exits 75 and the supervisor exits 1. No SIGTERM reaches the supervisor. |
+| `launchctl kickstart -k` (the manual deploy) | SIGTERM, exits 143, kickstart starts the job |
+| `launchctl bootout`, logout, machine shutdown | SIGTERM, exits 143, launchd has removed the job or is stopping, so no relaunch |
+| Ctrl+C on a dev server | exits 0 |
+
+launchd's stops carry the same SIGTERM, so the supervisor cannot tell them from
+a stray one and does not try: the exit code changes nothing for a job launchd
+is removing. The rows for kickstart, bootout and shutdown come from
+`man launchctl` and `man launchd.plist`, and have not been run against this
+change.
+
+Two consequences. **A signal no longer stops the service**: to keep it down,
+use `launchctl bootout`, and `launchctl bootstrap` to bring it back. And a
+sender that keeps signalling gets a relaunch each time, with two client builds
+and a hydration, at most once per `ThrottleInterval`; the three-per-hour limit
+counts the watchdog's own restarts and does not apply here.
+
+The handlers are armed on the supervisor's first lines. A signal with no
+handler kills the process, and `man launchd.plist` promises a relaunch only for
+a non-zero exit status or a crash signal, which SIGTERM is not.
+
 ## What a hang restart records first
 
 A hang used to leave one line, `no reply within 10000ms`. The server's own
@@ -434,6 +475,7 @@ serious of the two faults the invisible one.
 | The `liveness` field on `GET /api/deploy` | `packages/server/src/liveness.ts` |
 | `GRACE_MS` / `CHECK_MS` / `MAX_FAILS`, and arming the ticks | `scripts/serve.ts` |
 | Fast-crash damper for a child that dies young | `scripts/serve.ts` |
+| The exit code for a stop signal | `packages/server/src/supervisor-stop.ts` |
 | Per-boot `startedAt` → `servingAt` record | `packages/server/src/server-starts.ts` → `server-starts.json` |
 | A day of those records, read back | `bun run starts:report` |
 | Restart ledger on disk | `supervisor-restarts.json` in the data directory |
