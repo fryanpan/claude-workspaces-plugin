@@ -227,7 +227,7 @@ describe('held calls', () => {
       ['secrets', 'import', '--app', 'cw-saltmarsh'],
       'TUNNEL_TOKEN=test-value',
     );
-    expect(secrets.status).toBe(200);
+    expect(secrets.body.started).toBe(true);
     expect((await askFly(['machine', 'start', 'm2', '--app', 'cw-saltmarsh'])).status).toBe(200);
   });
 

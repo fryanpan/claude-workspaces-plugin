@@ -22,7 +22,7 @@ const WHAT: Record<HoldKind, string> = {
   'access.open':
     'Creates a Cloudflare Access application. Approving also lets its policy, which says who may sign in, be written in the next 10 minutes.',
   'move.grant':
-    'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. A project, a bucket, a push key and a destroy are a tap each.',
+    'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. A project, an image, a bucket, a push key and a destroy are a tap each.',
   other: 'A change the keeper does not run without you.',
 };
 
@@ -115,7 +115,7 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
     }
   } else if (r.call.type === 'move-grant') {
     details.push(`<dt>Board</dt><dd>${escapeHtml(r.call.board)}</dd>`);
-    const steps = moveSteps(r.call.board).map(
+    const steps = moveSteps(r.call.board, r.call.secrets).map(
       (s) => `<li>${escapeHtml(s.label)}<pre>${escapeHtml(s.shown)}</pre></li>`,
     );
     details.push(`<dt>Every step this covers</dt><dd><ol id="steps">${steps.join('')}</ol></dd>`);

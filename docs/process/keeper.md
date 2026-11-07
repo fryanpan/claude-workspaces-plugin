@@ -176,34 +176,6 @@ project machine. Store it once, piping it in so it is never an argument:
 `machine:deploy --push-repo` then asks the keeper for the keys, and each
 request waits for your passkey with every repo listed on the page.
 
-## One passkey for a board move
-
-Moving a board takes one approval. Run this first:
-
-```bash
-bun run machine:approve-move --board <id> --project <project>
-```
-
-It waits for your passkey. The approval page names the app and the board and
-lists every step it covers: the project's volume, setting and removing
-secrets, its image, and the exact commands of the move and the wall check.
-For 30 minutes those steps run on that one app without another tap. Run
-`machine:deploy`, `machine:wall-report --projects <project>` and
-`machine:move-board` inside that window. The steps are in
-`packages/server/src/keeper/keeper-move-steps.ts`, which the scripts also
-build their commands from.
-
-Each of these still needs its own tap: creating the app, the bucket, push
-keys, any shell command not on the list, a destroy, and any step on another
-project. So a wall report across several projects holds for each other
-project. A new project takes one tap to create and one for the move, because
-a move grant opens only on an app the keeper made or adopted.
-
-**The image step is the widest one.** A machine runs its image as root with
-its secrets, and the keeper cannot check that the build folder is the commit
-it says it is. So for those 30 minutes a caller could put any image on that
-one machine. The page says this.
-
 ## 5. Retire the old tokens
 
 ```bash
@@ -214,6 +186,45 @@ security delete-generic-password -a claude-workspaces -s claude-workspaces-secre
 
 Then revoke the old Fly token (`fly tokens list`, then `fly tokens revoke`)
 and the old Cloudflare token in the dashboard.
+
+## One passkey for a board move
+
+Moving a board takes one approval, and one more if it needs a new image. Run
+this first:
+
+```bash
+bun run machine:approve-move --board <id> --project <project>
+```
+
+It waits for your passkey. The approval page names the app and the board and
+lists every step it covers: the project's volume, up to 50 GB, staging the
+secrets you name with `--secrets A,B`, and the exact commands of the move and
+the wall check. For 30 minutes those steps run
+on that one app without another tap. Run `machine:deploy`, `machine:wall-report
+--projects <project>` and `machine:move-board` inside that window. The steps
+are in `packages/server/src/keeper/keeper-move-steps.ts`, which the scripts
+also build their commands from.
+
+**A new image is a tap of its own.** A machine runs its image as root, and the
+move's commands run probes from that image as root and hand their output to the
+caller. A caller that could deploy without a tap could replace a probe and read
+every secret on the machine. So `fly deploy` stays out of the grant, and a move
+that needs a new image takes two passkeys: the deploy and the move.
+
+**The grant is only as safe as the image you last approved.** Its commands are
+fixed strings, and what they run is the probes in that image.
+
+Each of these also still needs its own tap: creating the app, the bucket, push
+keys, `fly logs`, `fly secrets set`, any secret change without `--stage`, an
+import of a secret the page did not name, a volume over 50 GB, any shell command not on the list, a destroy, and any step on another project. So a
+wall report across several projects holds for each other project. A new project
+takes one tap to create, because a move grant opens only on an app the keeper
+made or adopted. `fly logs` matters on a quick-tunnel project, where the deploy
+reads the tunnel's address from them.
+
+If the 30 minutes end during a move, its last steps wait for a tap: the one that
+takes the machine out of maintenance and removes the upload is held like any
+other. Approve it, or the machine stays held off.
 
 ## If a page says "Approvals are stopped"
 

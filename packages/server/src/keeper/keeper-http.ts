@@ -124,6 +124,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         pollToken: s.request.pollToken,
         hold: s.request.hold,
         summary: s.request.summary,
+        ...(s.outcome === 'started' ? { started: true } : {}),
         approveUrl: `${origin}/approve/${s.request.id}`,
       },
       { [HELD_HEADER]: '1' },
@@ -231,6 +232,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
           type: 'move-grant',
           app: body.app as string,
           board: body.board as string,
+          secrets: (body.secrets ?? []) as string[],
         };
         return answer(await requests.submit(call, requester));
       }

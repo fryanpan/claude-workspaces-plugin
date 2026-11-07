@@ -46,6 +46,7 @@ import {
   classifyMoveGrant,
   grantCovers,
 } from './keeper-grants.ts';
+import { inputNames } from './keeper-move-steps.ts';
 import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import { type HoldKind, type Verdict, classifyCloudflare, classifyFly } from './keeper-policy.ts';
 import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
@@ -118,6 +119,8 @@ export interface HeldRequest {
 
 export type Submitted =
   | { outcome: 'ran'; result: KeeperResult }
+  /** A grant covered it and it is running: the requester polls, as after a tap. */
+  | { outcome: 'started'; request: HeldRequest }
   | { outcome: 'held'; request: HeldRequest }
   | { outcome: 'refused'; reason: string };
 
@@ -190,7 +193,7 @@ export function createKeeperRequests(deps: {
       : call.type === 'push-keys'
         ? classifyPushKeys(call.app, call.repos, deps.store.apps())
         : call.type === 'move-grant'
-          ? classifyMoveGrant(call.app, call.board, deps.store.apps())
+          ? classifyMoveGrant(call.app, call.board, call.secrets, deps.store.apps())
           : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
@@ -264,8 +267,8 @@ export function createKeeperRequests(deps: {
       log(`project ${r.app} created; setup grant open for 30 minutes`);
     }
     if (r.call.type === 'move-grant') {
-      const { app: target, board } = r.call;
-      grants.push({ scope: 'fly', target, board, expiresAt: now() + MOVE_GRANT_MS });
+      const { app: target, board, secrets } = r.call;
+      grants.push({ scope: 'fly', target, board, secrets, expiresAt: now() + MOVE_GRANT_MS });
       log(`move of ${board} onto ${target}: grant open for 30 minutes`);
     }
     if (r.hold === 'access.open' && r.call.type === 'cloudflare') {
@@ -277,6 +280,20 @@ export function createKeeperRequests(deps: {
         log(`access application ${id} created; policy grant open for 10 minutes`);
       }
     }
+  };
+
+  /** Run a request that may run: approved, or covered by a grant. */
+  const execute = async (r: HeldRequest): Promise<void> => {
+    r.status = 'running';
+    try {
+      const result = await run(r.call, r.configs ?? []);
+      r.result = result;
+      afterApproved(r, result);
+    } catch (err) {
+      r.error = err instanceof Error ? err.message : String(err);
+    }
+    r.status = 'done';
+    r.call = stripInput(r.call);
   };
 
   return {
@@ -295,12 +312,18 @@ export function createKeeperRequests(deps: {
       const cfPath = call.type === 'cloudflare' ? call.path : null;
       // A push key is a write key to a repo the requester named: always a tap.
       // A move grant is asked for by name, so no grant can answer for it.
-      if (
-        verdict.kind === 'routine' ||
-        (call.type !== 'push-keys' &&
-          call.type !== 'move-grant' &&
-          grantCovers(grants, call.type, verdict, cfPath, now()))
-      ) {
+      const covered =
+        verdict.kind === 'held' &&
+        call.type !== 'push-keys' &&
+        call.type !== 'move-grant' &&
+        grantCovers(
+          grants,
+          call.type,
+          call.type === 'fly' ? { ...verdict, secrets: inputNames(call.input) } : verdict,
+          cfPath,
+          now(),
+        );
+      if (verdict.kind === 'routine' || (covered && call.type === 'cloudflare')) {
         log(`ran ${requester}: ${verdict.summary}`);
         return {
           outcome: 'ran',
@@ -308,7 +331,9 @@ export function createKeeperRequests(deps: {
         };
       }
       const open = [...held.values()].filter((r) => r.status === 'pending').length;
-      if (open >= MAX_HELD) return { outcome: 'refused', reason: 'too many requests are waiting' };
+      if (!covered && open >= MAX_HELD) {
+        return { outcome: 'refused', reason: 'too many requests are waiting' };
+      }
       const request: HeldRequest = {
         id: token(),
         pollToken: token(),
@@ -326,6 +351,12 @@ export function createKeeperRequests(deps: {
       }
       if (paths?.configs.length) request.configs = paths.configs;
       held.set(request.id, request);
+      if (covered) {
+        log(`ran ${requester}: ${verdict.summary}`);
+        // An upload or an import can outlast a client's fetch, so nothing waits on it here.
+        void execute(request);
+        return { outcome: 'started', request };
+      }
       log(`held ${request.id} for ${request.requester}: ${verdict.hold} ${verdict.summary}`);
       return { outcome: 'held', request };
     },
@@ -370,17 +401,8 @@ export function createKeeperRequests(deps: {
 
     async approve(id, page, assertion) {
       const r = verifyTap(id, page, assertion);
-      r.status = 'running';
       log(`approved ${r.id}: ${r.summary}`);
-      try {
-        const result = await run(r.call, r.configs ?? []);
-        r.result = result;
-        afterApproved(r, result);
-      } catch (err) {
-        r.error = err instanceof Error ? err.message : String(err);
-      }
-      r.status = 'done';
-      r.call = stripInput(r.call);
+      await execute(r);
       return r;
     },
 

@@ -456,8 +456,16 @@ function writeAtomic(path: string, body: string | Uint8Array, mode: number): voi
  * the merge. Refuses, having written nothing, when the target already holds
  * the board, any of its files, or an entry for it in a shared file.
  */
-export function importBoard(bundleDir: string, dataDir: string): BoardManifest {
+export function importBoard(
+  bundleDir: string,
+  dataDir: string,
+  /** The board this import was approved for; a bundle for another is refused. */
+  expected?: string,
+): BoardManifest {
   const m = readBundle(bundleDir);
+  if (expected !== undefined && m.boardId !== expected) {
+    throw new MoveRefused(`the bundle holds ${m.boardId}, not ${expected}`);
+  }
   mkdirSync(join(dataDir, 'workspaces'), { recursive: true });
   if (holdsBoard(dataDir, m.boardId)) {
     throw new MoveRefused(`the target already holds board ${m.boardId}`);

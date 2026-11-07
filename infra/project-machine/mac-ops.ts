@@ -261,14 +261,7 @@ export function flyLive(args: string[]): void {
 
 /** A command run on the machine over `fly ssh console`, as root. */
 export function onMachine(app: string, command: string): string {
-  return flyOk([
-    'ssh',
-    'console',
-    '--app',
-    app,
-    '--command',
-    machineShell(command),
-  ]);
+  return flyOk(['ssh', 'console', '--app', app, '--command', machineShell(command)]);
 }
 
 export { asCw };

@@ -115,7 +115,7 @@ describe('board bundle checks', () => {
       'share-links.json',
       'sharing.json',
     ]);
-    importBoard(bundle, to);
+    importBoard(bundle, to, board);
     // Neither Mac path reached the target.
     const record = readFileSync(join(to, 'workspaces', `${board}.tasks.json`), 'utf8');
     expect(record).not.toContain('/repo/harborlight');
@@ -143,6 +143,11 @@ describe('board bundle checks', () => {
     mkdirSync(clash);
     const before = JSON.stringify({ links: [link(board)], members: [], audiences: [] });
     writeFileSync(join(clash, 'share-links.json'), before);
+    // A bundle for any board but the approved one is refused, writing nothing.
+    const unapproved = join(scratch, 'merge-other');
+    mkdirSync(unapproved);
+    expect(() => importBoard(bundle, unapproved, 'w-fixture9')).toThrow(/not w-fixture9/);
+    expect(existsSync(join(unapproved, 'workspaces', `${board}.tasks.json`))).toBe(false);
     expect(() => importBoard(bundle, clash)).toThrow(/already holds/);
     expect(readFileSync(join(clash, 'share-links.json'), 'utf8')).toBe(before);
     expect(existsSync(join(clash, 'workspaces', `${board}.tasks.json`))).toBe(false);

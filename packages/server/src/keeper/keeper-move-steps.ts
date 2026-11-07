@@ -12,9 +12,12 @@
  * exact strings below, each with one board id or one base64 word filled in.
  * Neither can carry a shell metacharacter.
  *
- * `fly deploy` is the exception, and the page says so: its build folder is
- * the requester's, and a machine runs its image as root with its secrets.
- * The keeper cannot check that an image is the commit it says it is.
+ * Those strings run the probes in the machine's image, so they are only as
+ * fixed as the image. That is why `fly deploy` is not a step: a requester
+ * that could deploy without a tap could replace a probe, and a listed
+ * command would then be a root shell that answers to it. For the same reason
+ * secrets are covered only with `--stage`, which changes nothing on the
+ * machine until a deploy, and that deploy is a tap.
  *
  * This file imports nothing: it runs in the keeper, on the Mac and on the
  * machine.
@@ -22,6 +25,9 @@
 
 export const BOARD_ID = /^w-[A-Za-z0-9_-]{6,64}$/;
 const BASE64_WORD = /^[A-Za-z0-9+/]+={0,2}$/;
+export const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** `projectConfig` allows no bigger volume. */
+const MAX_VOLUME_GB = 50;
 
 const BOARD_PROBE = 'bun /app/infra/project-machine/board-probe.ts';
 export const WALL_PROBE = 'bun /app/infra/project-machine/wall-probe.ts';
@@ -63,7 +69,7 @@ export function moveCommands(board: string) {
     holds: `${BOARD_PROBE} holds ${board}`,
     prepare: `if [ -e ${up} ]; then rm -r ${up}; fi; mkdir -m 700 ${up}`,
     holdOff: 'touch /data/maintenance',
-    importBundle: `mkdir ${up}/b && tar --no-same-owner --no-same-permissions -xzf ${up}/bundle.tgz -C ${up}/b && ${BOARD_PROBE} import ${up}/b`,
+    importBundle: `mkdir ${up}/b && tar --no-same-owner --no-same-permissions -xzf ${up}/bundle.tgz -C ${up}/b && ${BOARD_PROBE} import ${up}/b ${board}`,
     release: `chown -R cw:cw /data/cw; rm -r ${up}; rm -f /data/maintenance`,
     serving:
       "curl -s -o /dev/null -w '%{http_code}' -H 'host: localhost:8787' http://127.0.0.1:8787/api/deploy || true",
@@ -75,6 +81,15 @@ export function moveCommands(board: string) {
 export interface HeldFly {
   args?: readonly string[];
   setup?: boolean;
+  /** The names its stdin sets, or null when a line of it is not `NAME=value`. */
+  secrets?: readonly string[] | null;
+}
+
+/** The names a `fly secrets import` stdin sets, or null if any line hides what it sets. */
+export function inputNames(input: string | undefined): string[] | null {
+  const lines = (input ?? '').split('\n').filter((l) => l !== '');
+  const names = lines.map((l) => (l.includes('=') ? (l.split('=', 1)[0] as string) : ''));
+  return names.every((n) => SECRET_NAME.test(n)) ? names : null;
 }
 
 export interface MoveStep {
@@ -87,13 +102,6 @@ export interface MoveStep {
 
 const starts = (args: readonly string[], ...words: string[]): boolean =>
   words.every((w, i) => args[i] === w);
-
-/** `fly <words>`, already written as the keeper's list allows, on the granted app. */
-const flyStep = (label: string, shown: string, ...words: string[]): MoveStep => ({
-  label,
-  shown,
-  covers: (call) => starts(call.args ?? [], ...words),
-});
 
 /** The `--command` of a `fly ssh console` written as `onMachine` writes it, or null. */
 function consoleCommand(args: readonly string[], app: string): string | null {
@@ -122,26 +130,49 @@ function withWord(label: string, word: string, build: (w: string) => string): Mo
   };
 }
 
-/** Every step a move grant for `board` covers. Anything else stays held. */
-export function moveSteps(board: string): MoveStep[] {
+/**
+ * Every step a move grant for `board` covers. Anything else stays held.
+ * `secrets` are the names the owner saw: an import of any other is held.
+ */
+export function moveSteps(board: string, secrets: readonly string[] = []): MoveStep[] {
   const c = moveCommands(board);
+  const importStep: MoveStep = {
+    label: 'Stage these secrets, which take effect at the next deploy',
+    shown: `fly secrets import --stage: ${secrets.join(', ')}`,
+    covers: (call) => {
+      const a = call.args ?? [];
+      const names = call.secrets;
+      return (
+        call.setup === true &&
+        starts(a, 'secrets', 'import') &&
+        a.includes('--stage') &&
+        Array.isArray(names) &&
+        names.length > 0 &&
+        names.every((n) => secrets.includes(n))
+      );
+    },
+  };
   return [
     {
       label: 'Create the project volume',
-      shown: 'fly volume create <name> --region <region> --size <gb> --yes',
-      covers: (call) => call.setup === true && (call.args?.[0] ?? '').startsWith('volume'),
+      shown: `fly volume create <name> --region <region> --size <1-${MAX_VOLUME_GB}> --yes`,
+      covers: (call) => {
+        const a = call.args ?? [];
+        const at = a.indexOf('--size');
+        const gb = at === -1 ? Number.NaN : Number(a[at + 1]);
+        const sized = Number.isInteger(gb) && gb >= 1 && gb <= MAX_VOLUME_GB;
+        return call.setup === true && (a[0] ?? '').startsWith('volume') && sized;
+      },
     },
+    ...(secrets.length ? [importStep] : []),
     {
-      label: 'Set secrets',
-      shown: 'fly secrets import --stage',
-      covers: (call) => call.setup === true && starts(call.args ?? [], 'secrets', 'import'),
+      label: 'Stage the removal of secrets',
+      shown: 'fly secrets unset <names> --stage',
+      covers: (call) => {
+        const a = call.args ?? [];
+        return starts(a, 'secrets', 'unset') && a.includes('--stage');
+      },
     },
-    flyStep('Remove secrets', 'fly secrets unset <names> --stage', 'secrets', 'unset'),
-    flyStep(
-      'Deploy an image. An image can do anything on this machine, including read its secrets',
-      'fly deploy <build folder> --config <file>',
-      'deploy',
-    ),
     exactly('Check the machine does not hold the board', c.holds),
     exactly('Make the root-only upload folder', c.prepare),
     {
