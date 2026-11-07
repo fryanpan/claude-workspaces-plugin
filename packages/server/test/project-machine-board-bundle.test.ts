@@ -362,6 +362,22 @@ describe('a bundle that was not written by exportBoard', () => {
       expect(readFileSync(join(to, ydoc))).toEqual(readFileSync(join(bundle, 'files', ydoc)));
     });
 
+    it('leaves the target as it was when a later file fails', () => {
+      const { bundle, to } = fresh('swap-partial');
+      const { files } = manifestOf(bundle);
+      expect(files.length).toBe(2);
+      writeFileSync(join(bundle, 'files', (files[1] as { path: string }).path), 'changed');
+      let committed = false;
+      const commit = () => {
+        committed = true;
+      };
+      expect(() => writeListedFiles(bundle, to, files, commit)).toThrow(/altered/);
+      expect(committed).toBe(false);
+      expect(readdirSync(to, { recursive: true }).filter((n) => String(n).includes('.'))).toEqual(
+        [],
+      );
+    });
+
     it('refuses a file that became a symlink', () => {
       const { bundle, to, files, live } = checked('swap-link');
       const secret = join(scratch, 'swap-secret');

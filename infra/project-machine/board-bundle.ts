@@ -40,6 +40,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -495,15 +496,32 @@ function writeAtomic(path: string, body: string | Uint8Array, mode: number): voi
 }
 
 /**
- * Copies `files` into `dataDir`. Each is read again and hashed here, so what
- * lands is what the manifest says, whatever replaced the folder since the check.
+ * Copies `files` into `dataDir`. Each is read again and hashed first, so what
+ * lands is what the manifest says, whatever replaced the folder since the
+ * check. Nothing lands until all of them pass, and `commit` runs at that point,
+ * so a refusal here leaves the target as it was.
  */
 export function writeListedFiles(
   bundleDir: string,
   dataDir: string,
   files: readonly BundleFile[],
+  commit: () => void = () => {},
 ): void {
-  for (const f of files) writeAtomic(join(dataDir, f.path), listedFile(bundleDir, f), 0o600);
+  const moves = files.map((f) => {
+    const path = join(dataDir, f.path);
+    return { f, path, tmp: `${path}.move-tmp` };
+  });
+  try {
+    for (const { f, path, tmp } of moves) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(tmp, listedFile(bundleDir, f), { mode: 0o600 });
+    }
+  } catch (e) {
+    for (const { tmp } of moves) rmSync(tmp, { force: true });
+    throw e;
+  }
+  commit();
+  for (const { path, tmp } of moves) renameSync(tmp, path);
 }
 
 /** A doc of the bundle that a board already on the target lists. */
@@ -526,8 +544,7 @@ function docOfAnotherBoard(m: BoardManifest, dataDir: string): string | undefine
  * stopped, since it holds the shared files in memory and would write over
  * the merge. Refuses, having written nothing, when the target already holds
  * the board, any of its files, an entry for it in a shared file, or a doc
- * another board lists. A bundle changed during the writes refuses there, and
- * the board record, which goes last, is not written.
+ * another board lists, or when a file changed after it was checked.
  */
 export function importBoard(
   bundleDir: string,
@@ -568,7 +585,8 @@ export function importBoard(
     ...m.files.filter((f) => f.path !== record),
     ...m.files.filter((f) => f.path === record),
   ];
-  for (const w of writes) writeAtomic(w.path, w.body, w.mode);
-  writeListedFiles(bundleDir, dataDir, ordered);
+  writeListedFiles(bundleDir, dataDir, ordered, () => {
+    for (const w of writes) writeAtomic(w.path, w.body, w.mode);
+  });
   return m;
 }
