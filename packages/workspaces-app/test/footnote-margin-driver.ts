@@ -203,6 +203,32 @@ function read(editorEl: HTMLElement, proseEl: HTMLElement): ScrollReading {
   };
 }
 
+/** How long the column may take to restack once the pane has stopped. */
+const RESTACK_MS = 5_000;
+
+/**
+ * Move the pane and wait for the column to stack against the new position.
+ * It restacks 100ms after a scroll stops and redraws every leader line when
+ * it does, so the overlay's children changing is the restack. Nothing moves
+ * on a move to where the pane already is, and no column is drawn at 430.
+ */
+async function scrollAndRestack(editorEl: HTMLElement, y: number): Promise<void> {
+  let passes = 0;
+  const seen = new MutationObserver(() => {
+    passes += 1;
+  });
+  seen.observe(document.querySelector('.cw-leader-overlay') as Element, { childList: true });
+  const from = editorEl.scrollTop;
+  editorEl.scrollTop = y;
+  const end = performance.now() + RESTACK_MS;
+  while (balloonMarginVisible() && editorEl.scrollTop !== from && passes === 0) {
+    if (performance.now() > end) throw new Error(`no restack after a scroll to ${y}`);
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  }
+  seen.disconnect();
+  await frame();
+}
+
 /** The fixture, mounted as the review page mounts it, and nothing measured. */
 async function mountFixture(): Promise<{
   editorEl: HTMLElement;
@@ -300,9 +326,7 @@ async function probe(): Promise<string> {
   for (let y = 0; y < max; y += step) stops.push(y);
   stops.push(max);
   for (const y of [...stops, ...stops.slice(0, -1).reverse()]) {
-    editorEl.scrollTop = y;
-    await sleep(250);
-    await frame();
+    await scrollAndRestack(editorEl, y);
     settled.push(read(editorEl, proseEl));
   }
   // Leave the pane part-way down, settled, for the screenshot.
