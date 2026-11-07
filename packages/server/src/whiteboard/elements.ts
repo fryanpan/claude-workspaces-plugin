@@ -124,13 +124,71 @@ export interface BuildContext {
 /** The text of a labelled shape is its own element, under this id. */
 export const labelIdOf = (id: string): string => `${id}-label`;
 
+/**
+ * A character's width as a share of the font size. There is no font here, so
+ * these sit at the wide end of what Excalifont measures in a browser: too
+ * wide only wraps early, and too narrow clips the words on the canvas.
+ */
+function charWidth(c: string): number {
+  if (c === ' ') return 0.4;
+  if (c > '~') return 1.05;
+  return /[a-z]/.test(c) ? 0.55 : 0.7;
+}
+
+const lineWidth = (line: string): number => {
+  let share = 0;
+  for (const c of line) share += charWidth(c);
+  return share * FONT_SIZE;
+};
+
 function measure(text: string): { w: number; h: number } {
   const lines = text.split('\n');
-  const longest = Math.max(...lines.map((l) => l.length), 1);
   return {
-    w: Math.ceil(longest * FONT_SIZE * 0.55),
+    w: Math.ceil(Math.max(...lines.map(lineWidth), FONT_SIZE / 2)),
     h: Math.ceil(lines.length * FONT_SIZE * LINE_HEIGHT),
   };
+}
+
+/** A word too wide for a line, cut into pieces that fit. Always at least one character each. */
+function breakWord(word: string, width: number): string[] {
+  const pieces: string[] = [];
+  let piece = '';
+  for (const c of word) {
+    if (piece && lineWidth(piece + c) > width) {
+      pieces.push(piece);
+      piece = '';
+    }
+    piece += c;
+  }
+  pieces.push(piece);
+  return pieces;
+}
+
+/** One line broken at spaces so that each part fits `width`. */
+function wrapLine(line: string, width: number): string[] {
+  const out: string[] = [];
+  let current = '';
+  for (const word of line.split(' ')) {
+    const joined = `${current} ${word}`;
+    if (current && lineWidth(joined) <= width) {
+      current = joined;
+      continue;
+    }
+    if (current) out.push(current);
+    const pieces = breakWord(word, width);
+    current = pieces.pop() ?? '';
+    out.push(...pieces);
+  }
+  out.push(current);
+  return out;
+}
+
+/** Text broken into lines that fit a width. Excalidraw draws `text` as given. */
+function wrapText(text: string, width: number): string {
+  return text
+    .split('\n')
+    .flatMap((line) => wrapLine(line, width))
+    .join('\n');
 }
 
 function base(
@@ -171,23 +229,26 @@ function textElement(
   text: string,
   at: { x: number; y: number },
   containerId: string | null,
+  width?: number,
 ): SceneElement {
-  const size = measure(text);
+  const fixed = width !== undefined && width > 0;
+  const shown = fixed ? wrapText(text, width) : text;
+  const size = measure(shown);
   return base(ctx, ctx.existing.get(id), {
     id,
     type: 'text',
     x: at.x,
     y: at.y,
-    width: size.w,
+    width: fixed ? width : size.w,
     height: size.h,
-    text,
+    text: shown,
     originalText: text,
     fontSize: FONT_SIZE,
     fontFamily: FONT_FAMILY,
     textAlign: containerId ? 'center' : 'left',
     verticalAlign: containerId ? 'middle' : 'top',
     containerId,
-    autoResize: true,
+    autoResize: !fixed,
     lineHeight: LINE_HEIGHT,
   });
 }
@@ -247,7 +308,7 @@ export function buildElements(shapes: readonly ShapeInput[], ctx: BuildContext):
     const prior = ctx.existing.get(id);
     const size = DEFAULT_SIZE[shape.kind];
     if (shape.kind === 'text') {
-      out.set(id, textElement(ctx, id, shape.text ?? '', shape, null));
+      out.set(id, textElement(ctx, id, shape.text ?? '', shape, null, shape.w));
       continue;
     }
     if (shape.kind === 'arrow') {
@@ -405,7 +466,10 @@ export function toShapes(elements: readonly SceneElement[]): WhiteboardShape[] {
       shape.w = round(el.width);
       shape.h = round(el.height);
     }
-    if (el.type === 'text' && typeof el.text === 'string') shape.text = el.text;
+    if (el.type === 'text' && typeof el.text === 'string') {
+      // `text` is what the canvas draws, wrapped; `originalText` is what was written.
+      shape.text = typeof el.originalText === 'string' ? el.originalText : el.text;
+    }
     const label = boundRefs(el).find((r) => r.type === 'text');
     const labelEl = label ? byId.get(label.id) : undefined;
     if (labelEl && typeof labelEl.text === 'string') shape.text = labelEl.text;

@@ -4,8 +4,8 @@
  * Local → shared: a finished change (never half a stroke) writes each element
  * whose copy on the canvas beats the shared one. Shared → local: a change from
  * anyone else is merged into what the canvas holds, except the elements the
- * person here is still drawing, dragging or typing into, which keep their
- * local copy until the gesture ends. Both use `incomingWins`, the rule the
+ * person here is still drawing or typing into, which keep their local copy
+ * until the gesture ends, and all of it while they move a selection. Both use `incomingWins`, the rule the
  * server and Excalidraw's own reconcile use, so every page converges.
  *
  * Presence is read here too: a person is where their pointer is, and an agent
@@ -33,7 +33,6 @@ export interface GestureState {
   selectedElementsAreBeingDragged?: boolean;
   isResizing?: boolean;
   isRotating?: boolean;
-  selectedElementIds?: Readonly<Record<string, boolean>>;
 }
 
 /** Whether the person here is mid-gesture: a pen down, a drag, a resize, typing. */
@@ -51,16 +50,21 @@ export function inGesture(s: GestureState): boolean {
 }
 
 /**
- * The ids a remote change must not overwrite right now: whatever the gesture
- * is drawing, typing into, or moving.
+ * Whether the person here is moving, resizing or rotating the selection. Each
+ * step also rewrites what is bound to it, a box's words and its arrows, none
+ * of them selected. A shared copy merged in during the move would be rewritten
+ * too, from positions the gesture took at its start, and would win with the
+ * shared copy's own version. So nothing merges until the move ends.
  */
+export function movingSelection(s: GestureState): boolean {
+  return !!s.selectedElementsAreBeingDragged || !!s.isResizing || !!s.isRotating;
+}
+
+/** The ids a remote change must not overwrite right now: what is being drawn or typed. */
 export function protectedIds(s: GestureState): Set<string> {
   const ids = new Set<string>();
   for (const el of [s.newElement, s.resizingElement, s.multiElement, s.editingTextElement]) {
     if (el?.id) ids.add(el.id);
-  }
-  if (s.selectedElementsAreBeingDragged || s.isResizing || s.isRotating) {
-    for (const [id, on] of Object.entries(s.selectedElementIds ?? {})) if (on) ids.add(id);
   }
   return ids;
 }

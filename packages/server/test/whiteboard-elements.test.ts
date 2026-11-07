@@ -114,6 +114,68 @@ describe('buildElements', () => {
   });
 });
 
+describe('a text shape drawn with a width', () => {
+  const heading = 'Harborlight ferry crossings for the winter season';
+
+  it('keeps that width and does not resize itself to its words', () => {
+    const [el] = buildElements(
+      [{ id: 't', kind: 'text', x: 0, y: 0, w: 900, text: heading }],
+      ctx(),
+    );
+    expect(el).toMatchObject({ width: 900, autoResize: false, text: heading });
+  });
+
+  it('wraps at that width, grows in height, and reads back as sent', () => {
+    const [one] = buildElements([{ id: 't', kind: 'text', x: 0, y: 0, text: heading }], ctx());
+    const [el] = buildElements(
+      [{ id: 't', kind: 'text', x: 0, y: 0, w: 150, text: heading }],
+      ctx(),
+    );
+    expect(el?.width).toBe(150);
+    expect(el?.originalText).toBe(heading);
+    const lines = String(el?.text).split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join(' ')).toBe(heading);
+    expect(Number(el?.height)).toBe(lines.length * Number(one?.height));
+    expect(toShapes(el ? [el] : [])[0]).toMatchObject({ w: 150, text: heading });
+  });
+
+  it('allows more width to capitals than to lower case, as the canvas font does', () => {
+    const line = (text: string) =>
+      Number(buildElements([{ id: 't', kind: 'text', x: 0, y: 0, text }], ctx())[0]?.width);
+    expect(line('HARBORLIGHT')).toBeGreaterThan(line('harborlight'));
+    const [el] = buildElements(
+      [{ id: 't', kind: 'text', x: 0, y: 0, w: 200, text: 'HARBORLIGHT FERRY CROSSINGS' }],
+      ctx(),
+    );
+    expect(String(el?.text).split('\n').length).toBeGreaterThan(1);
+  });
+
+  it('breaks a word too long for the width rather than running past it', () => {
+    const word = 'Saltmarsh'.repeat(4);
+    const [el] = buildElements([{ id: 't', kind: 'text', x: 0, y: 0, w: 60, text: word }], ctx());
+    const lines = String(el?.text).split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join('')).toBe(word);
+    const widest = Math.max(...lines.map((l) => l.length));
+    expect(widest).toBeLessThan(word.length);
+  });
+
+  it('keeps a line break the agent wrote', () => {
+    const [el] = buildElements(
+      [{ id: 't', kind: 'text', x: 0, y: 0, w: 900, text: 'Riverbend\nSaltmarsh' }],
+      ctx(),
+    );
+    expect(el?.text).toBe('Riverbend\nSaltmarsh');
+  });
+
+  it('sizes itself to its words when no width is given', () => {
+    const [el] = buildElements([{ id: 't', kind: 'text', x: 0, y: 0, text: 'Riverbend' }], ctx());
+    expect(el?.autoResize).toBe(true);
+    expect(Number(el?.width)).toBeGreaterThan(0);
+  });
+});
+
 describe('toShapes', () => {
   it('reads back what the agent sent, a label folded into its box', () => {
     const sent: ShapeInput[] = [

@@ -51,6 +51,7 @@ import type { SseBus } from './sse.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import type { WebhookDispatcher } from './webhooks.ts';
 import { describeChange, watchSceneChanges } from './whiteboard/scene-events.ts';
+import { keepWinningCopies } from './whiteboard/scene.ts';
 
 /** Yjs origin for the private-meta guard's own deletes, so it never
  *  re-enters on its own transaction. */
@@ -792,6 +793,7 @@ export class LiveDocFanout {
     // A whiteboard has no text to re-anchor; its watchers hear one event per
     // settled burst instead (`whiteboard/scene-events.ts`).
     if (contentKind(doc.meta.type) === 'scene') {
+      keepWinningCopies(doc.ydoc);
       this.watchWhiteboard(doc);
       return;
     }

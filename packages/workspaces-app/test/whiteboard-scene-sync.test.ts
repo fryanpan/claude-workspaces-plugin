@@ -5,6 +5,7 @@ import {
   commitLocal,
   inGesture,
   mergeForCanvas,
+  movingSelection,
   presenceLine,
   presenceNames,
   protectedIds,
@@ -29,13 +30,18 @@ describe('a gesture in progress', () => {
     expect(inGesture({ editingTextElement: { id: 't1' } })).toBe(true);
   });
 
-  it('protects the stroke being drawn, and the selection only while it moves', () => {
+  it('protects the stroke being drawn, and no selected element by itself', () => {
     expect([...protectedIds({ newElement: { id: 's1' } })]).toEqual(['s1']);
-    const selected = { selectedElementIds: { b1: true, b2: false } };
-    expect(protectedIds(selected).size).toBe(0);
-    expect([...protectedIds({ ...selected, selectedElementsAreBeingDragged: true })]).toEqual([
-      'b1',
-    ]);
+    expect(protectedIds({ selectedElementIds: { b1: true } }).size).toBe(0);
+  });
+
+  it('counts a move of the selection, which also moves what is bound to it', () => {
+    expect(movingSelection({})).toBe(false);
+    expect(movingSelection({ newElement: { id: 's1' } })).toBe(false);
+    expect(movingSelection({ editingTextElement: { id: 't1' } })).toBe(false);
+    expect(movingSelection({ selectedElementsAreBeingDragged: true })).toBe(true);
+    expect(movingSelection({ isResizing: true })).toBe(true);
+    expect(movingSelection({ isRotating: true })).toBe(true);
   });
 });
 

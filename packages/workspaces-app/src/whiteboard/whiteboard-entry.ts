@@ -12,7 +12,7 @@ import { connect } from '@claude-workspaces/core';
  *  - It writes to the shared scene only when no gesture is in progress, so a
  *    half-drawn stroke never reaches anyone (`scene-sync.ts`).
  *  - A change from elsewhere never replaces what the person here is drawing
- *    or dragging; it lands when their gesture ends.
+ *    or moving; it lands when their gesture ends.
  *  - An agent shows up only where it points.
  */
 import { allSceneElements, sceneMap } from '@claude-workspaces/core/whiteboard-scene';
@@ -23,6 +23,7 @@ import {
   commitLocal,
   inGesture,
   mergeForCanvas,
+  movingSelection,
   presenceLine,
   presenceNames,
   protectedIds,
@@ -107,7 +108,12 @@ async function boot(): Promise<void> {
   const pullRemote = () => {
     pendingRemote = false;
     if (!canvas) return;
-    const keep = protectedIds(canvas.gesture());
+    const gesture = canvas.gesture();
+    if (movingSelection(gesture)) {
+      heldBack = true;
+      return;
+    }
+    const keep = protectedIds(gesture);
     heldBack = keep.size > 0;
     const merged = mergeForCanvas(canvas.elements(), allSceneElements(ydoc), keep);
     if (merged) canvas.show(merged);

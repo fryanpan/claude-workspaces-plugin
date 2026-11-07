@@ -19,70 +19,13 @@ import {
   parseAgentPointers,
   putSceneElements,
 } from '@claude-workspaces/core/whiteboard-scene';
-import * as decoding from 'lib0/decoding';
-import * as encoding from 'lib0/encoding';
-import * as awarenessProtocol from 'y-protocols/awareness';
-import * as syncProtocol from 'y-protocols/sync';
-import * as Y from 'yjs';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type FrameListener, listenFrames, waitForFrames } from './sse-frames.ts';
 import { insideWhiteboardSettle, pastWhiteboardSettle, waitFor } from './wait-for.ts';
+import { connectWhiteboardPage } from './whiteboard-page.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const MSG_SYNC = 0;
-const MSG_AWARENESS = 1;
 const AGENT = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent', color: '#2e7dd7' };
-
-/** A page's side of the socket: sync, its own edits sent on, presence. */
-function connectPage(url: string, origin: string, name: string) {
-  const ydoc = new Y.Doc();
-  const awareness = new awarenessProtocol.Awareness(ydoc);
-  const ws = new WebSocket(url, { headers: { origin } } as unknown as string[]);
-  ws.binaryType = 'arraybuffer';
-  let synced: () => void = () => {};
-  const ready = new Promise<void>((r) => {
-    synced = r;
-  });
-  const sendAwareness = () => {
-    const enc = encoding.createEncoder();
-    encoding.writeVarUint(enc, MSG_AWARENESS);
-    encoding.writeVarUint8Array(
-      enc,
-      awarenessProtocol.encodeAwarenessUpdate(awareness, [ydoc.clientID]),
-    );
-    ws.send(encoding.toUint8Array(enc));
-  };
-  ws.addEventListener('open', () => {
-    const enc = encoding.createEncoder();
-    encoding.writeVarUint(enc, MSG_SYNC);
-    syncProtocol.writeSyncStep1(enc, ydoc);
-    ws.send(encoding.toUint8Array(enc));
-    awareness.setLocalStateField('user', { name, color: '#c0392b' });
-    sendAwareness();
-  });
-  ws.addEventListener('message', (ev) => {
-    const dec = decoding.createDecoder(new Uint8Array(ev.data as ArrayBuffer));
-    const kind = decoding.readVarUint(dec);
-    if (kind === MSG_AWARENESS) {
-      awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(dec), ws);
-      return;
-    }
-    if (kind !== MSG_SYNC) return;
-    const enc = encoding.createEncoder();
-    encoding.writeVarUint(enc, MSG_SYNC);
-    const type = syncProtocol.readSyncMessage(dec, enc, ydoc, ws);
-    if (encoding.length(enc) > 1) ws.send(encoding.toUint8Array(enc));
-    if (type === syncProtocol.messageYjsSyncStep2) synced();
-  });
-  ydoc.on('update', (update: Uint8Array, from: unknown) => {
-    if (from === ws || ws.readyState !== WebSocket.OPEN) return;
-    const enc = encoding.createEncoder();
-    encoding.writeVarUint(enc, MSG_SYNC);
-    syncProtocol.writeUpdate(enc, update);
-    ws.send(encoding.toUint8Array(enc));
-  });
-  return { ydoc, awareness, ready, close: () => ws.close() };
-}
 
 const stroke = (id: string): SceneElement => ({
   id,
@@ -151,8 +94,8 @@ describe('a whiteboard', () => {
 
     // Two pages open; a stroke on one appears on the other.
     const socketUrl = () => `ws://127.0.0.1:${handle?.port}/workspaces/${ws}/docs/${docId}/y`;
-    const a = connectPage(socketUrl(), base, 'Riverbend');
-    const b = connectPage(socketUrl(), base, 'Saltmarsh');
+    const a = connectWhiteboardPage(socketUrl(), base, 'Riverbend');
+    const b = connectWhiteboardPage(socketUrl(), base, 'Saltmarsh');
     closers.push(a, b);
     await Promise.all([a.ready, b.ready]);
     await waitFor(() => b.awareness.getStates().size >= 2, { describe: 'presence from page A' });
@@ -250,7 +193,7 @@ describe('a whiteboard', () => {
     expect(scene.shapes).toEqual([
       expect.objectContaining({ id: 'only', kind: 'text', x: 0, y: 0, text: 'Harborlight' }),
     ]);
-    const c = connectPage(socketUrl(), base, 'Riverbend');
+    const c = connectWhiteboardPage(socketUrl(), base, 'Riverbend');
     closers.push(c);
     await c.ready;
     expect(
@@ -275,7 +218,7 @@ describe('a whiteboard', () => {
       await fetch(`${base}/workspaces/${ws}/docs/${docId}/events:stream`),
     );
     streams.push(frames);
-    const a = connectPage(
+    const a = connectWhiteboardPage(
       `ws://127.0.0.1:${handle.port}/workspaces/${ws}/docs/${docId}/y`,
       base,
       'Riverbend',

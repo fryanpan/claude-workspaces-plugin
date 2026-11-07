@@ -21,7 +21,11 @@ const SHAPE = {
     kind: { type: 'string', enum: ['box', 'ellipse', 'arrow', 'text'] },
     x: { type: 'number', description: 'Left edge, in canvas units.' },
     y: { type: 'number', description: 'Top edge, in canvas units.' },
-    w: { type: 'number', description: 'Width. Defaults: box 160, ellipse 140, arrow 120.' },
+    w: {
+      type: 'number',
+      description:
+        'Width. Defaults: box 160, ellipse 140, arrow 120. Text sizes itself to its words, or wraps at w when you pass it.',
+    },
     h: { type: 'number', description: 'Height. Defaults: box 80, ellipse 90, arrow 0.' },
     text: {
       type: 'string',
@@ -47,7 +51,7 @@ export const WHITEBOARD_TOOLS: ListToolsResult['tools'] = [
   {
     name: 'draw_on_whiteboard',
     description:
-      'Draw boxes, ellipses, arrows and text on a whiteboard. mode "add" (the default) draws over what is there, a shape whose id is already on the board replacing it; mode "replace" makes the board hold exactly these shapes and deletes the rest. Pass point {x, y} to show people where you are looking, labelled with your name; null clears it, omitted leaves it. Your presence on the canvas is only that point, never your last stroke. Returns the ids written and the element count. At most 200 shapes per call.',
+      'Draw boxes, ellipses, arrows and text on a whiteboard. mode "add" (the default) draws over what is there, a shape whose id is already on the board replacing it; mode "replace" makes the board hold exactly these shapes and deletes the rest, and it wins over changes a person has not finished: a drag in progress is dropped. A shape a person is still drawing stays beside yours. Pass point {x, y} to show people where you are looking, labelled with your name; null clears it, omitted leaves it. Your presence on the canvas is only that point, never your last stroke. Returns the ids written and the element count. At most 200 shapes per call.',
     inputSchema: {
       type: 'object',
       properties: {
