@@ -5,12 +5,13 @@
  * and compare it across chunkings. `spoken-player-joins-browser.test.ts` is
  * the same check through a real browser's renderer.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type PlaybackContext,
   type SpokenPlayer,
   createSpokenPlayer,
 } from '../src/board/spoken-reply-audio.ts';
+import { createLeadLineVoice } from '../src/lead-chat/lead-chat-meeting-voice.ts';
 
 const VOICE_RATE = 24_000;
 
@@ -167,5 +168,36 @@ describe('the joins between chunks of a spoken reply', () => {
     expect(Math.abs(late[0] ?? 1)).toBeLessThan(0.01);
     // The ramp is a few milliseconds: past it the voice is untouched.
     expect(peakDifference(late.subarray(480), reference.subarray(480))).toBeLessThan(1e-6);
+  });
+});
+
+describe('a meeting line, through the same player', () => {
+  it('plays a streamed line at the context’s rate, whole, and says it played', async () => {
+    const bytes = voiceBytes(4_800);
+    const whole = recordingContext(48_000);
+    playerOn(whole.ctx).push(bytes);
+    const { ctx, scheduled } = recordingContext(48_000);
+    const done: boolean[] = [];
+    const voice = createLeadLineVoice({
+      workspaceId: 'w-harbor',
+      author: { id: 'known-alice', name: 'Alice', kind: 'known' },
+      playbackContext: () => ctx,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              for (const part of chunked(bytes, 1_001)) c.enqueue(part);
+              c.close();
+            },
+          }),
+          { headers: { 'x-sample-rate': String(VOICE_RATE) } },
+        ),
+      onPlaying: () => {},
+      onDone: (_id, _turn, said) => done.push(said),
+    });
+    voice.play('lcm-1', 0.5);
+    await vi.waitFor(() => expect(done).toEqual([true]));
+    expect(scheduled.every((s) => s.rate === 48_000)).toBe(true);
+    expect(peakDifference(joined(whole.scheduled), joined(scheduled))).toBeLessThan(1e-6);
   });
 });

@@ -117,7 +117,11 @@ const RECORD_PLAYBACK = `(() => {
   const said = [];
   window.__said = said;
   AudioBufferSourceNode.prototype.start = function (when, ...rest) {
-    const level = this.buffer ? this.buffer.getChannelData(0)[0] * 32768 : 0;
+    // The peak, not the first sample: a chunk that follows a gap rises from
+    // silence, so its first sample is 0 whatever the answer's level.
+    const samples = this.buffer ? this.buffer.getChannelData(0) : [];
+    let level = 0;
+    for (const s of samples) level = Math.max(level, s * 32768);
     const row = {
       answer: Math.round(level / ${LEVEL_STEP}),
       at: when ?? 0,
