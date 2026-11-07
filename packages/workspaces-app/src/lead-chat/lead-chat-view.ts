@@ -1,13 +1,7 @@
 /**
  * The lead chat's DOM: the agent button, the bar that comes out of it, and
- * the panel the bar grows into. Drawing and placing only — what a tap does
- * is `lead-chat-mount.ts`.
- *
- * The bar is attached to the button. Wide (above 1100px) it runs from the
- * button's right edge along the button's own row; narrow it spans the screen
- * with 8px margins, just above the button. Either way it stops short of the
- * page's bottom-right corner, whose buttons belong to the comment widget and
- * the doc's mic and are never covered.
+ * the panel the bar grows into. Drawing only — where the bar and panel sit is
+ * `lead-chat-place.ts`, and what a tap does is `lead-chat-mount.ts`.
  *
  * The panel docks on the right edge of a wide screen, full height, and its
  * left edge drags to resize it; the width is kept on the device. While it is
@@ -36,7 +30,6 @@ import {
   createComposer,
 } from './lead-chat-composer.ts';
 import { createDock } from './lead-chat-dock.ts';
-import { typingBand } from './lead-chat-keyboard.ts';
 import { historyLine } from './lead-chat-lines.ts';
 import {
   MEETING_STYLES,
@@ -46,6 +39,7 @@ import {
 } from './lead-chat-meeting-view.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
+import { createPlacer } from './lead-chat-place.ts';
 import { drawMessage, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 import { drawBarLines, drawStatus } from './lead-chat-tail.ts';
@@ -55,18 +49,13 @@ export const LEAVE_EVENT = 'lc-leave';
 
 export { deliveryNote } from './lead-chat-rows.ts';
 export { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
+export { CORNER_ROOM, NARROW_MAX } from './lead-chat-place.ts';
 
 const SPARKLE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>';
 const CLOSE =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
-/** At or under this width the page is in the mobile tier (design-mobile.md). */
-export const NARROW_MAX = 1100;
-/** Room kept clear at the bottom-right corner when none of its buttons can
- *  be measured. */
-export const CORNER_ROOM = 72;
-const BAR_H_NARROW = 50;
 const IDLE_RUN = { phase: 'idle', note: '', partial: '' } as const;
 /** How close to the top of the list, in pixels, asks for the page before. */
 const OLDER_AT = 80;
@@ -218,44 +207,6 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   root.append(style, bar, pane);
   doc.body.append(layer);
 
-  const narrow = (): boolean => win.innerWidth <= NARROW_MAX;
-  /** Where the page's foot begins: the top of the board's tab bar when it
-   *  runs along the bottom, or of a floated agent button, so a sheet stops
-   *  above both and the button stays in reach. */
-  const footTop = (): number => {
-    const vh = win.innerHeight;
-    const r = doc.querySelector('.board-nav')?.getBoundingClientRect();
-    const nav = r && r.height > 0 && r.top > vh / 2 ? r.top : vh;
-    if (opts.placement !== 'float') return nav;
-    return Math.min(nav, button.getBoundingClientRect().top - 8);
-  };
-  /** The left edge of the buttons already in the bottom-right corner — the
-   *  comment widget's — which nothing here may cover; on one row only, when
-   *  given. */
-  const cornerLeft = (vw: number, vh: number, row?: { top: number; bottom: number }): number => {
-    const els: Element[] = [];
-    const widget = doc.querySelector('claude-feedback-widget');
-    if (widget?.shadowRoot) els.push(...widget.shadowRoot.querySelectorAll('button'));
-    // Unmeasured, the default room — except on a row the caller names, where
-    // only a button actually on that row takes any.
-    let left = row ? vw : vw - CORNER_ROOM + 12;
-    const { top, bottom } = row ?? { top: vh / 2, bottom: vh };
-    for (const el of els) {
-      const r = el.getBoundingClientRect();
-      const onRow = r.bottom > top && r.top < bottom;
-      if (r.width > 0 && r.width <= 200 && onRow && r.left > vw / 2) {
-        left = Math.min(left, r.left);
-      }
-    }
-    return left;
-  };
-  /** A sheet covers the screen, so the widget's corner buttons step aside
-   *  while it is up rather than sit over its composer. */
-  const hideWidget = (hide: boolean): void => {
-    const widget = doc.querySelector<HTMLElement>('claude-feedback-widget');
-    if (widget) widget.style.visibility = hide ? 'hidden' : '';
-  };
-
   const opened = new Set<string>();
   let last: LeadChatViewModel | null = null;
   const dock = createDock({
@@ -263,6 +214,16 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     grip,
     storage: opts.storage ?? null,
     onResize: () => place(),
+  });
+  const { place, hideWidget } = createPlacer({
+    doc,
+    win,
+    placement: opts.placement,
+    button,
+    bar,
+    pane,
+    list,
+    dock,
   });
 
   let lastNewest: string | undefined;
@@ -280,58 +241,6 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     const html = renderCommentMarkdown(msg.text, { bareLinks: true, sameTabBoardLinks: true });
     drawn.set(msg.id, { text: msg.text, html });
     return html;
-  };
-
-  /** Where the sheet was last placed, as written (the browser rewrites
-   *  `cssText`, so it cannot be read back to compare). */
-  let sheetCss = '';
-  const place = (): void => {
-    const vw = doc.documentElement.clientWidth || win.innerWidth;
-    const vh = win.innerHeight;
-    const a = button.getBoundingClientRect();
-    const corner = cornerLeft(vw, vh);
-    if (!bar.hidden) {
-      if (narrow()) {
-        const foot = Math.min(a.top, footTop());
-        // Across the screen, short of a corner button that rides the same row.
-        const top = Math.round(foot - BAR_H_NARROW - 8);
-        const right = cornerLeft(vw, vh, { top, bottom: top + BAR_H_NARROW }) - 8;
-        bar.style.cssText = `left:8px;width:${Math.round(right - 8)}px;top:${top}px;height:${BAR_H_NARROW}px`;
-      } else {
-        const left = Math.round(a.right + 8);
-        bar.style.cssText = `left:${left}px;width:${Math.max(120, Math.round(corner - 8 - left))}px;top:${Math.round(a.top)}px;height:${Math.round(a.height)}px`;
-      }
-    }
-    const sheet = !pane.hidden && narrow();
-    const docking = !pane.hidden && !sheet;
-    // Read before any class below changes the list's height.
-    const atFoot = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-    // Both cover the corner, so the widget's buttons step aside under them.
-    hideWidget(!pane.hidden);
-    // Full screen pins the navbar to the bottom; measure it after it moves.
-    dock.full(sheet);
-    pane.classList.toggle('lc-sheet', sheet);
-    pane.classList.toggle('lc-dock', docking);
-    // The keyboard up: the sheet covers what is left on screen, over the navbar.
-    const keys = sheet ? typingBand(win) : null;
-    pane.classList.toggle('lc-keys', !!keys);
-    if (sheet) {
-      const css = keys
-        ? `left:0;right:0;top:${keys.top}px;height:${keys.height}px`
-        : `left:0;right:0;top:0;bottom:${Math.round(vh - footTop())}px`;
-      // Only a sheet that changed size moves the list: a redraw under a
-      // press must leave the link where the finger is.
-      const moved = css !== sheetCss;
-      sheetCss = css;
-      pane.style.cssText = css;
-      if (moved && atFoot) list.scrollTop = list.scrollHeight;
-    } else if (docking) {
-      // Under the board's top bar, which keeps who is here and Settings in reach.
-      const bar = doc.querySelector('.board-topbar')?.getBoundingClientRect();
-      const top = bar && bar.height > 0 && bar.bottom < vh / 3 ? Math.round(bar.bottom) : 0;
-      pane.style.cssText = `right:0;width:${dock.width(vw)}px;top:${top}px;bottom:0`;
-    }
-    dock.docked(docking ? dock.width(vw) : null);
   };
 
   // Full screen, a page in the navbar beneath or a link in the chat moves the

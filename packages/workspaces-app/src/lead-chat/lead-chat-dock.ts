@@ -1,7 +1,7 @@
 /**
  * The lead chat's dock on a wide screen: how wide the panel is, the drag on
  * its left edge that changes that, and the choices kept on the device — the
- * width and whether tool use and board events show. `lead-chat-view.ts` places the panel
+ * width and whether tool use and board events show. `lead-chat-place.ts` places the panel
  * with what this answers.
  *
  * While the panel is docked, `<html data-lc-docked>` and `--lc-dock-w` say
