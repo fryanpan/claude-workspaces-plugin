@@ -17,8 +17,8 @@ const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'whiteboard-chat-browser-driver.ts');
 /** One bundle build, ten browser launches at each of two sizes. */
-const SUITE_MS = 300_000;
-const SPAWN_MS = 290_000;
+const SUITE_MS = 330_000;
+const SPAWN_MS = 320_000;
 /** The product's bar for a change reaching an open page, which is the
  *  behaviour under test here, so these two are real times. */
 const LIVE_MS = 1000;
@@ -45,16 +45,40 @@ describe.skipIf(CHROME === null)('the lead chat on a whiteboard', () => {
 
   for (const width of [1180, 430]) {
     describe(`at ${width} wide`, () => {
-      it('shows the bar a doc page shows', () => {
+      it('shows the board’s nav bar a mock page shows', () => {
+        const { mockPage, whiteboardPage } = size(width);
+        // CONTROL: the mock page draws the four pages this compares against.
+        expect(mockPage.nav?.links.map((l) => l[1])).toEqual([
+          'Home',
+          'Tasks',
+          'Library',
+          'Activity',
+        ]);
+        expect(whiteboardPage.nav).toEqual(mockPage.nav);
+      }, 60_000);
+
+      it('shows the top bar a doc page shows, beside that nav', () => {
         const { docPage, whiteboardPage } = size(width);
         // CONTROL: the doc page draws the bar this compares against.
         expect(docPage.bar?.height).toBeGreaterThan(0);
         expect(docPage.bar?.people).toBe(true);
         expect(whiteboardPage.bar).toEqual({
           ...docPage.bar,
+          width: whiteboardPage.bar?.width,
           title: 'Ferry flow',
         });
-        expect(whiteboardPage.boardNav).toBe(docPage.boardNav);
+      }, 60_000);
+
+      it('shows what an agent draws on an open whiteboard within a second, with no reload', () => {
+        const d = size(width).liveDraw;
+        expect(d.afterDraw).toBe(d.before + 1);
+        expect(d.afterReplace).toBe(1);
+        expect(d.inkAfter).toBeGreaterThan(d.inkBefore);
+        expect(d.noReload).toBe(true);
+        expect(d.drawMs).toBeGreaterThanOrEqual(0);
+        expect(d.drawMs).toBeLessThan(LIVE_MS);
+        expect(d.replaceMs).toBeGreaterThanOrEqual(0);
+        expect(d.replaceMs).toBeLessThan(LIVE_MS);
       }, 60_000);
 
       it('shows the chat and voice control a doc page shows', () => {

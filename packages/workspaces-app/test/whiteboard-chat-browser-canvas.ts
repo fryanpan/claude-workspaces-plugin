@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Cdp } from '../../../scripts/headless-chrome.ts';
 import { type Board, closePerson, navigate, openPerson, tap, until } from './follow-browser-kit.ts';
-import { CANVAS, CHAT, READY, TOOL } from './whiteboard-chat-browser-probes.ts';
+import { CANVAS, CHAT, INK, READY, TOOL } from './whiteboard-chat-browser-probes.ts';
 import type { CanvasCase, CanvasRead, ChatRead } from './whiteboard-chat-browser-reading.ts';
 
 export type Point = { x: number; y: number };
@@ -185,6 +185,62 @@ export async function canvasStill(
     voiceBar,
     wideDock,
   };
+}
+
+/** An agent draws, through `draw_on_whiteboard`'s route, on a whiteboard open
+ *  in a tab that has done nothing since it loaded. */
+export async function liveDraw(board: Board, width: number, height: number): Promise<LiveDrawCase> {
+  const B = `/workspaces/${board.ws}`;
+  const made = (await board.post(`${B}/whiteboards`, { title: `Live ${width}` })) as {
+    docId: string;
+    url: string;
+  };
+  const tab = await openPerson(width, height, {
+    anonId: `live-draw${width}`,
+    name: 'Alice',
+    ws: board.ws,
+  });
+  await openWhiteboard(tab, `${board.base}${made.url}`);
+  await tab.evaluate('window.__stillThisPage = true');
+  const elements = async () => Number(await tab.evaluate(`document.body.dataset.elements || '0'`));
+  const draw = (mode: string, x: number) =>
+    board.post(`${B}/docs/${made.docId}/whiteboard`, {
+      shapes: [{ kind: 'box', x, y: 200, w: 160, h: 100 }],
+      mode,
+      author: { id: 'agent-house-lead', name: 'Harborlight', kind: 'agent' },
+    });
+  const live = async (count: number): Promise<number> => {
+    const seen = await until(
+      'the canvas',
+      async () => ((await elements()) === count ? true : null),
+      5_000,
+    ).catch(() => false);
+    return seen ? 0 : -1;
+  };
+  const before = await elements();
+  const inkBefore = await read<number>(tab, INK);
+  let at = Date.now();
+  await draw('add', 80);
+  const landed = await live(before + 1);
+  const drawMs = landed < 0 ? -1 : Date.now() - at;
+  const inkAfter = await until(
+    'the ink',
+    async () => {
+      const ink = await read<number>(tab, INK);
+      return ink > inkBefore ? ink : null;
+    },
+    3_000,
+  ).catch(() => inkBefore);
+  const afterDraw = await elements();
+  await shot(tab, `live-draw-${width}`);
+  at = Date.now();
+  await draw('replace', 200);
+  const replaced = await live(1);
+  const replaceMs = replaced < 0 ? -1 : Date.now() - at;
+  const afterReplace = await elements();
+  const noReload = (await tab.evaluate('window.__stillThisPage === true')) === true;
+  await closePerson(tab);
+  return { before, afterDraw, afterReplace, inkBefore, inkAfter, drawMs, replaceMs, noReload };
 }
 
 /** The chat dragged as wide as it goes, which turns Excalidraw's own layout

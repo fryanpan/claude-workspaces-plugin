@@ -18,6 +18,7 @@ import {
   agentButton,
   canvasStill,
   chatAfterTap,
+  liveDraw,
   openWhiteboard,
   read,
   shot,
@@ -67,10 +68,19 @@ async function comparePages(
   width: number,
   height: number,
   whiteboard: string,
-): Promise<Pick<SizeRun, 'docPage' | 'whiteboardPage' | 'docChat' | 'whiteboardChat'>> {
+): Promise<
+  Pick<SizeRun, 'mockPage' | 'docPage' | 'whiteboardPage' | 'docChat' | 'whiteboardChat'>
+> {
   const B = `/workspaces/${board.ws}`;
   const openFresh = () =>
     openPerson(width, height, { anonId: `compare${width}`, name: 'Alice', ws: board.ws });
+  const mockTab = await openFresh();
+  await navigate(mockTab, `${board.base}${B}/mockups/${board.mockId}`);
+  await agentButton(mockTab);
+  const mockPage = await read<PageRead>(mockTab, PAGE);
+  await shot(mockTab, `mock-${width}`);
+  await closePerson(mockTab);
+
   const docTab = await openFresh();
   await navigate(docTab, `${board.base}${B}/docs/${board.docId}`);
   await agentButton(docTab);
@@ -87,7 +97,7 @@ async function comparePages(
   const whiteboardChat = await chatAfterTap(boardTab);
   await shot(boardTab, `whiteboard-chat-${width}`);
   await closePerson(boardTab);
-  return { docPage, whiteboardPage, docChat, whiteboardChat };
+  return { mockPage, docPage, whiteboardPage, docChat, whiteboardChat };
 }
 
 /** The lead's chip reaching a person who moves here, and a tab already here. */
@@ -269,7 +279,7 @@ async function tapLink(
 type LinkPoint = Point & { href: string; target: string | null };
 
 async function main(): Promise<void> {
-  deadline('whiteboard-chat', 280_000);
+  deadline('whiteboard-chat', 310_000);
   const board = await bootBoard('whiteboard-chat');
   const made = (await board.post(`/workspaces/${board.ws}/whiteboards`, {
     title: 'Ferry flow',
@@ -293,7 +303,9 @@ async function main(): Promise<void> {
       }
       step(`canvas at ${width}`);
       const canvas = await canvasStill(board, width, height, whiteboard);
-      sizes.push({ width, ...pages, presence: moved, live, links, canvas });
+      step(`live draw at ${width}`);
+      const drawn = await liveDraw(board, width, height);
+      sizes.push({ width, ...pages, presence: moved, live, links, canvas, liveDraw: drawn });
     }
     const run: WhiteboardChatRun = { workspaceId: board.ws, whiteboard, sizes };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

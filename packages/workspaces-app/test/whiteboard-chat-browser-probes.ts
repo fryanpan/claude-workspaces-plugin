@@ -25,7 +25,15 @@ export const PAGE = `(() => {
       title: title ? title.textContent.trim() : null,
       people: !!bar.querySelector('#doc-people'),
     } : null,
-    boardNav: document.querySelectorAll('.board-nav').length,
+    nav: (() => {
+      const n = document.querySelector('.board-nav');
+      if (!n) return null;
+      const b = n.getBoundingClientRect();
+      return {
+        rect: [b.left, b.top, b.width, b.height],
+        links: [...n.querySelectorAll('a')].map((a) => [new URL(a.href).pathname, a.textContent.trim()]),
+      };
+    })(),
   };
 })()`;
 
@@ -68,6 +76,19 @@ const centreOf = (selector: string): string => `(() => {
 export const VOICE_WORDS = centreOf('.lc-voice .lc-voice-btn');
 /** The newest whiteboard link in the chat. */
 export const LINK = centreOf('.lc-voice-text a[href*="/whiteboards/"]');
+
+/** How much of the middle of the canvas holds ink: Excalidraw's drawn scene,
+ *  read off the canvas itself rather than off the elements it was handed. */
+export const INK = `(() => {
+  const c = document.querySelector('.excalidraw canvas.static') || document.querySelector('.excalidraw canvas');
+  if (!c) return 0;
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  let n = 0;
+  for (let i = 3; i < data.length; i += 16) {
+    if (data[i] > 0 && (data[i - 3] < 200 || data[i - 2] < 200 || data[i - 1] < 200)) n++;
+  }
+  return n;
+})()`;
 
 /** The tool Excalidraw has selected. */
 export const TOOL = `(() => {

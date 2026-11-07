@@ -11,7 +11,7 @@ export interface PageRead {
     people: boolean;
   } | null;
   /** The board's page rail, on any page that draws one. */
-  boardNav: number;
+  nav: { rect: number[]; links: string[][] } | null;
 }
 
 /** The chat on a page. */
@@ -95,8 +95,26 @@ export interface CanvasCase {
   wideDock: CanvasRead | null;
 }
 
+/** An agent drawing on a whiteboard someone has open. */
+export interface LiveDrawCase {
+  /** Elements on the open canvas before, after a draw, and after a replace. */
+  before: number;
+  afterDraw: number;
+  afterReplace: number;
+  /** The drawn shape's ink on the canvas before and after the draw. */
+  inkBefore: number;
+  inkAfter: number;
+  /** The draw's response, to the canvas showing it. */
+  drawMs: number;
+  replaceMs: number;
+  /** Still the page that was open when the agent drew. */
+  noReload: boolean;
+}
+
 export interface SizeRun {
   width: number;
+  mockPage: PageRead;
+  liveDraw: LiveDrawCase;
   docPage: PageRead;
   whiteboardPage: PageRead;
   docChat: ChatRead;
