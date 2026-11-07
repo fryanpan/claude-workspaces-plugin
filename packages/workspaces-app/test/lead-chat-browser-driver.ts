@@ -84,7 +84,7 @@ const READ = `(() => {
     list: sr && sr.querySelector('.lc-list') ? sr.querySelector('.lc-list').textContent : '',
     composerFocused: !!sr && sr.activeElement === sr.querySelector('textarea'),
     listening: btn ? btn.dataset.listening === 'true' : false,
-    // Every control on screen in the chat that would start or stop listening.
+    // Every control inside the chat that starts or stops listening: only the composer's mic.
     listenControls: sr ? [...sr.querySelectorAll('button')].filter((x) => shown(x) && /listen|talk|mic/i.test((x.getAttribute('aria-label') || '') + ' ' + (x.title || '') + ' ' + x.className)).length : 0,
     viewport: { width: document.documentElement.clientWidth, height: innerHeight, inner: innerWidth, scale: visualViewport ? visualViewport.scale : 1 },
   };

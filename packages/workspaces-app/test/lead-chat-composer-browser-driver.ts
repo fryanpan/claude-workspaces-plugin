@@ -194,6 +194,8 @@ async function main(): Promise<void> {
       ).json()) as { webSocketDebuggerUrl: string };
       const other = await pageAt(port, opened.webSocketDebuggerUrl, width, height);
       const open = async (page: Cdp): Promise<void> => {
+        // A tab behind another never finishes its animation.
+        await page.send('Page.bringToFront');
         const loaded = page.once('Page.loadEventFired');
         await page.send('Page.navigate', { url: homeUrl });
         await loaded;
@@ -205,7 +207,11 @@ async function main(): Promise<void> {
         await page.evaluate(
           `document.querySelector('[data-lead-chat="button"]').shadowRoot.querySelector('button').click()`,
         );
-        await until('the panel', () => page.evaluate(`(${box('.lc-box')})?.w > 0`));
+        await until('the panel, its animation done', () =>
+          page.evaluate(
+            `(${box('.lc-box')})?.w > 0 && ${SR}.querySelector('.lc-pane').getAnimations().length === 0`,
+          ),
+        );
       };
       await open(cdp);
       await open(other);

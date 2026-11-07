@@ -111,13 +111,13 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
     }
   });
 
-  it('Voice first: the agent button is the one listen control; in the open panel its tap stops listening and Close closes', () => {
+  it('Voice first: outside the panel the agent button is the one listen control; in it the composer mic joins, its tap stops listening and Close closes', () => {
     for (const v of result().voice) {
       const at = String(v.width);
       expect(v.listeningOut, at).toBe(true);
       expect(v.listenControlsOut, at).toBe(0);
       expect(v.listeningInPane, at).toBe(true);
-      expect(v.listenControlsInPane, at).toBe(0);
+      expect(v.listenControlsInPane, at).toBe(1);
       expect(v.listeningAfter, at).toBe(false);
       expect(v.paneKept, at).toBe(true);
       expect(v.paneGone, at).toBe(true);
@@ -128,7 +128,7 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
     for (const s of result().surfaces) {
       const at = `${s.surface}@${s.width}`;
       expect(s.listeningOnOpen, at).toBe(true);
-      expect(s.listenControls, at).toBe(0);
+      expect(s.listenControls, at).toBe(1);
       expect(s.pausedOpen, at).toBe(true);
       expect(s.resumedOpen, at).toBe(true);
       expect(s.listeningAfterClose, at).toBe(false);
