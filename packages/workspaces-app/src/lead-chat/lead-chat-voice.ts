@@ -40,10 +40,13 @@
  * socket that closes as this page unloads is that move, not a stop, so it
  * is neither said nor reported. A refresh takes the same path.
  *
- * Without a tap, a try at a context at the mic's rate (`graphContext`) cannot
- * start either, so the graph stays on the 48 kHz context, where AirPods at 24
- * kHz deliver no audio. That tap therefore reopens the mic on a context made
- * at the mic's rate, and it wakes the speaker's context as well.
+ * That tap rebuilds the capture on a context made inside it, as a first tap
+ * does, when the graph sits at another rate than the mic (a headset on a page
+ * no tap reached) or when a context said it ran and delivered nothing for
+ * `NO_SOUND_MS`. The second is what CLAUDE-WORKSPACES-T reported: running,
+ * mic and context both at 48 kHz, no block and no empty render. Why such a
+ * graph never renders is not known; the report now says which part stayed
+ * silent (`AudioPump.diag`). The tap also wakes the speaker's context.
  *
  * A LATE ANSWER IS STILL SAID. Voice that stopped by itself plays what the lead
  * owes, and a socket dropped while it owes something reopens to collect it

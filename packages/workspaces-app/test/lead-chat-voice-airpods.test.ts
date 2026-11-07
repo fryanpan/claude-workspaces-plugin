@@ -294,6 +294,8 @@ describe('the lead chat voice with a headset mic at another rate', () => {
     expect(msg).toContain('context running at 48000 Hz');
     expect(msg).toContain('track 24000 Hz, 1 ch, default device');
     expect(msg).toContain('0 blocks, 150 renders without input');
+    expect(msg).toContain('worklet, processor not heard from');
+    expect(msg).toContain('started in a tap');
     expect(msg).not.toContain('Riverbend');
   });
 });

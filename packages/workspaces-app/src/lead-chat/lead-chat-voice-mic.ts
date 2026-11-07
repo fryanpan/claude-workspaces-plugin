@@ -43,6 +43,10 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let waiting: AudioContext | null = null;
   /** Voice started with no tap, and the one it may ask for has not come. */
   let tapDue = false;
+  /** The context says it runs and nothing came: the tap rebuilds the graph. */
+  let rebuild = false;
+  /** How this capture started, for the report. */
+  let how = 'started in a tap';
 
   const clear = (): void => {
     gen++;
@@ -88,13 +92,15 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         // can still rebuild the graph, so ask for it before giving up.
         if (ctx && tapDue) {
           waiting = ctx;
+          rebuild = true;
           opts.askForTap();
           soundTimer = setTimeout(noSound, NO_SOUND_MS);
           return;
         }
         // What the mic's track and the graph's context said, so the report
         // answers why (`AudioPump.diag`).
-        opts.onSilent(diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`);
+        const said = diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`;
+        opts.onSilent(`${said}; ${how}`);
       };
       soundTimer = setTimeout(noSound, NO_SOUND_MS);
     });
@@ -103,6 +109,8 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   return {
     open(ctx, carried) {
       tapDue = carried;
+      rebuild = false;
+      how = carried ? 'started without a tap' : 'started in a tap';
       start(ctx);
       if (!carried || !ctx) return;
       tapTimer = setTimeout(() => {
@@ -119,10 +127,12 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
       waiting = null;
       tapDue = false;
       const micRate = capture?.offRate?.();
-      if (micRate) {
+      if (micRate || rebuild) {
+        rebuild = false;
+        how += ', reopened in a tap';
         clear();
         // Made here, inside the tap, at the rate the mic delivers.
-        start(makeGestureContext(micRate));
+        start(makeGestureContext(micRate ?? undefined));
       } else {
         // Inside the gesture: the one call Safari lets start the context.
         void ctx.resume().catch(() => {});
