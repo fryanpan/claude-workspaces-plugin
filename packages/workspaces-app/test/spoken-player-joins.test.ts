@@ -182,7 +182,7 @@ describe('a meeting line, through the same player', () => {
       workspaceId: 'w-harbor',
       author: { id: 'known-alice', name: 'Alice', kind: 'known' },
       playbackContext: () => ctx,
-      fetch: (async () =>
+      fetch: (async (_url: unknown) =>
         new Response(
           new ReadableStream<Uint8Array>({
             start(c) {
