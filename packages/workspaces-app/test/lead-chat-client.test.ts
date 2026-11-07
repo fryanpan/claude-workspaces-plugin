@@ -4,6 +4,7 @@
  * and reads again when a stream it could not yet hear comes up.
  */
 import {
+  LEAD_CHAT_EVENT,
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
   LEAD_CHAT_MODEL_EVENT,
@@ -165,6 +166,60 @@ describe('the lead chat client', () => {
     await settle();
     expect(calls).toHaveLength(2);
     expect(client.state().messages.map((m) => m.id)).toEqual(['in-the-gap']);
+  });
+
+  it('ignores an older read that answers after a newer one', async () => {
+    const stream = new FakeStream('board');
+    const answers: Array<(body: unknown) => void> = [];
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      stream: stream as unknown as EventSource,
+      fetch: (() =>
+        new Promise<Response>((resolve) => {
+          answers.push((body) => resolve(new Response(JSON.stringify(body))));
+        })) as unknown as typeof fetch,
+    });
+    stream.fire('open');
+    expect(answers).toHaveLength(2);
+    answers[1]?.({
+      lead: null,
+      messages: [msg('m-1', 'asked', 5, { state: 'answered' })],
+      canTalk: true,
+    });
+    await settle();
+    answers[0]?.({
+      lead: null,
+      messages: [msg('m-1', 'asked', 5, { state: 'sent' })],
+      canTalk: false,
+    });
+    await settle();
+    expect(client.state().messages.map((m) => m.state)).toEqual(['answered']);
+    expect(client.state().canTalk).toBe(true);
+  });
+
+  it('keeps a change heard while a read was out, whose answer predates it', async () => {
+    const stream = new FakeStream('board');
+    stream.readyState = 1;
+    const answers: Array<(body: unknown) => void> = [];
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      stream: stream as unknown as EventSource,
+      fetch: (() =>
+        new Promise<Response>((resolve) => {
+          answers.push((body) => resolve(new Response(JSON.stringify(body))));
+        })) as unknown as typeof fetch,
+    });
+    stream.fire(LEAD_CHAT_EVENT, {
+      workspaceId: 'w-harbor',
+      message: msg('m-1', 'asked', 5, { state: 'received' }),
+    });
+    answers[0]?.({
+      lead: null,
+      messages: [msg('m-1', 'asked', 5, { state: 'sent' })],
+      canTalk: true,
+    });
+    await settle();
+    expect(client.state().messages.map((m) => m.state)).toEqual(['received']);
   });
 
   it('reads once on a stream that was already open, which has no gap', async () => {

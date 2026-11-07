@@ -111,7 +111,14 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   const changed = (): void => {
     for (const fn of listeners) fn(state);
   };
+  let readsSent = 0;
+  let readsOut = 0;
+  let newestApplied = 0;
+  /** Messages heard while a read is out, each with the last read sent before
+   *  it: that read's answer may predate the change. */
+  const heard = new Map<string, { message: LeadChatMessage; afterRead: number }>();
   const apply = (m: LeadChatMessage): void => {
+    if (readsOut > 0) heard.set(m.id, { message: m, afterRead: readsSent });
     state = { ...state, messages: upsertLeadChatMessage(state.messages, m) };
     changed();
   };
@@ -122,15 +129,27 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   };
 
   const load = async (): Promise<void> => {
+    const sent = ++readsSent;
+    readsOut++;
     try {
       const res = await doFetch(`${base}/lead-chat`, { credentials: 'same-origin' });
       if (!res.ok) return;
       const read = (await res.json()) as LeadChatRead;
+      // Reads can overlap and answer out of order, and an older one must not
+      // put back what a newer one changed.
+      if (sent < newestApplied) return;
+      newestApplied = sent;
       // A message a frame brought while the read was in flight, and the read
-      // does not hold yet, is kept; the read's copy wins for the rest.
+      // does not hold yet, is kept; the read's copy wins for the rest, except
+      // for the changes put back on it below.
       let messages = read.messages;
       for (const m of state.messages) {
         if (!messages.some((x) => x.id === m.id)) messages = upsertLeadChatMessage(messages, m);
+      }
+      // The stream is in order, so what it said after this read went out
+      // stands, and anything newer is a frame still to come.
+      for (const { message, afterRead } of heard.values()) {
+        if (afterRead >= sent) messages = upsertLeadChatMessage(messages, message);
       }
       // Pages already read back stay, and so does what the oldest of them
       // said about anything before it.
@@ -148,6 +167,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       changed();
     } catch {
       // Offline: the next reconnect reads again.
+    } finally {
+      if (--readsOut === 0) heard.clear();
     }
   };
 
