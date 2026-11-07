@@ -17,6 +17,7 @@
  * - `data-dir`: the server's own data folder.
  * - `owner-checkout`: the owner's own checkouts, prod's or the plugin
  *   cache, never a lead's folder.
+ * - `no-path`: starts a process it hands no path, so it reaches no file.
  * - `not-in-inventory`: the inventory's grep found no path by which it acts
  *   on a lead's folder. A module added after this table was written gets a
  *   label someone chose for it, not this one.
@@ -29,6 +30,7 @@ export type TreeFsLabel =
   | 'watch-only'
   | 'data-dir'
   | 'owner-checkout'
+  | 'no-path'
   | 'not-in-inventory';
 
 export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
@@ -122,8 +124,11 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/keeper/keeper-setup.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-stage.ts': 'not-in-inventory',
   'packages/server/src/keeper/keeper-store.ts': 'not-in-inventory',
+  'packages/server/src/lead-chat/files.ts': 'data-dir',
+  'packages/server/src/lead-chat/lead-model.ts': 'data-dir',
   'packages/server/src/lead-chat/log.ts': 'not-in-inventory',
   'packages/server/src/lead-chat/meeting.ts': 'not-in-inventory',
+  'packages/server/src/lead-chat/pane.ts': 'no-path',
   'packages/server/src/library.ts': 'tree-fs',
   'packages/server/src/meeting-home.ts': 'never-covered',
   'packages/server/src/meeting-notes-target.ts': 'not-in-inventory',
@@ -178,6 +183,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/routes/shell-static.ts': 'tree-fs',
   'packages/server/src/routes/workspace-content.ts': 'tree-fs',
   'packages/server/src/routes/workspace-embeds.ts': 'not-in-inventory',
+  'packages/server/src/routes/workspace-lead-chat-files.ts': 'data-dir',
   'packages/server/src/routes/workspace-library.ts': 'tree-fs',
   'packages/server/src/routes/workspace-next.ts': 'not-in-inventory',
   'packages/server/src/safe-path.ts': 'spelling-only',

@@ -47,6 +47,8 @@ export interface TrayFile {
   note: string;
   /** A local preview of an image. */
   preview?: string;
+  /** Still going up; shown steady, dimmed, until it is stored. */
+  uploading?: boolean;
 }
 
 export interface ComposerModel {
@@ -254,6 +256,7 @@ export function createComposer(doc: Document): Composer {
     for (const f of list) {
       const known = held.get(f.key);
       if (known) {
+        known.classList.toggle('lc-att-up', f.uploading === true);
         const note = known.querySelector('.lc-att-note');
         if (note) note.textContent = f.note;
         held.delete(f.key);
@@ -261,6 +264,7 @@ export function createComposer(doc: Document): Composer {
       }
       const chipEl = make(doc, 'div', f.preview ? 'lc-att' : 'lc-att lc-att-file');
       chipEl.dataset.key = f.key;
+      chipEl.classList.toggle('lc-att-up', f.uploading === true);
       chipEl.title = f.name;
       if (f.preview) {
         const img = make(doc, 'img');

@@ -436,7 +436,8 @@ in `packages/server/src` and `packages/core/src` (tests excluded) that imports
 `tree-fs` (reaches a lead tree only through `PathGuards`, `tree-fs.ts` or
 `git-contained.ts`), `refused-when-covered` (asks `covers` or `gitBarred`
 first), `spelling-only` (section G's `realpath` comparisons), `never-covered`
-(section F), `watch-only` (section H), `data-dir`, `owner-checkout`, and
+(section F), `watch-only` (section H), `data-dir`, `owner-checkout`, `no-path`
+(a process it hands no path, such as tmux and ps in `lead-chat/pane.ts`), and
 `not-in-inventory`. The last covers 129 modules: the inventory's grep found
 no path by which they act on a lead tree, and this work did not otherwise
 audit them; a module added later needs a label someone chose for it. A module

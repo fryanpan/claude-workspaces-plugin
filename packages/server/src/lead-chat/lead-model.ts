@@ -103,6 +103,10 @@ export class LeadModels {
     } finally {
       this.sending.delete(workspaceId);
     }
+    // A pick made during that send.
+    if (this.state(workspaceId).pending && !this.state(workspaceId).problem) {
+      await this.flush(workspaceId);
+    }
   }
 
   private settle(workspaceId: string, pick: LeadModelPick, sent: PaneSend): void {
@@ -116,7 +120,6 @@ export class LeadModels {
         ...(pick.effort ? { effort: pick.effort } : {}),
         ...(newer ? { pending: newer } : {}),
       });
-      if (newer) void this.flush(workspaceId);
       return;
     }
     // A terminal waiting on a question may be free when the turn ends. A
@@ -150,23 +153,22 @@ export class LeadModels {
   }
 
   private put(workspaceId: string, next: Held, announce = true): void {
+    const before = JSON.stringify(this.read(workspaceId));
     this.boards.set(workspaceId, next);
     const path = this.path(workspaceId);
     try {
       if (path) {
         mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(`${path}.tmp`, JSON.stringify(next));
+        // `idle` stays out: a turn may start while the server is down.
+        writeFileSync(`${path}.tmp`, JSON.stringify(this.read(workspaceId)));
         renameSync(`${path}.tmp`, path);
       }
     } catch (err) {
       console.error(`[lead-chat] could not keep ${workspaceId}'s model: ${String(err)}`);
     }
-    if (announce) {
-      this.deps.broadcast(workspaceId, {
-        event: LEAD_CHAT_MODEL_EVENT,
-        workspaceId,
-        state: this.read(workspaceId),
-      });
+    const state = this.read(workspaceId);
+    if (announce && JSON.stringify(state) !== before) {
+      this.deps.broadcast(workspaceId, { event: LEAD_CHAT_MODEL_EVENT, workspaceId, state });
     }
   }
 }

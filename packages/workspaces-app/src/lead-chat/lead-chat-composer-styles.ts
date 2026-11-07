@@ -10,6 +10,7 @@ export const COMPOSER_STYLES = `
 .lc-tray { display: flex; gap: 8px; padding: 10px 10px 0; overflow-x: auto; }
 .lc-tray[hidden] { display: none; }
 .lc-att { position: relative; flex: none; width: 56px; height: 56px; border: 1px solid var(--border, #d1d5da); border-radius: 10px; overflow: hidden; background: #f6f8fa; }
+.lc-att-up img { opacity: .5; }
 .lc-att img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .lc-att-file { display: flex; flex-direction: column; justify-content: center; width: 132px; padding: 0 26px 0 10px; font-size: 12px; line-height: 16px; }
 .lc-att-file b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

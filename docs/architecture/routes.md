@@ -297,7 +297,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/lead-chat/files` | POST | `routes/workspace-lead-chat-files.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/files/:id` | GET, HEAD | `routes/workspace-lead-chat-files.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/meeting` | POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
-| `/workspaces/:ws/lead-chat/model` | POST | `routes/workspace-lead-chat-model.ts` | owner proof |  |
+| `/workspaces/:ws/lead-chat/model` | POST | `routes/workspace-lead-chat-model.ts` | trusted-local |  |
 | `/workspaces/:ws/library` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | share-scope |  |
 | `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |

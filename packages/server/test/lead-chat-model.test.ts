@@ -111,6 +111,45 @@ describe('LeadModels', () => {
     t.cleanup();
   });
 
+  it('sends a pick made while another send is out', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-lead-model-'));
+    const sent: LeadModelPick[] = [];
+    let release: () => void = () => {};
+    const m = new LeadModels({
+      dataDir: dir,
+      leadOf: () => ({ agentId: 'harborlight-lead' }),
+      pane: {
+        send: async (_id, pick) => {
+          sent.push(pick);
+          if (sent.length === 1) await new Promise<void>((r) => (release = r));
+          return { ok: true };
+        },
+      },
+      broadcast: () => {},
+    });
+    m.turnEnded(BOARD);
+    const first = m.pick(BOARD, { model: 'opus' });
+    await waitFor(() => sent.length === 1);
+    await m.pick(BOARD, { model: 'haiku' });
+    release();
+    await first;
+    await waitFor(() => sent.length === 2);
+    expect(sent[1]?.model).toBe('haiku');
+    await waitFor(() => m.read(BOARD).pending === undefined);
+    rmSync(dir, { recursive: true });
+  });
+
+  it('after a restart, holds a pick until a hook says the lead is between turns', async () => {
+    const t = models();
+    t.m.turnEnded(BOARD);
+    const again = t.make();
+    await again.pick(BOARD, { model: 'opus' });
+    expect(t.sent).toEqual([]);
+    again.turnEnded(BOARD);
+    await waitFor(() => t.sent.length === 1);
+    t.cleanup();
+  });
+
   it('tells pages each change that shows, not each turn', async () => {
     const t = models();
     t.m.turnStarted(BOARD);
@@ -118,6 +157,8 @@ describe('LeadModels', () => {
     expect(t.frames).toEqual([]);
     t.m.observed(BOARD, { effort: 'low' });
     expect(t.frames.at(-1)?.state.effort).toBe('low');
+    t.m.observed(BOARD, { effort: 'low' });
+    expect(t.frames).toHaveLength(1);
     t.cleanup();
   });
 });

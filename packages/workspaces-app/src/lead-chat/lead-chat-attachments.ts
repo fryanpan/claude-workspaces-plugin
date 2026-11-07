@@ -66,6 +66,7 @@ export function createAttachments(opts: AttachmentsOpts): Attachments {
     if (res.ok) {
       entry.stored = res.file;
       entry.note = sizeLabel(res.file.size);
+      entry.uploading = false;
       opts.onChange();
       return;
     }
@@ -97,6 +98,7 @@ export function createAttachments(opts: AttachmentsOpts): Attachments {
           key: `f${seq}`,
           name: file.name || 'Pasted image',
           note: 'Uploading',
+          uploading: true,
           ...(file.type.startsWith('image/') ? { preview: url.createObjectURL(file) } : {}),
         };
         held = [...held, entry];

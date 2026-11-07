@@ -92,6 +92,8 @@ export function wireComposer(opts: ComposerWiringOpts): ComposerWiring {
   const pick = async (choice: { model?: LeadModelAlias; effort?: LeadEffort }): Promise<void> => {
     const res = await client.pickModel(choice);
     if (!res.ok) {
+      // The chat's status line sits behind the sheet.
+      c.sheet(null);
       opts.onNotice(
         res.error === 'owner-proof-required'
           ? 'Sign in as the board’s owner to switch the lead.'
