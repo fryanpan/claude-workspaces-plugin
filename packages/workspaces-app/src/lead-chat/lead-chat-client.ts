@@ -3,10 +3,11 @@
  * message, and hear every change on the board's own stream.
  *
  * The stream frame carries the whole message, so a change is applied in
- * place with no read. A stream that dropped and came back may have missed
- * frames, so a reconnect reads the conversation again — the frames are
- * transient (`lead-chat/lead-chat.ts` on the server) and a gap is never
- * replayed.
+ * place with no read. The frames are transient (`lead-chat/lead-chat.ts` on
+ * the server) and a gap is never replayed, so the conversation is read again
+ * whenever a stream comes up that may have missed one: after a drop, and on
+ * the first open of a stream that was still connecting when the first read
+ * went out. A message written between that read and that open is in neither.
  *
  * The first read holds the latest page; `loadOlder` pages back from the
  * oldest message shown until the server says there is nothing before it.
@@ -110,7 +111,14 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   const changed = (): void => {
     for (const fn of listeners) fn(state);
   };
+  let readsSent = 0;
+  let readsOut = 0;
+  let newestApplied = 0;
+  /** Messages heard while a read is out, each with the last read sent before
+   *  it: that read's answer may predate the change. */
+  const heard = new Map<string, { message: LeadChatMessage; afterRead: number }>();
   const apply = (m: LeadChatMessage): void => {
+    if (readsOut > 0) heard.set(m.id, { message: m, afterRead: readsSent });
     state = { ...state, messages: upsertLeadChatMessage(state.messages, m) };
     changed();
   };
@@ -121,15 +129,27 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   };
 
   const load = async (): Promise<void> => {
+    const sent = ++readsSent;
+    readsOut++;
     try {
       const res = await doFetch(`${base}/lead-chat`, { credentials: 'same-origin' });
       if (!res.ok) return;
       const read = (await res.json()) as LeadChatRead;
+      // Reads can overlap and answer out of order, and an older one must not
+      // put back what a newer one changed.
+      if (sent < newestApplied) return;
+      newestApplied = sent;
       // A message a frame brought while the read was in flight, and the read
-      // does not hold yet, is kept; the read's copy wins for the rest.
+      // does not hold yet, is kept; the read's copy wins for the rest, except
+      // for the changes put back on it below.
       let messages = read.messages;
       for (const m of state.messages) {
         if (!messages.some((x) => x.id === m.id)) messages = upsertLeadChatMessage(messages, m);
+      }
+      // The stream is in order, so what it said after this read went out
+      // stands, and anything newer is a frame still to come.
+      for (const { message, afterRead } of heard.values()) {
+        if (afterRead >= sent) messages = upsertLeadChatMessage(messages, message);
       }
       // Pages already read back stay, and so does what the oldest of them
       // said about anything before it.
@@ -147,6 +167,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       changed();
     } catch {
       // Offline: the next reconnect reads again.
+    } finally {
+      if (--readsOut === 0) heard.clear();
     }
   };
 
@@ -156,7 +178,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     (opts.openStream
       ? opts.openStream(boardStreamUrl(opts.workspaceId))
       : openBoardStream(opts.workspaceId));
-  let dropped = false;
+  // Not OPEN yet: this page cannot hear a frame until it is.
+  let dropped = stream.readyState !== 1;
   stream.addEventListener(LEAD_CHAT_EVENT, (ev) => {
     try {
       const frame = JSON.parse((ev as MessageEvent).data) as LeadChatFrame;
