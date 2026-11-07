@@ -417,7 +417,6 @@ console.log('finished');
         ...process.env,
         CW_KEEPER_URL: ORIGIN(),
         CW_KEEPER_CALLER_TOKEN_FILE: tokenFile,
-        CW_TEST_TIMING_SCALE: undefined,
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -428,7 +427,7 @@ console.log('finished');
     });
     const before = keeper.requests.pending().length;
     await waitFor(() => exited || keeper.requests.pending().length > before, {
-      timeoutMs: 30_000,
+      timeout: 30_000,
     });
     const heldNow = keeper.requests
       .pending()
