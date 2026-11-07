@@ -1,10 +1,11 @@
 /**
  * The whiteboard page's HTML shell (`/workspaces/<ws>/whiteboards/<id>`).
  *
- * A thin header (back to the board, the title, who is here) over one canvas
- * that fills the rest of the screen. The canvas and everything that draws on
- * it are `/app/whiteboard.js`, which loads Excalidraw lazily so the header
- * paints before the canvas library arrives. The stylesheets are the chrome
+ * The doc page's own top bar (back to the board, the title, who is here,
+ * `index.html` in workspaces-app) over one canvas that fills the rest of the
+ * screen. The canvas, the bar's people and the chat with the lead are
+ * `/app/whiteboard.js`, which loads Excalidraw lazily so the bar paints before
+ * the canvas library arrives. The stylesheets are the chrome
  * every page shares, then this page's own, then the token layer last, the
  * order the other shells use.
  */
@@ -40,11 +41,15 @@ export function renderWhiteboardShell(
     <link rel="stylesheet" href="${assetHref(assets, 'tokens.css')}" />
   </head>
   <body class="whiteboard-body" data-workspace-id="${escape(input.workspaceId)}" data-doc-id="${escape(input.docId)}">
-    <header class="wb-bar">
-      <a class="back-link" href="${escape(board)}" title="Back to the board" aria-label="Back to the board">←</a>
-      <span class="wb-title" id="wb-title">${escape(input.title)}</span>
-      <div id="wb-people" class="hidden"></div>
-      <span class="wb-presence" id="wb-presence" aria-live="polite">Connecting…</span>
+    <header id="topbar">
+      <div class="doc-crumb">
+        <a class="back-link" href="${escape(board)}" title="Back to the board" aria-label="Back to the board">←</a>
+        <span class="doc-path" dir="ltr" id="wb-title">${escape(input.title)}</span>
+      </div>
+      <div class="toolbar">
+        <div id="doc-people" class="hidden"></div>
+        <span class="wb-presence" id="wb-presence" aria-live="polite">Connecting…</span>
+      </div>
     </header>
     <main class="wb-stage" id="wb-stage"><div class="wb-loading" id="wb-loading">Loading the canvas…</div></main>
     <script type="module" src="${assetHref(assets, 'whiteboard.js')}"></script>
