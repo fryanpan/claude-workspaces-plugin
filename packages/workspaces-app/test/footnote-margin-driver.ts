@@ -310,21 +310,25 @@ async function probe(): Promise<string> {
   }
   const scrolling: ScrollReading[] = [];
   const settled: ScrollReading[] = [];
-  // One gesture, down and back, 12px a frame, read every sixth frame.
+  // One gesture, down and back, 24px a frame, read every third frame: a
+  // reading every 72px, with the column never restacking between them.
   const path: number[] = [];
-  for (let y = 0; y <= max; y += 12) path.push(y);
+  for (let y = 0; y <= max; y += 24) path.push(y);
   path.push(max);
-  for (let y = max; y >= 0; y -= 12) path.push(y);
+  for (let y = max; y >= 0; y -= 24) path.push(y);
   for (const [i, y] of path.entries()) {
     editorEl.scrollTop = y;
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    if (i % 6 === 0) scrolling.push(read(editorEl, proseEl));
+    if (i % 3 === 0) scrolling.push(read(editorEl, proseEl));
   }
   // Then at rest: step through the doc, letting the column settle at each stop.
   const step = Math.max(80, Math.round(editorEl.clientHeight / 4));
   const stops: number[] = [];
   for (let y = 0; y < max; y += step) stops.push(y);
   stops.push(max);
+  // The gesture can end on the first stop, which would then move nothing and
+  // read a column whose restack is still due. This move always restacks.
+  await scrollAndRestack(editorEl, step);
   for (const y of [...stops, ...stops.slice(0, -1).reverse()]) {
     await scrollAndRestack(editorEl, y);
     settled.push(read(editorEl, proseEl));

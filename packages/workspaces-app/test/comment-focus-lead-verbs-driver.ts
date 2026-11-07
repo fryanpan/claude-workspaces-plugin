@@ -239,7 +239,8 @@ async function openPage(
       return read();
     },
     scrollAndRestack: async (scroll) => {
-      // In one evaluate, so a pass already due cannot count as this one.
+      // In one evaluate, so a pass that ran before the scroll cannot count.
+      // One still due may, and it reads the new scroll position.
       const passes = await cdp.evaluate(
         `(() => { const passes = window.__restacks; ${scroll}; return passes; })()`,
       );
