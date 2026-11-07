@@ -1,7 +1,7 @@
 /**
  * The lead chat's mirror of the lead's session in a real browser, at
  * 1180x820, 1000x800 and 430x932: a tool call opens to its input and output, the
- * header's Tool use toggle shows the board events and tool calls hidden
+ * header's Show tool use toggle shows the board events and tool calls hidden
  * behind the current one, a new call takes that one's place and the lead's
  * text retires it, a spoken reply's words open on a tap,
  * the lead's text reaches an open page within a second, and on a wide
@@ -56,7 +56,8 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
       const at = String(w.width);
       expect(w.channel.before, at).toBe(0);
       expect(w.channel.toolsBefore, at).toBe(1);
-      expect(w.channel.count, at).toMatch(/^\(\d+\)$/);
+      expect(w.channel.off, at).toEqual(['Show tool use', 'false']);
+      expect(w.channel.on, at).toEqual(['Show tool use', 'true']);
       expect(w.channel.shown, at).toBe(1);
       expect(w.channel.after, at).toBe(0);
       expect(w.channel.headerFits, at).toBe(true);

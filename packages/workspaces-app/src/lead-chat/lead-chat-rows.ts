@@ -16,7 +16,7 @@
  *   open on a tap.
  *
  * Tool calls and board events are the session's working, not its answer, so
- * they are hidden unless the header's Tool use toggle is on — all but the
+ * they are hidden unless the header's Show tool use toggle is on — all but the
  * newest, and that one only while nothing has been said after it: it is what
  * the lead is doing now, and the lead's reply landing replaces it
  * (`liveWorkingRow`).
@@ -41,7 +41,7 @@ export interface RowContext {
   lead: LeadChatLead | null;
   /** Ids of the compact rows and voice bubbles the reader opened. */
   open: ReadonlySet<string>;
-  /** The Tool use toggle is on: every tool call and board event shows. */
+  /** The Show tool use toggle is on: every tool call and board event shows. */
   showWorking: boolean;
   /** The one working row shown while the toggle is off (`liveWorkingRow`). */
   liveWorking: string | null;
@@ -75,12 +75,6 @@ export function liveWorkingRow(list: readonly LeadChatMessage[]): string | null 
   const last = list.at(-1);
   return last && isWorkingRow(last) ? last.id : null;
 }
-
-/** How many working rows the toggle is hiding. */
-export const hiddenWorkingCount = (list: readonly LeadChatMessage[]): number => {
-  const live = liveWorkingRow(list);
-  return list.filter((m) => isWorkingRow(m) && m.id !== live).length;
-};
 
 /** A row from the lead's session. */
 export const isSessionRow = (m: LeadChatMessage): boolean =>
