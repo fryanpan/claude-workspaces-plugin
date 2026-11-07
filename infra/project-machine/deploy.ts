@@ -112,7 +112,13 @@ import {
   hasLifecycle,
   hasSnapshots,
 } from './tigris.ts';
-import { type ListedToken, chooseToken, readTokenList, tokenMarker } from './token-list.ts';
+import {
+  type ListedToken,
+  chooseToken,
+  imageHasTokenList,
+  readTokenList,
+  tokenMarker,
+} from './token-list.ts';
 import {
   type AppliedTunnel,
   TUNNEL_TOKEN_SECRET,
@@ -416,11 +422,17 @@ export async function deployProject(
   const refresh = tunnel && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
   const seen = await observe(cfg);
   // Before anything is changed: a label that is not listed stops the run.
-  const listed: ListedToken | undefined = leadTokenDue(cfg, seen)
-    ? chooseToken(readTokenList(), cfg.claudeToken)
-    : undefined;
-  if (cfg.claudeToken !== undefined && !listed) {
+  const tokens = leadTokenDue(cfg, seen) ? readTokenList() : [];
+  const listed: ListedToken | undefined = chooseToken(tokens, cfg.claudeToken);
+  if (cfg.claudeToken !== undefined && !leadTokenDue(cfg, seen)) {
     throw new Error(`--claude-token signs in a lead, and ${cfg.app} has no board to lead`);
+  }
+  // A project moved to a token must not fall back to the first by accident.
+  if (tokens.length > 0 && !cfg.claudeToken && cfg.leadRefresh.includes(LEAD_TOKEN_SECRET)) {
+    throw new Error('--refresh-lead replaces the sign-in: name a listed token with --claude-token');
+  }
+  if (listed && !imageHasTokenList(cfg.imageLabel)) {
+    throw new Error(`${cfg.imageLabel.slice(0, 9)} cannot start a lead on a listed token`);
   }
   const observed = { ...seen, listedToken: listed !== undefined };
   const actions = plan(cfg, observed, refresh, [...settings.keys()]);

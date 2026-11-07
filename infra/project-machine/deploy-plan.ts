@@ -47,6 +47,8 @@ export interface ProjectConfig {
   leadBoard?: string;
   /** Lead secrets to set again even though they exist: the ones this run named. */
   leadRefresh: string[];
+  /** The label of the listed token this run must use (`--claude-token`). */
+  claudeToken?: string;
   /** The repos the lead's deploy key may be on (`--lead-repo`); the deploy
    *  checks GitHub lists it read-only on one of these or a push repo. */
   leadRepos?: string[];

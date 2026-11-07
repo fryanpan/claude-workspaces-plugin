@@ -7,17 +7,16 @@
  * hold, one passkey tap. The restart takes the board down for as long as a
  * boot takes, and the lead resumes its conversation (`lead.sh`).
  *
- * The move then waits on the machine until `lead.sh` has written the new
- * label, which it can only have from an entrypoint that accepted the marker,
- * so it shows the lead started on this token. That wait is one `fly ssh
- * console`, a second tap through the keeper, and runs in one shell on the
- * machine so waiting costs no more taps.
+ * The move then waits on the machine until `lead.sh` writes the new label,
+ * which it does as it starts a lead the entrypoint accepted the marker for.
+ * That shows the machine took the token, not that Claude accepted it: a
+ * revoked token passes. The wait is one `fly ssh console`, a second tap
+ * through the keeper, and runs in one shell on the machine so waiting costs
+ * no more taps.
  *
- * An image older than this code reads the listed marker as another org's and
- * starts no lead, so the move refuses it before changing anything.
+ * An image older than this code cannot use a listed marker, so the move
+ * refuses it before changing anything (`imageHasTokenList`).
  */
-import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
 import {
   LEAD_BOARD_SECRET,
   LEAD_TOKEN_ORG_SECRET,
@@ -26,27 +25,19 @@ import {
 } from './deploy-plan.ts';
 import { machines } from './deploy.ts';
 import { flyJson, flyOk, onMachine } from './mac-ops.ts';
-import { chooseToken, readTokenList, tokenMarker } from './token-list.ts';
-import { LEAD_ROOT, MACHINE_PATH, asLead } from './token-usage.ts';
+import { chooseToken, imageHasTokenList, readTokenList, tokenMarker } from './token-list.ts';
+import { LEAD_ROOT, MACHINE_PATH, asLead, boundedRead } from './token-usage.ts';
 
-const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const CONFIRMED = 'cw-token-label=';
 /** How long the machine may take to boot its lead, 2s a try. */
 const CONFIRM_TRIES = 60;
-
-/** Whether the image built from `commit` holds this code. An unknown commit does not. */
-export function imageHasTokenList(commit: string, repo = REPO): boolean {
-  if (!/^[0-9a-f]{40}$/.test(commit)) return false;
-  const path = `${commit}:infra/project-machine/token-list.ts`;
-  return spawnSync('git', ['-C', repo, 'cat-file', '-e', path], { stdio: 'ignore' }).status === 0;
-}
 
 export const waitForLabelCommand = (
   label: string,
   root = LEAD_ROOT,
   path = MACHINE_PATH,
 ): string => {
-  const read = `$(cat ${root}/token-label 2>/dev/null)`;
+  const read = `$(${boundedRead(`${root}/token-label`, 256)})`;
   return asLead(
     `i=0; while [ $i -lt ${CONFIRM_TRIES} ]; do [ "${read}" = "${label}" ] && break; i=$((i + 1)); sleep 2; done; echo ${CONFIRMED}${read}`,
     path,

@@ -13,8 +13,8 @@
  * signed in with `CLAUDE_CODE_OAUTH_TOKEN`, and they say it comes only on
  * Pro, Max and Ultra plans and only after the session's first answer. So the
  * file records `seenAt` on every run, with or without numbers, and the first
- * real machine answers the question: `seenAt` with no `readAt` means the
- * status line ran and no numbers came.
+ * real machine answers the question: `seenAt` with no `readAt`, after the
+ * session's first answer, means the status line ran and no numbers came.
  *
  * It runs on every status update, so it imports nothing heavy.
  */
@@ -42,6 +42,10 @@ export interface UsageFile {
 }
 
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** Past any real reading and still a date `Date` can hold: seconds for `resetsAt`, ms for the rest. */
+const MAX_SECONDS = 1e11;
+const MAX_MS = 1e14;
+const inRange = (v: unknown, max: number): v is number => isNumber(v) && v >= 0 && v <= max;
 const validLabel = (v: unknown): v is string =>
   typeof v === 'string' && (v === '' || TOKEN_LABEL.test(v));
 
@@ -75,7 +79,7 @@ export function foldUsage(
 function storedWindow(v: unknown): UsageWindow | null | undefined {
   if (v === null) return null;
   const w = v as Partial<UsageWindow> | undefined;
-  if (!isNumber(w?.usedPercent) || !isNumber(w?.resetsAt)) return undefined;
+  if (!inRange(w?.usedPercent, 1000) || !inRange(w?.resetsAt, MAX_SECONDS)) return undefined;
   return { usedPercent: w.usedPercent, resetsAt: w.resetsAt };
 }
 
@@ -90,8 +94,8 @@ export function parseUsageFile(raw: string): UsageFile | null {
   } catch {
     return null;
   }
-  if (!v || !validLabel(v.label) || !isNumber(v.seenAt)) return null;
-  if (v.readAt !== null && !isNumber(v.readAt)) return null;
+  if (!v || !validLabel(v.label) || !inRange(v.seenAt, MAX_MS)) return null;
+  if (v.readAt !== null && !inRange(v.readAt, MAX_MS)) return null;
   const fiveHour = storedWindow(v.fiveHour);
   const sevenDay = storedWindow(v.sevenDay);
   if (fiveHour === undefined || sevenDay === undefined) return null;

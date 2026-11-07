@@ -4,7 +4,7 @@
  * Commands and rules are in `HELP`; the list is `token-list.ts`.
  */
 import { approveOrgSignIn } from './org-signin.ts';
-import { addToken, readTokenList } from './token-list.ts';
+import { addToken, assertNewLabel, readTokenList } from './token-list.ts';
 import { moveProject } from './token-move.ts';
 import { renderUsage, usageReport } from './token-usage.ts';
 
@@ -52,6 +52,8 @@ async function add(args: string[], io: TokensIo): Promise<number> {
     console.error(HELP);
     return 2;
   }
+  // Before the approval: a token made and then refused stays live for a year.
+  assertNewLabel(label);
   const show = io.show ?? ((t: string) => process.stdout.write(t));
   const token = args.includes('--stdin')
     ? (await (io.stdin ?? (() => Bun.stdin.text()))()).trim()
@@ -86,7 +88,7 @@ function move(args: string[], io: TokensIo): number {
   }
   const r = moveProject(project, label, io.imageReady ? { imageReady: io.imageReady } : {});
   if (r.confirmed) {
-    console.log(`[tokens] ${project}'s lead started on ${label}`);
+    console.log(`[tokens] ${project}'s machine took ${label}: it reports that label`);
     return 0;
   }
   console.error(

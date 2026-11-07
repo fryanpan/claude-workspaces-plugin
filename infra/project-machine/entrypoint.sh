@@ -219,9 +219,9 @@ lead_cgroup() {
 # CW_LEAD_TOKEN_ORG beside the token is the org's name for a token made by the
 # org's own approval, or listed:<label>:<sha256> for one from the central list,
 # which several orgs may share (token-list.ts, tokenMarker): the digest binds
-# this org, the label and this exact token. A token set by hand or the sign-in
-# every lead once shared starts no lead, and neither does a marker copied from
-# another org. The marker is never logged: its digest is of the sign-in.
+# this org, the label and this exact token. A sign-in with no marker starts no
+# lead, and neither does a marker copied from another org or a token set over
+# a listed marker. The marker is never logged: its digest is of the sign-in.
 LEAD_ORG="${FLY_APP_NAME:-}"
 LEAD_ORG="${LEAD_ORG#cw-}"
 LEAD_TOKEN_LABEL=""

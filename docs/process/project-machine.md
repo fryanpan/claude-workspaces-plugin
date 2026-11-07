@@ -278,16 +278,19 @@ bun run machine:deploy --project <project> --memory 2048 \
   and says why.
 - The machine starts its lead only when `CW_LEAD_TOKEN_ORG` names its own
   org or, for a listed token, holds a digest of its org, the label and that
-  exact token (`entrypoint.sh`). So a token set by hand, or the one every lead
-  used to share, starts no lead. The next deploy on the Mac sees no
+  exact token (`entrypoint.sh`). So a token with no marker, or one set over a
+  listed marker, starts no lead. A token set by hand over an org-name marker
+  still does. The next deploy on the Mac sees no
   `CW_LEAD_TOKEN_ORG` and sets a listed token, or asks for the org's approval.
 - The Mac's walled lead keeps its own Keychain sign-in,
   `claude-lead-oauth-token` (`scripts/lead-sandbox-token.ts`); no org's lead
   is given it. `--claude-account` is gone.
-- Revoke one org's sign-in at claude.ai/settings/claude-code; no other org
-  loses its lead. `--refresh-lead` then makes the org a new one.
+- Revoke a sign-in made for one org at claude.ai/settings/claude-code; no other
+  org loses its lead. `--refresh-lead` then makes the org a new one. With
+  tokens on the list, `--refresh-lead` must name one with `--claude-token`.
 - `--claude-token <label>` picks a listed token and sets it again on a run
-  that names it. Without it a deploy that needs a token takes the first listed.
+  that names it. Without it a deploy that needs a token takes the first listed,
+  and only a deploy of an image holding this code can set one.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private
   key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
   The deploy sets it only once GitHub lists it read-only: it reads the deploy
@@ -399,21 +402,27 @@ label, never a value:
 - **A move** is `fly secrets import` without `--stage`, which sets both and
   restarts the machine in one call. The board is down for a boot and the lead
   resumes its conversation. The move then waits until the machine reports the
-  new label. Through the keeper that is two taps: the import and the
-  `fly ssh console`. It refuses, before any change, a project with no lead or a
-  machine on an image older than this code, whose entrypoint would read the
-  marker as another org's and start no lead. Deploy that project first.
+  new label. That shows the machine took the token, not that Claude accepted
+  it. Through the keeper that is two taps on an app the keeper created: the
+  import and the `fly ssh console`. A live setup grant covers the import, and
+  on any other app the two reads before it are a tap each. It refuses, before
+  any change, a project with no lead or a machine on an image older than this
+  code, whose entrypoint would read the marker as another org's and start no
+  lead. Deploy that project first. A move off a token made for one org leaves
+  that token live for up to a year, so revoke it.
 - **Usage** comes from Claude Code's status line. `lead.sh` installs
   `lead-usage.ts` as the lead's status line command, which keeps
   `rate_limits` (5-hour and 7-day percentages and end times) in
   `/data/lead/usage.json`. `machine:tokens usage` reads that file as the `lead`
   user over `fly ssh console`, one tap per project through the keeper. It shows
-  each listed token's newest reading and the projects on it.
+  each listed token's newest reading from the projects on it now, so a token
+  no project runs on has no reading. The file is the lead's to write, so a
+  steered lead can misreport its own token.
 - **Unproven: whether `rate_limits` appears for a session signed in with
   `CLAUDE_CODE_OAUTH_TOKEN`.** The docs do not say, and give it only on Pro,
   Max and Ultra plans, after a session's first answer. The first real read
-  answers it: `the status line ran on <project>, with no rate_limits` means it
-  does not. The undocumented OAuth usage endpoint is not used.
+  answers it: `the status line ran on <project>, with no rate_limits so far`,
+  after the lead's first answer, means it does not. The undocumented OAuth usage endpoint is not used.
 - **Sharing a token gives up per-org revocation.** Every project on a listed
   token holds the same value. A lead can spend or send away its own sign-in
   (`docs/architecture/security.md`), so a token leaked from one project works

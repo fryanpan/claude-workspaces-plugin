@@ -16,11 +16,14 @@
  * A value goes to a child's stdin and nowhere else (`mac-ops.ts`). Every error
  * here names the entry or the label, never any part of a value.
  */
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import { TOKEN_LABEL } from './lead-usage.ts';
 import { keychainCreate, keychainHas, keychainRead } from './mac-ops.ts';
 import { isSetupToken } from './org-signin.ts';
 
+const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 export const TOKEN_LIST_SLOTS = 32;
 export const tokenSlot = (n: number): string => `claude-token-list-${n}`;
 /** The Mac's walled lead's sign-in, which no org's lead may hold (review H2). */
@@ -57,6 +60,17 @@ export function readTokenList(): ListedToken[] {
   return list;
 }
 
+/**
+ * Whether the image built from `commit` holds this code. An older entrypoint
+ * reads a listed marker as another org's and starts no lead. An unknown commit
+ * counts as older.
+ */
+export function imageHasTokenList(commit: string, repo = REPO): boolean {
+  if (!/^[0-9a-f]{40}$/.test(commit)) return false;
+  const path = `${commit}:infra/project-machine/token-list.ts`;
+  return spawnSync('git', ['-C', repo, 'cat-file', '-e', path], { stdio: 'ignore' }).status === 0;
+}
+
 /** The token `label` names, or the first listed; undefined only for an empty list and no label. */
 export function chooseToken(list: readonly ListedToken[], label?: string): ListedToken | undefined {
   if (label === undefined) return list[0];
@@ -78,16 +92,23 @@ export function tokenMarker(project: string, label: string, token: string): stri
   return `listed:${label}:${digest}`;
 }
 
-/** Store a new token in the first free slot. Returns the entry's name. */
-export function addToken(label: string, token: string, added: string): string {
+/** Why `label` cannot join the list. Asked before an approval makes a token. */
+export function assertNewLabel(label: string): void {
   if (!TOKEN_LABEL.test(label)) {
     throw new Error(
       'a label is 1-32 characters of a-z, 0-9 and -, starting with a letter or digit',
     );
   }
+  if (readTokenList().some((t) => t.label === label)) {
+    throw new Error(`${label} is already on the list`);
+  }
+}
+
+/** Store a new token in the first free slot. Returns the entry's name. */
+export function addToken(label: string, token: string, added: string): string {
+  assertNewLabel(label);
   if (!isSetupToken(token)) throw new Error('that is not a token claude setup-token prints');
   const list = readTokenList();
-  if (list.some((t) => t.label === label)) throw new Error(`${label} is already on the list`);
   if (list.some((t) => t.token === token)) throw new Error('that token is already on the list');
   if (keychainHas(WALLED_LEAD_ENTRY) && keychainRead(WALLED_LEAD_ENTRY).trim() === token) {
     throw new Error(`that token is ${WALLED_LEAD_ENTRY}, which no org's lead may hold`);

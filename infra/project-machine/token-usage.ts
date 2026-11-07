@@ -11,7 +11,7 @@
  * project read is one passkey tap. No route on the project's server reports
  * this, and adding one is not free: it is a new path to reach from outside.
  */
-import { PROJECT_NAME } from './deploy-plan.ts';
+import { LEAD_BOARD_SECRET, PROJECT_NAME } from './deploy-plan.ts';
 import {
   TOKEN_LABEL,
   type UsageFile,
@@ -30,9 +30,13 @@ const START = 'cw-usage-start';
 export const asLead = (script: string, path: string): string =>
   `env -i PATH=${path} setpriv --reuid=lead --regid=lead --init-groups -- sh -c '${script}'`;
 
+/** A file the lead wrote, which may be a pipe that never ends: bounded in time and size. */
+export const boundedRead = (file: string, bytes: number): string =>
+  `timeout 5 head -c ${bytes} ${file} 2>/dev/null`;
+
 export const leadReadCommand = (root = LEAD_ROOT, path = MACHINE_PATH): string =>
   asLead(
-    `echo ${START}; cat ${root}/token-label 2>/dev/null || echo; cat ${root}/usage.json 2>/dev/null; exit 0`,
+    `echo ${START}; ${boundedRead(`${root}/token-label`, 256)} || echo; ${boundedRead(`${root}/usage.json`, 4096)}; exit 0`,
     path,
   );
 
@@ -58,7 +62,7 @@ export function parseLeadRead(stdout: string): LeadRead {
   };
 }
 
-/** The projects to read: those named, or every `cw-` app on Fly. */
+/** The projects to read: those named, or every `cw-` app on Fly with a lead. */
 function projectsToRead(named: readonly string[]): string[] {
   if (named.length > 0) {
     const bad = named.find((p) => !PROJECT_NAME.test(p));
@@ -68,8 +72,19 @@ function projectsToRead(named: readonly string[]): string[] {
   return flyJson<{ Name?: string; name?: string }[]>(['apps', 'list'])
     .map((a) => a.Name ?? a.name ?? '')
     .filter((n) => n.startsWith('cw-') && PROJECT_NAME.test(n.slice(3)))
+    .filter(hasLead)
     .map((n) => n.slice(3))
     .sort();
+}
+
+/** A routine read, so an app with no lead costs no tap. Unknown counts as having one. */
+function hasLead(app: string): boolean {
+  try {
+    const secrets = flyJson<{ Name?: string; name?: string }[]>(['secrets', 'list', '--app', app]);
+    return secrets.some((s) => (s.Name ?? s.name) === LEAD_BOARD_SECRET);
+  } catch {
+    return true;
+  }
 }
 
 export function usageReport(named: readonly string[]): ProjectUsage[] {
@@ -98,12 +113,17 @@ function readingText(u: UsageFile, now: number): string {
 }
 
 const NOT_RUN = (p: string) => `no reading: the status line has not run on ${p}`;
-const NO_LIMITS = (p: string) => `no reading: the status line ran on ${p}, with no rate_limits`;
+const NO_LIMITS = (p: string) =>
+  `no reading: the status line ran on ${p}, with no rate_limits so far`;
+
+/** Whether this report's reading is of the token the project runs on now. */
+const ownReading = (r: ProjectUsage): UsageFile | null =>
+  r.usage !== null && r.usage.label === r.label ? r.usage : null;
 
 /** Why these projects give no numbers, from the most telling one. */
 function noReading(projects: readonly ProjectUsage[]): string {
   if (projects.length === 0) return 'no reading: no project runs on it';
-  const ran = projects.find((p) => p.usage !== null);
+  const ran = projects.find((p) => ownReading(p) !== null);
   if (ran) return NO_LIMITS(ran.project);
   return NOT_RUN((projects[0] as ProjectUsage).project);
 }
@@ -111,10 +131,13 @@ function noReading(projects: readonly ProjectUsage[]): string {
 const hasNumbers = (u: UsageFile | null): u is UsageFile => u !== null && u.readAt !== null;
 
 /**
- * One line per listed token, with its newest reading from any project,
- * attributed by the label in the reading: a project just moved still holds
- * its last reading of the old token. A project on its own sign-in has a line
- * of its own, because two of those are two tokens.
+ * One line per listed token, with the newest reading from the projects on it
+ * now. A project just moved has no reading of its new token yet, and its last
+ * reading of the old one is not used: the file is the lead's to write, and a
+ * reading counted for a token its project does not run on would let one lead
+ * speak for another's. What a lead says of its own token is taken as it comes.
+ * A project on its own sign-in has a line of its own, because two of those are
+ * two tokens.
  */
 export function renderUsage(
   labels: readonly string[],
@@ -130,21 +153,24 @@ export function renderUsage(
   };
   const seen = reports.flatMap((r) => (r.label ? [r.label] : []));
   for (const label of new Set([...labels, ...seen])) {
-    const newest = reports
-      .map((r) => r.usage)
-      .filter(hasNumbers)
-      .filter((u) => u.label === label)
-      .sort((a, b) => (b.readAt ?? 0) - (a.readAt ?? 0))[0];
     const projects = reports.filter((r) => r.label === label);
+    const newest = projects
+      .map(ownReading)
+      .filter(hasNumbers)
+      .filter((u) => (u.readAt ?? 0) <= now)
+      .sort((a, b) => (b.readAt ?? 0) - (a.readAt ?? 0))[0];
     line(labels.includes(label) ? label : `${label} (not on the list)`, projects, newest);
   }
   for (const r of reports) {
     if (r.error) {
       gap = true;
       out.push(`[${r.project}]: ${r.error}`);
-    } else if (!r.label) {
-      const own = hasNumbers(r.usage) && r.usage.label === '' ? r.usage : undefined;
-      line('own sign-in', [r], own);
+    } else if (r.label === null) {
+      gap = true;
+      out.push(`[${r.project}]: the machine's label is unreadable`);
+    } else if (r.label === '') {
+      const own = ownReading(r);
+      line('own sign-in', [r], hasNumbers(own) ? own : undefined);
     }
   }
   if (gap) {
