@@ -182,7 +182,7 @@ describe('a meeting line, through the same player', () => {
       workspaceId: 'w-harbor',
       author: { id: 'known-alice', name: 'Alice', kind: 'known' },
       playbackContext: () => ctx,
-      fetch: async () =>
+      fetch: (async () =>
         new Response(
           new ReadableStream<Uint8Array>({
             start(c) {
@@ -191,7 +191,7 @@ describe('a meeting line, through the same player', () => {
             },
           }),
           { headers: { 'x-sample-rate': String(VOICE_RATE) } },
-        ),
+        )) as typeof fetch,
       onPlaying: () => {},
       onDone: (_id, _turn, said) => done.push(said),
     });
