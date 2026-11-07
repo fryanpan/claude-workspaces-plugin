@@ -9,7 +9,7 @@ import {
 } from '@claude-workspaces/core/lead-chat';
 import { describe, expect, it, vi } from 'vitest';
 import { sizeLabel } from '../src/lead-chat/lead-chat-attachments.ts';
-import type { ModelPickResult, UploadResult } from '../src/lead-chat/lead-chat-client.ts';
+import type { UploadResult } from '../src/lead-chat/lead-chat-client.ts';
 import { wireComposer } from '../src/lead-chat/lead-chat-composer-wiring.ts';
 import { chipLabels, createComposer } from '../src/lead-chat/lead-chat-composer.ts';
 
@@ -32,12 +32,10 @@ function setup(
     ok: true,
     file: stored(`lf-${f.name}`, f),
   }),
-  pickModel: (p: unknown) => Promise<ModelPickResult> = async () => ({ ok: true }),
 ) {
   const c = createComposer(document);
   document.body.append(c.root, ...c.overlays);
   const notices: string[] = [];
-  const picks: unknown[] = [];
   const uploads: string[] = [];
   const listening = vi.fn();
   const wiring = wireComposer({
@@ -46,10 +44,6 @@ function setup(
       uploadFile: (f) => {
         uploads.push(f.name);
         return upload(f);
-      },
-      pickModel: (p) => {
-        picks.push(p);
-        return pickModel(p);
       },
     },
     onChange: () =>
@@ -63,7 +57,7 @@ function setup(
     onNotice: (t) => notices.push(t),
     toggleListening: listening,
   });
-  return { c, wiring, notices, picks, uploads, listening };
+  return { c, wiring, notices, uploads, listening };
 }
 
 /** A settled microtask queue: each fake upload resolves on it. */
@@ -159,35 +153,25 @@ describe('dragging', () => {
 });
 
 describe('the model chip', () => {
-  it('shows what the lead runs on, or the pick on its way', () => {
+  it('shows what the hooks report, never a pick left pending', () => {
     expect(chipLabels({ model: 'claude-fable-5-1', effort: 'xhigh' })).toEqual({
       model: 'Fable 5.1',
       effort: 'X-high',
     });
-    expect(chipLabels({ model: 'opus', pending: { model: 'haiku' } }).model).toBe('Haiku 5.5');
+    expect(chipLabels({ model: 'opus', pending: { model: 'haiku' } }).model).toBe('Opus 5.5');
+    expect(chipLabels({ effort: 'low', pending: { effort: 'max' } }).effort).toBe('Low');
     expect(chipLabels({})).toEqual({ model: 'Model', effort: '' });
   });
 
-  it('opens the sheet, and a tap picks only that value', async () => {
-    const { c, picks } = setup();
+  it('is read-only: no control, and a tap opens nothing', () => {
+    const { c } = setup();
+    expect(c.chip.tagName).toBe('DIV');
     c.chip.click();
-    expect(c.openSheet()).toBe('model');
-    c.modelRows.get('sonnet')?.click();
-    c.effortRows.get('low')?.click();
-    expect(picks).toEqual([{ model: 'sonnet' }, { effort: 'low' }]);
+    expect(c.openSheet()).toBeNull();
+    expect(c.scrim.hidden).toBe(true);
   });
 
-  it('says so when the page is not the owner’s', async () => {
-    const { c, notices } = setup(undefined, async () => ({
-      ok: false,
-      error: 'owner-proof-required',
-    }));
-    c.effortRows.get('low')?.click();
-    await vi.waitFor(() => expect(notices).toHaveLength(1));
-    expect(notices[0]).toContain('owner');
-  });
-
-  it('a scrim tap closes the sheet, and the sheet closes before the chat does', () => {
+  it('a scrim tap closes the add sheet, and the sheet closes before the chat does', () => {
     const { c, wiring } = setup();
     c.plus.click();
     expect(c.openSheet()).toBe('add');

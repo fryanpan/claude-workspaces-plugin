@@ -46,6 +46,7 @@ export interface ComposerCase {
   /** The same message, in a tab that was already open. */
   otherTab: { thumbs: number; files: number };
   /** The chip's box before and after the model changed. */
+  chipOpenedNothing: boolean;
   chipBefore: Box;
   chipAfter: Box;
   chipText: string;
@@ -244,8 +245,9 @@ async function main(): Promise<void> {
       await shot('add-sheet');
       await cdp.evaluate(`${SR}.querySelector('.lc-scrim').click()`);
       await cdp.evaluate(`${SR}.querySelector('.lc-chip').click()`);
-      await shot('model-sheet');
-      await cdp.evaluate(`${SR}.querySelector('.lc-scrim').click()`);
+      const chipOpenedNothing = Boolean(
+        await cdp.evaluate(`${SR}.querySelector('.lc-scrim').hidden`),
+      );
       const sendEnabledWithNoWords = !(await cdp.evaluate(
         `${SR}.querySelector('.lc-send').disabled`,
       ));
@@ -280,6 +282,7 @@ async function main(): Promise<void> {
         rowOverflows,
         sent,
         otherTab,
+        chipOpenedNothing,
         chipBefore,
         chipAfter,
         chipText,

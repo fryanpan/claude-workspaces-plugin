@@ -1,15 +1,16 @@
 /**
- * `POST /workspaces/<id>/lead-chat/model` — `{model?, effort?}`: switch the
- * board's running lead (`lead-chat/lead-model.ts`).
+ * `POST /workspaces/<id>/lead-chat/model`: refused today with 409
+ * `model-switch-off`, and nothing reaches a terminal. On Claude Code 2.1.319
+ * `/model` and `/effort` also save the value as the default for every new
+ * session, so a pick from the board changed the fleet's defaults
+ * (`lead-chat/lead-model.ts`).
  *
- * It types into a terminal, so `requireOwner` is not enough: that passes every
- * loopback caller, and every agent on this machine is one. The request must
- * prove the owner made it from the board's own page (`hasOwnerProof`), which
- * no agent can. Both values must be on core's allowlists; nothing else is
- * taken from the body. Not in the share member table, and a visitor is
- * refused here besides. The answer is the state a page shows.
+ * The gates stay in front of the refusal, so a caller that could never switch
+ * the lead keeps its 403: `requireOwner` passes every loopback caller, and
+ * every agent on this machine is one, so the request must also prove the owner
+ * made it from the board's own page (`hasOwnerProof`). Not in the share member
+ * table, and a visitor is refused here besides. The body is not read.
  */
-import { isLeadEffort, isLeadModelAlias } from '@claude-workspaces/core/lead-chat';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
@@ -28,19 +29,8 @@ export async function handleLeadChatModel(
       hint: 'Only the signed-in owner, on the board’s own page, can switch the lead.',
     });
   }
-  const body = await ctx.safeJson(rq.req);
-  const { model, effort } = (body ?? {}) as { model?: unknown; effort?: unknown };
-  const badModel = model !== undefined && !isLeadModelAlias(model);
-  const badEffort = effort !== undefined && !isLeadEffort(effort);
-  if (badModel || badEffort || (model === undefined && effort === undefined)) {
-    return ctx.j(400, { error: 'bad pick' });
-  }
-  if (!ctx.taskStore.getWorkspace(workspaceId)?.leadAgentId) {
-    return ctx.j(409, { error: 'no-lead' });
-  }
-  const state = await ctx.leadModels.pick(workspaceId, {
-    ...(isLeadModelAlias(model) ? { model } : {}),
-    ...(isLeadEffort(effort) ? { effort } : {}),
+  return ctx.j(409, {
+    error: 'model-switch-off',
+    hint: 'Switching the lead from the board is off: it would change the default model for every new session.',
   });
-  return ctx.j(200, { state });
 }

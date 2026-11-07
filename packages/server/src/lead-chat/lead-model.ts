@@ -1,13 +1,13 @@
 /**
- * What the board knows of its lead's model and effort, and a person's pick
- * of new ones.
+ * What the board knows of its lead's model and effort. The lead's hooks report
+ * what its session runs on (`routes/lead-mirror.ts`), and the state is kept on
+ * disk.
  *
- * The lead's hooks report what its session runs on (`routes/lead-mirror.ts`).
- * A pick is typed into the lead's terminal (`pane.ts`), only between its
- * turns: a prompt that appears mid-turn must never meet the Enter. So a pick
- * made while the lead works is held, shown as pending, and sent when the turn
- * ends. The state is kept on disk, and a server that does not know whether
- * the lead is working treats it as working until a hook says otherwise.
+ * Switching from the board is off. On Claude Code 2.1.319 `/model` and
+ * `/effort` also save the value as the default for every new session, so one
+ * pick typed into a lead's terminal changed the fleet's defaults. Nothing here
+ * calls `deps.pane`; `pane.ts` stays with its tests until switching has a way
+ * to reach one session only.
  *
  * Every change goes to the board's pages as a `lead-chat.model` frame and to
  * no agent stream.
@@ -28,6 +28,7 @@ export interface LeadModelsDeps {
   dataDir: string;
   /** The board's lead, by id; null when the seat is empty. */
   leadOf(workspaceId: string): LeadRef | null;
+  /** Never called while switching is off. */
   pane: { send(lead: LeadRef, pick: LeadModelPick): Promise<PaneSend> };
   broadcast(workspaceId: string, frame: LeadChatModelFrame): void;
 }
@@ -44,7 +45,6 @@ interface Held extends LeadModelState {
 
 export class LeadModels {
   private readonly boards = new Map<string, Held>();
-  private readonly sending = new Set<string>();
 
   constructor(private readonly deps: LeadModelsDeps) {}
 
@@ -56,7 +56,7 @@ export class LeadModels {
 
   /**
    * What the lead's session reported. `started` is a session that just began,
-   * which is between turns. A report that agrees with a pick clears it.
+   * which is between turns.
    */
   observed(
     workspaceId: string,
@@ -67,7 +67,7 @@ export class LeadModels {
     if (report.effort) s.effort = report.effort;
     if (report.started) s.idle = true;
     this.put(workspaceId, s);
-    if (report.started) void this.flush(workspaceId);
+    if (report.started) this.flush(workspaceId);
   }
 
   turnStarted(workspaceId: string): void {
@@ -77,60 +77,16 @@ export class LeadModels {
 
   turnEnded(workspaceId: string): void {
     this.put(workspaceId, { ...this.state(workspaceId), idle: true }, false);
-    void this.flush(workspaceId);
+    this.flush(workspaceId);
   }
 
-  /** Hold a pick and send it as soon as the lead is between turns. Resolves
-   *  with the state once a send it could make has been made. */
-  async pick(workspaceId: string, pick: LeadModelPick): Promise<LeadModelState> {
-    const s = this.state(workspaceId);
-    const { problem: _problem, ...rest } = s;
-    this.put(workspaceId, { ...rest, pending: { ...s.pending, ...pick } });
-    await this.flush(workspaceId);
-    return this.read(workspaceId);
-  }
-
-  private async flush(workspaceId: string): Promise<void> {
-    if (this.sending.has(workspaceId)) return;
-    const s = this.state(workspaceId);
-    const lead = this.deps.leadOf(workspaceId);
-    if (!s.pending || s.idle !== true || !lead) return;
-    this.sending.add(workspaceId);
-    const pick = s.pending;
-    try {
-      const sent = await this.deps.pane.send(lead, pick);
-      this.settle(workspaceId, pick, sent);
-    } finally {
-      this.sending.delete(workspaceId);
-    }
-    // A pick made during that send.
-    if (this.state(workspaceId).pending && !this.state(workspaceId).problem) {
-      await this.flush(workspaceId);
-    }
-  }
-
-  private settle(workspaceId: string, pick: LeadModelPick, sent: PaneSend): void {
-    const { pending, problem: _problem, ...s } = this.state(workspaceId);
-    // A pick made while this send was out goes on the next one.
-    const newer = pending && JSON.stringify(pending) !== JSON.stringify(pick) ? pending : undefined;
-    if (sent.ok) {
-      this.put(workspaceId, {
-        ...s,
-        ...(pick.model ? { model: pick.model } : {}),
-        ...(pick.effort ? { effort: pick.effort } : {}),
-        ...(newer ? { pending: newer } : {}),
-      });
-      return;
-    }
-    // A terminal waiting on a question may be free when the turn ends. A
-    // terminal that cannot be found is told to the reader, and nothing stays
-    // queued to fire later by surprise.
-    const keep = sent.problem === 'asking' ? (pending ?? pick) : newer;
-    this.put(workspaceId, {
-      ...s,
-      problem: sent.problem,
-      ...(keep ? { pending: keep } : {}),
-    });
+  /**
+   * Sends nothing. A pick an older server left on disk would otherwise fire
+   * at the next turn end, so it is dropped here, unsent, with its problem.
+   */
+  private flush(workspaceId: string): void {
+    const { pending, problem, ...s } = this.state(workspaceId);
+    if (pending || problem) this.put(workspaceId, s);
   }
 
   private path(workspaceId: string): string | null {

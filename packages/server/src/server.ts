@@ -1571,7 +1571,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     newId: () => cryptoId('lc'),
   });
   const leadChatFiles = new LeadChatFiles(dataDir, () => cryptoId('lf'));
-  // A person's pick of the lead's model, typed into its terminal between turns.
+  // The lead's model and effort as its hooks report them. Switching is off.
   const leadModels = new LeadModels({
     dataDir,
     leadOf: (workspaceId) => {

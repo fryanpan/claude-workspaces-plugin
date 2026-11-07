@@ -26,8 +26,6 @@ import {
   type LeadChatMessage,
   type LeadChatModelFrame,
   type LeadChatRead,
-  type LeadEffort,
-  type LeadModelAlias,
   type LeadModelState,
   compareLeadChatEntries,
   upsertLeadChatMessage,
@@ -63,7 +61,6 @@ export type MeetingAnswer =
   | { ok: false; error: string };
 
 export type UploadResult = { ok: true; file: LeadChatAttachment } | { ok: false; error: string };
-export type ModelPickResult = { ok: true } | { ok: false; error: string };
 
 export type SendResult = { ok: true; message: LeadChatMessage } | { ok: false; error: string };
 
@@ -82,8 +79,6 @@ export interface LeadChatClient {
   ): Promise<SendResult>;
   /** Store a file under the board, ready for a send to carry its id. */
   uploadFile(file: File): Promise<UploadResult>;
-  /** Switch the lead's model or effort (`lead-chat/lead-model.ts`). */
-  pickModel(pick: { model?: LeadModelAlias; effort?: LeadEffort }): Promise<ModelPickResult>;
   /** One verb on the board's meeting (`start`, `recording`, `line`, `join`,
    *  `end`); a meeting it answers with is applied before this resolves. */
   /** Read the page of messages before the oldest one held, when there is
@@ -264,25 +259,6 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
         };
         if (!res.ok || !body.file) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
         return { ok: true, file: body.file };
-      } catch {
-        return { ok: false, error: 'offline' };
-      }
-    },
-    async pickModel(pick) {
-      try {
-        const res = await doFetch(`${base}/lead-chat/model`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(pick),
-        });
-        const body = (await res.json().catch(() => ({}))) as {
-          state?: LeadModelState;
-          error?: string;
-        };
-        if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-        if (body.state) setLeadModel(body.state);
-        return { ok: true };
       } catch {
         return { ok: false, error: 'offline' };
       }

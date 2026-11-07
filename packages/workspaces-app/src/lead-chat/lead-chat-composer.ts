@@ -3,15 +3,14 @@
  * with + , the model chip, the mic and send. Drawing only; what a tap does is
  * `lead-chat-composer-wiring.ts`.
  *
- * The chip is sized for its widest label so the row never moves as the model
- * changes. The two sheets rise inside the panel, over a scrim, so the chat
- * stays where the reader left it.
+ * The chip shows what the lead's hooks report and opens nothing: switching from
+ * the board is off (`server/src/lead-chat/lead-model.ts` says why). It is sized
+ * for its widest label so the row never moves as the model changes. The sheet
+ * rises inside the panel, over a scrim, so the chat stays where the reader
+ * left it.
  */
 import {
-  LEAD_EFFORTS,
-  LEAD_MODELS,
   type LeadEffort,
-  type LeadModelAlias,
   type LeadModelState,
   leadModelLabel,
 } from '@claude-workspaces/core/lead-chat';
@@ -68,14 +67,14 @@ export const bareComposer = (field: HTMLTextAreaElement, listening: boolean): Co
   leadModel: {},
 });
 
-export type ComposerSheet = 'add' | 'model' | null;
+export type ComposerSheet = 'add' | null;
 
 export interface Composer {
   root: HTMLElement;
   field: HTMLTextAreaElement;
   send: HTMLButtonElement;
   plus: HTMLButtonElement;
-  chip: HTMLButtonElement;
+  chip: HTMLElement;
   mic: HTMLButtonElement;
   tray: HTMLElement;
   camera: HTMLInputElement;
@@ -89,8 +88,6 @@ export interface Composer {
   photosTile: HTMLButtonElement;
   filesTile: HTMLButtonElement;
   closers: readonly HTMLButtonElement[];
-  modelRows: ReadonlyMap<LeadModelAlias, HTMLButtonElement>;
-  effortRows: ReadonlyMap<LeadEffort, HTMLButtonElement>;
   sheet(which: ComposerSheet): void;
   openSheet(): ComposerSheet;
   render(m: ComposerModel): void;
@@ -148,29 +145,11 @@ function sheetShell(doc: Document, label: string) {
   return { sheet, close };
 }
 
-/** What the model sheet says beneath its heading. */
-function modelNote(s: LeadModelState): string {
-  switch (s.problem) {
-    case 'no-terminal':
-      return 'The board can’t reach a terminal running this lead, so the lead stays as it is.';
-    case 'many-terminals':
-      return 'More than one terminal runs this lead, so the board didn’t pick one.';
-    case 'asking':
-      return 'The lead’s terminal is waiting on a question. This goes when its next turn ends.';
-    case 'send-failed':
-      return 'The terminal didn’t take that. Try again.';
-  }
-  if (s.pending) return 'This goes to the lead when its turn ends.';
-  return 'Your next message runs on the model and effort you pick. The lead keeps working, with no restart.';
-}
-
-/** What the chip shows: a pick still on its way, or what the lead runs on. */
+/** What the chip shows: what the lead's hooks report it runs on. */
 export function chipLabels(s: LeadModelState): { model: string; effort: string } {
-  const model = s.pending?.model ?? s.model;
-  const effort = s.pending?.effort ?? s.effort;
   return {
-    model: leadModelLabel(model) ?? 'Model',
-    effort: EFFORT_LABEL[effort as LeadEffort] ?? '',
+    model: leadModelLabel(s.model) ?? 'Model',
+    effort: EFFORT_LABEL[s.effort as LeadEffort] ?? '',
   };
 }
 
@@ -185,9 +164,8 @@ export function createComposer(doc: Document): Composer {
   field.maxLength = 4000;
   const row = make(doc, 'div', 'lc-actions');
   const plus = iconButton(doc, 'lc-round', 'Add photos or files', PLUS);
-  const chip = make(doc, 'button', 'lc-chip');
-  chip.type = 'button';
-  chip.setAttribute('aria-haspopup', 'dialog');
+  const chip = make(doc, 'div', 'lc-chip');
+  chip.setAttribute('role', 'img');
   const chipModel = make(doc, 'span', undefined, 'Model');
   const chipEffort = make(doc, 'span', 'lc-eff');
   chip.append(chipModel, chipEffort);
@@ -213,40 +191,10 @@ export function createComposer(doc: Document): Composer {
   grid.append(cameraTile, photosTile, filesTile);
   add.sheet.append(grid);
 
-  const model = sheetShell(doc, 'Model');
-  const why = make(doc, 'p', 'lc-why');
-  const models = make(doc, 'div');
-  models.setAttribute('role', 'radiogroup');
-  models.setAttribute('aria-label', 'Model');
-  const modelRows = new Map<LeadModelAlias, HTMLButtonElement>();
-  for (const m of LEAD_MODELS) {
-    const b = make(doc, 'button', 'lc-pick');
-    b.type = 'button';
-    b.setAttribute('role', 'radio');
-    const words = make(doc, 'span', 'lc-grow', m.label);
-    words.append(make(doc, 'span', 'lc-sub', m.note));
-    b.append(make(doc, 'span', 'lc-tick', '✓'), words);
-    modelRows.set(m.alias, b);
-    models.append(b);
-  }
-  const effortRow = make(doc, 'div', 'lc-seg');
-  effortRow.setAttribute('role', 'radiogroup');
-  effortRow.setAttribute('aria-label', 'Effort');
-  const effortRows = new Map<LeadEffort, HTMLButtonElement>();
-  for (const e of LEAD_EFFORTS) {
-    const b = make(doc, 'button', undefined, EFFORT_LABEL[e]);
-    b.type = 'button';
-    b.setAttribute('role', 'radio');
-    effortRows.set(e, b);
-    effortRow.append(b);
-  }
-  model.sheet.append(why, models, make(doc, 'p', 'lc-label', 'Effort'), effortRow);
-
   let open: ComposerSheet = null;
   const sheet = (which: ComposerSheet): void => {
     open = which;
     add.sheet.hidden = which !== 'add';
-    model.sheet.hidden = which !== 'model';
     scrim.hidden = which === null;
   };
 
@@ -297,14 +245,6 @@ export function createComposer(doc: Document): Composer {
       'aria-label',
       `Lead model: ${labels.model}${labels.effort ? `, ${labels.effort} effort` : ''}`,
     );
-    why.textContent = modelNote(m.leadModel);
-    const shown = m.leadModel.pending?.model ?? m.leadModel.model;
-    const shownLabel = leadModelLabel(shown);
-    for (const [alias, b] of modelRows) {
-      b.setAttribute('aria-checked', String(leadModelLabel(alias) === shownLabel));
-    }
-    const effort = m.leadModel.pending?.effort ?? m.leadModel.effort;
-    for (const [e, b] of effortRows) b.setAttribute('aria-checked', String(e === effort));
   };
 
   return {
@@ -318,14 +258,12 @@ export function createComposer(doc: Document): Composer {
     camera,
     photos,
     files,
-    overlays: [scrim, add.sheet, model.sheet],
+    overlays: [scrim, add.sheet],
     scrim,
     cameraTile,
     photosTile,
     filesTile,
-    closers: [add.close, model.close],
-    modelRows,
-    effortRows,
+    closers: [add.close],
     sheet,
     openSheet: () => open,
     render,

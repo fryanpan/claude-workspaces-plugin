@@ -132,10 +132,11 @@ export type LeadModelProblem =
 
 /** What the board knows of its lead's model and effort. */
 export interface LeadModelState {
-  /** A model id its session reported, or the alias last sent to it. */
+  /** A model id its session reported. */
   model?: string;
   effort?: string;
-  /** Picked and not yet sent: it goes when the lead's turn ends. */
+  /** A pick an older server left on disk. It is dropped unsent
+   *  (`server/src/lead-chat/lead-model.ts`), and no chip shows it. */
   pending?: { model?: LeadModelAlias; effort?: LeadEffort };
   problem?: LeadModelProblem;
 }

@@ -93,7 +93,6 @@ describe('a mounted chat sends the page link', () => {
       onLeadLine: () => {},
       onChange: () => {},
       uploadFile: async () => ({ ok: false, error: 'offline' }),
-      pickModel: async () => ({ ok: true }),
       async loadOlder() {},
       async send(text, author, context, via) {
         sent.push(context);

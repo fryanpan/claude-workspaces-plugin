@@ -23,9 +23,9 @@ export const COMPOSER_STYLES = `
 .lc-round:disabled { opacity: .45; cursor: default; }
 .lc-send { border-color: var(--accent, #2e7dd7); background: var(--accent, #2e7dd7); color: #fff; }
 .lc-mic[aria-pressed="true"] { border-color: #c96442; background: #c96442; color: #fff; }
-.lc-chip { flex: 0 1 170px; display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 40px; margin: 0; padding: 0 12px; border: 1px solid var(--border, #d1d5da); border-radius: 20px; background: var(--bg, #fff); color: var(--fg, #1b1f23); font: inherit; font-size: 13.5px; white-space: nowrap; overflow: hidden; cursor: pointer; }
+.lc-chip { flex: 0 1 170px; display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 40px; margin: 0; padding: 0 12px; border: 1px solid var(--border, #d1d5da); border-radius: 20px; background: var(--bg, #fff); color: var(--fg, #1b1f23); font: inherit; font-size: 13.5px; white-space: nowrap; overflow: hidden; }
 .lc-eff { color: var(--fg-muted, #57606a); }
-.lc-round:focus-visible, .lc-chip:focus-visible, .lc-pick:focus-visible, .lc-tile:focus-visible { outline: 2px solid var(--accent, #2e7dd7); outline-offset: 2px; }
+.lc-round:focus-visible, .lc-tile:focus-visible { outline: 2px solid var(--accent, #2e7dd7); outline-offset: 2px; }
 .lc-scrim { position: absolute; inset: 0; z-index: 5; background: rgba(27,31,35,.28); }
 .lc-scrim[hidden], .lc-rise[hidden] { display: none; }
 .lc-rise { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; max-height: 86%; overflow-y: auto; padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px)); border-radius: 16px 16px 0 0; background: var(--bg, #fff); box-shadow: 0 -6px 24px rgba(0,0,0,.14); }
@@ -34,15 +34,6 @@ export const COMPOSER_STYLES = `
 .lc-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 8px; }
 .lc-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 72px; margin: 0; padding: 0; border: 1px solid var(--border, #d1d5da); border-radius: 12px; background: #f6f8fa; color: var(--fg, #1b1f23); font: inherit; font-size: 13.5px; cursor: pointer; }
 .lc-tile svg { width: 22px; height: 22px; }
-.lc-why { margin: 4px 0 10px; font-size: 13px; line-height: 1.45; color: var(--fg-muted, #57606a); }
-.lc-pick { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin: 0; padding: 8px 10px; border: 0; border-top: 1px solid var(--border, #d1d5da); background: none; color: var(--fg, #1b1f23); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer; }
-.lc-sub { display: block; font-size: 12.5px; color: var(--fg-muted, #57606a); }
-.lc-tick { visibility: hidden; flex: none; width: 18px; color: var(--accent, #2e7dd7); font-weight: 700; }
-.lc-pick[aria-checked="true"] .lc-tick { visibility: visible; }
-.lc-label { margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--fg-muted, #57606a); }
-.lc-seg { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 0 0 10px; padding: 3px; border-radius: 12px; background: #eef1f4; }
-.lc-seg button { min-height: 38px; margin: 0; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--fg, #1b1f23); font: inherit; font-size: 13px; cursor: pointer; }
-.lc-seg button[aria-checked="true"] { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.12); font-weight: 600; }
 .lc-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
 .lc-you .lc-thumbs { justify-content: flex-end; }
 .lc-thumbs img { display: block; width: 120px; height: 90px; border: 1px solid var(--border, #d1d5da); border-radius: 10px; object-fit: cover; }

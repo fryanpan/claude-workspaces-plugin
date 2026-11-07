@@ -342,7 +342,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/lead-chat/files/:id', 'GET HEAD'],
   ]),
   ...family('routes/workspace-lead-chat-model.ts', [
-    ['trusted-local', '/workspaces/:ws/lead-chat/model', 'POST'],
+    [
+      'trusted-local',
+      '/workspaces/:ws/lead-chat/model',
+      'POST',
+      'refuses every caller today: 409 `model-switch-off`',
+    ],
   ]),
   ...family('routes/workspace-point.ts', [['trusted-local', '/workspaces/:ws/point', 'POST']]),
 
