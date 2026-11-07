@@ -26,8 +26,9 @@
  * flag, and `VOICE_ON_KEY` while the page is listening. The next page opens
  * the same bar or panel and starts listening again without a tap where the
  * browser allows it (`start({ gesture: false })`), and asks for one tap
- * where it does not (iOS Safari). On a phone the side nav's pages move the
- * full-screen panel out of the way into the bar rather than closing the chat.
+ * where it does not (iOS Safari). On a phone the side nav's pages and a link
+ * in the chat move the full-screen panel out of the way into the bar rather
+ * than closing the chat, so the page is what the reader sees.
  *
  * The button is drawn only for a reader who may talk to the lead — the
  * board's owner — so nobody else is offered a composer that refuses.

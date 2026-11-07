@@ -646,7 +646,11 @@ scene. A delete is a newer copy with `isDeleted` set, never a removed key.
 `/workspaces/<ws>/whiteboards/<id>` serves `whiteboard/page-shell.ts`, and the
 page is its own bundle, `whiteboard.js`. It is the one place the app runs real
 React, because Excalidraw needs it; React and Excalidraw load behind one
-`import()` so the header and socket come up first. The page writes to the
+`import()` so the header and socket come up first. The page wears the doc
+page's `#topbar` and mounts the same `lead-chat-mount.ts`, so a voice chat
+carries onto it as onto any page of the board. The agent button sits in
+Excalidraw's foot row and the docked chat takes width from the canvas
+(`whiteboard.css`). The page writes to the
 scene only when no gesture is in progress, so a half-drawn stroke never
 reaches anyone, and it holds back a remote copy of an element the person is
 still drawing or dragging until they let go (`whiteboard/scene-sync.ts` in the

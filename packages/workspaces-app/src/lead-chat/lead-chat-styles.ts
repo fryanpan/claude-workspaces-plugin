@@ -17,7 +17,7 @@ export const BUTTON_STYLES = `
 :host { all: initial; display: inline-flex; flex: none; }
 :host([hidden]) { display: none; }
 :host([data-placement="dock"]) { margin-left: 8px; }
-:host([data-placement="float"]) { position: fixed; left: 12px; bottom: calc(var(--doc-dock-h, 0px) + var(--voice-rail-lift, 0px) + 16px + var(--safe-bottom, 0px)); z-index: 900; }
+:host([data-placement="float"]) { position: fixed; left: var(--lc-agent-left, 12px); bottom: calc(var(--doc-dock-h, 0px) + var(--voice-rail-lift, 0px) + 16px + var(--safe-bottom, 0px)); z-index: 900; }
 button { box-sizing: border-box; width: 44px; height: 44px; margin: 0; padding: 0; border-radius: 50%; border: 1px solid var(--border, #d1d5da); background: var(--bg, #fff); color: var(--accent, #2e7dd7); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 :host([data-placement="float"]) button { box-shadow: 0 3px 9px rgba(0,0,0,.18); }
 button:hover { background: var(--bg-hover, #f6f8fa); }
