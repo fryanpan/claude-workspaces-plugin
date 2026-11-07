@@ -72,6 +72,12 @@ const centreOf = (selector: string): string => `(() => {
   return { x: r.left + Math.min(r.width / 2, 12), y: r.top + r.height / 2, href: el.href ?? null, target: el.getAttribute('target') };
 })()`;
 
+/** How many spoken replies the chat holds; it keeps every earlier one. */
+export const VOICE_BUBBLES = `(() => {
+  const sr = ${LAYER};
+  return sr ? sr.querySelectorAll('.lc-voice .lc-voice-btn').length : 0;
+})()`;
+
 /** The newest voice bubble's Show words. */
 export const VOICE_WORDS = centreOf('.lc-voice .lc-voice-btn');
 /** The newest whiteboard link in the chat. */

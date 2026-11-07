@@ -31,6 +31,7 @@ import {
   LISTENING,
   PAGE,
   READY,
+  VOICE_BUBBLES,
   VOICE_WORDS,
   chipTitle,
 } from './whiteboard-chat-browser-probes.ts';
@@ -220,10 +221,16 @@ async function tapLink(
   if (!opened.listening) throw new Error(`voice never started on ${start}`);
   await until('the listener opened', () => (board.opened.length > since ? true : null));
   const heard = await say(board, `Where is the ferry drawn, from ${start} at ${width}?`);
+  // The chat keeps earlier replies, so "the newest" is only this answer once
+  // the count has moved. Read too soon, it is a reply with no link in it.
+  const earlier = await read<number>(tab, VOICE_BUBBLES);
   await board.post(`/workspaces/${board.ws}/voice-queue/${heard.queueId}/answer`, {
     agentId: LEAD.agentId,
     text: `It is on [Ferry flow](${board.base}${target}).`,
   });
+  await until('this answer’s bubble', async () =>
+    (await read<number>(tab, VOICE_BUBBLES)) > earlier ? true : null,
+  );
   const words = await until('the voice bubble', () => read<Point | null>(tab, VOICE_WORDS));
   await tap(tab, words);
   const link = await until('the link', () => read<LinkPoint | null>(tab, LINK));
