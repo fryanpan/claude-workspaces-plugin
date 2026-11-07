@@ -23,6 +23,11 @@ export interface WhiteboardShellInput {
   visitor: boolean;
 }
 
+/** Excalidraw takes its phone layout on a canvas narrower than this, and its
+ *  rule is not configurable (`MQ_MAX_WIDTH_PORTRAIT`). The docked chat keeps to
+ *  it, so an iPad landscape keeps the desktop tools beside the chat. */
+const CANVAS_DESKTOP_MIN = 730;
+
 /** The nav, and the room `whiteboard.css` leaves for it. */
 function pageNav(workspaceId: string): { head: string; body: string } {
   const { style, html } = hostNav(workspaceId);
@@ -41,6 +46,7 @@ export function renderWhiteboardShell(
   const sentryMeta = sentryTags ? `\n    ${sentryTags}` : '';
   const board = `/workspaces/${encodeURIComponent(input.workspaceId)}`;
   const nav = input.visitor ? { head: '', body: '' } : pageNav(input.workspaceId);
+  const pageMin = CANVAS_DESKTOP_MIN + (input.visitor ? 0 : NAV_RAIL_W);
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -54,7 +60,7 @@ export function renderWhiteboardShell(
     <link rel="stylesheet" href="${assetHref(assets, 'whiteboard.css')}" />
     <link rel="stylesheet" href="${assetHref(assets, 'tokens.css')}" />${nav.head}
   </head>
-  <body class="whiteboard-body" data-workspace-id="${escape(input.workspaceId)}" data-doc-id="${escape(input.docId)}">
+  <body class="whiteboard-body" data-workspace-id="${escape(input.workspaceId)}" data-doc-id="${escape(input.docId)}" data-lc-page-min="${pageMin}">
     <header id="topbar">
       <div class="doc-crumb">
         <a class="back-link" href="${escape(board)}" title="Back to the board" aria-label="Back to the board">←</a>

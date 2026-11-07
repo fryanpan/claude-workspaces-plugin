@@ -651,7 +651,8 @@ page's `#topbar`, draws the mock page's nav (`board-host-nav.ts`, which both
 shells render because neither has the board's bundle, and a share visitor gets
 on neither) and mounts the same `lead-chat-mount.ts`, so a voice chat carries
 onto it as onto any page of the board. The agent button sits in
-Excalidraw's foot row and the docked chat takes width from the canvas
+Excalidraw's foot row, and the docked chat takes width from the canvas down to
+what its desktop layout needs (`data-lc-page-min`, read by `lead-chat-dock.ts`)
 (`whiteboard.css`). The page writes to the
 scene only when no gesture is in progress, so a half-drawn stroke never
 reaches anyone, and it holds back a remote copy of an element the person is

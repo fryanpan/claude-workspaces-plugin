@@ -18,6 +18,7 @@ import {
   agentButton,
   canvasStill,
   chatAfterTap,
+  leaveByNav,
   liveDraw,
   openWhiteboard,
   read,
@@ -279,7 +280,7 @@ async function tapLink(
 type LinkPoint = Point & { href: string; target: string | null };
 
 async function main(): Promise<void> {
-  deadline('whiteboard-chat', 310_000);
+  deadline('whiteboard-chat', 370_000);
   const board = await bootBoard('whiteboard-chat');
   const made = (await board.post(`/workspaces/${board.ws}/whiteboards`, {
     title: 'Ferry flow',
@@ -305,7 +306,35 @@ async function main(): Promise<void> {
       const canvas = await canvasStill(board, width, height, whiteboard);
       step(`live draw at ${width}`);
       const drawn = await liveDraw(board, width, height);
-      sizes.push({ width, ...pages, presence: moved, live, links, canvas, liveDraw: drawn });
+      const navLeave =
+        width > 1100
+          ? null
+          : {
+              whiteboard: await leaveByNav(
+                board,
+                width,
+                height,
+                `${board.base}/workspaces/${board.ws}/whiteboards/${whiteboard}`,
+                'nav-whiteboard',
+              ),
+              mock: await leaveByNav(
+                board,
+                width,
+                height,
+                `${board.base}/workspaces/${board.ws}/mockups/${board.mockId}`,
+                'nav-mock',
+              ),
+            };
+      sizes.push({
+        width,
+        ...pages,
+        presence: moved,
+        live,
+        links,
+        canvas,
+        liveDraw: drawn,
+        navLeave,
+      });
     }
     const run: WhiteboardChatRun = { workspaceId: board.ws, whiteboard, sizes };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

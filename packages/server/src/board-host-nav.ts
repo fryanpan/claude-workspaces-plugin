@@ -5,8 +5,9 @@
  * like any other, so the way to the board's other pages is where it is on
  * them (`BOARD_NAV_TABS` in core, which the board's own rail draws from).
  * Plain links, for the owner's pages only: a share may not hold the pages they
- * lead to. Classed `board-nav` as well, which is how the lead chat's sheet
- * finds the bar it has to stop above.
+ * lead to. Classed `board-nav` and `board-nav-item` as well, which is how the
+ * lead chat's sheet finds the bar it has to stop above and the tap it has to
+ * get out of the way of.
  *
  * The nav places itself. The page beside it makes its own room, reading these
  * two sizes.
@@ -20,7 +21,7 @@ export const NAV_BAR_H = 54;
 export function hostNav(workspaceId: string): { style: string; html: string } {
   const links = BOARD_NAV_TABS.map(
     (t) =>
-      `<a href="${escape(boardNavPath(workspaceId, t.nav))}" title="${t.label}">` +
+      `<a class="board-nav-item" href="${escape(boardNavPath(workspaceId, t.nav))}" title="${t.label}">` +
       `${BOARD_NAV_ICONS[t.nav]}<span>${t.label}</span></a>`,
   ).join('');
   return {

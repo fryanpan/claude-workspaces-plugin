@@ -15,7 +15,8 @@ import type { ModeStorage } from './lead-chat-mode.ts';
 export const DOCK_W = 420;
 const DOCK_MIN = 320;
 const DOCK_MAX = 720;
-/** What the docked panel leaves of the page, at least. */
+/** What the docked panel leaves of the page, at least. A page that needs more
+ *  says so on its body, as the whiteboard does (`data-lc-page-min`). */
 const PAGE_MIN = 400;
 /** How far one arrow key moves the edge. */
 const KEY_STEP = 16;
@@ -62,9 +63,10 @@ export function createDock(opts: {
   };
   let show = read(WORKING_KEY) === 'show';
   let want = Number(read(DOCK_WIDTH_KEY)) || DOCK_W;
+  const pageMin = Number(doc.body?.dataset.lcPageMin) || PAGE_MIN;
   const vw = (): number => html.clientWidth || win.innerWidth;
   const width = (w: number): number =>
-    Math.round(Math.max(DOCK_MIN, Math.min(want, DOCK_MAX, w - PAGE_MIN)));
+    Math.round(Math.max(DOCK_MIN, Math.min(want, DOCK_MAX, w - pageMin)));
   const resize = (to: number, keep: boolean): void => {
     want = to;
     want = width(vw());

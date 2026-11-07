@@ -7,7 +7,13 @@ import { join } from 'node:path';
 import type { Cdp } from '../../../scripts/headless-chrome.ts';
 import { type Board, closePerson, navigate, openPerson, tap, until } from './follow-browser-kit.ts';
 import { CANVAS, CHAT, INK, READY, TOOL } from './whiteboard-chat-browser-probes.ts';
-import type { CanvasCase, CanvasRead, ChatRead } from './whiteboard-chat-browser-reading.ts';
+import type {
+  CanvasCase,
+  CanvasRead,
+  ChatRead,
+  LiveDrawCase,
+  NavLeave,
+} from './whiteboard-chat-browser-reading.ts';
 
 export type Point = { x: number; y: number };
 const AGENT_BUTTON = 8_000;
@@ -172,6 +178,9 @@ export async function canvasStill(
   await shot(voiceTab, `voice-bar-${width}`);
   await closePerson(voiceTab);
   const wideDock = width > 1100 ? await draggedDock(board, width, height, url) : null;
+  // Just over the breakpoint: the screen is not a phone, and the chat at its
+  // narrowest still leaves Excalidraw too little for its desktop layout.
+  const narrowDock = width > 1100 ? await draggedDock(board, 1104, height, url) : null;
   return {
     toolAfterKey,
     drew,
@@ -184,6 +193,7 @@ export async function canvasStill(
     open,
     voiceBar,
     wideDock,
+    narrowDock,
   };
 }
 
@@ -243,8 +253,7 @@ export async function liveDraw(board: Board, width: number, height: number): Pro
   return { before, afterDraw, afterReplace, inkBefore, inkAfter, drawMs, replaceMs, noReload };
 }
 
-/** The chat dragged as wide as it goes, which turns Excalidraw's own layout
- *  into its phone one on a screen that is not a phone. */
+/** The chat, dragged as wide as it goes on any page, opened on a whiteboard. */
 async function draggedDock(
   board: Board,
   width: number,
@@ -261,14 +270,47 @@ async function draggedDock(
   await openWhiteboard(tab, url);
   await chatAfterTap(tab);
   const canvas = await until(
-    'Excalidraw in its phone layout',
+    'the chat docked beside the canvas',
     async () => {
       const c = await read<CanvasRead>(tab, CANVAS);
-      return c.phoneLayout ? c : null;
+      return c.stage.width < width - 300 ? c : null;
     },
     5_000,
-  ).catch(() => read<CanvasRead>(tab, CANVAS));
+  );
   await shot(tab, `dragged-dock-${width}`);
   await closePerson(tab);
   return canvas;
+}
+
+/** A page in the board's nav tapped with the chat's sheet open over `url`. */
+export async function leaveByNav(
+  board: Board,
+  width: number,
+  height: number,
+  url: string,
+  anonId: string,
+): Promise<NavLeave> {
+  const tab = await openPerson(width, height, { anonId, name: 'Alice', ws: board.ws });
+  await navigate(tab, url);
+  await agentButton(tab);
+  const sheetBefore = (await chatAfterTap(tab)).paneKind === 'lc-sheet';
+  const at = await read<{ x: number; y: number }>(
+    tab,
+    `(() => { const b = document.querySelector('.board-nav a[title=Library]').getBoundingClientRect();
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`,
+  );
+  await tap(tab, at);
+  const landed = await until(
+    'the Library page',
+    async () => {
+      const path = await tab.evaluate('location.pathname').catch(() => '');
+      return String(path).endsWith('/library') ? String(path) : null;
+    },
+    10_000,
+  );
+  await agentButton(tab);
+  const chat = await read<ChatRead>(tab, CHAT);
+  await shot(tab, `nav-leave-${anonId}`);
+  await closePerson(tab);
+  return { sheetBefore, landed, paneAfter: chat.pane };
 }

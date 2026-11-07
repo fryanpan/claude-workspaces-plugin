@@ -1,9 +1,10 @@
 /**
  * The board's four pages, as every surface that links to them names them:
  * the label, the address and the glyph. The board's own rail draws them
- * (`workspaces-app/src/board/board-shell.ts`), and so does a page the app
- * bundle never loads on — the host page around a mock (`mockup-frame.ts` on
- * the server) — which is why they live here rather than in the app.
+ * (`workspaces-app/src/board/board-shell.ts`), and so do the pages the board's
+ * bundle never loads on — the host page around a mock and the whiteboard, both
+ * through `board-host-nav.ts` on the server — which is why they live here
+ * rather than in the app.
  */
 
 export type BoardNavTab = 'home' | 'tasks' | 'library' | 'activity';

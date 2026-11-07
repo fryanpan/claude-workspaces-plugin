@@ -93,6 +93,15 @@ export interface CanvasCase {
   voiceBar: { shown: boolean; canvas: CanvasRead };
   /** At 1180, the chat dragged as wide as it goes. */
   wideDock: CanvasRead | null;
+  narrowDock: CanvasRead | null;
+}
+
+/** Leaving through the board's nav with the chat's sheet open. */
+export interface NavLeave {
+  sheetBefore: boolean;
+  landed: string;
+  /** The chat's pane is open again on the page the reader went to. */
+  paneAfter: boolean;
 }
 
 /** An agent drawing on a whiteboard someone has open. */
@@ -115,6 +124,8 @@ export interface SizeRun {
   width: number;
   mockPage: PageRead;
   liveDraw: LiveDrawCase;
+  /** Phone only: the sheet stands over the page below 1100px. */
+  navLeave: { whiteboard: NavLeave; mock: NavLeave } | null;
   docPage: PageRead;
   whiteboardPage: PageRead;
   docChat: ChatRead;

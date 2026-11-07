@@ -17,8 +17,8 @@ const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'whiteboard-chat-browser-driver.ts');
 /** One bundle build, ten browser launches at each of two sizes. */
-const SUITE_MS = 330_000;
-const SPAWN_MS = 320_000;
+const SUITE_MS = 390_000;
+const SPAWN_MS = 380_000;
 /** The product's bar for a change reaching an open page, which is the
  *  behaviour under test here, so these two are real times. */
 const LIVE_MS = 1000;
@@ -147,17 +147,38 @@ describe.skipIf(CHROME === null)('the lead chat on a whiteboard', () => {
     });
   }
 
-  it('keeps the canvas whole beside the docked chat at 1180', () => {
+  it('keeps Excalidraw’s desktop layout beside the docked chat at 1180', () => {
     const { open } = size(1180).canvas;
     expect(open.canvasFits).toBe(true);
     expect(open.buttonOnControl).toBeNull();
-    expect(open.stage.width).toBeGreaterThanOrEqual(400);
+    expect(open.phoneLayout).toBe(false);
+    // CONTROL: the phone layout this rules out is the one 430 wide draws.
+    expect(size(430).canvas.open.phoneLayout).toBe(true);
   }, 60_000);
 
-  it('moves the agent button off Excalidraw’s phone layout when a wide chat brings that on', () => {
+  it('keeps that layout at 1180 for a chat dragged as wide as it goes', () => {
     const dock = size(1180).canvas.wideDock;
-    // CONTROL: the drag really did change Excalidraw's layout.
+    expect(dock?.phoneLayout).toBe(false);
+    expect(dock?.stage.width).toBeGreaterThanOrEqual(730);
+    expect(dock?.buttonOnControl).toBeNull();
+  }, 60_000);
+
+  it('moves the agent button off Excalidraw’s phone layout on a wide screen too small for the other', () => {
+    const dock = size(1180).canvas.narrowDock;
+    // CONTROL: this screen really did bring on the phone layout.
     expect(dock?.phoneLayout).toBe(true);
     expect(dock?.buttonOnControl).toBeNull();
   }, 60_000);
+
+  it.each(['whiteboard', 'mock'] as const)(
+    'moves the chat’s sheet out of the way of a page chosen in the %s’s nav',
+    (page) => {
+      const leave = size(430).navLeave?.[page];
+      // CONTROL: the sheet really was open when the nav was tapped.
+      expect(leave?.sheetBefore).toBe(true);
+      expect(leave?.landed).toMatch(/\/library$/);
+      expect(leave?.paneAfter).toBe(false);
+    },
+    60_000,
+  );
 });
