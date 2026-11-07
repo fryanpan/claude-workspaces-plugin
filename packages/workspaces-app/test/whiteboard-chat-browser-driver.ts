@@ -1,29 +1,4 @@
 #!/usr/bin/env bun
-/**
- * The chat with the lead on a whiteboard, in headless Chromium against a real
- * server and the real bundles, at 1180x820 and 430x932.
- *
- *  - The bar, the chat and the voice control are read off a doc page and off
- *    a whiteboard, so the two are compared rather than each checked against
- *    a list written here.
- *  - A person moves from a doc to a whiteboard the lead is pointing at, and
- *    the lead's chip has to be there; then the lead points again with the
- *    whiteboard open.
- *  - A person talking to the lead, on a doc and on Home, taps a whiteboard
- *    link in the lead's spoken answer. Nothing here assumes why that link
- *    was reported not to open: the run records where the tap went, what the
- *    new page shows on top, and whether listening came back.
- *  - Excalidraw keeps its keys, pointer and room with the chat mounted.
- *
- * No real device and no billed engine: Chrome's fake microphone, muted
- * output, a listener the driver speaks through.
- *
- * Spawned by `whiteboard-chat-browser.test.ts`, which reads the JSON it
- * prints. `WHITEBOARD_SHOTS=<dir>` also writes a screenshot of each stage.
- */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Cdp } from '../../../scripts/headless-chrome.ts';
 import {
   ADDRESS,
   type Board,
@@ -39,19 +14,27 @@ import {
   until,
 } from './follow-browser-kit.ts';
 import {
+  type Point,
+  agentButton,
+  canvasStill,
+  chatAfterTap,
+  openWhiteboard,
+  read,
+  shot,
+} from './whiteboard-chat-browser-canvas.ts';
+import {
   CANVAS,
   CHAT,
   LINK,
   LISTENING,
   PAGE,
   READY,
-  TOOL,
   VOICE_WORDS,
   chipTitle,
 } from './whiteboard-chat-browser-probes.ts';
 import type {
   ArrivalCase,
-  CanvasCase,
+  CanvasRead,
   ChatRead,
   LinkCase,
   LiveCase,
@@ -64,43 +47,6 @@ import type {
 const step = (what: string): void => {
   process.stderr.write(`[whiteboard-chat] ${what}\n`);
 };
-
-const AGENT_BUTTON = 8_000;
-const shots = process.env.WHITEBOARD_SHOTS;
-if (shots) mkdirSync(shots, { recursive: true });
-async function shot(cdp: Cdp, name: string): Promise<void> {
-  if (!shots) return;
-  const { data } = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
-    data: string;
-  };
-  writeFileSync(join(shots, `${name}.png`), Buffer.from(data, 'base64'));
-}
-
-const read = <T>(cdp: Cdp, expr: string): Promise<T> => cdp.evaluate(expr) as Promise<T>;
-
-async function openWhiteboard(cdp: Cdp, url: string): Promise<void> {
-  await navigate(cdp, url);
-  await until('the canvas', async () => ((await read<boolean>(cdp, READY)) ? true : null), 40_000);
-}
-
-/** The agent button's centre, or null on a page that draws none. */
-const agentButton = (cdp: Cdp) =>
-  until(
-    'the agent button',
-    async () => (await read<ChatRead>(cdp, CHAT)).button,
-    AGENT_BUTTON,
-  ).catch(() => null);
-
-/** The page's chat with its button drawn, read after one tap on it. */
-async function chatAfterTap(cdp: Cdp): Promise<ChatRead> {
-  const at = await agentButton(cdp);
-  if (!at) return read<ChatRead>(cdp, CHAT);
-  await tap(cdp, at);
-  return until('the chat open and listening', async () => {
-    const chat = await read<ChatRead>(cdp, CHAT);
-    return chat.pane && chat.listening ? chat : null;
-  }).catch(() => read<ChatRead>(cdp, CHAT));
-}
 
 /** Says `text` through the newest listener; returns what the lead heard. */
 async function say(board: Board, text: string) {
@@ -320,145 +266,7 @@ async function tapLink(
   };
 }
 
-type Point = { x: number; y: number };
 type LinkPoint = Point & { href: string; target: string | null };
-type CanvasRead = CanvasCase['closed'];
-
-const key = async (cdp: Cdp, k: string, code: string): Promise<void> => {
-  for (const type of ['keyDown', 'keyUp'] as const) {
-    await cdp.send('Input.dispatchKeyEvent', {
-      type,
-      key: k,
-      code,
-      ...(type === 'keyDown' ? { text: k } : {}),
-    });
-  }
-};
-
-async function drag(cdp: Cdp, from: Point, to: Point): Promise<void> {
-  const send = (type: string, at: Point, buttons: number) =>
-    cdp.send('Input.dispatchMouseEvent', {
-      type,
-      x: at.x,
-      y: at.y,
-      button: type === 'mouseMoved' && buttons === 0 ? 'none' : 'left',
-      buttons,
-      clickCount: 1,
-    });
-  await send('mouseMoved', from, 0);
-  await send('mousePressed', from, 1);
-  await send('mouseMoved', { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }, 1);
-  await send('mouseMoved', to, 1);
-  await send('mouseReleased', to, 0);
-}
-
-/** Excalidraw's keys, pointer and room with the chat on the page. */
-async function canvasStill(
-  board: Board,
-  width: number,
-  height: number,
-  whiteboard: string,
-): Promise<CanvasCase> {
-  const tab = await openPerson(width, height, {
-    anonId: `canvas${width}`,
-    name: 'Alice',
-    ws: board.ws,
-  });
-  await openWhiteboard(tab, `${board.base}/workspaces/${board.ws}/whiteboards/${whiteboard}`);
-  await agentButton(tab);
-  const elements = () => tab.evaluate(`Number(document.body.dataset.elements || '0')`);
-  const start = (await elements()) as number;
-  const cx = width / 2;
-  const cy = height / 2;
-  await tap(tab, { x: cx, y: cy });
-  await key(tab, 'r', 'KeyR');
-  const toolAfterKey = await until(
-    'the shortcut',
-    async () => {
-      const t = await read<string | null>(tab, TOOL);
-      return t === 'rectangle' ? t : null;
-    },
-    5_000,
-  ).catch(() => read<string | null>(tab, TOOL));
-  await drag(tab, { x: cx - 40, y: cy - 40 }, { x: cx + 40, y: cy + 40 });
-  const drew = await until(
-    'the rectangle',
-    async () => {
-      const n = (await elements()) as number;
-      return n > start ? n - start : null;
-    },
-    5_000,
-  ).catch(() => 0);
-  const closed = await read<CanvasRead>(tab, CANVAS);
-  await shot(tab, `canvas-${width}`);
-
-  const chat = await chatAfterTap(tab);
-  await until(
-    'the composer focused',
-    async () =>
-      (await tab.evaluate(
-        `document.querySelector('[data-lead-chat="layer"]')?.shadowRoot?.activeElement?.tagName === 'TEXTAREA'`,
-      ))
-        ? true
-        : null,
-    5_000,
-  ).catch(() => null);
-  const toolBeforeTyping = await read<string | null>(tab, TOOL);
-  const typed = 'reed';
-  for (const c of typed) await key(tab, c, `Key${c.toUpperCase()}`);
-  const composer = await until(
-    'the composer text',
-    async () => {
-      const v = (await tab.evaluate(
-        `document.querySelector('[data-lead-chat="layer"]')?.shadowRoot?.querySelector('textarea')?.value ?? ''`,
-      )) as string;
-      return v === typed ? v : null;
-    },
-    3_000,
-  ).catch(() => '');
-  const toolAfterTyping = await read<string | null>(tab, TOOL);
-  const open = await until(
-    'the canvas fitted beside the chat',
-    async () => {
-      const c = await read<CanvasRead>(tab, CANVAS);
-      return !chat.pane || c.canvasFits ? c : null;
-    },
-    3_000,
-  ).catch(() => read<CanvasRead>(tab, CANVAS));
-  await shot(tab, `canvas-chat-${width}`);
-  const elementsWhileTyping = ((await elements()) as number) - start - drew;
-  await closePerson(tab);
-
-  const voiceTab = await openPerson(width, height, {
-    anonId: `canvas-voice${width}`,
-    name: 'Alice',
-    ws: board.ws,
-    voice: true,
-  });
-  await openWhiteboard(voiceTab, `${board.base}/workspaces/${board.ws}/whiteboards/${whiteboard}`);
-  const voiceAt = await agentButton(voiceTab);
-  if (voiceAt) await tap(voiceTab, voiceAt);
-  const shown = await until(
-    'the voice bar',
-    async () => ((await read<ChatRead>(voiceTab, CHAT)).bar ? true : null),
-    5_000,
-  ).catch(() => false);
-  const voiceBar = { shown, canvas: await read<CanvasRead>(voiceTab, CANVAS) };
-  await shot(voiceTab, `voice-bar-${width}`);
-  await closePerson(voiceTab);
-  return {
-    toolAfterKey,
-    drew,
-    closed,
-    chatOpen: chat.pane,
-    composer,
-    toolBeforeTyping,
-    toolAfterTyping,
-    elementsWhileTyping,
-    open,
-    voiceBar,
-  };
-}
 
 async function main(): Promise<void> {
   deadline('whiteboard-chat', 280_000);

@@ -19,7 +19,8 @@ const DRIVER = join(import.meta.dirname, 'whiteboard-chat-browser-driver.ts');
 /** One bundle build, ten browser launches at each of two sizes. */
 const SUITE_MS = 300_000;
 const SPAWN_MS = 290_000;
-/** The product's bar for a change reaching an open page. */
+/** The product's bar for a change reaching an open page, which is the
+ *  behaviour under test here, so these two are real times. */
 const LIVE_MS = 1000;
 
 let run: WhiteboardChatRun | null = null;
@@ -127,5 +128,12 @@ describe.skipIf(CHROME === null)('the lead chat on a whiteboard', () => {
     expect(open.canvasFits).toBe(true);
     expect(open.buttonOnControl).toBeNull();
     expect(open.stage.width).toBeGreaterThanOrEqual(400);
+  }, 60_000);
+
+  it('moves the agent button off Excalidraw’s phone layout when a wide chat brings that on', () => {
+    const dock = size(1180).canvas.wideDock;
+    // CONTROL: the drag really did change Excalidraw's layout.
+    expect(dock?.phoneLayout).toBe(true);
+    expect(dock?.buttonOnControl).toBeNull();
   }, 60_000);
 });

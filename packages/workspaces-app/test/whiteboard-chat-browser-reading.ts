@@ -73,6 +73,8 @@ export interface CanvasRead {
   buttonOnControl: string | null;
   /** The bar a voice-first tap brings out lies on one of them. */
   barOnControl: string | null;
+  /** Excalidraw has picked its phone layout. */
+  phoneLayout: boolean;
   centreCovered: boolean;
   scroll: [number, number];
 }
@@ -89,6 +91,8 @@ export interface CanvasCase {
   open: CanvasRead;
   /** With a voice-first tap, which brings out the bar rather than the panel. */
   voiceBar: { shown: boolean; canvas: CanvasRead };
+  /** At 1180, the chat dragged as wide as it goes. */
+  wideDock: CanvasRead | null;
 }
 
 export interface SizeRun {

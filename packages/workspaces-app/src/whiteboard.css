@@ -27,13 +27,12 @@ body.whiteboard-body {
      where the selection panel above them does not reach. */
   --lc-agent-left: 238px;
 }
-/* Excalidraw's phone layout, which it picks by these same sizes, fills that
-   row, so the button rises above it instead. */
-@media (max-width: 730px), (max-width: 1000px) and (max-height: 500px) {
-  body.whiteboard-body {
-    --lc-agent-left: 12px;
-    --voice-rail-lift: 52px;
-  }
+/* Excalidraw's phone layout fills that row, so the button rises above it.
+   Read off Excalidraw's own class, because it picks the layout from the
+   canvas's size, which the docked chat changes, and not the screen's. */
+body.whiteboard-body:has(.excalidraw--mobile) {
+  --lc-agent-left: 12px;
+  --voice-rail-lift: 52px;
 }
 /* The doc page's #topbar, whose rules are in styles.css. There it is a grid
    track of 48px; here the page is a flex column, so it takes the same height

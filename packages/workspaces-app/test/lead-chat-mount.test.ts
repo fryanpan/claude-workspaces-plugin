@@ -382,4 +382,76 @@ describe('voice on, carried to the next page of the tab', () => {
     expect(view.pane.hidden).toBe(true);
     expect(view.bar.hidden).toBe(true);
   });
+
+  it('a touch on a canvas that cancels its click still wakes voice', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    const saved = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    let resumes = 0;
+    class Suspended {
+      state = 'suspended';
+      resume(): Promise<void> {
+        resumes++;
+        return Promise.resolve();
+      }
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = Suspended;
+    vi.useFakeTimers();
+    try {
+      const next = nextPage({ mode: 'voice' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const canvas = document.createElement('canvas');
+      document.body.append(canvas);
+      const asleep = resumes;
+      // On the agent button a touch leaves the wake to its click.
+      next.view.button.dispatchEvent(new Event('touchend', { bubbles: true, composed: true }));
+      expect(resumes).toBe(asleep);
+      canvas.dispatchEvent(new Event('touchend', { bubbles: true, composed: true }));
+      expect(resumes).toBeGreaterThan(asleep);
+      // No click came, so the agent button's next tap stops voice as usual.
+      next.view.button.click();
+      expect(next.view.button.dataset.listening).toBe('false');
+    } finally {
+      vi.useRealTimers();
+      (window as unknown as { AudioContext: unknown }).AudioContext = saved;
+    }
+  });
+
+  /** A link as the chat draws it, inside the list. */
+  const chatLink = (view: LeadChatMount['view'], target?: string): HTMLAnchorElement => {
+    const a = document.createElement('a');
+    a.href = '/workspaces/w-1/whiteboards/d-ferry';
+    if (target) a.target = target;
+    a.addEventListener('click', (e) => e.preventDefault());
+    view.list.append(a);
+    return a;
+  };
+
+  it('on a phone, a link in the chat moves the listening panel into the bar', async () => {
+    const { view, voice } = mount();
+    view.button.click();
+    await settle();
+    view.pane.classList.add('lc-sheet');
+    chatLink(view).click();
+    expect(view.pane.hidden).toBe(true);
+    expect(view.bar.hidden).toBe(false);
+    expect(view.button.dataset.listening).toBe('true');
+    expect(voice.mic.stops).toBe(0);
+  });
+
+  it('a link that opens a new tab, or any link in a docked chat, leaves the panel open', async () => {
+    const { view } = mount();
+    view.button.click();
+    await settle();
+    view.pane.classList.remove('lc-sheet');
+    chatLink(view).click();
+    expect(view.pane.hidden).toBe(false);
+    view.pane.classList.add('lc-sheet');
+    chatLink(view, '_blank').click();
+    expect(view.pane.hidden).toBe(false);
+  });
 });

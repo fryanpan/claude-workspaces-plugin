@@ -370,6 +370,11 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const onPageTap = (): void => {
     woke = voice.wake();
   };
+  /** Excalidraw's canvas cancels a touch on iOS, so that tap never becomes a
+   *  click. The agent button's tap always does, and decides what it meant. */
+  const onPageTouch = (e: Event): void => {
+    if (!e.composedPath().includes(host)) voice.wake();
+  };
   const onHidePage = (): void => {
     hiding = true;
   };
@@ -382,6 +387,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.close.addEventListener('click', closeAll);
   view.pane.addEventListener(LEAVE_EVENT, onLeave);
   doc.addEventListener('click', onPageTap, true);
+  doc.addEventListener('touchend', onPageTouch, true);
   win.addEventListener('pagehide', onHidePage);
   win.addEventListener('pageshow', onShowPage);
   view.send.addEventListener('click', () => void sendTyped());
@@ -437,6 +443,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       client.close();
       doc.removeEventListener('keydown', onKey);
       doc.removeEventListener('click', onPageTap, true);
+      doc.removeEventListener('touchend', onPageTouch, true);
       win.removeEventListener('pagehide', onHidePage);
       win.removeEventListener('pageshow', onShowPage);
       win.removeEventListener('resize', onResize);

@@ -107,6 +107,7 @@ export const CANVAS = `(() => {
     canvasFits: Math.abs(cw - s.width) <= 1 && (!dock || s.right <= dock.left + 1),
     buttonOnControl: landsOn(btn),
     barOnControl: landsOn(bar),
+    phoneLayout: !!document.querySelector('.excalidraw--mobile'),
     centreCovered: !mid || !mid.closest('.excalidraw'),
     scroll: [window.scrollX, window.scrollY],
   };
