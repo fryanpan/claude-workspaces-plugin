@@ -30,9 +30,9 @@ describe('a gesture in progress', () => {
     expect(inGesture({ editingTextElement: { id: 't1' } })).toBe(true);
   });
 
-  it('protects the stroke being drawn, and no selected element by itself', () => {
+  it('protects the stroke being drawn and the text being typed', () => {
     expect([...protectedIds({ newElement: { id: 's1' } })]).toEqual(['s1']);
-    expect(protectedIds({ selectedElementIds: { b1: true } }).size).toBe(0);
+    expect([...protectedIds({ editingTextElement: { id: 't1' } })]).toEqual(['t1']);
   });
 
   it('counts a move of the selection, which also moves what is bound to it', () => {
