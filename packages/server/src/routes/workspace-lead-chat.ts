@@ -13,9 +13,11 @@
  * (`middleware/host-guard.ts`), and both refuse a visitor here besides.
  */
 import {
+  LEAD_CHAT_FILES_PER_MESSAGE,
   LEAD_CHAT_MAX_CHARS,
   LEAD_CHAT_PAGE,
   LEAD_CHAT_PAGE_MAX,
+  type LeadChatAttachment,
   type LeadChatCursor,
   addressesLead,
 } from '@claude-workspaces/core/lead-chat';
@@ -24,6 +26,8 @@ import { isValidAgentId } from '../agent-watches.ts';
 import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
+import { handleLeadChatFiles } from './workspace-lead-chat-files.ts';
+import { handleLeadChatModel } from './workspace-lead-chat-model.ts';
 import {
   type WorkspaceRouteRequest,
   type WorkspaceRoutesContext,
@@ -35,6 +39,12 @@ export async function handleWorkspaceLeadChat(
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
   const { req, pathname, scope, visitor, authorFor, requireOwner } = rq;
+  if (scope && /^\/workspaces\/[^/]+\/lead-chat\/files(\/|$)/.test(pathname)) {
+    return handleLeadChatFiles(ctx, rq);
+  }
+  if (scope && /^\/workspaces\/[^/]+\/lead-chat\/model$/.test(pathname)) {
+    return handleLeadChatModel(ctx, rq, scope.workspaceId);
+  }
   if (scope && /^\/workspaces\/[^/]+\/lead-chat\/meeting\/say$/.test(pathname)) {
     if (req.method !== 'POST') return undefined;
     // A board's own lead is admitted for its board (`middleware/lead-scope.ts`).
@@ -71,13 +81,16 @@ export async function handleWorkspaceLeadChat(
     return ctx.j(200, {
       ...ctx.leadChat.snapshot(workspaceId),
       meeting: ctx.leadChatMeetings.current(workspaceId),
+      leadModel: ctx.leadModels.read(workspaceId),
       canTalk: !denied,
     });
   }
   if (denied) return denied;
   const body = await ctx.safeJson(req);
   const text = typeof body?.text === 'string' ? body.text.trim() : '';
-  if (!text) return ctx.j(400, { error: 'text required' });
+  const files = attachedFiles(ctx, workspaceId, body?.attachments);
+  if (files === null) return ctx.j(400, { error: 'bad attachments' });
+  if (!text && files.length === 0) return ctx.j(400, { error: 'text required' });
   if (text.length > LEAD_CHAT_MAX_CHARS) {
     return ctx.j(400, { error: `text over ${LEAD_CHAT_MAX_CHARS} chars` });
   }
@@ -92,9 +105,31 @@ export async function handleWorkspaceLeadChat(
     text,
     context,
     via,
+    files,
   );
   if (!res.ok) return ctx.j(500, { error: res.error });
   return ctx.j(201, { message: res.message });
+}
+
+/**
+ * The files a message names, as this board stored them, or null when it names
+ * one this board does not hold. A page sends ids and nothing else: what a
+ * file is called and what it is come from the store.
+ */
+function attachedFiles(
+  ctx: WorkspaceRoutesContext,
+  workspaceId: string,
+  raw: unknown,
+): LeadChatAttachment[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > LEAD_CHAT_FILES_PER_MESSAGE) return null;
+  const out: LeadChatAttachment[] = [];
+  for (const id of new Set(raw)) {
+    const file = typeof id === 'string' ? ctx.leadChatFiles.get(workspaceId, id) : null;
+    if (!file) return null;
+    out.push(file);
+  }
+  return out;
 }
 
 /** A message id as `parseLeadChatMessage` accepts one. */

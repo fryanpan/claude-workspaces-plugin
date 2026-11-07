@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
+import type { LeadPaneDeps } from '../src/lead-chat/pane.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 
@@ -69,7 +70,7 @@ export async function readJson<T>(res: Response): Promise<T> {
  */
 export async function startShareProofServer(
   name: string,
-  opts: { legacyMint?: boolean } = {},
+  opts: { legacyMint?: boolean; leadPane?: LeadPaneDeps } = {},
 ): Promise<ShareProofServer> {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
   const publicJwk = (await exportJWK(publicKey)) as JWK;
@@ -97,6 +98,7 @@ export async function startShareProofServer(
     proxiedTrustedEmails: [OWNER_EMAIL],
     ownerEmail: OWNER_EMAIL,
     share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
+    ...(opts.leadPane ? { leadPane: opts.leadPane } : {}),
   });
   const base = `http://127.0.0.1:${handle.port}`;
   const req = (path: string, host: string, init: RequestInit = {}) =>

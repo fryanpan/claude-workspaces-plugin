@@ -6,6 +6,11 @@
           {
             "type": "command",
             "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" --tell-agent \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-note.ts\""
+          },
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-report.ts\"",
+            "async": true
           }
         ]
       }
@@ -45,6 +50,11 @@
           {
             "type": "command",
             "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-note.ts\""
+          },
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-report.ts\"",
+            "async": true
           }
         ]
       }
@@ -87,6 +97,27 @@
             "type": "command",
             "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session-mirror.ts\"",
             "async": true
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-report.ts\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-switch-allow.ts\""
           }
         ]
       }

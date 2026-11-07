@@ -70,6 +70,7 @@ describe('the lead chat', () => {
       messages: [],
       more: false,
       meeting: null,
+      leadModel: {},
       canTalk: true,
     });
   });

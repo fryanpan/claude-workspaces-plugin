@@ -38,6 +38,8 @@ function fakeClient(canTalk = true) {
       fns.push(fn);
     },
     onLeadLine: () => {},
+    uploadFile: async () => ({ ok: false, error: 'offline' }),
+    pickModel: async () => ({ ok: true }),
     loadOlder: async () => {},
     async send(text, author, context, via) {
       sent.push({ text, via, context });
@@ -212,7 +214,7 @@ describe('the lead chat on a page', () => {
     expect(voice.mic.stops).toBe(1);
   });
 
-  it('the chat draws no mic of its own, and names the lead agent plainly', () => {
+  it('the composer’s mic is the same voice as the agent button, and names the lead plainly', () => {
     const { view } = mount({ mode: 'voice' });
     view.button.click();
     view.bar.click();
@@ -220,7 +222,8 @@ describe('the lead chat on a page', () => {
     const listens = buttons.filter((b) =>
       /listen|talk|mic/i.test(`${b.getAttribute('aria-label') ?? ''} ${b.title} ${b.className}`),
     );
-    expect(listens).toEqual([]);
+    expect(listens).toEqual([view.compose.mic]);
+    expect(view.compose.mic.getAttribute('aria-pressed')).toBe(view.button.dataset.listening);
     expect(view.pane.querySelector('.lc-title h2')?.textContent).toBe('Chat with Lead Agent');
     expect(view.composer.placeholder).toBe('Message lead agent');
     expect(view.composer.getAttribute('aria-label')).toBe('Message lead agent');

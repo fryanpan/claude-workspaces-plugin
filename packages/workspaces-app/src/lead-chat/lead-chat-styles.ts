@@ -85,14 +85,12 @@ export const LAYER_STYLES = `
 .lc-note { display: block; margin: 3px 2px 0; font-size: 12px; color: var(--fg-muted, #57606a); }
 .lc-you .lc-note { text-align: right; }
 .lc-status { flex: none; min-height: 22px; padding: 2px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--fg-muted, #57606a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lc-compose { flex: none; display: flex; align-items: flex-end; gap: 6px; padding: 6px 8px 8px 12px; border-top: 1px solid var(--border, #d1d5da); padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+.lc-compose { position: relative; flex: none; padding: 6px 8px 8px; border-top: 1px solid var(--border, #d1d5da); padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 .lc-pane:not(.lc-sheet) .lc-compose { padding-bottom: 8px; }
 /* Above iOS's form-accessory bar, which floats over the page's foot while a field is focused. */
 .lc-pane.lc-keys .lc-compose { padding-bottom: ${8 + IOS_ACCESSORY}px; }
-.lc-compose textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 132px; margin: 0; padding: 11px 12px; border: 1px solid var(--border, #d1d5da); border-radius: 10px; background: var(--bg, #fff); color: var(--fg, #1b1f23); font: inherit; font-size: 16px; line-height: 20px; resize: none; }
-.lc-compose textarea:focus { outline: 2px solid var(--accent, #2e7dd7); outline-offset: -1px; border-color: var(--accent, #2e7dd7); }
-.lc-send { flex: none; min-width: 64px; height: 44px; margin: 0; padding: 0 14px; border: 1px solid var(--accent, #2e7dd7); border-radius: 10px; background: var(--accent, #2e7dd7); color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
-.lc-send:disabled { opacity: .5; cursor: default; }
+.lc-compose textarea { display: block; width: 100%; min-height: 40px; max-height: 132px; margin: 0; padding: 10px 14px 4px; border: 0; border-radius: 18px; background: none; color: var(--fg, #1b1f23); font: inherit; font-size: 16px; line-height: 20px; resize: none; box-sizing: border-box; }
+.lc-compose textarea:focus { outline: none; }
 .lc-readonly { flex: none; padding: 12px 16px; border-top: 1px solid var(--border, #d1d5da); font-size: 13px; color: var(--fg-muted, #57606a); }
 .lc-pane.lc-dock { border-radius: 0; border-width: 0 0 0 1px; box-shadow: -4px 0 16px rgba(0,0,0,.06); overflow: visible; }
 .lc-grip { position: absolute; left: -8px; top: 0; bottom: 0; z-index: 2; width: 16px; margin: 0; padding: 0; border: 0; background: none; cursor: col-resize; touch-action: none; }

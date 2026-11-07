@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.352";
+var version2 = "0.1.353";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -16694,6 +16694,18 @@ var TOOL_LIST = {
           }
         },
         required: ["text"]
+      }
+    },
+    {
+      name: "read_chat_attachment",
+      description: "Read a photo or file a person sent you in the board chat. Their message names each one with an [Attached: …] line carrying its fileId. Saves the file to a private temp folder and returns its path, which Read opens; a small image also comes back inline.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board the message came from." },
+          fileId: { type: "string", description: "From the [Attached: …] line." }
+        },
+        required: ["workspaceId", "fileId"]
       }
     },
     {
@@ -21226,6 +21238,67 @@ function parseCapArg(raw) {
   };
 }
 
+// packages/mcp/src/tools/chat-attachment.ts
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+
+// packages/core/src/lead-chat.ts
+var LEAD_CHAT_FILE_MAX_BYTES = 25 * 1024 * 1024;
+var FILE_NAME_MAX = 160;
+var FILE_TYPE_MAX = 100;
+var LEAD_CHAT_FILE_ID = /^lf-[A-Za-z0-9_-]{8,40}$/;
+function leadChatFilePath(workspaceId, fileId) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/files/${encodeURIComponent(fileId)}`;
+}
+var LEAD_LINE_MIN_GAP = 1 / 1024;
+function parseLeadChatAttachment(raw) {
+  if (typeof raw !== "object" || raw === null)
+    return null;
+  const { id, name, type, size, image } = raw;
+  const ok2 = str(id, 100);
+  const label = str(name, FILE_NAME_MAX);
+  const kind = str(type, FILE_TYPE_MAX);
+  if (!ok2 || !LEAD_CHAT_FILE_ID.test(ok2) || !label || !kind)
+    return null;
+  if (typeof size !== "number" || !Number.isFinite(size) || size < 0)
+    return null;
+  return {
+    id: ok2,
+    name: label,
+    type: kind,
+    size,
+    ...image === true ? { image: true } : {}
+  };
+}
+function str(v, max) {
+  return typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
+}
+
+// packages/mcp/src/tools/chat-attachment.ts
+var INLINE_IMAGE_MAX_BYTES = 3500000;
+var onDisk = (name) => name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^\.+/, "");
+async function readChatAttachment(ctx, workspaceId, fileId) {
+  if (!workspaceId || !fileId)
+    return ctx.err("workspaceId and fileId are required");
+  if (!LEAD_CHAT_FILE_ID.test(fileId))
+    return ctx.err("fileId is not a chat file id");
+  const got = await ctx.http("GET", `${leadChatFilePath(workspaceId, fileId)}?encoding=base64`);
+  const file = parseLeadChatAttachment(got.file);
+  if (!file || typeof got.data !== "string")
+    return ctx.err("the server sent no file");
+  const dir = mkdtempSync(join2(ctx.tempRoot ?? tmpdir(), "cw-chat-file-"));
+  const path = join2(dir, onDisk(file.name) || "file");
+  writeFileSync(path, Buffer.from(got.data, "base64"), { flag: "wx", mode: 384 });
+  const said = { name: file.name, type: file.type, size: file.size, path };
+  return {
+    content: [
+      { type: "text", text: JSON.stringify(said, null, 2) },
+      ...file.image && file.size <= INLINE_IMAGE_MAX_BYTES ? [{ type: "image", data: got.data, mimeType: file.type }] : []
+    ]
+  };
+}
+
 // packages/mcp/src/tools/workspace.ts
 async function setBoardRetired(ctx, workspaceId, retired, reason) {
   const { http, AUTHOR } = ctx;
@@ -21578,6 +21651,10 @@ async function handleWorkspaceTool(name, a, ctx) {
         detached,
         note: detached ? "Off this board: list_agents no longer shows you, and a restart will not re-attach or re-watch it. attach_agent brings you back." : "You had no attachment here; the board stream is closed and its watch dropped all the same."
       });
+    }
+    case "read_chat_attachment": {
+      const { workspaceId, fileId } = a;
+      return readChatAttachment(ctx, workspaceId, fileId);
     }
     case "answer_voice": {
       const { workspaceId, queueId, text, written, minute } = a;

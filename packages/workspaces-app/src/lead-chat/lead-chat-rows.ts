@@ -25,11 +25,18 @@
  * Sent, Received, Working, Done or Answered. Nothing blinks (CLAUDE.md, calm
  * by default).
  */
-import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import {
+  type LeadChatLead,
+  type LeadChatMessage,
+  leadChatFilePath,
+} from '@claude-workspaces/core/lead-chat';
+import { sizeLabel } from './lead-chat-attachments.ts';
 import { toolLine } from './lead-chat-tool-line.ts';
 
 export interface RowContext {
   doc: Document;
+  /** The board a message's files are read from. */
+  workspaceId?: string;
   meId: string;
   lead: LeadChatLead | null;
   /** Ids of the compact rows and voice bubbles the reader opened. */
@@ -221,6 +228,31 @@ function whoFor(ctx: RowContext, msg: LeadChatMessage): string {
   return msg.via === 'voice' ? `${name}, by voice` : name;
 }
 
+/** A message's photos as thumbnails and its other files as links. */
+function attachmentRow(ctx: RowContext, msg: LeadChatMessage): HTMLElement | null {
+  if (!msg.attachments?.length) return null;
+  const { doc } = ctx;
+  const row = el(doc, 'div', 'lc-thumbs');
+  for (const a of msg.attachments) {
+    const link = el(doc, 'a', a.image ? '' : 'lc-sent-file');
+    const href = leadChatFilePath(ctx.workspaceId ?? '', a.id);
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    if (a.image) {
+      const img = el(doc, 'img');
+      img.src = href;
+      img.alt = a.name;
+      img.loading = 'lazy';
+      link.append(img);
+    } else {
+      link.append(el(doc, 'b', '', a.name), el(doc, 'span', '', sizeLabel(a.size)));
+    }
+    row.append(link);
+  }
+  return row;
+}
+
 /** One entry, or null for a working row the toggle hides. */
 export function drawMessage(ctx: RowContext, msg: LeadChatMessage): HTMLElement | null {
   if (isWorkingRow(msg) && !ctx.showWorking && msg.id !== ctx.liveWorking) return null;
@@ -238,11 +270,15 @@ export function drawMessage(ctx: RowContext, msg: LeadChatMessage): HTMLElement 
   let body: HTMLElement;
   if (mine) {
     body = el(doc, 'span', 'lc-msg-text', msg.text);
+    body.hidden = msg.text === '';
   } else {
     body = el(doc, 'div', 'lc-msg-text lc-md');
     body.innerHTML = ctx.markdown(msg);
   }
-  item.append(el(doc, 'span', 'lc-msg-who', whoFor(ctx, msg)), body);
+  item.append(el(doc, 'span', 'lc-msg-who', whoFor(ctx, msg)));
+  const files = attachmentRow(ctx, msg);
+  if (files) item.append(files);
+  item.append(body);
   const state = messageState(msg, ctx.messages);
   if (state) {
     const line = el(doc, 'span', 'lc-state');

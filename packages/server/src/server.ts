@@ -75,11 +75,14 @@ import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
+import { LeadChatFiles } from './lead-chat/files.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
+import { LeadModels } from './lead-chat/lead-model.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
 import { LeadMeetingFeed, meetingLeadFeedEnabled } from './lead-chat/meeting-feed.ts';
 import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
+import { LeadPane } from './lead-chat/pane.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -1563,7 +1566,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     },
     broadcast: (workspaceId, frame) =>
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
+    turn: (workspaceId, phase) =>
+      phase === 'start' ? leadModels.turnStarted(workspaceId) : leadModels.turnEnded(workspaceId),
     newId: () => cryptoId('lc'),
+  });
+  const leadChatFiles = new LeadChatFiles(dataDir, () => cryptoId('lf'));
+  // A person's pick of the lead's model, typed into its terminal between turns.
+  const leadModels = new LeadModels({
+    dataDir,
+    leadOf: (workspaceId) => {
+      const agentId = taskStore.getWorkspace(workspaceId)?.leadAgentId;
+      if (!agentId) return null;
+      return { agentId, name: voiceAgentLine.attached(workspaceId, agentId)?.name ?? agentId };
+    },
+    pane: new LeadPane(opts.leadPane),
+    broadcast: (workspaceId, frame) =>
+      sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
   });
   // What the lead's session writes mid-turn and the tools it calls.
   const leadSessionMirror = new LeadSessionMirror(leadChat, () => cryptoId('lc'));
@@ -3069,6 +3087,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     },
     leadChatMirror: leadChat,
     leadSessionMirror,
+    leadModels,
     readyNudger,
     j,
     safeJson,
@@ -3154,6 +3173,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenRelay,
     spokenTimings,
     leadChat,
+    leadChatFiles,
+    leadModels,
     leadChatMeetings,
     leadMeetingFeed:
       (opts.meetingLeadFeed ?? meetingLeadFeedEnabled(process.env)) ? leadMeetingFeed : null,

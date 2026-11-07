@@ -34,6 +34,7 @@
  */
 import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
+import { wireComposer } from './lead-chat-composer-wiring.ts';
 import { messageLinkOf, withMessageLink } from './lead-chat-link.ts';
 import {
   type LeadMeetingSeams,
@@ -168,6 +169,21 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     queueMicrotask(() => voice.start({ gesture: false }));
   };
 
+  // `render` and `voice` are declared below; these run only once a person acts.
+  const composing = wireComposer({
+    composer: view.compose,
+    client,
+    onChange: () => render(),
+    onNotice: (text) => {
+      ui.notice = text;
+      render();
+    },
+    toggleListening: () => {
+      if (voice.state().phase !== 'off') stopListening();
+      else startListening();
+    },
+  });
+
   const render = (): void => {
     const s = client.state();
     if (!restored && s.loaded) {
@@ -185,6 +201,14 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       messages: s.messages,
       canTalk: s.canTalk,
       loaded: s.loaded,
+      workspaceId: opts.workspaceId,
+      compose: {
+        files: composing.attachments.list(),
+        sendable: composing.sendable(),
+        listening: heard.phase !== 'off',
+        inMeeting: !!s.meeting,
+        leadModel: s.leadModel ?? {},
+      },
       meId: opts.author.id,
       open: ui.open,
       barOut: ui.bar,
@@ -223,8 +247,12 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     return at ? { ...at, chatOpen: ui.open } : undefined;
   };
 
-  const deliver = async (text: string, via: 'chat' | 'voice'): Promise<boolean> => {
-    const res = await client.send(text, opts.author, context(), via);
+  const deliver = async (
+    text: string,
+    via: 'chat' | 'voice',
+    attachments?: readonly string[],
+  ): Promise<boolean> => {
+    const res = await client.send(text, opts.author, context(), via, attachments);
     ui.notice = res.ok ? '' : 'Not sent. Check the connection and try again.';
     render();
     return res.ok;
@@ -310,13 +338,17 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
 
   const sendTyped = async (): Promise<void> => {
     const text = view.composer.value.trim();
-    if (!text) return;
+    if (!composing.sendable()) return;
     view.send.disabled = true;
-    if (await deliver(text, 'chat')) view.composer.value = '';
-    view.send.disabled = view.composer.value.trim() === '';
+    if (await deliver(text, 'chat', composing.attachments.ids())) {
+      view.composer.value = '';
+      composing.attachments.clear();
+    }
+    view.send.disabled = !composing.sendable();
   };
 
   const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape' && composing.closeSheet()) return;
     if (e.key === 'Escape' && (ui.open || ui.bar)) closeAll();
   };
   /** A full-screen panel making way for a page: listening goes on in the bar. */
@@ -354,7 +386,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.send.addEventListener('click', () => void sendTyped());
   view.list.addEventListener('scroll', () => olderIfAtTop(true), { passive: true });
   view.composer.addEventListener('input', () => {
-    view.send.disabled = view.composer.value.trim() === '';
+    view.send.disabled = !composing.sendable();
     view.composer.style.height = 'auto';
     view.composer.style.height = `${view.composer.scrollHeight}px`;
   });

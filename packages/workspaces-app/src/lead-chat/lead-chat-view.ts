@@ -28,6 +28,13 @@
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { hydrateLinkTitles } from '../link-titles.ts';
+import { COMPOSER_STYLES } from './lead-chat-composer-styles.ts';
+import {
+  type Composer,
+  type ComposerModel,
+  bareComposer,
+  createComposer,
+} from './lead-chat-composer.ts';
 import { createDock } from './lead-chat-dock.ts';
 import { typingBand } from './lead-chat-keyboard.ts';
 import { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
@@ -68,6 +75,9 @@ export interface LeadChatViewModel {
   messages: readonly LeadChatMessage[];
   canTalk: boolean;
   loaded: boolean;
+  workspaceId?: string;
+  /** The composer's tray and chip. */
+  compose?: ComposerModel;
   meId: string;
   open: boolean;
   barOut: boolean;
@@ -97,6 +107,7 @@ export interface LeadChatView {
   list: HTMLElement;
   composer: HTMLTextAreaElement;
   send: HTMLButtonElement;
+  compose: Composer;
   close: HTMLButtonElement;
   /** "Start a meeting", in the header while no meeting runs. */
   start: HTMLButtonElement;
@@ -154,7 +165,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   layer.dataset.leadChat = 'layer';
   const root = layer.attachShadow({ mode: 'open' });
   const style = make(doc, 'style');
-  style.textContent = LAYER_STYLES + MEETING_STYLES;
+  style.textContent = LAYER_STYLES + MEETING_STYLES + COMPOSER_STYLES;
 
   const bar = make(doc, 'button', 'lc-bar');
   bar.type = 'button';
@@ -199,19 +210,10 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   list.setAttribute('role', 'log');
   list.setAttribute('aria-live', 'polite');
   const status = make(doc, 'div', 'lc-status');
-  const compose = make(doc, 'div', 'lc-compose');
-  const composer = make(doc, 'textarea');
-  composer.rows = 1;
-  composer.placeholder = 'Message lead agent';
-  composer.setAttribute('aria-label', 'Message lead agent');
-  composer.maxLength = 4000;
-  const send = make(doc, 'button', 'lc-send', 'Send');
-  send.type = 'button';
-  // No mic of its own: the agent button starts and stops listening.
-  compose.append(composer, send);
+  const compose = createComposer(doc);
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
-  pane.append(grip, head, meeting.notes, list, status, compose, readonly);
+  pane.append(grip, head, meeting.notes, list, status, compose.root, readonly, ...compose.overlays);
   root.append(style, bar, pane);
   doc.body.append(layer);
 
@@ -380,6 +382,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     }
     const ctx = {
       doc,
+      ...(m.workspaceId ? { workspaceId: m.workspaceId } : {}),
       meId: m.meId,
       lead: m.lead,
       open: opened,
@@ -437,8 +440,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     bar,
     pane,
     list,
-    composer,
-    send,
+    composer: compose.field,
+    send: compose.send,
+    compose,
     close,
     start,
     meeting,
@@ -476,9 +480,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       meeting.render(
         m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false },
       );
-      compose.hidden = !m.canTalk;
+      compose.root.hidden = !m.canTalk;
       readonly.hidden = m.canTalk || !m.loaded;
-      send.disabled = composer.value.trim() === '';
+      compose.render(m.compose ?? bareComposer(compose.field, m.listening));
       renderAll(m);
     },
     nearTop: () => !pane.hidden && list.scrollTop < OLDER_AT,

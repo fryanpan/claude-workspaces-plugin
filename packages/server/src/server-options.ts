@@ -29,6 +29,7 @@ import type { GitRunner } from './git-push/git.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
 import type { FetchLike, HomeRemotesConfig } from './home-remotes.ts';
 import type { ReplyTransport } from './inbox/send-transport.ts';
+import type { LeadPaneDeps } from './lead-chat/pane.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
 import type { PluginRefresher } from './plugin-refresh.ts';
@@ -48,6 +49,9 @@ import type { TidyComplete } from './voice-feedback-tidy.ts';
 import type { VoiceComplete } from './voice.ts';
 
 export interface ServerOptions {
+  /** How the lead's terminal is reached; tests use a private tmux socket or
+   *  a fake runner, so no test can type into a real pane. */
+  leadPane?: LeadPaneDeps;
   /**
    * CW_SHARING_DISABLED was set: external sharing starts OFF and the runtime
    * toggle refuses to reopen it. The switch to reach for while a security

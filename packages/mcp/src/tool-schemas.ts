@@ -423,6 +423,19 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'read_chat_attachment',
+      description:
+        'Read a photo or file a person sent you in the board chat. Their message names each one with an [Attached: …] line carrying its fileId. Saves the file to a private temp folder and returns its path, which Read opens; a small image also comes back inline.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board the message came from.' },
+          fileId: { type: 'string', description: 'From the [Attached: …] line.' },
+        },
+        required: ['workspaceId', 'fileId'],
+      },
+    },
+    {
       name: 'answer_voice',
       description:
         'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead.',
