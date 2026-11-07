@@ -37,7 +37,7 @@ import {
 } from './lead-chat-composer.ts';
 import { createDock } from './lead-chat-dock.ts';
 import { typingBand } from './lead-chat-keyboard.ts';
-import { barLines, historyLine, statusLine } from './lead-chat-lines.ts';
+import { historyLine } from './lead-chat-lines.ts';
 import {
   MEETING_STYLES,
   type MeetingView,
@@ -48,6 +48,7 @@ import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
 import { drawMessage, hiddenWorkingCount, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
+import { drawBarLines, drawStatus } from './lead-chat-tail.ts';
 
 /** Fired on the pane when a full-screen chat must make way for a page. */
 export const LEAVE_EVENT = 'lc-leave';
@@ -467,14 +468,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       else button.removeAttribute('aria-pressed');
       bar.hidden = !m.barOut || m.open;
       pane.hidden = !m.open;
-      barText.replaceChildren();
-      for (const line of barLines(m)) {
-        const row = make(doc, 'span', `lc-bar-line${line.dim ? ' lc-dim' : ''}`);
-        row.append(make(doc, 'b', '', `${line.who}: `), line.text);
-        barText.append(row);
-      }
+      drawBarLines(barText, m);
       who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
-      status.textContent = statusLine(m);
+      drawStatus(status, m);
       title.hidden = meetingOn;
       start.hidden = meetingOn || !m.canTalk || !m.loaded;
       meeting.render(

@@ -85,6 +85,15 @@ export const LAYER_STYLES = `
 .lc-note { display: block; margin: 3px 2px 0; font-size: 12px; color: var(--fg-muted, #57606a); }
 .lc-you .lc-note { text-align: right; }
 .lc-status { flex: none; min-height: 22px; padding: 2px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--fg-muted, #57606a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Words being heard grow at the end, so their end stays in view: the text
+   sits against the clip's right edge and runs off its left, and the empty
+   ::after takes the slack so that a short line still starts at the left. */
+.lc-tail { display: flex; }
+.lc-tail-label { flex: none; white-space: pre; }
+.lc-tail-clip { flex: 1; min-width: 0; display: flex; justify-content: flex-end; overflow: hidden; }
+.lc-tail-clip::after { content: ""; flex: 1 1 0; }
+.lc-tail-text { flex: none; white-space: nowrap; }
+.lc-tail-clip.lc-cut { mask-image: linear-gradient(to right, transparent, #000 16px); }
 .lc-compose { position: relative; flex: none; padding: 6px 8px 8px; border-top: 1px solid var(--border, #d1d5da); padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 .lc-pane:not(.lc-sheet) .lc-compose { padding-bottom: 8px; }
 /* Above iOS's form-accessory bar, which floats over the page's foot while a field is focused. */
