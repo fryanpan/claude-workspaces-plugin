@@ -279,6 +279,56 @@ describe('buildLibrary', () => {
   });
 });
 
+/**
+ * How many labels a Library build joins. Naming is the step that held the
+ * event loop for seconds on a board with thousands of rows, and a count of
+ * its work says so without reading a clock.
+ */
+function joinsDuring(build: () => void): number {
+  const realJoin = Array.prototype.join;
+  let joins = 0;
+  Array.prototype.join = function join(this: unknown[], separator?: string): string {
+    joins += 1;
+    return realJoin.call(this, separator);
+  };
+  try {
+    build();
+  } finally {
+    Array.prototype.join = realJoin;
+  }
+  return joins;
+}
+
+describe('a Library load over a large project', () => {
+  const loadOf = (paths: readonly string[]) =>
+    joinsDuring(() =>
+      buildLibrary(
+        sources({
+          docs: [meta('d-plan', { title: 'Plan' })],
+          docKeyOf: () => makeDocKey(REPO, 'docs/plan.md'),
+          markdownFiles: () => paths.map((relPath, i) => ({ relPath, mtimeMs: i })),
+        }),
+      ),
+    );
+  const unique = (n: number) =>
+    Array.from({ length: n }, (_, i) => `docs/area-${i % 40}/note-${i}.md`);
+  const sameName = (n: number) => Array.from({ length: n }, (_, i) => `area-${i}/docs/README.md`);
+
+  it('names each row a bounded number of times, however many rows there are', () => {
+    for (const paths of [unique(400), sameName(400)]) {
+      const joins = loadOf(paths);
+      // Above zero, or this reads nothing: a build that stopped using join
+      // would pass the ceiling having measured no work at all.
+      expect(joins).toBeGreaterThanOrEqual(paths.length);
+      expect(joins).toBeLessThanOrEqual(paths.length * 4);
+    }
+  });
+
+  it('does twice the naming for twice the rows', () => {
+    expect(loadOf(unique(800))).toBeLessThanOrEqual(loadOf(unique(400)) * 2.5);
+  });
+});
+
 describe('library helpers', () => {
   it('names a file by its folder only when the bare name is ambiguous', () => {
     const names = displayNames(['README.md', 'a/README.md', 'a/b/notes.md']);
@@ -299,6 +349,42 @@ describe('library helpers', () => {
       'docs/README.md',
       'plan.md',
     ]);
+  });
+
+  it('names a path exactly as a pairwise comparison of every label would', () => {
+    // The rule itself, spelled the slow way: grow a path's label until no
+    // other path carries the same one, or the path runs out of folders.
+    const pairwise = (relPaths: readonly string[]): Map<string, string> => {
+      const paths = [...new Set(relPaths)];
+      const segs = (rel: string) => rel.split('/').filter((s) => s && s !== '.');
+      const label = (rel: string, depth: number) => segs(rel).slice(-depth).join('/');
+      const out = new Map<string, string>();
+      for (const rel of paths) {
+        let depth = 1;
+        while (
+          depth < segs(rel).length &&
+          paths.some((o) => o !== rel && label(o, depth) === label(rel, depth))
+        ) {
+          depth += 1;
+        }
+        out.set(rel, label(rel, depth));
+      }
+      return out;
+    };
+    const words = ['a', 'b', 'docs', 'README.md', 'plan.md'];
+    let seed = 7;
+    const pick = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    for (let round = 0; round < 200; round += 1) {
+      const paths = Array.from({ length: 1 + pick(14) }, () =>
+        Array.from({ length: 1 + pick(5) }, () => words[pick(words.length)]).join('/'),
+      );
+      // Spellings a listing should never produce still get one answer.
+      paths.push('./a/plan.md', 'a//plan.md', '.', '');
+      expect([...displayNames(paths)]).toEqual([...pairwise(paths)]);
+    }
   });
 
   it('offers a mounted markdown file to open, naming the mount it came from', () => {
