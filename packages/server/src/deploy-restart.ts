@@ -8,9 +8,9 @@
  * That is the same path a crash takes, and it needs nothing to happen after
  * this process is gone.
  *
- * The deploy used to run `launchctl kickstart -k` instead. That SIGTERMs the
- * supervisor, which exits 0 (an intentional stop), so the relaunch depended
- * entirely on launchd completing the kickstart's start half. On 31 Oct one
+ * The deploy used to run `launchctl kickstart -k` instead. That SIGTERMed the
+ * supervisor, which then exited 0, so the relaunch depended entirely on
+ * launchd completing the kickstart's start half. On 31 Oct one
  * deploy restart in 22 left the job `not running` with `last exit code = 0`.
  * kickstart also SIGKILLs a job that has not exited 5s after its SIGTERM
  * (measured), which cut short the doc flush in the graceful shutdown.
@@ -31,7 +31,8 @@ export const DEPLOY_SHUTDOWN_DEADLINE_MS = 30_000;
 let restartRequested = false;
 
 /** The code the SIGTERM handler exits with: the restart code after a deploy
- *  asked for one, 0 for any other stop (so launchd leaves the job down). */
+ *  asked for one, 0 for any other stop. This is the server's own exit, not the
+ *  job's: under launchd the supervisor exits non-zero either way. */
 export function shutdownExitCode(): number {
   return restartRequested ? DEPLOY_RESTART_EXIT_CODE : 0;
 }
