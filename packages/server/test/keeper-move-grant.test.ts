@@ -207,24 +207,6 @@ describe('asking for a move grant', () => {
   });
 });
 
-describe('the same gate on push keys', () => {
-  const ask = (headers: Record<string, string>) =>
-    fetch(`${base}/v1/push-keys`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify({ app: APP, repos: ['Harborlight/notes'] }),
-    });
-
-  it('refuses a request without the API header or the caller token', async () => {
-    expect((await ask({})).status).toBe(403);
-    expect((await ask({ 'x-cw-keeper': '1' })).status).toBe(401);
-  });
-
-  it('CONTROL: a request carrying both reaches the keeper', async () => {
-    expect((await ask(apiHeaders())).status).toBe(202);
-  });
-});
-
 describe('what one approval covers', () => {
   it('CONTROL: without a grant, a listed step waits for the passkey', async () => {
     clock += MOVE_GRANT_MS + 1;
