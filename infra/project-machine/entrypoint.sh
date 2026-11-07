@@ -215,18 +215,32 @@ lead_cgroup() {
 # (MACHINE_SECRETS, run-as.sh). Root starts its supervisor again whenever it
 # exits, so the lead, which can kill its own processes, cannot stop the
 # machine: this loop, not the supervisor, is what wait -n watches.
-# The sign-in must be one made for this org alone (review H2): machine:deploy
-# sets CW_LEAD_TOKEN_ORG to the org beside the token, so a token set by hand,
-# or the sign-in every lead once shared, starts no lead until a deploy makes
-# the org its own.
+# The sign-in must be one a deploy or a move set for this org (review H2).
+# CW_LEAD_TOKEN_ORG beside the token is the org's name for a token made by the
+# org's own approval, or listed:<label>:<sha256> for one from the central list,
+# which several orgs may share (token-list.ts, tokenMarker): the digest binds
+# this org, the label and this exact token. A sign-in with no marker starts no
+# lead, and neither does a marker copied from another org or a token set over
+# a listed marker. The marker is never logged: its digest is of the sign-in.
 LEAD_ORG="${FLY_APP_NAME:-}"
 LEAD_ORG="${LEAD_ORG#cw-}"
+LEAD_TOKEN_LABEL=""
+lead_token_ok() {
+  [ -n "$LEAD_ORG" ] || return 1
+  local marker="${CW_LEAD_TOKEN_ORG:-}" sum
+  [ "$marker" != "$LEAD_ORG" ] || return 0
+  [[ $marker =~ ^listed:([a-z0-9][a-z0-9-]{0,31}):([0-9a-f]{64})$ ]] || return 1
+  local label="${BASH_REMATCH[1]}" want="${BASH_REMATCH[2]}"
+  sum=$(printf '%s' "listed:$LEAD_ORG:$label:$CLAUDE_CODE_OAUTH_TOKEN" | sha256sum) || return 1
+  [ "${sum%% *}" = "$want" ] || return 1
+  LEAD_TOKEN_LABEL="$label"
+}
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   log "CLAUDE_CODE_OAUTH_TOKEN unset: no lead agent runs"
 elif [ -z "$LEAD_BOARD" ]; then
   log "CW_LEAD_BOARD unset: no lead agent runs"
-elif [ -z "$LEAD_ORG" ] || [ "${CW_LEAD_TOKEN_ORG:-}" != "$LEAD_ORG" ]; then
-  log "the lead's sign-in was not made for ${LEAD_ORG:-this org} (CW_LEAD_TOKEN_ORG is '${CW_LEAD_TOKEN_ORG:-}'): no lead agent runs; machine:deploy on the Mac makes it one with a browser approval"
+elif ! lead_token_ok; then
+  log "the lead's sign-in was not made for ${LEAD_ORG:-this org} (CW_LEAD_TOKEN_ORG does not match it): no lead agent runs; machine:deploy on the Mac sets it one, or machine:tokens move"
 else
   if cg=$(lead_cgroup); then
     log "the lead's memory is capped at $LEAD_MEMORY_MAX"
@@ -245,9 +259,11 @@ else
         app="${FLY_APP_NAME:-project}"
         export CW_BOARD_SOCKET="$SOCKETS/$LEAD_BOARD.sock" CW_WORKSPACE_ID="$LEAD_BOARD" \
           CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
-          CW_LEAD_ROOT="$LEAD_ROOT" DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash
+          CW_LEAD_ROOT="$LEAD_ROOT" CW_LEAD_TOKEN_LABEL="$LEAD_TOKEN_LABEL" \
+          DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
-          CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_REMOTE_CONTROL CW_LEAD_GITHUB_DEPLOY_KEY \
+          CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_TOKEN_LABEL CW_LEAD_REMOTE_CONTROL \
+          CW_LEAD_GITHUB_DEPLOY_KEY \
           DISABLE_AUTOUPDATER
         # 007, not 077: a file's group is the lead's own group, which holds
         # nobody else, except in the setgid dev folder, where it is

@@ -2078,7 +2078,10 @@ on the Mac does, and runs as a user of its own, so it holds none of the
 server's credentials and the server holds none of its.
 `middleware/loopback-uid-door.ts` joins the HTTP row and moves no boundary:
 it refuses loopback TCP from that user, by uid, at the front door. The runbook is
-[docs/process/project-machine.md](../process/project-machine.md).
+[docs/process/project-machine.md](../process/project-machine.md). Which Claude
+account a lead runs on comes from the Mac's central token list
+(`infra/project-machine/token-list.ts`); `machine:tokens` moves a project
+between listed tokens and reads each one's usage. None of it is in a package.
 
 `claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
 it holds one piece of process state the domain row's purity bar would not

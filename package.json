@@ -16,6 +16,7 @@
     "machine:move-board": "bun run infra/project-machine/move-board.ts",
     "machine:approve-move": "bun run infra/project-machine/approve-move.ts",
     "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
+    "machine:tokens": "bun run infra/project-machine/tokens.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",
     "cf:apply": "bun run infra/cloudflare/run.ts apply",
     "check:cloudflare-tf": "bun run infra/cloudflare/check.ts",

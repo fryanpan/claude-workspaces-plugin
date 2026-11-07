@@ -21,6 +21,8 @@ scripts that stand it up. How to run them is
 | `bun run machine:approve-move --board <id> --project <name>` | the Mac | Asks one passkey that covers that board's wall check and move on that project for 30 minutes (`docs/process/keeper.md`). |
 | `bun run machine:move-board --board <id> --project <name>` | the Mac | Moves one board onto the machine with the same ids (`board-bundle.ts`, `board-print.ts`), and archives the Mac's copy only when both fingerprints match |
 | `board-probe.ts` | the machine | The move's importer and fingerprint, on loopback |
+| `bun run machine:tokens` (`tokens.ts`, `token-list.ts`, `token-move.ts`, `token-usage.ts`) | the Mac | The central list of long-lived Claude tokens, of accounts Bryan owns only: add one, read each token's usage, move a project to another (`docs/process/project-machine.md`) |
+| `lead-usage.ts` | the machine | The lead's status line command: keeps the session's rate limits for `machine:tokens usage` |
 
 ## Why Tigris for the bucket
 
@@ -79,6 +81,7 @@ with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
 byte and reads the board back from a second server.
 `transcript-store.test.ts` holds the store's uploader: which key each board's files are sealed to, that a local-only board sends nothing, and that a run cut short resumes without repeating or skipping a byte. `transcript-store-uploader.test.ts` holds its keys file and a pass against a stand-in bucket on loopback, which sees PUTs only.
+`project-machine-token-list.test.ts` holds the token list: a deploy with no sign-in, the marker on a booted machine, a move, and the usage reading and report.
 `project-machine-move-board.test.ts` moves a board between two real servers on loopback and checks when the source is not archived; `project-machine-board-bundle.test.ts` checks the shared-file merge and that a hand-made bundle is refused; `bound-file-sync.test.ts` keeps a moved board's doc and its `.md` in step both ways.
 `project-machine-snapshot.test.ts` holds the refusals, the first snapshot
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs

@@ -164,6 +164,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
         'CW_AGENT_NAME',
         'CW_BOARD_SOCKET',
         'CW_LEAD_ROOT',
+        'CW_LEAD_TOKEN_LABEL',
         'CW_WORKSPACE_ID',
         'DISABLE_AUTOUPDATER',
         'HOME',
