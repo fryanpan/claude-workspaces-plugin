@@ -67,7 +67,7 @@ interface Exit {
 const relaunches = (e: Exit): boolean => e.signal === null && e.code !== null && e.code !== 0;
 
 const scratch: string[] = [];
-const running: ReturnType<typeof boot>[] = [];
+const running: { proc: ChildProcess; exited: () => Exit | null }[] = [];
 
 afterEach(async () => {
   // SIGTERM rather than SIGKILL: only the supervisor knows to stop the server.
