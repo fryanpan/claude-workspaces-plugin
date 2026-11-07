@@ -204,6 +204,14 @@ describe('following', () => {
     expect(storage.map.has(followStorageKey(WS))).toBe(false);
   });
 
+  it.each(['/review', '/'])('does not reload %s when the spot followed is that page', (path) => {
+    const p = page({ surface: 'board', path }, memoryStorage(), path);
+    participant(p.room)(person('u-peer', 'Bob', { surface: 'board', path }, 1));
+    p.follower.follow('p-u-peer');
+    expect(p.went).toEqual([]);
+    expect(p.follower.key()).toBe('p-u-peer');
+  });
+
   it("stops when the reader moves on their own, and a press on the strip isn't that", () => {
     const p = page({ surface: 'doc', docId: 'd-quay' });
     const peer = participant(p.room);
