@@ -6,6 +6,7 @@
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
  *       [--lead-board <boardId>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
+ *       [--claude-token <label>]
  *       [--push-repo <owner/name>]... [--refresh-push-keys]
  *       [--refresh-tunnel-token] [--tf-env prod|staging]
  *
@@ -23,11 +24,12 @@
  *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
  *   refuses every Claude call
  *   the lead agent, when the machine has a board to lead (`--lead-board`,
- *   as CW_LEAD_BOARD): a Claude Code sign-in made for this org alone, as
- *   CLAUDE_CODE_OAUTH_TOKEN beside CW_LEAD_TOKEN_ORG, from one browser
- *   approval of Bryan's (`claude setup-token`, `org-signin.ts`) the first
- *   time the org's app holds no token made for it, and kept nowhere on the
- *   Mac; and the repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
+ *   as CW_LEAD_BOARD): a Claude Code sign-in, as CLAUDE_CODE_OAUTH_TOKEN
+ *   beside CW_LEAD_TOKEN_ORG, the first time the org's app holds no token
+ *   set for it. It is the central list's token `--claude-token` names, or
+ *   its first (`token-list.ts`), with no sign-in; with an empty list it is
+ *   one made for this org alone by a browser approval of Bryan's
+ *   (`claude setup-token`, `org-signin.ts`), kept nowhere on the Mac. And the repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
  *   `--github-deploy-key` names, only once GitHub lists it read-only on the
  *   `--lead-repo` or a `--push-repo` (`lead-key-check.ts`). A machine with a lead needs `--memory 2048`.
  *   Each is set once, like every secret, except that a run naming its source
@@ -69,6 +71,7 @@ import {
   type Action,
   LEAD_BOARD_SECRET,
   LEAD_DEPLOY_KEY_SECRET,
+  LEAD_TOKEN_ORG_SECRET,
   LEAD_TOKEN_SECRET,
   type ObservedMachine,
   type ProjectConfig,
@@ -109,6 +112,7 @@ import {
   hasLifecycle,
   hasSnapshots,
 } from './tigris.ts';
+import { type ListedToken, chooseToken, readTokenList, tokenMarker } from './token-list.ts';
 import {
   type AppliedTunnel,
   TUNNEL_TOKEN_SECRET,
@@ -254,8 +258,10 @@ interface RunContext {
   settings: ReadonlyMap<string, Setting>;
   /** The tunnel token, when this run has a named tunnel. */
   tunnelToken?: () => string;
-  /** The org's own sign-in, from one browser approval, asked for when first needed. */
+  /** The lead's sign-in: a listed token, or one browser approval asked for when first needed. */
   leadToken: () => Promise<string>;
+  /** The marker for a listed token; an approved token's is the org's name (`secretValue`). */
+  leadMarker?: string;
 }
 
 async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void> {
@@ -322,6 +328,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
           throw new Error(`no source for secret ${n}`);
         }
       }
+      if (ctx.leadMarker) lines.set(LEAD_TOKEN_ORG_SECRET, ctx.leadMarker);
       if (a.names.includes(LEAD_TOKEN_SECRET)) lines.set(LEAD_TOKEN_SECRET, await ctx.leadToken());
       const input = a.names.map((n) => `${n}=${lines.get(n)}\n`).join('');
       flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input });
@@ -407,7 +414,15 @@ export async function deployProject(
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
   // A remade tunnel has a new token, so an existing secret holds the old one.
   const refresh = tunnel && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
-  const observed = await observe(cfg);
+  const seen = await observe(cfg);
+  // Before anything is changed: a label that is not listed stops the run.
+  const listed: ListedToken | undefined = leadTokenDue(cfg, seen)
+    ? chooseToken(readTokenList(), cfg.claudeToken)
+    : undefined;
+  if (cfg.claudeToken !== undefined && !listed) {
+    throw new Error(`--claude-token signs in a lead, and ${cfg.app} has no board to lead`);
+  }
+  const observed = { ...seen, listedToken: listed !== undefined };
   const actions = plan(cfg, observed, refresh, [...settings.keys()]);
   if (tunnel) console.log(`[deploy] tunnel ${tunnel.name} is ${tunnel.id}, from Terraform`);
   console.log(
@@ -430,6 +445,8 @@ export async function deployProject(
     console.log(
       `[deploy] not set: ${LEAD_BOARD_SECRET}: no --lead-board, so no lead agent runs on the machine`,
     );
+  else if (lead.includes(LEAD_TOKEN_SECRET) && listed)
+    console.log(`[deploy]   ${LEAD_TOKEN_SECRET} from the token list: ${listed.label}`);
   else if (lead.includes(LEAD_TOKEN_SECRET))
     console.log(
       `[deploy]   ${LEAD_TOKEN_SECRET} from one browser approval (claude setup-token): ${cfg.project}'s own sign-in, kept nowhere on this Mac`,
@@ -461,7 +478,9 @@ export async function deployProject(
   const ctx: RunContext = {
     org: () => keychainRead('fly-org-slug').trim(),
     settings,
+    ...(listed ? { leadMarker: tokenMarker(cfg.project, listed.label, listed.token) } : {}),
     leadToken: () => {
+      if (listed) return Promise.resolve(listed.token);
       if (!approval)
         console.log(
           `[deploy] ${cfg.project}'s lead needs a Claude sign-in of its own: approve it in the browser window that opens`,
@@ -525,6 +544,7 @@ async function main(): Promise<void> {
     githubDeployKey: arg(args, 'github-deploy-key'),
     leadBoard: arg(args, 'lead-board'),
     refreshLead: args.includes('--refresh-lead'),
+    claudeToken: arg(args, 'claude-token'),
     leadRepos: args.flatMap((a, i) => (a === '--lead-repo' ? [args[i + 1] ?? ''] : [])),
     pushRepos: args.flatMap((a, i) => (a === '--push-repo' ? [args[i + 1] ?? ''] : [])),
     refreshPushKeys: args.includes('--refresh-push-keys'),

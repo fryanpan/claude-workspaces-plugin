@@ -1,7 +1,8 @@
 /**
  * An org's own Claude sign-in, made during project setup with one browser
  * approval (re-review finding H2, approved by Bryan on 5 Nov: "Approve per
- * org").
+ * org"). A deploy reaches this only when the central list is empty
+ * (`token-list.ts`); `machine:tokens add` uses the same approval to fill it.
  *
  * `claude setup-token` opens Bryan's browser, he approves, and it prints a
  * token that lasts a year. The deploy runs it once for an org whose machine
@@ -56,6 +57,7 @@ const MIN_TOKEN = 90;
 const WRAPPED = /^(?:\r\n|\r|\n)(?!sk-ant-)[A-Za-z0-9_-]+(?:[\r\n]|$)/;
 /** The token `claude setup-token` prints. */
 const SETUP_TOKEN = /sk-ant-oat\d*-[A-Za-z0-9_-]+/g;
+const ONE_TOKEN = /^sk-ant-oat\d*-[A-Za-z0-9_-]+$/;
 const HIDDEN = '[token hidden]';
 /** Long enough to read the page and approve; the run stops after it. */
 const APPROVAL_LIMIT_MS = 10 * 60 * 1000;
@@ -133,6 +135,10 @@ export function tokenIn(screen: string): string | null {
   }
   return found.size === 1 ? ([...found][0] ?? null) : null;
 }
+
+/** Whether `value` is one whole setup token, and so safe on a `NAME=value` line. */
+export const isSetupToken = (value: string): boolean =>
+  value.length >= MIN_TOKEN && ONE_TOKEN.test(value);
 
 /**
  * Under `bun test`, the `claude` and `script` that would run must be a test's

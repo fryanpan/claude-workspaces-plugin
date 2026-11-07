@@ -9,6 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
+import { TOKEN_LABEL } from './lead-usage.ts';
 import { vmSizeFor } from './vm-size.ts';
 
 export type TunnelMode = 'quick' | 'named';
@@ -69,6 +70,8 @@ export interface ConfigInput {
   leadBoard?: string;
   /** Set every lead secret again from its source (`--refresh-lead`). */
   refreshLead?: boolean;
+  /** The listed token to sign the lead in with (`--claude-token`, `token-list.ts`). */
+  claudeToken?: string;
   leadRepos?: string[];
   pushRepos?: string[];
   refreshPushKeys?: boolean;
@@ -87,10 +90,11 @@ const BOARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
  */
 export const LEAD_TOKEN_SECRET = 'CLAUDE_CODE_OAUTH_TOKEN';
 /**
- * The org the lead's token was made for, set in the same import as the
- * token. The machine starts no lead whose token names another org, or none
- * (entrypoint.sh), so a token set by hand or from the old shared sign-in is
- * replaced on the next deploy rather than kept.
+ * The org the lead's token was set for, in the same import as the token: the
+ * org's name for a token made by its own approval, or a digest binding the
+ * org, the label and the token for a listed one (`tokenMarker`). The machine
+ * starts no lead on anything else (entrypoint.sh), so a token set by hand or
+ * from the old shared sign-in is replaced on the next deploy rather than kept.
  */
 export const LEAD_TOKEN_ORG_SECRET = 'CW_LEAD_TOKEN_ORG';
 /** The board the lead leads; its socket is the lead's one way to the server. */
@@ -148,6 +152,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
   if (input.refreshPushKeys && !input.pushRepos?.length) {
     throw new Error('--refresh-push-keys makes a key per repo, so it needs --push-repo');
   }
+  if (input.claudeToken !== undefined && !TOKEN_LABEL.test(input.claudeToken)) {
+    throw new Error(`token label must be a-z, 0-9 and -, got "${input.claudeToken}"`);
+  }
   if (input.refreshLead && input.leadBoard === undefined) {
     throw new Error('--refresh-lead sets the board again, so it needs --lead-board');
   }
@@ -158,6 +165,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     : [
         ...(input.leadBoard !== undefined ? [LEAD_BOARD_SECRET] : []),
         ...(input.githubDeployKey !== undefined ? [LEAD_DEPLOY_KEY_SECRET] : []),
+        ...(input.claudeToken !== undefined ? [LEAD_TOKEN_SECRET] : []),
       ];
   const app = `cw-${project}`;
   return {
@@ -181,6 +189,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     },
     ...(input.leadBoard !== undefined ? { leadBoard: input.leadBoard } : {}),
     leadRefresh,
+    ...(input.claudeToken !== undefined ? { claudeToken: input.claudeToken } : {}),
     ...(input.leadRepos?.length ? { leadRepos: [...input.leadRepos] } : {}),
     ...(input.pushRepos?.length ? { pushRepos: [...input.pushRepos] } : {}),
     refreshPushKeys: input.refreshPushKeys === true,
@@ -213,6 +222,8 @@ export interface Observed {
    * can, CI cannot. A run that cannot never plans an org's sign-in.
    */
   browser: boolean;
+  /** Whether the central list has a token for this run (`token-list.ts`). */
+  listedToken?: boolean;
 }
 
 export type Action =
@@ -282,14 +293,14 @@ export function leadTokenDue(cfg: ProjectConfig, obs: Observed): boolean {
 
 /**
  * The lead's secrets the machine needs. A project with no board gets no
- * sign-in. The token is listed only when it is due and this run can ask for
- * the approval that makes it.
+ * sign-in. The token is included only when it is due and this run has one:
+ * from the central list, or from the approval it can ask for.
  */
 export function leadSecrets(cfg: ProjectConfig, obs: Observed): string[] {
   if (!hasLead(cfg, obs)) return [];
   const { deployKey } = cfg.keychain;
   return [
-    ...(leadTokenDue(cfg, obs) && obs.browser ? LEAD_TOKEN_PAIR : []),
+    ...(leadTokenDue(cfg, obs) && (obs.browser || obs.listedToken) ? LEAD_TOKEN_PAIR : []),
     ...(cfg.leadBoard !== undefined ? [LEAD_BOARD_SECRET] : []),
     ...(deployKey !== undefined && obs.keychain.has(deployKey) ? [LEAD_DEPLOY_KEY_SECRET] : []),
   ];
