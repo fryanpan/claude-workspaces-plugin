@@ -89,11 +89,17 @@ Staging reads the same three configs from `deploys/staging/*.local.*`
 The credentials reach terraform in its environment and nowhere else: never an
 argument, a variable or a file, so neither is in the state.
 
-**The keeper.** The provider cannot send the keeper's request header, so
-terraform never goes through the keeper. That is why CI is the main path: the
-GitHub secret holds the token. A local `cf:plan` is optional and needs a token
-in the Keychain's `cloudflare-api-token`, which the keeper's runbook deletes
-(`docs/process/keeper.md`, section 5). There is no keeper route for terraform.
+**The keeper.** The provider cannot send the keeper's request header, so on
+the Mac the keeper runs terraform itself, from its own release, with its own
+token (`keeper-run.ts`). With `CW_KEEPER_URL` set and no `--ci`, `run.ts`
+hands off to `keeper-wrapper.ts`, which sends the keeper the configs and the
+state bucket's credential and reads no Cloudflare token. `cf:plan` runs at
+once. `cf:apply` prints the plan, then waits for Bryan's passkey on the
+keeper's approval page, which shows the same plan; the tap applies exactly
+that saved plan. A missing service token is made on a tap of its own first,
+its pair written straight to the Keychain, and the apply that imports it is
+a second tap. Without `CW_KEEPER_URL`, or with `CLOUDFLARE_API_TOKEN` set,
+the old path below runs. CI is unchanged. Runbook: `docs/process/keeper.md`.
 
 **Adopting what exists.** `deploys/prod/imports.tf` imports each live resource
 `discover.ts` found by the name this config gives it, so the first apply

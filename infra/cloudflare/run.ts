@@ -26,12 +26,23 @@
  *
  * Credentials reach terraform in the child's environment and nowhere else:
  * never an argument, a file, a variable or a printed line.
+ *
+ * On the Mac, once the keeper holds the Cloudflare token (`CW_KEEPER_URL`
+ * set, `--ci` absent, no `CLOUDFLARE_API_TOKEN` in the environment), the
+ * keeper runs terraform from its own release instead, and this process reads
+ * no Cloudflare token (`keeper-wrapper.ts`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import {
+  announceToBoard,
+  boardUrlFromEnv,
+} from '../../packages/server/src/keeper/keeper-announce.ts';
+import { keeperTerraform } from '../../packages/server/src/keeper/keeper-client.ts';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
 import { keychainHas, keychainRead } from '../project-machine/mac-ops.ts';
 import { tfCredentials } from './credentials.ts';
+import { type KeeperWrapperIo, runThroughKeeper } from './keeper-wrapper.ts';
 import { planSummary } from './plan-summary.ts';
 import { audienceLines, discoverRun, initArgs, writeRunFiles } from './prepare.ts';
 import {
@@ -216,6 +227,34 @@ export function realIo(tfEnv: TfEnv): WrapperIo {
   };
 }
 
+/** Whether a run goes through the keeper rather than reading a token here. */
+export function throughKeeper(env: Record<string, string | undefined>, ci: boolean): boolean {
+  return !ci && !!env.CW_KEEPER_URL?.trim() && !env.CLOUDFLARE_API_TOKEN?.trim();
+}
+
+export function realKeeperWrapperIo(origin: string): KeeperWrapperIo {
+  const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'cf:apply';
+  return {
+    read: configReader(process.env),
+    env: process.env,
+    keychainHas,
+    keychainRead,
+    keychainHasService: (service) => keychainHasService(service),
+    storeToken: storeTokenInKeychain,
+    keeper: (command, env, input) =>
+      keeperTerraform(origin, command, env, input, {
+        requester,
+        announce: announceToBoard(boardUrlFromEnv(), requester),
+        onHeld: (held) => {
+          process.stderr.write(`[keeper] ${held.summary} waits for Bryan's passkey\n`);
+          process.stderr.write(`[keeper] approve at ${held.approveUrl}\n`);
+        },
+      }),
+    out: (s) => process.stdout.write(s),
+    err: (s) => process.stderr.write(s),
+  };
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -226,7 +265,9 @@ if (import.meta.main) {
     );
     process.exit(2);
   }
-  runWrapper(command, { env, ci: args.includes('--ci') }, realIo(env)).then((code) =>
-    process.exit(code),
-  );
+  const ci = args.includes('--ci');
+  const run = throughKeeper(process.env, ci)
+    ? runThroughKeeper(command, env, realKeeperWrapperIo(process.env.CW_KEEPER_URL?.trim() ?? ''))
+    : runWrapper(command, { env, ci }, realIo(env));
+  run.then((code) => process.exit(code));
 }
