@@ -13,8 +13,9 @@
  *   bun packages/server/src/keeper/keeper-bin.ts clear-alarm    let approvals run again after a service-worker alarm
  *
  * `CW_KEEPER_DIR` names the store (mode 700, `keeper-store.ts`);
- * `CW_KEEPER_FLY_BIN` the `fly` binary, which must sit where only root or
- * the keeper's user can write; `CW_KEEPER_PORT` overrides the loopback port,
+ * `CW_KEEPER_FLY_BIN` the `fly` binary and `CW_KEEPER_TERRAFORM_BIN` the
+ * `terraform` binary, each of which must sit where only root or the keeper's
+ * user can write; `CW_KEEPER_PORT` overrides the loopback port,
  * which is otherwise chosen once and kept in the store (`keeper-port.ts`);
  * `CW_KEEPER_SOCKET` the unix socket launchd's port job relays to
  * (`keeper-launchd.ts`). Without it the keeper listens on the port itself. Every command but `check` refuses to run when the start guard
@@ -50,11 +51,14 @@ const ENROLL_MS = 15 * 60_000;
 const [command, arg] = process.argv.slice(2);
 const dir = process.env.CW_KEEPER_DIR?.trim() || fail('CW_KEEPER_DIR is not set');
 const flyBin = process.env.CW_KEEPER_FLY_BIN?.trim() ?? '';
+const terraformBin = process.env.CW_KEEPER_TERRAFORM_BIN?.trim() ?? '';
 const socket = process.env.CW_KEEPER_SOCKET?.trim() ?? '';
 const uid = process.getuid?.() ?? -1;
 
 // The install root is four folders above this file. Everything the keeper
 // imports is under packages/server/src; bun also reads the configs beside it.
+// Its Terraform run is `infra/cloudflare/keeper-run.ts`, which imports only
+// from `infra/` and reads the `.tf` files and Worker sources there.
 const root = resolve(import.meta.dir, '../../../..');
 const configs = [
   'bunfig.toml',
@@ -67,8 +71,13 @@ const configs = [
   .map((f) => join(root, f))
   .filter((f) => existsSync(f));
 const problems = keeperStartProblems({
-  sourceDirs: [join(root, 'packages/server/src')],
-  files: [...configs, process.execPath, ...(flyBin ? [flyBin] : [])],
+  sourceDirs: [join(root, 'packages/server/src'), join(root, 'infra')],
+  files: [
+    ...configs,
+    process.execPath,
+    ...(flyBin ? [flyBin] : []),
+    ...(terraformBin ? [terraformBin] : []),
+  ],
   keeperUid: uid,
 });
 if (command === 'check') {
@@ -150,7 +159,22 @@ if (command === 'import') {
   console.log(`[keeper] ${arg} may now be started, stopped and restarted without a passkey`);
 } else if (command === undefined) {
   if (!flyBin) fail('CW_KEEPER_FLY_BIN is not set');
-  const exec = keeperExecutors({ store, flyBin, home: homedir(), fetch: fixedHostFetch });
+  const exec = keeperExecutors({
+    store,
+    flyBin,
+    home: homedir(),
+    fetch: fixedHostFetch,
+    ...(terraformBin
+      ? {
+          terraform: {
+            root,
+            terraformBin,
+            workDir: join(dirname(resolve(dir)), 'terraform'),
+            bunBin: process.execPath,
+          },
+        }
+      : {}),
+  });
   const keeper = serveKeeper({
     store,
     exec,

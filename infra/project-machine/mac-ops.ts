@@ -86,7 +86,8 @@ export function keychainCreate(name: string, value: string): void {
 /**
  * The Cloudflare API token, for a deploy script's API calls without the
  * keeper: CLOUDFLARE_API_TOKEN when set (CI), else the Keychain. `cf:plan`
- * reads it through `infra/cloudflare/credentials.ts`.
+ * without the keeper reads it through `infra/cloudflare/credentials.ts`; with
+ * it, the keeper runs terraform (`infra/cloudflare/keeper-wrapper.ts`).
  * Held in memory only.
  */
 export function cloudflareApiToken(): string {

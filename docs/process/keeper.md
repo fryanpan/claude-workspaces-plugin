@@ -7,7 +7,7 @@ read the tokens. Agents ask it to act instead:
 - **Routine calls run at once:** reads, and starting or stopping a machine of
   an app the keeper made.
 - **Risky calls wait for your passkey:** a new project, an Access app, a
-  secret, a deploy.
+  secret, a deploy, a Cloudflare Terraform apply.
 - **Calls whose answer would hand over a credential are refused.**
 
 What it allows and refuses is in [security.md](../architecture/security.md),
@@ -152,15 +152,33 @@ prints, step by step:
   cw-keeper-probe`, prints the approval link, and withdraws the request, so
   nothing is created and no tap can run it later.
 
-One caller is not covered. `bun run cf:plan` and `cf:apply`
-(`infra/cloudflare/`) read the Keychain's `cloudflare-api-token` themselves,
-because the Terraform provider cannot send the keeper's request header; once
-section 5 deletes that entry they stop, saying no token is set, until a token
-for them is stored there again. Applying is CI's job
-(`.github/workflows/cloudflare.yml`), so the Mac needs that token only for a
-local plan. `machine:deploy` reads the Access settings from `terraform
-output`. It reads a named tunnel's token from the API with the Keychain's
-token, which the keeper refuses because the answer is a credential.
+`machine:deploy` reads the Access settings from `terraform output`. It
+reads a named tunnel's token from the API with the Keychain's token, which
+the keeper refuses because the answer is a credential.
+
+## Cloudflare Terraform: `cf:plan` and `cf:apply`
+
+The keeper runs these itself, from its own release, with its own Cloudflare
+token, so they work after section 5 deletes the Keychain's
+`cloudflare-api-token`. Your terminal sends the keeper the configs and the
+state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
+
+- **`bun run cf:plan`** runs at once and prints the plan. No passkey.
+- **`bun run cf:apply`** prints the plan, then prints an approval link and
+  puts it on your Home. The page shows what changes and the whole plan.
+  Your tap applies exactly that plan. If nothing would change, there is no
+  tap.
+- **A new Access service token** takes one more tap. The first page lists
+  the tokens it makes. After your tap, cf:apply puts each token's client id
+  and secret into your Keychain without printing them. The second page is
+  the plan that adopts them.
+
+The keeper needs its own `terraform` for this. The install script copies
+yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from
+`KEEPER_TERRAFORM=/path/to/terraform`. A keeper installed before this
+change needs one more run of the install command (section 1) at the merge
+commit that adds it. Until then, cf:plan answers that the keeper has no
+terraform. CI's plan and apply are unchanged.
 
 ## The GitHub token
 
@@ -244,8 +262,9 @@ A browser showed the keeper signs of a service worker on its address.
 
 - **Your admin password.** Anyone who has it, or who reaches an open `sudo`
   session, can read the tokens.
-- **Four credentials it doesn't hold:** each project's Tigris admin key and
-  backup identity, Home's feed tokens, and the Keychain Cloudflare token
-  `cf:apply` reads, if you keep one.
-- **Its `bun` and `fly`:** they are copies of yours, so an agent that had
-  already replaced those binaries would have them copied in.
+- **Three credentials it doesn't hold:** each project's Tigris admin key and
+  backup identity, and Home's feed tokens.
+- **Its `bun`, `fly` and `terraform`:** they are copies of yours, so an agent
+  that had already replaced those binaries would have them copied in.
+- **The config a Cloudflare apply plans from:** it comes from your checkout,
+  which agents can write. Read the plan on the approval page before you tap.

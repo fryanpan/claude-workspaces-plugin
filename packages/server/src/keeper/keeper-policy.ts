@@ -34,7 +34,13 @@
  */
 import { APP_NAME } from './keeper-store.ts';
 
-export type HoldKind = 'project.create' | 'token.move' | 'access.open' | 'move.grant' | 'other';
+export type HoldKind =
+  | 'project.create'
+  | 'token.move'
+  | 'access.open'
+  | 'move.grant'
+  | 'cloudflare.apply'
+  | 'other';
 
 export type Verdict =
   | { kind: 'routine'; app: string | null; summary: string }

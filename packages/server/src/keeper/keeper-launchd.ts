@@ -95,6 +95,7 @@ export function keeperJobPlist(job: KeeperJob): string {
     EnvironmentVariables: {
       CW_KEEPER_DIR: `${job.root}/state`,
       CW_KEEPER_FLY_BIN: `${job.root}/bin/fly`,
+      CW_KEEPER_TERRAFORM_BIN: `${job.root}/bin/terraform`,
       CW_KEEPER_PORT: String(job.port),
       CW_KEEPER_SOCKET: job.socketPath,
       HOME: job.home,

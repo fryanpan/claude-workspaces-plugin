@@ -174,22 +174,47 @@ export function keeperFetch(origin: string, opts: KeeperClientOptions = {}): typ
 }
 
 /** One `fly` call through the keeper. */
-export async function keeperFly(
+export function keeperFly(
   origin: string,
   args: string[],
   input: string | undefined,
   opts: KeeperClientOptions = {},
 ): Promise<FlyResult> {
+  return postAndWait(origin, '/v1/fly', { args, ...(input !== undefined ? { input } : {}) }, opts);
+}
+
+/**
+ * One Cloudflare Terraform run through the keeper (`keeper-terraform.ts`):
+ * a plan answers at once; an apply is planned, then waits for a tap. `input`
+ * is the configs and the state bucket's credential, as JSON.
+ */
+export function keeperTerraform(
+  origin: string,
+  command: 'plan' | 'apply',
+  env: 'prod' | 'staging',
+  input: string,
+  opts: KeeperClientOptions = {},
+): Promise<FlyResult> {
+  return postAndWait(origin, '/v1/terraform', { command, env, input }, opts);
+}
+
+/** POST one call, and wait out a hold; a refusal or a failed wait is a failed result. */
+async function postAndWait(
+  origin: string,
+  path: string,
+  body: Record<string, unknown>,
+  opts: KeeperClientOptions,
+): Promise<FlyResult> {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
   const caller = callerOf(opts);
-  const res = await doFetch(`${origin}/v1/fly`, {
+  const res = await doFetch(`${origin}${path}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       ...apiHeaders(caller.token),
       ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
     },
-    body: JSON.stringify({ args, ...(input !== undefined ? { input } : {}) }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

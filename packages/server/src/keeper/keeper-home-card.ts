@@ -116,6 +116,7 @@ const HOLD_WORDS: Record<string, string> = {
   'token.move': 'move a credential',
   'access.open': 'open an Access application',
   'move.grant': 'move a board',
+  'cloudflare.apply': 'apply a Cloudflare change',
 };
 
 /**

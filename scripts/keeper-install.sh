@@ -14,8 +14,8 @@
 # which one. It never boots out the port job, never deletes anything, and
 # creates no users: cw-relay must exist (docs/process/mac-lead-users.md).
 #
-#   KEEPER_BUN=/path/to/bun KEEPER_FLY=/path/to/fly   where to copy bun and fly from,
-#                                                      the first time or with KEEPER_UPDATE_BINARIES=1
+#   KEEPER_BUN=/path/to/bun KEEPER_FLY=/path/to/fly   where to copy bun, fly and terraform from,
+#   KEEPER_TERRAFORM=/path/to/terraform                the first time or with KEEPER_UPDATE_BINARIES=1
 #   KEEPER_YES=1                                       install the commit GitHub names without asking
 
 set -eu
@@ -35,7 +35,7 @@ ok() { print -r -- "   ok: $*"; }
 stop() { print -r -- ""; print -r -- "STOP: $*"; print -r -- "Nothing after this step ran. Fix it and run the script again."; exit 1; }
 as_relay() { $SUDO -H -u $RELAY "$@"; }
 keeper() {
-  as_relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
+  as_relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" CW_KEEPER_TERRAFORM_BIN="$K/bin/terraform" \
     "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" "$@"
 }
 loaded() { $SUDO launchctl print "system/$1" >/dev/null 2>&1; }
@@ -51,7 +51,7 @@ as_relay mkdir -p "$K/bin" "$K/state" "$K/releases" "$K/run"
 as_relay chmod 700 "$K/state" "$K/run"
 ok "$K/{bin,state,releases,run}"
 
-step "2. bun and fly, copied so only $RELAY can change them"
+step "2. bun, fly and terraform, copied so only $RELAY can change them"
 find_bin() {
   local want=$1 override=$2 c
   if [ -n "$override" ]; then print -r -- "$override"; return; fi
@@ -72,6 +72,8 @@ copy_bin() {
 }
 copy_bin bun "$(find_bin bun "${KEEPER_BUN:-}" "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun)"
 copy_bin fly "$(find_bin fly "${KEEPER_FLY:-}" "$HOME/.fly/bin/flyctl" /opt/homebrew/bin/flyctl /usr/local/bin/flyctl)"
+# cf:plan and cf:apply run terraform inside the keeper (keeper-terraform.ts).
+copy_bin terraform "$(find_bin terraform "${KEEPER_TERRAFORM:-}" "$HOME/.local/bin/terraform" /opt/homebrew/bin/terraform /usr/local/bin/terraform)"
 
 step "3. The keeper's own clone"
 if as_relay git -C "$K/src" rev-parse --git-dir >/dev/null 2>&1; then
@@ -167,7 +169,7 @@ fi
 step "7. The keeper job"
 WANT=$(keeper plist keeper)
 HAVE=$($SUDO cat "$D/$KEEPER_JOB.plist" 2>/dev/null || true)
-for want in "$K/bin/bun" keeper-bin.ts CW_KEEPER_SOCKET "$K/run/keeper.sock" CW_KEEPER_PORT "$PORT"; do
+for want in "$K/bin/bun" keeper-bin.ts CW_KEEPER_SOCKET "$K/run/keeper.sock" CW_KEEPER_PORT "$PORT" "$K/bin/terraform"; do
   print -r -- "$WANT" | grep -qF -- "$want" || stop "the keeper plist this release writes does not name $want"
 done
 PLIST_CHANGED=0
