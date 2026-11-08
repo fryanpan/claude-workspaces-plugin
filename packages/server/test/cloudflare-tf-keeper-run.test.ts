@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import {
   type KeeperRunInput,
   type KeeperRunIo,
+  MAX_TEXT,
   keeperRun,
   realKeeperIo,
 } from '../../../infra/cloudflare/keeper-run.ts';
@@ -54,7 +55,32 @@ interface World {
   released: string[];
 }
 
-function world(opts: { changes?: number; tfvarsInRelease?: boolean } = {}): World {
+interface WorldOpts {
+  changes?: number;
+  tfvarsInRelease?: boolean;
+  /** Extra resource changes in `terraform show -json`. */
+  more?: unknown[];
+  /** What `terraform show -no-color` prints. */
+  planText?: string;
+}
+
+const ALICE = 'alice@harborlight.test';
+const BOB = 'bob@harborlight.test';
+/** A people policy whose sign-in list gains Alice and loses Bob. */
+const PEOPLE_CHANGE = {
+  address: 'module.stack.module.access.cloudflare_zero_trust_access_policy.people["riverbend"]',
+  mode: 'managed',
+  type: 'cloudflare_zero_trust_access_policy',
+  name: 'people',
+  index: 'riverbend',
+  change: {
+    actions: ['update'],
+    before: { include: [{ email: { email: BOB }, email_domain: null }] },
+    after: { include: [{ email: { email: ALICE }, email_domain: null }] },
+  },
+};
+
+function world(opts: WorldOpts = {}): World {
   const w: World = {
     tf: [],
     files: {},
@@ -108,9 +134,12 @@ function world(opts: { changes?: number; tfvarsInRelease?: boolean } = {}): Worl
           mode: 'managed',
           change: { actions: ['update'] },
         }));
-        return { status: 0, stdout: JSON.stringify({ resource_changes: rc }) };
+        const all = [...rc, ...(opts.more ?? [])];
+        return { status: 0, stdout: JSON.stringify({ resource_changes: all }) };
       }
-      if (args[0] === 'show') return { status: 0, stdout: 'Plan: 0 to add, 1 to change.\n' };
+      if (args[0] === 'show') {
+        return { status: 0, stdout: opts.planText ?? 'Plan: 0 to add, 1 to change.\n' };
+      }
       if (args[0] === 'output') return { status: 0, stdout: '{}' };
       return { status: 0, stdout: '' };
     },
@@ -159,6 +188,42 @@ describe('keeperRun plan', () => {
     expect(w.released).toContain(
       join('infra', 'cloudflare', 'deploys', 'prod', 'terraform.tfvars'),
     );
+  });
+
+  it("reports who a kept plan adds to and removes from each project's sign-in list", async () => {
+    const w = world({ more: [PEOPLE_CHANGE] });
+    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    expect(r.ok && r.mode === 'plan' && r.access).toEqual([
+      { project: 'riverbend', added: [ALICE], removed: [BOB] },
+    ]);
+  });
+
+  it('leaves the sign-in changes out of a plan that is not kept, whose report goes to the requester', async () => {
+    const w = world({ more: [PEOPLE_CHANGE] });
+    const r = await keeperRun('plan', 'prod', input([]), w.io);
+    expect(r.ok && r.mode === 'plan').toBe(true);
+    expect(JSON.stringify(r)).not.toContain(ALICE);
+  });
+
+  it('marks text cut at the limit and keeps no saved plan for it', async () => {
+    const w = world({ planText: 'x'.repeat(MAX_TEXT + 10) });
+    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    expect(r.ok && r.mode === 'plan' && r.cut).toEqual({ shown: MAX_TEXT, total: MAX_TEXT + 10 });
+    expect(r.ok && r.mode === 'plan' && r.text.length).toBe(MAX_TEXT);
+    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+    const whole = world({ planText: 'x'.repeat(MAX_TEXT) });
+    const full = await keeperRun('plan', 'prod', input([], { keep: true }), whole.io);
+    expect(full.ok && full.mode === 'plan' && full.cut).toBeUndefined();
+    expect(whole.removed).toEqual([]);
+  });
+
+  it("plans from the requester's configs, not from any config file in the release", async () => {
+    const w = world();
+    await keeperRun('plan', 'prod', input([]), w.io);
+    expect(w.released).not.toContain(join('infra', 'access-apps', 'access.local.json'));
+    expect(w.released).not.toContain(join('infra', 'board-router-worker', 'router.local.json'));
+    // The requester's hosts reached the tfvars terraform reads.
+    expect(Object.values(w.files).join('\n')).toContain(`riverbend-workspaces.${ZONE}`);
   });
 
   it('refuses a plan id the keeper did not shape', async () => {
@@ -256,7 +321,7 @@ describe("the keeper's terraform", () => {
       const bin = join(work, 'terraform');
       writeFileSync(
         bin,
-        `#!/bin/sh\n{ echo "ARGV $*"; echo "CWD $(pwd)"; env | sort; } > "${seen}"\n`,
+        `#!/bin/sh\n{ echo "ARGV $*"; echo "CWD $(pwd)"; echo "UMASK $(umask)"; env | sort; } > "${seen}"\n`,
       );
       chmodSync(bin, 0o755);
       const io = realKeeperIo('prod', work, bin);
@@ -265,6 +330,8 @@ describe("the keeper's terraform", () => {
       expect(r.status).toBe(0);
       const out = readFileSync(seen, 'utf8');
       expect(out).toContain('ARGV version');
+      // A saved plan holds the Access addresses: nothing terraform writes is readable by others.
+      expect(out).toContain('UMASK 0077');
       expect(out).toContain(`CWD ${envDir('prod')}`);
       expect(out).toContain(`TF_DATA_DIR=${join(work, 'prod-data')}`);
       expect(out).toContain(`TF_CLI_CONFIG_FILE=${join(work, 'terraformrc')}`);

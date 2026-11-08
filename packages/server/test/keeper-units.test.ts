@@ -289,6 +289,13 @@ describe('cloudflare policy', () => {
   it('refuses minting a token and a path that is not plain', () => {
     expect(classifyCloudflare('POST', '/user/tokens').kind).toBe('refused');
     expect(classifyCloudflare('POST', '/accounts/abc/tokens').kind).toBe('refused');
+    // An Access service token's secret comes back to whoever makes or rotates it.
+    const st = '/accounts/abc/access/service_tokens';
+    expect(classifyCloudflare('POST', st).kind).toBe('refused');
+    expect(classifyCloudflare('POST', `${st}/t1/rotate`).kind).toBe('refused');
+    expect(classifyCloudflare('POST', `${st}/t1/refresh`).kind).toBe('refused');
+    expect(classifyCloudflare('PUT', `${st}/t1`).kind).toBe('refused');
+    expect(classifyCloudflare('GET', st).kind).not.toBe('refused');
     expect(classifyCloudflare('GET', '/accounts/../user').kind).toBe('refused');
     expect(classifyCloudflare('TRACE', '/zones').kind).toBe('refused');
   });

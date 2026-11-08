@@ -165,13 +165,24 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
 
 - **`bun run cf:plan`** runs at once and prints the plan. No passkey.
 - **`bun run cf:apply`** prints the plan, then prints an approval link and
-  puts it on your Home. The page shows what changes and the whole plan.
-  Your tap applies exactly that plan. If nothing would change, there is no
-  tap.
+  puts it on your Home. The page shows what changes, who each project's
+  sign-in list gains or loses, and the whole plan. Your tap applies exactly
+  that plan. If nothing would change, there is no tap.
+- **Read the sign-in list.** The keeper plans with its own `.tf` files, but
+  from the configs your terminal sent, which any agent running as you can
+  edit. The plan text prints `(sensitive value)` where the addresses are, so
+  the "Who can sign in" list is the only place an added address shows. The
+  list is on the page only; your terminal never prints it.
+- **A plan too long to show** (over 512 KB of text) is marked "cut short" on
+  the page, which then offers only Deny: the keeper does not apply a plan
+  you could not read in full.
 - **A new Access service token** takes one more tap. The first page lists
   the tokens it makes. After your tap, cf:apply puts each token's client id
   and secret into your Keychain without printing them. The second page is
-  the plan that adopts them.
+  the plan that adopts them. This step needs the keeper's token to hold
+  Access: Service Tokens **Edit**, and the token the setup makes (sections
+  2 to 4) holds only Read, so today the tap fails and nothing is made. Do not add Edit
+  yet (see security.md, "Known gaps").
 
 The keeper needs its own `terraform` for this. The install script copies
 yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from

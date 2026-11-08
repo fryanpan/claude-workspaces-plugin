@@ -10,7 +10,9 @@
  *
  *   keeper-run.ts plan  <env>   discover, write the tfvars, init, plan to a saved
  *                               file, and report its text, its summary and the
- *                               service tokens the account lacks
+ *                               service tokens the account lacks; for a plan
+ *                               kept for an apply, also who each project's
+ *                               sign-in list gains or loses (`access-changes.ts`)
  *   keeper-run.ts apply <env>   init, apply the saved plan the keeper names, and
  *                               report the Access audiences
  *   keeper-run.ts mint  <env>   make exactly the missing service tokens the keeper
@@ -34,6 +36,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
+import { type AccessChange, accessChanges } from './access-changes.ts';
 import { planSummary, verbOf } from './plan-summary.ts';
 import { audienceLines, discoverRun, initArgs, writeRunFiles } from './prepare.ts';
 import { type TokenServices, mintServiceTokens } from './service-tokens.ts';
@@ -87,13 +90,21 @@ export type KeeperRunReport =
       summary: string;
       changes: number;
       missing: Record<string, string>;
+      /**
+       * Only on a plan kept for an apply, which reaches the keeper's approval
+       * page and never the requester: who each sign-in list gains or loses.
+       */
+      access?: AccessChange[];
+      /** Set when `text` is the first `shown` characters of `total`. Such a plan is never kept. */
+      cut?: { shown: number; total: number };
     }
   | { ok: true; mode: 'apply'; text: string; audiences: string[] }
   | { ok: true; mode: 'mint'; minted: MintedToken[] }
   | { ok: false; error: string; refusals?: string[] };
 
 export const PLAN_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const MAX_TEXT = 512 * 1024;
+/** The most plan text a report carries, in characters. */
+export const MAX_TEXT = 512 * 1024;
 
 const planFile = (id: string) => `plan-${id}.tfplan`;
 
@@ -178,12 +189,15 @@ export async function keeperRun(
   // No lock: a plan changes nothing, and an apply of the saved plan takes the
   // lock and refuses a plan the state has moved past.
   const plan = ['plan', '-input=false', '-lock=false', varFile, `-out=${file}`];
+  let cut = false;
   try {
     const planned = io.terraform(plan, tfEnv);
     if (planned.status !== 0) return fail(`terraform plan exited ${planned.status}`);
     const json = io.terraform(['show', '-json', file], tfEnv);
     const text = io.terraform(['show', '-no-color', file], tfEnv);
     if (json.status !== 0 || text.status !== 0) return fail('terraform show failed');
+    // A plan the owner could not read in full is never applied.
+    cut = text.stdout.length > MAX_TEXT;
     return {
       ok: true,
       mode: 'plan',
@@ -191,10 +205,14 @@ export async function keeperRun(
       summary: planSummary(json.stdout, env),
       changes: changeCount(json.stdout),
       missing: found.missing,
+      ...(input.keep ? { access: accessChanges(json.stdout) } : {}),
+      ...(cut ? { cut: { shown: MAX_TEXT, total: text.stdout.length } } : {}),
     };
   } finally {
     // A plan that would make a service token is never applied (`service-tokens.ts`).
-    if (!input.keep || Object.keys(found.missing).length > 0) io.removeState(planFile(id));
+    if (!input.keep || cut || Object.keys(found.missing).length > 0) {
+      io.removeState(planFile(id));
+    }
   }
 }
 
@@ -241,7 +259,10 @@ export function realKeeperIo(env: TfEnv, workRoot: string, terraformBin: string)
     statePath: (name) => join(dir, name),
     removeState: (name) => rmSync(join(dir, name), { force: true }),
     terraform: (args, extra) => {
-      const r = Bun.spawnSync([terraformBin, ...args], {
+      // Under umask 077, as `terraform.ts` runs it: a saved plan holds the
+      // Access addresses, so nothing terraform writes is readable by others.
+      const sh = ['/bin/sh', '-c', 'umask 077 && exec "$0" "$@"', terraformBin, ...args];
+      const r = Bun.spawnSync(sh, {
         cwd: envDir(env),
         env: {
           PATH: '/usr/bin:/bin',

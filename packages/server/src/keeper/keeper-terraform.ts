@@ -15,7 +15,11 @@
  * **An apply is a tap, on the plan the owner reads.** At submit the keeper
  * plans first and keeps the saved plan under an id of its own. The approval
  * page shows that plan's text, and an approval applies exactly that saved
- * file; terraform refuses it if the state moved on since. A plan that changes
+ * file; terraform refuses it if the state moved on since. The text prints
+ * `(sensitive value)` for each project's sign-in list, so the run also
+ * reports who each list gains or loses, which goes to the page and nowhere
+ * else. Text cut at the run's limit is marked on the page, and the tap then
+ * applies nothing, because the owner did not see the whole plan. A plan that changes
  * nothing runs no tap. When the account lacks a service token the config
  * names, the request instead makes exactly those tokens, listed on the page,
  * and hands their pairs back to the requester for Bryan's Keychain
@@ -42,9 +46,29 @@ export interface TerraformCall {
   input: string;
 }
 
+/**
+ * One project's Access sign-in list as the plan changes it
+ * (`infra/cloudflare/access-changes.ts`). The plan text cannot show it,
+ * because the module marks the list sensitive.
+ */
+export interface SignInChange {
+  project: string;
+  added: string[];
+  removed: string[];
+}
+
 /** What a held apply will run once approved: the saved plan, or the tokens. */
 export type TerraformHold =
-  | { stage: 'apply'; planId: string; plan: string; summary: string }
+  | {
+      stage: 'apply';
+      planId: string;
+      plan: string;
+      summary: string;
+      /** For the approval page only: never the requester's answer or a log line. */
+      access: SignInChange[];
+      /** The plan text was cut here, so the page did not show it all and the tap applies nothing. */
+      cut?: { shown: number; total: number };
+    }
   | { stage: 'mint'; tokens: Record<string, string> };
 
 /** Runs `keeper-run.ts <mode> <env>` with this stdin; the result's stdout is its report. */
@@ -116,6 +140,37 @@ interface PlanReport {
   summary?: string;
   changes?: number;
   missing?: Record<string, string>;
+  access?: SignInChange[];
+  cut?: { shown: number; total: number };
+}
+
+const strings = (x: unknown): x is string[] =>
+  Array.isArray(x) && x.every((v) => typeof v === 'string');
+
+/** The run's sign-in changes, or null when the report does not hold a readable list. */
+function signInChanges(x: unknown): SignInChange[] | null {
+  if (!Array.isArray(x)) return null;
+  const ok = x.every((c) => {
+    const o = (c ?? {}) as Record<string, unknown>;
+    return typeof o.project === 'string' && strings(o.added) && strings(o.removed);
+  });
+  return ok ? (x as SignInChange[]) : null;
+}
+
+/**
+ * The run's result with the sign-in changes taken out of its report, for an
+ * answer that goes back to the requester.
+ */
+function withoutAccess(r: FlyResult): FlyResult {
+  const lines = r.stdout.trim().split('\n');
+  try {
+    const last = JSON.parse(lines.pop() ?? '') as Record<string, unknown>;
+    if (!('access' in last)) return r;
+    const { access: _, ...rest } = last;
+    return { ...r, stdout: `${[...lines, JSON.stringify(rest)].join('\n')}\n` };
+  } catch {
+    return r;
+  }
 }
 
 function report(r: FlyResult): PlanReport | null {
@@ -147,7 +202,7 @@ export async function prepareApply(
   const planId = newPlanId();
   const result = await run('plan', call.env, stdinFor(call, { planId, keep: true }));
   const r = report(result);
-  if (result.status !== 0 || !r?.ok) return { ran: result };
+  if (result.status !== 0 || !r?.ok) return { ran: withoutAccess(result) };
   const missing = r.missing ?? {};
   if (Object.keys(missing).length > 0) {
     // That plan would have terraform make the tokens, so the run kept no copy of it.
@@ -156,11 +211,26 @@ export async function prepareApply(
       summary: `make Access service tokens for ${call.env}: ${Object.values(missing).join(', ')}`,
     };
   }
-  if (!r.changes) return { ran: result };
-  return {
-    hold: { stage: 'apply', planId, plan: r.text ?? '', summary: r.summary ?? '' },
-    summary: `terraform apply ${call.env}`,
+  if (!r.changes) return { ran: withoutAccess(result) };
+  const access = signInChanges(r.access);
+  if (access === null) {
+    return {
+      ran: {
+        status: 1,
+        stdout: `${JSON.stringify({ ok: false, error: 'the plan did not say who it lets sign in; nothing was held' })}\n`,
+        stderr: '',
+      },
+    };
+  }
+  const hold: TerraformHold = {
+    stage: 'apply',
+    planId,
+    plan: r.text ?? '',
+    summary: r.summary ?? '',
+    access,
+    ...(r.cut ? { cut: r.cut } : {}),
   };
+  return { hold, summary: `terraform apply ${call.env}` };
 }
 
 /** The run an approval or a routine plan starts. */
@@ -171,5 +241,12 @@ export function runTerraformCall(
 ): Promise<FlyResult> {
   if (!hold) return run('plan', call.env, stdinFor(call, { planId: newPlanId(), keep: false }));
   if (hold.stage === 'mint') return run('mint', call.env, stdinFor(call, { expect: hold.tokens }));
+  if (hold.cut) {
+    return Promise.reject(
+      new Error(
+        'refused: the plan was longer than the approval page showed, so nothing was applied',
+      ),
+    );
+  }
   return run('apply', call.env, stdinFor(call, { planId: hold.planId }));
 }
