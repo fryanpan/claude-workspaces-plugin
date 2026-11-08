@@ -295,6 +295,7 @@ describe('cloudflare policy', () => {
     expect(classifyCloudflare('POST', `${st}/t1/rotate`).kind).toBe('refused');
     expect(classifyCloudflare('POST', `${st}/t1/refresh`).kind).toBe('refused');
     expect(classifyCloudflare('PUT', `${st}/t1`).kind).toBe('refused');
+    expect(classifyCloudflare('POST', '/accounts/abc/access/Service_Tokens').kind).toBe('refused');
     expect(classifyCloudflare('GET', st).kind).not.toBe('refused');
     expect(classifyCloudflare('GET', '/accounts/../user').kind).toBe('refused');
     expect(classifyCloudflare('TRACE', '/zones').kind).toBe('refused');

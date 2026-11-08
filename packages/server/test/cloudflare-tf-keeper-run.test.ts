@@ -205,6 +205,15 @@ describe('keeperRun plan', () => {
     expect(JSON.stringify(r)).not.toContain(ALICE);
   });
 
+  it('keeps no saved plan when it cannot read who a plan lets sign in', async () => {
+    const unread = { ...PEOPLE_CHANGE, change: { ...PEOPLE_CHANGE.change, after: {} } };
+    const w = world({ more: [unread] });
+    await expect(keeperRun('plan', 'prod', input([], { keep: true }), w.io)).rejects.toThrow(
+      'the plan does not say who can sign in to riverbend',
+    );
+    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+  });
+
   it('marks text cut at the limit and keeps no saved plan for it', async () => {
     const w = world({ planText: 'x'.repeat(MAX_TEXT + 10) });
     const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);

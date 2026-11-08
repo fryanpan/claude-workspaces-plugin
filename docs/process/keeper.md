@@ -172,7 +172,9 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
   from the configs your terminal sent, which any agent running as you can
   edit. The plan text prints `(sensitive value)` where the addresses are, so
   the "Who can sign in" list is the only place an added address shows. The
-  list is on the page only; your terminal never prints it.
+  list is shown on the approval page, which any program on the Mac can load;
+  cf:apply never prints it. Hostnames an application covers are in the plan
+  text, not in this list.
 - **A plan too long to show** (over 512 KB of text) is marked "cut short" on
   the page, which then offers only Deny: the keeper does not apply a plan
   you could not read in full.
@@ -181,8 +183,8 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
   and secret into your Keychain without printing them. The second page is
   the plan that adopts them. This step needs the keeper's token to hold
   Access: Service Tokens **Edit**, and the token the setup makes (sections
-  2 to 4) holds only Read, so today the tap fails and nothing is made. Do not add Edit
-  yet (see security.md, "Known gaps").
+  2 to 4) holds only Read, so today the tap fails and nothing is made. Adding Edit is a
+  change of its own (security.md, "Known gaps").
 
 The keeper needs its own `terraform` for this. The install script copies
 yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from

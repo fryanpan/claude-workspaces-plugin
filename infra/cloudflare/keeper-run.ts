@@ -189,7 +189,8 @@ export async function keeperRun(
   // No lock: a plan changes nothing, and an apply of the saved plan takes the
   // lock and refuses a plan the state has moved past.
   const plan = ['plan', '-input=false', '-lock=false', varFile, `-out=${file}`];
-  let cut = false;
+  // Kept only once the whole report is built: a run that fails or throws keeps nothing.
+  let kept = false;
   try {
     const planned = io.terraform(plan, tfEnv);
     if (planned.status !== 0) return fail(`terraform plan exited ${planned.status}`);
@@ -197,8 +198,8 @@ export async function keeperRun(
     const text = io.terraform(['show', '-no-color', file], tfEnv);
     if (json.status !== 0 || text.status !== 0) return fail('terraform show failed');
     // A plan the owner could not read in full is never applied.
-    cut = text.stdout.length > MAX_TEXT;
-    return {
+    const cut = text.stdout.length > MAX_TEXT;
+    const report: KeeperRunReport = {
       ok: true,
       mode: 'plan',
       text: text.stdout.slice(0, MAX_TEXT),
@@ -208,11 +209,11 @@ export async function keeperRun(
       ...(input.keep ? { access: accessChanges(json.stdout) } : {}),
       ...(cut ? { cut: { shown: MAX_TEXT, total: text.stdout.length } } : {}),
     };
-  } finally {
     // A plan that would make a service token is never applied (`service-tokens.ts`).
-    if (!input.keep || cut || Object.keys(found.missing).length > 0) {
-      io.removeState(planFile(id));
-    }
+    kept = !!input.keep && !cut && Object.keys(found.missing).length === 0;
+    return report;
+  } finally {
+    if (!kept) io.removeState(planFile(id));
   }
 }
 

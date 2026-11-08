@@ -169,7 +169,8 @@ function withoutAccess(r: FlyResult): FlyResult {
     const { access: _, ...rest } = last;
     return { ...r, stdout: `${[...lines, JSON.stringify(rest)].join('\n')}\n` };
   } catch {
-    return r;
+    // Fail closed: a report the keeper cannot read is not passed on.
+    return { ...r, stdout: '' };
   }
 }
 

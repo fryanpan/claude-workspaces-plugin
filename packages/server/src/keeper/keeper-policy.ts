@@ -459,7 +459,7 @@ export function classifyCloudflare(
   }
   // Making, rotating or refreshing an Access service token answers with its
   // secret. Only `cf:apply`'s mint step makes one (`keeper-terraform.ts`).
-  if (segments.includes('service_tokens')) {
+  if (segments.some((s) => s.toLowerCase() === 'service_tokens')) {
     return {
       kind: 'refused',
       reason: 'a write under service_tokens hands its secret to the requester',

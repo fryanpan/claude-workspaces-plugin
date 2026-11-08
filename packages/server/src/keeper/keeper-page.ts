@@ -212,7 +212,8 @@ function configsSent(input: string): string[] {
 
 /** Each project whose sign-in list the plan changes, with every address added or removed. */
 function signInList(changes: readonly SignInChange[]): string {
-  if (!changes.length) return "<p>No change to any project's sign-in list.</p>";
+  if (!changes.length)
+    return "<p>No change to any project's list of people who may sign in. Which hostnames an application covers is in the plan below.</p>";
   const items = (verb: string, xs: readonly string[]) =>
     xs.map((x) => `<li>${verb} <code>${escapeHtml(x)}</code></li>`).join('');
   const rows = changes.map(
