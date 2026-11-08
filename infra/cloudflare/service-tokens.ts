@@ -120,7 +120,7 @@ export async function mintServiceTokens(
     } catch {
       // Never the caught message: it was raised next to the secret.
       io.err(
-        `Made service token "${name}"${id ? ` (${id})` : ''} but could not store its pair in ${services.secret}. Its secret is lost: rotate it in the dashboard, then store it there by hand.\n`,
+        `Made service token "${name}"${id ? ` (${id})` : ''} but could not store its pair in ${services.secret}. Its secret is lost: rotate it in the dashboard, then add the pair to the Keychain by hand.\n`,
       );
       return { ok: false };
     }
