@@ -23,6 +23,8 @@ const WHAT: Record<HoldKind, string> = {
     'Creates a Cloudflare Access application. Approving also lets its policy, which says who may sign in, be written in the next 10 minutes.',
   'move.grant':
     'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. An image, a secret, a volume, a project, a bucket, a push key and a destroy are a tap each.',
+  'cloudflare.apply':
+    "Changes Cloudflare with the keeper's token: applies exactly the Terraform plan below, which the keeper made from its own copy of the config, or makes the Access service tokens below and hands their secrets to the requester to store in your Keychain.",
   other: 'A change the keeper does not run without you.',
 };
 
@@ -119,6 +121,20 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
       (s) => `<li>${escapeHtml(s.label)}<pre>${escapeHtml(s.shown)}</pre></li>`,
     );
     details.push(`<dt>Every step this covers</dt><dd><ol id="steps">${steps.join('')}</ol></dd>`);
+  } else if (r.call.type === 'terraform') {
+    details.push(`<dt>Environment</dt><dd>${escapeHtml(r.call.env)}</dd>`);
+    const tf = r.terraform;
+    if (tf?.stage === 'apply') {
+      details.push(
+        `<dt>What changes</dt><dd><pre id="plan-summary">${escapeHtml(tf.summary)}</pre></dd>`,
+      );
+      details.push(`<dt>The whole plan</dt><dd><pre id="plan">${escapeHtml(tf.plan)}</pre></dd>`);
+    } else if (tf?.stage === 'mint') {
+      const names = Object.values(tf.tokens).map((n) => `<li><code>${escapeHtml(n)}</code></li>`);
+      details.push(
+        `<dt>Service tokens it makes</dt><dd><ol id="tokens">${names.join('')}</ol></dd>`,
+      );
+    }
   } else if (r.call.type === 'push-keys') {
     const repos = r.call.repos.map((x) => `<li><code>${escapeHtml(x)}</code></li>`);
     details.push(

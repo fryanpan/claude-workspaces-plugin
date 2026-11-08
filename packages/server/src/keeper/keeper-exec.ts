@@ -1,6 +1,8 @@
 /**
  * How the keeper runs what it allowed: `fly` with the org token in its
- * environment, and the Cloudflare API with the token in a header.
+ * environment, the Cloudflare API with the token in a header, and the
+ * Cloudflare Terraform run (`infra/cloudflare/keeper-run.ts`, from the
+ * keeper's own release) with the token in its environment.
  *
  * A credential goes into a child's environment or a request header and
  * nowhere else: never an argument (`ps` shows arguments to every user),
@@ -9,11 +11,13 @@
  * of the fly binary's own folder and the system's.
  */
 import { spawn } from 'node:child_process';
-import { dirname } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { GuardedFetch } from '../outbound-fetch.ts';
 import { ed25519Pair, makePushKeys } from './keeper-push-keys.ts';
 import type { CloudflareResult, Executors, FlyResult } from './keeper-requests.ts';
 import type { KeeperStore } from './keeper-store.ts';
+import type { TerraformEnv, TerraformMode } from './keeper-terraform.ts';
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
 /** The longest the keeper lets one `fly` run before it kills it. */
@@ -28,14 +32,67 @@ export function runFly(
   args: string[],
   input: string | undefined,
 ): Promise<FlyResult> {
+  return runChild(
+    flyBin,
+    args,
+    { PATH: `${dirname(flyBin)}:/usr/bin:/bin`, HOME: home, FLY_API_TOKEN: token, NO_COLOR: '1' },
+    input,
+  );
+}
+
+/** Where the keeper's Terraform run finds what it runs, all of it the keeper's own. */
+export interface TerraformSetup {
+  /** The release's root: `keeper-run.ts` and the `.tf` files under `infra/cloudflare`. */
+  root: string;
+  /** The fixed terraform binary, beside `bun` and `fly`. */
+  terraformBin: string;
+  /** A folder of the keeper's own, mode 700: tfvars, saved plans, providers. */
+  workDir: string;
+  /** The bun that runs the keeper. */
+  bunBin: string;
+}
+
+/**
+ * One `keeper-run.ts <mode> <env>`, the requester's input on stdin. The
+ * environment is built from nothing: the token, the fixed binary and the
+ * work folder, so nothing in it came from a requester.
+ */
+export function runTerraform(
+  setup: TerraformSetup,
+  home: string,
+  token: string,
+  mode: TerraformMode,
+  env: TerraformEnv,
+  stdin: string,
+): Promise<FlyResult> {
+  mkdirSync(setup.workDir, { recursive: true, mode: 0o700 });
+  return runChild(
+    setup.bunBin,
+    [join(setup.root, 'infra', 'cloudflare', 'keeper-run.ts'), mode, env],
+    {
+      PATH: '/usr/bin:/bin',
+      HOME: home,
+      CLOUDFLARE_API_TOKEN: token,
+      CW_TERRAFORM_BIN: setup.terraformBin,
+      CW_TF_WORK_DIR: setup.workDir,
+      NO_COLOR: '1',
+    },
+    stdin,
+    setup.root,
+  );
+}
+
+function runChild(
+  bin: string,
+  args: string[],
+  env: Record<string, string>,
+  input: string | undefined,
+  cwd?: string,
+): Promise<FlyResult> {
   return new Promise((resolve) => {
-    const child = spawn(flyBin, args, {
-      env: {
-        PATH: `${dirname(flyBin)}:/usr/bin:/bin`,
-        HOME: home,
-        FLY_API_TOKEN: token,
-        NO_COLOR: '1',
-      },
+    const child = spawn(bin, args, {
+      env,
+      ...(cwd ? { cwd } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: FLY_TIMEOUT_MS,
     });
@@ -58,8 +115,23 @@ export function keeperExecutors(opts: {
   flyBin: string;
   home: string;
   fetch: GuardedFetch;
+  /** Without it the keeper answers every Terraform request with an error. */
+  terraform?: TerraformSetup;
 }): Executors {
+  /** One Terraform run at a time: two would share the work folder. */
+  let tfLane: Promise<unknown> = Promise.resolve();
   const exec: Executors = {
+    terraform(mode, env, stdin) {
+      const token = opts.store.credentials().cloudflare?.apiToken;
+      const setup = opts.terraform;
+      if (!token || !setup) {
+        const why = token ? 'the keeper has no terraform' : 'the keeper holds no Cloudflare token';
+        return Promise.resolve({ status: 1, stdout: '', stderr: why });
+      }
+      const next = tfLane.then(() => runTerraform(setup, opts.home, token, mode, env, stdin));
+      tfLane = next.catch(() => {});
+      return next;
+    },
     fly(args, input) {
       const token = opts.store.credentials().fly?.orgToken;
       if (!token)

@@ -32,7 +32,9 @@
  * the new Access application (so revoking it later needs no tap) and opens a
  * 10-minute grant on it, so its policy can be written. A `move.grant` runs
  * nothing itself and opens a 30-minute grant on one app for one board's listed
- * steps (`keeper-move-steps.ts`). Every other held request is one tap each.
+ * steps (`keeper-move-steps.ts`). Every other held request is one tap each; a
+ * Terraform apply is planned before it is held, and the tap applies that plan
+ * (`keeper-terraform.ts`).
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -51,6 +53,14 @@ import { type HoldKind, type Verdict, classifyCloudflare, classifyFly } from './
 import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
 import { stageFlyPaths } from './keeper-stage.ts';
 import type { KeeperStore } from './keeper-store.ts';
+import {
+  type TerraformCall,
+  type TerraformHold,
+  type TerraformRunner,
+  classifyTerraform,
+  prepareApply,
+  runTerraformCall,
+} from './keeper-terraform.ts';
 import {
   type AssertionInput,
   type CeremonyExpectation,
@@ -83,7 +93,7 @@ export interface CloudflareCall {
   body?: string;
 }
 
-export type KeeperCall = FlyCall | CloudflareCall | PushKeysCall | MoveGrantCall;
+export type KeeperCall = FlyCall | CloudflareCall | PushKeysCall | MoveGrantCall | TerraformCall;
 export type KeeperResult = FlyResult | CloudflareResult;
 
 export interface Executors {
@@ -91,6 +101,8 @@ export interface Executors {
   cloudflare(method: string, path: string, body: string | undefined): Promise<CloudflareResult>;
   /** Make and register a project's push deploy keys (`keeper-push-keys.ts`). */
   pushKeys?(app: string, repos: readonly string[]): Promise<CloudflareResult>;
+  /** The keeper's own Terraform run (`keeper-exec.ts`, `runTerraform`). */
+  terraform?: TerraformRunner;
 }
 
 export type RequestStatus = 'pending' | 'running' | 'done' | 'denied' | 'expired' | 'withdrawn';
@@ -109,6 +121,8 @@ export interface HeldRequest {
   local?: { path: string; entries: string[] }[];
   /** Each config fly will read, as the keeper rewrote it. */
   configs?: { path: string; toml: string }[];
+  /** A Terraform apply's saved plan, or the service tokens it makes. */
+  terraform?: TerraformHold;
   /** Each served page's token, and the challenge that page was last given. */
   pages: Map<string, string | null>;
   result?: KeeperResult;
@@ -195,9 +209,15 @@ export function createKeeperRequests(deps: {
         ? classifyPushKeys(call.app, call.repos, deps.store.apps())
         : call.type === 'move-grant'
           ? classifyMoveGrant(call.app, call.board, deps.store.apps())
-          : classifyCloudflare(call.method, call.path, deps.store.accessApps());
+          : call.type === 'terraform'
+            ? classifyTerraform(call.command, call.env, call.input)
+            : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
+  const terraform = (): TerraformRunner => {
+    if (!deps.exec.terraform) throw new Error('this keeper cannot run terraform');
+    return deps.exec.terraform;
+  };
   const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
 
   /** Checked at submit and again just before fly starts. */
@@ -210,8 +230,9 @@ export function createKeeperRequests(deps: {
 
   type Configs = readonly { path: string; toml: string }[];
   /** `configs` are the ones cleaned at submit: what the owner saw is what fly reads. */
-  const run = async (call: KeeperCall, configs: Configs): Promise<KeeperResult> => {
+  const run = async (call: KeeperCall, configs: Configs, tf?: TerraformHold) => {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
+    if (call.type === 'terraform') return runTerraformCall(call, tf, terraform());
     if (call.type === 'move-grant') return { status: 200, body: '{"granted":true}' };
     if (call.type === 'push-keys') {
       if (!deps.exec.pushKeys) throw new Error('this keeper cannot make push keys');
@@ -287,7 +308,7 @@ export function createKeeperRequests(deps: {
   const execute = async (r: HeldRequest): Promise<void> => {
     r.status = 'running';
     try {
-      const result = await run(r.call, r.configs ?? []);
+      const result = await run(r.call, r.configs ?? [], r.terraform);
       r.result = result;
       afterApproved(r, result);
     } catch (err) {
@@ -317,6 +338,7 @@ export function createKeeperRequests(deps: {
         verdict.kind === 'held' &&
         call.type !== 'push-keys' &&
         call.type !== 'move-grant' &&
+        call.type !== 'terraform' &&
         grantCovers(grants, call.type, verdict, cfPath, now());
       if (verdict.kind === 'routine' || (covered && call.type === 'cloudflare')) {
         log(`ran ${requester}: ${verdict.summary}`);
@@ -329,6 +351,9 @@ export function createKeeperRequests(deps: {
         (r) => r.status === 'pending' || r.status === 'running',
       ).length;
       if (open >= MAX_HELD) return { outcome: 'refused', reason: 'too many requests are waiting' };
+      // An apply is planned first, so the page shows the plan the tap applies.
+      const prepared = call.type === 'terraform' ? await prepareApply(call, terraform()) : null;
+      if (prepared && 'ran' in prepared) return { outcome: 'ran', result: prepared.ran };
       const request: HeldRequest = {
         id: token(),
         pollToken: token(),
@@ -345,6 +370,7 @@ export function createKeeperRequests(deps: {
         request.local = paths.paths.map((path) => ({ path, entries: folderEntries(path) }));
       }
       if (paths?.configs.length) request.configs = paths.configs;
+      if (prepared) Object.assign(request, { terraform: prepared.hold, summary: prepared.summary });
       held.set(request.id, request);
       if (covered) {
         log(`ran ${requester}: ${verdict.summary}`);
@@ -443,6 +469,7 @@ export function createKeeperRequests(deps: {
 
 /** A request's stdin is dropped as soon as it can no longer run. */
 function stripInput(call: KeeperCall): KeeperCall {
+  if (call.type === 'terraform') return { ...call, input: '' };
   return call.type === 'fly' && call.input !== undefined ? { ...call, input: undefined } : call;
 }
 

@@ -8,7 +8,7 @@
  * - **Every request** must come from a loopback peer, name the keeper's own
  *   host (`localhost:<port>` or `127.0.0.1:<port>`, so a rebound DNS name
  *   cannot reach it from a browser), and carry no `cf-ray`.
- * - **The agent API** (`POST /v1/fly`, `/v1/cloudflare/*`, `GET` and
+ * - **The agent API** (`POST /v1/fly`, `/v1/terraform`, `/v1/cloudflare/*`, `GET` and
  *   `DELETE /v1/requests/<id>`) must also carry `x-cw-keeper: 1`, which a web
  *   page cannot add without a CORS preflight the keeper never grants, and the
  *   caller token in `x-cw-keeper-caller`, which only a process that can read
@@ -188,6 +188,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       // ── The agent API ───────────────────────────────────────────────────
       if (
         path === '/v1/fly' ||
+        path === '/v1/terraform' ||
         path === '/v1/move-grant' ||
         path === '/v1/push-keys' ||
         path.startsWith('/v1/cloudflare/') ||
@@ -215,6 +216,16 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
           type: 'fly',
           args: body.args as string[],
           ...(input !== undefined ? { input } : {}),
+        };
+        return answer(await requests.submit(call, requester));
+      }
+      if (method === 'POST' && path === '/v1/terraform') {
+        const body = await readJson(req);
+        const call: KeeperCall = {
+          type: 'terraform',
+          command: body.command as 'plan' | 'apply',
+          env: body.env as 'prod' | 'staging',
+          input: str(body.input),
         };
         return answer(await requests.submit(call, requester));
       }
@@ -300,6 +311,11 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         try {
           if (verb === 'deny') return json(200, view(requests.deny(id, pageToken, assertion)));
           const r = await requests.approve(id, pageToken, assertion);
+          // A Terraform result can carry a new service token's secret: only its requester reads it.
+          if (r.call.type === 'terraform') {
+            const { result: _, ...shown } = view(r);
+            return json(200, { ...shown, status: r.result?.status });
+          }
           return json(200, { ...view(r), ...(r.result ?? {}) });
         } catch (err) {
           return json(403, { error: err instanceof Error ? err.message : String(err) });
