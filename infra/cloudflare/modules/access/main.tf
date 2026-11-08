@@ -3,8 +3,8 @@
 # own, so a stamp minted for one project verifies on no other project's
 # server (`packages/server/src/middleware/cf-access.ts`).
 #
-# People and whole email domains share one `allow` policy; service tokens get
-# a `non_identity` policy of their own, which admits a token and never a
+# People and whole email domains share one `allow` policy; service tokens are
+# managed here too, and get a `non_identity` policy of their own, which admits a token and never a
 # person. A project with nobody listed gets no `allow` policy, so its
 # application admits no person at all rather than everyone.
 #
@@ -20,6 +20,24 @@ locals {
   token_projects = {
     for label, p in var.projects : label => p
     if length(p.service_tokens) > 0
+  }
+  service_token_names = toset(flatten([for p in var.projects : p.service_tokens]))
+}
+
+# Every service token a project names. The apply never makes one: `cf:apply`
+# on the Mac makes a missing token first and keeps its secret in the Keychain
+# (`infra/cloudflare/service-tokens.ts`), and each root imports it by id, so
+# the state never holds a `client_secret` (Cloudflare returns it only to the
+# call that made the token). A plan for a token that does not exist yet still
+# shows the create.
+resource "cloudflare_zero_trust_access_service_token" "project" {
+  for_each   = local.service_token_names
+  account_id = var.account_id
+  name       = "${var.name_prefix}${each.key}"
+
+  # Destroying a token locks out every agent that holds it.
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -41,7 +59,7 @@ resource "cloudflare_zero_trust_access_policy" "service_tokens" {
   name       = "${var.name_prefix}${each.key} service tokens"
   decision   = "non_identity"
   include = [
-    for name in each.value.service_tokens : { service_token = { token_id = var.service_token_ids[name] } }
+    for name in each.value.service_tokens : { service_token = { token_id = cloudflare_zero_trust_access_service_token.project[name].id } }
   ]
 }
 

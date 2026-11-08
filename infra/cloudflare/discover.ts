@@ -1,9 +1,10 @@
 /**
  * The variables only the account knows, read before every plan: the zone and
- * account ids, each service token's id, and the id of every live resource the
- * config names, so Terraform adopts it (`deploys/prod/imports.tf`) instead of
- * making a second one. Reads only; it sends no write. Names come from the
- * deployment's `terraform.tfvars`, so staging looks for its own.
+ * account ids, and the id of every live resource the config names, so
+ * Terraform adopts it (`deploys/prod/imports.tf`) instead of making a second
+ * one. Service token ids are adopted in staging too (`service_token_ids`).
+ * Reads only; it sends no write. Names come from the deployment's
+ * `terraform.tfvars`, so staging looks for its own.
  *
  * It also refuses, before terraform runs, the cases the old deploy scripts
  * refused, because a plan would otherwise repoint or shadow something this
@@ -12,14 +13,18 @@
  * - a project host covered by an Access application the config does not own
  *   (prod's sign-in application is never shadowed), or any Access
  *   application over a tunnel's origin;
- * - two applications, policies, tunnels or records where the config names
- *   one, an application named `board <project>` that is not `self_hosted`,
- *   or a tunnel configured from a file on the machine;
+ * - two applications, policies, tunnels, records or service tokens where the
+ *   config names one, an application named `board <project>` that is not
+ *   `self_hosted`, or a tunnel configured from a file on the machine;
  * - a tunnel origin's record that is not a proxied CNAME to that tunnel;
  * - a route the config names that another Worker holds;
- * - a service token name that matches no token;
  * - an origin of the Mac's with no proxied record, or a project hostname no
  *   certificate covers (Universal SSL switched off).
+ *
+ * A service token the config names and the account lacks is not refused. It
+ * is listed in `missing_service_tokens`, a plan shows Terraform making it,
+ * and `cf:apply` on the Mac makes it first, so its secret never enters the
+ * state (`service-tokens.ts`). A token is looked up as `<name_prefix><name>`.
  *
  * Tested against a fake account by
  * `packages/server/test/cloudflare-tf-discover.test.ts`.
@@ -47,7 +52,14 @@ export interface RuntimeVars {
   imports: Imports;
 }
 
-export type Discovery = { ok: true; vars: RuntimeVars } | { ok: false; refusals: string[] };
+export type Discovery =
+  | {
+      ok: true;
+      vars: RuntimeVars;
+      /** Config name -> name in Cloudflare, for each token that does not exist yet. */
+      missing_service_tokens: Record<string, string>;
+    }
+  | { ok: false; refusals: string[] };
 
 interface AccessApp {
   id: string;
@@ -217,6 +229,7 @@ export async function discover(
     .map(([l]) => l);
   const tokenLabels = projects.filter(([, p]) => p.service_tokens.length > 0).map(([l]) => l);
   const service_token_ids: Record<string, string> = {};
+  const missing_service_tokens: Record<string, string> = {};
   if (peopleLabels.length + tokenLabels.length > 0) {
     const policies = await api.all<Named>(`${A}/access/policies`);
     const adopt = (labels: string[], suffix: string, into: Record<string, string>) => {
@@ -237,9 +250,10 @@ export async function discover(
   if (tokenNames.length > 0) {
     const tokens = await api.all<Named>(`${A}/access/service_tokens`);
     for (const name of tokenNames) {
-      const found = tokens.filter((t) => t.name === name);
-      if (found.length === 0) refusals.push(`no service token is named "${name}"`);
-      const t = one(found, `service tokens named "${name}"`, refusals);
+      const full = `${names.name_prefix}${name}`;
+      const found = tokens.filter((t) => t.name === full);
+      if (found.length === 0) missing_service_tokens[name] = full;
+      const t = one(found, `service tokens named "${full}"`, refusals);
       if (t) service_token_ids[name] = t.id;
     }
   }
@@ -305,5 +319,6 @@ export async function discover(
   return {
     ok: true,
     vars: { account_id: zone.account.id, zone_id: zone.id, service_token_ids, imports },
+    missing_service_tokens,
   };
 }

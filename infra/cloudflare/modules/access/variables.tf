@@ -23,9 +23,3 @@ variable "projects" {
     service_tokens = list(string)
   }))
 }
-
-variable "service_token_ids" {
-  description = "Access service token name -> id."
-  type        = map(string)
-  default     = {}
-}

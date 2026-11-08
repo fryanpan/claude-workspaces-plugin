@@ -75,12 +75,6 @@ variable "access_projects" {
   default = {}
 }
 
-variable "service_token_ids" {
-  description = "Access service token name -> id, read from the account."
-  type        = map(string)
-  default     = {}
-}
-
 variable "share_link_routes" {
   description = "Route patterns of the share-link Worker; empty manages no share-link Worker."
   type        = list(string)

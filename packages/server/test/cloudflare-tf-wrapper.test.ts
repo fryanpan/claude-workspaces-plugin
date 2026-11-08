@@ -189,6 +189,11 @@ function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
     env: {},
     keychainHas: (n) => n in KEYCHAIN,
     keychainRead: (n) => KEYCHAIN[n] ?? '',
+    keychainHasService: () => false,
+    storeToken: () => {
+      throw new Error('this config names no service token');
+    },
+    confirm: () => false,
     api: () => fakeApi(),
     writeState: (name, content) => {
       r.state[name] = content;

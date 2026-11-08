@@ -2,7 +2,8 @@
 # `bun run cf:plan staging` / `bun run cf:apply staging` (README.md), which
 # assemble the variables and put the credentials into terraform's
 # environment only.
-# Wired and validated, never applied yet: it adopts nothing.
+# Wired and validated, never applied yet: it adopts nothing but its own
+# service tokens (imports.tf).
 
 # The token comes from CLOUDFLARE_API_TOKEN in terraform's environment. It is
 # never a variable, so it never enters the state.
@@ -22,7 +23,6 @@ module "stack" {
   tunnels                 = var.tunnels
   access_session_duration = var.access_session_duration
   access_projects         = var.access_projects
-  service_token_ids       = var.service_token_ids
   share_link_routes       = var.share_link_routes
   name_prefix             = var.name_prefix
   router_script_name      = var.router_script_name

@@ -39,7 +39,7 @@ variables {
       service_tokens = []
     }
   }
-  service_token_ids      = { "relay riverbend" = "token-1" }
+  service_token_ids      = {}
   name_prefix            = ""
   router_script_name     = "board-router"
   share_link_script_name = "share-link-gate"
@@ -142,6 +142,14 @@ run "a_project_with_nobody_listed_admits_no_person" {
     projects         = var.access_projects
   }
 
+  override_resource {
+    target          = cloudflare_zero_trust_access_service_token.project
+    override_during = plan
+    values = {
+      id = "token-1"
+    }
+  }
+
   assert {
     condition     = toset(keys(cloudflare_zero_trust_access_policy.people)) == toset(["riverbend"])
     error_message = "only a project with people or domains gets an allow policy"
@@ -164,7 +172,12 @@ run "a_project_with_nobody_listed_admits_no_person" {
 
   assert {
     condition     = [for r in cloudflare_zero_trust_access_policy.service_tokens["riverbend"].include : r.service_token.token_id] == ["token-1"]
-    error_message = "a service token name resolves to its id"
+    error_message = "a policy admits the managed token by its id"
+  }
+
+  assert {
+    condition     = keys(cloudflare_zero_trust_access_service_token.project) == ["relay riverbend"] && cloudflare_zero_trust_access_service_token.project["relay riverbend"].name == "relay riverbend"
+    error_message = "each named service token is one managed token, named as the config names it"
   }
 
   assert {
@@ -187,7 +200,7 @@ run "staging_names_do_not_collide_with_prod" {
   }
 
   assert {
-    condition     = cloudflare_zero_trust_access_application.project["riverbend"].name == "staging board riverbend" && cloudflare_zero_trust_access_policy.people["riverbend"].name == "staging riverbend people"
+    condition     = cloudflare_zero_trust_access_application.project["riverbend"].name == "staging board riverbend" && cloudflare_zero_trust_access_policy.people["riverbend"].name == "staging riverbend people" && cloudflare_zero_trust_access_service_token.project["relay riverbend"].name == "staging relay riverbend"
     error_message = "the name prefix reaches every Access name"
   }
 }
