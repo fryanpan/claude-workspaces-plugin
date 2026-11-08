@@ -10,7 +10,9 @@
  *      (`credentials.ts`);
  *   3. read the account for the ids Terraform cannot know offline, and refuse
  *      what would repoint or shadow something this config did not make
- *      (`discover.ts`);
+ *      (`discover.ts`); on a local apply, make each service token the
+ *      account lacks and put its pair in the Keychain (`service-tokens.ts`),
+ *      which CI cannot do and so refuses;
  *   4. write the tfvars and the -backend-config file to `state/<env>/`, 600;
  *   5. `terraform init` against the R2 state, then plan, or apply (which shows
  *      the plan and asks first);
@@ -33,6 +35,13 @@ import { DEFAULT_STATE_BUCKET, backendConfig, tfCredentials } from './credential
 import { discover } from './discover.ts';
 import { planSummary } from './plan-summary.ts';
 import {
+  type MintIo,
+  keychainHasService,
+  mintServiceTokens,
+  storeTokenInKeychain,
+  tokenServices,
+} from './service-tokens.ts';
+import {
   TF_DIR,
   type TfEnv,
   type TfResult,
@@ -46,7 +55,7 @@ import { CONFIG_ENV, CONFIG_PATHS, type ReadConfig, parseEnvNames, staticVars } 
 
 const REPO = resolve(TF_DIR, '..', '..');
 
-export interface WrapperIo {
+export interface WrapperIo extends Omit<MintIo, 'out' | 'err'> {
   /** A config relative to the repo root, or null when it is missing. */
   read: ReadConfig;
   env: Record<string, string | undefined>;
@@ -99,14 +108,48 @@ export async function runWrapper(
     const namesRaw = io.read(join('infra', 'cloudflare', 'deploys', opts.env, 'terraform.tfvars'));
     if (namesRaw === null) throw new Error(`deploys/${opts.env}/terraform.tfvars is missing`);
     const creds = tfCredentials(io);
-    const found = await discover(io.api(creds.token), stat, parseEnvNames(namesRaw));
+    const api = io.api(creds.token);
+    const found = await discover(api, stat, parseEnvNames(namesRaw));
     if (!found.ok) {
       for (const r of found.refusals) io.err(`  - ${r}\n`);
       io.err('Refused before terraform ran; nothing was changed.\n');
       return 1;
     }
-    // Only prod adopts what exists; staging is made fresh or not at all.
+    // Only prod adopts what exists; staging is made fresh or not at all. The
+    // one exception is a service token, adopted by id in both (service-tokens.ts).
     const { imports, ...runtime } = found.vars;
+    const missing = found.missing_service_tokens;
+    if (Object.keys(missing).length > 0) {
+      if (command === 'apply' && opts.ci) {
+        for (const name of Object.values(missing)) {
+          io.err(
+            `  - service token "${name}" does not exist, and CI has no Keychain for its secret\n`,
+          );
+        }
+        io.err(
+          `Run bun run cf:apply ${opts.env} on the Mac once to make it. Nothing was changed.\n`,
+        );
+        return 1;
+      }
+      if (command === 'apply') {
+        const minted = await mintServiceTokens(api, runtime.account_id, missing, {
+          keychainHasService: io.keychainHasService,
+          storeToken: io.storeToken,
+          confirm: io.confirm,
+          out: io.out,
+          err: io.err,
+        });
+        if (!minted.ok) return 1;
+        runtime.service_token_ids = { ...runtime.service_token_ids, ...minted.ids };
+      } else if (!opts.ci) {
+        for (const name of Object.values(missing)) {
+          const s = tokenServices(name);
+          io.out(
+            `Service token "${name}" does not exist: cf:apply makes it and stores its pair in the Keychain (${s.clientId}, ${s.secret}).\n`,
+          );
+        }
+      }
+    }
     const vars = opts.env === 'prod' ? { ...stat, ...runtime, imports } : { ...stat, ...runtime };
     const varFile = `-var-file=${io.writeState('run.tfvars.json', `${JSON.stringify(vars, null, 2)}\n`)}`;
     const bucket = io.env.CF_TFSTATE_BUCKET?.trim() || DEFAULT_STATE_BUCKET;
@@ -175,6 +218,9 @@ export function realIo(tfEnv: TfEnv): WrapperIo {
     env: process.env,
     keychainHas,
     keychainRead,
+    keychainHasService: (service) => keychainHasService(service),
+    storeToken: storeTokenInKeychain,
+    confirm: (question) => prompt(`${question} Only 'yes' is accepted:`)?.trim() === 'yes',
     api: (token) => cloudflareApi(token),
     writeState: (name, content) => {
       mkdirSync(dir, { recursive: true, mode: 0o700 });

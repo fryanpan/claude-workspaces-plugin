@@ -15,7 +15,7 @@ bun run cf:apply           # prints the plan again and asks "yes" before changin
 
 | Path | What it is |
 | --- | --- |
-| `modules/access` | One Access application per project, its people policy and its service-token policy |
+| `modules/access` | One Access application per project, its people policy, its service-token policy, and every service token a project names |
 | `modules/router-worker` | The board router Worker, a route and a proxied AAAA `100::` per project hostname |
 | `modules/share-link` | The share-link Worker and its `/share/*` routes |
 | `modules/tunnel` | Each project machine's tunnel, its ingress, its origin CNAME, and its token (read back) |
@@ -41,7 +41,7 @@ assembles:
 | zone, one address, project origins and hostnames, board origins, tunnels | the board router's `router.local.json` |
 | Access projects, their emails, domains and service tokens, session length | `infra/access-apps/access.local.json` |
 | share-link routes | `infra/share-link-worker/wrangler.local.toml` |
-| account and zone ids, service token ids, ids to adopt (prod only) | read from the account before every plan (`discover.ts`) |
+| account and zone ids, ids to adopt (prod only; service tokens in both) | read from the account before every plan (`discover.ts`) |
 
 Staging reads the same three configs from `deploys/staging/*.local.*`
 (gitignored). In CI each config is a secret, handed in as `CF_ROUTER_CONFIG`,
@@ -76,10 +76,10 @@ Staging reads the same three configs from `deploys/staging/*.local.*`
    anything that a plan would repoint or shadow: a project host under an
    Access application the config does not own (prod's sign-in application),
    an Access application over a tunnel's origin, a tunnel origin's record that
-   points anywhere but its own tunnel, a route another Worker holds, a service
-   token name that matches no token, two resources where the config names
-   one, an origin of the Mac's with no proxied record, a project hostname no
-   certificate covers.
+   points anywhere but its own tunnel, a route another Worker holds, two
+   resources where the config names one, an origin of the Mac's with no
+   proxied record, a project hostname no certificate covers. A service token
+   the config names and the account lacks is not refused (below).
 4. Write the run's tfvars and the `-backend-config` file (bucket, key
    `cloudflare/<env>.tfstate`, endpoint) to `state/<env>/`, mode 600.
 5. `terraform init` against the R2 state, then `plan`, or `apply`.
@@ -102,9 +102,25 @@ already in state does nothing. Read the first plan closely: an adopted
 resource shows every field the config sets differently. The share-link
 Worker's workers.dev address is not managed, so it stays as it is.
 
+**Service tokens.** Terraform owns every token a project names
+(`cloudflare_zero_trust_access_service_token`, named `<name_prefix><name>`),
+but the provider never makes one, because it would keep the new token's
+`client_secret` in the state. A plan shows a missing token as an add. On a
+local `cf:apply`, `service-tokens.ts` lists each missing token, asks "yes",
+makes it through the API, and puts its client id and secret straight into the
+Keychain as `cw-<name>-access-client-id` and `cw-<name>-access-secret` (the
+name lower-cased, spaces as dashes; `agent moi` becomes
+`cw-agent-moi-access-secret`), the services `CW_ACCESS_SECRET_SERVICE` and the
+relay configs name. Neither value is printed or written to a file. The apply
+then imports the token by id, in staging too, and an imported token has no
+secret in the state: Cloudflare returns it only to the call that made it. A
+Keychain service already taken is refused before anything is made. A CI apply
+refuses a missing token, since CI has no Keychain: run `cf:apply` on the Mac
+once. Tokens carry `prevent_destroy`.
+
 **Removing.** An entry removed from a config is destroyed at the next apply,
-and the plan lists it as a destroy first. Access applications and tunnels
-carry `prevent_destroy`, so a plan that would remove or replace one fails.
+and the plan lists it as a destroy first. Access applications, service
+tokens and tunnels carry `prevent_destroy`, so a plan that would remove or replace one fails.
 To remove one on purpose, take its `lifecycle` block off in a reviewed
 change first.
 
@@ -160,13 +176,14 @@ credential:
 - No tunnel token. `machine:deploy` reads a tunnel's token from the API with the id in `terraform output tunnels`. Every same-repo pull request's plan holds the read-only state key, and that key must not unlock a token.
 - No tunnel secret. `tunnel_secret` is left unset, so Cloudflare generates it and the provider stores none; `config_src = "cloudflare"` keeps the ingress in Cloudflare.
 - No share-link key. The `SHARE_LINK_KEY` binding is kept by `keep_bindings` and never declared.
-- The Access applications are `self_hosted`, so the one computed secret the provider has (`saas_app.client_secret`) stays empty.
+- The Access applications are `self_hosted`, so the provider's `saas_app.client_secret` stays empty.
+- No service token secret. The provider would store `client_secret` for a token it made, so it makes none: `cf:apply` makes a missing token through the API, puts its pair in the Keychain, and terraform imports it by id. An import reads the token back, and Cloudflare never returns a secret on a read.
 
 The router Worker's plain-text vars are hostname tables, not secrets.
 
 ## The token's permissions
 
-On the account: Access: Apps and Policies Edit, Access: Service Tokens Read,
+On the account: Access: Apps and Policies Edit, Access: Service Tokens Edit (a local apply makes missing tokens with it, and terraform updates the ones it owns),
 Access: Organizations Read, Cloudflare Tunnel Edit (`machine:deploy`'s
 tunnel token read needs it, when it runs on the Mac with this token), Workers Scripts Edit. On the zone: Zone Read, DNS Edit, SSL and
 Certificates Read, Workers Routes Edit. The plan token has the Read form of
@@ -189,7 +206,8 @@ reads them now.
 which plans the root and each module from a fixture against a mock provider
 (no token, no state, no network call beyond the provider download).
 In `packages/server/test`: `cloudflare-tf-discover.test.ts` runs the adoption
-and the refusals against a fake account; `cloudflare-tf-wrapper.test.ts` the
+and the refusals against a fake account; `cloudflare-tf-service-tokens.test.ts`
+a missing token through plan, local apply and CI apply, with a fake Keychain; `cloudflare-tf-wrapper.test.ts` the
 variable assembly, where each credential goes, what CI prints, and the file
 modes; `cloudflare-tf-outputs.test.ts` the credential sources, the plan
 summary and the outputs `machine:deploy` reads. What only the real account

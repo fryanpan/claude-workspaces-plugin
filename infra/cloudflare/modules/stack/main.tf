@@ -10,12 +10,11 @@ locals {
 }
 
 module "access" {
-  source            = "../access"
-  account_id        = var.account_id
-  name_prefix       = var.name_prefix
-  session_duration  = var.access_session_duration
-  projects          = var.access_projects
-  service_token_ids = var.service_token_ids
+  source           = "../access"
+  account_id       = var.account_id
+  name_prefix      = var.name_prefix
+  session_duration = var.access_session_duration
+  projects         = var.access_projects
 }
 
 module "router" {

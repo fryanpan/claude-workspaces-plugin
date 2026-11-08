@@ -82,7 +82,7 @@ variable "access_projects" {
 }
 
 variable "service_token_ids" {
-  description = "Access service token name -> id, read from the account."
+  description = "Service token name (as the config spells it) -> id of the live token, to import (discover.ts). Never holds a secret."
   type        = map(string)
   default     = {}
 }

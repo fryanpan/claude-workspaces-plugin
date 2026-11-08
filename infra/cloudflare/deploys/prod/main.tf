@@ -22,7 +22,6 @@ module "stack" {
   tunnels                 = var.tunnels
   access_session_duration = var.access_session_duration
   access_projects         = var.access_projects
-  service_token_ids       = var.service_token_ids
   share_link_routes       = var.share_link_routes
   name_prefix             = var.name_prefix
   router_script_name      = var.router_script_name

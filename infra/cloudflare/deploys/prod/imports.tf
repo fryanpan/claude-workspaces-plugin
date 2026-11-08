@@ -23,6 +23,16 @@ import {
   id       = "${var.account_id}/${each.value}"
 }
 
+# Service tokens, from `service_token_ids` rather than `imports`, because
+# staging adopts them too: `cf:apply` makes a missing token before terraform
+# runs, so it is always imported and its secret never enters the state
+# (`infra/cloudflare/service-tokens.ts`).
+import {
+  for_each = var.service_token_ids
+  to       = module.stack.module.access.cloudflare_zero_trust_access_service_token.project[each.key]
+  id       = "accounts/${var.account_id}/${each.value}"
+}
+
 import {
   for_each = { for k, v in var.imports.scripts : k => v if k == var.router_script_name }
   to       = module.stack.module.router.cloudflare_workers_script.router

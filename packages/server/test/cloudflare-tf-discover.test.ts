@@ -156,8 +156,54 @@ describe('discover', () => {
           tunnels: {},
         },
       },
+      missing_service_tokens: {},
     });
     expect(writes).toEqual([]);
+  });
+
+  it('lists a service token the account lacks for apply to make, and refuses nothing', async () => {
+    const acct = fresh();
+    acct.tokens = [];
+    const { api, writes } = fakeApi(acct);
+    const r = await discover(api, vars(), PROD);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.missing_service_tokens).toEqual({ 'relay riverbend': 'relay riverbend' });
+    expect(r.vars.service_token_ids).toEqual({});
+    expect(writes).toEqual([]);
+  });
+
+  it('adopts an existing token by id and lists only the missing one', async () => {
+    const two = vars();
+    const river = two.access_projects.riverbend;
+    if (river) river.service_tokens = ['relay riverbend', 'agent riverbend'];
+    const r = await discover(fakeApi(fresh()).api, two, PROD);
+    expect(r.ok ? r.vars.service_token_ids : null).toEqual({ 'relay riverbend': 'token-1' });
+    expect(r.ok ? r.missing_service_tokens : null).toEqual({
+      'agent riverbend': 'agent riverbend',
+    });
+  });
+
+  it('looks a staging token up under its prefix, so staging never adopts prod’s', async () => {
+    const staging: EnvNames = { ...PROD, name_prefix: 'staging ' };
+    const acct = fresh();
+    const r = await discover(fakeApi(acct).api, vars(), staging);
+    expect(r.ok ? r.missing_service_tokens : null).toEqual({
+      'relay riverbend': 'staging relay riverbend',
+    });
+    acct.tokens.push({ id: 'token-s', name: 'staging relay riverbend' });
+    const again = await discover(fakeApi(acct).api, vars(), staging);
+    expect(again.ok ? again.vars.service_token_ids : null).toEqual({
+      'relay riverbend': 'token-s',
+    });
+  });
+
+  it('refuses two service tokens of one name', async () => {
+    const acct = fresh();
+    acct.tokens.push({ id: 'token-2', name: 'relay riverbend' });
+    expect(await refusalsOf(acct)).toEqual([
+      'there are 2 service tokens named "relay riverbend"; resolve that by hand',
+    ]);
   });
 
   it('adopts every live resource the config names, so a plan creates no second copy', async () => {
@@ -231,12 +277,10 @@ describe('discover', () => {
     expect(await refusalsOf(local)).toContainEqual(expect.stringContaining('from a file'));
   });
 
-  it('refuses a route another Worker holds, and an unknown service token', async () => {
+  it('refuses a route another Worker holds', async () => {
     const acct = fresh();
     acct.routes = [{ id: 'r', pattern: `${RIVER_HOST}/*`, script: 'someone-else' }];
-    acct.tokens = [];
     expect(await refusalsOf(acct)).toEqual([
-      'no service token is named "relay riverbend"',
       `the route ${RIVER_HOST}/* is bound to the Worker someone-else, not board-router`,
     ]);
   });

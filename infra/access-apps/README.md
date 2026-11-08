@@ -22,8 +22,12 @@ Per project, the Terraform config (`../cloudflare/modules/access`) makes:
 1. the application `board <project>`, `self_hosted`, over the project's
    hosts, adopting the live one of that name if it exists;
 2. a reusable `allow` policy `<project> people` for the emails and domains,
-   and a `non_identity` policy `<project> service tokens`, each service token
-   named here resolved to its id by name.
+   and a `non_identity` policy `<project> service tokens` for the service
+   tokens named here;
+3. each service token named here, adopting the live one of that name. One
+   that does not exist is made by a local `cf:apply`, which puts its client
+   id and secret in the Keychain as `cw-<name>-access-client-id` and
+   `cw-<name>-access-secret` (`../cloudflare/README.md`, "Service tokens").
 
 After a local apply the wrapper prints each server's `CF_ACCESS_AUD` and
 `CF_ACCESS_HOST_AUDS`; `machine:deploy` reads them from `terraform output`.
@@ -33,7 +37,7 @@ nothing changed:
 - a project host equal to, or under, a hostname that an application the config
   does not own covers (a wildcard counts as its base name). Prod's sign-in
   application is never changed or shadowed;
-- a service token name that matches no token, or more than one;
+- a service token name that matches more than one token;
 - an application named `board <project>` that is not `self_hosted`, or two
   of them.
 
