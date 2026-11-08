@@ -35,7 +35,8 @@ export function lockDownState(dir: string): void {
 
 /**
  * terraform, under umask 077, in `cwd`. `capture` returns stdout instead of
- * showing it. The credentials are only ever in `env`.
+ * showing it. The credentials are only ever in `env`. `bin` is the binary,
+ * found on PATH by default; the keeper passes its own fixed path.
  */
 export function spawnTerraform(
   cwd: string,
@@ -43,8 +44,9 @@ export function spawnTerraform(
   env: Record<string, string>,
   capture = false,
   lockDir?: string,
+  bin = 'terraform',
 ): TfResult {
-  const r = spawnSync('/bin/sh', ['-c', 'umask 077 && exec terraform "$@"', 'terraform', ...args], {
+  const r = spawnSync('/bin/sh', ['-c', 'umask 077 && exec "$0" "$@"', bin, ...args], {
     cwd,
     env: { ...process.env, TF_IN_AUTOMATION: '1', ...env },
     encoding: 'utf8',

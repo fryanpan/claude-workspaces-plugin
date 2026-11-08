@@ -31,9 +31,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
 import { keychainHas, keychainRead } from '../project-machine/mac-ops.ts';
-import { DEFAULT_STATE_BUCKET, backendConfig, tfCredentials } from './credentials.ts';
-import { discover } from './discover.ts';
+import { tfCredentials } from './credentials.ts';
 import { planSummary } from './plan-summary.ts';
+import { audienceLines, discoverRun, initArgs, writeRunFiles } from './prepare.ts';
 import {
   type MintIo,
   keychainHasService,
@@ -51,7 +51,7 @@ import {
   spawnTerraform,
   stateDir,
 } from './terraform.ts';
-import { CONFIG_ENV, CONFIG_PATHS, type ReadConfig, parseEnvNames, staticVars } from './vars.ts';
+import { CONFIG_ENV, CONFIG_PATHS, type ReadConfig } from './vars.ts';
 
 const REPO = resolve(TF_DIR, '..', '..');
 
@@ -77,19 +77,7 @@ export interface WrapperOptions {
   ci: boolean;
 }
 
-/** The env lines a project server needs, from the `access` output. */
-export function audienceLines(
-  access: Record<string, { aud?: string; hosts?: string[] }>,
-): string[] {
-  const lines: string[] = [];
-  for (const [label, p] of Object.entries(access)) {
-    if (!p.aud) continue;
-    const hostAuds = Object.fromEntries((p.hosts ?? []).map((h) => [h, p.aud]));
-    lines.push(`${label}: CF_ACCESS_AUD=${p.aud}`);
-    lines.push(`${label}: CF_ACCESS_HOST_AUDS='${JSON.stringify(hostAuds)}'`);
-  }
-  return lines;
-}
+export { audienceLines };
 
 function step(io: WrapperIo, name: string, r: TfResult): boolean {
   if (r.status === 0) return true;
@@ -104,21 +92,16 @@ export async function runWrapper(
   io: WrapperIo,
 ): Promise<number> {
   try {
-    const stat = staticVars(io.read, CONFIG_PATHS[opts.env]);
-    const namesRaw = io.read(join('infra', 'cloudflare', 'deploys', opts.env, 'terraform.tfvars'));
-    if (namesRaw === null) throw new Error(`deploys/${opts.env}/terraform.tfvars is missing`);
     const creds = tfCredentials(io);
     const api = io.api(creds.token);
-    const found = await discover(api, stat, parseEnvNames(namesRaw));
+    const found = await discoverRun(opts.env, io.read, api);
     if (!found.ok) {
       for (const r of found.refusals) io.err(`  - ${r}\n`);
       io.err('Refused before terraform ran; nothing was changed.\n');
       return 1;
     }
-    // Only prod adopts what exists; staging is made fresh or not at all. The
-    // one exception is a service token, adopted by id in both (service-tokens.ts).
-    const { imports, ...runtime } = found.vars;
-    const missing = found.missing_service_tokens;
+    const { runtime } = found;
+    const missing = found.missing;
     if (Object.keys(missing).length > 0) {
       if (command === 'apply' && opts.ci) {
         for (const name of Object.values(missing)) {
@@ -150,17 +133,14 @@ export async function runWrapper(
         }
       }
     }
-    const vars = opts.env === 'prod' ? { ...stat, ...runtime, imports } : { ...stat, ...runtime };
-    const varFile = `-var-file=${io.writeState('run.tfvars.json', `${JSON.stringify(vars, null, 2)}\n`)}`;
-    const bucket = io.env.CF_TFSTATE_BUCKET?.trim() || DEFAULT_STATE_BUCKET;
-    const backend = io.writeState(
-      'backend.hcl',
-      backendConfig(opts.env, runtime.account_id, bucket),
+    const { varFile, backend } = writeRunFiles(
+      opts.env,
+      found,
+      io.env.CF_TFSTATE_BUCKET,
+      io.writeState,
     );
     const env = creds.env;
-    const init = ['init', '-input=false', '-lockfile=readonly', '-reconfigure'];
-    if (!step(io, 'init', io.terraform([...init, `-backend-config=${backend}`], env, opts.ci)))
-      return 1;
+    if (!step(io, 'init', io.terraform(initArgs(backend), env, opts.ci))) return 1;
 
     if (!opts.ci) {
       if (!step(io, command, io.terraform([command, varFile], env))) return 1;

@@ -1,0 +1,281 @@
+/**
+ * The keeper's own Terraform run (`infra/cloudflare/keeper-run.ts`): a plan
+ * saves its file under the keeper's id and reports text, summary and missing
+ * tokens; an apply applies exactly that file; a mint makes exactly the tokens
+ * the keeper approved. The configs are the requester's, the committed tfvars
+ * the release's, and the token is in terraform's environment and never an
+ * argument. The run imports nothing outside `infra/` and no package, because
+ * the keeper's release has no `node_modules`. A fake account and a fake
+ * terraform; nothing calls Cloudflare.
+ */
+import { describe, expect, it } from 'bun:test';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  type KeeperRunInput,
+  type KeeperRunIo,
+  keeperRun,
+  realKeeperIo,
+} from '../../../infra/cloudflare/keeper-run.ts';
+import { envDir } from '../../../infra/cloudflare/terraform.ts';
+import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
+
+const ZONE = 'harborlight.test';
+const ACCOUNT = 'a'.repeat(32);
+const TOKEN = 'fixture-token-Riverbend-0000000000';
+const PLAN_ID = 'keeper-plan-id-000000001';
+const SECRET = 'feedface'.repeat(8);
+const TFVARS =
+  'name_prefix = ""\nrouter_script_name = "board-router"\nshare_link_script_name = "share-link-gate"\n';
+
+const input = (tokens: string[], extra: Partial<KeeperRunInput> = {}): KeeperRunInput => ({
+  configs: {
+    router: JSON.stringify({
+      zone: ZONE,
+      oneAddress: `workspaces.${ZONE}`,
+      projects: { riverbend: `mac-origin.${ZONE}` },
+    }),
+    access: JSON.stringify({
+      projects: { riverbend: { hosts: [`riverbend-workspaces.${ZONE}`], serviceTokens: tokens } },
+    }),
+  },
+  state: { accessKeyId: 'fixture-r2-id', secretAccessKey: 'fixture-r2-secret' },
+  planId: PLAN_ID,
+  ...extra,
+});
+
+interface World {
+  io: KeeperRunIo;
+  tf: Array<{ args: string[]; env: Record<string, string> }>;
+  files: Record<string, string>;
+  removed: string[];
+  posts: string[];
+  released: string[];
+}
+
+function world(opts: { changes?: number; tfvarsInRelease?: boolean } = {}): World {
+  const w: World = {
+    tf: [],
+    files: {},
+    removed: [],
+    posts: [],
+    released: [],
+    io: undefined as never,
+  };
+  const answer = (path: string): unknown => {
+    const p = path.split('?')[0] ?? '';
+    if (p === '/zones') return [{ id: 'f'.repeat(32), account: { id: ACCOUNT } }];
+    if (p.endsWith('/ssl/certificate_packs')) return [{ hosts: [ZONE, `*.${ZONE}`] }];
+    if (p.endsWith('/dns_records')) {
+      return [{ id: 'm', type: 'CNAME', name: `mac-origin.${ZONE}`, content: 'x', proxied: true }];
+    }
+    return [];
+  };
+  const api = (async (method: string, path: string, body?: unknown) => {
+    if (method === 'POST') {
+      w.posts.push((body as { name: string }).name);
+      return { id: 'token-1', client_id: 'c0ffee.access', client_secret: SECRET };
+    }
+    return answer(path);
+  }) as CloudflareApi;
+  api.all = async <T>(path: string) => answer(path) as T[];
+  const changes = opts.changes ?? 1;
+  w.io = {
+    token: TOKEN,
+    readRelease: (rel) => {
+      w.released.push(rel);
+      return rel === join('infra', 'cloudflare', 'deploys', 'prod', 'terraform.tfvars') &&
+        opts.tfvarsInRelease !== false
+        ? TFVARS
+        : null;
+    },
+    api: (t) => {
+      expect(t).toBe(TOKEN);
+      return api;
+    },
+    writeState: (name, content) => {
+      w.files[name] = content;
+      return `/work/${name}`;
+    },
+    statePath: (name) => `/work/${name}`,
+    removeState: (name) => w.removed.push(name),
+    terraform: (args, env) => {
+      w.tf.push({ args, env });
+      if (args[0] === 'show' && args[1] === '-json') {
+        const rc = Array.from({ length: changes }, (_, i) => ({
+          address: `cloudflare_dns_record.r${i}`,
+          mode: 'managed',
+          change: { actions: ['update'] },
+        }));
+        return { status: 0, stdout: JSON.stringify({ resource_changes: rc }) };
+      }
+      if (args[0] === 'show') return { status: 0, stdout: 'Plan: 0 to add, 1 to change.\n' };
+      if (args[0] === 'output') return { status: 0, stdout: '{}' };
+      return { status: 0, stdout: '' };
+    },
+  };
+  return w;
+}
+
+const argsOf = (w: World) => w.tf.map((t) => t.args.join(' ')).join('\n');
+
+describe('keeperRun plan', () => {
+  it('saves the plan under the keeper id and reports its text, summary and changes', async () => {
+    const w = world({ changes: 2 });
+    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    expect(r).toMatchObject({ ok: true, mode: 'plan', changes: 2, missing: {} });
+    expect(r.ok && r.mode === 'plan' && r.text).toBe('Plan: 0 to add, 1 to change.\n');
+    expect(w.tf.map((t) => t.args[0])).toEqual(['init', 'plan', 'show', 'show']);
+    expect(w.tf[1]?.args).toContain(`-out=/work/plan-${PLAN_ID}.tfplan`);
+    expect(w.tf[1]?.args).toContain('-lock=false');
+    expect(w.removed).toEqual([]);
+  });
+
+  it('puts the token in terraform environment and never in an argument or a file', async () => {
+    const w = world();
+    await keeperRun('plan', 'prod', input([]), w.io);
+    expect(argsOf(w)).not.toContain(TOKEN);
+    expect(JSON.stringify(w.files)).not.toContain(TOKEN);
+    for (const t of w.tf) expect(t.env.CLOUDFLARE_API_TOKEN).toBe(TOKEN);
+    expect(w.tf[0]?.env.AWS_ACCESS_KEY_ID).toBe('fixture-r2-id');
+  });
+
+  it('removes a plan it was not asked to keep, and one that would make a service token', async () => {
+    const plain = world();
+    await keeperRun('plan', 'prod', input([]), plain.io);
+    expect(plain.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+    const minting = world();
+    const r = await keeperRun('plan', 'prod', input(['agent moi'], { keep: true }), minting.io);
+    expect(r).toMatchObject({ ok: true, missing: { 'agent moi': 'agent moi' } });
+    expect(minting.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+  });
+
+  it("reads the committed tfvars from the release, never from the requester's input", async () => {
+    const w = world({ tfvarsInRelease: false });
+    await expect(keeperRun('plan', 'prod', input([]), w.io)).rejects.toThrow(
+      'deploys/prod/terraform.tfvars is missing',
+    );
+    expect(w.released).toContain(
+      join('infra', 'cloudflare', 'deploys', 'prod', 'terraform.tfvars'),
+    );
+  });
+
+  it('refuses a plan id the keeper did not shape', async () => {
+    const w = world();
+    const r = await keeperRun('plan', 'prod', input([], { planId: '../../x' }), w.io);
+    expect(r).toMatchObject({ ok: false });
+    expect(w.tf).toEqual([]);
+  });
+});
+
+describe('keeperRun apply', () => {
+  it('applies the saved plan the keeper named and removes it', async () => {
+    const w = world();
+    const r = await keeperRun('apply', 'prod', input([]), w.io);
+    expect(r).toMatchObject({ ok: true, mode: 'apply', audiences: [] });
+    expect(w.tf.map((t) => t.args[0])).toEqual(['init', 'apply', 'output']);
+    expect(w.tf[1]?.args).toEqual([
+      'apply',
+      '-input=false',
+      '-lock-timeout=5m',
+      `/work/plan-${PLAN_ID}.tfplan`,
+    ]);
+    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+  });
+});
+
+describe('keeperRun mint', () => {
+  it('makes exactly the approved tokens and reports their pairs', async () => {
+    const w = world();
+    const r = await keeperRun(
+      'mint',
+      'prod',
+      input(['agent moi'], { expect: { 'agent moi': 'agent moi' } }),
+      w.io,
+    );
+    expect(w.posts).toEqual(['agent moi']);
+    expect(r).toEqual({
+      ok: true,
+      mode: 'mint',
+      minted: [
+        {
+          name: 'agent moi',
+          id: 'token-1',
+          services: {
+            clientId: 'cw-agent-moi-access-client-id',
+            secret: 'cw-agent-moi-access-secret',
+          },
+          clientId: 'c0ffee.access',
+          secret: SECRET,
+        },
+      ],
+    });
+    expect(w.tf).toEqual([]);
+  });
+
+  it('makes nothing when the missing tokens differ from what was approved', async () => {
+    const w = world();
+    const r = await keeperRun(
+      'mint',
+      'prod',
+      input(['agent moi', 'agent two'], { expect: { 'agent moi': 'agent moi' } }),
+      w.io,
+    );
+    expect(r).toMatchObject({ ok: false });
+    expect(w.posts).toEqual([]);
+  });
+});
+
+describe("the keeper's release can run it", () => {
+  it('imports only node built-ins and files under infra/', async () => {
+    const root = join(import.meta.dir, '..', '..', '..');
+    const built = await Bun.build({
+      entrypoints: [join(root, 'infra', 'cloudflare', 'keeper-run.ts')],
+      target: 'bun',
+      packages: 'external',
+      metafile: true,
+    });
+    expect(built.success).toBe(true);
+    const inputs = built.metafile?.inputs ?? {};
+    const outside = Object.keys(inputs).filter((p) => !p.startsWith('infra/'));
+    const packages = Object.values(inputs)
+      .flatMap((v) => v.imports)
+      .filter((i) => i.external && !i.path.startsWith('node:') && !/^[a-z_]+$/.test(i.path))
+      .map((i) => i.path);
+    expect(outside).toEqual([]);
+    expect(packages).toEqual([]);
+  });
+});
+
+describe("the keeper's terraform", () => {
+  it('runs the fixed binary in the release root, with direct downloads only and its own folders', () => {
+    const work = mkdtempSync(join(tmpdir(), 'keeper-run-io-'));
+    try {
+      const seen = join(work, 'seen');
+      const bin = join(work, 'terraform');
+      writeFileSync(
+        bin,
+        `#!/bin/sh\n{ echo "ARGV $*"; echo "CWD $(pwd)"; env | sort; } > "${seen}"\n`,
+      );
+      chmodSync(bin, 0o755);
+      const io = realKeeperIo('prod', work, bin);
+      io.writeState('backend.hcl', 'x');
+      const r = io.terraform(['version'], { CLOUDFLARE_API_TOKEN: TOKEN });
+      expect(r.status).toBe(0);
+      const out = readFileSync(seen, 'utf8');
+      expect(out).toContain('ARGV version');
+      expect(out).toContain(`CWD ${envDir('prod')}`);
+      expect(out).toContain(`TF_DATA_DIR=${join(work, 'prod-data')}`);
+      expect(out).toContain(`TF_CLI_CONFIG_FILE=${join(work, 'terraformrc')}`);
+      expect(readFileSync(join(work, 'terraformrc'), 'utf8')).toBe(
+        'provider_installation {\n  direct {}\n}\n',
+      );
+      // The saved files are 600, and terraform's own folder stays one it can open.
+      expect(statSync(join(work, 'prod', 'backend.hcl')).mode & 0o777).toBe(0o600);
+      expect(statSync(join(work, 'prod-data')).mode & 0o777).toBe(0o700);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+});
