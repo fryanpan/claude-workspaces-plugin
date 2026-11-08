@@ -14,7 +14,7 @@ import {
 import { throughKeeper } from '../../../infra/cloudflare/run.ts';
 import type { TokenServices } from '../../../infra/cloudflare/service-tokens.ts';
 import { CONFIG_PATHS } from '../../../infra/cloudflare/vars.ts';
-import type { FlyResult } from '../../src/keeper/keeper-requests.ts';
+import type { FlyResult } from '../src/keeper/keeper-requests.ts';
 
 const SECRET = 'feedface'.repeat(8);
 const ok = (r: Record<string, unknown>): FlyResult => ({
