@@ -200,6 +200,19 @@ describe('keeper-setup', () => {
     expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
   });
 
+  it("makes the token again even when the keeper's old one can no longer read the account", async () => {
+    expect((await run(w)).status).toBe(0);
+    rmSync(join(w.state, 'cred-cloudflare-token-permissions'));
+    // The keeper's agent API stays up; its Cloudflare read now fails.
+    const r = await run(w, { keeperAccountsFail: true });
+    expect(r.status).toBe(0);
+    // The account is confirmed after the new token is made, before it is stored.
+    expect(r.confirms).toBe(2);
+    expect(r.out).toContain(`Cloudflare account: ${ACCOUNT_NAME}`);
+    expect(cred(w, 'cloudflare-api-token')).toBe(NEW_CF);
+    expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
+  });
+
   it('an earlier run that stored the token and its fingerprint only adds the account id', async () => {
     expect((await run(w)).status).toBe(0);
     rmSync(join(w.state, 'cred-cloudflare-account-id'));

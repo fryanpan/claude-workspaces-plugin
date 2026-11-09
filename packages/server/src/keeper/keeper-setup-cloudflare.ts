@@ -58,7 +58,9 @@ export const CF_TOKEN_PERMISSIONS: readonly CfPermission[] = [
  * the token it makes (`cloudflare-token-permissions`), and a later run makes
  * the token again when the stored one differs from this list's. Cloudflare
  * cannot say which permissions a token holds without API Tokens Read, which
- * the keeper's token deliberately lacks.
+ * the keeper's token deliberately lacks. For a token Bryan made in the
+ * dashboard the fingerprint records which list he was shown, not what he
+ * granted.
  */
 export function cfPermissionsStamp(list: readonly CfPermission[] = CF_TOKEN_PERMISSIONS): string {
   const lines = list.map((p) => `${p.scope}:${p.api}`).sort();

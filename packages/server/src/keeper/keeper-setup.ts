@@ -204,8 +204,11 @@ async function steps(o: SetupOptions): Promise<void> {
       const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: api });
       const body = (await r.json().catch(() => ({}))) as { result?: unknown };
       const one = theOneAccount(body.result);
-      if ('why' in one) throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
-      account = one;
+      // A remake replaces that token anyway; the new token's account is then
+      // confirmed after it is made, as for a pasted one.
+      if ('why' in one && cfNeed === 'account')
+        throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
+      if (!('why' in one)) account = one;
     }
     if (cfNeed !== 'account') current = keychain('cloudflare-api-token');
     if (cfNeed === 'make') {
@@ -266,12 +269,13 @@ async function steps(o: SetupOptions): Promise<void> {
   } else if (cfNeed === 'account') {
     importValue('cloudflare-account-id', (account as CfAccount).id);
   } else {
-    const name = `claude-workspaces keeper ${new Date().toISOString().slice(0, 10)}`;
+    const name = `claude-workspaces keeper ${new Date().toISOString().slice(0, 16)}`;
     const minted = current
       ? await mintKeeperToken(o.fetch, current, name)
       : { why: 'the Keychain holds no cloudflare-api-token' };
     let token: string;
     let remove: string;
+    const keep = 'token' in minted ? `"${name}"` : 'the one you just made';
     if ('token' in minted) {
       token = minted.token;
       remove = `Delete the token "${name}" in the Cloudflare dashboard: My Profile > API Tokens`;
@@ -303,7 +307,7 @@ async function steps(o: SetupOptions): Promise<void> {
     importValue('cloudflare-account-id', seen.id);
     if (cfNeed === 'remake')
       o.print(
-        "   The keeper's previous Cloudflare token is no longer used. Delete it in the dashboard: My Profile > API Tokens, the older one named claude-workspaces keeper.",
+        `   The keeper's previous Cloudflare token is no longer used. In the dashboard (My Profile > API Tokens) keep ${keep} and delete the older claude-workspaces keeper token.`,
       );
   }
 

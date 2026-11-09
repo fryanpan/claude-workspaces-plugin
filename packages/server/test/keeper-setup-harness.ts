@@ -164,7 +164,7 @@ export interface Cf {
 }
 
 /** Cloudflare and the keeper's agent API, both logged to the same file. */
-export function fakeFetch(w: World, cf: Cf): typeof fetch {
+export function fakeFetch(w: World, cf: Cf, keeperAccountsFail = false): typeof fetch {
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), { status, headers });
   return (async (input: string | URL | Request, init?: RequestInit) => {
@@ -215,7 +215,9 @@ export function fakeFetch(w: World, cf: Cf): typeof fetch {
       if (method === 'DELETE' && url.pathname === '/v1/requests/req1') return json({ ok: true });
       // The generic Cloudflare route, read with the keeper's own token.
       if (method === 'GET' && url.pathname === '/v1/cloudflare/accounts')
-        return json({ success: true, result: [{ id: ACCOUNT, name: ACCOUNT_NAME }] });
+        return keeperAccountsFail
+          ? json({ success: false, errors: [{ message: 'Invalid API Token' }] }, 401)
+          : json({ success: true, result: [{ id: ACCOUNT, name: ACCOUNT_NAME }] });
     }
     return json({}, 404);
   }) as typeof fetch;
@@ -228,6 +230,8 @@ export interface RunOpts {
   /** What Bryan types at each y/N; "y" when unset. */
   answer?: string;
   env?: Record<string, string>;
+  /** The keeper's own Cloudflare token answers 401, as a revoked one does. */
+  keeperAccountsFail?: boolean;
 }
 
 export async function run(w: World, opts: RunOpts = {}) {
@@ -243,7 +247,7 @@ export async function run(w: World, opts: RunOpts = {}) {
     label: LABEL,
     env: { ...w.env, ...opts.env },
     dryRun: opts.dryRun ?? false,
-    fetch: fakeFetch(w, cf),
+    fetch: fakeFetch(w, cf, opts.keeperAccountsFail),
     readSecret: async () => {
       asked++;
       return opts.pasted ?? '';

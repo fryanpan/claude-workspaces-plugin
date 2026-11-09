@@ -142,8 +142,11 @@ prints, step by step:
   keeper's token was stored before fingerprints existed, the next run says
   `Cloudflare token: the keeper's lacks this release's permissions; a new
   one is made`, makes a new token the same way after your `y`, and tells you
-  to delete the old one in the dashboard (My Profile, API Tokens, the older
-  token named `claude-workspaces keeper`). Nothing else is made again.
+  which token to keep and to delete the older `claude-workspaces keeper`
+  token in the dashboard (My Profile, API Tokens). It reads the account
+  through the keeper's old token; if that token no longer works, it asks
+  you to confirm the new token's account instead. Nothing else is made
+  again.
 - **Project apps:** every Fly app named `cw-<project>`, the deploy's name
   for a project, is adopted, so starting and stopping it needs no passkey.
 - **Callers:** `CW_KEEPER_URL` goes into the `env` of
