@@ -400,6 +400,16 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/*', 'GET'],
   ]),
 
+  // Board links in the wrong form, redirected to the page they name: the old
+  // `review/<id>` spelling (a review item, task, doc or set on this board) and
+  // the open route a relative link in a comment is drawn through. Owner-only,
+  // as the task address beside them is: no share table names either.
+  ...family('routes/board-links.ts', [
+    ['trusted-local', '/workspaces/:ws/review/:id', 'GET'],
+    ['trusted-local', '/workspaces/:ws/reviews/:id', 'GET'],
+    ['trusted-local', '/workspaces/:ws/open', 'GET'],
+  ]),
+
   ...family('routes/task-detail.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/detail', 'GET'],
   ]),

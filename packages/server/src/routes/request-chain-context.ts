@@ -28,6 +28,7 @@ import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
 import type { AuthShareRoutesContext } from './auth-share.ts';
+import type { BoardLinkRoutesContext } from './board-links.ts';
 import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
 import type { BoardTokenRoutesContext } from './board-tokens.ts';
 import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
@@ -126,6 +127,9 @@ export interface RequestChainContext {
   featureRoutes: FeatureRoutes;
   coachRoutesCtx: CoachRoutesContext;
   serveShellRoutes: ShellStatic['serveShellRoutes'];
+  /** The wrong-form board links and the relative-link open route
+   *  (`board-links.ts`). */
+  boardLinkRoutesCtx: BoardLinkRoutesContext;
 }
 
 /**
