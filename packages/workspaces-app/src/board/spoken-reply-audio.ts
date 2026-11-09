@@ -59,6 +59,17 @@ export interface SpokenCapture {
   /** The mic's rate when the graph runs at another, which on iOS delivers
    *  no audio (`graphContext`); otherwise null. */
   offRate?(): number | null;
+  /** The graph's clock in seconds (`AudioPump.clock`). */
+  clock?(): number;
+  /** Suspend and resume the graph's context (`AudioPump.kick`). */
+  kick?(): Promise<void>;
+  /** Release the microphone's track and keep the graph. While an echo-
+   *  cancelled track is live, iOS 26.2+ crackles every sound the page plays
+   *  (WebKit bug 326286), so the lead chat lets go of it while it speaks. */
+  pause?(): void;
+  /** Open the microphone again into the same graph. False if it would not
+   *  open, or this capture cannot reopen in place. */
+  unpause?(): Promise<boolean>;
 }
 
 export interface SpokenCaptureOpts {
@@ -83,20 +94,22 @@ function refusal(err: unknown): string {
   return 'The microphone could not be opened.';
 }
 
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
+};
+
 export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<SpokenCaptureStart> {
   const release = (): void => void opts.context?.close().catch(() => {});
+  const getMedia =
+    opts.getMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
   let stream: MediaStream;
   try {
-    const getMedia =
-      opts.getMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
-    stream = await getMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    stream = await getMedia(MIC_CONSTRAINTS);
   } catch (err) {
     release();
     return { ok: false, message: refusal(err) };
@@ -110,6 +123,10 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
     return { ok: false, message: refusal(err) };
   }
   const resample = createResampler(pump.sampleRate, MEETING_SAMPLE_RATE);
+  let paused = false;
+  /** Counts pauses, so an open that a later pause overtook is dropped. */
+  let pauses = 0;
+  let stopped = false;
   let pending: Int16Array = new Int16Array(0);
   pump.onBlock = (block) => {
     const step = chunkPcm16(pending, floatToPcm16(resample(block)), MEETING_FRAME_SAMPLES);
@@ -124,7 +141,35 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
         const mic = trackFacts(stream).sampleRate;
         return mic && mic !== pump.sampleRate ? mic : null;
       },
+      ...(pump.clock ? { clock: () => pump.clock?.() ?? 0 } : {}),
+      ...(pump.kick ? { kick: () => pump.kick?.() ?? Promise.resolve() } : {}),
+      pause() {
+        paused = true;
+        pauses++;
+        for (const t of stream.getTracks()) t.stop();
+      },
+      async unpause() {
+        if (!paused) return true;
+        if (stopped || !pump.replaceStream) return false;
+        const mine = pauses;
+        let next: MediaStream;
+        try {
+          next = await getMedia(MIC_CONSTRAINTS);
+        } catch {
+          return false;
+        }
+        // Stopped, or paused again, while the device was opening.
+        if (stopped || mine !== pauses) {
+          for (const t of next.getTracks()) t.stop();
+          return false;
+        }
+        paused = false;
+        stream = next;
+        pump.replaceStream(next);
+        return true;
+      },
       stop() {
+        stopped = true;
         pump.onBlock = null;
         pump.stop();
         // The track holds the device: without this the recording light stays on.
@@ -143,6 +188,27 @@ export interface PlaybackContext {
   createBuffer(channels: number, length: number, sampleRate: number): AudioBuffer;
   createBufferSource(): AudioBufferSourceNode;
   readonly destination: AudioNode;
+  /** Read for the playback report; absent in older Safari. */
+  readonly baseLatency?: number;
+  readonly outputLatency?: number;
+  close?(): Promise<void>;
+}
+
+/** What one spoken answer's playback met, for the report a voice sends. */
+export interface PlaybackFacts {
+  sampleRate: number;
+  state: string;
+  baseLatency: number | null;
+  outputLatency: number | null;
+  /** Buffers since `begin`. */
+  chunks: number;
+  /** Chunks that arrived after the queue had run dry. */
+  underruns: number;
+  /** The least time left queued when a chunk arrived, in ms; null before
+   *  the second chunk. */
+  leastAheadMs: number | null;
+  /** The headroom the player now schedules a fresh start with, in ms. */
+  leadMs: number;
 }
 
 export interface SpokenPlayer {
@@ -162,6 +228,10 @@ export interface SpokenPlayer {
    */
   mark(onStart: (audibleAt: number) => void): void;
   playing(): boolean;
+  /** What this answer's playback met so far (`PlaybackFacts`). */
+  facts(): PlaybackFacts | null;
+  /** Stop, and close the context, so the page holds no audio session. */
+  release(): void;
 }
 
 export interface SpokenPlayerOpts {
@@ -173,6 +243,11 @@ export interface SpokenPlayerOpts {
 
 /** A little headroom so the first buffer is not scheduled in the past. */
 const LEAD_S = 0.03;
+/** The most the headroom grows to after the queue runs dry. */
+const MAX_LEAD_S = 0.24;
+/** Less than this left queued counts as dry: a buffer started that close to
+ *  the clock may begin late and lose its first samples. */
+const DRY_S = 0.01;
 
 /** How long a chunk that follows a gap takes to rise from silence. */
 const RAMP_S = 0.004;
@@ -205,6 +280,12 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
   let doneTimer: ReturnType<typeof setTimeout> | null = null;
   let active = false;
   let marks: Array<(audibleAt: number) => void> = [];
+  /** Headroom for a fresh start: doubles each time the queue runs dry, so a
+   *  network that delivers late stops leaving a gap at every chunk. */
+  let lead = LEAD_S;
+  let chunks = 0;
+  let underruns = 0;
+  let leastAhead = Number.POSITIVE_INFINITY;
 
   const clearDone = (): void => {
     if (doneTimer) clearTimeout(doneTimer);
@@ -225,7 +306,7 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
     return all.subarray(0, -1);
   };
 
-  return {
+  const player: SpokenPlayer = {
     wake() {
       ctx = ctx ?? opts.context();
       if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => {});
@@ -242,6 +323,9 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       oddByte = null;
       heardFirst = false;
       active = true;
+      chunks = 0;
+      underruns = 0;
+      leastAhead = Number.POSITIVE_INFINITY;
     },
     push(bytes) {
       if (!active || !ctx) return;
@@ -252,9 +336,20 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       resample ??= createResampler(rate, sampleRate);
       const samples = new Float32Array(resample(pcm16ToFloat(whole)));
       if (samples.length === 0) return;
-      const earliest = Math.round((ctx.currentTime + LEAD_S) * sampleRate);
-      if (continuing && earliest > playFrame) rampUp(samples, RAMP_S * sampleRate);
-      const startFrame = Math.max(playFrame, earliest);
+      chunks++;
+      let startFrame = playFrame;
+      if (continuing) {
+        const ahead = playFrame / sampleRate - ctx.currentTime;
+        leastAhead = Math.min(leastAhead, ahead);
+        if (ahead < DRY_S) {
+          underruns++;
+          lead = Math.min(MAX_LEAD_S, lead * 2);
+          startFrame = Math.round((ctx.currentTime + lead) * sampleRate);
+          rampUp(samples, RAMP_S * sampleRate);
+        }
+      } else {
+        startFrame = Math.max(playFrame, Math.round((ctx.currentTime + lead) * sampleRate));
+      }
       const t = startFrame / sampleRate;
       const buf = ctx.createBuffer(1, samples.length, sampleRate);
       buf.copyToChannel(samples, 0);
@@ -308,5 +403,26 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
       marks.push(onStart);
     },
     playing: () => active,
+    facts() {
+      if (!ctx) return null;
+      const latency = (v: number | undefined): number | null =>
+        typeof v === 'number' && Number.isFinite(v) ? v : null;
+      return {
+        sampleRate: ctx.sampleRate,
+        state: ctx.state,
+        baseLatency: latency(ctx.baseLatency),
+        outputLatency: latency(ctx.outputLatency),
+        chunks,
+        underruns,
+        leastAheadMs: Number.isFinite(leastAhead) ? Math.round(leastAhead * 1000) : null,
+        leadMs: Math.round(lead * 1000),
+      };
+    },
+    release() {
+      player.stop();
+      void ctx?.close?.().catch(() => {});
+      ctx = null;
+    },
   };
+  return player;
 }

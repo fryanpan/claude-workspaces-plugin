@@ -71,6 +71,10 @@ class FakeContext {
     this.state = 'closed';
     return Promise.resolve();
   }
+  /** The render clock: it moves only as quanta render. */
+  get currentTime(): number {
+    return this.rendered / this.sampleRate;
+  }
   createMediaStreamSource(stream: MediaStream): FakeSource {
     const s = new FakeSource(stream.getAudioTracks()[0]?.getSettings().sampleRate);
     this.sources.push(s);
