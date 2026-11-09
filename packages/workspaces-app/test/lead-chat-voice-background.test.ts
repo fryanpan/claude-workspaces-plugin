@@ -278,6 +278,25 @@ describe('the lead chat mic, back from the background', () => {
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
   });
 
+  it('does nothing while the page is hidden again, and checks afresh when it returns', async () => {
+    const reports: Error[] = [];
+    const { voice, frames } = await listeningThenHidden(reports);
+    (tracks[0] as FakeTrack).readyState = 'ended';
+    setVisible('visible');
+    // Swiped away again before the check ran.
+    setVisible('hidden');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(tracks).toHaveLength(1);
+    setVisible('visible');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(tracks).toHaveLength(2);
+    const before = frames();
+    renderAll(100);
+    expect(frames()).toBeGreaterThan(before);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(reports).toHaveLength(0);
+  });
+
   it('wakes the speakers’ context iOS left interrupted', async () => {
     const reports: Error[] = [];
     const { speaker } = await listeningThenHidden(reports);

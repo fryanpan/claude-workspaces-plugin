@@ -199,8 +199,13 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     const held = capture;
     if (!held || waiting || tapRebuild) return;
     void held.resume?.();
-    // Released while an answer is said: `unpause` checks the track it takes.
-    if (paused) return;
+    // Released while an answer is said: `unpause` watches the track it takes.
+    if (!paused) watch(held, 'after the page came back');
+  };
+
+  /** Give `held` `CLOCK_CHECK_MS` to send, then recover it as `recheck`
+   *  describes. `when` names the moment, for the report. */
+  const watch = (held: SpokenCapture, when: string): void => {
     const mine = gen;
     const before = framesSeen;
     // This check answers for the mic now; a no-sound clock that ran down in
@@ -212,16 +217,18 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
       recheckTimer = setTimeout(() => {
         recheckTimer = null;
         if (mine !== gen || paused || waiting || framesSeen > before) return;
+        // Hidden again: the next return checks afresh.
+        if (document.visibilityState === 'hidden') return;
         const h = held.health?.();
         if (h && (h.track !== 'live' || h.muted)) {
           const kept = how;
           clear();
-          how = `${kept}, track ${h.track}${h.muted ? ' and muted' : ''} after the page came back, reopened`;
+          how = `${kept}, track ${h.track}${h.muted ? ' and muted' : ''} ${when}, reopened`;
           begin(makeGestureContext(), true);
           return;
         }
         if (!kicked) {
-          how += ', silent after the page came back, suspended and resumed';
+          how += `, silent ${when}, suspended and resumed`;
           void held.kick?.();
           look(true);
           return;
@@ -275,15 +282,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           opts.onRefused('The microphone could not be opened again.');
           return;
         }
-        // The reopened track has its own chance to send nothing.
-        const before = framesSeen;
-        if (soundTimer) clearTimeout(soundTimer);
-        soundTimer = setTimeout(() => {
-          soundTimer = null;
-          if (mine !== gen || paused || framesSeen > before) return;
-          const said = held.diag?.() || 'no report';
-          opts.onSilent(`${said}; ${how}, reopened after an answer`);
-        }, NO_SOUND_MS);
+        // The reopened track has its own chance to send nothing, and is
+        // recovered the way a page coming back is.
+        watch(held, 'after an answer');
       });
     },
     live: () => capture !== null && !paused,
