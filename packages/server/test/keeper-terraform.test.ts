@@ -38,8 +38,16 @@ interface Run {
   stdin: Record<string, unknown>;
 }
 const runs: Run[] = [];
+interface Next {
+  changes: number;
+  missing: Record<string, string>;
+  access?: unknown;
+  cut?: { shown: number; total: number };
+}
 /** What the stand-in plan reports next. */
-let next: { changes: number; missing: Record<string, string> } = { changes: 1, missing: {} };
+let next: Next = { changes: 1, missing: {} };
+const ALICE = 'alice@harborlight.test';
+const BOB = 'bob@harborlight.test';
 
 const report = (r: Record<string, unknown>): FlyResult => ({
   status: r.ok === false ? 1 : 0,
@@ -60,6 +68,9 @@ const exec: Executors = {
         summary: `Cloudflare plan for ${env}: ${next.changes} to change.`,
         changes: next.changes,
         missing: next.missing,
+        // A kept plan reports its sign-in changes, as `keeper-run.ts` does.
+        ...(JSON.parse(stdin).keep === true ? { access: next.access ?? [] } : {}),
+        ...(next.cut ? { cut: next.cut } : {}),
       });
     }
     if (mode === 'mint') {
@@ -219,6 +230,73 @@ describe('an apply', () => {
     const done = await poll(id, r.body.pollToken as string);
     expect(done.status).toBe('done');
     expect(JSON.parse(done.result?.stdout ?? '{}')).toMatchObject({ mode: 'apply' });
+  });
+
+  it("names on the page each address the plan adds to a project's sign-in list, and tells the requester none of them", async () => {
+    runs.length = 0;
+    next = {
+      changes: 1,
+      missing: {},
+      access: [{ project: 'riverbend', added: [ALICE], removed: [BOB] }],
+    };
+    const r = await submit('apply');
+    expect(r.status).toBe(202);
+    const id = r.body.id as string;
+    const page = await (await fetch(`${base}/approve/${id}`)).text();
+    const signIn = /<dd id="sign-in">([\s\S]*?)<\/dd>/.exec(page)?.[1] ?? '';
+    const project = /<li data-project="riverbend">([\s\S]*?)<\/ul><\/li>/.exec(signIn)?.[1] ?? '';
+    expect(project).toContain(`<li>adds <code>${ALICE}</code></li>`);
+    expect(project).toContain(`<li>removes <code>${BOB}</code></li>`);
+    expect(page).toContain('id="approve"');
+
+    // The requester's answers carry the plan summary, never the addresses.
+    expect(JSON.stringify(r.body)).not.toContain(ALICE);
+    expect(JSON.stringify(await poll(id, r.body.pollToken as string))).not.toContain(ALICE);
+    const approved = await approve(id);
+    expect(approved.text).not.toContain(ALICE);
+    expect(JSON.stringify(await poll(id, r.body.pollToken as string))).not.toContain(ALICE);
+    next = { changes: 1, missing: {} };
+  });
+
+  it('says on the page that the configs are the requester’s and the Terraform files the keeper’s', async () => {
+    next = { changes: 1, missing: {} };
+    const r = await submit('apply');
+    const page = await (await fetch(`${base}/approve/${r.body.id as string}`)).text();
+    expect(page).toContain(
+      'planned it with its own release&#39;s Terraform files, from the configs the requester sent',
+    );
+    expect(page).not.toContain('its own copy of the config');
+    expect(/<dd id="configs-sent">([^<]*)<\/dd>/.exec(page)?.[1]).toBe('access');
+  });
+
+  it('with a plan cut at the size limit says so on the page and applies nothing on a tap', async () => {
+    runs.length = 0;
+    next = { changes: 1, missing: {}, cut: { shown: 524_288, total: 600_000 } };
+    const r = await submit('apply');
+    expect(r.status).toBe(202);
+    const id = r.body.id as string;
+    const page = await (await fetch(`${base}/approve/${id}`)).text();
+    expect(page).toContain('The plan, cut short');
+    expect(page).toContain(
+      'Cut here. The plan is 600000 characters and this page shows the first 524288.',
+    );
+    expect(page).not.toContain('id="approve"');
+    expect(page).toContain('id="deny"');
+
+    // A tap that reaches the API anyway still applies nothing.
+    const approved = await approve(id);
+    expect(approved.text).toContain('longer than the approval page showed');
+    expect(runs.map((x) => x.mode)).toEqual(['plan']);
+    next = { changes: 1, missing: {} };
+  });
+
+  it('whose run reports no readable sign-in list is not held', async () => {
+    runs.length = 0;
+    next = { changes: 1, missing: {}, access: [{ project: 'riverbend', added: 'x' }] };
+    const r = await submit('apply');
+    expect(r.held).toBe(false);
+    expect(JSON.stringify(r.body)).toContain('did not say who it lets sign in');
+    next = { changes: 1, missing: {} };
   });
 
   it('that changes nothing runs no tap', async () => {

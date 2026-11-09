@@ -10,6 +10,7 @@ import { randomBytes } from 'node:crypto';
 import { moveSteps } from './keeper-move-steps.ts';
 import { type HoldKind, shellQuote } from './keeper-policy.ts';
 import { type HeldRequest, secretNames } from './keeper-requests.ts';
+import { type SignInChange, parseTerraformInput } from './keeper-terraform.ts';
 
 export const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -24,7 +25,7 @@ const WHAT: Record<HoldKind, string> = {
   'move.grant':
     'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. An image, a secret, a volume, a project, a bucket, a push key and a destroy are a tap each.',
   'cloudflare.apply':
-    "Changes Cloudflare with the keeper's token: applies exactly the Terraform plan below, which the keeper made from its own copy of the config, or makes the Access service tokens below and hands their secrets to the requester to store in your Keychain.",
+    "Changes Cloudflare with the keeper's token: applies exactly the Terraform plan below, or makes the Access service tokens below and hands their secrets to the requester to store in your Keychain. The keeper planned it with its own release's Terraform files, from the configs the requester sent, so anything those configs say is in the plan: check who it lets sign in.",
   other: 'A change the keeper does not run without you.',
 };
 
@@ -123,12 +124,24 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
     details.push(`<dt>Every step this covers</dt><dd><ol id="steps">${steps.join('')}</ol></dd>`);
   } else if (r.call.type === 'terraform') {
     details.push(`<dt>Environment</dt><dd>${escapeHtml(r.call.env)}</dd>`);
+    const sent = configsSent(r.call.input);
+    if (sent.length) {
+      details.push(
+        `<dt>Configs the requester sent</dt><dd id="configs-sent">${escapeHtml(sent.join(', '))}</dd>`,
+      );
+    }
     const tf = r.terraform;
     if (tf?.stage === 'apply') {
       details.push(
         `<dt>What changes</dt><dd><pre id="plan-summary">${escapeHtml(tf.summary)}</pre></dd>`,
       );
-      details.push(`<dt>The whole plan</dt><dd><pre id="plan">${escapeHtml(tf.plan)}</pre></dd>`);
+      details.push(`<dt>Who can sign in</dt><dd id="sign-in">${signInList(tf.access)}</dd>`);
+      const cut = tf.cut
+        ? `\n\n[Cut here. The plan is ${tf.cut.total} characters and this page shows the first ${tf.cut.shown}. The keeper will not apply a plan it could not show in full.]`
+        : '';
+      details.push(
+        `<dt>${tf.cut ? 'The plan, cut short' : 'The whole plan'}</dt><dd><pre id="plan">${escapeHtml(tf.plan)}${escapeHtml(cut)}</pre></dd>`,
+      );
     } else if (tf?.stage === 'mint') {
       const names = Object.values(tf.tokens).map((n) => `<li><code>${escapeHtml(n)}</code></li>`);
       details.push(
@@ -143,9 +156,14 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
   } else if (r.call.body) {
     details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body)}</pre></dd>`);
   }
+  // A plan cut short is never applied, so the page offers only Deny.
+  const cutShort = r.terraform?.stage === 'apply' && r.terraform.cut !== undefined;
+  const approveButton = cutShort
+    ? ''
+    : '<button id="approve" type="button">Approve with passkey</button>';
   const state =
     r.status === 'pending' && pageToken
-      ? `<p><button id="approve" type="button">Approve with passkey</button><button id="deny" type="button">Deny</button></p>`
+      ? `<p>${approveButton}<button id="deny" type="button">Deny</button></p>`
       : r.status === 'pending'
         ? '<p>Too many pages are open on this request. Use the one you opened first.</p>'
         : `<p>This request is ${escapeHtml(r.status)}.</p>`;
@@ -156,7 +174,7 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
 const id = ${JSON.stringify(r.id)};
 const pageToken = ${JSON.stringify(pageToken ?? '')};
 const base = '/v1/requests/' + encodeURIComponent(id);
-const buttons = () => ['approve', 'deny'].map((b) => document.getElementById(b));
+const buttons = () => ['approve', 'deny'].map((b) => document.getElementById(b)).filter(Boolean);
 // Approving and denying are both a passkey tap on this page's own challenge.
 const tap = async () => {
   const c = await post(base + '/challenge', { page: pageToken });
@@ -184,6 +202,25 @@ document.getElementById('deny')?.addEventListener('click', async () => {
   } catch (e) { say('Not denied: ' + e.message); }
 });`;
   return page(`Approve ${r.hold}`, body, r.status === 'pending' && pageToken ? script : '');
+}
+
+/** Which configs the keeper hands the run, by name, from the request's stdin (gone once it ran). */
+function configsSent(input: string): string[] {
+  const parsed = parseTerraformInput(input);
+  return 'error' in parsed ? [] : Object.keys(parsed.configs).sort();
+}
+
+/** Each project whose sign-in list the plan changes, with every address added or removed. */
+function signInList(changes: readonly SignInChange[]): string {
+  if (!changes.length)
+    return "<p>No change to any project's list of people who may sign in. Which hostnames an application covers is in the plan below.</p>";
+  const items = (verb: string, xs: readonly string[]) =>
+    xs.map((x) => `<li>${verb} <code>${escapeHtml(x)}</code></li>`).join('');
+  const rows = changes.map(
+    (c) =>
+      `<li data-project="${escapeHtml(c.project)}"><strong>${escapeHtml(c.project)}</strong><ul>${items('adds', c.added)}${items('removes', c.removed)}</ul></li>`,
+  );
+  return `<ul>${rows.join('')}</ul>`;
 }
 
 /**

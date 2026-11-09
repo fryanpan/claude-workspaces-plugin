@@ -457,6 +457,14 @@ export function classifyCloudflare(
   if (segments.includes('tokens')) {
     return { kind: 'refused', reason: 'a write under tokens mints a credential for the requester' };
   }
+  // Making, rotating or refreshing an Access service token answers with its
+  // secret. Only `cf:apply`'s mint step makes one (`keeper-terraform.ts`).
+  if (segments.some((s) => s.toLowerCase() === 'service_tokens')) {
+    return {
+      kind: 'refused',
+      reason: 'a write under service_tokens hands its secret to the requester',
+    };
+  }
   if (m === 'POST' && new RegExp(`^/accounts/${ID}/access/apps/?$`).test(pathname)) {
     return { kind: 'held', hold: 'access.open', app: null, summary };
   }
