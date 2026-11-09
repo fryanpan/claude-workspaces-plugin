@@ -96,6 +96,7 @@ if (command === 'check') {
         ({
           'cloudflare-api-token': cf?.apiToken,
           'cloudflare-account-id': cf?.accountId,
+          'cloudflare-token-permissions': cf?.permissions,
           'fly-org-token': fly?.orgToken,
           'fly-org-slug': fly?.orgSlug,
           'github-token': github?.token,
@@ -103,6 +104,8 @@ if (command === 'check') {
     );
     console.log(`credentials: ${held.join(' ') || 'none'}`);
     console.log(`apps: ${store.apps().join(' ') || 'none'}`);
+    // A fingerprint, not a credential: which permission list the token was made with.
+    console.log(`cloudflare-token-permissions: ${cf?.permissions ?? 'none'}`);
     console.log(`store: ok, ${store.passkeys().length} passkeys, ${store.apps().length} apps`);
   }
   process.exit(problems.length || 'error' in store ? 1 : 0);
@@ -122,6 +125,8 @@ if (command === 'import') {
   const value = (await Bun.stdin.text()).trim();
   if (!value || value.length > 4096 || /\s/.test(value))
     fail('stdin must hold one value and nothing else');
+  if (arg === 'cloudflare-token-permissions' && !/^[0-9a-f]{16}$/.test(value))
+    fail('cloudflare-token-permissions must be 16 hex characters');
   store.setCredential(arg as CredentialName, value);
   console.log(`[keeper] stored ${arg}`);
 } else if (command === 'enroll') {

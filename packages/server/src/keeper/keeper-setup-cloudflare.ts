@@ -5,7 +5,11 @@
  * The list is the union of what the callers through the keeper used:
  * sharing (Access applications), `machine:deploy` (the Access reads,
  * `docs/process/project-machine.md`), and the router deploy and
- * `access:apply`, which `infra/cloudflare/` has since replaced. The new token
+ * `access:apply`, which `infra/cloudflare/` has since replaced. Access:
+ * Service Tokens Edit is there for `cf:apply`'s mint step
+ * (`keeper-terraform.ts`), the one path that makes a service token: every
+ * other write under `service_tokens` is refused (`classifyCloudflare`),
+ * because its answer is the new secret. The new token
  * gets no API Tokens permission: the keeper refuses every token write
  * anyway, and a token that cannot make tokens cannot be turned into a wider
  * one.
@@ -16,6 +20,8 @@
  * the keeper exists so that no file they can read holds it. The person's
  * confirmation in `keeper-setup.ts` stays the gate.
  */
+
+import { createHash } from 'node:crypto';
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
@@ -37,6 +43,7 @@ export const CF_TOKEN_PERMISSIONS: readonly CfPermission[] = [
   perm('Access: Apps and Policies', 'Edit', 'account'),
   perm('Access: Apps and Policies', 'Read', 'account'),
   perm('Access: Organizations, Identity Providers, and Groups', 'Read', 'account'),
+  perm('Access: Service Tokens', 'Edit', 'account'),
   perm('Access: Service Tokens', 'Read', 'account'),
   perm('Cloudflare Tunnel', 'Edit', 'account'),
   perm('Workers Scripts', 'Edit', 'account'),
@@ -45,6 +52,37 @@ export const CF_TOKEN_PERMISSIONS: readonly CfPermission[] = [
   perm('SSL and Certificates', 'Read', 'zone'),
   perm('Workers Routes', 'Edit', 'zone'),
 ];
+
+/**
+ * A fingerprint of a permission list, order-blind. The setup stores it beside
+ * the token it makes (`cloudflare-token-permissions`), and a later run makes
+ * the token again when the stored one differs from this list's. Cloudflare
+ * cannot say which permissions a token holds without API Tokens Read, which
+ * the keeper's token deliberately lacks.
+ */
+export function cfPermissionsStamp(list: readonly CfPermission[] = CF_TOKEN_PERMISSIONS): string {
+  const lines = list.map((p) => `${p.scope}:${p.api}`).sort();
+  return createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16);
+}
+
+/**
+ * What the setup does about the keeper's Cloudflare token, from the names
+ * `keeper-bin.ts check` lists and the fingerprint it prints:
+ * - `make`: none is held.
+ * - `remake`: one is held, made for another permission list or before the
+ *   fingerprint was recorded, so it may lack a permission this list grants.
+ * - `account`: an earlier run stored the token and its fingerprint, then
+ *   stopped before the account id.
+ * - `done`: nothing to do.
+ */
+export function cfTokenNeed(
+  held: ReadonlySet<string>,
+  stamp: string | null,
+): 'make' | 'remake' | 'account' | 'done' {
+  if (!held.has('cloudflare-api-token')) return 'make';
+  if (stamp !== cfPermissionsStamp()) return 'remake';
+  return held.has('cloudflare-account-id') ? 'done' : 'account';
+}
 
 /** What to make in the dashboard when the current token cannot make one. */
 export function manualTokenSteps(): string[] {

@@ -91,6 +91,7 @@ prints, step by step:
 == 2. A new Cloudflare token, and the one account it sees
    ok: made a new Cloudflare token with the current one
    ok: the keeper stored cloudflare-api-token
+   ok: the keeper stored cloudflare-token-permissions
    ok: the keeper stored cloudflare-account-id
 == 3. Adopt the project apps made before the keeper
    ok: adopted cw-<project>
@@ -128,14 +129,21 @@ prints, step by step:
   your password once more. The permissions:
   - on the account: Access: Apps and Policies Edit, Access: Apps and
     Policies Read, Access: Organizations, Identity Providers, and Groups
-    Read, Access: Service Tokens Read, Cloudflare Tunnel Edit, Workers
-    Scripts Edit;
+    Read, Access: Service Tokens Edit, Access: Service Tokens Read,
+    Cloudflare Tunnel Edit, Workers Scripts Edit;
   - on all zones of the account: Zone Read, DNS Edit, SSL and Certificates
     Read, Workers Routes Edit;
   - no API Tokens permission.
 
   The account id is the one account the new token sees. It goes to the
   keeper and nowhere else.
+- **When the permissions change:** the setup stores a fingerprint of the
+  list above beside the token. If a later release's list differs, or the
+  keeper's token was stored before fingerprints existed, the next run says
+  `Cloudflare token: the keeper's lacks this release's permissions; a new
+  one is made`, makes a new token the same way after your `y`, and tells you
+  to delete the old one in the dashboard (My Profile, API Tokens, the older
+  token named `claude-workspaces keeper`). Nothing else is made again.
 - **Project apps:** every Fly app named `cw-<project>`, the deploy's name
   for a project, is adopted, so starting and stopping it needs no passkey.
 - **Callers:** `CW_KEEPER_URL` goes into the `env` of
@@ -182,9 +190,12 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
   the tokens it makes. After your tap, cf:apply puts each token's client id
   and secret into your Keychain without printing them. The second page is
   the plan that adopts them. This step needs the keeper's token to hold
-  Access: Service Tokens **Edit**, and the token the setup makes (sections
-  2 to 4) holds only Read, so today the tap fails and nothing is made. Adding Edit is a
-  change of its own (security.md, "Known gaps").
+  Access: Service Tokens **Edit**, which the setup grants. This is the only
+  way the keeper makes a service token: it refuses every other write under
+  `service_tokens`, because the answer is the new secret. A keeper set up
+  before Edit was granted needs the install command (section 1) run once
+  more, at the merge commit that grants it; its setup step makes the new
+  token.
 
 The keeper needs its own `terraform` for this. The install script copies
 yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from

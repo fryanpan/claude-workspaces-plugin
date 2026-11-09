@@ -67,10 +67,13 @@ case "$cmd" in
     creds=$(cd "$S" && ls cred-* 2>/dev/null | sed 's/^cred-//' | tr '\\n' ' ' | sed 's/ $//')
     apps=$(cat "$S/apps" 2>/dev/null | tr '\\n' ' ' | sed 's/ $//')
     echo "credentials: \${creds:-none}"; echo "apps: \${apps:-none}"
+    echo "cloudflare-token-permissions: $(cat "$S/cred-cloudflare-token-permissions" 2>/dev/null || echo none)"
     echo "store: ok, 1 passkeys, 0 apps"; echo "bun: a warning on stderr" >&2 ;;
   port) echo ${PORT} ;;
   import) [ "$arg" = "$FAKE_IMPORT_FAILS" ] && { echo "refused" >&2; exit 1; }
-    cat > "$S/cred-$arg"; echo "[keeper] stored $arg" ;;
+    cat > "$S/cred-$arg"; echo "[keeper] stored $arg"
+    # As the real store does: a new token drops the old one's fingerprint.
+    [ "$arg" = cloudflare-api-token ] && rm -f "$S/cred-cloudflare-token-permissions"; true ;;
   adopt) echo "$arg" >> "$S/apps"; echo "[keeper] $arg may now be started" ;;
   caller-token) t="caller-token-for-tests-$(date +%s%N | tail -c 12)xxxxxxxxxxxxxxxxxxxx"
     printf %s "$t" > "$S/caller"; echo "$t" ;;
@@ -210,6 +213,9 @@ export function fakeFetch(w: World, cf: Cf): typeof fetch {
         );
       }
       if (method === 'DELETE' && url.pathname === '/v1/requests/req1') return json({ ok: true });
+      // The generic Cloudflare route, read with the keeper's own token.
+      if (method === 'GET' && url.pathname === '/v1/cloudflare/accounts')
+        return json({ success: true, result: [{ id: ACCOUNT, name: ACCOUNT_NAME }] });
     }
     return json({}, 404);
   }) as typeof fetch;
