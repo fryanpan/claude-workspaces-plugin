@@ -168,6 +168,39 @@ describe('fullNote — the whole closing message, reduced line by line', () => {
     // negative control: a repo-relative target is the work, not the host
     expect(fullNote('See [x](packages/a.ts)')).toBe('See [x](packages/a.ts)');
   });
+  it('keeps a board link as its path, so the chat panel can open it', () => {
+    // The 8 Nov report: `[open](https://<host>/workspaces/<w>/home?item=…)`
+    // reached the chat panel as `[open]([url])`, which opened
+    // "Workspace not found … [url]".
+    expect(
+      fullNote(
+        'See [the ask](https://board.example/workspaces/w-harbor/home?item=task-review%3At-1%3Ar-2).',
+      ),
+    ).toBe('See [the ask](/workspaces/w-harbor/home?item=task-review%3At-1%3Ar-2).');
+    expect(
+      fullNote('Open http://mac-mini.tailXXXXX.ts.net:8787/workspaces/w-harbor?task=t-1 now'),
+    ).toBe('Open /workspaces/w-harbor?task=t-1 now');
+    expect(fullNote('Open mac-mini.tailXXXXX.ts.net:8787/workspaces/w-harbor/docs/d-1')).toBe(
+      'Open /workspaces/w-harbor/docs/d-1',
+    );
+    // A root-relative board path is kept whole, not cut to its last segment.
+    expect(fullNote('[doc](/workspaces/w-harbor/docs/d-1) and /workspaces/w-river?task=t-9.')).toBe(
+      '[doc](/workspaces/w-harbor/docs/d-1) and /workspaces/w-river?task=t-9.',
+    );
+  });
+  it('drops every parameter of a board link that opens nothing, and any value that reads as a secret', () => {
+    expect(
+      fullNote('https://board.example/workspaces/w-harbor?task=t-1&token=abc&from=x#frag'),
+    ).toBe('/workspaces/w-harbor?task=t-1');
+    expect(fullNote('https://board.example/workspaces/w-harbor?thread=sk-test-FAKE123456')).toBe(
+      '/workspaces/w-harbor',
+    );
+    // Credentials in the URL, or a path segment that reads as a secret, keep the marker.
+    expect(fullNote('https://u:p@board.example/workspaces/w-harbor')).toBe('[url]');
+    expect(fullNote('https://board.example/workspaces/Ab12Cd34Ef56Gh78Ij90Kl')).toBe('[url]');
+    // Negative control: a URL that is not a board page is still a marker.
+    expect(fullNote('https://board.example/api/workspaces')).toBe('[url]');
+  });
   it('reduces inside inline code, emphasis and angle brackets without dropping the markup', () => {
     expect(fullNote('key is `sk-test-FAKEXYZ00000000` in `/Users/x/secret`')).toBe(
       'key is `[token]` in `secret`',

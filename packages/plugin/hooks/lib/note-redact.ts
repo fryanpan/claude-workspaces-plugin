@@ -187,6 +187,8 @@ function reduceLocator(word: string): string {
   const m = /^([("'[`<*_]*)(.*?)([)"'\]`>*_.,;:!?]*)$/.exec(word);
   if (!m) return word;
   const [, open, core, close] = m;
+  const board = boardPathOf(core);
+  if (board !== null) return `${open}${board}${close}`;
   if (URL_RE.test(core)) return `${open}[url]${close}`;
   if (HOST_PATH_RE.test(core) || WIN_PATH_RE.test(core)) {
     return `${open}${basenameOf(core)}${close}`;
@@ -209,6 +211,74 @@ function reduceLocator(word: string): string {
   const opaque = redactOpaque(core);
   if (opaque !== core) return `${open}${opaque}${close}`;
   return word;
+}
+
+/** A board page: `/workspaces/<id>` and anything under it. */
+const BOARD_PATH_RE = /^\/workspaces\/[^/?#\s]+(\/[^?#\s]*)?$/;
+/** The query parameters a board page reads to open something (the client's
+ *  `board-url.ts`, and the lead chat's own link list). Any other parameter is
+ *  dropped: it opens nothing, and a value nobody listed could be anything. */
+const BOARD_LINK_PARAMS: ReadonlySet<string> = new Set([
+  'task',
+  'goal',
+  'thread',
+  'item',
+  'tab',
+  'settings',
+  'list',
+  'place',
+  'view',
+]);
+
+/**
+ * A link to a board page, as the PATH alone — or null for anything else.
+ *
+ * A closing message routinely hands the reader a board link copied from a
+ * tool's `url`, which is absolute. Reduced to `[url]` like any other URL, the
+ * link died: the board's chat panel drew `[text]([url])` as a link to the
+ * relative address `[url]`, which opened "Workspace not found … [url]". The
+ * host is the part that names a machine; the path names a board page the
+ * reader can already see, and it opens on whatever host they read it on. So
+ * the host goes, the path stays, and only the parameters that open something
+ * ride along. A root-relative board path is kept whole instead of being cut to
+ * its last segment the way a host path is.
+ */
+function boardPathOf(core: string): string | null {
+  let rest: string;
+  if (URL_RE.test(core)) {
+    if (!/^https?:\/\//i.test(core)) return null;
+    let u: URL;
+    try {
+      u = new URL(core);
+    } catch {
+      return null;
+    }
+    if (u.username !== '' || u.password !== '') return null;
+    rest = `${u.pathname}${u.search}`;
+  } else if (core.startsWith('/workspaces/')) {
+    rest = core.split('#', 1)[0] ?? '';
+  } else {
+    const schemeless = /^[^/\s]+(\/workspaces\/\S*)$/.exec(core);
+    if (!schemeless || !SCHEMELESS_HOST_RE.test(core) || schemeless[1] === undefined) return null;
+    rest = schemeless[1].split('#', 1)[0] ?? '';
+  }
+  const q = rest.indexOf('?');
+  const path = q === -1 ? rest : rest.slice(0, q);
+  // A path segment that reads as a secret is not a board id: the whole link
+  // falls back to the marker rather than carrying it.
+  if (!BOARD_PATH_RE.test(path) || redactOpaque(path) !== path) return null;
+  const kept = new URLSearchParams();
+  for (const [name, value] of new URLSearchParams(q === -1 ? '' : rest.slice(q + 1))) {
+    if (!BOARD_LINK_PARAMS.has(name)) continue;
+    // Each value is reduced like any other word: an id is short and passes,
+    // a value carrying a token or an address does not ride along.
+    if (redactOpaque(value) !== value || TOKEN_PREFIX_RE.test(value) || EMAIL_RE.test(value)) {
+      continue;
+    }
+    kept.set(name, value);
+  }
+  const search = kept.toString();
+  return `${path}${search ? `?${search}` : ''}`;
 }
 
 /** The word-level reduction pass: the spans that cross a word boundary
