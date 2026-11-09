@@ -26,7 +26,6 @@ import { mountDocFloats } from './doc-floats.ts';
 import { wireDocGates } from './doc-gates.ts';
 import { mountMeetingHeading } from './doc-heading.ts';
 import { mountDocMargin } from './doc-margin.ts';
-import { mountPointerPillLayer } from './doc-pointer-pill.ts';
 import { mountDocPreview } from './doc-preview.ts';
 import { wireDocReady } from './doc-ready.ts';
 import { mountDocSaveState } from './doc-save-state.ts';
@@ -65,12 +64,8 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   const editorMount = el<HTMLElement>('editor');
   const composer = el<HTMLElement>('composer');
   const commentPill = el<HTMLButtonElement>('comment-pill');
-  // The pill's markup says "Add comment" because that is all it ever did, and
-  // on a huddle doc that is now all it leads to as well. It was relabelled
-  // "Turn this line into work" here while a range selection grew a pill
-  // offering Research and Create Task (see doc/doc-pointer-pill.ts); those
-  // went on 2026-09-04, so the label goes with them rather than promising a
-  // menu of work that no longer opens.
+  // A meeting's notes (or a plan) — only the heading reads this now; the
+  // comment pill is the same on every doc.
   const huddle = ctx.huddle === true;
   const formatBar = el<HTMLElement>('format-bar');
   const toggleFormat = el<HTMLButtonElement>('toggle-format');
@@ -187,8 +182,8 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
   void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: false });
 
-  // The two always-in-view floats — Approve (the plan gate) and Review. A
-  // review of somebody's branch, or a companion doc under `navDocId`, is not
+  // The always-in-view float — Approve (the plan gate). A review of
+  // somebody's branch, or a companion doc under `navDocId`, is not
   // a plan a person approves.
   if (ctx.docType === 'markdown' && ctx.navDocId === undefined) {
     // A meeting's title as its page's heading, with its dates under it.
@@ -258,26 +253,14 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   });
 
   // ---- Selection affordances ----
-  // Two modules, wired in the order they depend on each other: the pointer
-  // pill a huddle doc grows over a range (doc-pointer-pill), and the round
-  // comment pill that owns the cached selection it reads (doc-comment-pill).
-  const pointer = mountPointerPillLayer({
-    huddle,
-    editor,
-    editorMount,
-    scope,
-    getSelection: () => pill?.currentSelection() ?? null,
-    hideAll: () => pill?.hide(),
-    openComposer: () => reviewChrome.openComposer(),
-  });
+  // The round comment pill, the same on every markdown doc — meeting notes
+  // and plans included (doc-comment-pill).
   pill = mountCommentPill({
-    huddle,
     editor,
     editorMount,
     composer,
     commentPill,
     scope,
-    pointer,
     openComposer: () => reviewChrome.openComposer(),
     follow: () => editViewport?.follow(),
   });

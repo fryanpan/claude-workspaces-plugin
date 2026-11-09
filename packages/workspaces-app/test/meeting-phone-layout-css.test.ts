@@ -1,12 +1,14 @@
 /**
- * The meeting page as a phone lays it out — the three rules Bryan asked for
+ * The meeting page as a phone lays it out — two of the rules Bryan asked for
  * after holding a meeting on his own phone (2026-09-11):
  *
- *   1. the transcript scrolls and stays ABOVE Make Plan and Review, instead of
- *      ending behind them with nothing left to scroll;
+ *   1. the transcript scrolls and stays ABOVE the floats, instead of ending
+ *      behind them with nothing left to scroll;
  *   2. no status bar under the recording bar — the indicator blinks in the top
- *      right and nothing else is dedicated to it;
- *   3. Make Plan and Review are much shorter and lose their subtitles.
+ *      right and nothing else is dedicated to it.
+ *
+ * His third, shorter Make Plan and Review pills, went with those two buttons
+ * (2026-11-09).
  *
  * These are the CASCADE half: which rule wins at 430 and which at 1180, read
  * as computed values against the real sheets. The geometry half was a
@@ -61,29 +63,10 @@ function pane(opts: { zone?: boolean; float?: boolean; floating?: boolean } = {}
     dock.className = opts.floating ? 'doc-floats is-floating' : 'doc-floats';
     section.appendChild(dock);
     float = document.createElement('button');
-    float.className = 'plan-float plan-float--make';
+    float.className = 'plan-float plan-float--approve';
     dock.appendChild(float);
   }
   return { editor, dock, float };
-}
-
-/** A float with its two lines, as plan-gate.ts and review-float.ts build it.
- *  `face` is the per-state class the renderers toggle. */
-function floatWithSubtitle(
-  parent: Element,
-  face = 'plan-float--make',
-): { button: HTMLElement; sub: HTMLElement } {
-  const button = document.createElement('button');
-  button.className = `plan-float ${face}`;
-  const label = document.createElement('span');
-  label.className = 'plan-float-label';
-  label.textContent = 'Make Plan';
-  const sub = document.createElement('span');
-  sub.className = 'plan-float-sub';
-  sub.textContent = 'Ask your agent to create a plan';
-  button.append(label, sub);
-  parent.appendChild(button);
-  return { button, sub };
 }
 
 describe('the transcript clears the floats (rule 1)', () => {
@@ -126,52 +109,5 @@ describe('no status bar under the recording bar (rule 2)', () => {
     const strip = attach('meeting-strip is-live');
     attach('meeting-feed-inner meeting-caption-line', { parent: strip });
     expect(styleOf(strip).display).toBe('flex');
-  });
-});
-
-describe('Make Plan and Review are one short line (rule 3)', () => {
-  it('a phone drops the subtitle', () => {
-    setViewport(PHONE);
-    const { sub } = floatWithSubtitle(document.body);
-    expect(styleOf(sub).display).toBe('none');
-  });
-
-  it('and the pill stops padding itself past the 44px tap floor', () => {
-    setViewport(PHONE);
-    const { button } = floatWithSubtitle(document.body);
-    const style = styleOf(button);
-    expect(style.paddingTop).toBe('8px');
-    expect(style.paddingBottom).toBe('8px');
-    expect(style.minHeight).toBe('44px');
-  });
-
-  it('the Review ask loses it too — both faces a meeting presses', () => {
-    setViewport(PHONE);
-    const { sub } = floatWithSubtitle(document.body, 'review-float review-float--ask');
-    expect(styleOf(sub).display).toBe('none');
-  });
-
-  it('but a receipt keeps its second line: who asked, and whether anyone is listening', () => {
-    // Not decoration — it is the answer to "did that go anywhere", and it is
-    // the line that was added after a Review press with the lead seat empty
-    // read as if an agent were coming. Approve Plan's subtitle is the
-    // consequence of a press that creates tickets, and keeps it for the same
-    // reason.
-    setViewport(PHONE);
-    for (const face of ['plan-float--requested', 'plan-float--approve']) {
-      const { sub } = floatWithSubtitle(document.body, face);
-      expect(styleOf(sub).display, face).not.toBe('none');
-    }
-  });
-
-  it('control — an iPad keeps both lines and the taller pill', () => {
-    setViewport(IPAD);
-    const { button, sub } = floatWithSubtitle(document.body);
-    const subStyle = styleOf(sub);
-    expect(subStyle.display).not.toBe('none');
-    // Positive control: no rule caps `display` here, so the reading above is
-    // only evidence if the sheet reaches this element at all.
-    expect(subStyle.fontSize).toBe('11.5px');
-    expect(styleOf(button).paddingTop).toBe('10px');
   });
 });

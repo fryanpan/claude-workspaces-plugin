@@ -810,6 +810,16 @@ items ride the doc record the page already reads — `linkedItems` on
 adds no fetch. The bar's measured height is `--doc-dock-h`, which `doc.css`
 takes out of `#shell` and adds to the composer, toast and phone comment sheet.
 
+**A meeting's notes take comments like any other doc.** `doc-floats.ts`
+mounts one float, the plan gate's Approve (`plan-gate.ts`), on a doc an agent
+marked a pending plan. Meeting-notes and plan docs also carried Make Plan and
+a Review float (`review-float.ts`), and a range selection there grew a
+separate pointer pill (`pointer-pill.ts`, `doc/doc-pointer-pill.ts`) instead
+of the round comment pill. Bryan removed both buttons on 2026-11-09, and the
+three modules went with them: every markdown doc now gets the same comment
+pill (`doc/doc-comment-pill.ts`). The server's `plan-request` and
+`review-request` routes are unchanged and now have no caller in the page.
+
 **A thread's ask is answerable in that thread's popover.** When an agent
 answers a reader's comment with a review item, the popover the reader opens
 shows the item: its latest round, the detail with its links, a button per

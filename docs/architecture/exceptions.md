@@ -327,7 +327,6 @@ The remaining 112 are exceptions. Each row names the one harness its cases share
 | `packages/server/test/agent-watches.test.ts` | 774 | Store and route describes share the `AgentWatches` data-dir fixture. |
 | `packages/server/test/comment-durability.test.ts` | 613 | Both describes use the shared `listenFrames()` / `settle()` SSE harness against the agent comment queue. |
 | `packages/server/test/share-link-flow.test.ts` | 1712 | Eight describes over one server: the share hostname, the owner hostname, two boards and a doc on each. The two-audience fixture is the point — every cross-check case is vacuous without both, so splitting the file would mean building it twice. |
-| `packages/workspaces-app/test/plan-gate.test.ts` | 643 | One describe on `mountPlanGate` over the shared `root` / `stubFetch` / `stubTimers` seam. |
 | `packages/server/test/parallelism-cap.test.ts` | 602 | Both describes assert the same workspace cap through the shared frame harness. |
 | `packages/server/test/owner-kind.test.ts` | 621 | The pure `resolveOwnerKind` tables and the HTTP describes are two declared layers of one decision over shared fixtures. |
 | `packages/core/test/thread-summary.test.ts` | 646 | Every describe builds its subject with the module-scope `makeThread()` ydoc builder. |
