@@ -101,7 +101,7 @@
 /* The linked-item dock (doc/linked-dock.ts) is a bar fixed under the page,
    outside the doc. Its measured height is --doc-dock-h, and the page gives
    that height back: the shell ends above the bar, so the doc's last line, the
-   edge strips and the Make Plan / Review floats all sit above it. The fixed
+   edge strips and the Approve float all sit above it. The fixed
    controls that ride --kb-bottom ride the bar too — the composer carries its
    own lift (THE NEW-COMMENT COMPOSER, PLACED); the toast has no section here,
    so its lift is below. The phone's comment sheet (z 950) opens over the bar
@@ -480,10 +480,9 @@ body.is-archived #editor .ProseMirror {
 }
 
 /* The plan doc's one floating control (src/plan-gate.ts) — always at the
-   bottom of the editor pane, wearing one of four faces as the doc moves from
-   an unasked goal to an approved plan: Make Plan, Plan requested, Approve
-   Plan, ✓ Plan Approved. One element rather than a dock of buttons because
-   only ever one of them applies.
+   bottom of the editor pane, wearing one of two faces: Approve Plan while a
+   plan's drafts are held, then ✓ Plan Approved for a few seconds. Make Plan
+   and Plan requested went on 2026-11-09.
 
    It replaces two retired surfaces: the derived-work chip strip (#531 — the
    tasks a doc produced now read through the links written in its prose,
@@ -1895,8 +1894,8 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
 
    The floats (float-dock.ts) are pinned to #editor-pane, not to the prose, so
    they lie OVER the bottom of the scroller; with 8px of padding under the
-   words the scroll ended with the last lines behind Make Plan and Review and
-   nothing left to scroll. This is the dock's own footprint given back as
+   words the scroll ended with the last lines behind the floats and nothing
+   left to scroll. This is the dock's own footprint given back as
    runway: the words clear the buttons at maximum scroll, and at rest the
    transcript still hugs the last line of the doc rather than sitting a screen
    below it.
@@ -2349,9 +2348,9 @@ body.composer-open .composer-scrim.composer-scrim--clear {
 
 /* ================= SPOKEN COMMENTS (doc/voice-note-foot.ts) =================
    A spoken comment's foot on its thread card, and the lift that keeps the
-   fixed agent button clear of a plan's Make Plan and Review row: in the
-   margin column on a wide layout, where the row's two-line cards reach 139px
-   up at 1180, and edge to edge at phone width, 58px up. The button rises
+   fixed agent button clear of a plan's float row (now the Approve float
+   alone): in the margin column on a wide layout, where the row's two-line
+   cards reach 139px up at 1180, and edge to edge at phone width, 58px up. The button rises
    clear of the row while the row shows, and only then. */
 body:has(.doc-floats.is-floating > .plan-float:not([hidden])) {
   --voice-rail-lift: 136px;

@@ -666,7 +666,6 @@ body.is-reading-width #editor > .ProseMirror {
   user-select: none;
 }
 
-/* ===== The pointer pill ===== */
 /* Mobile prose tuning. Trim horizontal padding (40px → 16px) so a
    ~390px viewport doesn't have content squeezed into the middle 300px,
    and scale headings down — 2rem h1 at desktop is gigantic on mobile.
