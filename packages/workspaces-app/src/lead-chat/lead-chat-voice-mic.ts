@@ -55,6 +55,8 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let clockTimer: ReturnType<typeof setTimeout> | null = null;
   /** The track is released while an answer is said. */
   let paused = false;
+  /** Frames the current capture has made, across its pauses. */
+  let framesSeen = 0;
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
   /** A context started outside a tap that is not running yet. */
   let waiting: AudioContext | null = null;
@@ -84,10 +86,12 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   const start = (ctx: AudioContext | undefined): void => {
     const mine = gen;
     let frames = 0;
+    framesSeen = 0;
     void (opts.startCapture ?? startSpokenCapture)({
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
         frames++;
+        framesSeen++;
         if (mine === gen) opts.onFrame(pcm);
       },
     }).then((r) => {
@@ -100,6 +104,8 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         return;
       }
       capture = r.capture;
+      // An answer began while the mic was opening: let go of it now.
+      if (paused) r.capture.pause?.();
       const diag = r.capture.diag;
       const startedAt = r.capture.clock?.();
       /** The clock never moved, so a tap's fresh context may run where this
@@ -180,18 +186,31 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
       return true;
     },
     pause() {
-      if (!capture?.pause) return;
+      if (capture && !capture.pause) return;
       paused = true;
-      capture.pause();
+      capture?.pause?.();
     },
     unpause() {
       const held = capture;
-      if (!paused || !held) return;
+      if (!paused) return;
       paused = false;
+      if (!held) return;
       const mine = gen;
       void held.unpause?.().then((ok) => {
-        if (ok || mine !== gen || paused) return;
-        opts.onRefused('The microphone could not be opened again.');
+        if (mine !== gen || paused) return;
+        if (!ok) {
+          opts.onRefused('The microphone could not be opened again.');
+          return;
+        }
+        // The reopened track has its own chance to send nothing.
+        const before = framesSeen;
+        if (soundTimer) clearTimeout(soundTimer);
+        soundTimer = setTimeout(() => {
+          soundTimer = null;
+          if (mine !== gen || paused || framesSeen > before) return;
+          const said = held.diag?.() || 'no report';
+          opts.onSilent(`${said}; ${how}, reopened after an answer`);
+        }, NO_SOUND_MS);
       });
     },
     live: () => capture !== null && !paused,

@@ -281,7 +281,9 @@ export function createSpokenPlayer(opts: SpokenPlayerOpts): SpokenPlayer {
   let active = false;
   let marks: Array<(audibleAt: number) => void> = [];
   /** Headroom for a fresh start: doubles each time the queue runs dry, so a
-   *  network that delivers late stops leaving a gap at every chunk. */
+   *  network that delivers late stops leaving a gap at every chunk. Kept for
+   *  the page's life on purpose: the network that ran dry once is the one
+   *  the next answer comes over. */
   let lead = LEAD_S;
   let chunks = 0;
   let underruns = 0;

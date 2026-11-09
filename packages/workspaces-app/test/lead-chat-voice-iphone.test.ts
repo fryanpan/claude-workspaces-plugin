@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackContext } from '../src/board/spoken-reply-audio.ts';
 import { PLAYBACK_REPORTS } from '../src/lead-chat/lead-chat-voice-io.ts';
-import { type LeadVoice, createLeadVoice } from '../src/lead-chat/lead-chat-voice.ts';
+import { type LeadVoice, NO_SOUND, createLeadVoice } from '../src/lead-chat/lead-chat-voice.ts';
 import { type FakeSocket, fakeVoice } from './lead-chat-voice-fakes.ts';
 
 /** Speakers at the phone's 48 kHz, with the latencies Safari reports. */
@@ -106,6 +106,57 @@ describe('the lead chat voice, while an answer is said on an iPhone', () => {
       notice: 'The microphone could not be opened again.',
     });
     expect(reports.map((e) => e.name)).toContain('LeadVoiceStopped');
+  });
+});
+
+describe('the lead chat voice, taking the mic back after an answer', () => {
+  it('stops and reports it when the reopened mic sends nothing', async () => {
+    const { fake, ws, voice, reports } = await asking();
+    fake.speak();
+    await answer(ws);
+    expect(voice.state().phase).toBe('listening');
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'off', notice: NO_SOUND });
+    const stop = reports.find((e) => e.name === 'LeadVoiceStopped');
+    expect(stop?.message).toContain('reopened after an answer');
+  });
+
+  it('keeps listening when the reopened mic sends frames', async () => {
+    const { fake, ws, voice } = await asking();
+    fake.speak();
+    await answer(ws);
+    fake.speak();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+  });
+
+  it('lets go of a mic that finished opening only after the answer began', async () => {
+    vi.useFakeTimers();
+    const fake = fakeVoice();
+    const open = fake.seams.startCapture;
+    let ready: () => void = () => {};
+    fake.seams.startCapture = async (c) => {
+      await new Promise<void>((done) => (ready = done));
+      if (!open) throw new Error('no capture');
+      return open(c);
+    };
+    voice = createLeadVoice({
+      ...fake.seams,
+      playbackContext: () => speakers() as unknown as PlaybackContext,
+      workspaceId: 'w-harbor',
+      author: { id: 'known-alice', name: 'Alice', kind: 'known' },
+      getContext: () => ({ surface: 'board' }),
+      agent: () => 'harborlight-lead',
+      onChange: () => {},
+    });
+    voice.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = fake.socket();
+    ws.open();
+    ws.serve({ type: 'audio-start', sampleRate: 24_000 });
+    ready();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.mic.pauses).toBe(1);
   });
 });
 

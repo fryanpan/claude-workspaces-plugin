@@ -334,6 +334,8 @@ export async function createAudioPump(
       current = next;
       source = ctx.createMediaStreamSource(next);
       if (sink) source.connect(sink);
+      // As at the first open: a new capture can mark the context interrupted.
+      if (ctx.state !== 'running') void ctx.resume().catch(() => {});
     },
     diag: () =>
       [
