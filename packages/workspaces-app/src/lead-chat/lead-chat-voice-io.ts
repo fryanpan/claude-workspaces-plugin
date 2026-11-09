@@ -65,3 +65,21 @@ export function playbackError(f: PlaybackFacts, mic: 'live' | 'released' | 'off'
   err.name = 'LeadVoicePlayback';
   return err;
 }
+
+/** Call `fn` each time the page is shown again: visible after being hidden
+ *  (iOS backgrounding the tab or the app), or restored from the
+ *  back-forward cache. Returns the unsubscribe. */
+export function onPageReturn(fn: () => void): () => void {
+  const onVisible = (): void => {
+    if (document.visibilityState === 'visible') fn();
+  };
+  const onShow = (ev: Event): void => {
+    if ((ev as PageTransitionEvent).persisted) fn();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('pageshow', onShow);
+  return () => {
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('pageshow', onShow);
+  };
+}
