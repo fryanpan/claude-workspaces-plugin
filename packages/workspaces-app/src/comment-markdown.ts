@@ -19,8 +19,10 @@
  * or goal. Display-only: the stored comment keeps the raw URL. An explicit
  * [label](url) keeps the author's text but a workspace target still earns the
  * chip (`data-ws-custom` is how hydration knows not to touch the words); and
- * non-workspace URLs stay plain text — unless the caller passes `bareLinks`,
- * as the lead chat does, whose agent pastes PR and CI links bare.
+ * a bare non-workspace http(s) URL is a plain new-tab link unless the caller
+ * passes `bareLinks: false`. A relative target (`../plan.md`) goes to the
+ * board's open route (`relativeTargetHref`), and a redactor's `[url]` marker
+ * as a target leaves the label as text.
  */
 import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
 import {
@@ -57,7 +59,9 @@ function safeHref(url: string): string | null {
 }
 
 export interface CommentMarkdownOpts {
-  /** Link a bare http(s) URL that is not a workspace one, too. */
+  /** Link a bare http(s) URL that is not a workspace one, too. On unless a
+   *  caller passes `false`: a pasted PR or CI link drawn as plain text cannot
+   *  be opened on a phone at all, where nobody can select and copy it. */
   bareLinks?: boolean;
   /** Open a link to this board's own pages in the same tab, so a plain
    *  click stays on the board and Ctrl- or Cmd-click opens a new tab — the
@@ -102,6 +106,47 @@ function isAddressLabel(label: string, url: string, link: WorkspaceLink): boolea
   }
 }
 
+/** The markers the plugin's note reducer leaves where a URL, a token or an
+ *  address was (`packages/plugin/hooks/lib/note-redact.ts`). */
+const REDACTION_MARKER = /^\[(?:url|redacted|token|email)\]$/;
+
+function currentPathname(): string {
+  return typeof window !== 'undefined' ? window.location.pathname : '';
+}
+
+/**
+ * The board's open route for a RELATIVE link target, or null.
+ *
+ * An agent writes `[note](../dir/plan.md)` from its own checkout, where the
+ * path is right. On a page it is wrong: the browser resolves it against the
+ * page's address and lands on `/dir/plan.md`, which nothing serves. The
+ * server holds what the browser does not — which docs this board has, and the
+ * file each one is bound to — so the link goes to
+ * `/workspaces/<ws>/open?path=…`, which redirects to that doc or says it has
+ * none. On a doc's own page `from` names the doc, so a path relative to it
+ * resolves against its file first.
+ *
+ * Null for a scheme, a root-relative path, an anchor or a query (each already
+ * means something on a page), and off a board's pages, where no board can
+ * answer.
+ */
+export function relativeTargetHref(target: string, pathname: string): string | null {
+  const t = target.trim();
+  if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t)) return null;
+  if (t.startsWith('/') || t.startsWith('#') || t.startsWith('?')) return null;
+  const m = /^\/workspaces\/([^/]+)(?:\/(?:docs|mockups)\/([^/]+))?/.exec(pathname);
+  if (!m?.[1]) return null;
+  const params = new URLSearchParams({ path: t });
+  if (m[2]) {
+    try {
+      params.set('from', decodeURIComponent(m[2]));
+    } catch {
+      // A malformed id names no doc; the path alone still resolves.
+    }
+  }
+  return `/workspaces/${m[1]}/open?${params.toString()}`;
+}
+
 /** Inline marks on an ALREADY-escaped string. Order matters: code first so
  *  its contents aren't re-marked, links last so labels can carry marks. */
 function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
@@ -115,9 +160,17 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
   out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label: string, rawUrl: string) => {
     // The URL text was HTML-escaped; unescape &amp; for parsing, then re-escape.
     const url = rawUrl.replace(/&amp;/g, '&');
+    const newTab = 'target="_blank" rel="noopener noreferrer"';
+    // A target a redactor replaced is no address: drawn as a link it resolved
+    // against the page and opened "No board answers to [url]". The words stay.
+    if (REDACTION_MARKER.test(url.trim())) return label;
+    // A relative path (`../notes/plan.md`) names a file, not a page of this
+    // server. Resolved against the page it opened a 404; the board's open
+    // route finds the doc on this board that the path names.
+    const fileHref = relativeTargetHref(url, currentPathname());
+    if (fileHref) return `<a href="${escapeHtml(fileHref)}" ${newTab}>${label}</a>`;
     const href = safeHref(url);
     if (!href) return m;
-    const newTab = 'target="_blank" rel="noopener noreferrer"';
     // A workspace target keeps the author's label but is still marked, so a
     // task/goal link can wear its status chip once hydration answers. Same
     // origin rule as the bare-URL pass — a foreign lookalike stays unmarked.
@@ -200,7 +253,7 @@ function trimUrlTail(s: string): string {
  * markup, and the text segments are still escape-first.
  */
 function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
-  const bareLinks = opts.bareLinks === true;
+  const bareLinks = opts.bareLinks !== false;
   if (!/https?:\/\/|\/workspaces\//.test(html)) return html;
   let anchorDepth = 0;
   let codeDepth = 0;
