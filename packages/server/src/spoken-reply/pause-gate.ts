@@ -92,6 +92,10 @@ export class PauseGate {
     private timing: SpokenPause = SPOKEN_PAUSE_DEFAULT,
     /** What counts as not yet a sentence; a tapped request reads more. */
     private readonly unfinished: (text: string) => boolean = midSentence,
+    /** Whether the listener's final turn opens the gate. A meeting's lead
+     *  line waits for silence instead (`lead-line-hold.ts`): Soniox settles a
+     *  mid-thought stop in about 200ms, so a final says nothing there. */
+    private readonly finalOpens = true,
   ) {}
 
   /** What the listener heard: the turn so far, and whether it is final. */
@@ -102,7 +106,7 @@ export class PauseGate {
     if (news) this.called = false;
     if (!t || this.called) return;
     const unfinished = this.unfinished(t);
-    if (final && !unfinished) {
+    if (final && !unfinished && this.finalOpens) {
       this.cancel();
       this.call();
       return;

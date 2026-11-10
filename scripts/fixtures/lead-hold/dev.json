@@ -1,0 +1,1150 @@
+{
+ "about": "Development set for the lead hold measurement. Invented talk; the label at any moment is fixed by the script: a release before the last word of the talk is a cut-in.",
+ "set": "dev",
+ "points": [
+  {
+   "id": "d-c1-01",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "So we could, um",
+     "gapAfterMs": 2500
+    },
+    {
+     "who": "Alice",
+     "text": "move the pier to the east side."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c1-02",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "The survey boats are, uh",
+     "gapAfterMs": 2000
+    },
+    {
+     "who": "Bob",
+     "text": "booked through the end of May."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c1-03",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "I think the main thing is, um,",
+     "gapAfterMs": 1800
+    },
+    {
+     "who": "Harborlight",
+     "text": "getting the permits in early."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c1-04",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "What we need is uh",
+     "gapAfterMs": 2200
+    },
+    {
+     "who": "Riverbend",
+     "text": "another crew for the night shift."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c1-05",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "Last year we, er",
+     "gapAfterMs": 1600
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "ran out of fuel twice in March."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   },
+   "before": [
+    {
+     "who": "Alice",
+     "text": "Let us talk about the boats."
+    }
+   ]
+  },
+  {
+   "id": "d-c1-06",
+   "class": 1,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "And the ferry timetable is, um",
+     "gapAfterMs": 2800
+    },
+    {
+     "who": "Alice",
+     "text": "still the winter one."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c2-01",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "Saltmarsh is late.",
+     "gapAfterMs": 1800
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Because the dredge broke down on Tuesday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c2-02",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "The budget is fine.",
+     "gapAfterMs": 1500
+    },
+    {
+     "who": "Alice",
+     "text": "What worries me is the schedule."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c2-03",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "We tried the north channel",
+     "gapAfterMs": 1700
+    },
+    {
+     "who": "Bob",
+     "text": "and it silted up again within a week."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c2-04",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "Riverbend wants a second berth.",
+     "gapAfterMs": 2000
+    },
+    {
+     "who": "Harborlight",
+     "text": "They asked for it in writing, and they want an answer by Friday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c2-05",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "I spoke to the harbour office yesterday.",
+     "gapAfterMs": 1400
+    },
+    {
+     "who": "Riverbend",
+     "text": "They will not move the date."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   },
+   "before": [
+    {
+     "who": "Alice",
+     "text": "Any news from the office?"
+    }
+   ]
+  },
+  {
+   "id": "d-c2-06",
+   "class": 2,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "That is one option.",
+     "gapAfterMs": 1900
+    },
+    {
+     "who": "Alice",
+     "text": "The other is to hire the boats from Saltmarsh for the season."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c3-01",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "Three things. First the pier.",
+     "gapAfterMs": 1500
+    },
+    {
+     "who": "Harborlight",
+     "text": "Second the ferry.",
+     "gapAfterMs": 1400
+    },
+    {
+     "who": "Harborlight",
+     "text": "And third the budget for April."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c3-02",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "Two problems.",
+     "gapAfterMs": 1300
+    },
+    {
+     "who": "Alice",
+     "text": "One, the crane is broken.",
+     "gapAfterMs": 1600
+    },
+    {
+     "who": "Alice",
+     "text": "Two, nobody can fix it before May."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c3-03",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "There are a few steps here. We dredge the channel",
+     "gapAfterMs": 1500
+    },
+    {
+     "who": "Bob",
+     "text": "then we survey it",
+     "gapAfterMs": 1200
+    },
+    {
+     "who": "Bob",
+     "text": "and then Riverbend signs off."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 4
+   }
+  },
+  {
+   "id": "d-c3-04",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "So first, the permits.",
+     "gapAfterMs": 1700
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Then the crew.",
+     "gapAfterMs": 1500
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Then the boats."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c3-05",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "I have four points. The first is cost.",
+     "gapAfterMs": 1600
+    },
+    {
+     "who": "Riverbend",
+     "text": "The second is time,",
+     "gapAfterMs": 1300
+    },
+    {
+     "who": "Riverbend",
+     "text": "the third is the weather,",
+     "gapAfterMs": 1400
+    },
+    {
+     "who": "Riverbend",
+     "text": "and the last is the crew."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c3-06",
+   "class": 3,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "On the agenda we have the survey",
+     "gapAfterMs": 1400
+    },
+    {
+     "who": "Alice",
+     "text": "the berth",
+     "gapAfterMs": 1200
+    },
+    {
+     "who": "Alice",
+     "text": "and the ferry fares."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c4-01",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "It was the",
+     "gapAfterMs": 3500
+    },
+    {
+     "who": "Alice",
+     "text": "Harborlight berth, the old one."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c4-02",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "We should call the",
+     "gapAfterMs": 3000
+    },
+    {
+     "who": "Bob",
+     "text": "harbour master before Monday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c4-03",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "The part we need is the, what is it",
+     "gapAfterMs": 3200
+    },
+    {
+     "who": "Harborlight",
+     "text": "the winch cable."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c4-04",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "They are sending the",
+     "gapAfterMs": 2600
+    },
+    {
+     "who": "Riverbend",
+     "text": "the inspector on Thursday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c4-05",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "Our contact at Riverbend is",
+     "gapAfterMs": 3800
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Alice, I think."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c4-06",
+   "class": 4,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "The thing with the",
+     "gapAfterMs": 2900
+    },
+    {
+     "who": "Alice",
+     "text": "tide tables is they are a year old."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c5-01",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "Why does that matter?",
+     "gapAfterMs": 1200
+    },
+    {
+     "who": "Harborlight",
+     "text": "Well, the ferry cannot dock at low tide."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c5-02",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "So what do we do about it?",
+     "gapAfterMs": 1500
+    },
+    {
+     "who": "Alice",
+     "text": "I think we wait for the survey."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c5-03",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "Is that a problem?",
+     "gapAfterMs": 1100
+    },
+    {
+     "who": "Bob",
+     "text": "Not really, we have budget for it."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c5-04",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "Who owns the berth?",
+     "gapAfterMs": 1400
+    },
+    {
+     "who": "Riverbend",
+     "text": "Saltmarsh does, since last spring."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c5-05",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "How long will it take?",
+     "gapAfterMs": 1300
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "About three weeks if the weather holds."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c5-06",
+   "class": 5,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "Why are we late?",
+     "gapAfterMs": 1000
+    },
+    {
+     "who": "Alice",
+     "text": "Because the dredge contract slipped."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   },
+   "before": [
+    {
+     "who": "Bob",
+     "text": "We are behind on the channel."
+    }
+   ]
+  },
+  {
+   "id": "d-c6-01",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "The Harborlight survey needs two boats.",
+     "gapAfterMs": 700
+    },
+    {
+     "who": "Bob",
+     "text": "Mm-hm.",
+     "gapAfterMs": 600
+    },
+    {
+     "who": "Alice",
+     "text": "And we only have one until June."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c6-02",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "We could move the ferry stop",
+     "gapAfterMs": 600
+    },
+    {
+     "who": "Riverbend",
+     "text": "Right.",
+     "gapAfterMs": 500
+    },
+    {
+     "who": "Harborlight",
+     "text": "to the south pier for the summer."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c6-03",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "I priced the hire last week.",
+     "gapAfterMs": 800
+    },
+    {
+     "who": "Alice",
+     "text": "Yeah.",
+     "gapAfterMs": 700
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "It comes to about twice what we paid before."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c6-04",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "The crane is fixed.",
+     "gapAfterMs": 600
+    },
+    {
+     "who": "Harborlight",
+     "text": "Okay.",
+     "gapAfterMs": 600
+    },
+    {
+     "who": "Bob",
+     "text": "But the operator is away until Monday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c6-05",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "So the plan is to start in March",
+     "gapAfterMs": 700
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Mm.",
+     "gapAfterMs": 500
+    },
+    {
+     "who": "Riverbend",
+     "text": "and finish before the summer ferries."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c6-06",
+   "class": 6,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "Riverbend agreed to the price.",
+     "gapAfterMs": 900
+    },
+    {
+     "who": "Bob",
+     "text": "Uh-huh.",
+     "gapAfterMs": 600
+    },
+    {
+     "who": "Alice",
+     "text": "They want it in writing though."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c7-01",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "That is the plan for the berth.",
+     "gapAfterMs": 250
+    },
+    {
+     "who": "Bob",
+     "text": "Okay, and what about the crane?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c7-02",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "So we wait for the survey.",
+     "gapAfterMs": 200
+    },
+    {
+     "who": "Riverbend",
+     "text": "I can chase the survey team tomorrow."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c7-03",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "We hire the boats from Riverbend.",
+     "gapAfterMs": 150
+    },
+    {
+     "who": "Alice",
+     "text": "Agreed. I will put it on the budget."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c7-04",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "I think we are done with the ferry.",
+     "gapAfterMs": 300
+    },
+    {
+     "who": "Harborlight",
+     "text": "Good. Next is the pier lighting."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c7-05",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "The tide tables are updated.",
+     "gapAfterMs": 250
+    },
+    {
+     "who": "Saltmarsh",
+     "text": "Thanks. I will send them to the crew."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c7-06",
+   "class": 7,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "That covers the permits.",
+     "gapAfterMs": 200
+    },
+    {
+     "who": "Bob",
+     "text": "One more thing on the permits.",
+     "gapAfterMs": 300
+    },
+    {
+     "who": "Bob",
+     "text": "They expire in June."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c8-01",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "That's the plan for Riverbend."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c8-02",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "We start the survey on the first Monday of March."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c8-03",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "The ferry will stop at the south pier until the work is done."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c8-04",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "I sent the price to Riverbend this morning. They accepted it."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c8-05",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "So the decision is to hire, not buy."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c8-06",
+   "class": 8,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "The crane is fixed and the operator is back on Monday."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c9-01",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "So, yeah, and that's it, I guess, and\u2026"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c9-02",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "Anyway that is where we are with the boats, so"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c9-03",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "I think that covers it, um"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c9-04",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "That was the survey, and"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c9-05",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "So, the budget is fine and the crew is ready, and yeah, that is about it, I suppose, but"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 4
+   }
+  },
+  {
+   "id": "d-c9-06",
+   "class": 9,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "Yeah, so that is everything from me on the pier, or"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c10-01",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "That is the berth plan. Any questions?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c10-02",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Harborlight",
+     "text": "So we hire the boats. What do people think?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c10-03",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Bob",
+     "text": "I have nothing else on the ferry. Lead, anything from you?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 3
+   }
+  },
+  {
+   "id": "d-c10-04",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Riverbend",
+     "text": "Does anyone want to add something?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 1
+   }
+  },
+  {
+   "id": "d-c10-05",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Saltmarsh",
+     "text": "That is my update. Over to you."
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 2
+   }
+  },
+  {
+   "id": "d-c10-06",
+   "class": 10,
+   "talk": [
+    {
+     "who": "Alice",
+     "text": "Thoughts?"
+    }
+   ],
+   "requestAt": {
+    "segment": 0,
+    "word": 0
+   },
+   "before": [
+    {
+     "who": "Alice",
+     "text": "The survey starts in March and the boats come from Saltmarsh."
+    }
+   ]
+  }
+ ]
+}
