@@ -654,6 +654,12 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // says no. Keeping the path a member route is what lets a PROMOTED owner
   // retune their own board from the share hostname.
   settings: ['GET', 'PUT'],
+  // The board's embed mapping (`routes/workspace-embeds.ts`): which
+  // `::name{block="…"}` doc paragraphs draw a frame, and from where. A doc
+  // on this board renders it for every reader, so refusing the read left a
+  // member looking at the directive as plain text. GET only: the PUT is
+  // board configuration and stays the owner's, from their own host.
+  embeds: ['GET'],
   // The Activity tab. Rows are passed through the same visitor redaction the
   // board's live event stream uses, so actor ids do not arrive here by the
   // one door nothing was checking.

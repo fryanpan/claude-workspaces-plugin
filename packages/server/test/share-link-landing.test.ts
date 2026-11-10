@@ -320,6 +320,60 @@ describe('share link landing and the shared library', () => {
     });
   });
 
+  /**
+   * A doc's `::name{block="…"}` paragraph is drawn as a frame from the board's
+   * embed mapping. A member who could not read the mapping saw the directive
+   * as plain text where the owner saw the frame.
+   */
+  describe("the board's embeds for a member", () => {
+    const EMBEDS = {
+      harborlight: {
+        origin: 'https://harborlight.example',
+        pathTemplate: '{origin}/embed/{block}/',
+      },
+    };
+    const path = (ws: string) => `/workspaces/${ws}/embeds`;
+
+    beforeAll(async () => {
+      writeFileSync(join(dataDir, 'embed-origins.json'), '["https://harborlight.example"]');
+      const set = await req(path(board), `localhost:${handle.port}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ embeds: EMBEDS }),
+      });
+      expect(set.status, await set.clone().text()).toBe(200);
+    });
+
+    it('reads the mapping, and the doc page puts no frame-src in its way', async () => {
+      const linkId = await mintLinkId(board, { kind: 'doc', id: docId });
+      expect((await onShareHost(`/s/${linkId}`, MEMBER)).status).toBe(302);
+      const r = await onShareHost(path(board), MEMBER);
+      expect(r.status, await r.clone().text()).toBe(200);
+      expect(await r.json()).toEqual({ workspaceId: board, embeds: EMBEDS });
+      const page = await onShareHost(
+        `/workspaces/${board}/docs/${encodeURIComponent(docId)}`,
+        MEMBER,
+      );
+      const csp = page.headers.get('content-security-policy') ?? '';
+      const frameSrc = /(?:^|;)\s*(?:frame-src|child-src|default-src)\s+([^;]*)/.exec(csp);
+      if (frameSrc) expect(frameSrc[1]).toContain('https://harborlight.example');
+    });
+
+    it('refuses a member the write, a non-member the read, and another board', async () => {
+      const put = await onShareHost(path(board), MEMBER, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ embeds: {} }),
+      });
+      expect(put.status).toBe(403);
+      expect((await onShareHost(path(board), STRANGER)).status).toBe(403);
+      expect((await onShareHost(path(otherBoard), MEMBER)).status).toBe(403);
+      // The refused write changed nothing.
+      const owner = await req(path(board), `localhost:${handle.port}`);
+      expect(((await owner.json()) as { embeds: unknown }).embeds).toEqual(EMBEDS);
+    });
+  });
+
   describe('the board is one tap from where a link lands', () => {
     it("a doc names the member's board as its back arrow", async () => {
       const linkId = await mintLinkId(board, { kind: 'doc', id: docId });

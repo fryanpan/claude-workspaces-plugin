@@ -1,0 +1,56 @@
+/**
+ * A share-link member opening a doc with a `::name{block="…"}` line on the
+ * share hostname sees the board's embed frame, as the owner does.
+ *
+ * Reported on a shared board: the member saw the directive as plain text,
+ * because the board's embed mapping was on no member route and the doc's
+ * frame plugin draws nothing without it. Real browser, real server, real doc
+ * bundle, and a genuine Access token on every request.
+ */
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { chromeForSuite } from '../../../scripts/browser-tests.ts';
+import type { ShareEmbedReading } from './share-embed-browser-driver.ts';
+
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
+
+/** A doc bundle build, one launch and one page. */
+const SUITE_MS = 200_000;
+const SPAWN_MS = 180_000;
+const CASE_MS = 60_000;
+
+let r: ShareEmbedReading;
+
+describe.skipIf(CHROME === null)("a share-link member sees the board's embed frame", () => {
+  beforeAll(() => {
+    const run = spawnSync('bun', [join(import.meta.dirname, 'share-embed-browser-driver.ts')], {
+      encoding: 'utf8',
+      timeout: SPAWN_MS,
+    });
+    expect(run.status, run.stderr).toBe(0);
+    r = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? '') as ShareEmbedReading;
+  }, SUITE_MS);
+
+  it(
+    "reads the board's embed mapping from the share hostname",
+    () => {
+      expect(r.embedsStatus).toBe(200);
+    },
+    CASE_MS,
+  );
+
+  it(
+    'draws the frame at the allowlisted origin for the directive',
+    () => {
+      expect(r.frame).toEqual({
+        src: 'https://harborlight.example/embed/ferry-map/',
+        origin: 'https://harborlight.example',
+        block: 'ferry-map',
+      });
+    },
+    CASE_MS,
+  );
+});

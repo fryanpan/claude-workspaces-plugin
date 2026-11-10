@@ -270,7 +270,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/voice-feedback.md` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/voice-feedback/:file` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/y` | GET | `routes/upgrade-stream.ts` | share-scope |  |
-| `/workspaces/:ws/embeds` | GET, PUT | `routes/workspace-embeds.ts` | trusted-local |  |
+| `/workspaces/:ws/embeds` | GET | `routes/workspace-embeds.ts` | share-scope |  |
+| `/workspaces/:ws/embeds` | PUT | `routes/workspace-embeds.ts` | trusted-local |  |
 | `/workspaces/:ws/events` | GET | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/github-subscriptions` | GET, PUT | `routes/github-hub.ts` | loopback-only |  |
