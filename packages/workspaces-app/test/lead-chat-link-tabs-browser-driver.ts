@@ -47,6 +47,11 @@ import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
+/** Fixed ids shaped like the server's base64url ones, each with a `_` run a
+ *  markdown pass once read as italics inside the href. The board's own id is
+ *  minted by the store, so these two are where the case is pinned. */
+const DOC_ID = 'd-_Rb_tide';
+const MOCK_ID = 'd-_Sm_-mud';
 
 export type LinkName = 'mock' | 'doc' | 'external';
 export type Gesture = 'tap' | 'touch' | 'new-tab-click';
@@ -269,10 +274,13 @@ async function main(): Promise<void> {
 
     const plan = join(dir, 'riverbend-summary.md');
     writeFileSync(plan, '# Riverbend summary\n');
+    // The route mints a random id for a new name, so each fixed id is made
+    // first and the route files it on the board by that id.
+    server.docStore.getOrCreate(DOC_ID, { type: 'markdown', sourceUrl: plan });
     const docId = String(
       (
         (await post(`/workspaces/${ws}/docs`, {
-          docId: 'riverbend-summary',
+          docId: DOC_ID,
           type: 'markdown',
           title: 'Riverbend summary',
           sourceUrl: plan,
@@ -282,10 +290,11 @@ async function main(): Promise<void> {
     // `attach_mockup(docId, sourceHtmlPath)`, as the MCP tool sends it.
     const source = join(dir, 'saltmarsh-home.html');
     writeFileSync(source, '<!doctype html><html><body><h1>Saltmarsh tides</h1></body></html>');
+    server.docStore.getOrCreate(MOCK_ID, { type: 'mockup', sourceUrl: source });
     const mockId = String(
       (
         (await post(`/workspaces/${ws}/docs`, {
-          docId: 'saltmarsh-home-mock',
+          docId: MOCK_ID,
           type: 'mockup',
           sourceUrl: source,
           title: 'Saltmarsh home mock',
