@@ -9,12 +9,13 @@
  * widens nothing else: no other board, nobody the audience does not name,
  * and removing them still ends it.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { AUDIENCE_ONLY, ShareLinks } from '../src/share/share-links.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
@@ -173,5 +174,50 @@ describe('a board audience entry admits its person with no link', () => {
     expect(handle.shareLinks.removeMember(harborlight, BOB)).toBe(true);
     expect((await as(BOB, docPath(harborlight))).status).toBe(403);
     expect(handle.shareLinks.isMember(harborlight, BOB)).toBe(false);
+  });
+});
+
+describe('the store: an audience entry admits on its own', () => {
+  const BOARD = 'w-board-1';
+  const REVIEWER = 'alice@partner.example';
+  const OTHER_REVIEWER = 'bob@partner.example';
+  let dataDir: string;
+  let links: ShareLinks;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'audience-admits-store-'));
+    links = new ShareLinks({ dataDir });
+    links.addToAudience(BOARD, ['@partner.example'], 'Bryan');
+  });
+  afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
+
+  it('lets in an address it names on the first ask, with no link, as a regular member', () => {
+    expect(links.forWorkspace(BOARD)).toEqual([]);
+    expect(links.isMember(BOARD, REVIEWER)).toBe(true);
+    const row = links.membersOf(BOARD).find((m) => m.email === REVIEWER);
+    expect(row?.viaLinkId).toBe(AUDIENCE_ONLY);
+    expect(links.roleOf(BOARD, REVIEWER)).toBe('member');
+    // Written down, so a restart keeps them listed.
+    expect(new ShareLinks({ dataDir }).membersOf(BOARD).map((m) => m.email)).toEqual([REVIEWER]);
+  });
+
+  it('lets in nobody it does not name, and writes no row for them', () => {
+    expect(links.isMember(BOARD, 'alice@harborlight.example')).toBe(false);
+    expect(links.membersOf(BOARD)).toEqual([]);
+  });
+
+  it('ends on removal, and a removed person is not let back in by the domain', () => {
+    expect(links.isMember(BOARD, REVIEWER)).toBe(true);
+    expect(links.removeMember(BOARD, REVIEWER)).toBe(true);
+    expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+    expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(true);
+    expect(links.removeFromAudience(BOARD, '@partner.example')).toEqual([OTHER_REVIEWER]);
+    expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(false);
+  });
+
+  it('does not cost a redeemed link its role', () => {
+    const owner = links.create({ workspaceId: BOARD, createdBy: 'Test Agent', role: 'owner' });
+    expect(links.redeem(owner.linkId, REVIEWER).ok).toBe(true);
+    expect(links.roleOf(BOARD, REVIEWER)).toBe('owner');
   });
 });
