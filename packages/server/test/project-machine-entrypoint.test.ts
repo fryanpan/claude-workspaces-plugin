@@ -133,7 +133,7 @@ describe.skipIf(BASH === null)('the project machine process tree', () => {
     }
   }, 30_000);
 
-  it("runs the project's dev server as cwdev, in its own folder, with PATH and nothing else", async () => {
+  it("runs the project's dev server as cwdev, in its own folder, with PATH and the proxy's address and nothing else", async () => {
     const devRecord = `d=$(dirname "$0")/../log; f=$(/usr/bin/mktemp "$d/.part.XXXXXX")
 { echo "uid=\${STUB_UID:-root}"; echo "argv=devserve $*"; /usr/bin/env; } > "$f"
 /bin/mv "$f" "$d/rec.dev.$$"
@@ -160,7 +160,20 @@ exec /bin/sleep 1000`;
       expect(rec?.env.get('HOME')).toBe('/home/cwdev');
       const bashOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD']);
       expect([...(rec?.env.keys() ?? [])].filter((k) => !bashOwn.has(k)).sort()).toEqual(
-        ['HOME', 'LOGNAME', 'PATH', 'STUB_UID', 'USER'].sort(),
+        [
+          'HOME',
+          'LOGNAME',
+          'PATH',
+          'STUB_UID',
+          'USER',
+          // The network wall's proxy (lead-proxy.ts), its one way out.
+          'HTTPS_PROXY',
+          'HTTP_PROXY',
+          'NO_PROXY',
+          'http_proxy',
+          'https_proxy',
+          'no_proxy',
+        ].sort(),
       );
       // Its folder is its own and the lead's group's, setgid, and nobody else's.
       expect(lines(log, '.chown')).toContain(`root -h cwdev:cwdevsrc ${volume}/dev`);

@@ -2,39 +2,39 @@
 /**
  * The lead's network wall on a project machine (`entrypoint.sh`).
  *
- *   bun lead-egress.ts apply   as root: resolve lead-egress.allow, load the
- *                              rules for IPv4 and IPv6, pin the names in
- *                              /etc/hosts. Prints one line; exit 1 and the
- *                              reason when the wall is not in place.
- *   bun lead-egress.ts probe   as the lead: try what the wall must refuse and
- *                              the one host it must allow (judgeProbe's codes).
+ *   bun lead-egress.ts apply   as root: load the loopback-only rules for IPv4
+ *                              and IPv6 and read them back. Prints one line;
+ *                              exit 1 and the reason when the wall is not in.
+ *   bun lead-egress.ts probe   as the lead: try what the wall must refuse,
+ *                              and the one host it must allow through the
+ *                              proxy (judgeProbe's codes).
  *
- * The rules and the file format are `lead-egress-plan.ts`. Names are resolved
- * over DNS, never through /etc/hosts, so a refresh sees a host's current
- * addresses rather than the ones this script pinned last time.
+ * The rules and the list are `lead-egress-plan.ts`; the proxy that enforces
+ * the list is `lead-proxy.ts`.
  */
 import { promises as dns } from 'node:dns';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import {
-  type AllowEntry,
   CHAIN,
   type Family,
   PROBE_ALLOWED,
-  PROBE_REFUSED,
+  PROBE_DIRECT,
   PROBE_UNLISTED_NAME,
+  PROXY_HOST,
+  PROXY_PORT,
+  PROXY_URL,
   type ProbeOutcome,
-  type Resolved,
   WALLED_UIDS,
-  applySummary,
   chainProblem,
   judgeProbe,
   jumpArgs,
   parseAllowlist,
   rulesFor,
-  spliceHosts,
 } from './lead-egress-plan.ts';
+
+export const ALLOW_PATH = join(import.meta.dir, 'lead-egress.allow');
 
 export interface Ran {
   status: number;
@@ -42,7 +42,6 @@ export interface Ran {
   stderr: string;
 }
 export type Runner = (argv: string[], stdin?: string) => Ran;
-export type Resolver = (host: string) => Promise<string[]>;
 
 export const runCommand: Runner = (argv, stdin) => {
   try {
@@ -51,15 +50,6 @@ export const runCommand: Runner = (argv, stdin) => {
   } catch (err) {
     return { status: 127, stdout: '', stderr: err instanceof Error ? err.message : String(err) };
   }
-};
-
-/** Both families' addresses over DNS. A family with no answer is empty, not an error. */
-export const resolveOverDns: Resolver = async (host) => {
-  const [v4, v6] = await Promise.all([
-    dns.resolve4(host).catch(() => [] as string[]),
-    dns.resolve6(host).catch(() => [] as string[]),
-  ]);
-  return [...v4, ...v6];
 };
 
 /** Each family's tools, nft first, then legacy for a kernel without nf_tables. */
@@ -77,17 +67,10 @@ const BACKENDS: Record<Family, readonly [restore: string, tool: string][]> = {
 const firstLine = (r: Ran) => (r.stderr || r.stdout).trim().split('\n')[0] || `exit ${r.status}`;
 
 /** Loads one family's chain and jumps, then reads them back. Returns why it failed, or null. */
-export function applyFamily(
-  run: Runner,
-  family: Family,
-  entries: AllowEntry[],
-  resolved: Resolved,
-  uids: readonly number[],
-): string | null {
-  const rules = rulesFor(entries, resolved, family);
+export function applyFamily(run: Runner, family: Family, uids: readonly number[]): string | null {
   const errors: string[] = [];
   for (const [restore, tool] of BACKENDS[family]) {
-    const loaded = run([restore, '--noflush'], rules);
+    const loaded = run([restore, '--noflush'], rulesFor(family));
     if (loaded.status !== 0) {
       errors.push(`${restore}: ${firstLine(loaded)}`);
       continue;
@@ -114,92 +97,116 @@ export function applyFamily(
   return `IPv${family} rules could not be loaded (${errors.join('; ')})`;
 }
 
-export interface ApplyOptions {
-  allowPath: string;
-  hostsPath: string;
-  uids?: readonly number[];
-  run?: Runner;
-  resolve?: Resolver;
-}
-
-export async function apply(o: ApplyOptions): Promise<{ ok: boolean; line: string }> {
-  const run = o.run ?? runCommand;
-  const resolve = o.resolve ?? resolveOverDns;
-  let entries: AllowEntry[];
+/**
+ * Reads the list first, because the proxy reads it too: a list it cannot
+ * read leaves the lead with no way out, so it fails the wall here, loudly,
+ * rather than as a proxy that exits on every start.
+ */
+export function apply(
+  run: Runner = runCommand,
+  uids: readonly number[] = WALLED_UIDS,
+  readList: () => string = () => readFileSync(ALLOW_PATH, 'utf8'),
+): { ok: boolean; line: string } {
+  let hosts: number;
   try {
-    entries = parseAllowlist(readFileSync(o.allowPath, 'utf8'));
+    hosts = parseAllowlist(readList()).length;
   } catch (err) {
-    return {
-      ok: false,
-      line: `${o.allowPath}: ${err instanceof Error ? err.message : String(err)}`,
-    };
+    return { ok: false, line: `lead-egress.allow: ${err instanceof Error ? err.message : err}` };
   }
-  const resolved: Resolved = new Map();
-  for (const e of entries) resolved.set(e.host, await resolve(e.host));
   for (const family of [4, 6] as const) {
-    const problem = applyFamily(run, family, entries, resolved, o.uids ?? WALLED_UIDS);
+    const problem = applyFamily(run, family, uids);
     if (problem) return { ok: false, line: problem };
   }
-  try {
-    writeFileSync(o.hostsPath, spliceHosts(readFileSync(o.hostsPath, 'utf8'), entries, resolved));
-  } catch (err) {
-    return {
-      ok: false,
-      line: `could not pin the names in ${o.hostsPath}: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-  return { ok: true, line: applySummary(entries, resolved) };
+  return {
+    ok: true,
+    line: `uids ${uids.join(', ')} reach loopback only, IPv4 and IPv6; out through ${PROXY_URL} to the ${hosts} hosts on lead-egress.allow`,
+  };
 }
 
-export type Connector = (host: string, port: number) => Promise<ProbeOutcome>;
-export type Lookup = (host: string) => Promise<boolean>;
+export interface ProbeDeps {
+  /** A direct TCP connection. */
+  direct: (host: string, port: number) => Promise<ProbeOutcome>;
+  /** Whether a name resolves the way the lead's tools resolve it. */
+  lookup: (host: string) => Promise<boolean>;
+  /** A CONNECT to host:port through the proxy: `connected` on a 200. */
+  viaProxy: (host: string, port: number) => Promise<ProbeOutcome>;
+  /** An HTTPS request through the proxy: `connected` on any HTTP answer. */
+  httpsViaProxy: (url: string) => Promise<ProbeOutcome>;
+}
 
 const TIMEOUT_MS = 4000;
 
-export const tcpConnect: Connector = (host, port) =>
-  new Promise((done) => {
+const tcp = (host: string, port: number, onConnect?: (s: ReturnType<typeof connect>) => void) =>
+  new Promise<ProbeOutcome>((done) => {
     const s = connect({ host, port, timeout: TIMEOUT_MS });
     const end = (o: ProbeOutcome) => {
       s.destroy();
       done(o);
     };
-    s.once('connect', () => end('connected'));
     s.once('timeout', () => end('refused'));
     s.once('error', () => end('refused'));
+    s.once('connect', () => {
+      if (!onConnect) return end('connected');
+      let head = '';
+      s.on('data', (d: Buffer) => {
+        head += d.toString('latin1');
+        if (head.includes('\r\n')) end(/^HTTP\/1\.[01] 200 /.test(head) ? 'connected' : 'refused');
+      });
+      onConnect(s);
+    });
   });
 
-/** Resolves the way the lead's tools do: /etc/hosts, then DNS. */
-export const systemLookup: Lookup = async (host) => {
-  const timeout = new Promise<boolean>((done) => setTimeout(() => done(false), TIMEOUT_MS));
-  const lookup = dns.lookup(host).then(
-    () => true,
-    () => false,
-  );
-  return Promise.race([lookup, timeout]);
+export const realProbe: ProbeDeps = {
+  direct: (host, port) => tcp(host, port),
+  lookup: (host) =>
+    Promise.race([
+      dns.lookup(host).then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((done) => setTimeout(() => done(false), TIMEOUT_MS)),
+    ]),
+  viaProxy: (host, port) =>
+    tcp(PROXY_HOST, PROXY_PORT, (s) => s.write(`CONNECT ${host}:${port} HTTP/1.1\r\n\r\n`)),
+  httpsViaProxy: async (url) => {
+    try {
+      await fetch(url, {
+        proxy: PROXY_URL,
+        method: 'HEAD',
+        signal: AbortSignal.timeout(TIMEOUT_MS * 2),
+      });
+      return 'connected';
+    } catch {
+      return 'refused';
+    }
+  },
 };
 
 export async function probe(
-  c: Connector = tcpConnect,
-  lookup: Lookup = systemLookup,
+  d: ProbeDeps = realProbe,
+  pause: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
 ): Promise<{ code: 0 | 1 | 3; line: string }> {
-  const refused = await Promise.all(
-    PROBE_REFUSED.map(async (t) => ({
+  // The proxy starts just before the probe: wait for it to listen, up to 10s.
+  for (let i = 0; i < 20; i++) {
+    if ((await d.direct(PROXY_HOST, PROXY_PORT)) === 'connected') break;
+    await pause(500);
+  }
+  const direct = await Promise.all(
+    PROBE_DIRECT.map(async (t) => ({
       target: `${t.what} (${t.host.includes(':') ? `[${t.host}]` : t.host}:${t.port})`,
-      outcome: await c(t.host, t.port),
+      outcome: await d.direct(t.host, t.port),
     })),
   );
-  const unlistedResolved = await lookup(PROBE_UNLISTED_NAME);
-  const allowed = await c(PROBE_ALLOWED.host, PROBE_ALLOWED.port);
-  return judgeProbe({ refused, unlistedResolved, allowed });
+  const unlistedResolved = await d.lookup(PROBE_UNLISTED_NAME);
+  const proxyUnlisted = await d.viaProxy(PROBE_UNLISTED_NAME, 443);
+  const allowed = await d.httpsViaProxy(`https://${PROBE_ALLOWED.host}/`);
+  return judgeProbe({ direct, unlistedResolved, proxyUnlisted, allowed });
 }
 
 if (import.meta.main) {
   const [cmd] = process.argv.slice(2);
   if (cmd === 'apply') {
-    const r = await apply({
-      allowPath: join(import.meta.dir, 'lead-egress.allow'),
-      hostsPath: '/etc/hosts',
-    });
+    const r = apply();
     console.log(r.line);
     process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'probe') {

@@ -1,17 +1,21 @@
 # Where the lead agent and the dev server may connect, and nothing else.
 #
-# One line per host: the name, the ports it is allowed on, and why, after a
-# `#`. A line without a reason is refused, so the machine boots no lead.
-# `lead-egress.ts apply` reads this file as root at boot and every 10 minutes,
-# resolves each name, allows exactly those addresses on those ports for the
-# `lead` and `cwdev` users, and pins the names in /etc/hosts. Those users'
-# DNS is refused, so a name that is not here does not resolve for them.
-# Loopback is always allowed; the board server refuses both users' loopback
-# TCP calls, and the lead reaches its board through its socket.
+# One line per host: the name, the TCP ports it is allowed on, and why, after
+# a `#`. A line without a reason is refused, so the machine boots no lead.
+#
+# The firewall gives the `lead` and `cwdev` users loopback and nothing else,
+# DNS included (lead-egress.ts). Their only way out is the CONNECT proxy on
+# 127.0.0.1:3128 (lead-proxy.ts), which they get as HTTPS_PROXY, and which
+# opens a connection only to a name below, on a listed port, and for TLS only
+# when the hello names that same host. The proxy matches names, never
+# addresses, so a host behind a CDN admits itself and not the CDN's other
+# sites.
 #
 # Changing this file is an image deploy (machine:deploy).
 
-api.anthropic.com   tcp/443  # Claude Code's model API, flags and the WebFetch safety check (Anthropic's network-config page: required)
-platform.claude.com tcp/443  # OAuth token exchange and refresh for the lead's sign-in (network-config page: required for every sign-in)
-claude.ai           tcp/443  # claude.ai account authentication; assumed needed for Remote Control (CW_LEAD_REMOTE_CONTROL), unchecked
-github.com          tcp/22   # git fetch of the project repo over SSH with the read-only deploy key (lead.sh); pushes go through the server
+api.anthropic.com   tcp/443         # Claude Code's model API, feature flags and WebFetch safety check (Claude Code network-config page: required)
+platform.claude.com tcp/443         # OAuth token exchange and refresh for the lead's sign-in (network-config page: required for every sign-in)
+registry.npmjs.org  tcp/443         # bun install and bunx in the project checkout, for the lead and the dev server
+github.com          tcp/443,tcp/22  # 22: git fetch of the project repo with the read-only deploy key (lead.sh core.sshCommand); 443: git over HTTPS for public repos. The lead never pushes: pushes go through the board server (routes/git-push.ts)
+api.github.com      tcp/443         # bun github: dependencies, which ask its tarball API first; and gh, should a project install it (it is not in the image)
+codeload.github.com tcp/443         # where api.github.com's tarball and archive downloads redirect (bun github: dependencies)

@@ -358,25 +358,36 @@ What the lead can reach:
   server. A watchdog that cannot read `/proc` logs `the lead's memory is NOT
   capped`.
 - **Its network.** The lead and the dev server (which runs code the lead
-  writes) connect only to loopback and the hosts in
+  writes) connect only to loopback; their DNS is refused too. Their one way
+  out is a proxy on `127.0.0.1:3128` (`lead-proxy.ts`, run as `cwproxy`),
+  which opens a connection only to a host name in
   `infra/project-machine/lead-egress.allow`: the model API and Claude's
-  sign-in hosts on 443, and `github.com` on 22 for the deploy key's fetches.
-  Their DNS is refused and the listed names are pinned in `/etc/hosts`, so no
-  other name resolves for them. The rules (`lead-egress.ts`) are loaded at
-  boot and refreshed every 10 minutes; then a probe as the lead must be
-  refused by 1.1.1.1:443 and the IPv6 equivalent, fail to resolve
-  `example.com`, and reach `api.anthropic.com:443`. The boot log says `the
-  lead's network wall holds`, or `is in but UNPROVEN` when the model API did
-  not answer either. When the rules cannot be loaded or the probe gets
-  through, it says `the lead's network is NOT walled: <why>` and starts
-  neither the lead nor the dev server. `fly secrets set CW_LEAD_EGRESS=open`
-  runs both without the wall, and the log says so on every boot. Claude Code
-  runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  sign-in host, `registry.npmjs.org`, and GitHub (`github.com`,
+  `api.github.com`, `codeload.github.com`) on 443, and `github.com` on 22
+  for the deploy key's fetches. A TLS connection must name the same host in
+  its handshake as in its CONNECT. Both users get `HTTPS_PROXY`,
+  `HTTP_PROXY` and `NO_PROXY` in both cases, which Claude Code, Bun's
+  `fetch`, `bun install` and git over HTTPS read (each measured in a
+  container on 9 November 2026; `gh` reads them too but is not in the
+  image); ssh does not, so
+  `lead.sh` sets git's `core.sshCommand` with a `ProxyCommand` through the
+  same proxy. The rules (`lead-egress.ts`) are loaded at boot, then a probe
+  as the lead must be refused by 1.1.1.1:443 and the IPv6 equivalent, fail
+  to resolve `example.com`, be refused `example.com` by the proxy, and reach
+  `https://api.anthropic.com` through it. The boot log says `the lead's
+  network wall holds`, or `is in but UNPROVEN` when the model API did not
+  answer either. When the rules cannot be loaded or the probe gets through,
+  it says `the lead's network is NOT walled: <why>` and starts neither the
+  lead nor the dev server. `fly secrets set CW_LEAD_EGRESS=open` runs both
+  without the wall, and the log says so on every boot. Each host the proxy
+  refuses is a line `[lead-proxy] refused <host>:<port>: <why>`, at most once
+  a minute per host. Claude Code runs with `DISABLE_TELEMETRY=1` and
   `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so it does not try the telemetry and
-  connector hosts the wall refuses. A dev server that needs another host, and
-  any package install the lead runs, needs a line in the list and an image
-  deploy. What the wall leaves open is in
-  [security.md](../architecture/security.md), under the project machine's lead.
+  connector hosts; not `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, which
+  turns Remote Control off as well. A dev server or a package that needs
+  another host needs a line in the list and an image deploy. What the wall
+  leaves open is in [security.md](../architecture/security.md), under the
+  project machine's lead.
 
 **When it ends.** `lead.sh` checks the tmux session every 5 seconds and starts
 the session again, resuming the last conversation in `/data/lead/work`
@@ -403,20 +414,27 @@ pinned Claude Code build).
 
 ### The lead's limits: checking them on a machine
 
-The tests prove the rules and the watchdog on Docker's Linux kernel
+The tests prove the rules, the proxy and the watchdog on Docker's Linux kernel
 (`CW_CONTAINER_TESTS=1 bun test packages/server/test/project-machine-lead-limits-container.test.ts`),
 not on Fly's. On a test machine with a lead, after a deploy:
 
 1. `fly logs --app cw-<project> --no-tail | grep -E "lead's (memory|network)"`.
    The memory line names the cgroup or the watchdog; the network line must
    read `the lead's network wall holds`.
-2. The wall, by hand, as the lead (`env -i`, so root's secrets stay root's):
+2. The wall, by hand, as the lead (`env -i`, so root's secrets stay root's,
+   and the proxy given the way the entrypoint gives it):
    ```bash
-   fly ssh console --app cw-<project> -C "env -i PATH=/usr/local/bin:/usr/bin:/bin setpriv --reuid=lead --regid=lead --init-groups bash -c 'timeout 5 bash -c \"exec 3<>/dev/tcp/1.1.1.1/443\" && echo LEAK || echo refused; timeout 5 bash -c \"exec 3<>/dev/tcp/api.anthropic.com/443\" && echo allowed'"
+   fly ssh console --app cw-<project> -C "env -i PATH=/usr/local/bin:/usr/bin:/bin HTTPS_PROXY=http://127.0.0.1:3128 setpriv --reuid=lead --regid=lead --init-groups bash -c 'cd /tmp; timeout 5 bash -c \"exec 3<>/dev/tcp/1.1.1.1/443\" && echo LEAK || echo refused; f=\"try{console.log((await fetch(process.argv[1])).status)}catch{console.log(0)}\"; bun -e \"\$f\" https://example.com/; bun -e \"\$f\" https://registry.npmjs.org/is-number'"
    ```
-   It must print `refused` then `allowed`. The same pair as root (without
-   `setpriv`) prints `LEAK` then `allowed`, which is the control.
-3. The memory cap, at its default 1280M on a 2048 MB machine. Read what the
+   It must print `refused`, `403` (the proxy's refusal) and `200`. The
+   first as root (without `setpriv`) prints `LEAK`, which is the control.
+   `fly logs` shows `[lead-proxy] refused example.com:443`.
+3. The lead's tools, once it has a checkout: attach and have it run `bun
+   install` and `git fetch` in `/data/dev/work`. Then watch `fly logs` for
+   `[lead-proxy] refused` lines for an hour of normal work, Remote Control
+   included if it is on: each names a host something the lead runs needs,
+   which is the evidence for adding a line to the list.
+4. The memory cap, at its default 1280M on a 2048 MB machine. Read what the
    lead holds now (`fly ssh console --app cw-<project> -C "bash
    /app/infra/project-machine/lead-memory.sh total 10004"`, in bytes), then
    make a lead process grow by 80 MB a second:
@@ -514,16 +532,15 @@ fly secrets set --app cw-<project> \
 ```
 
 - **Its user.** The entrypoint runs `CW_DEV_SERVER_CMD` with bash as
-  `cwdev`, in `/data/dev/work`, with `PATH` and nothing else: no secret, no
+  `cwdev`, in `/data/dev/work`, with `PATH` and the proxy's address and nothing else: no secret, no
   board socket, and the server refuses its loopback TCP calls as it refuses
   every uid but root's and its own. It is started again when it exits, after
   a wait that doubles from 5s to 60s; it never stops the machine.
-- **Its network.** The lead's wall, because it runs code the lead writes
-  ("Its network" under the lead, above). `registry.npmjs.org` is not on the
-  list, so neither the lead nor `bunx` can fetch a package: the project's
-  dependencies have to be in its checkout. Adding the registry would admit
-  every site behind the same Cloudflare addresses, since the wall allows
-  addresses, not names.
+- **Its network.** The lead's wall and its proxy, because it runs code the
+  lead writes ("Its network" under the lead, above). `bunx` and `bun
+  install` reach `registry.npmjs.org` through the proxy; a package that
+  fetches from any other host at install time is refused, and the boot log
+  names the host.
 - **Its files.** `/data/dev` is `cwdev:cwdevsrc` mode 2770, and the group
   `cwdevsrc` holds `cwdev` and `lead`. The lead clones the project's repo
   into `/data/dev/work` and edits it there; the lead's umask is 007, so its

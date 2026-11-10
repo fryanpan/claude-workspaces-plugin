@@ -96,7 +96,8 @@ done
 exec "$@"`,
   );
   // The release check answers nothing, so the machine runs the image's app.
-  // The lead's network wall (lead-egress.ts) applies and its probe holds,
+  // The lead's network wall (lead-egress.ts) applies, its proxy stays up and
+  // its probe holds,
   // unless a test leaves `.egress-apply` (the reason it fails) or
   // `.egress-probe` (an exit code, then the probe's line) in the log folder:
   // the entrypoint gives bun only PATH, so a file is how a test reaches it.
@@ -111,6 +112,7 @@ case "$*" in
   *"lead-egress.ts probe"*)
     if [ -e "${log}/.egress-probe" ]; then { read -r c; cat; } < "${log}/.egress-probe"; exit "$c"; fi
     echo "stub probe held"; exit 0;;
+  *"lead-proxy.ts serve"*) echo "[lead-proxy] listening (stub)"; exec /bin/sleep 1000;;
 esac
 exit 0`,
   );

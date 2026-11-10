@@ -173,8 +173,15 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(lead?.env.get('HOME')).toBe(join(homes, 'lead'));
     expect(lead?.env.get('SHELL')).toBe('/bin/bash');
     expect(lead?.env.get('DISABLE_AUTOUPDATER')).toBe('1');
-    // Off the telemetry and connector hosts the network wall refuses.
-    expect(lead?.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')).toBe('1');
+    // Off the telemetry and connector hosts the proxy refuses, and not off
+    // Remote Control (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC would be).
+    expect(lead?.env.get('DISABLE_TELEMETRY')).toBe('1');
+    expect(lead?.env.has('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')).toBe(false);
+    // Out through the machine's proxy, by every spelling its tools read.
+    for (const v of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) {
+      expect(lead?.env.get(v)).toBe('http://127.0.0.1:3128');
+    }
+    expect(lead?.env.get('NO_PROXY')).toBe('localhost,127.0.0.1,::1');
     expect(lead?.env.get('ENABLE_CLAUDEAI_MCP_SERVERS')).toBe('false');
 
     // Nothing else of root's: not the server's key, not the tunnel's or the
@@ -187,7 +194,6 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     const bashOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD']);
     expect([...(lead?.env.keys() ?? [])].filter((k) => !bashOwn.has(k)).sort()).toEqual(
       [
-        'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
         'CLAUDE_CODE_OAUTH_TOKEN',
         'CW_AGENT_NAME',
         'CW_BOARD_SOCKET',
@@ -195,8 +201,15 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
         'CW_LEAD_TOKEN_LABEL',
         'CW_WORKSPACE_ID',
         'DISABLE_AUTOUPDATER',
+        'DISABLE_TELEMETRY',
         'ENABLE_CLAUDEAI_MCP_SERVERS',
         'HOME',
+        'HTTPS_PROXY',
+        'HTTP_PROXY',
+        'NO_PROXY',
+        'http_proxy',
+        'https_proxy',
+        'no_proxy',
         'LOGNAME',
         'PATH',
         'SHELL',
@@ -211,7 +224,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(readFileSync(keyFile, 'utf8')).toBe(DEPLOY_KEY);
     expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     expect(lines(log, '.git')).toEqual([
-      `lead config --global core.sshCommand ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes`,
+      `lead config --global core.sshCommand ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o 'ProxyCommand=bun /app/infra/project-machine/lead-proxy.ts connect %h %p'`,
     ]);
 
     // The sign-in and the deploy key are the lead's alone: no process of any

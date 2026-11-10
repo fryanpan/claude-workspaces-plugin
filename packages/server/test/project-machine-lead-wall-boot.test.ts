@@ -80,6 +80,7 @@ function boot(b: Boot) {
 const egressCalls = (recs: Rec[], verb: string) =>
   recs.filter((r) => r.argv.startsWith('bun ') && r.argv.endsWith(`lead-egress.ts ${verb}`));
 const claude = (recs: Rec[]) => recs.filter((r) => r.argv.startsWith('claude '));
+const proxies = (recs: Rec[]) => recs.filter((r) => r.argv.endsWith('lead-proxy.ts serve'));
 
 describe.skipIf(BASH === null)("the lead's network wall at boot", () => {
   it('applies the wall as root, probes it as the lead, logs both, and then starts the lead', async () => {
@@ -95,6 +96,14 @@ describe.skipIf(BASH === null)("the lead's network wall at boot", () => {
     expect([...(applied?.env.keys() ?? [])].filter((k) => !bashOwn.has(k))).toEqual(['PATH']);
     expect(probed?.env.has('CLAUDE_CODE_OAUTH_TOKEN')).toBe(false);
     expect(m.text()).toContain("the lead's network wall is in: allowed: stub");
+    // The proxy, as its own user, which the wall does not hold, with PATH alone.
+    const [proxy] = proxies(recs);
+    expect(proxy?.uid).toBe('cwproxy');
+    expect(
+      [...(proxy?.env.keys() ?? [])].filter((k) => !bashOwn.has(k) && k !== 'STUB_UID').sort(),
+    ).toEqual(['HOME', 'LOGNAME', 'PATH', 'USER']);
+    expect(m.text()).toContain('[lead-proxy] listening (stub)');
+    expect(claude(recs)[0]?.env.get('HTTPS_PROXY')).toBe('http://127.0.0.1:3128');
     expect(m.text()).toContain(
       "the lead's network wall holds: refused 1.1.1.1:443; api.anthropic.com:443 connected",
     );
@@ -116,6 +125,7 @@ describe.skipIf(BASH === null)("the lead's network wall at boot", () => {
     expect(m.text()).toContain('no lead agent runs, because its network is not walled');
     expect(claude(m.recs())).toEqual([]);
     expect(egressCalls(m.recs(), 'probe')).toEqual([]);
+    expect(proxies(m.recs())).toEqual([]);
   }, 30_000);
 
   it('starts no lead when the probe gets through the wall', async () => {
@@ -145,6 +155,9 @@ describe.skipIf(BASH === null)("the lead's network wall at boot", () => {
       "the lead's network is NOT walled: CW_LEAD_EGRESS=open, so the lead and the dev server may connect anywhere",
     );
     expect(egressCalls(m.recs(), 'apply')).toEqual([]);
+    // No proxy, so nothing points the lead at one.
+    expect(proxies(m.recs())).toEqual([]);
+    expect(claude(m.recs())[0]?.env.has('HTTPS_PROXY')).toBe(false);
   }, 30_000);
 
   it('holds the dev server to the same wall: none runs when the wall cannot be applied', async () => {
@@ -170,5 +183,9 @@ describe.skipIf(BASH === null)("the lead's network wall at boot", () => {
     });
     expect(egressCalls(m.recs(), 'apply')).toHaveLength(1);
     expect(egressCalls(m.recs(), 'probe')).toHaveLength(1);
+    expect(proxies(m.recs())).toHaveLength(1);
+    const dev = m.recs().find((r) => r.uid === 'cwdev');
+    expect(dev?.env.get('HTTPS_PROXY')).toBe('http://127.0.0.1:3128');
+    expect(dev?.env.get('no_proxy')).toBe('localhost,127.0.0.1,::1');
   }, 30_000);
 });

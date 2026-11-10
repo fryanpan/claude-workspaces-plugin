@@ -41,8 +41,9 @@
 #                                 cgroup's memory.max, or without a cgroup v2
 #                                 memory controller a watchdog's (lead-memory.sh)
 #   CW_LEAD_EGRESS                `open` runs the lead and the dev server without
-#                                 their network wall (lead-egress.allow); unset,
-#                                 neither runs when the wall cannot be applied
+#                                 their network wall and its proxy
+#                                 (lead-egress.allow); unset, neither runs when
+#                                 the wall cannot be applied
 #   CW_RELEASE_POLL_SECONDS       how often the machine checks for a signed release;
 #                                 300 unless set
 #   CW_RELEASE_CHANNEL_URL        where it checks; this repo's server-channel

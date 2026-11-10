@@ -1,48 +1,59 @@
 /**
  * The lead's network wall (`infra/project-machine/lead-egress*.ts`): the
- * allowlist's format, the rules built from it, how they are loaded and read
- * back, the /etc/hosts block, and how the boot probe is judged.
+ * allowlist's format, the loopback-only rules, how they are loaded and read
+ * back, and how the boot probe is judged. The proxy that enforces the list is
+ * `project-machine-lead-proxy.test.ts`.
  *
  * Nothing here touches a firewall or the network: the commands are a fake
  * runner that records what it was asked and keeps the rules it was given,
- * and resolution and connection are injected. That the kernel enforces the
- * rules is `project-machine-lead-limits-container.test.ts`, in a container.
+ * and every connection the probe makes is injected. That the kernel enforces
+ * the rules is `project-machine-lead-limits-container.test.ts`, in a container.
  */
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CHAIN,
-  HOSTS_BEGIN,
-  HOSTS_END,
   PROBE_ALLOWED,
-  type Resolved,
+  PROXY_HOST,
+  PROXY_PORT,
+  type ProbeOutcome,
   WALLED_UIDS,
+  admits,
   chainProblem,
   judgeProbe,
   parseAllowlist,
   rulesFor,
-  spliceHosts,
 } from '../../../infra/project-machine/lead-egress-plan.ts';
-import { type Ran, type Runner, apply, probe } from '../../../infra/project-machine/lead-egress.ts';
+import {
+  type ProbeDeps,
+  type Ran,
+  type Runner,
+  apply,
+  probe,
+} from '../../../infra/project-machine/lead-egress.ts';
 import { machineDir } from './project-machine-harness.ts';
 
 const SHIPPED = join(machineDir, 'lead-egress.allow');
+const LIST = () => 'api.riverbend.test tcp/443 # model\n';
 
 describe('the allowlist file', () => {
-  it('reads the shipped list: every entry has a reason, and DNS is not on it', () => {
+  it('reads the shipped list: names only, every entry with a reason, ssh to github.com alone', () => {
     const entries = parseAllowlist(readFileSync(SHIPPED, 'utf8'));
     expect(entries.map((e) => e.host)).toEqual([
       'api.anthropic.com',
       'platform.claude.com',
-      'claude.ai',
+      'registry.npmjs.org',
       'github.com',
+      'api.github.com',
+      'codeload.github.com',
     ]);
     expect(entries.every((e) => e.why.length > 10)).toBe(true);
-    const github = entries.find((e) => e.host === 'github.com');
-    expect(github?.ports).toEqual([{ proto: 'tcp', port: 22 }]);
-    expect(entries.flatMap((e) => e.ports).some((p) => p.port === 53)).toBe(false);
+    const ports = (h: string) => entries.find((e) => e.host === h)?.ports.map((p) => p.port);
+    expect(ports('github.com')).toEqual([443, 22]);
+    expect(entries.filter((e) => e.ports.some((p) => p.port !== 443)).map((e) => e.host)).toEqual([
+      'github.com',
+    ]);
   });
 
   it('refuses a line with no reason, a bad host, a bad port and a duplicate, naming the line', () => {
@@ -51,8 +62,8 @@ describe('the allowlist file', () => {
       ['# ok\n\nexample..com tcp/443 # x\n', /line 3: .* is not a host name/],
       ['203.0.113.7 tcp/443 # an address, not a name\n', /not a host name/],
       ['riverbend.test tcp/70000 # too big\n', /is not tcp\/<port>/],
-      ['riverbend.test icmp/1 # wrong proto\n', /is not tcp\/<port>/],
-      ['riverbend.test # no ports\n', /want "<host> <proto>/],
+      ['riverbend.test udp/443 # a proxy carries tcp only\n', /is not tcp\/<port>/],
+      ['riverbend.test # no ports\n', /want "<host> tcp/],
       [
         'riverbend.test tcp/443 # a\nriverbend.test tcp/22 # b\n',
         /line 2: riverbend.test is listed twice/,
@@ -60,68 +71,53 @@ describe('the allowlist file', () => {
     ];
     for (const [text, why] of bad) expect(() => parseAllowlist(text)).toThrow(why);
     // POSITIVE CONTROL: the same shapes, written correctly, parse.
-    expect(parseAllowlist('riverbend.test tcp/443,udp/4433 # two ports\n')[0]?.ports).toEqual([
+    expect(parseAllowlist('riverbend.test tcp/443,tcp/22 # two ports\n')[0]?.ports).toEqual([
       { proto: 'tcp', port: 443 },
-      { proto: 'udp', port: 4433 },
+      { proto: 'tcp', port: 22 },
     ]);
+  });
+
+  it('admits a listed host on a listed port only, whatever its case or trailing dot', () => {
+    const e = parseAllowlist('git.harborlight.test tcp/443,tcp/22 # git\n');
+    expect(admits(e, 'GIT.Harborlight.test.', 22)?.host).toBe('git.harborlight.test');
+    expect(admits(e, 'git.harborlight.test', 80)).toBeNull();
+    expect(admits(e, 'harborlight.test', 443)).toBeNull();
+    expect(admits(e, 'evil.git.harborlight.test', 443)).toBeNull();
   });
 });
 
-const ENTRIES = parseAllowlist(
-  'api.riverbend.test tcp/443 # model\ngit.harborlight.test tcp/22 # git\ngone.saltmarsh.test tcp/443 # unresolved\n',
-);
-const RESOLVED: Resolved = new Map([
-  ['api.riverbend.test', ['203.0.113.10', '2001:db8::10', '203.0.113.10']],
-  ['git.harborlight.test', ['198.51.100.22']],
-  ['gone.saltmarsh.test', []],
-]);
-
 describe('the rules', () => {
-  it('allows loopback and each resolved address on its ports, in its own family, and rejects the rest', () => {
-    expect(rulesFor(ENTRIES, RESOLVED, 4).split('\n')).toEqual([
+  it('accept loopback and reject everything else, in each family', () => {
+    expect(rulesFor(4).trim().split('\n')).toEqual([
       '*filter',
       `:${CHAIN} - [0:0]`,
       `-A ${CHAIN} -o lo -j ACCEPT`,
-      `-A ${CHAIN} -d 203.0.113.10/32 -p tcp -m tcp --dport 443 -j ACCEPT`,
-      `-A ${CHAIN} -d 198.51.100.22/32 -p tcp -m tcp --dport 22 -j ACCEPT`,
       `-A ${CHAIN} -p tcp -j REJECT --reject-with tcp-reset`,
       `-A ${CHAIN} -j REJECT --reject-with icmp-port-unreachable`,
       'COMMIT',
-      '',
     ]);
-    const v6 = rulesFor(ENTRIES, RESOLVED, 6);
-    expect(v6).toContain(`-A ${CHAIN} -d 2001:db8::10/128 -p tcp -m tcp --dport 443 -j ACCEPT`);
-    expect(v6).not.toContain('203.0.113.10');
-    expect(v6.trim().split('\n').at(-2)).toBe(
-      `-A ${CHAIN} -j REJECT --reject-with icmp6-port-unreachable`,
-    );
+    expect(rulesFor(6)).toContain('-j REJECT --reject-with icmp6-port-unreachable');
   });
 
-  it('reads a chain back as holding only when it ends in the reject', () => {
-    const good = rulesFor(ENTRIES, RESOLVED, 4)
-      .split('\n')
-      .filter((l) => l.startsWith('-A'))
-      .join('\n');
-    expect(chainProblem(`-N ${CHAIN}\n${good}\n`, 4)).toBeNull();
-    expect(chainProblem(`-N ${CHAIN}\n-A ${CHAIN} -o lo -j ACCEPT\n`, 4)).toMatch(
-      /does not end in a reject/,
+  it('read a chain back as holding only when it ends in the reject and accepts loopback alone', () => {
+    const listing = (f: 4 | 6) =>
+      rulesFor(f)
+        .split('\n')
+        .filter((l) => l.startsWith('-A'))
+        .join('\n');
+    expect(chainProblem(listing(4), 4)).toBeNull();
+    expect(chainProblem(listing(6), 6)).toBeNull();
+    expect(chainProblem(`-N ${CHAIN}\n-A ${CHAIN} -o lo -j ACCEPT`, 4)).toContain(
+      'does not end in a reject',
     );
-    expect(chainProblem(`-N ${CHAIN}\n`, 6)).toMatch(/last rule: none/);
-  });
-
-  it('replaces only its own block in /etc/hosts', () => {
-    const fly = '127.0.0.1 localhost\nfdaa::5 riverbend-machine\n';
-    const once = spliceHosts(fly, ENTRIES, RESOLVED);
-    expect(once).toBe(
-      `${fly}${HOSTS_BEGIN}\n2001:db8::10 api.riverbend.test\n203.0.113.10 api.riverbend.test\n198.51.100.22 git.harborlight.test\n${HOSTS_END}\n`,
+    const widened = listing(4).replace(
+      `-A ${CHAIN} -p tcp`,
+      `-A ${CHAIN} -d 203.0.113.9/32 -j ACCEPT\n-A ${CHAIN} -p tcp`,
     );
-    const moved: Resolved = new Map([['api.riverbend.test', ['203.0.113.99']]]);
-    const twice = spliceHosts(once, ENTRIES, moved);
-    expect(twice).toBe(`${fly}${HOSTS_BEGIN}\n203.0.113.99 api.riverbend.test\n${HOSTS_END}\n`);
+    expect(chainProblem(widened, 4)).toBe(`IPv4 chain ${CHAIN} accepts more than loopback`);
   });
 });
 
-/** iptables as far as apply uses it: restore keeps the chain, -C/-I/-S read and change OUTPUT. */
 function fakeTables(fail: Record<string, string> = {}) {
   const calls: string[] = [];
   const chain: Record<string, string[]> = {};
@@ -153,162 +149,146 @@ function fakeTables(fail: Record<string, string> = {}) {
   return { run, calls, chain, output };
 }
 
-function files(allow: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'lead-egress-'));
-  const allowPath = join(dir, 'allow');
-  const hostsPath = join(dir, 'hosts');
-  writeFileSync(allowPath, allow);
-  writeFileSync(hostsPath, '127.0.0.1 localhost\n');
-  return { dir, allowPath, hostsPath, done: () => rmSync(dir, { recursive: true, force: true }) };
-}
-
-const resolve = async (h: string) => RESOLVED.get(h) ?? [];
-
 describe('applying the wall', () => {
-  it('loads both families, sends each walled uid in once, reads the chain back and pins the names', async () => {
-    const f = files(
-      'api.riverbend.test tcp/443 # model\ngone.saltmarsh.test tcp/443 # unresolved\n',
-    );
-    try {
-      const t = fakeTables();
-      const r = await apply({
-        allowPath: f.allowPath,
-        hostsPath: f.hostsPath,
-        run: t.run,
-        resolve,
-      });
-      expect(r).toEqual({
-        ok: true,
-        line: 'allowed: api.riverbend.test tcp/443 (2 addresses); gone.saltmarsh.test tcp/443 UNRESOLVED',
-      });
-      for (const tool of ['iptables', 'ip6tables']) {
-        expect(t.output[tool]).toEqual(
-          [...WALLED_UIDS].reverse().map((u) => `OUTPUT -m owner --uid-owner ${u} -j ${CHAIN}`),
-        );
-        expect(t.chain[tool]?.at(-1)).toContain('-j REJECT');
-      }
-      expect(readFileSync(f.hostsPath, 'utf8')).toContain('203.0.113.10 api.riverbend.test');
-      // A refresh replaces the chain and adds no second jump.
-      const again = await apply({
-        allowPath: f.allowPath,
-        hostsPath: f.hostsPath,
-        run: t.run,
-        resolve,
-      });
-      expect(again.ok).toBe(true);
-      expect(t.output.iptables).toHaveLength(WALLED_UIDS.length);
-      expect(t.calls.filter((c) => c.startsWith('iptables -I'))).toHaveLength(WALLED_UIDS.length);
-    } finally {
-      f.done();
-    }
-  });
-
-  it('falls back to the legacy tools when nf_tables will not load', async () => {
-    const f = files('api.riverbend.test tcp/443 # model\n');
-    try {
-      const t = fakeTables({ 'iptables-restore': "iptables-restore: Couldn't load match `owner'" });
-      const r = await apply({
-        allowPath: f.allowPath,
-        hostsPath: f.hostsPath,
-        run: t.run,
-        resolve,
-      });
-      expect(r.ok).toBe(true);
-      expect(t.calls).toContain('iptables-legacy-restore --noflush');
-      expect(t.output['iptables-legacy']).toHaveLength(WALLED_UIDS.length);
-    } finally {
-      f.done();
-    }
-  });
-
-  it('fails, with the reason, when a family cannot be loaded, and leaves /etc/hosts alone', async () => {
-    const f = files('api.riverbend.test tcp/443 # model\n');
-    try {
-      const t = fakeTables({
-        'ip6tables-restore': 'ip6tables-restore: unable to initialize table filter',
-        'ip6tables-legacy-restore': 'ip6tables-legacy-restore: no such module',
-      });
-      const r = await apply({
-        allowPath: f.allowPath,
-        hostsPath: f.hostsPath,
-        run: t.run,
-        resolve,
-      });
-      expect(r.ok).toBe(false);
-      expect(r.line).toBe(
-        'IPv6 rules could not be loaded (ip6tables-restore: ip6tables-restore: unable to initialize table filter; ip6tables-legacy-restore: ip6tables-legacy-restore: no such module)',
+  it('loads both families, sends each walled uid in once, and reads the chain back', () => {
+    const t = fakeTables();
+    expect(apply(t.run, WALLED_UIDS, LIST)).toEqual({
+      ok: true,
+      line: `uids ${WALLED_UIDS.join(', ')} reach loopback only, IPv4 and IPv6; out through http://127.0.0.1:3128 to the 1 hosts on lead-egress.allow`,
+    });
+    for (const tool of ['iptables', 'ip6tables']) {
+      expect(t.output[tool]).toEqual(
+        [...WALLED_UIDS].reverse().map((u) => `OUTPUT -m owner --uid-owner ${u} -j ${CHAIN}`),
       );
-      expect(readFileSync(f.hostsPath, 'utf8')).toBe('127.0.0.1 localhost\n');
-    } finally {
-      f.done();
+      expect(t.chain[tool]?.at(-1)).toContain('-j REJECT');
     }
+    // A second boot's apply replaces the chain and adds no second jump.
+    expect(apply(t.run, WALLED_UIDS, LIST).ok).toBe(true);
+    expect(t.output.iptables).toHaveLength(WALLED_UIDS.length);
+    expect(t.calls.filter((c) => c.startsWith('iptables -I'))).toHaveLength(WALLED_UIDS.length);
   });
 
-  it('fails when the owner match will not take', async () => {
-    const f = files('api.riverbend.test tcp/443 # model\n');
-    try {
-      const t = fakeTables();
-      const run: Runner = (argv, stdin) =>
-        argv[1] === '-I'
-          ? { status: 1, stdout: '', stderr: "Couldn't load match `owner'" }
-          : t.run(argv, stdin);
-      const r = await apply({ allowPath: f.allowPath, hostsPath: f.hostsPath, run, resolve });
-      expect(r).toEqual({
-        ok: false,
-        line: `iptables: could not send uid ${WALLED_UIDS[0]} into ${CHAIN}: Couldn't load match \`owner'`,
-      });
-    } finally {
-      f.done();
-    }
+  it('falls back to the legacy tools when nf_tables will not load', () => {
+    const t = fakeTables({ 'iptables-restore': "iptables-restore: Couldn't load match `owner'" });
+    expect(apply(t.run, WALLED_UIDS, LIST).ok).toBe(true);
+    expect(t.calls).toContain('iptables-legacy-restore --noflush');
+    expect(t.output['iptables-legacy']).toHaveLength(WALLED_UIDS.length);
   });
 
-  it('fails on a list it cannot read, before running anything', async () => {
-    const f = files('api.riverbend.test tcp/443\n');
-    try {
-      const t = fakeTables();
-      const r = await apply({
-        allowPath: f.allowPath,
-        hostsPath: f.hostsPath,
-        run: t.run,
-        resolve,
-      });
-      expect(r.ok).toBe(false);
-      expect(r.line).toContain('line 1: every entry needs a reason');
-      expect(t.calls).toEqual([]);
-    } finally {
-      f.done();
-    }
+  it('fails, with the reason, when a family cannot be loaded', () => {
+    const t = fakeTables({
+      'ip6tables-restore': 'ip6tables-restore: unable to initialize table filter',
+      'ip6tables-legacy-restore': 'ip6tables-legacy-restore: no such module',
+    });
+    expect(apply(t.run, WALLED_UIDS, LIST)).toEqual({
+      ok: false,
+      line: 'IPv6 rules could not be loaded (ip6tables-restore: ip6tables-restore: unable to initialize table filter; ip6tables-legacy-restore: ip6tables-legacy-restore: no such module)',
+    });
+  });
+
+  it('fails when the owner match will not take', () => {
+    const t = fakeTables();
+    const run: Runner = (argv, stdin) =>
+      argv[1] === '-I'
+        ? { status: 1, stdout: '', stderr: "Couldn't load match `owner'" }
+        : t.run(argv, stdin);
+    expect(apply(run, WALLED_UIDS, LIST)).toEqual({
+      ok: false,
+      line: `iptables: could not send uid ${WALLED_UIDS[0]} into ${CHAIN}: Couldn't load match \`owner'`,
+    });
+  });
+
+  it('fails on a list the proxy could not read, before running anything', () => {
+    const t = fakeTables();
+    const r = apply(t.run, WALLED_UIDS, () => 'api.riverbend.test tcp/443\n');
+    expect(r).toEqual({
+      ok: false,
+      line: 'lead-egress.allow: line 1: every entry needs a reason after #',
+    });
+    expect(t.calls).toEqual([]);
   });
 });
 
 describe('the boot probe', () => {
-  const allowed = `${PROBE_ALLOWED.host}:${PROBE_ALLOWED.port}`;
-  it('holds when every refused target is refused, the unlisted name does not resolve, and the model API answers', async () => {
-    const r = await probe(
-      async (host) => (host === PROBE_ALLOWED.host ? 'connected' : 'refused'),
-      async () => false,
-    );
-    expect(r.code).toBe(0);
-    expect(r.line).toContain(`${allowed} connected`);
+  /** A machine where the wall and the proxy hold, with `over` changing what one check answers. */
+  const deps = (over: Partial<ProbeDeps> = {}): ProbeDeps & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      direct: async (h, p) => {
+        asked.push(`direct ${h}:${p}`);
+        return h === PROXY_HOST && p === PROXY_PORT ? 'connected' : 'refused';
+      },
+      lookup: async () => false,
+      viaProxy: async (): Promise<ProbeOutcome> => 'refused',
+      httpsViaProxy: async (): Promise<ProbeOutcome> => 'connected',
+      ...over,
+    };
+  };
+  const noPause = async () => {};
+  const allowed = `https://${PROBE_ALLOWED.host} through the proxy`;
+
+  it('holds when the direct addresses, DNS and the proxy to an unlisted name are refused, and the model API answers', async () => {
+    const r = await probe(deps(), noPause);
+    expect(r).toEqual({
+      code: 0,
+      line: `refused a public IPv4 address (1.1.1.1:443), a public IPv6 address ([2606:4700:4700::1111]:443), DNS for example.com and the proxy to example.com; ${allowed} answered`,
+    });
   });
 
-  it('does not hold when anything gets through', async () => {
-    const through = await probe(
-      async () => 'connected',
-      async () => false,
+  it('does not hold when anything gets through, naming each way out', async () => {
+    const r = await probe(
+      deps({
+        direct: async () => 'connected',
+        lookup: async () => true,
+        viaProxy: async () => 'connected',
+      }),
+      noPause,
     );
-    expect(through.code).toBe(1);
-    expect(through.line).toMatch(/^the wall let through: a public IPv4 address \(1\.1\.1\.1:443\)/);
-    const dns = judgeProbe({ refused: [], unlistedResolved: true, allowed: 'connected' });
-    expect(dns).toEqual({ code: 1, line: 'the wall let through: DNS for example.com' });
+    expect(r.code).toBe(1);
+    expect(r.line).toBe(
+      'the wall let through: a public IPv4 address (1.1.1.1:443), a public IPv6 address ([2606:4700:4700::1111]:443), DNS for example.com, the proxy, to example.com:443',
+    );
+    // One way out alone is enough.
+    const proxyOnly = await probe(deps({ viaProxy: async () => 'connected' }), noPause);
+    expect(proxyOnly).toEqual({
+      code: 1,
+      line: 'the wall let through: the proxy, to example.com:443',
+    });
   });
 
   it('is unproven, not holding, when the allowed host fails too', async () => {
-    const r = await probe(
-      async () => 'refused',
-      async () => false,
-    );
+    const r = await probe(deps({ httpsViaProxy: async () => 'refused' }), noPause);
     expect(r.code).toBe(3);
     expect(r.line).toContain(`but ${allowed} did not answer either`);
+  });
+
+  it('waits for the proxy to listen before it judges anything, and no longer than ten seconds', async () => {
+    let tries = 0;
+    const pauses: number[] = [];
+    const late = deps({
+      direct: async (h, p) => {
+        if (h === PROXY_HOST && p === PROXY_PORT) return ++tries >= 3 ? 'connected' : 'refused';
+        return 'refused';
+      },
+    });
+    expect((await probe(late, async (ms) => void pauses.push(ms))).code).toBe(0);
+    expect(tries).toBe(3);
+    expect(pauses).toEqual([500, 500]);
+    const never = deps({ direct: async () => 'refused', httpsViaProxy: async () => 'refused' });
+    const waited: number[] = [];
+    expect((await probe(never, async (ms) => void waited.push(ms))).code).toBe(3);
+    expect(waited.reduce((a, b) => a + b, 0)).toBe(10_000);
+  });
+
+  it('agrees with judgeProbe on a result built by hand', () => {
+    expect(
+      judgeProbe({
+        direct: [],
+        unlistedResolved: true,
+        proxyUnlisted: 'refused',
+        allowed: 'connected',
+      }),
+    ).toEqual({ code: 1, line: 'the wall let through: DNS for example.com' });
   });
 });

@@ -21,11 +21,12 @@
 #             sign-in, its board's socket and its repo's deploy key, and
 #             nothing else. The server refuses its loopback TCP calls, so it
 #             reaches only its own board, through that board's socket. Its
-#             connections reach only the hosts in lead-egress.allow
-#             (wall_network), and its memory has a ceiling (lead_cgroup,
-#             else lead-memory.sh).
+#             connections reach loopback only, and out only through the
+#             proxy to the hosts in lead-egress.allow (wall_network); its
+#             memory has a ceiling (lead_cgroup, else lead-memory.sh).
+#   cwproxy   that proxy (lead-proxy.ts), with PATH and nothing else.
 #   cwdev     the project's dev server, when CW_DEV_SERVER_CMD names one, with
-#             PATH and nothing else. It binds loopback; the board proxies it
+#             PATH and the proxy's address. It binds loopback; the board proxies it
 #             (attach_app) behind the board's own sign-in. The server refuses
 #             its loopback TCP calls, and it is in no board's socket group.
 #             It runs code the lead writes, so it is behind the lead's
@@ -204,15 +205,19 @@ fi
 pids+=($!)
 
 # The lead and the dev server's network wall (lead-egress.ts): their
-# connections reach loopback and the hosts in lead-egress.allow, and nothing
-# else, DNS included. Both run only behind it, because the dev server runs
+# connections reach loopback and nothing else, DNS included. Their way out is
+# the CONNECT proxy on 127.0.0.1:3128 (lead-proxy.ts), run as cwproxy, which
+# the wall does not hold; it opens a connection only to a host name in
+# lead-egress.allow. Both run only behind it, because the dev server runs
 # code the lead writes, so either could carry a board's data out. Applied
 # once, by whichever of them starts first; CW_LEAD_EGRESS=open (a Fly
 # secret, for a machine whose kernel cannot load the rules) runs both
-# without it. The rules are applied as root, then a probe as the lead
-# checks that a public address and an unlisted name are refused and that
-# the model API answers. Every outcome is logged.
+# without it. The rules are applied as root, then a probe as the lead checks
+# that a public address, an unlisted name and the proxy to an unlisted name
+# are refused, and that the model API answers through the proxy. Every
+# outcome is logged.
 EGRESS_STATE=""
+PROXY_URL=http://127.0.0.1:3128
 egress() { (only_env PATH; bun "$HERE/lead-egress.ts" "$@"); }
 wall_network() {
   if [ -n "$EGRESS_STATE" ]; then
@@ -232,6 +237,19 @@ wall_network() {
     return 1
   fi
   log "the lead's network wall is in: $out"
+  # The proxy, started again 5s after it exits: a lead that crashes it loses
+  # its own way out for 5s and never stops the machine.
+  (
+    while :; do
+      (
+        only_env PATH
+        run_as cwproxy bun "$HERE/lead-proxy.ts" serve
+      ) 2>&1 | while IFS= read -r line; do log "$line"; done
+      log "the lead's proxy exited; starting it again in 5s"
+      sleep 5
+    done
+  ) &
+  pids+=($!)
   status=0
   out=$( (only_env PATH; run_as lead bun "$HERE/lead-egress.ts" probe) 2>&1) || status=$?
   case $status in
@@ -244,16 +262,17 @@ wall_network() {
       ;;
   esac
   EGRESS_STATE=walled
-  # A host's addresses move, so the list is resolved again every 10 minutes.
-  # A refresh that fails leaves the last rules in place.
-  (
-    while :; do
-      sleep 600
-      out=$(egress apply 2>&1) || log "the lead's network wall was not refreshed, the last rules stay: $out"
-    done
-  ) &
-  pids+=($!)
 }
+
+# The proxy's address, for a walled child's environment. Every client the
+# lead runs reads one of these spellings: Claude Code and Bun the upper case,
+# git (libcurl) and curl the lower. ssh reads neither (lead.sh).
+proxy_env() {
+  [ "$EGRESS_STATE" = walled ] || return 0
+  export HTTPS_PROXY="$PROXY_URL" HTTP_PROXY="$PROXY_URL" https_proxy="$PROXY_URL" \
+    http_proxy="$PROXY_URL" NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1
+}
+PROXY_VARS="HTTPS_PROXY HTTP_PROXY https_proxy http_proxy NO_PROXY no_proxy"
 
 # The lead agent's memory: a cgroup v2 group of its own with a ceiling, so a
 # lead that grows is killed alone and the server keeps running. Prints the
@@ -342,13 +361,16 @@ else
           CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
           CW_LEAD_ROOT="$LEAD_ROOT" CW_LEAD_TOKEN_LABEL="$LEAD_TOKEN_LABEL" \
           DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash \
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
+          DISABLE_TELEMETRY=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
         # The last two keep Claude Code off the telemetry and connector hosts
-        # the network wall refuses (lead-egress.allow).
+        # the proxy refuses. Not CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+        # which turns off Remote Control as well.
+        proxy_env
+        # shellcheck disable=SC2086
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
           CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_TOKEN_LABEL CW_LEAD_REMOTE_CONTROL \
           CW_LEAD_GITHUB_DEPLOY_KEY \
-          DISABLE_AUTOUPDATER CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ENABLE_CLAUDEAI_MCP_SERVERS
+          DISABLE_AUTOUPDATER DISABLE_TELEMETRY ENABLE_CLAUDEAI_MCP_SERVERS $PROXY_VARS
         # 007, not 077: a file's group is the lead's own group, which holds
         # nobody else, except in the setgid dev folder, where it is
         # cwdevsrc's, so the dev server can read the checkout there.
@@ -367,7 +389,7 @@ else
 fi
 
 # The project's dev server, when CW_DEV_SERVER_CMD names one: a command line
-# run by bash in $DEV_ROOT/work as cwdev, with PATH and nothing else, so it
+# run by bash in $DEV_ROOT/work as cwdev, with PATH and the proxy's address, so it
 # holds no secret and reaches the board only as the internet does. It must
 # bind 127.0.0.1 on a port of its own (the server's, 8787, is refused at
 # attach). It is started again when it exits, after a wait that doubles from
@@ -385,7 +407,9 @@ elif [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
     while :; do
       started=$SECONDS
       (
-        only_env PATH
+        proxy_env
+        # shellcheck disable=SC2086
+        only_env PATH $PROXY_VARS
         umask 007
         cd "$DEV_ROOT" || exit 1
         # The folder is made by cwdev, so it is cwdev's and cwdevsrc's.
