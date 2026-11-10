@@ -110,3 +110,37 @@ export function resolveDocLink(opts: {
   const memberDocId = `${reviewId}:${segs.join('~')}`;
   return docHref(memberDocId, workspaceId ?? null);
 }
+
+/**
+ * Whether a link is a page of THIS app — the board, Home, a doc, a mock, a
+ * task — and so opens in the tab it was tapped in (the owner, 9 Nov). A new tab
+ * left the agent chat and its voice behind on the old one. The platform's own
+ * new-tab gesture (Cmd- or Ctrl-click, a middle click) still opens one,
+ * because the anchor carries no `target`. Any other origin, or a path this
+ * app does not render as a page, is external and still opens a new tab.
+ *
+ * `base` is the page the link is drawn on; a relative href resolves against
+ * it, as the browser would.
+ */
+export function isAppPageHref(href: string | null | undefined, base: string): boolean {
+  const safe = safeLinkHref(href);
+  if (!safe) return false;
+  let u: URL;
+  let at: URL;
+  try {
+    at = new URL(base);
+    u = new URL(safe, at);
+  } catch {
+    return false;
+  }
+  if (u.origin !== at.origin) return false;
+  return (
+    u.pathname === '/' || u.pathname === '/workspaces' || u.pathname.startsWith('/workspaces/')
+  );
+}
+
+/** The page a link is drawn on, for `isAppPageHref`; a fixed origin where
+ *  there is no window, so the answer there is "external". */
+export function currentPageHref(): string {
+  return typeof window !== 'undefined' ? window.location.href : 'http://localhost.invalid/';
+}

@@ -421,6 +421,43 @@ describe('voice on, carried to the next page of the tab', () => {
     }
   });
 
+  it('a touch on a board link leaves the wake to its click, so iOS still follows the link', async () => {
+    const first = mount({ mode: 'voice' });
+    first.view.button.click();
+    await settle();
+    const saved = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    let resumes = 0;
+    class Suspended {
+      state = 'suspended';
+      resume(): Promise<void> {
+        resumes++;
+        return Promise.resolve();
+      }
+      close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    (window as unknown as { AudioContext: unknown }).AudioContext = Suspended;
+    vi.useFakeTimers();
+    try {
+      nextPage({ mode: 'voice' });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const link = document.createElement('a');
+      link.href = '/workspaces/w-1/mockups/d-Riv_B0ab';
+      link.addEventListener('click', (e) => e.preventDefault());
+      document.body.append(link);
+      const asleep = resumes;
+      // Waking during the touch changes the page, and iOS then drops the click.
+      link.dispatchEvent(new Event('touchend', { bubbles: true, composed: true }));
+      expect(resumes).toBe(asleep);
+      link.click();
+      expect(resumes).toBeGreaterThan(asleep);
+    } finally {
+      vi.useRealTimers();
+      (window as unknown as { AudioContext: unknown }).AudioContext = saved;
+    }
+  });
+
   /** A link as the chat draws it, inside the list. */
   const chatLink = (view: LeadChatMount['view'], target?: string): HTMLAnchorElement => {
     const a = document.createElement('a');

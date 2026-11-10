@@ -25,6 +25,7 @@
  * as a target leaves the label as text.
  */
 import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
+import { currentPageHref, isAppPageHref } from './link-open.ts';
 import {
   cachedLinkStatus,
   cachedLinkTitle,
@@ -63,12 +64,6 @@ export interface CommentMarkdownOpts {
    *  caller passes `false`: a pasted PR or CI link drawn as plain text cannot
    *  be opened on a phone at all, where nobody can select and copy it. */
   bareLinks?: boolean;
-  /** Open a link to this board's own pages in the same tab, so a plain
-   *  click stays on the board and Ctrl- or Cmd-click opens a new tab — the
-   *  browser's own rule once the anchor has no `target`. Other links still
-   *  open a new tab. The lead chat asks for this: leaving the board for a
-   *  PR would leave the conversation too. */
-  sameTabBoardLinks?: boolean;
 }
 
 /** The id a board link names: the task, goal, doc, mock or review. */
@@ -161,6 +156,9 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
     // The URL text was HTML-escaped; unescape &amp; for parsing, then re-escape.
     const url = rawUrl.replace(/&amp;/g, '&');
     const newTab = 'target="_blank" rel="noopener noreferrer"';
+    // A page of this app opens in this tab; anything else in a new one.
+    const tabFor = (to: string): string =>
+      isAppPageHref(to, currentPageHref()) ? '' : ` ${newTab}`;
     // A target a redactor replaced is no address: drawn as a link it resolved
     // against the page and opened "No board answers to [url]". The words stay.
     if (REDACTION_MARKER.test(url.trim())) return label;
@@ -168,15 +166,15 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
     // server. Resolved against the page it opened a 404; the board's open
     // route finds the doc on this board that the path names.
     const fileHref = relativeTargetHref(url, currentPathname());
-    if (fileHref) return `<a href="${escapeHtml(fileHref)}" ${newTab}>${label}</a>`;
+    if (fileHref) return `<a href="${escapeHtml(fileHref)}"${tabFor(fileHref)}>${label}</a>`;
     const href = safeHref(url);
     if (!href) return m;
     // A workspace target keeps the author's label but is still marked, so a
     // task/goal link can wear its status chip once hydration answers. Same
     // origin rule as the bare-URL pass — a foreign lookalike stays unmarked.
     const link = isSameOriginWorkspaceUrl(url) ? parseWorkspaceLink(url) : null;
-    if (!link) return `<a href="${escapeHtml(href)}" ${newTab}>${label}</a>`;
-    const base = `href="${escapeHtml(href)}"${opts.sameTabBoardLinks ? '' : ` ${newTab}`}`;
+    if (!link) return `<a href="${escapeHtml(href)}"${tabFor(href)}>${label}</a>`;
+    const base = `href="${escapeHtml(href)}"${tabFor(href)}`;
     // A label that is only the address is not the author's words: it takes
     // the resource's name, as a bare URL does.
     const named = isAddressLabel(label, url, link);
@@ -283,7 +281,7 @@ function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
       const attrs =
         `href="${escapeHtml(url)}" class="ws-link" data-ws-link="${escapeHtml(url)}"` +
         `${title === undefined ? ' data-ws-pending=""' : ''}` +
-        `${opts.sameTabBoardLinks ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
+        `${isAppPageHref(url, currentPageHref()) ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
       // Title text via escapeHtml (server data is not markup); the raw-URL
       // fallback is `trimmed`, which is already escaped text.
       return `<a ${attrs}>${title ? escapeHtml(title) : trimmed}${status ? statusChipHtml(status) : ''}</a>${tail}`;

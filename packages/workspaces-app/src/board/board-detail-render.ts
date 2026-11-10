@@ -27,6 +27,7 @@ import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import type { ReviewGateNote } from '@claude-workspaces/core/review-hold';
 import { blockableStatus } from '@claude-workspaces/core/task-blocked';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { currentPageHref, isAppPageHref } from '../link-open.ts';
 import { cachedLinkTitle, fetchLinkInfos } from '../link-titles.ts';
 import {
   type BoardDecisionOption,
@@ -206,8 +207,10 @@ export function renderTaskLinks(task: BoardTask, workspaceId?: string): HTMLElem
       const a = document.createElement('a');
       a.className = 'board-link-chip';
       a.href = ref.url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
+      if (!isAppPageHref(ref.url, currentPageHref())) {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      }
       // The host is what identifies a link at a glance; the full URL is the
       // tooltip so a chip never grows to the width of a query string.
       a.textContent = new URL(ref.url).host;
@@ -897,8 +900,10 @@ export function renderRelatedLinks(
     const a = document.createElement('a');
     a.className = 'board-related-link board-related-link-plain';
     a.href = url;
-    a.rel = 'noreferrer';
-    a.target = '_blank';
+    if (!isAppPageHref(url, currentPageHref())) {
+      a.rel = 'noreferrer';
+      a.target = '_blank';
+    }
     a.textContent = url;
     a.addEventListener('click', (ev) => ev.stopPropagation());
     li.append(a);

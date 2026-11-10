@@ -371,9 +371,15 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     woke = voice.wake();
   };
   /** Excalidraw's canvas cancels a touch on iOS, so that tap never becomes a
-   *  click. The agent button's tap always does, and decides what it meant. */
+   *  click: only a touch on a canvas wakes voice at touchend. Any other tap
+   *  waits for its click. Waking clears the tap-to-listen notice, and iOS
+   *  Safari withholds the click of a tap whose touch changed what the page
+   *  shows, so a link tapped while voice waited needed a long-press (the owner,
+   *  9 Nov). The agent button's tap always clicks, and decides what it meant. */
   const onPageTouch = (e: Event): void => {
-    if (!e.composedPath().includes(host)) voice.wake();
+    const at = e.composedPath()[0];
+    if ((at as Element | undefined)?.localName === 'canvas' && !e.composedPath().includes(host))
+      voice.wake();
   };
   const onHidePage = (): void => {
     hiding = true;

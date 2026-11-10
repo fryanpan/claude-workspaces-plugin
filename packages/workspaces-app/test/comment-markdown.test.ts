@@ -340,8 +340,6 @@ describe('relativeTargetHref — a relative link in a comment goes to the board 
   it('renders the relative link through the open route of the page it is drawn on', () => {
     window.history.replaceState(null, '', '/workspaces/w-harbor?task=t-1');
     const out = renderCommentMarkdown('[note](../dir/file.md)');
-    expect(out).toBe(
-      '<p><a href="/workspaces/w-harbor/open?path=..%2Fdir%2Ffile.md" target="_blank" rel="noopener noreferrer">note</a></p>',
-    );
+    expect(out).toBe('<p><a href="/workspaces/w-harbor/open?path=..%2Fdir%2Ffile.md">note</a></p>');
   });
 });

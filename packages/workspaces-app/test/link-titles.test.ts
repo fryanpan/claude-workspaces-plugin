@@ -62,28 +62,29 @@ describe('renderCommentMarkdown — bare workspace URLs', () => {
     expect(out).not.toContain('data-ws-link');
   });
 
-  it('leaves non-workspace URLs untouched', () => {
+  it('links a non-workspace URL as itself, in a new tab, with no title', () => {
     const out = renderCommentMarkdown('https://github.com/owner/repo/pull/1');
-    expect(out).not.toContain('<a ');
-    expect(out).toContain('https://github.com/owner/repo/pull/1');
+    expect(out).toBe(
+      '<p><a href="https://github.com/owner/repo/pull/1" target="_blank" rel="noopener noreferrer">https://github.com/owner/repo/pull/1</a></p>',
+    );
   });
 
-  it('leaves a FOREIGN-origin URL raw even when its path matches a workspace shape', () => {
+  it('never titles a FOREIGN-origin URL, even when its path matches a workspace shape', () => {
     // The spoofing path: a valid doc id on an attacker host. Linkifying it
     // and hydrating the trusted title would label a phishing href "Q3 Plan".
     const spoof = 'https://attacker.example/review/doc-1';
     primeLinkTitle(spoof, 'Q3 Plan'); // even a poisoned cache must not render
     const out = renderCommentMarkdown(`see ${spoof} now`);
-    expect(out).not.toContain('<a ');
     expect(out).not.toContain('Q3 Plan');
-    expect(out).toContain(spoof);
+    expect(out).not.toContain('data-ws-link');
+    expect(out).toContain(`target="_blank" rel="noopener noreferrer">${spoof}</a>`);
   });
 
   it('treats a same-host different-port URL as foreign', () => {
     const otherPort = 'http://localhost:9999/review/doc-1';
     const out = renderCommentMarkdown(otherPort);
-    expect(out).not.toContain('<a ');
-    expect(out).toContain(otherPort);
+    expect(out).not.toContain('data-ws-link');
+    expect(out).toContain(`target="_blank" rel="noopener noreferrer">${otherPort}</a>`);
   });
 
   it('leaves a URL inside inline code untouched', () => {
@@ -340,15 +341,18 @@ describe('a markdown link whose label is only its own address', () => {
   });
 });
 
-describe('sameTabBoardLinks', () => {
+describe('a link to this app opens in the same tab', () => {
   const targets = (markdown: string): Array<string | null> => {
     const el = document.createElement('div');
-    el.innerHTML = renderCommentMarkdown(markdown, { bareLinks: true, sameTabBoardLinks: true });
+    el.innerHTML = renderCommentMarkdown(markdown, { bareLinks: true });
     return [...el.querySelectorAll('a')].map((a) => a.getAttribute('target'));
   };
 
-  it('opens a board link in the same tab, bare or labelled', () => {
+  it('opens a board link in the same tab, bare or labelled, in every caller', () => {
     expect(targets(`${DOC_URL} and [the doc](${DOC_URL})`)).toEqual([null, null]);
+    const el = document.createElement('div');
+    el.innerHTML = renderCommentMarkdown(DOC_URL);
+    expect(el.querySelector('a')?.getAttribute('target')).toBeNull();
   });
 
   it('still opens a link off the board in a new tab', () => {
@@ -359,9 +363,8 @@ describe('sameTabBoardLinks', () => {
     ).toEqual(['_blank', '_blank']);
   });
 
-  it('is off unless asked for', () => {
-    const el = document.createElement('div');
-    el.innerHTML = renderCommentMarkdown(DOC_URL);
-    expect(el.querySelector('a')?.getAttribute('target')).toBe('_blank');
+  it('opens a relative link through the board in the same tab', () => {
+    window.history.replaceState(null, '', '/workspaces/w-harbor/home');
+    expect(targets('[note](../notes/plan.md)')).toEqual([null]);
   });
 });

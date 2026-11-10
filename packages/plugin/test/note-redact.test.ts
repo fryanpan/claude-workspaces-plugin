@@ -188,6 +188,17 @@ describe('fullNote — the whole closing message, reduced line by line', () => {
       '[doc](/workspaces/w-harbor/docs/d-1) and /workspaces/w-river?task=t-9.',
     );
   });
+  it('keeps a mockup link whole, mixed case and underscore included', () => {
+    // The 9 Nov report: a relative mock link in a closing message reached the
+    // chat panel cut to its last segment, `[mock](d-…)`, which the panel
+    // resolved to `/workspaces/<w>/d-…` and "Nothing on this board answers to".
+    expect(fullNote('[mock](/workspaces/w-harbor/mockups/d-Riv_B0ab)')).toBe(
+      '[mock](/workspaces/w-harbor/mockups/d-Riv_B0ab)',
+    );
+    expect(fullNote('The mock: /workspaces/w-harbor/mockups/d-Riv_B0ab')).toBe(
+      'The mock: /workspaces/w-harbor/mockups/d-Riv_B0ab',
+    );
+  });
   it('drops every parameter of a board link that opens nothing, and any value that reads as a secret', () => {
     expect(
       fullNote('https://board.example/workspaces/w-harbor?task=t-1&token=abc&from=x#frag'),
