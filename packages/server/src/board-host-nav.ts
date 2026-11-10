@@ -11,6 +11,13 @@
  *
  * The nav places itself. The page beside it makes its own room, reading these
  * two sizes.
+ *
+ * `dock` adds the board's dock for the lead chat's agent button, where the
+ * board's own nav keeps it: the foot of the rail, the left end of the bar. The
+ * mock page asks for it because the button floated over its frame otherwise,
+ * and at 1100px or under the frame's comment composer puts its Cancel in
+ * exactly that corner, so the button covered the only way out of a comment.
+ * The dock takes no room until the chat draws its button in it.
  */
 import { BOARD_NAV_ICONS, BOARD_NAV_TABS, boardNavPath } from '@claude-workspaces/core/board-nav';
 import { escape } from './shells.ts';
@@ -18,7 +25,18 @@ import { escape } from './shells.ts';
 export const NAV_RAIL_W = 58;
 export const NAV_BAR_H = 54;
 
-export function hostNav(workspaceId: string): { style: string; html: string } {
+/** The dock's rules: hidden until it holds a shown button, then at the rail's
+ *  foot, or at the bar's left end, as on the board (`board.css`). */
+const DOCK_STYLE =
+  '.cw-host-nav>.board-nav-dock{display:flex;align-items:center;justify-content:center;flex:none}' +
+  '.cw-host-nav>.board-nav-dock:not(:has(>:not([hidden]))){display:none}' +
+  '@media (min-width:1101px){.cw-host-nav>.board-nav-dock{margin-top:auto;padding-top:8px;border-top:1px solid #d1d9e0}}' +
+  '@media (max-width:1100px){.cw-host-nav>.board-nav-dock{order:-1;padding:0 10px;border-right:1px solid #d1d9e0}}';
+
+export function hostNav(
+  workspaceId: string,
+  opts: { dock?: boolean } = {},
+): { style: string; html: string } {
   const links = BOARD_NAV_TABS.map(
     (t) =>
       `<a class="board-nav-item" href="${escape(boardNavPath(workspaceId, t.nav))}" title="${t.label}">` +
@@ -35,7 +53,10 @@ export function hostNav(workspaceId: string): { style: string; html: string } {
       'padding:8px 0;gap:2px;border-right:1px solid #d1d9e0}.cw-host-nav a{height:54px}}' +
       `@media (max-width:1100px){:root{--doc-dock-h:${NAV_BAR_H}px}.cw-host-nav{left:0;right:0;bottom:0;` +
       `height:calc(${NAV_BAR_H}px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);` +
-      'border-top:1px solid #d1d9e0}.cw-host-nav a{flex:1}}',
-    html: `<nav class="cw-host-nav board-nav" aria-label="Workspace pages">${links}</nav>`,
+      'border-top:1px solid #d1d9e0}.cw-host-nav a{flex:1}}' +
+      (opts.dock ? DOCK_STYLE : ''),
+    html:
+      `<nav class="cw-host-nav board-nav" aria-label="Workspace pages">${links}` +
+      `${opts.dock ? '<div class="board-nav-dock" role="group" aria-label="Lead chat"></div>' : ''}</nav>`,
   };
 }
