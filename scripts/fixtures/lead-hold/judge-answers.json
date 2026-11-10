@@ -1,1062 +1,1062 @@
 {
- "prompt": "79e49a75d606",
- "model": "claude-haiku-5-5",
- "answers": {
-  "Alice: So we could, um\nAlice: move the pier to the east side.": {
-   "finished": true,
-   "latencyMs": 670
-  },
-  "Bob: The survey boats are, uh\nBob: booked through the end of May.": {
-   "finished": true,
-   "latencyMs": 669
-  },
-  "Harborlight: I think the main thing is, um,\nHarborlight: getting the permits in early.": {
-   "finished": true,
-   "latencyMs": 755
-  },
-  "Riverbend: What we need is uh\nRiverbend: another crew for the night shift": {
-   "finished": true,
-   "latencyMs": 663
-  },
-  "Alice: Let us talk about the boats.\nSaltmarsh: Last year we, er\nSaltmarsh: ran out of fuel twice in March.": {
-   "finished": true,
-   "latencyMs": 872
-  },
-  "Alice: And the ferry timetable is, um": {
-   "finished": false,
-   "latencyMs": 699
-  },
-  "Alice: And the ferry timetable is, um\nAlice: still the winter one.": {
-   "finished": true,
-   "latencyMs": 701
-  },
-  "Saltmarsh: Saltmarsh is late.": {
-   "finished": false,
-   "latencyMs": 895
-  },
-  "Saltmarsh: Saltmarsh is late.\nSaltmarsh: Because the dredge broke down on Tuesday.": {
-   "finished": true,
-   "latencyMs": 785
-  },
-  "Alice: The budget is fine": {
-   "finished": true,
-   "latencyMs": 857
-  },
-  "Alice: The budget is fine\nAlice: What worries me is the schedule": {
-   "finished": false,
-   "latencyMs": 768
-  },
-  "Bob: We tried the north channel": {
-   "finished": false,
-   "latencyMs": 683
-  },
-  "Bob: We tried the north channel\nBob: and it silted up again within a week.": {
-   "finished": true,
-   "latencyMs": 1312
-  },
-  "Harborlight: Riverbend wants a second berth.": {
-   "finished": true,
-   "latencyMs": 908
-  },
-  "Alice: Any news from the office?\nRiverbend: I spoke to the harbour office yesterday.": {
-   "finished": false,
-   "latencyMs": 781
-  },
-  "Alice: Any news from the office?\nRiverbend: I spoke to the harbour office yesterday.\nRiverbend: They will not move the date.": {
-   "finished": true,
-   "latencyMs": 926
-  },
-  "Alice: That is one option": {
-   "finished": false,
-   "latencyMs": 760
-  },
-  "Alice: That is one option\nAlice: The other is to hire the boats from Saltmarsh for the season": {
-   "finished": true,
-   "latencyMs": 742
-  },
-  "Harborlight: Three things. First the pier.": {
-   "finished": false,
-   "latencyMs": 827
-  },
-  "Harborlight: Three things. First the pier.\nHarborlight: Second the ferry.": {
-   "finished": false,
-   "latencyMs": 697
-  },
-  "Harborlight: Three things. First the pier.\nHarborlight: Second the ferry.\nHarborlight: And third the budget for April.": {
-   "finished": true,
-   "latencyMs": 847
-  },
-  "Alice: Two problems.": {
-   "finished": false,
-   "latencyMs": 1110
-  },
-  "Alice: Two problems.\nAlice: One, the crane is broken.": {
-   "finished": false,
-   "latencyMs": 648
-  },
-  "Alice: Two problems.\nAlice: One, the crane is broken.\nAlice: Two, nobody can fix it before May.": {
-   "finished": true,
-   "latencyMs": 849
-  },
-  "Bob: There are a few steps here. We dredge the channel": {
-   "finished": false,
-   "latencyMs": 756
-  },
-  "Bob: There are a few steps here. We dredge the channel\nBob: then we survey it": {
-   "finished": false,
-   "latencyMs": 665
-  },
-  "Bob: There are a few steps here. We dredge the channel\nBob: then we survey it\nBob: and then Riverbend signs off.": {
-   "finished": true,
-   "latencyMs": 776
-  },
-  "Saltmarsh: So first the permits": {
-   "finished": false,
-   "latencyMs": 835
-  },
-  "Saltmarsh: So first the permits\nSaltmarsh: Then the crew": {
-   "finished": false,
-   "latencyMs": 647
-  },
-  "Saltmarsh: So first the permits\nSaltmarsh: Then the crew\nSaltmarsh: Then the boats": {
-   "finished": false,
-   "latencyMs": 660
-  },
-  "Riverbend: I have four points. The first is cost.": {
-   "finished": false,
-   "latencyMs": 1315
-  },
-  "Riverbend: I have four points. The first is cost.\nRiverbend: The second is time,\nRiverbend: the third is the weather,\nRiverbend: and the last is the crew.": {
-   "finished": true,
-   "latencyMs": 681
-  },
-  "Alice: On the agenda we have the survey": {
-   "finished": false,
-   "latencyMs": 671
-  },
-  "Alice: On the agenda we have the survey\nAlice: the berth": {
-   "finished": false,
-   "latencyMs": 787
-  },
-  "Alice: On the agenda we have the survey\nAlice: the berth\nAlice: and the ferry fares.": {
-   "finished": true,
-   "latencyMs": 949
-  },
-  "Alice: It was the": {
-   "finished": false,
-   "latencyMs": 703
-  },
-  "Alice: It was the\nAlice: Harborlight berth, the old one.": {
-   "finished": false,
-   "latencyMs": 809
-  },
-  "Bob: We should call the": {
-   "finished": false,
-   "latencyMs": 716
-  },
-  "Bob: We should call the\nBob: harbour master before Monday": {
-   "finished": false,
-   "latencyMs": 946
-  },
-  "Harborlight: The part we need is the, what is it": {
-   "finished": false,
-   "latencyMs": 849
-  },
-  "Harborlight: The part we need is the, what is it\nHarborlight: the winch cable.": {
-   "finished": true,
-   "latencyMs": 703
-  },
-  "Riverbend: They are sending the\nRiverbend: the inspector on Thursday.": {
-   "finished": true,
-   "latencyMs": 726
-  },
-  "Saltmarsh: Our contact at Riverbend is": {
-   "finished": false,
-   "latencyMs": 695
-  },
-  "Saltmarsh: Our contact at Riverbend is\nSaltmarsh: Alice, I think.": {
-   "finished": false,
-   "latencyMs": 769
-  },
-  "Alice: The thing with the": {
-   "finished": false,
-   "latencyMs": 669
-  },
-  "Alice: The thing with the\nAlice: tide tables is they are a year old": {
-   "finished": true,
-   "latencyMs": 695
-  },
-  "Harborlight: Why does that matter?": {
-   "finished": false,
-   "latencyMs": 866
-  },
-  "Harborlight: Why does that matter?\nHarborlight: Well, the ferry cannot dock at low tide.": {
-   "finished": true,
-   "latencyMs": 717
-  },
-  "Alice: So what do we do about it?": {
-   "finished": true,
-   "latencyMs": 671
-  },
-  "Alice: So what do we do about it?\nAlice: I think we wait for the survey.": {
-   "finished": true,
-   "latencyMs": 798
-  },
-  "Bob: Is that a problem?": {
-   "finished": false,
-   "latencyMs": 1507
-  },
-  "Bob: Is that a problem?\nBob: Not really, we have budget for it.": {
-   "finished": true,
-   "latencyMs": 633
-  },
-  "Riverbend: Who owns the berth": {
-   "finished": false,
-   "latencyMs": 607
-  },
-  "Riverbend: Who owns the berth\nRiverbend: Saltmarsh does since last spring": {
-   "finished": true,
-   "latencyMs": 782
-  },
-  "Saltmarsh: How long will it take?": {
-   "finished": false,
-   "latencyMs": 730
-  },
-  "Saltmarsh: How long will it take?\nSaltmarsh: About three weeks if the weather holds.": {
-   "finished": true,
-   "latencyMs": 690
-  },
-  "Bob: We are behind on the channel.\nAlice: Why are we late?": {
-   "finished": false,
-   "latencyMs": 773
-  },
-  "Bob: We are behind on the channel.\nAlice: Why are we late?\nAlice: Because the dredge contract slipped.": {
-   "finished": true,
-   "latencyMs": 600
-  },
-  "Alice: The Harborlight survey needs two boats.\nBob: Mm-hm.\nAlice: And we only have one until June.": {
-   "finished": true,
-   "latencyMs": 758
-  },
-  "Harborlight: We could move the ferry stop\nRiverbend: Right\nHarborlight: to the south pier for the summer": {
-   "finished": true,
-   "latencyMs": 1570
-  },
-  "Saltmarsh: I priced the hire last week.\nAlice: Yeah.\nSaltmarsh: It comes to about twice what we paid before.": {
-   "finished": true,
-   "latencyMs": 724
-  },
-  "Bob: The crane is fixed.\nHarborlight: Okay.\nBob: But the operator is away until Monday.": {
-   "finished": false,
-   "latencyMs": 660
-  },
-  "Riverbend: So the plan is to start in March\nSaltmarsh: Mm.\nRiverbend: and finish before the summer ferries.": {
-   "finished": true,
-   "latencyMs": 731
-  },
-  "Alice: Riverbend agreed to the price\nBob: Uh-huh\nAlice: They want it in writing though": {
-   "finished": false,
-   "latencyMs": 667
-  },
-  "Alice: That is the plan for the berth.\nBob: Okay, and what about the crane?": {
-   "finished": false,
-   "latencyMs": 757
-  },
-  "Harborlight: So we wait for the survey.\nRiverbend: I can chase the survey team tomorrow.": {
-   "finished": true,
-   "latencyMs": 622
-  },
-  "Saltmarsh: We hire the boats from Riverbend.\nAlice: Agreed. I will put it on the budget.": {
-   "finished": true,
-   "latencyMs": 833
-  },
-  "Bob: I think we are done with the ferry\nHarborlight: Good Next is the pier lighting": {
-   "finished": true,
-   "latencyMs": 654
-  },
-  "Riverbend: The tide tables are updated.\nSaltmarsh: Thanks. I will send them to the crew.": {
-   "finished": true,
-   "latencyMs": 778
-  },
-  "Alice: That covers the permits.\nBob: One more thing on the permits.\nBob: They expire in June.": {
-   "finished": true,
-   "latencyMs": 713
-  },
-  "Alice: That's the plan for Riverbend.": {
-   "finished": true,
-   "latencyMs": 963
-  },
-  "Harborlight: We start the survey on the first Monday of March": {
-   "finished": false,
-   "latencyMs": 901
-  },
-  "Bob: The ferry will stop at the south pier until the work is done.": {
-   "finished": true,
-   "latencyMs": 784
-  },
-  "Saltmarsh: I sent the price to Riverbend this morning. They accepted it.": {
-   "finished": true,
-   "latencyMs": 831
-  },
-  "Riverbend: So the decision is to hire, not buy.": {
-   "finished": true,
-   "latencyMs": 653
-  },
-  "Alice: The crane is fixed and the operator is back on Monday": {
-   "finished": true,
-   "latencyMs": 655
-  },
-  "Alice: So, yeah, and that's it, I guess, and…": {
-   "finished": false,
-   "latencyMs": 856
-  },
-  "Bob: Anyway that is where we are with the boats, so": {
-   "finished": false,
-   "latencyMs": 1313
-  },
-  "Harborlight: I think that covers it, um": {
-   "finished": false,
-   "latencyMs": 1144
-  },
-  "Riverbend: That was the survey and": {
-   "finished": false,
-   "latencyMs": 838
-  },
-  "Saltmarsh: So, the budget is fine and the crew is ready, and yeah, that is about it, I suppose, but": {
-   "finished": false,
-   "latencyMs": 688
-  },
-  "Alice: Yeah, so that is everything from me on the pier, or": {
-   "finished": false,
-   "latencyMs": 653
-  },
-  "Riverbend: Does anyone want to add something?": {
-   "finished": true,
-   "latencyMs": 598
-  },
-  "Alice: The Harborlight survey needs two boats.": {
-   "finished": true,
-   "latencyMs": 832
-  },
-  "Alice: The Harborlight survey needs two boats.\nBob: Mm-hm.": {
-   "finished": false,
-   "latencyMs": 652
-  },
-  "Harborlight: We could move the ferry stop": {
-   "finished": false,
-   "latencyMs": 697
-  },
-  "Saltmarsh: I priced the hire last week.": {
-   "finished": false,
-   "latencyMs": 912
-  },
-  "Saltmarsh: I priced the hire last week.\nAlice: Yeah.": {
-   "finished": false,
-   "latencyMs": 785
-  },
-  "Bob: The crane is fixed.": {
-   "finished": true,
-   "latencyMs": 694
-  },
-  "Bob: The crane is fixed.\nHarborlight: Okay.": {
-   "finished": true,
-   "latencyMs": 607
-  },
-  "Riverbend: So the plan is to start in March": {
-   "finished": false,
-   "latencyMs": 866
-  },
-  "Alice: Riverbend agreed to the price": {
-   "finished": true,
-   "latencyMs": 664
-  },
-  "Alice: Riverbend agreed to the price\nBob: Uh-huh": {
-   "finished": false,
-   "latencyMs": 627
-  },
-  "Harborlight: We could move the ferry stop\nRiverbend: Right": {
-   "finished": true,
-   "latencyMs": 747
-  },
-  "Riverbend: So the plan is to start in March\nSaltmarsh: Mm.": {
-   "finished": false,
-   "latencyMs": 874
-  },
-  "Alice: I think the survey team should, uh\nAlice: start at the Saltmarsh end and work back toward town.": {
-   "finished": true,
-   "latencyMs": 825
-  },
-  "Riverbend: We still need a number for the dredge.\nBob: The budget for the dredge is, um, it's about": {
-   "finished": false,
-   "latencyMs": 748
-  },
-  "Riverbend: We still need a number for the dredge.\nBob: The budget for the dredge is, um, it's about\nBob: two hundred thousand, give or take.": {
-   "finished": true,
-   "latencyMs": 695
-  },
-  "Riverbend: If we push the ferry timetable back by, uh\nRiverbend: twenty minutes, the morning crossing lines up with the train.": {
-   "finished": false,
-   "latencyMs": 666
-  },
-  "Harborlight: We already um": {
-   "finished": false,
-   "latencyMs": 665
-  },
-  "Harborlight: We already um\nHarborlight: we already sent the tender out last week": {
-   "finished": true,
-   "latencyMs": 606
-  },
-  "Saltmarsh: So the plan would be to, like, um\nSaltmarsh: close the east berth for two days": {
-   "finished": true,
-   "latencyMs": 648
-  },
-  "Saltmarsh: So the plan would be to, like, um\nSaltmarsh: close the east berth for two days\nSaltmarsh: and run everything off the west one.": {
-   "finished": true,
-   "latencyMs": 638
-  },
-  "Bob: The contractor called again this morning.\nAlice: My worry with the schedule is that, uh": {
-   "finished": false,
-   "latencyMs": 661
-  },
-  "Bob: The contractor called again this morning.\nAlice: My worry with the schedule is that, uh\nAlice: the contractor can't start until after the spring tides.": {
-   "finished": true,
-   "latencyMs": 679
-  },
-  "Bob: The pilings on the Riverbend side are, er, um\nBob: in worse shape than we thought.": {
-   "finished": true,
-   "latencyMs": 646
-  },
-  "Harborlight: And then we uh we'd need to\nHarborlight: um\nHarborlight: get sign-off from the harbour board before any of that": {
-   "finished": true,
-   "latencyMs": 651
-  },
-  "Riverbend: What I'd suggest is we": {
-   "finished": false,
-   "latencyMs": 796
-  },
-  "Riverbend: What I'd suggest is we\nRiverbend: uh, hold the survey money back until the quotes come in.": {
-   "finished": true,
-   "latencyMs": 900
-  },
-  "Saltmarsh: The ferry crew said they'd, um, they'd rather": {
-   "finished": false,
-   "latencyMs": 818
-  },
-  "Saltmarsh: The ferry crew said they'd, um, they'd rather\nSaltmarsh: do the overtime than cancel the late sailing.": {
-   "finished": true,
-   "latencyMs": 1045
-  },
-  "Harborlight: The fenders came up again at the last meeting.\nAlice: It's mostly a question of, uh, you know,\nAlice: who pays for the new fenders.": {
-   "finished": false,
-   "latencyMs": 969
-  },
-  "Bob: So yeah the um": {
-   "finished": false,
-   "latencyMs": 651
-  },
-  "Bob: So yeah the um\nBob: the tide gauge at Harborlight needs replacing too": {
-   "finished": true,
-   "latencyMs": 723
-  },
-  "Saltmarsh: The Saltmarsh survey is going to be late.": {
-   "finished": false,
-   "latencyMs": 677
-  },
-  "Saltmarsh: The Saltmarsh survey is going to be late.\nSaltmarsh: Because the boat we booked is still in the yard.": {
-   "finished": true,
-   "latencyMs": 898
-  },
-  "Alice: We spent most of the contingency on the breakwater repairs in the autumn, which nobody really planned for.\nAlice: So anything new this year has to come out of the maintenance line.": {
-   "finished": true,
-   "latencyMs": 657
-  },
-  "Riverbend: How did the ferry do last week?\nBob: The ferry ran full every morning last week.": {
-   "finished": true,
-   "latencyMs": 724
-  },
-  "Harborlight: I spoke to the dredging crew": {
-   "finished": false,
-   "latencyMs": 731
-  },
-  "Harborlight: I spoke to the dredging crew\nHarborlight: and they said the channel is silting up faster than the model predicted": {
-   "finished": true,
-   "latencyMs": 665
-  },
-  "Riverbend: The quotes came in.\nRiverbend: Two of them are way over budget, and the third doesn't include the pontoon.": {
-   "finished": true,
-   "latencyMs": 695
-  },
-  "Alice: We can't open the new berth before July, there's just no way the steel arrives in time for the fit-out crew to get started": {
-   "finished": true,
-   "latencyMs": 599
-  },
-  "Saltmarsh: That's the schedule.": {
-   "finished": true,
-   "latencyMs": 807
-  },
-  "Bob: The survey data from Harborlight looks clean": {
-   "finished": true,
-   "latencyMs": 674
-  },
-  "Bob: The survey data from Harborlight looks clean\nBob: apart from the soundings near the old slipway which we'll need to redo": {
-   "finished": true,
-   "latencyMs": 655
-  },
-  "Alice: Where are we on the gangway?\nHarborlight: We've got the money for the gangway.": {
-   "finished": true,
-   "latencyMs": 640
-  },
-  "Riverbend: The harbour master signed off on the plan for the outer moorings yesterday afternoon after the site walk.": {
-   "finished": true,
-   "latencyMs": 680
-  },
-  "Bob: We could close the inner basin for the works.\nAlice: I'm fine with that\nAlice: as long as the ferry keeps the early sailing during the works.": {
-   "finished": true,
-   "latencyMs": 747
-  },
-  "Bob: The ferry is losing money on the winter route": {
-   "finished": true,
-   "latencyMs": 722
-  },
-  "Harborlight: Three things from the survey. First, the pier deck.": {
-   "finished": false,
-   "latencyMs": 1071
-  },
-  "Harborlight: Three things from the survey. First, the pier deck.\nHarborlight: Second, the ferry ramp.": {
-   "finished": false,
-   "latencyMs": 727
-  },
-  "Harborlight: Three things from the survey. First, the pier deck.\nHarborlight: Second, the ferry ramp.\nHarborlight: And third, the lights on the outer wall.": {
-   "finished": true,
-   "latencyMs": 802
-  },
-  "Alice: There are two options on the budget, really.": {
-   "finished": false,
-   "latencyMs": 812
-  },
-  "Alice: There are two options on the budget, really.\nAlice: One is we defer the dredge a year.": {
-   "finished": false,
-   "latencyMs": 636
-  },
-  "Alice: There are two options on the budget, really.\nAlice: One is we defer the dredge a year.\nAlice: The other is we borrow against next year's harbour dues.": {
-   "finished": false,
-   "latencyMs": 688
-  },
-  "Bob: So the schedule goes, the Riverbend berth in March,\nBob: Saltmarsh slipway in April": {
-   "finished": false,
-   "latencyMs": 871
-  },
-  "Bob: So the schedule goes, the Riverbend berth in March,\nBob: Saltmarsh slipway in April\nBob: then the pontoon at Harborlight sometime in May.": {
-   "finished": true,
-   "latencyMs": 1371
-  },
-  "Riverbend: A couple of risks I want to flag The first is the steel price": {
-   "finished": false,
-   "latencyMs": 889
-  },
-  "Riverbend: A couple of risks I want to flag The first is the steel price\nRiverbend: the second is the contractor's availability": {
-   "finished": false,
-   "latencyMs": 799
-  },
-  "Riverbend: A couple of risks I want to flag The first is the steel price\nRiverbend: the second is the contractor's availability\nRiverbend: and the last one which is the big one is the weather window in February": {
-   "finished": true,
-   "latencyMs": 703
-  },
-  "Harborlight: What does the north face need?\nSaltmarsh: We need, um, a new gangway,\nSaltmarsh: new fenders on the north face,\nSaltmarsh: and someone to look at the bollards.": {
-   "finished": true,
-   "latencyMs": 755
-  },
-  "Alice: Number one, the ferry timetable.": {
-   "finished": false,
-   "latencyMs": 663
-  },
-  "Alice: Number one, the ferry timetable.\nAlice: Number two, the parking at the terminal.": {
-   "finished": false,
-   "latencyMs": 704
-  },
-  "Harborlight: What the survey covers is the seabed depth, the condition of the piles,\nHarborlight: the scour around the old jetty": {
-   "finished": false,
-   "latencyMs": 662
-  },
-  "Harborlight: What the survey covers is the seabed depth, the condition of the piles,\nHarborlight: the scour around the old jetty\nHarborlight: and whether the breakwater has moved since the last storm.": {
-   "finished": false,
-   "latencyMs": 829
-  },
-  "Bob: Okay first item the tide gauges": {
-   "finished": false,
-   "latencyMs": 742
-  },
-  "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares": {
-   "finished": false,
-   "latencyMs": 833
-  },
-  "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares\nBob: Third item": {
-   "finished": false,
-   "latencyMs": 693
-  },
-  "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares\nBob: Third item\nBob: the dredging contract renewal": {
-   "finished": true,
-   "latencyMs": 763
-  },
-  "Riverbend: So for the budget, we've got staff costs\nRiverbend: fuel": {
-   "finished": false,
-   "latencyMs": 786
-  },
-  "Riverbend: So for the budget, we've got staff costs\nRiverbend: fuel\nRiverbend: and the insurance on the two work boats.": {
-   "finished": true,
-   "latencyMs": 1523
-  },
-  "Saltmarsh: Things that slipped this month: the buoy replacement.": {
-   "finished": false,
-   "latencyMs": 649
-  },
-  "Saltmarsh: Things that slipped this month: the buoy replacement.\nSaltmarsh: The paint job on the ferry.": {
-   "finished": false,
-   "latencyMs": 567
-  },
-  "Saltmarsh: Things that slipped this month: the buoy replacement.\nSaltmarsh: The paint job on the ferry.\nSaltmarsh: And the survey report, which is now three weeks late.": {
-   "finished": true,
-   "latencyMs": 696
-  },
-  "Alice: There are a few steps before we can start. We get the permit,\nAlice: we put the notice out to mariners,\nAlice: and then we can mobilise.": {
-   "finished": true,
-   "latencyMs": 721
-  },
-  "Bob: Two quick updates The crane is booked": {
-   "finished": false,
-   "latencyMs": 699
-  },
-  "Bob: Two quick updates The crane is booked\nBob: And the divers are confirmed for the Tuesday": {
-   "finished": true,
-   "latencyMs": 644
-  },
-  "Harborlight: It was the": {
-   "finished": false,
-   "latencyMs": 1298
-  },
-  "Harborlight: It was the\nHarborlight: Harborlight berth, the one by the fuel dock.": {
-   "finished": true,
-   "latencyMs": 1105
-  },
-  "Alice: The person from the, what's it called, the": {
-   "finished": false,
-   "latencyMs": 853
-  },
-  "Alice: The person from the, what's it called, the\nAlice: the hydrographic office.": {
-   "finished": false,
-   "latencyMs": 682
-  },
-  "Bob: We need to order more of those, um, the rubber things, the": {
-   "finished": false,
-   "latencyMs": 694
-  },
-  "Riverbend: The survey showed a lot of": {
-   "finished": false,
-   "latencyMs": 745
-  },
-  "Riverbend: The survey showed a lot of\nRiverbend: sediment basically right across the channel mouth": {
-   "finished": false,
-   "latencyMs": 1269
-  },
-  "Alice: Where is the inspection interval written down?\nSaltmarsh: It's in the, uh, oh, what's the document": {
-   "finished": false,
-   "latencyMs": 668
-  },
-  "Alice: Where is the inspection interval written down?\nSaltmarsh: It's in the, uh, oh, what's the document\nSaltmarsh: the maintenance plan, appendix four.": {
-   "finished": true,
-   "latencyMs": 876
-  },
-  "Alice: The ferry's main problem is the\nAlice: the hydraulics on the bow ramp.": {
-   "finished": true,
-   "latencyMs": 808
-  },
-  "Harborlight: We paid, I want to say": {
-   "finished": false,
-   "latencyMs": 828
-  },
-  "Harborlight: We paid, I want to say\nHarborlight: forty thousand for the last one, roughly.": {
-   "finished": true,
-   "latencyMs": 663
-  },
-  "Bob: Last year the board approved the\nBob: the capital plan for the Saltmarsh slipway in October": {
-   "finished": false,
-   "latencyMs": 805
-  },
-  "Riverbend: Who was it that, um, did the\nRiverbend: the dive inspection, was it the Riverbend crew": {
-   "finished": false,
-   "latencyMs": 710
-  },
-  "Riverbend: Who was it that, um, did the\nRiverbend: the dive inspection, was it the Riverbend crew\nRiverbend: no, it was the outside firm.": {
-   "finished": true,
-   "latencyMs": 459
-  },
-  "Saltmarsh: The thing that holds the pontoon in place, the": {
-   "finished": false,
-   "latencyMs": 680
-  },
-  "Alice: We should use the\nAlice: uh\nAlice: the spring tide window, that gives us the most depth.": {
-   "finished": true,
-   "latencyMs": 729
-  },
-  "Bob: The schedule hinges on the": {
-   "finished": false,
-   "latencyMs": 790
-  },
-  "Bob: The schedule hinges on the\nBob: on the delivery date for the new pontoon sections": {
-   "finished": false,
-   "latencyMs": 669
-  },
-  "Alice: Why does that matter?": {
-   "finished": false,
-   "latencyMs": 680
-  },
-  "Alice: Why does that matter?\nAlice: Well, because the ferry can't berth at low tide if the channel silts up.": {
-   "finished": true,
-   "latencyMs": 738
-  },
-  "Bob: So what do we actually need?": {
-   "finished": false,
-   "latencyMs": 667
-  },
-  "Bob: So what do we actually need?\nBob: Honestly, just a second crew for the summer.": {
-   "finished": true,
-   "latencyMs": 741
-  },
-  "Riverbend: The paint job is quoted at twelve thousand.\nHarborlight: Can we afford it?": {
-   "finished": false,
-   "latencyMs": 734
-  },
-  "Riverbend: The paint job is quoted at twelve thousand.\nHarborlight: Can we afford it?\nHarborlight: Probably, if we push the paint job to next year.": {
-   "finished": true,
-   "latencyMs": 614
-  },
-  "Riverbend: Where does the money come from though": {
-   "finished": true,
-   "latencyMs": 640
-  },
-  "Saltmarsh: What happens if the survey boat breaks down again?": {
-   "finished": true,
-   "latencyMs": 978
-  },
-  "Saltmarsh: What happens if the survey boat breaks down again?\nSaltmarsh: We lose the tide window\nSaltmarsh: and the whole schedule moves by a month.": {
-   "finished": true,
-   "latencyMs": 716
-  },
-  "Alice: Is the Riverbend pier safe?": {
-   "finished": true,
-   "latencyMs": 782
-  },
-  "Bob: How long will the dredge take? Two weeks?": {
-   "finished": true,
-   "latencyMs": 617
-  },
-  "Bob: How long will the dredge take? Two weeks?\nBob: More like three, with the weather.": {
-   "finished": true,
-   "latencyMs": 656
-  },
-  "Harborlight: Do we need the second crane um\nHarborlight: no I don't think so the barge crane can do the lifts": {
-   "finished": true,
-   "latencyMs": 740
-  },
-  "Riverbend: And why did the quote double?": {
-   "finished": false,
-   "latencyMs": 595
-  },
-  "Riverbend: And why did the quote double?\nRiverbend: Steel. It's all steel.": {
-   "finished": true,
-   "latencyMs": 737
-  },
-  "Saltmarsh: So the question is, who owns the ferry ramp?": {
-   "finished": true,
-   "latencyMs": 782
-  },
-  "Saltmarsh: So the question is, who owns the ferry ramp?\nSaltmarsh: And the answer is, nobody's quite sure, the deed is older than the harbour trust.": {
-   "finished": true,
-   "latencyMs": 1307
-  },
-  "Alice: When do we tell the ferry passengers?": {
-   "finished": true,
-   "latencyMs": 764
-  },
-  "Bob: What's the worst case\nBob: The worst case is the breakwater fails in a storm": {
-   "finished": true,
-   "latencyMs": 695
-  },
-  "Bob: What's the worst case\nBob: The worst case is the breakwater fails in a storm\nBob: and we're closed for a season": {
-   "finished": true,
-   "latencyMs": 656
-  },
-  "Alice: So the dredge crew can start on the Monday,\nBob: mm-hm\nAlice: provided the permit comes through by Friday.": {
-   "finished": true,
-   "latencyMs": 917
-  },
-  "Riverbend: The ferry numbers were up about ten percent": {
-   "finished": true,
-   "latencyMs": 705
-  },
-  "Riverbend: The ferry numbers were up about ten percent\nSaltmarsh: right\nRiverbend: mostly on the weekend sailings to Harborlight.": {
-   "finished": true,
-   "latencyMs": 675
-  },
-  "Bob: We moved the survey to the spring because the autumn slot clashed with the regatta\nAlice: yeah\nBob: and that pushed the report back": {
-   "finished": true,
-   "latencyMs": 1029
-  },
-  "Bob: We moved the survey to the spring because the autumn slot clashed with the regatta\nAlice: yeah\nBob: and that pushed the report back\nAlice: mm\nBob: so the board won't see it until June.": {
-   "finished": true,
-   "latencyMs": 1355
-  },
-  "Harborlight: The budget for the pontoon is fine": {
-   "finished": true,
-   "latencyMs": 824
-  },
-  "Harborlight: The budget for the pontoon is fine\nRiverbend: okay\nHarborlight: It's the gangway that's the problem that one's way over": {
-   "finished": false,
-   "latencyMs": 665
-  },
-  "Saltmarsh: If we close the east berth,\nBob: uh-huh\nSaltmarsh: the fishing boats have nowhere to land": {
-   "finished": true,
-   "latencyMs": 625
-  },
-  "Saltmarsh: If we close the east berth,\nBob: uh-huh\nSaltmarsh: the fishing boats have nowhere to land\nSaltmarsh: except Riverbend, and that's already full.": {
-   "finished": true,
-   "latencyMs": 780
-  },
-  "Alice: I talked to the contractor this morning\nHarborlight: oh good\nAlice: and they can do the piling in April instead of May.": {
-   "finished": true,
-   "latencyMs": 1678
-  },
-  "Bob: The tide gauge has been reading high since the storm,\nSaltmarsh: right, right\nBob: so all the depth numbers in the survey are off by about ten centimetres.": {
-   "finished": true,
-   "latencyMs": 1039
-  },
-  "Riverbend: So what I'm proposing is a shuttle boat for the summer": {
-   "finished": false,
-   "latencyMs": 1810
-  },
-  "Riverbend: So what I'm proposing is a shuttle boat for the summer\nAlice: mm-hm\nRiverbend: running between Saltmarsh and the main pier every forty minutes": {
-   "finished": false,
-   "latencyMs": 708
-  },
-  "Harborlight: We've had three complaints about the ferry ramp,\nBob: yeah, I saw\nHarborlight: all about the gap at low tide.": {
-   "finished": true,
-   "latencyMs": 973
-  },
-  "Saltmarsh: The insurer wants a new survey before renewal\nRiverbend: sure\nSaltmarsh: which means we have to book the dive team now": {
-   "finished": true,
-   "latencyMs": 1212
-  },
-  "Saltmarsh: The insurer wants a new survey before renewal\nRiverbend: sure\nSaltmarsh: which means we have to book the dive team now\nRiverbend: yep\nSaltmarsh: or we miss the deadline in March.": {
-   "finished": true,
-   "latencyMs": 770
-  },
-  "Alice: The schedule's tight": {
-   "finished": false,
-   "latencyMs": 670
-  },
-  "Alice: The schedule's tight\nBob: mm\nAlice: but it works if the weather holds in February.": {
-   "finished": true,
-   "latencyMs": 694
-  },
-  "Bob: The fuel costs have gone up again\nHarborlight: ugh yeah\nBob: so the winter ferry is going to run at a loss unless we change the fares": {
-   "finished": true,
-   "latencyMs": 913
-  },
-  "Alice: So that's where the budget stands.\nBob: Thanks. On the schedule side, we're still waiting on the crane booking.": {
-   "finished": false,
-   "latencyMs": 885
-  },
-  "Harborlight: The survey finished on Thursday.\nRiverbend: And the data looks good. We'll have the report by next week.": {
-   "finished": true,
-   "latencyMs": 775
-  },
-  "Saltmarsh: That covers the ferry numbers for October.\nAlice: Great. I just want to add that the weekend sailings were the busiest we've had.": {
-   "finished": true,
-   "latencyMs": 681
-  },
-  "Bob: I think we should hold off on the gangway until spring\nHarborlight: Agreed": {
-   "finished": true,
-   "latencyMs": 854
-  },
-  "Riverbend: The permit came through this morning, so the dredge can start Monday.\nSaltmarsh: Good news. I'll tell the fishing crews to move their moorings by Sunday.": {
-   "finished": true,
-   "latencyMs": 759
-  },
-  "Alice: Anyway, the pontoon sections are on the boat from the yard\nAlice: and should land on the fifteenth.\nBob: That lines up with the crane, so we're fine.": {
-   "finished": true,
-   "latencyMs": 680
-  },
-  "Harborlight: So the berth at Riverbend stays closed through November.\nAlice: Okay. Then the ferry will use the Saltmarsh pier until it reopens, and we'll put signs up at both ends.": {
-   "finished": true,
-   "latencyMs": 743
-  },
-  "Bob: That's all I had on the fenders\nRiverbend: Cool Moving on the fuel contract renews in January": {
-   "finished": false,
-   "latencyMs": 799
-  },
-  "Saltmarsh: The breakwater inspection found nothing new.\nHarborlight: Which is a relief, honestly, after that storm.": {
-   "finished": true,
-   "latencyMs": 629
-  },
-  "Riverbend: We're about eight percent under budget for the quarter.\nAlice: Most of that is the survey coming in cheaper than the quote.": {
-   "finished": true,
-   "latencyMs": 641
-  },
-  "Alice: The divers are booked for the Tuesday.\nSaltmarsh: Right, and I've told the harbour office so they can close the inner basin that morning.": {
-   "finished": true,
-   "latencyMs": 664
-  },
-  "Harborlight: So yeah the timetable change goes live on the first\nHarborlight: assuming the board signs it off\nBob: They will I spoke to them yesterday": {
-   "finished": true,
-   "latencyMs": 1103
-  },
-  "Alice: Saltmarsh is sorted, so last is the north bank.\nRiverbend: That's the plan for Riverbend.": {
-   "finished": true,
-   "latencyMs": 1195
-  },
-  "Alice: The survey report is finished and it's on the shared drive.": {
-   "finished": true,
-   "latencyMs": 779
-  },
-  "Bob: We're on budget for the dredge. Nothing else to report there.": {
-   "finished": true,
-   "latencyMs": 853
-  },
-  "Harborlight: The ferry will run the winter timetable from the first of November The summer timetable comes back in April That's settled": {
-   "finished": true,
-   "latencyMs": 773
-  },
-  "Saltmarsh: I've booked the crane for the fourteenth and the divers for the fifteenth.": {
-   "finished": true,
-   "latencyMs": 918
-  },
-  "Alice: So the new berth opens in July. The steel arrived early, so we're actually ahead of schedule.": {
-   "finished": true,
-   "latencyMs": 803
-  },
-  "Harborlight: Did the budget go through?\nRiverbend: The board approved the budget, all of it, including the contingency.": {
-   "finished": true,
-   "latencyMs": 708
-  },
-  "Bob: That's everything from me on the Harborlight pontoon": {
-   "finished": true,
-   "latencyMs": 653
-  },
-  "Harborlight: Right, the tide gauges are all replaced and reading correctly now.": {
-   "finished": true,
-   "latencyMs": 772
-  },
-  "Saltmarsh: The fishing crews have moved their moorings.": {
-   "finished": false,
-   "latencyMs": 873
-  },
-  "Saltmarsh: The fishing crews have moved their moorings.\nSaltmarsh: So the dredge can start on Monday as planned.": {
-   "finished": true,
-   "latencyMs": 1418
-  },
-  "Alice: We'll keep the Saltmarsh slipway closed until the repairs are done in March.": {
-   "finished": true,
-   "latencyMs": 757
-  },
-  "Riverbend: Are the fares changing\nBob: Fares stay the same this year We'll look at them again next autumn": {
-   "finished": true,
-   "latencyMs": 769
-  },
-  "Bob: The dredge is booked for March.": {
-   "finished": true,
-   "latencyMs": 1005
-  },
-  "Bob: The dredge is booked for March.\nBob: So, yeah, that's about it, I think, and…": {
-   "finished": false,
-   "latencyMs": 1072
-  },
-  "Alice: Anyway, the ferry numbers are fine, so": {
-   "finished": false,
-   "latencyMs": 708
-  },
-  "Harborlight: I don't know, the survey is what it is, and, um, yeah": {
-   "finished": false,
-   "latencyMs": 673
-  },
-  "Riverbend: We sorted the fenders out last week": {
-   "finished": true,
-   "latencyMs": 718
-  },
-  "Riverbend: We sorted the fenders out last week\nRiverbend: So that's that really and the rest is just you know": {
-   "finished": false,
-   "latencyMs": 819
-  },
-  "Saltmarsh: Yeah, so, the budget's basically where we said it would be, and, uh": {
-   "finished": false,
-   "latencyMs": 835
-  },
-  "Alice: The crane's booked, the divers are booked,\nAlice: so we're kind of, yeah, we're sort of there, I suppose…": {
-   "finished": false,
-   "latencyMs": 850
-  },
-  "Bob: That's mostly what I had on the pontoon, and the gangway, and": {
-   "finished": false,
-   "latencyMs": 652
-  },
-  "Harborlight: So the schedule for Saltmarsh\nHarborlight: it's fine it's all fine and um": {
-   "finished": false,
-   "latencyMs": 1506
-  },
-  "Riverbend: And yeah, I guess the ferry ramp will just have to wait, so": {
-   "finished": false,
-   "latencyMs": 662
-  },
-  "Saltmarsh: I mean, the weather's the weather, there's not much we can do about it, so, yeah, and…": {
-   "finished": false,
-   "latencyMs": 899
-  },
-  "Alice: The quotes are in, they're all a bit high,\nAlice: but, you know, it is what it is, and so": {
-   "finished": false,
-   "latencyMs": 900
-  },
-  "Bob: So um the tide gauges they're done and the buoys and yeah": {
-   "finished": false,
-   "latencyMs": 864
-  },
-  "Bob: We could either defer the gangway or borrow against the dues.": {
-   "finished": false,
-   "latencyMs": 809
-  },
-  "Riverbend: I've covered the ferry numbers and the fares": {
-   "finished": true,
-   "latencyMs": 821
-  },
-  "Riverbend: I've covered the ferry numbers and the fares\nRiverbend: anyone want to add something": {
-   "finished": true,
-   "latencyMs": 689
-  },
-  "Saltmarsh: The schedule is tight but doable. Does anyone see a problem with it?": {
-   "finished": true,
-   "latencyMs": 909
-  },
-  "Harborlight: Before we move on does anyone have concerns about closing the Riverbend berth": {
-   "finished": false,
-   "latencyMs": 691
-  },
-  "Riverbend: The quotes are in the folder.": {
-   "finished": true,
-   "latencyMs": 1136
-  },
-  "Riverbend: The quotes are in the folder.\nRiverbend: Which one would you all go with?": {
-   "finished": true,
-   "latencyMs": 635
-  },
-  "Saltmarsh: I think that's everything on the breakwater. Questions, comments, anything?": {
-   "finished": true,
-   "latencyMs": 975
-  },
-  "Alice: So we've got three options for the ferry ramp": {
-   "finished": false,
-   "latencyMs": 881
-  },
-  "Bob: Okay that's the survey Anything else before we wrap up": {
-   "finished": true,
-   "latencyMs": 1490
+  "prompt": "79e49a75d606",
+  "model": "claude-haiku-5-5",
+  "answers": {
+    "Alice: So we could, um\nAlice: move the pier to the east side.": {
+      "finished": true,
+      "latencyMs": 670
+    },
+    "Bob: The survey boats are, uh\nBob: booked through the end of May.": {
+      "finished": true,
+      "latencyMs": 669
+    },
+    "Harborlight: I think the main thing is, um,\nHarborlight: getting the permits in early.": {
+      "finished": true,
+      "latencyMs": 755
+    },
+    "Riverbend: What we need is uh\nRiverbend: another crew for the night shift": {
+      "finished": true,
+      "latencyMs": 663
+    },
+    "Alice: Let us talk about the boats.\nSaltmarsh: Last year we, er\nSaltmarsh: ran out of fuel twice in March.": {
+      "finished": true,
+      "latencyMs": 872
+    },
+    "Alice: And the ferry timetable is, um": {
+      "finished": false,
+      "latencyMs": 699
+    },
+    "Alice: And the ferry timetable is, um\nAlice: still the winter one.": {
+      "finished": true,
+      "latencyMs": 701
+    },
+    "Saltmarsh: Saltmarsh is late.": {
+      "finished": false,
+      "latencyMs": 895
+    },
+    "Saltmarsh: Saltmarsh is late.\nSaltmarsh: Because the dredge broke down on Tuesday.": {
+      "finished": true,
+      "latencyMs": 785
+    },
+    "Alice: The budget is fine": {
+      "finished": true,
+      "latencyMs": 857
+    },
+    "Alice: The budget is fine\nAlice: What worries me is the schedule": {
+      "finished": false,
+      "latencyMs": 768
+    },
+    "Bob: We tried the north channel": {
+      "finished": false,
+      "latencyMs": 683
+    },
+    "Bob: We tried the north channel\nBob: and it silted up again within a week.": {
+      "finished": true,
+      "latencyMs": 1312
+    },
+    "Harborlight: Riverbend wants a second berth.": {
+      "finished": true,
+      "latencyMs": 908
+    },
+    "Alice: Any news from the office?\nRiverbend: I spoke to the harbour office yesterday.": {
+      "finished": false,
+      "latencyMs": 781
+    },
+    "Alice: Any news from the office?\nRiverbend: I spoke to the harbour office yesterday.\nRiverbend: They will not move the date.": {
+      "finished": true,
+      "latencyMs": 926
+    },
+    "Alice: That is one option": {
+      "finished": false,
+      "latencyMs": 760
+    },
+    "Alice: That is one option\nAlice: The other is to hire the boats from Saltmarsh for the season": {
+      "finished": true,
+      "latencyMs": 742
+    },
+    "Harborlight: Three things. First the pier.": {
+      "finished": false,
+      "latencyMs": 827
+    },
+    "Harborlight: Three things. First the pier.\nHarborlight: Second the ferry.": {
+      "finished": false,
+      "latencyMs": 697
+    },
+    "Harborlight: Three things. First the pier.\nHarborlight: Second the ferry.\nHarborlight: And third the budget for April.": {
+      "finished": true,
+      "latencyMs": 847
+    },
+    "Alice: Two problems.": {
+      "finished": false,
+      "latencyMs": 1110
+    },
+    "Alice: Two problems.\nAlice: One, the crane is broken.": {
+      "finished": false,
+      "latencyMs": 648
+    },
+    "Alice: Two problems.\nAlice: One, the crane is broken.\nAlice: Two, nobody can fix it before May.": {
+      "finished": true,
+      "latencyMs": 849
+    },
+    "Bob: There are a few steps here. We dredge the channel": {
+      "finished": false,
+      "latencyMs": 756
+    },
+    "Bob: There are a few steps here. We dredge the channel\nBob: then we survey it": {
+      "finished": false,
+      "latencyMs": 665
+    },
+    "Bob: There are a few steps here. We dredge the channel\nBob: then we survey it\nBob: and then Riverbend signs off.": {
+      "finished": true,
+      "latencyMs": 776
+    },
+    "Saltmarsh: So first the permits": {
+      "finished": false,
+      "latencyMs": 835
+    },
+    "Saltmarsh: So first the permits\nSaltmarsh: Then the crew": {
+      "finished": false,
+      "latencyMs": 647
+    },
+    "Saltmarsh: So first the permits\nSaltmarsh: Then the crew\nSaltmarsh: Then the boats": {
+      "finished": false,
+      "latencyMs": 660
+    },
+    "Riverbend: I have four points. The first is cost.": {
+      "finished": false,
+      "latencyMs": 1315
+    },
+    "Riverbend: I have four points. The first is cost.\nRiverbend: The second is time,\nRiverbend: the third is the weather,\nRiverbend: and the last is the crew.": {
+      "finished": true,
+      "latencyMs": 681
+    },
+    "Alice: On the agenda we have the survey": {
+      "finished": false,
+      "latencyMs": 671
+    },
+    "Alice: On the agenda we have the survey\nAlice: the berth": {
+      "finished": false,
+      "latencyMs": 787
+    },
+    "Alice: On the agenda we have the survey\nAlice: the berth\nAlice: and the ferry fares.": {
+      "finished": true,
+      "latencyMs": 949
+    },
+    "Alice: It was the": {
+      "finished": false,
+      "latencyMs": 703
+    },
+    "Alice: It was the\nAlice: Harborlight berth, the old one.": {
+      "finished": false,
+      "latencyMs": 809
+    },
+    "Bob: We should call the": {
+      "finished": false,
+      "latencyMs": 716
+    },
+    "Bob: We should call the\nBob: harbour master before Monday": {
+      "finished": false,
+      "latencyMs": 946
+    },
+    "Harborlight: The part we need is the, what is it": {
+      "finished": false,
+      "latencyMs": 849
+    },
+    "Harborlight: The part we need is the, what is it\nHarborlight: the winch cable.": {
+      "finished": true,
+      "latencyMs": 703
+    },
+    "Riverbend: They are sending the\nRiverbend: the inspector on Thursday.": {
+      "finished": true,
+      "latencyMs": 726
+    },
+    "Saltmarsh: Our contact at Riverbend is": {
+      "finished": false,
+      "latencyMs": 695
+    },
+    "Saltmarsh: Our contact at Riverbend is\nSaltmarsh: Alice, I think.": {
+      "finished": false,
+      "latencyMs": 769
+    },
+    "Alice: The thing with the": {
+      "finished": false,
+      "latencyMs": 669
+    },
+    "Alice: The thing with the\nAlice: tide tables is they are a year old": {
+      "finished": true,
+      "latencyMs": 695
+    },
+    "Harborlight: Why does that matter?": {
+      "finished": false,
+      "latencyMs": 866
+    },
+    "Harborlight: Why does that matter?\nHarborlight: Well, the ferry cannot dock at low tide.": {
+      "finished": true,
+      "latencyMs": 717
+    },
+    "Alice: So what do we do about it?": {
+      "finished": true,
+      "latencyMs": 671
+    },
+    "Alice: So what do we do about it?\nAlice: I think we wait for the survey.": {
+      "finished": true,
+      "latencyMs": 798
+    },
+    "Bob: Is that a problem?": {
+      "finished": false,
+      "latencyMs": 1507
+    },
+    "Bob: Is that a problem?\nBob: Not really, we have budget for it.": {
+      "finished": true,
+      "latencyMs": 633
+    },
+    "Riverbend: Who owns the berth": {
+      "finished": false,
+      "latencyMs": 607
+    },
+    "Riverbend: Who owns the berth\nRiverbend: Saltmarsh does since last spring": {
+      "finished": true,
+      "latencyMs": 782
+    },
+    "Saltmarsh: How long will it take?": {
+      "finished": false,
+      "latencyMs": 730
+    },
+    "Saltmarsh: How long will it take?\nSaltmarsh: About three weeks if the weather holds.": {
+      "finished": true,
+      "latencyMs": 690
+    },
+    "Bob: We are behind on the channel.\nAlice: Why are we late?": {
+      "finished": false,
+      "latencyMs": 773
+    },
+    "Bob: We are behind on the channel.\nAlice: Why are we late?\nAlice: Because the dredge contract slipped.": {
+      "finished": true,
+      "latencyMs": 600
+    },
+    "Alice: The Harborlight survey needs two boats.\nBob: Mm-hm.\nAlice: And we only have one until June.": {
+      "finished": true,
+      "latencyMs": 758
+    },
+    "Harborlight: We could move the ferry stop\nRiverbend: Right\nHarborlight: to the south pier for the summer": {
+      "finished": true,
+      "latencyMs": 1570
+    },
+    "Saltmarsh: I priced the hire last week.\nAlice: Yeah.\nSaltmarsh: It comes to about twice what we paid before.": {
+      "finished": true,
+      "latencyMs": 724
+    },
+    "Bob: The crane is fixed.\nHarborlight: Okay.\nBob: But the operator is away until Monday.": {
+      "finished": false,
+      "latencyMs": 660
+    },
+    "Riverbend: So the plan is to start in March\nSaltmarsh: Mm.\nRiverbend: and finish before the summer ferries.": {
+      "finished": true,
+      "latencyMs": 731
+    },
+    "Alice: Riverbend agreed to the price\nBob: Uh-huh\nAlice: They want it in writing though": {
+      "finished": false,
+      "latencyMs": 667
+    },
+    "Alice: That is the plan for the berth.\nBob: Okay, and what about the crane?": {
+      "finished": false,
+      "latencyMs": 757
+    },
+    "Harborlight: So we wait for the survey.\nRiverbend: I can chase the survey team tomorrow.": {
+      "finished": true,
+      "latencyMs": 622
+    },
+    "Saltmarsh: We hire the boats from Riverbend.\nAlice: Agreed. I will put it on the budget.": {
+      "finished": true,
+      "latencyMs": 833
+    },
+    "Bob: I think we are done with the ferry\nHarborlight: Good Next is the pier lighting": {
+      "finished": true,
+      "latencyMs": 654
+    },
+    "Riverbend: The tide tables are updated.\nSaltmarsh: Thanks. I will send them to the crew.": {
+      "finished": true,
+      "latencyMs": 778
+    },
+    "Alice: That covers the permits.\nBob: One more thing on the permits.\nBob: They expire in June.": {
+      "finished": true,
+      "latencyMs": 713
+    },
+    "Alice: That's the plan for Riverbend.": {
+      "finished": true,
+      "latencyMs": 963
+    },
+    "Harborlight: We start the survey on the first Monday of March": {
+      "finished": false,
+      "latencyMs": 901
+    },
+    "Bob: The ferry will stop at the south pier until the work is done.": {
+      "finished": true,
+      "latencyMs": 784
+    },
+    "Saltmarsh: I sent the price to Riverbend this morning. They accepted it.": {
+      "finished": true,
+      "latencyMs": 831
+    },
+    "Riverbend: So the decision is to hire, not buy.": {
+      "finished": true,
+      "latencyMs": 653
+    },
+    "Alice: The crane is fixed and the operator is back on Monday": {
+      "finished": true,
+      "latencyMs": 655
+    },
+    "Alice: So, yeah, and that's it, I guess, and…": {
+      "finished": false,
+      "latencyMs": 856
+    },
+    "Bob: Anyway that is where we are with the boats, so": {
+      "finished": false,
+      "latencyMs": 1313
+    },
+    "Harborlight: I think that covers it, um": {
+      "finished": false,
+      "latencyMs": 1144
+    },
+    "Riverbend: That was the survey and": {
+      "finished": false,
+      "latencyMs": 838
+    },
+    "Saltmarsh: So, the budget is fine and the crew is ready, and yeah, that is about it, I suppose, but": {
+      "finished": false,
+      "latencyMs": 688
+    },
+    "Alice: Yeah, so that is everything from me on the pier, or": {
+      "finished": false,
+      "latencyMs": 653
+    },
+    "Riverbend: Does anyone want to add something?": {
+      "finished": true,
+      "latencyMs": 598
+    },
+    "Alice: The Harborlight survey needs two boats.": {
+      "finished": true,
+      "latencyMs": 832
+    },
+    "Alice: The Harborlight survey needs two boats.\nBob: Mm-hm.": {
+      "finished": false,
+      "latencyMs": 652
+    },
+    "Harborlight: We could move the ferry stop": {
+      "finished": false,
+      "latencyMs": 697
+    },
+    "Saltmarsh: I priced the hire last week.": {
+      "finished": false,
+      "latencyMs": 912
+    },
+    "Saltmarsh: I priced the hire last week.\nAlice: Yeah.": {
+      "finished": false,
+      "latencyMs": 785
+    },
+    "Bob: The crane is fixed.": {
+      "finished": true,
+      "latencyMs": 694
+    },
+    "Bob: The crane is fixed.\nHarborlight: Okay.": {
+      "finished": true,
+      "latencyMs": 607
+    },
+    "Riverbend: So the plan is to start in March": {
+      "finished": false,
+      "latencyMs": 866
+    },
+    "Alice: Riverbend agreed to the price": {
+      "finished": true,
+      "latencyMs": 664
+    },
+    "Alice: Riverbend agreed to the price\nBob: Uh-huh": {
+      "finished": false,
+      "latencyMs": 627
+    },
+    "Harborlight: We could move the ferry stop\nRiverbend: Right": {
+      "finished": true,
+      "latencyMs": 747
+    },
+    "Riverbend: So the plan is to start in March\nSaltmarsh: Mm.": {
+      "finished": false,
+      "latencyMs": 874
+    },
+    "Alice: I think the survey team should, uh\nAlice: start at the Saltmarsh end and work back toward town.": {
+      "finished": true,
+      "latencyMs": 825
+    },
+    "Riverbend: We still need a number for the dredge.\nBob: The budget for the dredge is, um, it's about": {
+      "finished": false,
+      "latencyMs": 748
+    },
+    "Riverbend: We still need a number for the dredge.\nBob: The budget for the dredge is, um, it's about\nBob: two hundred thousand, give or take.": {
+      "finished": true,
+      "latencyMs": 695
+    },
+    "Riverbend: If we push the ferry timetable back by, uh\nRiverbend: twenty minutes, the morning crossing lines up with the train.": {
+      "finished": false,
+      "latencyMs": 666
+    },
+    "Harborlight: We already um": {
+      "finished": false,
+      "latencyMs": 665
+    },
+    "Harborlight: We already um\nHarborlight: we already sent the tender out last week": {
+      "finished": true,
+      "latencyMs": 606
+    },
+    "Saltmarsh: So the plan would be to, like, um\nSaltmarsh: close the east berth for two days": {
+      "finished": true,
+      "latencyMs": 648
+    },
+    "Saltmarsh: So the plan would be to, like, um\nSaltmarsh: close the east berth for two days\nSaltmarsh: and run everything off the west one.": {
+      "finished": true,
+      "latencyMs": 638
+    },
+    "Bob: The contractor called again this morning.\nAlice: My worry with the schedule is that, uh": {
+      "finished": false,
+      "latencyMs": 661
+    },
+    "Bob: The contractor called again this morning.\nAlice: My worry with the schedule is that, uh\nAlice: the contractor can't start until after the spring tides.": {
+      "finished": true,
+      "latencyMs": 679
+    },
+    "Bob: The pilings on the Riverbend side are, er, um\nBob: in worse shape than we thought.": {
+      "finished": true,
+      "latencyMs": 646
+    },
+    "Harborlight: And then we uh we'd need to\nHarborlight: um\nHarborlight: get sign-off from the harbour board before any of that": {
+      "finished": true,
+      "latencyMs": 651
+    },
+    "Riverbend: What I'd suggest is we": {
+      "finished": false,
+      "latencyMs": 796
+    },
+    "Riverbend: What I'd suggest is we\nRiverbend: uh, hold the survey money back until the quotes come in.": {
+      "finished": true,
+      "latencyMs": 900
+    },
+    "Saltmarsh: The ferry crew said they'd, um, they'd rather": {
+      "finished": false,
+      "latencyMs": 818
+    },
+    "Saltmarsh: The ferry crew said they'd, um, they'd rather\nSaltmarsh: do the overtime than cancel the late sailing.": {
+      "finished": true,
+      "latencyMs": 1045
+    },
+    "Harborlight: The fenders came up again at the last meeting.\nAlice: It's mostly a question of, uh, you know,\nAlice: who pays for the new fenders.": {
+      "finished": false,
+      "latencyMs": 969
+    },
+    "Bob: So yeah the um": {
+      "finished": false,
+      "latencyMs": 651
+    },
+    "Bob: So yeah the um\nBob: the tide gauge at Harborlight needs replacing too": {
+      "finished": true,
+      "latencyMs": 723
+    },
+    "Saltmarsh: The Saltmarsh survey is going to be late.": {
+      "finished": false,
+      "latencyMs": 677
+    },
+    "Saltmarsh: The Saltmarsh survey is going to be late.\nSaltmarsh: Because the boat we booked is still in the yard.": {
+      "finished": true,
+      "latencyMs": 898
+    },
+    "Alice: We spent most of the contingency on the breakwater repairs in the autumn, which nobody really planned for.\nAlice: So anything new this year has to come out of the maintenance line.": {
+      "finished": true,
+      "latencyMs": 657
+    },
+    "Riverbend: How did the ferry do last week?\nBob: The ferry ran full every morning last week.": {
+      "finished": true,
+      "latencyMs": 724
+    },
+    "Harborlight: I spoke to the dredging crew": {
+      "finished": false,
+      "latencyMs": 731
+    },
+    "Harborlight: I spoke to the dredging crew\nHarborlight: and they said the channel is silting up faster than the model predicted": {
+      "finished": true,
+      "latencyMs": 665
+    },
+    "Riverbend: The quotes came in.\nRiverbend: Two of them are way over budget, and the third doesn't include the pontoon.": {
+      "finished": true,
+      "latencyMs": 695
+    },
+    "Alice: We can't open the new berth before July, there's just no way the steel arrives in time for the fit-out crew to get started": {
+      "finished": true,
+      "latencyMs": 599
+    },
+    "Saltmarsh: That's the schedule.": {
+      "finished": true,
+      "latencyMs": 807
+    },
+    "Bob: The survey data from Harborlight looks clean": {
+      "finished": true,
+      "latencyMs": 674
+    },
+    "Bob: The survey data from Harborlight looks clean\nBob: apart from the soundings near the old slipway which we'll need to redo": {
+      "finished": true,
+      "latencyMs": 655
+    },
+    "Alice: Where are we on the gangway?\nHarborlight: We've got the money for the gangway.": {
+      "finished": true,
+      "latencyMs": 640
+    },
+    "Riverbend: The harbour master signed off on the plan for the outer moorings yesterday afternoon after the site walk.": {
+      "finished": true,
+      "latencyMs": 680
+    },
+    "Bob: We could close the inner basin for the works.\nAlice: I'm fine with that\nAlice: as long as the ferry keeps the early sailing during the works.": {
+      "finished": true,
+      "latencyMs": 747
+    },
+    "Bob: The ferry is losing money on the winter route": {
+      "finished": true,
+      "latencyMs": 722
+    },
+    "Harborlight: Three things from the survey. First, the pier deck.": {
+      "finished": false,
+      "latencyMs": 1071
+    },
+    "Harborlight: Three things from the survey. First, the pier deck.\nHarborlight: Second, the ferry ramp.": {
+      "finished": false,
+      "latencyMs": 727
+    },
+    "Harborlight: Three things from the survey. First, the pier deck.\nHarborlight: Second, the ferry ramp.\nHarborlight: And third, the lights on the outer wall.": {
+      "finished": true,
+      "latencyMs": 802
+    },
+    "Alice: There are two options on the budget, really.": {
+      "finished": false,
+      "latencyMs": 812
+    },
+    "Alice: There are two options on the budget, really.\nAlice: One is we defer the dredge a year.": {
+      "finished": false,
+      "latencyMs": 636
+    },
+    "Alice: There are two options on the budget, really.\nAlice: One is we defer the dredge a year.\nAlice: The other is we borrow against next year's harbour dues.": {
+      "finished": false,
+      "latencyMs": 688
+    },
+    "Bob: So the schedule goes, the Riverbend berth in March,\nBob: Saltmarsh slipway in April": {
+      "finished": false,
+      "latencyMs": 871
+    },
+    "Bob: So the schedule goes, the Riverbend berth in March,\nBob: Saltmarsh slipway in April\nBob: then the pontoon at Harborlight sometime in May.": {
+      "finished": true,
+      "latencyMs": 1371
+    },
+    "Riverbend: A couple of risks I want to flag The first is the steel price": {
+      "finished": false,
+      "latencyMs": 889
+    },
+    "Riverbend: A couple of risks I want to flag The first is the steel price\nRiverbend: the second is the contractor's availability": {
+      "finished": false,
+      "latencyMs": 799
+    },
+    "Riverbend: A couple of risks I want to flag The first is the steel price\nRiverbend: the second is the contractor's availability\nRiverbend: and the last one which is the big one is the weather window in February": {
+      "finished": true,
+      "latencyMs": 703
+    },
+    "Harborlight: What does the north face need?\nSaltmarsh: We need, um, a new gangway,\nSaltmarsh: new fenders on the north face,\nSaltmarsh: and someone to look at the bollards.": {
+      "finished": true,
+      "latencyMs": 755
+    },
+    "Alice: Number one, the ferry timetable.": {
+      "finished": false,
+      "latencyMs": 663
+    },
+    "Alice: Number one, the ferry timetable.\nAlice: Number two, the parking at the terminal.": {
+      "finished": false,
+      "latencyMs": 704
+    },
+    "Harborlight: What the survey covers is the seabed depth, the condition of the piles,\nHarborlight: the scour around the old jetty": {
+      "finished": false,
+      "latencyMs": 662
+    },
+    "Harborlight: What the survey covers is the seabed depth, the condition of the piles,\nHarborlight: the scour around the old jetty\nHarborlight: and whether the breakwater has moved since the last storm.": {
+      "finished": false,
+      "latencyMs": 829
+    },
+    "Bob: Okay first item the tide gauges": {
+      "finished": false,
+      "latencyMs": 742
+    },
+    "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares": {
+      "finished": false,
+      "latencyMs": 833
+    },
+    "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares\nBob: Third item": {
+      "finished": false,
+      "latencyMs": 693
+    },
+    "Bob: Okay first item the tide gauges\nBob: Second item is the ferry fares\nBob: Third item\nBob: the dredging contract renewal": {
+      "finished": true,
+      "latencyMs": 763
+    },
+    "Riverbend: So for the budget, we've got staff costs\nRiverbend: fuel": {
+      "finished": false,
+      "latencyMs": 786
+    },
+    "Riverbend: So for the budget, we've got staff costs\nRiverbend: fuel\nRiverbend: and the insurance on the two work boats.": {
+      "finished": true,
+      "latencyMs": 1523
+    },
+    "Saltmarsh: Things that slipped this month: the buoy replacement.": {
+      "finished": false,
+      "latencyMs": 649
+    },
+    "Saltmarsh: Things that slipped this month: the buoy replacement.\nSaltmarsh: The paint job on the ferry.": {
+      "finished": false,
+      "latencyMs": 567
+    },
+    "Saltmarsh: Things that slipped this month: the buoy replacement.\nSaltmarsh: The paint job on the ferry.\nSaltmarsh: And the survey report, which is now three weeks late.": {
+      "finished": true,
+      "latencyMs": 696
+    },
+    "Alice: There are a few steps before we can start. We get the permit,\nAlice: we put the notice out to mariners,\nAlice: and then we can mobilise.": {
+      "finished": true,
+      "latencyMs": 721
+    },
+    "Bob: Two quick updates The crane is booked": {
+      "finished": false,
+      "latencyMs": 699
+    },
+    "Bob: Two quick updates The crane is booked\nBob: And the divers are confirmed for the Tuesday": {
+      "finished": true,
+      "latencyMs": 644
+    },
+    "Harborlight: It was the": {
+      "finished": false,
+      "latencyMs": 1298
+    },
+    "Harborlight: It was the\nHarborlight: Harborlight berth, the one by the fuel dock.": {
+      "finished": true,
+      "latencyMs": 1105
+    },
+    "Alice: The person from the, what's it called, the": {
+      "finished": false,
+      "latencyMs": 853
+    },
+    "Alice: The person from the, what's it called, the\nAlice: the hydrographic office.": {
+      "finished": false,
+      "latencyMs": 682
+    },
+    "Bob: We need to order more of those, um, the rubber things, the": {
+      "finished": false,
+      "latencyMs": 694
+    },
+    "Riverbend: The survey showed a lot of": {
+      "finished": false,
+      "latencyMs": 745
+    },
+    "Riverbend: The survey showed a lot of\nRiverbend: sediment basically right across the channel mouth": {
+      "finished": false,
+      "latencyMs": 1269
+    },
+    "Alice: Where is the inspection interval written down?\nSaltmarsh: It's in the, uh, oh, what's the document": {
+      "finished": false,
+      "latencyMs": 668
+    },
+    "Alice: Where is the inspection interval written down?\nSaltmarsh: It's in the, uh, oh, what's the document\nSaltmarsh: the maintenance plan, appendix four.": {
+      "finished": true,
+      "latencyMs": 876
+    },
+    "Alice: The ferry's main problem is the\nAlice: the hydraulics on the bow ramp.": {
+      "finished": true,
+      "latencyMs": 808
+    },
+    "Harborlight: We paid, I want to say": {
+      "finished": false,
+      "latencyMs": 828
+    },
+    "Harborlight: We paid, I want to say\nHarborlight: forty thousand for the last one, roughly.": {
+      "finished": true,
+      "latencyMs": 663
+    },
+    "Bob: Last year the board approved the\nBob: the capital plan for the Saltmarsh slipway in October": {
+      "finished": false,
+      "latencyMs": 805
+    },
+    "Riverbend: Who was it that, um, did the\nRiverbend: the dive inspection, was it the Riverbend crew": {
+      "finished": false,
+      "latencyMs": 710
+    },
+    "Riverbend: Who was it that, um, did the\nRiverbend: the dive inspection, was it the Riverbend crew\nRiverbend: no, it was the outside firm.": {
+      "finished": true,
+      "latencyMs": 459
+    },
+    "Saltmarsh: The thing that holds the pontoon in place, the": {
+      "finished": false,
+      "latencyMs": 680
+    },
+    "Alice: We should use the\nAlice: uh\nAlice: the spring tide window, that gives us the most depth.": {
+      "finished": true,
+      "latencyMs": 729
+    },
+    "Bob: The schedule hinges on the": {
+      "finished": false,
+      "latencyMs": 790
+    },
+    "Bob: The schedule hinges on the\nBob: on the delivery date for the new pontoon sections": {
+      "finished": false,
+      "latencyMs": 669
+    },
+    "Alice: Why does that matter?": {
+      "finished": false,
+      "latencyMs": 680
+    },
+    "Alice: Why does that matter?\nAlice: Well, because the ferry can't berth at low tide if the channel silts up.": {
+      "finished": true,
+      "latencyMs": 738
+    },
+    "Bob: So what do we actually need?": {
+      "finished": false,
+      "latencyMs": 667
+    },
+    "Bob: So what do we actually need?\nBob: Honestly, just a second crew for the summer.": {
+      "finished": true,
+      "latencyMs": 741
+    },
+    "Riverbend: The paint job is quoted at twelve thousand.\nHarborlight: Can we afford it?": {
+      "finished": false,
+      "latencyMs": 734
+    },
+    "Riverbend: The paint job is quoted at twelve thousand.\nHarborlight: Can we afford it?\nHarborlight: Probably, if we push the paint job to next year.": {
+      "finished": true,
+      "latencyMs": 614
+    },
+    "Riverbend: Where does the money come from though": {
+      "finished": true,
+      "latencyMs": 640
+    },
+    "Saltmarsh: What happens if the survey boat breaks down again?": {
+      "finished": true,
+      "latencyMs": 978
+    },
+    "Saltmarsh: What happens if the survey boat breaks down again?\nSaltmarsh: We lose the tide window\nSaltmarsh: and the whole schedule moves by a month.": {
+      "finished": true,
+      "latencyMs": 716
+    },
+    "Alice: Is the Riverbend pier safe?": {
+      "finished": true,
+      "latencyMs": 782
+    },
+    "Bob: How long will the dredge take? Two weeks?": {
+      "finished": true,
+      "latencyMs": 617
+    },
+    "Bob: How long will the dredge take? Two weeks?\nBob: More like three, with the weather.": {
+      "finished": true,
+      "latencyMs": 656
+    },
+    "Harborlight: Do we need the second crane um\nHarborlight: no I don't think so the barge crane can do the lifts": {
+      "finished": true,
+      "latencyMs": 740
+    },
+    "Riverbend: And why did the quote double?": {
+      "finished": false,
+      "latencyMs": 595
+    },
+    "Riverbend: And why did the quote double?\nRiverbend: Steel. It's all steel.": {
+      "finished": true,
+      "latencyMs": 737
+    },
+    "Saltmarsh: So the question is, who owns the ferry ramp?": {
+      "finished": true,
+      "latencyMs": 782
+    },
+    "Saltmarsh: So the question is, who owns the ferry ramp?\nSaltmarsh: And the answer is, nobody's quite sure, the deed is older than the harbour trust.": {
+      "finished": true,
+      "latencyMs": 1307
+    },
+    "Alice: When do we tell the ferry passengers?": {
+      "finished": true,
+      "latencyMs": 764
+    },
+    "Bob: What's the worst case\nBob: The worst case is the breakwater fails in a storm": {
+      "finished": true,
+      "latencyMs": 695
+    },
+    "Bob: What's the worst case\nBob: The worst case is the breakwater fails in a storm\nBob: and we're closed for a season": {
+      "finished": true,
+      "latencyMs": 656
+    },
+    "Alice: So the dredge crew can start on the Monday,\nBob: mm-hm\nAlice: provided the permit comes through by Friday.": {
+      "finished": true,
+      "latencyMs": 917
+    },
+    "Riverbend: The ferry numbers were up about ten percent": {
+      "finished": true,
+      "latencyMs": 705
+    },
+    "Riverbend: The ferry numbers were up about ten percent\nSaltmarsh: right\nRiverbend: mostly on the weekend sailings to Harborlight.": {
+      "finished": true,
+      "latencyMs": 675
+    },
+    "Bob: We moved the survey to the spring because the autumn slot clashed with the regatta\nAlice: yeah\nBob: and that pushed the report back": {
+      "finished": true,
+      "latencyMs": 1029
+    },
+    "Bob: We moved the survey to the spring because the autumn slot clashed with the regatta\nAlice: yeah\nBob: and that pushed the report back\nAlice: mm\nBob: so the board won't see it until June.": {
+      "finished": true,
+      "latencyMs": 1355
+    },
+    "Harborlight: The budget for the pontoon is fine": {
+      "finished": true,
+      "latencyMs": 824
+    },
+    "Harborlight: The budget for the pontoon is fine\nRiverbend: okay\nHarborlight: It's the gangway that's the problem that one's way over": {
+      "finished": false,
+      "latencyMs": 665
+    },
+    "Saltmarsh: If we close the east berth,\nBob: uh-huh\nSaltmarsh: the fishing boats have nowhere to land": {
+      "finished": true,
+      "latencyMs": 625
+    },
+    "Saltmarsh: If we close the east berth,\nBob: uh-huh\nSaltmarsh: the fishing boats have nowhere to land\nSaltmarsh: except Riverbend, and that's already full.": {
+      "finished": true,
+      "latencyMs": 780
+    },
+    "Alice: I talked to the contractor this morning\nHarborlight: oh good\nAlice: and they can do the piling in April instead of May.": {
+      "finished": true,
+      "latencyMs": 1678
+    },
+    "Bob: The tide gauge has been reading high since the storm,\nSaltmarsh: right, right\nBob: so all the depth numbers in the survey are off by about ten centimetres.": {
+      "finished": true,
+      "latencyMs": 1039
+    },
+    "Riverbend: So what I'm proposing is a shuttle boat for the summer": {
+      "finished": false,
+      "latencyMs": 1810
+    },
+    "Riverbend: So what I'm proposing is a shuttle boat for the summer\nAlice: mm-hm\nRiverbend: running between Saltmarsh and the main pier every forty minutes": {
+      "finished": false,
+      "latencyMs": 708
+    },
+    "Harborlight: We've had three complaints about the ferry ramp,\nBob: yeah, I saw\nHarborlight: all about the gap at low tide.": {
+      "finished": true,
+      "latencyMs": 973
+    },
+    "Saltmarsh: The insurer wants a new survey before renewal\nRiverbend: sure\nSaltmarsh: which means we have to book the dive team now": {
+      "finished": true,
+      "latencyMs": 1212
+    },
+    "Saltmarsh: The insurer wants a new survey before renewal\nRiverbend: sure\nSaltmarsh: which means we have to book the dive team now\nRiverbend: yep\nSaltmarsh: or we miss the deadline in March.": {
+      "finished": true,
+      "latencyMs": 770
+    },
+    "Alice: The schedule's tight": {
+      "finished": false,
+      "latencyMs": 670
+    },
+    "Alice: The schedule's tight\nBob: mm\nAlice: but it works if the weather holds in February.": {
+      "finished": true,
+      "latencyMs": 694
+    },
+    "Bob: The fuel costs have gone up again\nHarborlight: ugh yeah\nBob: so the winter ferry is going to run at a loss unless we change the fares": {
+      "finished": true,
+      "latencyMs": 913
+    },
+    "Alice: So that's where the budget stands.\nBob: Thanks. On the schedule side, we're still waiting on the crane booking.": {
+      "finished": false,
+      "latencyMs": 885
+    },
+    "Harborlight: The survey finished on Thursday.\nRiverbend: And the data looks good. We'll have the report by next week.": {
+      "finished": true,
+      "latencyMs": 775
+    },
+    "Saltmarsh: That covers the ferry numbers for October.\nAlice: Great. I just want to add that the weekend sailings were the busiest we've had.": {
+      "finished": true,
+      "latencyMs": 681
+    },
+    "Bob: I think we should hold off on the gangway until spring\nHarborlight: Agreed": {
+      "finished": true,
+      "latencyMs": 854
+    },
+    "Riverbend: The permit came through this morning, so the dredge can start Monday.\nSaltmarsh: Good news. I'll tell the fishing crews to move their moorings by Sunday.": {
+      "finished": true,
+      "latencyMs": 759
+    },
+    "Alice: Anyway, the pontoon sections are on the boat from the yard\nAlice: and should land on the fifteenth.\nBob: That lines up with the crane, so we're fine.": {
+      "finished": true,
+      "latencyMs": 680
+    },
+    "Harborlight: So the berth at Riverbend stays closed through November.\nAlice: Okay. Then the ferry will use the Saltmarsh pier until it reopens, and we'll put signs up at both ends.": {
+      "finished": true,
+      "latencyMs": 743
+    },
+    "Bob: That's all I had on the fenders\nRiverbend: Cool Moving on the fuel contract renews in January": {
+      "finished": false,
+      "latencyMs": 799
+    },
+    "Saltmarsh: The breakwater inspection found nothing new.\nHarborlight: Which is a relief, honestly, after that storm.": {
+      "finished": true,
+      "latencyMs": 629
+    },
+    "Riverbend: We're about eight percent under budget for the quarter.\nAlice: Most of that is the survey coming in cheaper than the quote.": {
+      "finished": true,
+      "latencyMs": 641
+    },
+    "Alice: The divers are booked for the Tuesday.\nSaltmarsh: Right, and I've told the harbour office so they can close the inner basin that morning.": {
+      "finished": true,
+      "latencyMs": 664
+    },
+    "Harborlight: So yeah the timetable change goes live on the first\nHarborlight: assuming the board signs it off\nBob: They will I spoke to them yesterday": {
+      "finished": true,
+      "latencyMs": 1103
+    },
+    "Alice: Saltmarsh is sorted, so last is the north bank.\nRiverbend: That's the plan for Riverbend.": {
+      "finished": true,
+      "latencyMs": 1195
+    },
+    "Alice: The survey report is finished and it's on the shared drive.": {
+      "finished": true,
+      "latencyMs": 779
+    },
+    "Bob: We're on budget for the dredge. Nothing else to report there.": {
+      "finished": true,
+      "latencyMs": 853
+    },
+    "Harborlight: The ferry will run the winter timetable from the first of November The summer timetable comes back in April That's settled": {
+      "finished": true,
+      "latencyMs": 773
+    },
+    "Saltmarsh: I've booked the crane for the fourteenth and the divers for the fifteenth.": {
+      "finished": true,
+      "latencyMs": 918
+    },
+    "Alice: So the new berth opens in July. The steel arrived early, so we're actually ahead of schedule.": {
+      "finished": true,
+      "latencyMs": 803
+    },
+    "Harborlight: Did the budget go through?\nRiverbend: The board approved the budget, all of it, including the contingency.": {
+      "finished": true,
+      "latencyMs": 708
+    },
+    "Bob: That's everything from me on the Harborlight pontoon": {
+      "finished": true,
+      "latencyMs": 653
+    },
+    "Harborlight: Right, the tide gauges are all replaced and reading correctly now.": {
+      "finished": true,
+      "latencyMs": 772
+    },
+    "Saltmarsh: The fishing crews have moved their moorings.": {
+      "finished": false,
+      "latencyMs": 873
+    },
+    "Saltmarsh: The fishing crews have moved their moorings.\nSaltmarsh: So the dredge can start on Monday as planned.": {
+      "finished": true,
+      "latencyMs": 1418
+    },
+    "Alice: We'll keep the Saltmarsh slipway closed until the repairs are done in March.": {
+      "finished": true,
+      "latencyMs": 757
+    },
+    "Riverbend: Are the fares changing\nBob: Fares stay the same this year We'll look at them again next autumn": {
+      "finished": true,
+      "latencyMs": 769
+    },
+    "Bob: The dredge is booked for March.": {
+      "finished": true,
+      "latencyMs": 1005
+    },
+    "Bob: The dredge is booked for March.\nBob: So, yeah, that's about it, I think, and…": {
+      "finished": false,
+      "latencyMs": 1072
+    },
+    "Alice: Anyway, the ferry numbers are fine, so": {
+      "finished": false,
+      "latencyMs": 708
+    },
+    "Harborlight: I don't know, the survey is what it is, and, um, yeah": {
+      "finished": false,
+      "latencyMs": 673
+    },
+    "Riverbend: We sorted the fenders out last week": {
+      "finished": true,
+      "latencyMs": 718
+    },
+    "Riverbend: We sorted the fenders out last week\nRiverbend: So that's that really and the rest is just you know": {
+      "finished": false,
+      "latencyMs": 819
+    },
+    "Saltmarsh: Yeah, so, the budget's basically where we said it would be, and, uh": {
+      "finished": false,
+      "latencyMs": 835
+    },
+    "Alice: The crane's booked, the divers are booked,\nAlice: so we're kind of, yeah, we're sort of there, I suppose…": {
+      "finished": false,
+      "latencyMs": 850
+    },
+    "Bob: That's mostly what I had on the pontoon, and the gangway, and": {
+      "finished": false,
+      "latencyMs": 652
+    },
+    "Harborlight: So the schedule for Saltmarsh\nHarborlight: it's fine it's all fine and um": {
+      "finished": false,
+      "latencyMs": 1506
+    },
+    "Riverbend: And yeah, I guess the ferry ramp will just have to wait, so": {
+      "finished": false,
+      "latencyMs": 662
+    },
+    "Saltmarsh: I mean, the weather's the weather, there's not much we can do about it, so, yeah, and…": {
+      "finished": false,
+      "latencyMs": 899
+    },
+    "Alice: The quotes are in, they're all a bit high,\nAlice: but, you know, it is what it is, and so": {
+      "finished": false,
+      "latencyMs": 900
+    },
+    "Bob: So um the tide gauges they're done and the buoys and yeah": {
+      "finished": false,
+      "latencyMs": 864
+    },
+    "Bob: We could either defer the gangway or borrow against the dues.": {
+      "finished": false,
+      "latencyMs": 809
+    },
+    "Riverbend: I've covered the ferry numbers and the fares": {
+      "finished": true,
+      "latencyMs": 821
+    },
+    "Riverbend: I've covered the ferry numbers and the fares\nRiverbend: anyone want to add something": {
+      "finished": true,
+      "latencyMs": 689
+    },
+    "Saltmarsh: The schedule is tight but doable. Does anyone see a problem with it?": {
+      "finished": true,
+      "latencyMs": 909
+    },
+    "Harborlight: Before we move on does anyone have concerns about closing the Riverbend berth": {
+      "finished": false,
+      "latencyMs": 691
+    },
+    "Riverbend: The quotes are in the folder.": {
+      "finished": true,
+      "latencyMs": 1136
+    },
+    "Riverbend: The quotes are in the folder.\nRiverbend: Which one would you all go with?": {
+      "finished": true,
+      "latencyMs": 635
+    },
+    "Saltmarsh: I think that's everything on the breakwater. Questions, comments, anything?": {
+      "finished": true,
+      "latencyMs": 975
+    },
+    "Alice: So we've got three options for the ferry ramp": {
+      "finished": false,
+      "latencyMs": 881
+    },
+    "Bob: Okay that's the survey Anything else before we wrap up": {
+      "finished": true,
+      "latencyMs": 1490
+    }
   }
- }
 }

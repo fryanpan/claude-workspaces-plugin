@@ -84,7 +84,7 @@ export function loadAnswers(): Record<string, Answer> {
 
 function saveAnswers(answers: Record<string, Answer>): void {
   const f: AnswersFile = { prompt: PROMPT_ID, model: MODEL, answers };
-  writeFileSync(ANSWERS_PATH, `${JSON.stringify(f, null, 1)}\n`);
+  writeFileSync(ANSWERS_PATH, `${JSON.stringify(f, null, 2)}\n`);
 }
 
 export function cachedJudge(answers: Record<string, Answer>): ReplayJudge {
