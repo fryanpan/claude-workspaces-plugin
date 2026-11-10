@@ -1013,12 +1013,19 @@ export async function handleTaskTool(
           'POST',
           `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/revise`,
           { ...patch, commentId },
-        )) as { held?: boolean; heldReason?: string; message?: string };
+        )) as { url?: string; held?: boolean; heldReason?: string; message?: string };
         // The hold, forwarded. This used to be dropped with a comment
         // saying the doc route runs no gate — true when it was written and
         // false since the gate reached this surface, which left a filer
         // reading `revised: true` for an item the queue still omits.
-        return ok({ docId, threadId, commentId, revised: true, ...heldResult(docRes) });
+        return ok({
+          docId,
+          threadId,
+          commentId,
+          revised: true,
+          ...(docRes.url !== undefined ? { url: docRes.url } : {}),
+          ...heldResult(docRes),
+        });
       }
       let effectiveTaskId = taskId;
       if (effectiveTaskId === undefined) {
@@ -1041,13 +1048,14 @@ export async function handleTaskTool(
               address.threadId,
             )}/revise`,
             { ...patch, commentId: address.commentId },
-          )) as { held?: boolean; heldReason?: string; message?: string };
+          )) as { url?: string; held?: boolean; heldReason?: string; message?: string };
           return ok({
             reviewItemId,
             docId: address.docId,
             threadId: address.threadId,
             commentId: address.commentId,
             revised: true,
+            ...(docRes.url !== undefined ? { url: docRes.url } : {}),
             ...heldResult(docRes),
           });
         }
@@ -1070,6 +1078,7 @@ export async function handleTaskTool(
         `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/review-items/${encodeURIComponent(targetItemId)}/revise`,
         { ...patch, ...(reply !== undefined ? { reply } : {}) },
       )) as {
+        url?: string;
         threadId?: string;
         reviewAdvice?: string;
         held?: boolean;
@@ -1080,6 +1089,8 @@ export async function handleTaskTool(
         taskId: effectiveTaskId,
         ...(reviewItemId !== undefined ? { reviewItemId } : { decision: true }),
         revised: true,
+        // The item's own link — Home with its walkthrough on it.
+        ...(res.url !== undefined ? { url: res.url } : {}),
         ...(res.threadId !== undefined ? { threadId: res.threadId } : {}),
         ...(reply !== undefined && res.threadId !== undefined ? { replied: true } : {}),
         ...(res.reviewAdvice !== undefined ? { reviewAdvice: res.reviewAdvice } : {}),

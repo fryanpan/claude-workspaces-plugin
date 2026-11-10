@@ -37,7 +37,16 @@ import { join } from 'node:path';
 import type { StoredPasskey } from './webauthn.ts';
 
 export interface KeeperCredentials {
-  cloudflare?: { apiToken?: string; accountId?: string };
+  cloudflare?: {
+    apiToken?: string;
+    accountId?: string;
+    /**
+     * Which permission list `apiToken` was made with: a fingerprint of
+     * `CF_TOKEN_PERMISSIONS` (`keeper-setup-cloudflare.ts`), so a setup run
+     * after the list changes knows to make the token again. Not a secret.
+     */
+    permissions?: string;
+  };
   fly?: { orgToken?: string; orgSlug?: string };
   github?: { token?: string };
 }
@@ -46,6 +55,7 @@ export interface KeeperCredentials {
 export const CREDENTIAL_NAMES = [
   'cloudflare-api-token',
   'cloudflare-account-id',
+  'cloudflare-token-permissions',
   'fly-org-token',
   'fly-org-slug',
   'github-token',
@@ -170,8 +180,12 @@ export function openKeeperStore(
     credentials: () => read<KeeperCredentials>('credentials.json', {}),
     setCredential(name, value) {
       const creds = read<KeeperCredentials>('credentials.json', {});
+      // A new token drops the old one's fingerprint: what it was made with is
+      // unknown until the setup records it.
       if (name === 'cloudflare-api-token')
-        creds.cloudflare = { ...creds.cloudflare, apiToken: value };
+        creds.cloudflare = { ...creds.cloudflare, apiToken: value, permissions: undefined };
+      if (name === 'cloudflare-token-permissions')
+        creds.cloudflare = { ...creds.cloudflare, permissions: value };
       if (name === 'cloudflare-account-id')
         creds.cloudflare = { ...creds.cloudflare, accountId: value };
       if (name === 'fly-org-token') creds.fly = { ...creds.fly, orgToken: value };

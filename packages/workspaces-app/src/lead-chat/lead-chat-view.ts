@@ -238,7 +238,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const markdown = (msg: LeadChatMessage): string => {
     const hit = drawn.get(msg.id);
     if (hit?.text === msg.text) return hit.html;
-    const html = renderCommentMarkdown(msg.text, { bareLinks: true, sameTabBoardLinks: true });
+    const html = renderCommentMarkdown(msg.text, { bareLinks: true });
     drawn.set(msg.id, { text: msg.text, html });
     return html;
   };

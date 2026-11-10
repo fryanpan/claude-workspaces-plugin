@@ -3,6 +3,7 @@ import { classifyActor } from '../actor-identity.ts';
 import type { AgentNoteLog } from '../agent-note-log.ts';
 import type { AgentNoteInput, AgentNoteRing } from '../agent-notes.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
+import { reviewItemPath, taskReviewItemKey } from '../board-links.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
 import type { DispatchReportStore } from '../dispatch-reports.ts';
@@ -337,6 +338,25 @@ export function taskUrlFor(
 ): string | undefined {
   const base = isVisitor ? undefined : ctx.externalBaseUrl?.();
   return base === undefined ? undefined : `${base}${taskDeepLink(workspaceId, taskId)}`;
+}
+
+/**
+ * The absolute link that opens one review item filed on a ticket: Home, with
+ * the walkthrough on it (`reviewItemPath`). What `add_review_item` and
+ * `revise_review_item` hand back, so the agent has the item's own link to
+ * pass on rather than the task's, or one it built. Undefined where
+ * `taskUrlFor` is.
+ */
+export function reviewItemUrlFor(
+  ctx: Pick<TaskRoutesContext, 'externalBaseUrl'>,
+  workspaceId: string,
+  taskId: string,
+  reviewItemId: string,
+  isVisitor: boolean,
+): string | undefined {
+  const base = isVisitor ? undefined : ctx.externalBaseUrl?.();
+  if (base === undefined) return undefined;
+  return `${base}${reviewItemPath(workspaceId, taskReviewItemKey(taskId, reviewItemId))}`;
 }
 
 /**
