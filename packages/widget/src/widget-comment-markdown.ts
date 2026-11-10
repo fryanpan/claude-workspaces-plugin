@@ -34,11 +34,12 @@ export const MD_CSS = [
 
 /**
  * One inline mark per alternative: code, bold, a link, `*italic*`,
- * `_italic_`. Code is first so its contents are never marked; a link's label
- * and a mark's words are marked again inside.
+ * `_italic_`, and a bare URL. Code is first so its contents are never marked;
+ * a link's label and a mark's words are marked again inside. A bare URL is
+ * kept as its text: board ids are base64url, and `w--_xK3_-P` is no italics.
  */
 const INLINE =
-  /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)\s]+)\)|(?<![\w*])\*([^*\s][^*]*?)\*(?!\*)|(?<!\w)_([^_\s][^_]*?)_(?!\w)/g;
+  /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)\s]+)\)|(?<![\w*])\*([^*\s][^*]*?)\*(?!\*)|(?<!\w)_([^_\s][^_]*?)_(?!\w)|(https?:\/\/[^\s()<>]+)/g;
 
 /** The address a link may go to, or null when it may not be a link. */
 function safeHref(url: string): string | null {
@@ -60,9 +61,10 @@ function inline(text: string): DocumentFragment {
   const out = document.createDocumentFragment();
   let at = 0;
   for (const m of text.matchAll(INLINE)) {
-    const [whole, code, bold, label, url, star, under] = m;
+    const [whole, code, bold, label, url, star, under, bare] = m;
     let node: Node;
-    if (code !== undefined) node = el('code', document.createTextNode(code));
+    if (bare !== undefined) node = document.createTextNode(bare);
+    else if (code !== undefined) node = el('code', document.createTextNode(code));
     else if (bold !== undefined) node = el('strong', inline(bold));
     else if (label !== undefined && url !== undefined) {
       const href = safeHref(url);
