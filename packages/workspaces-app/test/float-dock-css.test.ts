@@ -1,19 +1,17 @@
 /**
  * The float dock (src/float-dock.ts) and its stylesheet: the ROW pins to the
- * pane and the floats sit in it. Two things that would regress silently:
+ * pane and the float sits in it. Two things that would regress silently:
  *
  *  1. a float that positions itself again (`position: absolute` on
- *     `.plan-float`) would stack both buttons on the pane's centre;
- *  2. the Review float's `hidden` must still win the cascade — the same trap
- *     plan-gate-hidden-css.test.ts guards for Make Plan, now on a second
- *     element that shares the class.
+ *     `.plan-float`) would leave the row and sit on the pane's centre;
+ *  2. a hidden float's `hidden` must still win the cascade inside the row.
  *
  * Real cascade reads against the injected sheet; happy-dom does no layout
  * but resolves `display` and `position`, which is all this needs.
  */
 import type { User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mountReviewFloat } from '../src/review-float.ts';
+import { mountPlanGate } from '../src/plan-gate.ts';
 import { installSheets } from './css-harness.ts';
 
 const JORDAN: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#336699' };
@@ -29,8 +27,8 @@ afterEach(() => {
   removeSheets();
 });
 
-function mount(meta: { huddle?: boolean }, canWrite: boolean) {
-  return mountReviewFloat({
+function mount(meta: { planState?: string }, canWrite: boolean) {
+  return mountPlanGate({
     docId: 'd-css',
     root,
     user: JORDAN,
@@ -41,10 +39,10 @@ function mount(meta: { huddle?: boolean }, canWrite: boolean) {
 
 describe('the float dock', () => {
   it('the dock is the positioned row; a float inside it does not position itself', async () => {
-    const float = mount({ huddle: true }, true);
+    const float = mount({ planState: 'pending' }, true);
     await float.ready;
     const dock = document.querySelector<HTMLElement>('.doc-floats');
-    const btn = document.querySelector<HTMLElement>('.review-float');
+    const btn = document.querySelector<HTMLElement>('.plan-float');
     expect(dock && btn && dock.contains(btn)).toBe(true);
     expect(getComputedStyle(dock!).position).toBe('absolute');
     expect(getComputedStyle(dock!).display).toBe('flex');
@@ -53,10 +51,10 @@ describe('the float dock', () => {
     float.destroy();
   });
 
-  it('an ordinary doc does not DISPLAY the Review float, not merely flag it hidden', async () => {
+  it('an ordinary doc does not DISPLAY the float in the row, not merely flag it hidden', async () => {
     const float = mount({}, true);
     await float.ready;
-    const btn = document.querySelector<HTMLElement>('.review-float');
+    const btn = document.querySelector<HTMLElement>('.doc-floats .plan-float');
     expect(btn?.hidden).toBe(true);
     expect(getComputedStyle(btn!).display).toBe('none');
     float.destroy();

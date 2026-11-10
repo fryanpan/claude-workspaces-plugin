@@ -1,13 +1,13 @@
 /**
  * One read of a doc's JSON record per open, shared by everything that needs it.
  *
- * The record is `GET /workspaces/<ws>/docs/<id>?format=json`. Three modules
- * read it on a doc open: the router (`fetchDocMeta`, to pick the surface), and
- * both floats (`plan-gate.ts`, `review-float.ts`) when they mount. Each float
- * also re-read it whenever the synced `meta` map fired, and that map fires for
- * the Yjs initial sync, which changes nothing the floats show. So one open cost
+ * The record is `GET /workspaces/<ws>/docs/<id>?format=json`. The router reads
+ * it on a doc open (`fetchDocMeta`, to pick the surface), and so do the plan
+ * gate (`plan-gate.ts`) and the linked-item dock when they mount. The floats
+ * used to re-read it whenever the synced `meta` map fired, and that map fires
+ * for the Yjs initial sync, which changes nothing they show. So one open cost
  * five identical requests, and Sentry raised them as an N+1. The map also
- * fires on every `contentRevision` bump, so each edit burst cost two more.
+ * fires on every `contentRevision` bump, so each edit burst cost more.
  *
  * What replaces that:
  *  - The router's answer seeds the floats' first read (`rememberDocRecord` /
@@ -25,14 +25,7 @@
 /** The synced meta keys a float renders from. The server writes each one into
  *  the Yjs `meta` map and the record's `meta` in the same call
  *  (`doc-store.ts`), so the two agree unless something moved. */
-const RENDERED_STAMPS = [
-  'planState',
-  'planRequestedAt',
-  'planRequestedBy',
-  'reviewRequestedAt',
-  'reviewRequestedBy',
-  'reviewThreadId',
-] as const;
+const RENDERED_STAMPS = ['planState'] as const;
 
 export interface DocRecordReader {
   /** The record as of the last known movement. Shares an in-flight read, or
