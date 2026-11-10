@@ -140,7 +140,7 @@ export class LeadAnswers {
     if (w.from !== undefined && w.from !== by) return false;
     const kept = minute?.trim();
     // The chat shows words: a tone cue is for the voice alone (`cues.ts`).
-    const shown = written?.trim() || withoutCues(words);
+    const shown = written?.trim() || withoutCues(words) || words;
     const answer = { ...shapedAnswer(words, LEAD_ANSWER_ROUTE), ...(kept ? { minute: kept } : {}) };
     if (w.heir !== undefined) {
       w.held = { answer, text: shown };

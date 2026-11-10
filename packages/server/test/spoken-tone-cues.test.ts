@@ -33,6 +33,10 @@ describe('cues', () => {
     );
   });
 
+  it('leaves text with no cue exactly as it was', () => {
+    expect(withoutCues('Wait … what? ')).toBe('Wait … what? ');
+  });
+
   it('reads the cues a line opens with', () => {
     expect(leadingCues('[warm] [calm] Hello.')).toBe('[warm] [calm]');
     expect(leadingCues('Hello [warm] there.')).toBe('');

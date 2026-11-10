@@ -28,8 +28,10 @@ const CUE = /\[([A-Za-z][A-Za-z' -]{0,30})\](?!\()/g;
 /** The cues that open `text`, as written (`[warm] [calm] `), or ''. */
 const LEADING = /^(?:\s*\[[A-Za-z][A-Za-z' -]{0,30}\](?!\())+\s*/;
 
-/** `text` with every cue taken out and the spacing they left closed up. */
+/** `text` with every cue taken out and the spacing they left closed up.
+ *  Text with no cue comes back exactly as it was. */
 export function withoutCues(text: string): string {
+  if (!text.includes('[') || text.replace(CUE, '') === text) return text;
   return text
     .replace(CUE, ' ')
     .replace(/\s+([.,;:!?…])/g, '$1')
