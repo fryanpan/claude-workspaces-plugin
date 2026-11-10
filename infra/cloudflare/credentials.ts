@@ -5,7 +5,17 @@
  *
  *   CLOUDFLARE_API_TOKEN                        Keychain `cloudflare-api-token`
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY    Keychain `cloudflare-r2-tfstate`,
- *                                               JSON {accessKeyId, secretAccessKey}
+ *                                               JSON {accessKeyId, secretAccessKey};
+ *                                               else the board secret card's two
+ *                                               entries `r2-tfstate-access-key-id`
+ *                                               and `r2-tfstate-secret-access-key`
+ *
+ * The sources are the Keychain readers in `infra/project-machine/mac-ops.ts`,
+ * which look a name up under the board secret store's prefix and decode it,
+ * so a card entry is read by the name the card asked for. An agent cannot
+ * write the JSON entry (the secret store refuses it), so the card's pair is
+ * the way a person hands over the state key; the JSON entry still wins when
+ * both exist.
  *
  * The R2 pair is the state bucket's S3 credential, an R2 API token scoped to
  * that one bucket. Every value goes into terraform's environment and nowhere
@@ -14,6 +24,9 @@
 
 export const TOKEN_ENTRY = 'cloudflare-api-token';
 export const STATE_ENTRY = 'cloudflare-r2-tfstate';
+/** The board secret card's two entries for the same credential. */
+export const STATE_CARD_ID_ENTRY = 'r2-tfstate-access-key-id';
+export const STATE_CARD_SECRET_ENTRY = 'r2-tfstate-secret-access-key';
 export const DEFAULT_STATE_BUCKET = 'claude-workspaces-tfstate';
 
 export interface CredentialSources {
@@ -45,7 +58,8 @@ export function stateCredentials(src: CredentialSources): Record<string, string>
   const id = src.env.AWS_ACCESS_KEY_ID;
   const secret = src.env.AWS_SECRET_ACCESS_KEY;
   if (set(id) && set(secret)) return { AWS_ACCESS_KEY_ID: id, AWS_SECRET_ACCESS_KEY: secret };
-  const raw = fromKeychain(src, STATE_ENTRY, 'AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY');
+  if (!src.keychainHas(STATE_ENTRY)) return fromCard(src);
+  const raw = src.keychainRead(STATE_ENTRY).trim();
   let pair: { accessKeyId?: unknown; secretAccessKey?: unknown };
   try {
     pair = JSON.parse(raw);
@@ -56,6 +70,31 @@ export function stateCredentials(src: CredentialSources): Record<string, string>
     throw new Error(`the Keychain entry ${STATE_ENTRY} has no accessKeyId and secretAccessKey`);
   }
   return { AWS_ACCESS_KEY_ID: pair.accessKeyId, AWS_SECRET_ACCESS_KEY: pair.secretAccessKey };
+}
+
+/** The state credential from the board secret card's two entries. */
+function fromCard(src: CredentialSources): Record<string, string> {
+  const missing = [STATE_CARD_ID_ENTRY, STATE_CARD_SECRET_ENTRY].filter((e) => !src.keychainHas(e));
+  if (missing.length === 2) {
+    throw new Error(
+      `none of AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, the Keychain entry ${STATE_ENTRY}, or the secret card's entries ${STATE_CARD_ID_ENTRY} and ${STATE_CARD_SECRET_ENTRY} is set; nothing was changed`,
+    );
+  }
+  if (missing.length === 1) {
+    throw new Error(
+      `the Keychain entry ${STATE_ENTRY} is not set and the secret card's entry ${missing[0]} is missing; nothing was changed`,
+    );
+  }
+  const keyId = src.keychainRead(STATE_CARD_ID_ENTRY).trim();
+  const keySecret = src.keychainRead(STATE_CARD_SECRET_ENTRY).trim();
+  const empty = [
+    ...(keyId === '' ? [STATE_CARD_ID_ENTRY] : []),
+    ...(keySecret === '' ? [STATE_CARD_SECRET_ENTRY] : []),
+  ];
+  if (empty.length > 0) {
+    throw new Error(`the secret card's entry ${empty.join(' and ')} is empty; nothing was changed`);
+  }
+  return { AWS_ACCESS_KEY_ID: keyId, AWS_SECRET_ACCESS_KEY: keySecret };
 }
 
 export function tfCredentials(src: CredentialSources): TfCredentials {
