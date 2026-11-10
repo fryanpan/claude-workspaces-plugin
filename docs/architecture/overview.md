@@ -2209,7 +2209,9 @@ spelling of a review item's link (`home?item=<key>`), which the add and revise
 routes return, and the rule that picks which doc on a board a relative link
 names. `routes/board-links.ts` is its HTTP reader: it redirects
 `review/<id>`, an escaped `home%3Fitem…` and `open?path=` to the page they
-meant. No layer changes.
+meant. It also answers the scope middleware's refusal of a person's
+`docs|mockups|whiteboards/<id>` link that names a board the page is not filed
+on, with the same page under the board that holds it. No layer changes.
 
 Four top-level modules keep a doc page readable with no network, and none of
 them changes a layer. `doc-cache.ts` is a store adapter: the browser's

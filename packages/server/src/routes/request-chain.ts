@@ -45,6 +45,7 @@ import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '..
 import type { BoardWorkspace } from '../tasks.ts';
 import { matchWorkspaceRoute } from '../workspace-path.ts';
 import { handleAuthShareRoutes } from './auth-share.ts';
+import { pageOnOtherBoard } from './board-links.ts';
 import { handleGithubHubRoute } from './github-hub.ts';
 import { handleHomeFeedRoute } from './home-feed.ts';
 import { handleRecallWebhookRoute } from './recall-webhook.ts';
@@ -430,7 +431,16 @@ export function createRequestChain(
             // missing, in which case there is nowhere on it to go and the
             // board's own not-found page is the honest answer: offering to
             // open a board that does not exist is a second dead end.
+            // A person's page link naming the wrong board opens the board
+            // that holds it (`pageOnOtherBoard`).
             notFoundPage: (address) =>
+              (address.boardExists && visitor === null
+                ? pageOnOtherBoard(workspacesOfMember, {
+                    method: req.method,
+                    rest: address.rest,
+                    url,
+                  })
+                : undefined) ??
               new Response(
                 address.boardExists
                   ? renderBoardMemberNotFound(address.workspaceId, askedAddress(url))
