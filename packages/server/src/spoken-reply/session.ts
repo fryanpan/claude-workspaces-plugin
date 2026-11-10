@@ -65,13 +65,16 @@ import { FillerCue, cueFor } from './filler-cue.ts';
 import type { GeminiLive, GeminiLiveSession } from './gemini-live.ts';
 import { type MeetingAnswer, type MeetingRoom, SILENT, meetingAnswer } from './meeting-ask.ts';
 import { MeetingErrands, withHeld } from './meeting-errands.ts';
-import { type GateTimers, PauseGate, unfinishedAsk } from './pause-gate.ts';
+import { type GateTimers, PauseGate, foreignNoise, unfinishedAsk } from './pause-gate.ts';
 import { speakPoints } from './speak-points.ts';
 import type { SpokenTimings } from './timings.ts';
 import type { SpokenVoice } from './tts.ts';
 
 export const SPOKEN_INPUT_RATE = 16_000;
 
+/** The language the listener holds a spoken request to; the product has no
+ *  per-person setting yet. A short turn heard as another is dropped. */
+export const SPOKEN_LANGUAGE = 'en';
 /** The listener's tuning for a board question: end of speech called at most
  *  2 s after the last word. It was 500 ms from Bryan's 2 Oct ask, then 1 s
  *  (30 Oct: "it's often cutting me off too soon"), and 1 s still cut him off
@@ -429,6 +432,7 @@ export class SpokenSession {
         sampleRate: SPOKEN_INPUT_RATE,
         detectSpeakers: false,
         tuning: planning ? SPOKEN_PLANNING_TUNING : SPOKEN_TAP_TUNING,
+        language: SPOKEN_LANGUAGE,
         onTurn: (frame) => {
           if (turn !== this.turn) return;
           const t = this.fresh(frame);
@@ -473,6 +477,14 @@ export class SpokenSession {
   }
 
   private hear(t: EngineTurn): void {
+    if (foreignNoise(t, SPOKEN_LANGUAGE)) {
+      // Not words: its partial leaves the gate, and what came before stays.
+      this.tail = null;
+      const before = this.finals.join(' ').trim();
+      if (before) this.pause?.heard(before, false);
+      else this.pause?.cancel();
+      return;
+    }
     this.tail = t.final ? null : t;
     if (t.final) this.finals.push(t.text);
     if (t.final && t.stream !== 'system') this.own.push(t.text);

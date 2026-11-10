@@ -94,6 +94,12 @@ export interface EngineTurn {
    * words are all still provisional. Never longer in words than `text`.
    */
   settledText?: string;
+  /**
+   * The language most of a final turn's words were tagged with, when the
+   * session named a `language` and the engine tags words (Soniox). Absent on
+   * partials and on every other session.
+   */
+  language?: string;
 }
 
 export interface TranscriptionOpenOpts {
@@ -121,6 +127,12 @@ export interface TranscriptionOpenOpts {
    * own defaults rather than a copy of ours; see meeting-tuning.ts.
    */
   tuning?: MeetingTuning;
+  /**
+   * The one language the speaker speaks, as an ISO code. An engine that can
+   * holds recognition to it and tags each final turn with the language it
+   * heard (`EngineTurn.language`). Absent: the engine detects any language.
+   */
+  language?: string;
   onTurn: (turn: EngineTurn) => void;
   onError: (message: string) => void;
   /**
