@@ -11,6 +11,7 @@ import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { LeadChatFiles } from '../lead-chat/files.ts';
 import type { LeadChat } from '../lead-chat/lead-chat.ts';
+import type { LeadLineHolds } from '../lead-chat/lead-line-holds.ts';
 import type { LeadModels } from '../lead-chat/lead-model.ts';
 import type { LeadMeetingFeed } from '../lead-chat/meeting-feed.ts';
 import type { LeadChatMeetings } from '../lead-chat/meeting.ts';
@@ -88,6 +89,9 @@ export interface WorkspaceRoutesContext {
   /** The voice a line the lead says into a meeting is played in, or null
    *  when this server has none (the line still shows). */
   leadMeetingVoice: SpokenVoice | null;
+  /** Holds a line the lead says into a meeting until the speaker finishes
+   *  the thought (`lead-chat/lead-line-holds.ts`); null says it at once. */
+  leadLineHolds?: LeadLineHolds | null;
   /** What the pages say about features this server's profile turned off. */
   featuresOff: FeaturesOff;
   /** Where each agent points, in its boards' presence rooms. */

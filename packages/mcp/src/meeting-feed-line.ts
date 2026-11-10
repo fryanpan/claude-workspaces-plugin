@@ -35,8 +35,8 @@ export function meetingStartedLine(p: MeetingFeedPayload): string {
     `[voice.meeting_started] A meeting started${by}${doc}. You are in it: what is said arrives as ` +
     'voice.meeting_heard lines. Follow along, read the doc and research while people talk. ' +
     `To speak, call say_in_meeting(workspaceId="${p.workspaceId ?? ''}", text): it is played aloud ` +
-    'in the room at once, so keep it to one short spoken sentence and use it rarely. Put other ' +
-    'questions in the lead chat until the meeting can tell when a speaker has finished a thought.'
+    'in the room once whoever is speaking has finished the thought, and dropped if the talk moves ' +
+    'past it. Keep it to one short spoken sentence and use it rarely.'
   );
 }
 

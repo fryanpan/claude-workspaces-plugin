@@ -29,6 +29,8 @@ import type { GitRunner } from './git-push/git.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
 import type { FetchLike, HomeRemotesConfig } from './home-remotes.ts';
 import type { ReplyTransport } from './inbox/send-transport.ts';
+import type { HoldTiming } from './lead-chat/lead-line-hold.ts';
+import type { LeadHoldSetting } from './lead-chat/lead-line-holds.ts';
 import type { LeadPaneDeps } from './lead-chat/pane.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
@@ -42,6 +44,7 @@ import type { ReviewJudge } from './review-judge.ts';
 import type { SecretWriter } from './secret-store.ts';
 import type { CfApi } from './share/cf-api.ts';
 import type { ShareConfig } from './share/types.ts';
+import type { MeetingEars } from './spoken-reply/meeting-ears.ts';
 import type { SpokenEngines } from './spoken-reply/session.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
@@ -449,6 +452,17 @@ export interface ServerOptions {
    * unasked. Unset → `CW_MEETING_LEAD_FEED=1` turns it on.
    */
   meetingLeadFeed?: boolean;
+  /**
+   * How a line the lead says into a meeting waits for the speaker to finish
+   * (`lead-chat/lead-line-holds.ts`). Unset → `CW_MEETING_LEAD_HOLD`, else
+   * `judge` with a `voiceComplete`, `gate` without. Tests pass shorter
+   * `leadHoldTiming` so a held line settles inside a test's budget.
+   */
+  leadHold?: LeadHoldSetting;
+  leadHoldTiming?: Partial<HoldTiming>;
+  /** What the hold hears the room through; the meeting's own ears unless a
+   *  test scripts the room. */
+  leadHoldEars?: Pick<MeetingEars, 'engine'>;
   /**
    * How many quiet windows a row with a WATCHING builder dispatch gets
    * before the wake calls its builder silent (default

@@ -54,6 +54,11 @@ function replyFor(path: string): { status: number; body: unknown } {
   if (path.startsWith('/workspaces/w-full/')) return { status: 409, body: { error: 'room-first' } };
   if (path.startsWith('/workspaces/w-live/'))
     return { status: 200, body: { ok: true, played: true } };
+  if (path.startsWith('/workspaces/w-talking/'))
+    return {
+      status: 200,
+      body: { ok: true, said: false, lapsed: 'lapsed', hint: 'The room moved past this line.' },
+    };
   if (path.startsWith('/workspaces/w-quiet/'))
     return { status: 409, body: { error: 'no-meeting' } };
   if (path.startsWith('/workspaces/w-other/')) return { status: 403, body: { error: 'not-lead' } };
@@ -178,6 +183,15 @@ describe('say_in_meeting — the lead speaks into its meeting', () => {
     expect(out).toEqual({ said: true, played: true });
     // Said as the lead, so it carries the lead's own token.
     expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it('says a held line that the room talked past was not said, and why', async () => {
+    const out = payload(await call('say_in_meeting', { workspaceId: 'w-talking', text: 'Hi.' }));
+    expect(out).toEqual({
+      said: false,
+      reason: 'lapsed',
+      note: 'The room moved past this line.',
+    });
   });
 
   it('names each refusal for what it is: token, machine, seat, or the room’s turn', async () => {

@@ -200,8 +200,19 @@ describe('a lead line in a meeting', () => {
   it('asks the judge at once when the room is already quiet', () => {
     const j = handJudge();
     const r = rig('judge', j.judge);
+    r.hear(0, 0, 'That is the plan for Riverbend.', true);
+    r.clock.advanceTo(T.quietMs * 2);
     r.say();
     expect(j.asked).toHaveLength(1);
+  });
+
+  it('lets a line go into a room nobody has spoken in, without a call', () => {
+    const j = handJudge();
+    const r = rig('judge', j.judge);
+    r.say();
+    r.clock.advanceTo(T.graceMs);
+    expect(j.asked).toHaveLength(0);
+    expect(r.outcomes.map((o) => o.said)).toEqual([true]);
   });
 
   it('drops a line the talk has moved past, and says so', () => {

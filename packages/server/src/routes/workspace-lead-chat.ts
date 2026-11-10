@@ -250,6 +250,7 @@ async function meetingAction(
       ...(docId ? { docId } : {}),
       ...(docTitle ? { docTitle } : {}),
     });
+    if (r.ok) ctx.leadLineHolds?.listen(workspaceId, r.meeting);
     return answer(r, r.ok ? { meeting: r.meeting } : {});
   }
   if (action === 'line') {
@@ -273,6 +274,9 @@ async function meetingAction(
       if (leadHearsLine(source, proven)) {
         const sent = ctx.leadChat.post(workspaceId, person, text, undefined, 'voice');
         if (sent.ok) toLead = sent.message.id;
+        // The room asked the lead: its answer is not held.
+        const m = meetings.current(workspaceId);
+        if (sent.ok && m) ctx.leadLineHolds?.addressed(workspaceId, m);
       } else if (leadHearsLine(source, true)) {
         // Only the sign-in is missing, so the page can say so.
         refused = 'sign-in';
@@ -292,6 +296,7 @@ async function meetingAction(
   if (action === 'end') {
     const r = meetings.end(workspaceId, meetingId);
     if (r.ok) ctx.leadMeetingFeed?.ended(workspaceId);
+    if (r.ok) ctx.leadLineHolds?.end(workspaceId);
     return answer(r, {});
   }
   return ctx.j(400, { error: 'unknown action' });
@@ -331,6 +336,24 @@ async function leadSays(
   if (!text) return ctx.j(400, { error: 'text required' });
   if (text.length > LEAD_SAY_MAX) return ctx.j(400, { error: `text over ${LEAD_SAY_MAX} chars` });
   const who = ctx.leadChat.leadAuthor(workspaceId, agentId).name;
+  // The line waits for the speaker to finish the thought, and is dropped if
+  // the talk moves past it (`lead-chat/lead-line-holds.ts`).
+  const running = ctx.leadChatMeetings.current(workspaceId);
+  const held =
+    running && ctx.leadLineHolds ? await ctx.leadLineHolds.wait(workspaceId, running) : null;
+  if (held && !held.said) {
+    return ctx.j(200, {
+      ok: true,
+      said: false,
+      lapsed: held.reason,
+      hint:
+        held.reason === 'replaced'
+          ? 'A newer line from you replaced this one.'
+          : held.reason === 'ended'
+            ? 'The meeting ended before the line could be said.'
+            : 'The room kept talking and moved past this line, so it was not said.',
+    });
+  }
   const r = ctx.leadChatMeetings.said(workspaceId, who, text);
   if (!r.ok) {
     if (r.error === 'no-meeting') {
@@ -346,8 +369,10 @@ async function leadSays(
   }
   return ctx.j(200, {
     ok: true,
+    said: true,
     meetingId: r.meeting.id,
     turn: r.line.turn,
+    ...(held ? { waitedMs: held.waitedMs } : {}),
     // Played only from a microphone meeting's recording tab
     // (`leadLinePlaysHere` on the page).
     played: ctx.leadMeetingVoice !== null && r.meeting.source === 'mic',

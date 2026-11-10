@@ -505,7 +505,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'say_in_meeting',
       description:
-        "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. It shows in the meeting on every page and is played aloud in the room at once, so it can talk over whoever is speaking. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running or you are not the board's lead.",
+        "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. The call waits until whoever is speaking has finished the thought (usually a few seconds; at once when it answers a “Lead, …” ask), then the line shows on every page and is played aloud in the room. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running, you are not the board's lead, or the room kept talking past the line (reason “lapsed”), in which case it was not said.",
       inputSchema: {
         type: 'object',
         properties: {

@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.355";
+var version2 = "0.1.356";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14620,7 +14620,7 @@ function oneLine(s) {
 function meetingStartedLine(p) {
   const by = p.actor?.name ? ` by ${oneLine(p.actor.name)}` : "";
   const doc2 = p.docId ? ` on doc ${p.docId}${p.docTitle ? ` ("${oneLine(p.docTitle)}")` : ""}` : "";
-  return `[voice.meeting_started] A meeting started${by}${doc2}. You are in it: what is said arrives as ` + "voice.meeting_heard lines. Follow along, read the doc and research while people talk. " + `To speak, call say_in_meeting(workspaceId="${p.workspaceId ?? ""}", text): it is played aloud ` + "in the room at once, so keep it to one short spoken sentence and use it rarely. Put other " + "questions in the lead chat until the meeting can tell when a speaker has finished a thought.";
+  return `[voice.meeting_started] A meeting started${by}${doc2}. You are in it: what is said arrives as ` + "voice.meeting_heard lines. Follow along, read the doc and research while people talk. " + `To speak, call say_in_meeting(workspaceId="${p.workspaceId ?? ""}", text): it is played aloud ` + "in the room once whoever is speaking has finished the thought, and dropped if the talk moves " + "past it. Keep it to one short spoken sentence and use it rarely.";
 }
 function meetingHeardLine(p) {
   const said = (p.lines ?? []).filter((l) => typeof l.text === "string" && l.text.trim()).map((l) => `${oneLine(l.who ?? "Someone") || "Someone"}: ${oneLine(l.text ?? "")}`);
@@ -16773,7 +16773,7 @@ var TOOL_LIST = {
     },
     {
       name: "say_in_meeting",
-      description: "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. It shows in the meeting on every page and is played aloud in the room at once, so it can talk over whoever is speaking. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running or you are not the board's lead.",
+      description: "Only for the board's lead, while a meeting runs on the board (a voice.meeting_started line said so): say one line into the meeting. The call waits until whoever is speaking has finished the thought (usually a few seconds; at once when it answers a “Lead, …” ask), then the line shows on every page and is played aloud in the room. Keep it to one short spoken sentence and use it rarely. said:false means no meeting is running, you are not the board's lead, or the room kept talking past the line (reason “lapsed”), in which case it was not said.",
       inputSchema: {
         type: "object",
         properties: {
@@ -21738,6 +21738,9 @@ async function handleWorkspaceTool(name, a, ctx) {
         return err2("text is empty — say the line");
       try {
         const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`, { agentId: AUTHOR.id, text: words });
+        if (res.said === false) {
+          return ok2({ said: false, reason: res.lapsed ?? "lapsed", note: res.hint ?? "" });
+        }
         return ok2({
           said: true,
           played: res.played === true,

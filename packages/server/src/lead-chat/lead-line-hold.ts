@@ -208,7 +208,8 @@ export class LeadLineHold {
       return;
     }
     if (this.cancelJudge || this.graceTimer !== null) return;
-    if (!this.opts.judge) {
+    // Nothing heard yet is nothing to judge.
+    if (!this.opts.judge || this.lines.length === 0) {
       this.startGrace();
       return;
     }
