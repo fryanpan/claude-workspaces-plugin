@@ -13,6 +13,13 @@ const NO_SOUND_MS = 5_000;
 /** How long a context started outside a tap has to run before the chat asks
  *  for one. */
 const TAP_WAIT_MS = 600;
+/** How long an open mic may send nothing before its context's clock is read.
+ *  A context that says `running` with its clock still where it started is
+ *  not rendering — what Bryan's iPhone reported after a refresh ("context
+ *  running … clock 0 s"), and what WebKit bugs 263627 and 276687 describe
+ *  once another page's audio lets go of the session. Suspending and resuming
+ *  is the workaround both threads report. */
+const CLOCK_CHECK_MS = 1_000;
 
 export interface LeadMicOpts {
   startCapture: LeadVoiceOpts['startCapture'];
@@ -31,6 +38,13 @@ export interface LeadMic {
   open(ctx: AudioContext | undefined, carried: boolean): void;
   /** Inside a tap: start what was waiting for one. False if nothing was. */
   wake(): boolean;
+  /** Let go of the microphone's track while an answer is said, keeping the
+   *  graph (`SpokenCapture.pause`). */
+  pause(): void;
+  /** Take the microphone back after the answer. */
+  unpause(): void;
+  /** Whether the microphone's track is live now, for the playback report. */
+  live(): boolean;
   stop(): void;
 }
 
@@ -38,6 +52,11 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let capture: SpokenCapture | null = null;
   let gen = 0;
   let soundTimer: ReturnType<typeof setTimeout> | null = null;
+  let clockTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The track is released while an answer is said. */
+  let paused = false;
+  /** Frames the current capture has made, across its pauses. */
+  let framesSeen = 0;
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
   /** A context started outside a tap that is not running yet. */
   let waiting: AudioContext | null = null;
@@ -45,6 +64,8 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let tapDue = false;
   /** The context says it runs and nothing came: the tap rebuilds the graph. */
   let rebuild = false;
+  /** A tap already rebuilt the capture once since voice was turned on. */
+  let reopened = false;
   /** How this capture started, for the report. */
   let how = 'started in a tap';
 
@@ -52,6 +73,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     gen++;
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
+    if (clockTimer) clearTimeout(clockTimer);
+    clockTimer = null;
+    paused = false;
     if (tapTimer) clearTimeout(tapTimer);
     tapTimer = null;
     waiting = null;
@@ -62,10 +86,12 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   const start = (ctx: AudioContext | undefined): void => {
     const mine = gen;
     let frames = 0;
+    framesSeen = 0;
     void (opts.startCapture ?? startSpokenCapture)({
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
         frames++;
+        framesSeen++;
         if (mine === gen) opts.onFrame(pcm);
       },
     }).then((r) => {
@@ -78,19 +104,37 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         return;
       }
       capture = r.capture;
+      // An answer began while the mic was opening: let go of it now.
+      if (paused) r.capture.pause?.();
       const diag = r.capture.diag;
+      const startedAt = r.capture.clock?.();
+      /** The clock never moved, so a tap's fresh context may run where this
+       *  one did not. */
+      let frozen = false;
+      if (startedAt !== undefined) {
+        clockTimer = setTimeout(() => {
+          clockTimer = null;
+          if (mine !== gen || frames > 0 || waiting) return;
+          if (r.capture.clock?.() !== startedAt) return;
+          frozen = true;
+          how += ', clock stood still, suspended and resumed';
+          void r.capture.kick?.();
+        }, CLOCK_CHECK_MS);
+      }
       // An open mic that makes no frame is a context that never ran — unless
       // it is waiting for the reader's tap, which restarts this clock.
       const noSound = (): void => {
         soundTimer = null;
         if (mine !== gen || frames > 0) return;
-        if (waiting) {
+        // Released while an answer is said: no frame is owed.
+        if (waiting || paused) {
           soundTimer = setTimeout(noSound, NO_SOUND_MS);
           return;
         }
         // A context that says it runs, on a page no tap has reached: the tap
         // can still rebuild the graph, so ask for it before giving up.
-        if (ctx && tapDue) {
+        // A clock that stood still through the kick: likewise.
+        if (ctx && (tapDue || (frozen && !reopened))) {
           waiting = ctx;
           rebuild = true;
           opts.askForTap();
@@ -110,6 +154,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     open(ctx, carried) {
       tapDue = carried;
       rebuild = false;
+      reopened = false;
       how = carried ? 'started without a tap' : 'started in a tap';
       start(ctx);
       if (!carried || !ctx) return;
@@ -129,6 +174,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
       const micRate = capture?.offRate?.();
       if (micRate || rebuild) {
         rebuild = false;
+        reopened = true;
         how += ', reopened in a tap';
         clear();
         // Made here, inside the tap, at the rate the mic delivers.
@@ -139,6 +185,35 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
       }
       return true;
     },
+    pause() {
+      if (capture && !capture.pause) return;
+      paused = true;
+      capture?.pause?.();
+    },
+    unpause() {
+      const held = capture;
+      if (!paused) return;
+      paused = false;
+      if (!held) return;
+      const mine = gen;
+      void held.unpause?.().then((ok) => {
+        if (mine !== gen || paused) return;
+        if (!ok) {
+          opts.onRefused('The microphone could not be opened again.');
+          return;
+        }
+        // The reopened track has its own chance to send nothing.
+        const before = framesSeen;
+        if (soundTimer) clearTimeout(soundTimer);
+        soundTimer = setTimeout(() => {
+          soundTimer = null;
+          if (mine !== gen || paused || framesSeen > before) return;
+          const said = held.diag?.() || 'no report';
+          opts.onSilent(`${said}; ${how}, reopened after an answer`);
+        }, NO_SOUND_MS);
+      });
+    },
+    live: () => capture !== null && !paused,
     stop: clear,
   };
 }

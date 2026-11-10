@@ -79,7 +79,16 @@ export function fakeTab() {
 export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
   const tabs = fakeTab();
   const sockets: FakeSocket[] = [];
-  const mic = { starts: 0, stops: 0, onFrame: null as SpokenCaptureOpts['onFrame'] | null };
+  const mic = {
+    starts: 0,
+    stops: 0,
+    /** The track let go (`SpokenCapture.pause`) and taken back. */
+    pauses: 0,
+    unpauses: 0,
+    /** Whether taking the track back succeeds. */
+    reopens: true,
+    onFrame: null as SpokenCaptureOpts['onFrame'] | null,
+  };
   const seams: Partial<LeadVoiceOpts> = {
     fetchSetups: async () => opts.setups ?? [1],
     openSocket: (url) => {
@@ -90,7 +99,17 @@ export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
     startCapture: async (c): Promise<SpokenCaptureStart> => {
       mic.starts++;
       mic.onFrame = c.onFrame;
-      return { ok: true, capture: { stop: () => void mic.stops++ } };
+      return {
+        ok: true,
+        capture: {
+          stop: () => void mic.stops++,
+          pause: () => void mic.pauses++,
+          unpause: async () => {
+            mic.unpauses++;
+            return mic.reopens;
+          },
+        },
+      };
     },
     playbackContext: () => null,
     blocked: () => null,
