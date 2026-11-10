@@ -16,6 +16,7 @@
  * which is why `?task=` already worked this way, and why `parseWorkspaceLink`
  * (the chip renderer's contract) recognizes params on the workspace path.
  */
+import { REVIEW_FOCUS_PARAM } from '../link-titles.ts';
 import { type BoardNav, navFromPath, navPath } from './board-presence-model.ts';
 
 export interface BoardLocation {
@@ -168,6 +169,33 @@ export function taskShareUrl(origin: string, workspaceId: string, taskId: string
 /** The shareable address of one goal — the task link's shape, `?goal=`. */
 export function goalShareUrl(origin: string, workspaceId: string, goalId: string): string {
   return `${origin}/workspaces/${encodeURIComponent(workspaceId)}?goal=${encodeURIComponent(goalId)}`;
+}
+
+/**
+ * Whether this address asks the panel for `taskId` to land on its open review
+ * items: `?focus=review`, which a needs-review task link adds when it is
+ * followed (`reviewLandingHref`, link-titles.ts). Read once, by the panel, as
+ * it opens; `buildBoardUrl` never writes it back, so the next address the
+ * board writes drops it and a later reopen lands where it always did.
+ */
+export function reviewFocusOf(search: string, taskId: string): boolean {
+  const params = new URLSearchParams(search);
+  return params.get('task') === taskId && params.get(REVIEW_FOCUS_PARAM) === 'review';
+}
+
+/** The address this page was opened at. The board rewrites the bar to its
+ *  clean form before the panel mounts, so the panel cannot read it there. */
+let arrivedAt = typeof window === 'undefined' ? '' : window.location.search;
+
+/**
+ * Whether the panel opening `taskId` should land on its review items: the
+ * address the page arrived at asks for it, or the current one does. True at
+ * most once per arrival, so closing and reopening the task opens it as usual.
+ */
+export function takeReviewFocus(taskId: string): boolean {
+  const arrived = reviewFocusOf(arrivedAt, taskId);
+  if (arrived) arrivedAt = '';
+  return arrived || reviewFocusOf(window.location.search, taskId);
 }
 
 /**
