@@ -9,9 +9,14 @@
  * other within one awareness round trip.
  */
 import type { FeedbackClient } from '@claude-workspaces/core';
-import { PERSON_SPOT_FIELD, type PresenceSpot } from '@claude-workspaces/core/workspace-presence';
+import {
+  ATTENDING_FIELD,
+  PERSON_SPOT_FIELD,
+  type PresenceSpot,
+} from '@claude-workspaces/core/workspace-presence';
 import { mountPresenceIsland, presenceData } from '../board/presence-island.tsx';
 import { boardSocketUrl } from '../doc-path.ts';
+import { type AttentionHost, watchAttention } from './attention.ts';
 import { roomChips } from './follow-model.ts';
 import { type FollowStorage, type Follower, createFollower, stopOnOwnInput } from './follower.ts';
 
@@ -33,6 +38,8 @@ export interface PagePresenceDeps {
   inputTarget: Pick<EventTarget, 'addEventListener'>;
   /** A short notice — the board's toast says the same words. */
   notify?: (text: string) => void;
+  /** Where this tab's focus and visibility are read; the page's own. */
+  attention?: AttentionHost;
 }
 
 export interface PagePresence {
@@ -50,12 +57,17 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
   const client = deps.connect(`${boardSocketUrl(deps.origin, deps.workspaceId)}&presence=1`);
   const { awareness } = client;
   let here = deps.here;
+  const attention = watchAttention(
+    deps.attention ?? { win: window, doc: document },
+    () => announce(),
+  );
   const announce = (): void => {
     awareness.setLocalState({
       user: { id: deps.user.id, name: deps.user.name, color: deps.user.color },
       surface: here.surface,
       ...(here.docId ? { docId: here.docId } : {}),
       [PERSON_SPOT_FIELD]: here,
+      [ATTENDING_FIELD]: attention.attending(),
       lastActive: Date.now(),
     });
   };
