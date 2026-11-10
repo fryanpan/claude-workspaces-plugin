@@ -53,11 +53,16 @@ describe('findQueueItem', () => {
 
 describe('ticketItemRef', () => {
   it('reads the task and item out of either key form, and an id on its own', () => {
-    expect(ticketItemRef('w-x:task-review:t-1:r-1')).toEqual({ taskId: 't-1', itemId: 'r-1' });
+    expect(ticketItemRef('w-x:task-review:t-1:r-1')).toEqual({
+      workspaceId: 'w-x',
+      taskId: 't-1',
+      itemId: 'r-1',
+    });
     expect(ticketItemRef('task-review:t-1:r-1')).toEqual({ taskId: 't-1', itemId: 'r-1' });
     expect(ticketItemRef('r-1')).toEqual({ itemId: 'r-1' });
     expect(ticketItemRef('doc-thread:d-1:th-1')).toBeUndefined();
     expect(ticketItemRef('task-review:t-1')).toBeUndefined();
+    expect(ticketItemRef('a:b:task-review:t-1:r-1')).toBeUndefined();
   });
 });
 

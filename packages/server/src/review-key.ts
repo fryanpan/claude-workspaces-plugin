@@ -49,14 +49,18 @@ export function findQueueItem(
 }
 
 /** The ticket review item a key names, as far as the key alone says. */
-export function ticketItemRef(rawKey: string): { taskId?: string; itemId: string } | undefined {
+export function ticketItemRef(
+  rawKey: string,
+): { workspaceId?: string; taskId?: string; itemId: string } | undefined {
   const key = decodeKey(rawKey);
   const parts = key.split(':');
   const at = parts.indexOf('task-review');
-  if (at >= 0) {
+  if (at === 0 || at === 1) {
     const [taskId, itemId] = parts.slice(at + 1);
-    return taskId && itemId && parts.length === at + 3 ? { taskId, itemId } : undefined;
+    if (!taskId || !itemId || parts.length !== at + 3) return undefined;
+    return at === 1 ? { workspaceId: parts[0] ?? '', taskId, itemId } : { taskId, itemId };
   }
+  if (at >= 0) return undefined;
   return parts.length === 1 && key !== '' && key !== LEGACY_REVIEW_ITEM_ID
     ? { itemId: key }
     : undefined;

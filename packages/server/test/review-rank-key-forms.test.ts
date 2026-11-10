@@ -155,6 +155,13 @@ describe('the rank route takes every name a lead is handed for an item', () => {
     expect(((await res.json()) as { error: string }).error).toBe('task-done');
   });
 
+  it('a held item named under another board is not-found, not held', async () => {
+    const held = await ticketItem(harbor, 'Slipway hours', HELD);
+    const res = await rank(`w-elsewhere:task-review:${held.taskId}:${held.itemId}`, 1);
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toBe('not-found');
+  });
+
   it('a name that matches nothing is still not-found', async () => {
     for (const form of ['r-none', 'task-review:t-none:r-none', `${harbor}:task-review:t-x:r-x`]) {
       const res = await rank(form, 1);

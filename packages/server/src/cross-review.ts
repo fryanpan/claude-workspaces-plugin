@@ -236,6 +236,8 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     for (const task of tasks) {
       const found = taskStore.listReviewItems(task.id).find((i) => i.id === ref.itemId);
       if (!found) continue;
+      // A key naming a board names that board's item and no other.
+      if (ref.workspaceId !== undefined && ref.workspaceId !== task.workspaceId) return undefined;
       const w = taskStore.getWorkspace(task.workspaceId);
       return { item: found, task, boardLive: w !== undefined && !isRetired(w) };
     }
