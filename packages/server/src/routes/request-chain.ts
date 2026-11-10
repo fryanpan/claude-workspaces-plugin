@@ -41,7 +41,7 @@ import {
 import { isGatedWrite, signInRequiredBody } from '../middleware/write-gate.ts';
 import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
-import { renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
+import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
 import { matchWorkspaceRoute } from '../workspace-path.ts';
 import { handleAuthShareRoutes } from './auth-share.ts';
@@ -433,8 +433,8 @@ export function createRequestChain(
             notFoundPage: (address) =>
               new Response(
                 address.boardExists
-                  ? renderBoardMemberNotFound(address.workspaceId, address.rest)
-                  : renderBoardNotFound(address.workspaceId),
+                  ? renderBoardMemberNotFound(address.workspaceId, askedAddress(url))
+                  : renderBoardNotFound(address.workspaceId, askedAddress(url)),
                 { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
               ),
           },

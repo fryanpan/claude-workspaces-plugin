@@ -44,6 +44,7 @@ import {
 import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
 import { threadOpenParts } from '../answer-coverage.ts';
+import { reviewItemPath, threadReviewItemKey } from '../board-links.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { BOARD_SOCKET_TOKEN_ID } from '../middleware/board-socket-door.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
@@ -644,9 +645,20 @@ export async function handleDocThreadRoutes(
       // held, though — a held item is on nobody's queue, so nothing
       // may buzz a phone claiming it is.
       if (!gate.held) announceThreadReview(docId, threadId, gate.review, user);
+      // The item's own link (`reviewItemPath`), on the base the doc's link
+      // was built on, so `revise_review_item` hands back the same kind of
+      // link on either surface.
+      const docLink = threadUrl(docId, Boolean(visitor));
+      const itemBoard = rq.scope?.workspaceId ?? resolveWorkspaceForDoc(docId);
+      const itemKey = threadReviewItemKey(docId, threadId);
+      const url =
+        docLink && itemBoard
+          ? new URL(reviewItemPath(itemBoard, itemKey), docLink).href
+          : undefined;
       return j(200, {
         thread: docStore.getThread(docId, threadId) ?? res.thread,
         review: gate.review,
+        ...(url !== undefined ? { url } : {}),
         ...heldFields(gate),
       });
     }

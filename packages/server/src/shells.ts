@@ -710,8 +710,21 @@ function shortAddress(raw: string): string {
   return raw.length > 120 ? `${raw.slice(0, 120)}…` : raw;
 }
 
-export function renderBoardNotFound(workspaceId: string): string {
-  const safe = escape(shortAddress(workspaceId));
+/**
+ * The address a not-found page echoes: the path and query the browser asked
+ * for, exactly as it arrived. The whole address rather than the part after
+ * the board — "review/r-1" or "[url]" alone did not tell the reader, or the
+ * agent they reported it to, which link it was. Not decoded, so a
+ * percent-escaped `<` stays escaped text.
+ */
+export function askedAddress(url: { pathname: string; search: string }): string {
+  return `${url.pathname}${url.search}`;
+}
+
+/** `asked` is the whole address the browser asked for (`askedAddress`);
+ *  without it the page names the board id alone, as it always did. */
+export function renderBoardNotFound(workspaceId: string, asked?: string): string {
+  const safe = escape(shortAddress(asked ?? workspaceId));
   return renderNotFoundPage({
     title: 'Workspace not found',
     heading: 'Workspace not found',
@@ -734,7 +747,7 @@ export function renderBoardNotFound(workspaceId: string): string {
  * wanted is one tap away, and a not-found page whose only link is the server
  * root sends them back through a list to find a board they were already on.
  */
-export function renderBoardMemberNotFound(workspaceId: string, rest: string): string {
+export function renderBoardMemberNotFound(workspaceId: string, asked: string): string {
   const href = escape(`/workspaces/${encodeURIComponent(workspaceId)}`);
   // No board id printed beside the link. The link carries it, and a reader
   // cannot do anything with the id that the link does not already do — what
@@ -748,7 +761,7 @@ export function renderBoardMemberNotFound(workspaceId: string, rest: string): st
     heading: 'Page not found',
     body: `${SERVER_IS_UP}
       <p>Nothing on this board answers to
-      <code>${escape(shortAddress(rest))}</code>.</p>
+      <code>${escape(shortAddress(asked))}</code>.</p>
       <p><a href="${href}">Open the board</a> and look for the page there.</p>
       <p class="quiet">Report this link to the person who sent it.
       <a href="/">All workspaces</a>.</p>`,

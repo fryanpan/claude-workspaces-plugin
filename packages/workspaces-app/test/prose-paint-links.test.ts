@@ -46,11 +46,18 @@ describe('first paint links', () => {
     'mailto:a@example.com',
     'other-doc.md',
     '../notes/plan.md',
-    '#section',
-    '/workspaces/w/docs/d',
-  ])('keeps %s a live link', (href) => {
+  ])('keeps %s a live link, in a new tab', (href) => {
     const a = paintLink(href).querySelector('a');
     expect(a?.getAttribute('href')).toBe(href);
     expect(a?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(a?.getAttribute('target')).toBe('_blank');
+  });
+
+  // A page of this app opens in this tab, so the agent chat and voice stay.
+  it.each(['#section', '/workspaces/w/docs/d'])('keeps %s a live link, in this tab', (href) => {
+    const a = paintLink(href).querySelector('a');
+    expect(a?.getAttribute('href')).toBe(href);
+    expect(a?.getAttribute('target')).toBeNull();
+    expect(a?.getAttribute('rel')).toBeNull();
   });
 });

@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.354";
+var version2 = "0.1.355";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -18584,7 +18584,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes. Returns \`url\`, the absolute link to the task that holds the item. Give that link to a person.`,
+      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes. Returns \`url\`, the item's own link: it opens Home on this item, or the task that holds it once the item has left the queue. Give that link to a person as it is; on the board or in chat, the path from \`/workspaces/\` on works the same.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -18644,7 +18644,7 @@ var TOOL_LIST = {
     },
     {
       name: "revise_review_item",
-      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again. When the source cannot support what a hold asked for, answer with lessSpecific rather than inventing a specific.",
+      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again. When the source cannot support what a hold asked for, answer with lessSpecific rather than inventing a specific. Returns `url`, the item's own link, as add_review_item does.",
       inputSchema: {
         type: "object",
         properties: {
@@ -20939,7 +20939,14 @@ async function handleTaskTool(name, a, ctx) {
           return err2("`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply");
         }
         const docRes = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/revise`, { ...patch, commentId });
-        return ok2({ docId, threadId, commentId, revised: true, ...heldResult(docRes) });
+        return ok2({
+          docId,
+          threadId,
+          commentId,
+          revised: true,
+          ...docRes.url !== undefined ? { url: docRes.url } : {},
+          ...heldResult(docRes)
+        });
       }
       let effectiveTaskId = taskId;
       if (effectiveTaskId === undefined) {
@@ -20958,6 +20965,7 @@ async function handleTaskTool(name, a, ctx) {
             threadId: address.threadId,
             commentId: address.commentId,
             revised: true,
+            ...docRes.url !== undefined ? { url: docRes.url } : {},
             ...heldResult(docRes)
           });
         }
@@ -20972,6 +20980,7 @@ async function handleTaskTool(name, a, ctx) {
         taskId: effectiveTaskId,
         ...reviewItemId !== undefined ? { reviewItemId } : { decision: true },
         revised: true,
+        ...res.url !== undefined ? { url: res.url } : {},
         ...res.threadId !== undefined ? { threadId: res.threadId } : {},
         ...reply !== undefined && res.threadId !== undefined ? { replied: true } : {},
         ...res.reviewAdvice !== undefined ? { reviewAdvice: res.reviewAdvice } : {},

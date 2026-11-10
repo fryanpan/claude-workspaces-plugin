@@ -382,6 +382,10 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'library', 'open'],
   ['workspaces', ':id', 'library'],
   ['workspaces', ':id', 'links:titles'],
+  // Wrong-form board links, redirected to the page they meant (routes/board-links.ts).
+  ['workspaces', ':id', 'open'],
+  ['workspaces', ':id', 'review', ':id'],
+  ['workspaces', ':id', 'reviews', ':id'],
   ['workspaces', ':id', 'manifest.webmanifest'],
   ['workspaces', ':id', 'members', ':id', 'role'],
   ['workspaces', ':id', 'members', ':id'],
