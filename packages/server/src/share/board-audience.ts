@@ -5,7 +5,8 @@
  * audience is that list, kept on the board rather than on each link, so that
  * a forwarded link can only ever invite someone the board already names. It
  * is checked on every request (`ShareLinks.isMember`), so narrowing it ends a
- * person's access on their next one.
+ * person's access on their next one, and it admits on its own: a person it
+ * names is made a member on their first signed-in request, with no link.
  *
  * Two entry shapes, read by `audienceEntryAdmits` like every other audience
  * on this server: `someone@partner.example` is one address and

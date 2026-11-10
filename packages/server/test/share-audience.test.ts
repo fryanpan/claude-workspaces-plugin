@@ -105,7 +105,8 @@ describe('the store applies the audience', () => {
   it('refuses a redemption outside the audience and writes nothing', () => {
     const link = mint(['@harborlight.example']);
     expect(links.redeem(link.linkId, RIVERBEND)).toEqual({ ok: false, state: 'outside-audience' });
-    expect(links.isMember('w-board', RIVERBEND)).toBe(false);
+    // No row, read off the list: `isMember` would let RIVERBEND in through
+    // the board's own audience, which names their domain.
     expect(links.allMembers()).toHaveLength(0);
     expect(links.get(link.linkId)?.redemptions).toHaveLength(0);
     expect(links.redeem(link.linkId, BOB).ok).toBe(true);
