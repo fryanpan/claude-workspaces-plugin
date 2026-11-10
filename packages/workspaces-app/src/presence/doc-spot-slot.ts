@@ -29,14 +29,28 @@ export function docSpotMoved(spot: DocPlace, heading: string | undefined): void 
   onMove?.(spot, heading);
 }
 
-/** Show a followed spot on the doc on screen, if it is that doc. */
+/** A spot asked for before its doc mounted: a page that loaded to show it. */
+let pending: PresenceSpot | null = null;
+
+/** Show a followed spot on the doc on screen, if it is that doc; a spot on
+ *  a doc still mounting is shown when it mounts. */
 export function showDocSpot(spot: PresenceSpot): void {
-  if (handle && handle.docId === spot.docId) handle.show(spot);
+  if (handle && handle.docId === spot.docId) {
+    pending = null;
+    handle.show(spot);
+  } else {
+    pending = spot;
+  }
 }
 
 /** The doc mounted registers itself. Answers the function that drops it. */
 export function setDocSpotHandle(next: DocSpotHandle): () => void {
   handle = next;
+  if (pending && pending.docId === next.docId) {
+    const spot = pending;
+    pending = null;
+    next.show(spot);
+  }
   return () => {
     if (handle === next) handle = null;
   };

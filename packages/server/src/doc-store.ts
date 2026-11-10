@@ -222,6 +222,14 @@ export type WsCtx = {
    */
   presenceOnly?: boolean;
   /**
+   * What the upgrade proved about the person behind a board room socket:
+   * `owner` when a person proof named the owner, `other` when it named
+   * somebody else, absent when it proved nobody. A page's announced user id
+   * is whatever it set, so this is what `person-presence.ts` trusts when it
+   * decides which tabs are the owner's. Set on the board room's socket only.
+   */
+  personProof?: 'owner' | 'other';
+  /**
    * The board widget token and page origin a tailnet widget door socket was
    * admitted with. Like `shareId`: the token is checked once at the upgrade,
    * so without this a socket outlived the token's expiry, its watermark and

@@ -312,6 +312,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/next` | GET | `routes/workspace-next.ts` | trusted-local |  |
 | `/workspaces/:ws/open` | GET | `routes/board-links.ts` | trusted-local |  |
 | `/workspaces/:ws/parallelism-cap` | GET, PUT | `routes/workspace-settings.ts` | trusted-local |  |
+| `/workspaces/:ws/person/show` | POST | `routes/workspace-point.ts` | trusted-local |  |
+| `/workspaces/:ws/person/watch` | POST | `routes/workspace-point.ts` | trusted-local |  |
 | `/workspaces/:ws/point` | POST | `routes/workspace-point.ts` | trusted-local |  |
 | `/workspaces/:ws/refs:backfill` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/refs:backlinks` | POST | `routes/task-status-links.ts` | trusted-local |  |

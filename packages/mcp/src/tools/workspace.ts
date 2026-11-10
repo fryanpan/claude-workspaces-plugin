@@ -30,6 +30,7 @@ import { declareWorkspaceLead } from '../declare-lead.ts';
 import { sayRefusal } from '../meeting-feed-line.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
 import { readChatAttachment } from './chat-attachment.ts';
+import { placeOf, refusalOf } from './person.ts';
 
 /** What the workspace tools read out of `mcp.ts`. */
 export interface WorkspaceToolContext {
@@ -830,15 +831,7 @@ export async function handleWorkspaceTool(
       // is on the board; its refusal comes back as an answer, not an error.
       const { workspaceId } = a as { workspaceId?: string };
       if (!workspaceId) return err('workspaceId is required');
-      const place: Record<string, unknown> = {};
-      for (const k of ['path', 'docId', 'taskId', 'goalId', 'threadId', 'blockId'] as const) {
-        const v = a[k];
-        if (typeof v === 'string' && v.trim()) place[k] = v.trim();
-      }
-      if (typeof a.quote === 'string' && a.quote.trim()) place.quote = a.quote.trim();
-      for (const k of ['scroll', 'x', 'y'] as const) {
-        if (typeof a[k] === 'number') place[k] = a[k];
-      }
+      const place = placeOf(a);
       try {
         const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
           agentId: AUTHOR.id,
@@ -851,16 +844,9 @@ export async function handleWorkspaceTool(
           note: 'Anyone following you is taken there now. Nothing was written.',
         });
       } catch (e) {
-        const m = String(e).match(/→ (400|403|404): (.*)$/s);
-        if (!m) throw e;
-        const error = (() => {
-          try {
-            return (JSON.parse(m[2] ?? '') as { error?: string }).error;
-          } catch {
-            return undefined;
-          }
-        })();
-        return ok({ pointed: false, error: error ?? `refused (${m[1]})` });
+        const refused = refusalOf(e, [400, 403, 404]);
+        if (!refused) throw e;
+        return ok({ pointed: false, ...refused });
       }
     }
     case 'say_in_meeting': {

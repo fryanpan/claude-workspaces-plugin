@@ -38,6 +38,7 @@ import {
   reviewItemHeldLine,
   stalledLine,
 } from './nudge-line.ts';
+import { type PersonLandedLike, personLandedIds, personLandedLine } from './person-line.ts';
 import {
   type ReviewItemEventPayload,
   isTaskReviewItemEvent,
@@ -167,7 +168,7 @@ export interface ChannelPayload {
 /** Board/workspace event families formatted by emitBoardChannelMessage. Thread
  *  and suggestion events on the same workspace stream keep the doc-shaped
  *  path below. */
-const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach)\./;
+const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
 
 export interface BoardEventPayload {
   workspaceId?: string;
@@ -492,6 +493,13 @@ async function emitBoardChannelMessage(
       body = line;
       break;
     }
+    // Addressed to an agent that called watch_person: where the owner is.
+    // The page's id rides in the meta under the name a reader feeds back
+    // (`doc_id` or `task_id`), the same as every other board event.
+    case 'person.landed':
+      body = personLandedLine(rawPayload as PersonLandedLike);
+      Object.assign(p, personLandedIds(rawPayload as PersonLandedLike));
+      break;
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ''}`;
   }
