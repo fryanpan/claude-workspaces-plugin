@@ -5,8 +5,10 @@
  *   GET /workspaces/<ws>/embeds          → {workspaceId, embeds}
  *   PUT /workspaces/<ws>/embeds {embeds} → the same, after replacing it whole
  *
- * Trusted-local, like the parallelism cap: a share visitor never reaches it,
- * so on a shared board the visitor's doc shows the directive as plain text.
+ * A member of a shared board may GET it (`BOARD_MEMBER_ROUTES` in
+ * `middleware/host-guard.ts`): every doc on the board draws its frames from
+ * it, and refused, a member saw the directive as plain text. The PUT stays
+ * trusted-local, like the parallelism cap.
  *
  * An entry that names an origin is stored only when that origin is on the
  * deployment's allowlist, and is left out of a read once it no longer is. The

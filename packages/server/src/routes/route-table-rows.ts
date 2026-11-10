@@ -315,7 +315,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
 
   ...family('routes/doc-move.ts', [['trusted-local', '/workspaces/:ws/docs/:docId/move', 'POST']]),
 
-  ...family('routes/workspace-embeds.ts', [['trusted-local', '/workspaces/:ws/embeds', 'GET PUT']]),
+  // A doc on the board draws its embed frames from this mapping for every
+  // reader, so a member reads it; writing it is board configuration.
+  ...family('routes/workspace-embeds.ts', [
+    ['share-scope', '/workspaces/:ws/embeds', 'GET'],
+    ['trusted-local', '/workspaces/:ws/embeds', 'PUT'],
+  ]),
 
   ...family('routes/workspace-settings.ts', [
     ['trusted-local', '/workspaces/:ws/goal', 'PUT'],
