@@ -71,7 +71,9 @@ Staging reads the same three configs from `deploys/staging/*.local.*`
    state bucket's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. Each comes
    from the environment when set (CI), else from the Keychain entries
    `cloudflare-api-token` and `cloudflare-r2-tfstate` (JSON
-   `{accessKeyId, secretAccessKey}`).
+   `{accessKeyId, secretAccessKey}`). Without `cloudflare-r2-tfstate`, the
+   state key comes from the board secret card's two entries
+   `r2-tfstate-access-key-id` and `r2-tfstate-secret-access-key`.
 3. Read the account (`discover.ts`), and stop before terraform runs on
    anything that a plan would repoint or shadow: a project host under an
    Access application the config does not own (prod's sign-in application),
