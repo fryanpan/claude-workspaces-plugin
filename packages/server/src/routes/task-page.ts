@@ -47,7 +47,7 @@
  * followed the redirect would be handed the BOARD where it asked for a task —
  * a wrong answer carrying a 200, which is worse than the 404 it had.
  */
-import { renderBoardMemberNotFound } from '../shells.ts';
+import { askedAddress, renderBoardMemberNotFound } from '../shells.ts';
 import { safeDecodeSegment, wantsJson } from '../workspace-path.ts';
 
 /** `/workspaces/<ws>/tasks/<taskId>`, with whatever follows the id. */
@@ -84,7 +84,7 @@ export function handleTaskPageRoutes(rq: TaskPageRequest): Response | undefined 
 
   // An unknown verb, asked for by a browser: a page naming the board it can
   // go back to.
-  return notFoundPage(workspaceId, `tasks/${taskId}${verb}`);
+  return notFoundPage(workspaceId, askedAddress(rq.url));
 }
 
 /**
@@ -106,8 +106,8 @@ function redirectToBoard(workspaceId: string, taskId: string, url: URL): Respons
 }
 
 /** The readable 404 — HTML, never the bare body a browser cannot render. */
-function notFoundPage(workspaceId: string, rest: string): Response {
-  return new Response(renderBoardMemberNotFound(workspaceId, rest), {
+function notFoundPage(workspaceId: string, asked: string): Response {
+  return new Response(renderBoardMemberNotFound(workspaceId, asked), {
     status: 404,
     headers: { 'content-type': 'text/html; charset=utf-8' },
   });

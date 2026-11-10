@@ -169,3 +169,24 @@ export function taskShareUrl(origin: string, workspaceId: string, taskId: string
 export function goalShareUrl(origin: string, workspaceId: string, goalId: string): string {
   return `${origin}/workspaces/${encodeURIComponent(workspaceId)}?goal=${encodeURIComponent(goalId)}`;
 }
+
+/**
+ * The task a Home item key belongs to, with the thread it names — or null for
+ * a key on no task. `task-review:<taskId>:<itemId>` and `decision:<taskId>`
+ * are items filed on a ticket; `task-thread:task:<taskId>:<threadId>` is an
+ * ask on a task's own thread (`threadReviewItemKey` on the server). A doc's
+ * thread is on no task.
+ */
+export function taskOfItemKey(key: string): { taskId: string; threadId: string | null } | null {
+  const parts = key.split(':');
+  if (parts[0] === 'task-review' && parts.length === 3 && parts[1]) {
+    return { taskId: parts[1], threadId: null };
+  }
+  if (parts[0] === 'decision' && parts.length === 2 && parts[1]) {
+    return { taskId: parts[1], threadId: null };
+  }
+  if (parts[0] === 'task-thread' && parts[1] === 'task' && parts.length === 4 && parts[2]) {
+    return { taskId: parts[2], threadId: parts[3] || null };
+  }
+  return null;
+}

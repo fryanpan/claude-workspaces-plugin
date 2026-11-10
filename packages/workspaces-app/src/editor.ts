@@ -30,7 +30,7 @@ import { boardEmbedFramesFor } from './doc/board-embed-frames.ts';
 import { FootnoteDecorations } from './doc/footnote-decorations.ts';
 import { FIRST_PAINT_CLASS } from './doc/prose-paint.ts';
 import { RemoteEditsKeepScroll } from './doc/remote-edit-scroll.ts';
-import { resolveDocLink, safeLinkHref } from './link-open.ts';
+import { currentPageHref, isAppPageHref, resolveDocLink, safeLinkHref } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MassDeleteUndo } from './mass-delete-undo.ts';
 import { MathInline } from './math-inline.ts';
@@ -345,8 +345,7 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     if (!href) return;
     ev.preventDefault();
     ev.stopPropagation();
-    // A relative link to a sibling workspace doc navigates in-app (same
-    // tab — it's the same review session); everything else opens externally.
+    // A sibling doc navigates in-app; any other app page opens in this tab.
     const inApp = opts.docLink
       ? resolveDocLink({
           href,
@@ -357,6 +356,11 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       : null;
     if (inApp && opts.docLink) {
       opts.docLink.navigate(inApp);
+      return;
+    }
+    // Keeping chat and voice; Cmd/Ctrl-click still asks for a new tab.
+    if (!ev.metaKey && !ev.ctrlKey && isAppPageHref(href, currentPageHref())) {
+      window.location.assign(href);
       return;
     }
     window.open(href, '_blank', 'noopener,noreferrer');

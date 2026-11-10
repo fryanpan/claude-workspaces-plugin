@@ -25,7 +25,7 @@ import {
   followImageVersions,
   imageVersionLookup,
 } from '../doc-image-versions.ts';
-import { paintedLinkHref } from '../link-open.ts';
+import { currentPageHref, isAppPageHref, paintedLinkHref } from '../link-open.ts';
 import type { MountScope } from '../mount-scope.ts';
 
 /** Marks the root while it is still the paint; the editor removes it. */
@@ -69,8 +69,10 @@ function renderText(text: Y.XmlText, doc: Document): DocumentFragment {
         wrap = doc.createElement(href ? 'a' : 'span');
         if (href) {
           wrap.setAttribute('href', href);
-          wrap.setAttribute('target', '_blank');
-          wrap.setAttribute('rel', 'noopener noreferrer');
+          if (!isAppPageHref(href, currentPageHref())) {
+            wrap.setAttribute('target', '_blank');
+            wrap.setAttribute('rel', 'noopener noreferrer');
+          }
         }
       }
       if (!wrap) continue;

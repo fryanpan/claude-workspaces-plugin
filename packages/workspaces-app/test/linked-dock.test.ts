@@ -136,15 +136,16 @@ describe('the doc dock', () => {
       target: a.getAttribute('target'),
       rel: a.getAttribute('rel'),
     }));
-    // The card's renderer (`renderCommentMarkdown`) and its link rules: every
-    // link opens in a new tab, and a protocol-relative address is an outside
-    // link like any other http one.
+    // The card's renderer (`renderCommentMarkdown`) and its link rules: a
+    // page of this app opens in this tab, every other link in a new one, and
+    // a protocol-relative address is an outside link like any other http one.
     const outside = { target: '_blank', rel: 'noopener noreferrer' };
     expect(links).toEqual([
       {
         text: 'tide notes',
         href: `${location.origin}/workspaces/w-harbor/docs/d-tide`,
-        ...outside,
+        target: null,
+        rel: null,
       },
       { text: 'harbour table', href: 'https://example.org/tides', ...outside },
       { text: 'that', href: `${location.protocol}//example.net/x`, ...outside },
