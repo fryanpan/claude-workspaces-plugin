@@ -113,6 +113,15 @@ export interface BoardMembersHandle {
   settled(): Promise<void>;
 }
 
+/**
+ * What an applied add still needs. The board admits the person from their
+ * next request, but a server behind Cloudflare Access lets nobody reach it
+ * whom the Access policy does not name, and that policy is Terraform's.
+ */
+export function cloudflareStep(match: string): string {
+  return `One more step if this board is behind Cloudflare Access: add ${match} to its Access policy, or they are stopped at sign-in.`;
+}
+
 /** Bryan's words for the two levels, and the only place they are spelled. */
 export function roleLabel(role: BoardRole): string {
   return role === 'owner' ? 'Owner' : 'Regular User';
@@ -469,6 +478,10 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
         deps.toast(
           res.proposed ? `Filed ${match} for the owner’s approval` : `${match} can now sign in`,
         );
+        // Kept under the form, not only toasted: the board lets them in now,
+        // but Cloudflare Access is a separate gate kept by Terraform, and
+        // nothing here changes it.
+        if (!res.proposed) say(cloudflareStep(match));
       });
     });
   }

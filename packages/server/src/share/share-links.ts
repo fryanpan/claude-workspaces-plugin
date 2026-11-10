@@ -62,6 +62,12 @@ import type { ShareLanding } from './share-landing.ts';
 
 const SECRET_MODE = 0o600;
 const REGISTRY_FILENAME = 'share-links.json';
+/**
+ * The `viaLinkId` of a member let in by the board's audience alone. Not a link
+ * id (those are 32 hex characters), so `get` finds no link and the row has no
+ * link audience to answer to, only the board's.
+ */
+export const AUDIENCE_ONLY = 'audience';
 
 /** One person coming through a link, the first time they came. */
 export interface ShareLinkRedemption {
@@ -315,11 +321,46 @@ export class ShareLinks {
    * access, and the link it came through is read for one thing only: its
    * audience, which must still admit the row. A revoked link's members still
    * answer true here, and that is the intended behaviour, not a gap.
+   *
+   * An address the board's audience names is let in on its first signed-in
+   * request with no link at all (`admitFromAudience`), so adding a person to
+   * the audience is enough.
    */
   isMember(workspaceId: string, email: string | null | undefined): boolean {
     const who = email ? normalizeEmail(email) : '';
     if (who === '' || !workspaceId) return false;
-    return this.admittedRow(workspaceId, who) !== null;
+    return this.memberRow(workspaceId, who) !== null;
+  }
+
+  /** The admitted row, writing one first when only the audience names them. */
+  private memberRow(workspaceId: string, who: string): ShareLinkMember | null {
+    return this.admittedRow(workspaceId, who) ?? this.admitFromAudience(workspaceId, who);
+  }
+
+  /**
+   * Write a member row for an address the board's audience admits and that
+   * holds no row on this board, exactly as redeeming a link would, so the
+   * person is listed, can be given a role, and is ejected by the same
+   * removals as anybody else.
+   *
+   * Only when there is no row at all: a row its own link refuses stays
+   * refused rather than being replaced. The row arrives as a regular member;
+   * the audience never makes anybody an Owner. A registry that could not be
+   * read writes nothing and admits nobody, as everywhere else here.
+   */
+  private admitFromAudience(workspaceId: string, who: string): ShareLinkMember | null {
+    if (this.loadFailed) return null;
+    if (!boardAudienceAdmits(this.audienceOf(workspaceId), who)) return null;
+    if (this.members.some((m) => m.workspaceId === workspaceId && m.email === who)) return null;
+    const row: ShareLinkMember = {
+      workspaceId,
+      email: who,
+      addedAt: Date.now(),
+      viaLinkId: AUDIENCE_ONLY,
+    };
+    this.members.push(row);
+    this.save();
+    return row;
   }
 
   /**
@@ -446,7 +487,7 @@ export class ShareLinks {
   roleOf(workspaceId: string, email: string | null | undefined): BoardRole | null {
     const who = email ? normalizeEmail(email) : '';
     if (who === '' || !workspaceId) return null;
-    const row = this.admittedRow(workspaceId, who);
+    const row = this.memberRow(workspaceId, who);
     if (!row) return null;
     return row.role ?? DEFAULT_BOARD_ROLE;
   }
@@ -543,7 +584,9 @@ export class ShareLinks {
     at: number,
     role?: BoardRole,
   ): boolean {
-    if (this.isMember(workspaceId, email)) return false;
+    // The row as it stands, never `isMember`: that would write an
+    // audience-only row first and this link's role would be lost.
+    if (this.admittedRow(workspaceId, email)) return false;
     // A row the audience of its own link no longer admits is replaced, so the
     // person arrives as this link says, exactly as a first redemption would.
     this.members = this.members.filter(

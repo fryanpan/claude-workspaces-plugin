@@ -131,6 +131,9 @@ describe('a share link with an audience', () => {
   });
 
   it('for one address, admits that address and refuses any other at redemption', async () => {
+    // The board names only Alice here: an audience entry admits on its own,
+    // so a board naming Bob would let him in with no link at all.
+    handle.shareLinks.removeFromAudience(board, '@harborlight.example');
     const linkId = await mint([ALICE]);
     const refused = await onShareHost(`/s/${linkId}`, BOB);
     expect(refused.status).toBe(403);
