@@ -33,6 +33,7 @@ import {
   readReleasedPluginVersion,
 } from '../plugin-release.ts';
 import { sentryWatchPlan } from '../sentry-projects.ts';
+import { withoutCues } from '../spoken-reply/cues.ts';
 import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX, LEAD_WRITTEN_MAX } from '../spoken-reply/lead-answer.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
@@ -424,10 +425,12 @@ export async function handleWorkspaceAttachments(
     // answer lands however long the lead took. A spoken one is written to
     // the chat whether or not its socket is still open, and then said on it
     // or into the meeting that asked.
-    if (leadChat.answer(workspaceId, entryId, text, agentId, written)) {
+    // The chat shows words: a tone cue (`[warm]`) is for the voice alone.
+    const shown = withoutCues(text) || text;
+    if (leadChat.answer(workspaceId, entryId, shown, agentId, written)) {
       return j(200, { ok: true, delivered: true });
     }
-    leadChat.voiceReply(workspaceId, entryId, written ?? text, agentId, written !== undefined);
+    leadChat.voiceReply(workspaceId, entryId, written ?? shown, agentId, written !== undefined);
     return j(200, {
       ok: true,
       delivered: spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId, written),

@@ -439,7 +439,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'answer_voice',
       description:
-        'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead.',
+        'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead. To set the tone, put a Soniox tag in square brackets before the words it changes, at the start or after any sentence: "[warm] It shipped. [curious] Want the next one?". The tags that work include warm, curious, calm, happy, excited, serious, reassuringly, sighs, laughs and pause. A tag stays in effect until the next tag. Use one or two tags in an answer, not more. Tags are never shown in the chat, and the ElevenLabs voice ignores them.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -447,7 +447,8 @@ export const TOOL_LIST: ListToolsResult = {
           queueId: { type: 'string', description: 'From the voice.request line.' },
           text: {
             type: 'string',
-            description: 'What to say: the shortest answer that works, one sentence at most.',
+            description:
+              'What to say: the shortest answer that works, one sentence at most. It can include tone tags such as [warm] or [curious].',
           },
           written: {
             type: 'string',

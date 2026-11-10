@@ -27,6 +27,7 @@ import { capWords } from '../voice-status.ts';
 import type { VoiceHandleResult, VoiceResult } from '../voice.ts';
 import { parseOrdinal, pickByLabel } from '../voice.ts';
 import { type AgentConversation, awayAck } from './agent-conversation.ts';
+import { withoutCues } from './cues.ts';
 import type { SpokenInterview } from './interview.ts';
 import { withNotes } from './notes.ts';
 import { shapeReply, stripWake } from './reply-shape.ts';
@@ -79,13 +80,14 @@ function walkAnswer(w: WalkReply): SpokenAnswer {
   return { ...w, route: 'review-queue' };
 }
 
-/** The page's `reply` frame for an answer — every setup sends this one. */
+/** The page's `reply` frame for an answer — every setup sends this one. The
+ *  page shows the words, so a tone cue the voice reads is not in them. */
 export function replyMessage(a: SpokenAnswer): SpokenServerMessage {
   return {
     type: 'reply',
-    spoken: a.spoken,
+    spoken: withoutCues(a.spoken),
     detail: a.detail,
-    points: a.points,
+    points: a.points.map((p) => ({ ...p, say: withoutCues(p.say) })),
     asking: a.asking,
     ...(a.choices ? { choices: a.choices } : {}),
     route: a.route,
