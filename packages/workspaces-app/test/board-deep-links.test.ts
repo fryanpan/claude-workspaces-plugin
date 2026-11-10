@@ -133,6 +133,54 @@ describe('createBoardDeepLinks', () => {
     expect(d.syncBoardUrl).toHaveBeenCalled();
   });
 
+  it('opens the task an off-queue item belongs to, so its link still lands somewhere', () => {
+    // The link add_review_item hands back is Home with the item open. A held
+    // or answered item is off the queue; the link opens its task instead.
+    const d = deepLinks({
+      bootLoc: {
+        nav: 'home',
+        task: null,
+        goal: null,
+        thread: null,
+        item: 'task-review:t-1:r-held',
+        archived: false,
+        tab: null,
+        settings: null,
+      },
+    });
+    const { state } = d;
+    state.tasks.set('t-1', task('t-1'));
+    state.walkKey = 'task-review:t-1:r-held';
+    vi.advanceTimersByTime(WALK_HANDOFF_DEADLINE_MS);
+    expect(state.walkKey).toBeNull();
+    expect(state.detailTaskId).toBe('t-1');
+    expect(d.renderDetail).toHaveBeenCalled();
+    expect(d.syncBoardUrl).toHaveBeenCalled();
+  });
+
+  it('opens no task for an off-queue doc-thread item, or for a task this board lacks', () => {
+    for (const key of ['doc-thread:d-1:th-1', 'task-review:t-elsewhere:r-1']) {
+      const d = deepLinks({
+        bootLoc: {
+          nav: 'home',
+          task: null,
+          goal: null,
+          thread: null,
+          item: key,
+          archived: false,
+          tab: null,
+          settings: null,
+        },
+      });
+      const { state } = d;
+      state.tasks.set('t-1', task('t-1'));
+      state.walkKey = key;
+      vi.advanceTimersByTime(WALK_HANDOFF_DEADLINE_MS);
+      expect(state.detailTaskId).toBeNull();
+      expect(d.syncBoardUrl).toHaveBeenCalled();
+    }
+  });
+
   it('releases the boot URL’s goal claim at the same deadline', () => {
     // Until it is released, `renderDetail` must not close an unconfirmed goal
     // the way it closes one that genuinely left the board.

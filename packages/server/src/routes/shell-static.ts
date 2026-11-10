@@ -71,6 +71,7 @@ import { landingPath } from '../share/share-landing.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
+  askedAddress,
   buildProjectArtifacts,
   collectLandingProjects,
   collectLandingWorkspaces,
@@ -611,7 +612,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       const workspaceId = decodeURIComponent(boardPageMatch[1] ?? '');
       const workspace = taskStore.getWorkspace(workspaceId);
       if (!workspace) {
-        return new Response(renderBoardNotFound(workspaceId), {
+        return new Response(renderBoardNotFound(workspaceId, askedAddress(url)), {
           status: 404,
           headers: { 'content-type': 'text/html; charset=utf-8' },
         });

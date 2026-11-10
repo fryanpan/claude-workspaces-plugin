@@ -40,7 +40,7 @@ import {
   type TaskRouteRequest,
   type TaskRoutesContext,
   ownerOnlyDenial,
-  taskUrlFor,
+  reviewItemUrlFor,
 } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -96,7 +96,7 @@ export async function handleTaskReviewItems(
     // with. The divergent `shapeGaps` vocabulary stays exactly where it
     // is for the callers that already read it — this is a new door, and
     // a new door has no old callers to keep.
-    const url = taskUrlFor(ctx, workspaceId, taskId, Boolean(visitor));
+    const url = reviewItemUrlFor(ctx, workspaceId, taskId, res.item.id, Boolean(visitor));
     return j(200, {
       task: res.task,
       item: gate.item,
@@ -295,6 +295,7 @@ export async function handleTaskReviewItems(
   if (taskReviewReviseMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewReviseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReviseMatch[2] ?? '');
+    const url = reviewItemUrlFor(ctx, workspaceId, taskId, reviewItemId, Boolean(visitor));
     {
       const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
       if (denied) return denied;
@@ -372,6 +373,7 @@ export async function handleTaskReviewItems(
       return j(200, {
         task: revised.task,
         item: gate?.item ?? revised.item,
+        ...(url !== undefined ? { url } : {}),
         ...heldFields(gate),
       });
     }
@@ -414,6 +416,7 @@ export async function handleTaskReviewItems(
     return j(200, {
       task: res.task,
       item: gate.item,
+      ...(url !== undefined ? { url } : {}),
       ...(res.threadId !== undefined ? { threadId: res.threadId } : {}),
       ...(thread ? { thread } : {}),
       ...(res.advice !== undefined ? { reviewAdvice: res.advice } : {}),

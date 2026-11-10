@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { renderCommentMarkdown, renderCommentMarkdownInline } from '../src/comment-markdown.ts';
+import {
+  relativeTargetHref,
+  renderCommentMarkdown,
+  renderCommentMarkdownInline,
+} from '../src/comment-markdown.ts';
 
 describe('renderCommentMarkdown', () => {
   it('escapes HTML — no XSS passthrough', () => {
@@ -297,13 +301,45 @@ describe('renderCommentMarkdownInline — hard-break backslashes', () => {
     expect(renderCommentMarkdown('a | b\nc')).toBe('<p>a | b<br>c</p>');
   });
 
-  it('links a bare http(s) URL only when asked to', () => {
+  it('links a bare http(s) URL by default, so a phone can open it, unless told not to', () => {
     const text = 'see https://github.com/x/y/pull/1. and javascript:alert(1)';
-    expect(renderCommentMarkdown(text)).not.toContain('<a ');
-    const out = renderCommentMarkdown(text, { bareLinks: true });
+    expect(renderCommentMarkdown(text, { bareLinks: false })).not.toContain('<a ');
+    const out = renderCommentMarkdown(text);
     expect(out).toContain(
       '<a href="https://github.com/x/y/pull/1" target="_blank" rel="noopener noreferrer">https://github.com/x/y/pull/1</a>.',
     );
     expect(out.match(/<a /g)).toHaveLength(1);
+  });
+
+  it('draws a link whose target a redactor replaced as its words, not as a link to "[url]"', () => {
+    // The 8 Nov report: the chat panel opened "No board answers to [url]".
+    expect(renderCommentMarkdown('[Open the ask]([url]) now')).toBe('<p>Open the ask now</p>');
+    expect(renderCommentMarkdown('[key]([redacted])')).toBe('<p>key</p>');
+  });
+});
+
+describe('relativeTargetHref — a relative link in a comment goes to the board open route', () => {
+  it('sends a relative path on a board page to the open route, naming the doc on a doc page', () => {
+    expect(relativeTargetHref('../dir/file.md', '/workspaces/w-harbor')).toBe(
+      '/workspaces/w-harbor/open?path=..%2Fdir%2Ffile.md',
+    );
+    expect(relativeTargetHref('notes/plan.md', '/workspaces/w-harbor/home')).toBe(
+      '/workspaces/w-harbor/open?path=notes%2Fplan.md',
+    );
+    expect(relativeTargetHref('./plan.md', '/workspaces/w-harbor/docs/w-harbor%3Adocs~a.md')).toBe(
+      '/workspaces/w-harbor/open?path=.%2Fplan.md&from=w-harbor%3Adocs%7Ea.md',
+    );
+  });
+  it('leaves schemes, root paths, anchors and pages off a board alone', () => {
+    expect(relativeTargetHref('https://x.example/a', '/workspaces/w-harbor')).toBeNull();
+    expect(relativeTargetHref('mailto:a@b.example', '/workspaces/w-harbor')).toBeNull();
+    expect(relativeTargetHref('/workspaces/w-harbor?task=t-1', '/workspaces/w-harbor')).toBeNull();
+    expect(relativeTargetHref('#section', '/workspaces/w-harbor')).toBeNull();
+    expect(relativeTargetHref('plan.md', '/settings/prompts')).toBeNull();
+  });
+  it('renders the relative link through the open route of the page it is drawn on', () => {
+    window.history.replaceState(null, '', '/workspaces/w-harbor?task=t-1');
+    const out = renderCommentMarkdown('[note](../dir/file.md)');
+    expect(out).toBe('<p><a href="/workspaces/w-harbor/open?path=..%2Fdir%2Ffile.md">note</a></p>');
   });
 });

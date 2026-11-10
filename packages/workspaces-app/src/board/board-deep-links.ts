@@ -33,7 +33,7 @@ import {
   walkHandoffReady,
   walkNextUrl,
 } from './board-review-model.ts';
-import { type BoardLocation } from './board-url.ts';
+import { type BoardLocation, taskOfItemKey } from './board-url.ts';
 
 /** How long an armed ?walk=1 handoff waits for the board to produce a queue
  *  before concluding it is genuinely clear. Generous against a slow ydoc
@@ -114,9 +114,22 @@ export function createBoardDeepLinks(deps: BoardDeepLinkDeps): BoardDeepLinks {
   };
   if (bootLoc.task || bootLoc.goal || bootLoc.item) {
     setTimeout(() => {
-      if (boot.item()) {
+      const missedItem = boot.item();
+      if (missedItem) {
         boot.clearItem();
-        showToast('That review item is not in the queue any more — it may already be answered.');
+        // An item off the queue (answered, withdrawn, or held by the quality
+        // gate) is still on its task. A link to it opens that task rather
+        // than leaving the reader on Home with nothing open.
+        const home = taskOfItemKey(missedItem);
+        if (home && state.tasks.has(home.taskId) && !state.detailTaskId) {
+          state.detailTaskId = home.taskId;
+          state.detailGoalId = null;
+          state.detailThreadId = home.threadId;
+          showToast('That review item is not in the queue any more — here is its task.');
+          renderDetail();
+        } else {
+          showToast('That review item is not in the queue any more — it may already be answered.');
+        }
         syncBoardUrl();
       }
       boot.clearGoal();
