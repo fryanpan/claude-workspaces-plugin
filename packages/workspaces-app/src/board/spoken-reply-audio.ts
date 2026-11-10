@@ -63,6 +63,11 @@ export interface SpokenCapture {
   clock?(): number;
   /** Suspend and resume the graph's context (`AudioPump.kick`). */
   kick?(): Promise<void>;
+  /** Resume the graph's context, as far as the browser lets it. */
+  resume?(): Promise<void>;
+  /** The context's state and the track's, read on return to a page iOS put
+   *  in the background: the track can end or mute there. */
+  health?(): { context: string; track: string; muted: boolean };
   /** Release the microphone's track and keep the graph. While an echo-
    *  cancelled track is live, iOS 26.2+ crackles every sound the page plays
    *  (WebKit bug 326286), so the lead chat lets go of it while it speaks. */
@@ -143,6 +148,15 @@ export async function startSpokenCapture(opts: SpokenCaptureOpts): Promise<Spoke
       },
       ...(pump.clock ? { clock: () => pump.clock?.() ?? 0 } : {}),
       ...(pump.kick ? { kick: () => pump.kick?.() ?? Promise.resolve() } : {}),
+      resume: () => pump.resume?.().catch(() => {}) ?? Promise.resolve(),
+      health: () => {
+        const t = stream.getAudioTracks?.()[0];
+        return {
+          context: pump.contextState?.() ?? 'unknown',
+          track: t?.readyState ?? 'ended',
+          muted: t?.muted === true,
+        };
+      },
       pause() {
         paused = true;
         pauses++;
