@@ -3817,3 +3817,12 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   clock 1s after it opens and kicks the context if it has not moved. If the
   clock is still stuck, it asks for one tap to rebuild instead of stopping.
   A page that unloads for good now closes its audio at `pagehide`.
+- The check at open was not enough. Bryan, 9 Nov: the mic went silent
+  after he put the page in the background and came back. The capture's
+  timers only run when it opens, so a track that iOS ended or muted in the
+  background, or a context it left `interrupted`, left the chat on
+  "Listening…" for good. Now, on `visibilitychange` back to visible or a
+  `pageshow` from the back-forward cache, the lead chat wakes both contexts
+  and checks the mic (`LeadMic.recheck`). If no frame arrives within 1s, it
+  reopens an ended or muted track, otherwise suspends and resumes the
+  context, and if that does not help either, asks for one tap to rebuild.
