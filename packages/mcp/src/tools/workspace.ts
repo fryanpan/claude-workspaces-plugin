@@ -862,7 +862,11 @@ export async function handleWorkspaceTool(
           'POST',
           `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`,
           { agentId: AUTHOR.id, text: words },
-        )) as { played?: boolean };
+        )) as { played?: boolean; said?: boolean; lapsed?: string; hint?: string };
+        // Held until the speaker finished, then dropped: the room moved on.
+        if (res.said === false) {
+          return ok({ said: false, reason: res.lapsed ?? 'lapsed', note: res.hint ?? '' });
+        }
         return ok({
           said: true,
           played: res.played === true,
