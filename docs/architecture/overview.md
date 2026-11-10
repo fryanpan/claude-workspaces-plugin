@@ -1199,6 +1199,12 @@ in its nav dock, the doc page floats it bottom-left, and the mock host loads
 `WS /workspaces/<ws>/voice/converse` with the lead named in `start`, so the
 audio reaches only this server and the listener it already uses. There is no
 browser speech recognition, because Chrome's sends the audio to Google.
+While the page or a frame on it speaks with the browser's `speechSynthesis`,
+the mic sends silence instead of what it hears, so an app's spoken line never
+reaches the lead as a request. The server writes the speech watch
+(`core/src/page-speech.ts`, a new top-level core module) into every mock, app
+and doc-file frame, and `lead-chat/page-speech.ts` reads what the frames
+post; the reasons are in [app-voice](app-voice.md).
 
 **Tab titles.** Every page's browser tab starts with its workspace's name,
 then the page's own name (`Harborlight · tides.md · Workspaces`), so several

@@ -52,6 +52,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { WriteVia } from '@claude-workspaces/core';
+import { SPEECH_WATCH_SCRIPT } from '@claude-workspaces/core/page-speech';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
 import { NAV_BAR_H, NAV_RAIL_W, hostNav } from './board-host-nav.ts';
 import { FRAME_TICKET_PARAM } from './frame-ticket.ts';
@@ -399,7 +400,7 @@ const RELATIVE_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*["'`]\.\.?\//;
 
 /**
  * The frame's HTML with nothing left for it to fetch from the board: the
- * bridge first in the head, and every script and stylesheet the page names on
+ * bridge and the speech watch first in the head, and every script and stylesheet the page names on
  * this board written into the page itself.
  *
  * The frame's own requests carry no cookie (see "Why the frame's scripts are
@@ -429,10 +430,12 @@ export function injectFrameScripts(
   const roots = { app: appDist, widget: widgetDist };
   let out = html;
   const bridge = readAsset(widgetDist, 'mock-bridge.js');
-  if (bridge !== null) {
-    const tag = `<script data-feedback-widget>${inlineSafe(bridge)}</script>`;
-    out = HEAD_OPEN.test(out) ? out.replace(HEAD_OPEN, (m) => `${m}${tag}`) : `${tag}${out}`;
-  }
+  // The speech watch runs before the page's own scripts, so a line the page
+  // speaks at load is told to the lead chat's mic too (`core/page-speech.ts`).
+  const speech = `<script data-feedback-widget>${SPEECH_WATCH_SCRIPT}</script>`;
+  const tag =
+    (bridge === null ? '' : `<script data-feedback-widget>${inlineSafe(bridge)}</script>`) + speech;
+  out = HEAD_OPEN.test(out) ? out.replace(HEAD_OPEN, (m) => `${m}${tag}`) : `${tag}${out}`;
   return out.replace(TAG, (tag, attrs: string | undefined) =>
     attrs === undefined
       ? inlineStylesheet(tag, page, appDist)

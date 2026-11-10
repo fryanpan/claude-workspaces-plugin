@@ -76,8 +76,24 @@ export function fakeTab() {
   };
 }
 
+/** Whether the page or a frame on it speaks, set by the test
+ *  (`page-speech.ts`): silent until told otherwise. */
+export function fakePageSpeech() {
+  const speech = { watching: 0, onChange: null as ((speaking: boolean) => void) | null };
+  const watch: NonNullable<LeadVoiceOpts['pageSpeech']> = (onChange) => {
+    speech.watching++;
+    speech.onChange = onChange;
+    return () => {
+      speech.watching--;
+      speech.onChange = null;
+    };
+  };
+  return { speech, watch, set: (speaking: boolean) => speech.onChange?.(speaking) };
+}
+
 export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
   const tabs = fakeTab();
+  const pageSpeech = fakePageSpeech();
   const sockets: FakeSocket[] = [];
   const mic = {
     starts: 0,
@@ -117,10 +133,12 @@ export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
     // A stop is reported to the page; here it would surface as an uncaught error.
     report: () => {},
     listeningTab: tabs.make,
+    pageSpeech: pageSpeech.watch,
   };
   return {
     seams,
     tabs,
+    pageSpeech,
     sockets,
     mic,
     socket: (): FakeSocket => {
