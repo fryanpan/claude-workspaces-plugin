@@ -91,7 +91,7 @@ describe('the lead line holds of a board', () => {
     expect(late).toBeNull();
     holds.end('w-1');
     await waitFor(() => late !== null, { describe: 'the late line dropped at the end' });
-    expect(late).toEqual({ said: false, reason: 'ended' });
+    expect(late as HoldOutcome | null).toEqual({ said: false, reason: 'ended' });
   });
 
   it('says at once when nothing can listen, and drops a waiting line at the end', async () => {
