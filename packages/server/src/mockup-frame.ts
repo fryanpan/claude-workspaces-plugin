@@ -400,8 +400,8 @@ const RELATIVE_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*["'`]\.\.?\//;
 
 /**
  * The frame's HTML with nothing left for it to fetch from the board: the
- * bridge and the speech watch first in the head, and every script and stylesheet the page names on
- * this board written into the page itself.
+ * bridge and the speech watch first in the head, and every script and
+ * stylesheet the page names on this board written into the page itself.
  *
  * The frame's own requests carry no cookie (see "Why the frame's scripts are
  * inlined" above), so behind Cloudflare Access or a share session each one
