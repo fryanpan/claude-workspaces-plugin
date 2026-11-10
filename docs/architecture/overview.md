@@ -1931,6 +1931,10 @@ call behind the same key and consent as the composer.
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `settings-allow-file.ts`, `git-diff.ts`, `sentry.ts`, `outbound-fetch.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts`, `start-contract.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. `start-contract.ts` is the supervisor's half: the port, the data dir (required, no default) and whether a busy port is waited for (prod) or refuses the start; no start moves to another port. |
 
+`transcribe-soniox-tokens.ts` is the Soniox adapter's token reading (speaker
+letters, a turn's language from its words' tags), split out of
+`transcribe-soniox.ts` and covered by the same `transcribe-*.ts` glob.
+
 `outbound-fetch.ts` joins the adapters as the one facility every other adapter
 reaches the network through. Each module that calls out still takes an
 injectable fetch; its default is now one of the guard's three ways out — the
