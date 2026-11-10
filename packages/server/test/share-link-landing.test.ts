@@ -30,7 +30,8 @@ const SHARE_HOST = 'share.example.test';
 const CF_RAY = { 'cf-ray': '8a1b2c3d4e5f-SJC' };
 
 const MEMBER = 'alice@example.com';
-const STRANGER = 'bob@example.com';
+/** Signed in, and outside the `@example.com` audience every board here names. */
+const STRANGER = 'bob@riverbend.example';
 
 let jwks: JSONWebKeySet;
 let signJwt: (email: string) => Promise<string>;

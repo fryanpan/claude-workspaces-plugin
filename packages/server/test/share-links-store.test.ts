@@ -46,6 +46,10 @@ describe('the share-link store', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  /** A member row exists. Not `isMember`, which would write one (audience). */
+  const rowOn = (ws: string, who: string): boolean =>
+    links.membersOf(ws).some((m) => m.email === who);
+
   const mint = (opts: { ttlSeconds?: number; workspaceId?: string } = {}) =>
     links.create({
       workspaceId: opts.workspaceId ?? BOARD,
@@ -89,7 +93,7 @@ describe('the share-link store', () => {
   describe('redeeming', () => {
     it('makes the verified email a member, and says it added one', () => {
       const link = mint();
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
       const first = links.redeem(link.linkId, REVIEWER);
       expect(first).toEqual({ ok: true, workspaceId: BOARD, added: true });
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
@@ -134,7 +138,7 @@ describe('the share-link store', () => {
       const link = mint({ workspaceId: OTHER_BOARD });
       const outcome = links.redeem(link.linkId, REVIEWER);
       expect(outcome).toEqual({ ok: true, workspaceId: OTHER_BOARD, added: true });
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
     });
   });
 
@@ -151,7 +155,7 @@ describe('the share-link store', () => {
       const link = mint({ ttlSeconds: 60 });
       const after = link.expiresAt! + 1;
       expect(links.redeem(link.linkId, REVIEWER, after)).toEqual({ ok: false, state: 'expired' });
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
       // Positive control: the same link a moment earlier admits them, so the
       // refusal above is the expiry and not a dead store.
       expect(links.redeem(link.linkId, REVIEWER, link.expiresAt! - 1).ok).toBe(true);
@@ -165,7 +169,7 @@ describe('the share-link store', () => {
       expect(links.revoke(link.linkId)).toBe(true);
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
       expect(links.redeem(link.linkId, OTHER_REVIEWER)).toEqual({ ok: false, state: 'revoked' });
-      expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, OTHER_REVIEWER)).toBe(false);
     });
 
     it('revoking twice is not a second revocation', () => {
@@ -205,6 +209,8 @@ describe('the share-link store', () => {
 
   describe('membership is per workspace', () => {
     it('a member of one board is not a member of another', () => {
+      // The other board must not name them: an audience entry admits alone.
+      links.removeFromAudience(OTHER_BOARD, '@partner.example');
       links.redeem(mint({ workspaceId: BOARD }).linkId, REVIEWER);
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
       expect(links.isMember(OTHER_BOARD, REVIEWER)).toBe(false);
