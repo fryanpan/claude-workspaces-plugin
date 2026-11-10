@@ -342,10 +342,41 @@ What the lead can reach:
   the server can read, so a person must not bind a doc or folder under `/tmp`
   on this machine. The transcripts are not in the snapshots yet: the snapshot
   runs as `cw`.
-- **Its memory.** The entrypoint puts the lead in a cgroup v2 group of its own
-  (`cw-lead`, `memory.max` 1280M unless `CW_LEAD_MEMORY_MAX` is set), so a
-  lead that grows is killed alone and the server keeps running. A machine
-  with no cgroup v2 memory controller logs `the lead's memory is NOT capped`.
+- **Its memory.** A ceiling of 1280M unless `CW_LEAD_MEMORY_MAX` is set, so a
+  lead that grows is killed alone and the server keeps running. Where the
+  machine has a cgroup v2 memory controller (the entrypoint mounts cgroup2 at
+  `/sys/fs/cgroup` if nothing is mounted there), the lead is in a group of its
+  own, `cw-lead`, with that `memory.max`, and the boot log says `capped at
+  1280M by its cgroup`. Where it has none, which is what cw-moi's boot log
+  showed on 6 November, a root watchdog (`lead-memory.sh`) adds up the PSS of
+  every process of the `lead` uid every 2 seconds and kills them all with
+  SIGKILL once the total passes the cap; the log says `capped at 1280M by a
+  watchdog`. Root starts the supervisor again 10s later and the session
+  resumes its conversation. Between two checks the lead can outgrow the cap,
+  so its `oom_score_adj` is also 1000, set by root so the lead cannot lower
+  it: if the machine runs out first, the kernel kills the lead before the
+  server. A watchdog that cannot read `/proc` logs `the lead's memory is NOT
+  capped`.
+- **Its network.** The lead and the dev server (which runs code the lead
+  writes) connect only to loopback and the hosts in
+  `infra/project-machine/lead-egress.allow`: the model API and Claude's
+  sign-in hosts on 443, and `github.com` on 22 for the deploy key's fetches.
+  Their DNS is refused and the listed names are pinned in `/etc/hosts`, so no
+  other name resolves for them. The rules (`lead-egress.ts`) are loaded at
+  boot and refreshed every 10 minutes; then a probe as the lead must be
+  refused by 1.1.1.1:443 and the IPv6 equivalent, fail to resolve
+  `example.com`, and reach `api.anthropic.com:443`. The boot log says `the
+  lead's network wall holds`, or `is in but UNPROVEN` when the model API did
+  not answer either. When the rules cannot be loaded or the probe gets
+  through, it says `the lead's network is NOT walled: <why>` and starts
+  neither the lead nor the dev server. `fly secrets set CW_LEAD_EGRESS=open`
+  runs both without the wall, and the log says so on every boot. Claude Code
+  runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so it does not try the telemetry and
+  connector hosts the wall refuses. A dev server that needs another host, and
+  any package install the lead runs, needs a line in the list and an image
+  deploy. What the wall leaves open is in
+  [security.md](../architecture/security.md), under the project machine's lead.
 
 **When it ends.** `lead.sh` checks the tmux session every 5 seconds and starts
 the session again, resuming the last conversation in `/data/lead/work`
@@ -369,6 +400,34 @@ Detach with `Ctrl-b d`; exiting Claude Code ends the session, and the
 supervisor starts another. `fly secrets set CW_LEAD_REMOTE_CONTROL=1` starts
 each session with Remote Control, named after the agent (the flag is in the
 pinned Claude Code build).
+
+### The lead's limits: checking them on a machine
+
+The tests prove the rules and the watchdog on Docker's Linux kernel
+(`CW_CONTAINER_TESTS=1 bun test packages/server/test/project-machine-lead-limits-container.test.ts`),
+not on Fly's. On a test machine with a lead, after a deploy:
+
+1. `fly logs --app cw-<project> --no-tail | grep -E "lead's (memory|network)"`.
+   The memory line names the cgroup or the watchdog; the network line must
+   read `the lead's network wall holds`.
+2. The wall, by hand, as the lead (`env -i`, so root's secrets stay root's):
+   ```bash
+   fly ssh console --app cw-<project> -C "env -i PATH=/usr/local/bin:/usr/bin:/bin setpriv --reuid=lead --regid=lead --init-groups bash -c 'timeout 5 bash -c \"exec 3<>/dev/tcp/1.1.1.1/443\" && echo LEAK || echo refused; timeout 5 bash -c \"exec 3<>/dev/tcp/api.anthropic.com/443\" && echo allowed'"
+   ```
+   It must print `refused` then `allowed`. The same pair as root (without
+   `setpriv`) prints `LEAK` then `allowed`, which is the control.
+3. The memory cap, at its default 1280M on a 2048 MB machine. Read what the
+   lead holds now (`fly ssh console --app cw-<project> -C "bash
+   /app/infra/project-machine/lead-memory.sh total 10004"`, in bytes), then
+   make a lead process grow by 80 MB a second:
+   ```bash
+   fly ssh console --app cw-<project> -C "env -i PATH=/usr/local/bin:/usr/bin:/bin setpriv --reuid=lead --regid=lead --init-groups bun -e 'const a=[];for(;;){a.push(Buffer.alloc(8<<20,1));await Bun.sleep(100)}'"
+   ```
+   It must be killed within about 20 seconds, and `fly logs` must show
+   `killing all <n> of them` (watchdog) or the kernel's OOM kill in
+   `cw-lead` (cgroup). The lead's session is killed with it and is back
+   within a minute; the server must not restart (`fly logs` shows no
+   `a child exited`).
 
 ## The central token list
 
@@ -436,7 +495,7 @@ Still unchecked on a real machine: whether a `setup-token` sign-in allows
 Remote Control; whether Claude Code asks anything on its first run that the
 seeded `~/.claude.json` does not answer; whether `--continue` and
 `--remote-control` work together; the session's memory; whether a Fly
-machine offers the cgroup memory controller; and the MCP relay over the
+machine's kernel loads the lead's network wall; and the MCP relay over the
 board socket under the image's bun. Attach once after the first deploy and
 look. The session runs in Claude Code's default permission mode, so it asks
 before each tool; nobody answers unless a person attaches or uses Remote
@@ -459,6 +518,12 @@ fly secrets set --app cw-<project> \
   board socket, and the server refuses its loopback TCP calls as it refuses
   every uid but root's and its own. It is started again when it exits, after
   a wait that doubles from 5s to 60s; it never stops the machine.
+- **Its network.** The lead's wall, because it runs code the lead writes
+  ("Its network" under the lead, above). `registry.npmjs.org` is not on the
+  list, so neither the lead nor `bunx` can fetch a package: the project's
+  dependencies have to be in its checkout. Adding the registry would admit
+  every site behind the same Cloudflare addresses, since the wall allows
+  addresses, not names.
 - **Its files.** `/data/dev` is `cwdev:cwdevsrc` mode 2770, and the group
   `cwdevsrc` holds `cwdev` and `lead`. The lead clones the project's repo
   into `/data/dev/work` and edits it there; the lead's umask is 007, so its

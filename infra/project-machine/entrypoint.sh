@@ -20,11 +20,16 @@
 #   lead      the lead agent's Claude Code session (lead.sh), with its own
 #             sign-in, its board's socket and its repo's deploy key, and
 #             nothing else. The server refuses its loopback TCP calls, so it
-#             reaches only its own board, through that board's socket.
+#             reaches only its own board, through that board's socket. Its
+#             connections reach only the hosts in lead-egress.allow
+#             (wall_network), and its memory has a ceiling (lead_cgroup,
+#             else lead-memory.sh).
 #   cwdev     the project's dev server, when CW_DEV_SERVER_CMD names one, with
 #             PATH and nothing else. It binds loopback; the board proxies it
 #             (attach_app) behind the board's own sign-in. The server refuses
 #             its loopback TCP calls, and it is in no board's socket group.
+#             It runs code the lead writes, so it is behind the lead's
+#             network wall too.
 #
 # A user's processes can read each other's environment (/proc/<pid>/environ),
 # so a secret kept from the server has to live under another uid, not merely
@@ -70,6 +75,10 @@ RELEASE_KEY="$APP/infra/project-machine/release-signing-key.pub"
 BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
+# The lead's uid, fixed in the Dockerfile, and /proc. Overridable only so a
+# test can run this off a machine.
+LEAD_UID=10004
+PROC="${CW_MACHINE_PROC_ROOT:-/proc}"
 # The dev server's folder. Group cwdevsrc (cwdev and lead, fixed in the
 # Dockerfile) owns it, setgid, so the lead's checkout there is the one the
 # dev server reads and the dev server's caches are ones the lead can clear.
@@ -194,11 +203,67 @@ else
 fi
 pids+=($!)
 
+# The lead and the dev server's network wall (lead-egress.ts): their
+# connections reach loopback and the hosts in lead-egress.allow, and nothing
+# else, DNS included. Both run only behind it, because the dev server runs
+# code the lead writes, so either could carry a board's data out. Applied
+# once, by whichever of them starts first; CW_LEAD_EGRESS=open (a Fly
+# secret, for a machine whose kernel cannot load the rules) runs both
+# without it. The rules are applied as root, then a probe as the lead
+# checks that a public address and an unlisted name are refused and that
+# the model API answers. Every outcome is logged.
+EGRESS_STATE=""
+egress() { (only_env PATH; bun "$HERE/lead-egress.ts" "$@"); }
+wall_network() {
+  if [ -n "$EGRESS_STATE" ]; then
+    [ "$EGRESS_STATE" != failed ]
+    return
+  fi
+  if [ "${CW_LEAD_EGRESS:-walled}" = open ]; then
+    EGRESS_STATE=open
+    log "the lead's network is NOT walled: CW_LEAD_EGRESS=open, so the lead and the dev server may connect anywhere"
+    return 0
+  fi
+  local out status=0
+  out=$(egress apply 2>&1) || status=$?
+  if [ "$status" != 0 ]; then
+    EGRESS_STATE=failed
+    log "the lead's network is NOT walled: ${out:-lead-egress.ts apply exited $status}"
+    return 1
+  fi
+  log "the lead's network wall is in: $out"
+  status=0
+  out=$( (only_env PATH; run_as lead bun "$HERE/lead-egress.ts" probe) 2>&1) || status=$?
+  case $status in
+    0) log "the lead's network wall holds: $out" ;;
+    3) log "the lead's network wall is in but UNPROVEN: $out" ;;
+    *)
+      EGRESS_STATE=failed
+      log "the lead's network is NOT walled: the probe as the lead says: ${out:-it exited $status}"
+      return 1
+      ;;
+  esac
+  EGRESS_STATE=walled
+  # A host's addresses move, so the list is resolved again every 10 minutes.
+  # A refresh that fails leaves the last rules in place.
+  (
+    while :; do
+      sleep 600
+      out=$(egress apply 2>&1) || log "the lead's network wall was not refreshed, the last rules stay: $out"
+    done
+  ) &
+  pids+=($!)
+}
+
 # The lead agent's memory: a cgroup v2 group of its own with a ceiling, so a
 # lead that grows is killed alone and the server keeps running. Prints the
-# group, or fails when the machine has no memory controller to use.
+# group, or fails when the machine has no memory controller to use. A
+# machine whose init mounted no cgroup filesystem gets one mounted here.
 lead_cgroup() {
   local cg="$CGROUP/cw-lead"
+  if [ -d "$CGROUP" ] && [ ! -e "$CGROUP/cgroup.controllers" ]; then
+    mount -t cgroup2 cgroup2 "$CGROUP" 2>/dev/null || true
+  fi
   grep -qw memory "$CGROUP/cgroup.controllers" 2>/dev/null || return 1
   grep -qw memory "$CGROUP/cgroup.subtree_control" 2>/dev/null ||
     echo +memory >"$CGROUP/cgroup.subtree_control" 2>/dev/null || return 1
@@ -241,12 +306,23 @@ elif [ -z "$LEAD_BOARD" ]; then
   log "CW_LEAD_BOARD unset: no lead agent runs"
 elif ! lead_token_ok; then
   log "the lead's sign-in was not made for ${LEAD_ORG:-this org} (CW_LEAD_TOKEN_ORG does not match it): no lead agent runs; machine:deploy on the Mac sets it one, or machine:tokens move"
+elif ! wall_network; then
+  log "no lead agent runs, because its network is not walled (CW_LEAD_EGRESS=open runs it without the wall)"
 else
+  # Without a cgroup, a root watchdog kills the lead's processes once their
+  # total passes the cap (lead-memory.sh). A watchdog that cannot run says
+  # so and leaves the machine up.
   if cg=$(lead_cgroup); then
-    log "the lead's memory is capped at $LEAD_MEMORY_MAX"
+    log "the lead's memory is capped at $LEAD_MEMORY_MAX by its cgroup, $cg"
   else
     cg=""
-    log "the lead's memory is NOT capped: no cgroup v2 memory controller at $CGROUP"
+    log "no cgroup v2 memory controller at $CGROUP: the lead's memory is capped at $LEAD_MEMORY_MAX by a watchdog (lead-memory.sh) that kills its processes once their total passes it"
+    (
+      bash "$HERE/lead-memory.sh" watch "$LEAD_MEMORY_MAX" "$LEAD_UID" ||
+        log "the lead's memory is NOT capped: its watchdog exited"
+      exec sleep infinity
+    ) &
+    pids+=($!)
   fi
   (
     child=""
@@ -256,15 +332,23 @@ else
         if [ -n "$cg" ]; then
           echo "$BASHPID" >"$cg/cgroup.procs" || log "could not join $cg"
         fi
+        # First for the kernel's OOM killer, cgroup or not, so a machine that
+        # runs out before the cap is reached loses the lead and not the
+        # server. Root's write also sets the floor, so the lead cannot lower it.
+        echo 1000 >"$PROC/$BASHPID/oom_score_adj" 2>/dev/null ||
+          log "could not set the lead's oom_score_adj"
         app="${FLY_APP_NAME:-project}"
         export CW_BOARD_SOCKET="$SOCKETS/$LEAD_BOARD.sock" CW_WORKSPACE_ID="$LEAD_BOARD" \
           CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
           CW_LEAD_ROOT="$LEAD_ROOT" CW_LEAD_TOKEN_LABEL="$LEAD_TOKEN_LABEL" \
-          DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash
+          DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash \
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
+        # The last two keep Claude Code off the telemetry and connector hosts
+        # the network wall refuses (lead-egress.allow).
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
           CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_TOKEN_LABEL CW_LEAD_REMOTE_CONTROL \
           CW_LEAD_GITHUB_DEPLOY_KEY \
-          DISABLE_AUTOUPDATER
+          DISABLE_AUTOUPDATER CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ENABLE_CLAUDEAI_MCP_SERVERS
         # 007, not 077: a file's group is the lead's own group, which holds
         # nobody else, except in the setgid dev folder, where it is
         # cwdevsrc's, so the dev server can read the checkout there.
@@ -290,7 +374,9 @@ fi
 # 5s to 60s and resets once a run lasts 5 minutes; it never stops the
 # machine. The command is an operator setting (fly secrets set), never a
 # value the lead or a board can write.
-if [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
+if [ -n "${CW_DEV_SERVER_CMD:-}" ] && ! wall_network; then
+  log "no dev server runs, because its network is not walled (CW_LEAD_EGRESS=open runs it without the wall)"
+elif [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
   (
     cmd="$CW_DEV_SERVER_CMD"
     child=""

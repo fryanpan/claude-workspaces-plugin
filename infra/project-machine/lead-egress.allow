@@ -1,0 +1,17 @@
+# Where the lead agent and the dev server may connect, and nothing else.
+#
+# One line per host: the name, the ports it is allowed on, and why, after a
+# `#`. A line without a reason is refused, so the machine boots no lead.
+# `lead-egress.ts apply` reads this file as root at boot and every 10 minutes,
+# resolves each name, allows exactly those addresses on those ports for the
+# `lead` and `cwdev` users, and pins the names in /etc/hosts. Those users'
+# DNS is refused, so a name that is not here does not resolve for them.
+# Loopback is always allowed; the board server refuses both users' loopback
+# TCP calls, and the lead reaches its board through its socket.
+#
+# Changing this file is an image deploy (machine:deploy).
+
+api.anthropic.com   tcp/443  # Claude Code's model API, flags and the WebFetch safety check (Anthropic's network-config page: required)
+platform.claude.com tcp/443  # OAuth token exchange and refresh for the lead's sign-in (network-config page: required for every sign-in)
+claude.ai           tcp/443  # claude.ai account authentication; assumed needed for Remote Control (CW_LEAD_REMOTE_CONTROL), unchecked
+github.com          tcp/22   # git fetch of the project repo over SSH with the read-only deploy key (lead.sh); pushes go through the server
