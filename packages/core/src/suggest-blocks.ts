@@ -83,23 +83,40 @@ function markableThroughout(el: Y.XmlElement): boolean {
 }
 
 /**
- * Whether every offered block can carry the proposal. When one cannot, remove
- * them ALL and answer false: the replacement cannot be proposed as written.
+ * Which offered blocks the proposal carries, and which are written directly.
+ * When one block can be neither, remove them ALL and answer null: the
+ * replacement cannot be proposed as written.
  *
- * A mark needs a character to sit on. A horizontal rule or an image in the
- * replacement could carry no `suggestInsert`, so it would serialize as
- * accepted content on the next write-back and survive a reject — a change
- * nobody agreed to. Dropping just that block would be no better: accepting
- * would then write part of what the caller asked for and call it done.
+ * A mark needs a character to sit on. A horizontal rule in the replacement
+ * could carry no `suggestInsert`, so it would serialize as accepted content
+ * on the next write-back and survive a reject — a change nobody agreed to.
+ * Dropping just that block would be no better: accepting would then write
+ * part of what the caller asked for and call it done.
+ *
+ * A top-level image is the exception. It removes nothing, so writing it
+ * directly is what an insert of it would do, and an agent could already make
+ * that insert in the same batch. Refusing it left a whole-doc rewrite as the
+ * only way to put a picture where a person's placeholder line was. The
+ * words it replaces are still only struck, so rejecting keeps them.
  */
-export function offerWhole(offered: readonly Y.XmlElement[]): boolean {
-  if (offered.every(markableThroughout)) return true;
+export function splitOffer(
+  offered: readonly Y.XmlElement[],
+): { marked: Y.XmlElement[]; direct: Y.XmlElement[] } | null {
+  const marked: Y.XmlElement[] = [];
+  const direct: Y.XmlElement[] = [];
   for (const el of offered) {
-    const parent = el.parent as Y.XmlFragment | Y.XmlElement | null;
-    const idx = parent ? (parent.toArray() as unknown[]).indexOf(el) : -1;
-    if (parent && idx >= 0) parent.delete(idx, 1);
+    if (markableThroughout(el)) marked.push(el);
+    else if (el.nodeName === 'image') direct.push(el);
+    else {
+      for (const gone of offered) {
+        const parent = gone.parent as Y.XmlFragment | Y.XmlElement | null;
+        const idx = parent ? (parent.toArray() as unknown[]).indexOf(gone) : -1;
+        if (parent && idx >= 0) parent.delete(idx, 1);
+      }
+      return null;
+    }
   }
-  return false;
+  return { marked, direct };
 }
 
 /**

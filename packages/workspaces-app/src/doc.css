@@ -1342,6 +1342,19 @@ body.is-archived #editor .ProseMirror {
   max-width: 100%;
   height: auto;
 }
+/* An image line with `^[…]` notes after it draws them as a caption under
+   the picture (doc-image-src.ts, doc/prose-paint.ts). */
+#editor > .ProseMirror .doc-image-figure {
+  margin: 0.5em 0 1em;
+}
+#editor > .ProseMirror .doc-image-figure img {
+  display: block;
+}
+#editor > .ProseMirror .doc-image-figure figcaption {
+  margin-top: 0.35em;
+  font-size: 0.875em;
+  color: var(--fg-muted);
+}
 
 /* ========== board embeds (doc/board-embed-frames.ts) ========== */
 /* A `::name{block="…"}` line's live app frame, drawn under the line. */

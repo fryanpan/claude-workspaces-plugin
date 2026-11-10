@@ -50,7 +50,7 @@ import type { MarkdownParseOptions } from './prose-mdx.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
 import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
 import { type SplitBeforeError, splitBeforeBlock } from './prose-split.ts';
-import { blockText, markBlockProposal, offerWhole } from './suggest-blocks.ts';
+import { blockText, markBlockProposal, splitOffer } from './suggest-blocks.ts';
 import type { SuggestionAuthor } from './suggest-ops.ts';
 
 /** One edit, addressed by block id. */
@@ -128,7 +128,10 @@ const TABLE_PROPOSED =
   'every thread in its cells; to add, edit or remove a row directly, use find_and_replace ' +
   'with the pipe rows (find one row, replace it with that row plus the new one, or with nothing)';
 const TEXTLESS_BLOCK =
-  'the replacement holds a block with no text (a rule or an image), which a suggestion cannot carry';
+  'the replacement holds a block with no text (a rule), which a suggestion cannot carry';
+const IMAGE_DIRECT =
+  'the image was written directly, since a suggestion cannot carry one; the words it replaces ' +
+  'are struck as a suggestion, and stay until a person accepts it';
 
 /**
  * Turn a replace or delete of a block the caller does not own into a pending
@@ -142,19 +145,23 @@ function proposeEdit(
   el: Y.XmlElement,
   replacement: string | null,
   opts: Pick<ApplyBlockEditsOptions, 'author' | 'suggestionAuthor' | 'parse'>,
-): { suggestionId: string } | { error: BlockEditError; reason?: string } {
+): { suggestionId: string; reason?: string } | { error: BlockEditError; reason?: string } {
   const struck = blockText(el);
   if (struck === null) return { error: 'suggest-failed', reason: ALREADY_PROPOSED };
   if (struck.length === 0) return { error: 'no-range' };
   let offered: Y.XmlElement[] = [];
+  let direct: Y.XmlElement[] = [];
   if (replacement !== null) {
     const written = writeReplacement(fragment, el, replacement, 'after', opts.parse);
     if (typeof written === 'string') return { error: written };
-    if (!offerWhole(written)) return { error: 'suggest-failed', reason: TEXTLESS_BLOCK };
-    offered = written;
-    for (const made of offered) claimSubtree(made, opts.author);
+    const split = splitOffer(written);
+    if (split === null) return { error: 'suggest-failed', reason: TEXTLESS_BLOCK };
+    offered = split.marked;
+    direct = split.direct;
+    for (const made of written) claimSubtree(made, opts.author);
   }
-  return { suggestionId: markBlockProposal(struck, offered, opts.suggestionAuthor) };
+  const suggestionId = markBlockProposal(struck, offered, opts.suggestionAuthor);
+  return direct.length > 0 ? { suggestionId, reason: IMAGE_DIRECT } : { suggestionId };
 }
 
 /** The end of a heading's section: the index of the next heading at the same
@@ -296,7 +303,11 @@ export function applyBlockEdits(
                     op: edit.op,
                     status: 'suggested',
                     suggestionId: res.suggestionId,
-                    ...(el.nodeName === 'table' ? { reason: TABLE_PROPOSED } : {}),
+                    ...(el.nodeName === 'table'
+                      ? { reason: TABLE_PROPOSED }
+                      : res.reason
+                        ? { reason: res.reason }
+                        : {}),
                   }
                 : { op: edit.op, status: 'failed', error: res.error, reason: res.reason },
             );
