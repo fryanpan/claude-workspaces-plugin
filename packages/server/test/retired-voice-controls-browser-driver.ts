@@ -76,7 +76,7 @@ const step = (what: string): void => {
 
 /**
  * A control the page still has, drawn in the same mount as the retired ones:
- * the agent button on the board, the Review float on the doc. Until it is
+ * the agent button on the board, the plan gate's float on the doc. Until it is
  * there a reading proves nothing. The doc's top bar is static markup, and the
  * editor paints the doc's text before the mount has added the rest, so
  * neither of those would do.
@@ -85,8 +85,8 @@ interface Kept {
   selector: string;
   /** Whether it must be drawn, or only mounted. The board's agent button
    *  sits in the static shell, hidden until the board boots, so it must be
-   *  drawn; the doc's Review float is mounted hidden on a doc with nothing
-   *  to review, so being in the page is the signal. */
+   *  drawn; the doc's plan float is mounted hidden on a doc with no pending
+   *  plan, so being in the page is the signal. */
   drawn: boolean;
 }
 
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
       reading.doc[size] = await read(
         docUrl,
         size,
-        { selector: '.review-float', drawn: false },
+        { selector: '.plan-float', drawn: false },
         DOC_RETIRED,
       );
     }

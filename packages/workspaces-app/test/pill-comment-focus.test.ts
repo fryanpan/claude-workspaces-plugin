@@ -4,7 +4,7 @@ import { prose } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { mountPointerPillLayer } from '../src/doc/doc-pointer-pill.ts';
+import { mountCommentPill } from '../src/doc/doc-comment-pill.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import * as realChunk from '../src/md-composer-chunk.ts';
 import { type ComposerEditorModule, setComposerEditorLoader } from '../src/md-composer.ts';
@@ -14,17 +14,22 @@ import type { ReviewSurface } from '../src/review-surface.ts';
 import { surfaceOf } from './support/composer.ts';
 
 /**
- * Pressing Comment on the pointer pill: what the reader gets, on the wiring
- * `app.ts` actually builds.
+ * Pressing the comment pill on a meeting's notes: what the reader gets, on
+ * the wiring the markdown mount actually builds.
  *
  * Bryan's acceptance criteria, verbatim (2026-09-04): *"when user clicks
  * comment, focus immediately on the text input and suggest in placeholder
  * text that they can request research, ask for edits, or ask to create
  * task(s)"*. Two claims, and neither can be checked on either half alone —
- * `doc-pointer-pill.test.ts` hands the pill a spy for a composer, and the
+ * `doc-comment-pill.test.ts` hands the pill a spy for a composer, and the
  * composer suites open the composer by calling it. So this file wires the
- * real layer to the real chrome, exactly the way the markdown mount does,
+ * real pill to the real chrome, exactly the way the markdown mount does,
  * and presses the button.
+ *
+ * Those words were said of a separate "pointer pill" that meeting-notes docs
+ * grew over a selection. That pill went on 2026-11-09, when Bryan lost the
+ * comment button there; the round pill every other doc uses is the one these
+ * cases press now.
  *
  * IMMEDIATELY means in the click's own tick. The caret used to be scheduled
  * 30ms out, and iOS raises the keyboard only for a focus that happens inside
@@ -78,14 +83,13 @@ const SELECTION = {
 
 const composerText = () => document.getElementById('composer-text') as HTMLTextAreaElement;
 const composerEl = () => document.getElementById('composer') as HTMLElement;
-const commentBtn = () =>
-  document.querySelector<HTMLButtonElement>('.pointer-pill button[data-action="comment"]');
+const commentBtn = () => document.getElementById('comment-pill') as HTMLButtonElement | null;
 
 const open: Array<() => void> = [];
 
 /**
  * The markdown mount's own wiring, cut down to the two modules this is about:
- * the chrome that owns the composer, and the pill layer that presses it.
+ * the chrome that owns the composer, and the pill that presses it.
  * `openComposer` is passed exactly as `app.ts` passes it — a bare call, with
  * nothing awaited between the click and the focus.
  */
@@ -113,22 +117,29 @@ function mount() {
     ydoc,
     awareness: new Awareness(ydoc),
   });
-  editor.editor.commands.setTextSelection({ from: 1, to: 24 });
-  const layer = mountPointerPillLayer({
-    huddle: true,
+  const pill = mountCommentPill({
     editor,
     editorMount,
+    composer: document.getElementById('composer') as HTMLElement,
+    commentPill: commentBtn() as HTMLButtonElement,
     scope,
-    getSelection: () => SELECTION,
-    hideAll: () => {},
     openComposer: () => chrome.openComposer(),
+    follow: () => {},
   });
   open.push(() => {
     scope.dispose();
     editor.destroy();
   });
-  layer.show(1, 24);
-  return { chrome, layer, scope };
+  // Select the words the way a reader does, and let the pill find them: a
+  // DOM selection inside the prose, then a scroll, which is one of the
+  // signals the pill re-decides on.
+  editor.editor.commands.setTextSelection({ from: 1, to: 24 });
+  const range = document.createRange();
+  range.selectNodeContents(editor.editor.view.dom);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+  editorMount.dispatchEvent(new Event('scroll'));
+  return { chrome, pill, scope };
 }
 
 afterEach(() => {
@@ -152,6 +163,8 @@ describe('pressing Comment on the pill', () => {
     // assertion below reads is the press and not the mount.
     expect(document.activeElement).not.toBe(composerText());
     expect(composerEl().classList.contains('hidden')).toBe(true);
+    // The pill is up over the selection before anybody presses it.
+    expect(commentBtn()?.classList.contains('hidden')).toBe(false);
 
     commentBtn()?.click();
 
@@ -221,7 +234,7 @@ describe('the box says what can be asked for', () => {
     commentBtn()?.click();
     const hint = composerText().placeholder;
     for (const ask of ASKS) expect(hint).toMatch(ask);
-    // Still a comment box first: the pill's one button says Comment, and a
+    // Still a comment box first: the pill is the comment button, and a
     // placeholder that only listed errands would read as a different field.
     expect(hint).toMatch(/^comment/i);
   });

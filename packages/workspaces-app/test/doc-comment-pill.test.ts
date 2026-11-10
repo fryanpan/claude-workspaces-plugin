@@ -13,8 +13,7 @@ import { MountScope } from '../src/mount-scope.ts';
  * They are one state machine, not two widgets, and the state that matters
  * is the CACHE: iOS blurs the editor between the pill appearing and the tap
  * landing, so what a comment anchors to has to survive the editor forgetting
- * it. The tests below drive the transitions that write it, and the huddle
- * routing that hands a range to the pointer pill instead.
+ * it. The tests below drive the transitions that write it.
  */
 
 const open: Array<() => void> = [];
@@ -34,7 +33,7 @@ beforeEach(() => {
 
 const pill = () => document.getElementById('comment-pill') as HTMLButtonElement;
 
-function mount(opts: { huddle?: boolean; markdown?: string } = {}) {
+function mount(opts: { markdown?: string } = {}) {
   const ydoc = new Y.Doc();
   const md = opts.markdown ?? 'One sentence. And a second one here.\n';
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(md));
@@ -45,17 +44,14 @@ function mount(opts: { huddle?: boolean; markdown?: string } = {}) {
     awareness: new Awareness(ydoc),
   });
   const scope = new MountScope();
-  const pointer = { show: vi.fn(), hide: vi.fn() };
   const openComposer = vi.fn();
   const follow = vi.fn();
   const handle = mountCommentPill({
-    huddle: opts.huddle === true,
     editor,
     editorMount,
     composer: document.getElementById('composer') as HTMLElement,
     commentPill: pill(),
     scope,
-    pointer,
     openComposer,
     follow,
   });
@@ -63,7 +59,7 @@ function mount(opts: { huddle?: boolean; markdown?: string } = {}) {
     scope.dispose();
     editor.destroy();
   });
-  return { handle, editor, scope, pointer, openComposer, follow, editorMount };
+  return { handle, editor, scope, openComposer, follow, editorMount };
 }
 
 /** Put a real DOM selection over the editor's prose — this is what the pill
@@ -106,21 +102,14 @@ describe('the cached selection', () => {
 });
 
 describe('a range selection', () => {
-  it('on a huddle doc goes to the pointer pill, and the round pill stands down', () => {
-    const { editor, editorMount, pointer } = mount({ huddle: true });
-    editor.editor.commands.setTextSelection({ from: 1, to: 13 });
-    selectInEditor(editor);
+  it('raises the round pill', () => {
+    const { editor, editorMount } = mount();
+    // Control: no pill before anything is selected.
     repositionViaScroll(editorMount);
-    expect(pointer.show).toHaveBeenCalledWith(1, 13);
     expect(pill().classList.contains('hidden')).toBe(true);
-  });
-
-  it('everywhere else raises the round pill instead', () => {
-    const { editor, editorMount, pointer } = mount();
     editor.editor.commands.setTextSelection({ from: 1, to: 13 });
     selectInEditor(editor);
     repositionViaScroll(editorMount);
-    expect(pointer.show).not.toHaveBeenCalled();
     expect(pill().classList.contains('hidden')).toBe(false);
   });
 
@@ -156,26 +145,10 @@ describe('tapping the round pill', () => {
   });
 
   it('opens the composer in caret mode too — one press, not a second button', () => {
-    const { editor, openComposer, pointer } = mount();
+    const { editor, openComposer } = mount();
     caretInEditor(editor, 5);
     expect(pill().classList.contains('caret')).toBe(true);
     pill().click();
-    expect(openComposer).toHaveBeenCalledTimes(1);
-    expect(pointer.show).not.toHaveBeenCalled();
-  });
-
-  it('does the same on a huddle doc, where it used to hand over a second one', () => {
-    // The press used to select the sentence and grow the pointer pill's
-    // Comment button over it, so commenting cost two presses (Bryan,
-    // 2026-09-10). The round pill is the comment affordance on every surface.
-    const { editor, openComposer } = mount({ huddle: true });
-    caretInEditor(editor, 5);
-    expect(pill().classList.contains('caret')).toBe(true);
-    pill().click();
-    // It used to be zero here: the press ended in the pointer pill, and the
-    // composer waited for a press on THAT. (The pointer pill is still grown
-    // over the sentence the selection makes, and `openComposer` takes both
-    // pills down on its way in — `hidePill`, wired in review-chrome.)
     expect(openComposer).toHaveBeenCalledTimes(1);
   });
 
@@ -188,8 +161,8 @@ describe('tapping the round pill', () => {
 });
 
 describe('hiding', () => {
-  it('takes both pills down together', () => {
-    const { handle, editor, editorMount, pointer } = mount();
+  it('takes the pill down', () => {
+    const { handle, editor, editorMount } = mount();
     editor.editor.commands.setTextSelection({ from: 1, to: 13 });
     selectInEditor(editor);
     repositionViaScroll(editorMount);
@@ -197,7 +170,6 @@ describe('hiding', () => {
 
     handle.hide();
     expect(pill().classList.contains('hidden')).toBe(true);
-    expect(pointer.hide).toHaveBeenCalled();
   });
 
   it('happens when the editor is blurred', () => {

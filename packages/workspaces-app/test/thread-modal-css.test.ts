@@ -137,7 +137,7 @@ describe('the modal hides the way the rest of the app hides', () => {
     // Control: an element that DOES override it reads differently in the same
     // pass, so `none` above is the absence of an override and not the absence
     // of the `.hidden` rule itself.
-    expect(styleOf(attach('pointer-pill hidden')).display).toBe('inline-flex');
+    expect(styleOf(attach('thread-view hidden')).display).toBe('flex');
   });
 });
 
