@@ -8,7 +8,7 @@ import type * as Y from 'yjs';
  * The one line that carries the "Make a plan" entry (round-4 mock, B1): the
  * doc opens with nothing but the Goal heading, and this placeholder does all
  * the explaining — talk and type both land here, and "ask to make a plan"
- * names the next step the floating Make Plan button offers. No recording UI
+ * names the next step, which a person takes in a comment. No recording UI
  * on the doc, no listening chip; the meeting strip is the capture chrome.
  *
  * STRICTLY RENDER-TIME, like the task-link chips: a widget decoration at the

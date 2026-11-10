@@ -5,13 +5,10 @@ import { mountDocFloats } from '../src/doc/doc-floats.ts';
 import { MountScope } from '../src/mount-scope.ts';
 
 /**
- * The two always-in-view floats a document carries (doc/doc-floats.ts):
- * Approve (the plan gate) and Review.
- *
- * One module because they are one row and one condition: both hang off the
- * same `meta` map for a transition no event stream carries, and the order
- * they mount in IS the order they read in — plan, then review. Split across
- * two call sites, that ordering is an accident waiting to be reversed.
+ * The always-in-view float a document carries (doc/doc-floats.ts): Approve,
+ * the plan gate. Meeting-notes and plan docs carried Make Plan and Review
+ * beside it until Bryan removed them (2026-11-09, "They're really
+ * confusing"); the first block below holds that.
  */
 
 const open: Array<() => void> = [];
@@ -29,21 +26,22 @@ const testUser: User = { id: 'u1', name: 'Alice', kind: 'known', color: '#2e7dd7
 
 const floats = () => [...document.querySelectorAll('#editor-pane .plan-float')];
 
-/** Answers every read with a plain markdown doc, and counts the reads. */
-function stubFetch() {
+/** Answers every read with `meta` (a plain markdown doc by default), and
+ *  counts the reads. */
+function stubFetch(meta: Record<string, unknown>) {
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       calls.push(String(url));
-      return { ok: true, json: async () => ({ meta: {} }) } as Response;
+      return { ok: true, json: async () => ({ meta, leadAgentId: 'harbor-agent' }) } as Response;
     }),
   );
   return calls;
 }
 
-function mount() {
-  const calls = stubFetch();
+function mount(meta: Record<string, unknown> = {}) {
+  const calls = stubFetch(meta);
   const ydoc = new Y.Doc();
   const scope = new MountScope();
   mountDocFloats({
@@ -61,19 +59,37 @@ function mount() {
   return { ydoc, scope, calls };
 }
 
+/** Every float button on the pane that a person can see. */
+const shown = () => floats().filter((f) => !(f as HTMLElement).hidden);
+const labels = () =>
+  [...document.querySelectorAll('#editor-pane button')].map((b) => b.textContent);
+
+describe('meeting-notes and plan docs', () => {
+  for (const huddleKind of ['plan', 'discussion']) {
+    it(`a ${huddleKind} meeting's notes show neither Make Plan nor Review`, async () => {
+      const { calls } = mount({ type: 'markdown', huddle: true, huddleKind });
+      await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+      // Let the read's answer render.
+      await new Promise((r) => setTimeout(r, 0));
+      expect(shown()).toHaveLength(0);
+      expect(labels().some((t) => /Make Plan|Plan requested|Review/.test(t ?? ''))).toBe(false);
+      expect(document.querySelector('.review-float')).toBeNull();
+    });
+  }
+
+  it('a plan an agent marked pending still offers Approve', async () => {
+    mount({ type: 'markdown', huddle: true, huddleKind: 'plan', planState: 'pending' });
+    await vi.waitFor(() => expect(shown()).toHaveLength(1));
+    expect(shown()[0]?.textContent).toContain('Approve Plan');
+  });
+});
+
 describe('the float row', () => {
-  it('mounts the plan gate first and the Review float after it', () => {
+  it('mounts one float, the plan gate, hidden until something needs doing', () => {
     mount();
     const row = floats();
-    expect(row).toHaveLength(2);
-    // Review carries its own face; the plan gate is the bare float.
-    expect(row[0]?.classList.contains('review-float')).toBe(false);
-    expect(row[1]?.classList.contains('review-float')).toBe(true);
-  });
-
-  it('both start hidden — a float appears because something needs doing', () => {
-    mount();
-    for (const f of floats()) expect((f as HTMLElement).hidden).toBe(true);
+    expect(row).toHaveLength(1);
+    expect((row[0] as HTMLElement).hidden).toBe(true);
   });
 });
 
@@ -83,7 +99,7 @@ describe('the metadata watch', () => {
     await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
     const before = calls.length;
     // `setPlanState` writes into this same map on the server; observing it is
-    // how the floats hear that the plan landed — no event stream carries it.
+    // how the float hears that the plan landed — no event stream carries it.
     ydoc.getMap('meta').set('planState', 'approved');
     await vi.waitFor(() => expect(calls.length).toBeGreaterThan(before));
   });
@@ -100,9 +116,9 @@ describe('the metadata watch', () => {
 });
 
 describe('teardown', () => {
-  it('takes both floats off the pane', () => {
+  it('takes the float off the pane', () => {
     const { scope } = mount();
-    expect(floats()).toHaveLength(2);
+    expect(floats()).toHaveLength(1);
     scope.dispose();
     expect(floats()).toHaveLength(0);
   });

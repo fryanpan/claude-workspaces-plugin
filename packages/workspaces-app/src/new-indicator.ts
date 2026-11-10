@@ -24,7 +24,7 @@
  * balloon column's own footprint, which is where anything said ABOUT the
  * document already lives; at phone widths there is no column, so the strips
  * are real rows at the top and bottom of the pane and the prose sits between
- * them. The action dock (Make Plan and friends) keeps its own row: the
+ * them. The action dock (the Approve float) keeps its own row: the
  * bottom strip is measured clear of it rather than sharing it — and, on a
  * wide layout, is seated in the SAME column footprint. A dock centred on the
  * pane sits over the prose, and nothing may cover body text (Bryan, on round
