@@ -11,12 +11,17 @@
  *
  * Driven through the real capture path — `createLeadVoice`, its default
  * `startSpokenCapture`, core's `createAudioPump` — over a fake audio stack
- * whose sources deliver only from a live, unmuted track.
+ * that renders as Chrome does: a running graph keeps handing its processor a
+ * block every render quantum, and a source whose track ended or is muted
+ * hands it zeros (measured 10 Nov: 388 blocks in the second after
+ * `track.stop()`, all but the 9 already buffered zero). So a block is not
+ * sound; only a block with a sample in it is.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackContext } from '../src/board/spoken-reply-audio.ts';
 import {
   type LeadVoice,
+  NO_SOUND,
   TAP_TO_LISTEN,
   createLeadVoice,
 } from '../src/lead-chat/lead-chat-voice.ts';
@@ -25,6 +30,9 @@ import { fakeVoice } from './lead-chat-voice-fakes.ts';
 let inTap = false;
 /** Whether a suspend and resume brings a stopped clock back. */
 let kickHeals = true;
+/** Sources made from now on render zeros from a live track: the reopened
+ *  iPhone mic that holds the device and delivers nothing. */
+let deafSources = false;
 
 interface FakeTrack {
   readyState: 'live' | 'ended';
@@ -41,11 +49,14 @@ class FakeWorkletNode {
 
 class FakeSource {
   target: FakeWorkletNode | null = null;
+  readonly deaf = deafSources;
   constructor(readonly track: FakeTrack | undefined) {}
   connect(n: FakeWorkletNode): void {
     this.target = n;
   }
-  disconnect(): void {}
+  disconnect(): void {
+    this.target = null;
+  }
 }
 
 class FakeContext {
@@ -89,8 +100,9 @@ class FakeContext {
   render(): void {
     if (this.state !== 'running' || this.still) return;
     for (const s of this.sources) {
-      const delivers = s.track?.readyState === 'live' && !s.track.muted;
-      if (delivers) s.target?.port.onmessage?.({ data: new Float32Array(128) });
+      const delivers = s.track?.readyState === 'live' && !s.track.muted && !s.deaf;
+      // A room's noise floor from a live mic; zeros from anything else.
+      s.target?.port.onmessage?.({ data: new Float32Array(128).fill(delivers ? 0.02 : 0) });
     }
     this.rendered += 128;
   }
@@ -125,6 +137,7 @@ beforeEach(() => {
   FakeContext.made = [];
   tracks.length = 0;
   kickHeals = true;
+  deafSources = false;
   visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', {
     configurable: true,
@@ -175,8 +188,8 @@ function speakers() {
   return ctx;
 }
 
-/** Voice turned on in a tap, the mic sending, and the page then hidden. */
-async function listeningThenHidden(reports: Error[]) {
+/** Voice turned on in a tap, the mic sending. */
+async function listening(reports: Error[]) {
   vi.useFakeTimers();
   const fake = fakeVoice();
   const seams = { ...fake.seams };
@@ -205,9 +218,17 @@ async function listeningThenHidden(reports: Error[]) {
   fake.socket().open();
   renderAll(100);
   await vi.advanceTimersByTimeAsync(1_500);
-  setVisible('hidden');
-  const frames = (): number => fake.socket().sent.filter((d) => d instanceof Int16Array).length;
+  /** Frames sent up that carry sound; a dead source's zeros go up too. */
+  const frames = (): number =>
+    fake.socket().sent.filter((d) => d instanceof Int16Array && d.some((v) => v !== 0)).length;
   return { fake, voice, tap, speaker, frames, mic: FakeContext.made[0] as FakeContext };
+}
+
+/** ...and the page then hidden. */
+async function listeningThenHidden(reports: Error[]) {
+  const on = await listening(reports);
+  setVisible('hidden');
+  return on;
 }
 
 describe('the lead chat mic, back from the background', () => {
@@ -317,5 +338,72 @@ describe('the lead chat mic, back from the background', () => {
     expect(tracks).toHaveLength(1);
     expect(FakeContext.made).toHaveLength(1);
     expect(reports).toHaveLength(0);
+  });
+});
+
+/** 100 ms of the lead's voice at 24 kHz. */
+const said = (): ArrayBuffer => new Int16Array(2_400).fill(1200).buffer;
+
+/** A graph that keeps rendering while `ms` pass, as a running one does. */
+async function renderFor(ms: number): Promise<void> {
+  for (let t = 0; t < ms; t += 100) {
+    renderAll(38);
+    await vi.advanceTimersByTimeAsync(100);
+  }
+}
+
+describe('the lead chat mic, when its graph renders only silence', () => {
+  // Bryan, 10 Nov, iPhone: "listening", the mic light on, no words ever shown.
+  it('reopens a muted track whose graph still renders blocks, back from the background', async () => {
+    const reports: Error[] = [];
+    const { voice, frames } = await listeningThenHidden(reports);
+    (tracks[0] as FakeTrack).muted = true;
+    setVisible('visible');
+    await renderFor(1_500);
+    expect(tracks).toHaveLength(2);
+    const before = frames();
+    renderAll(100);
+    expect(frames()).toBeGreaterThan(before);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(reports).toHaveLength(0);
+  });
+
+  it('asks for one tap when the mic taken back after an answer renders only zeros, and that tap rebuilds it', async () => {
+    const reports: Error[] = [];
+    const { voice, fake, tap, mic, frames } = await listening(reports);
+    const ws = fake.socket();
+    ws.serve({ type: 'turn-end', text: 'is the ferry running' });
+    ws.serve({ type: 'reply', spoken: 'It is.', detail: [], asking: false, route: 'agent' });
+    ws.serve({ type: 'audio-start', sampleRate: 24_000 });
+    ws.onmessage?.({ data: said() });
+    // The track the next question takes holds the device and delivers nothing.
+    deafSources = true;
+    ws.serve({ type: 'audio-end' });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(voice.state().phase).toBe('listening');
+    expect(tracks).toHaveLength(2);
+    expect(tracks[1]?.readyState).toBe('live');
+    await renderFor(2_500);
+    // A suspend and resume first, then the tap.
+    expect(mic.kicks).toBe(1);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: TAP_TO_LISTEN });
+    expect(reports.filter((e) => e.name === 'LeadVoiceStopped')).toHaveLength(0);
+    deafSources = false;
+    tap(() => expect(voice.wake()).toBe(true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeContext.made.at(-1)).not.toBe(mic);
+    const before = frames();
+    renderAll(100);
+    expect(frames()).toBeGreaterThan(before);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+  });
+
+  it('stops and says so when the mic it opened renders only zeros', async () => {
+    const reports: Error[] = [];
+    deafSources = true;
+    const { voice } = await listening(reports);
+    await renderFor(6_000);
+    expect(voice.state()).toMatchObject({ phase: 'off', notice: NO_SOUND });
+    expect(reports.map((e) => e.name)).toContain('LeadVoiceStopped');
   });
 });
