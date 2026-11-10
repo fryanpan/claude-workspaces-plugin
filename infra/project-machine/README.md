@@ -14,6 +14,9 @@ scripts that stand it up. How to run them is
 | `release-cli.ts`, `release-store.ts`, `release-manifest.ts` | the machine | As `cwrelease`: checks for a newer release CI signed, chooses which app the server boots, and rolls back a release that did not stay up |
 | `release-publish.ts` | CI (`server-release.yml`) | Builds and signs a release; `keygen` makes the signing pair once |
 | `lead.sh` | the machine | Keeps the lead agent's Claude Code session running in tmux, and starts it again within a minute when it ends |
+| `lead-egress.ts`, `lead-egress-plan.ts`, `lead-egress.allow` | the machine | The lead's and the dev server's network wall: iptables rules by owner match that allow them loopback only, loaded and probed at boot |
+| `lead-proxy.ts`, `lead-proxy-plan.ts` | the machine | The wall's one way out: a CONNECT proxy on 127.0.0.1:3128, run as `cwproxy`, that opens only the host names in `lead-egress.allow`, with a matching TLS server name |
+| `lead-memory.sh` | the machine | The lead's memory cap where there is no cgroup v2 memory controller: a root watchdog that kills the lead's processes once their total passes it |
 | `github-known-hosts.txt` | the machine | GitHub's SSH host keys, pinned for the lead's git over SSH |
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |
 | `store-uploader.ts`, `store-upload.ts` | any machine running sessions | Every 5 minutes, sends the new lines of each Claude Code transcript and analytics log to the transcript store, each sealed to its board's key; local-only boards never leave. Not installed anywhere yet |
@@ -86,6 +89,6 @@ byte and reads the board back from a second server.
 `project-machine-snapshot.test.ts` holds the refusals, the first snapshot
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
-program, and checks which user each child runs as and which secrets it holds. The image, the Fly deploy and the Tigris calls are proved by
+program, and checks which user each child runs as and which secrets it holds. `project-machine-lead-egress.test.ts`, `project-machine-lead-proxy.test.ts`, `project-machine-lead-memory.test.ts` and `project-machine-lead-wall-boot.test.ts` hold the lead's network wall, its proxy and the memory watchdog with a fake iptables, a loopback upstream and a fake `/proc`; `project-machine-lead-limits-container.test.ts` runs both on a Linux kernel in Docker, only with `CW_CONTAINER_TESTS=1`. The image, the Fly deploy and the Tigris calls are proved by
 `machine:drill`, not by a test; the Cloudflare configuration by
 `bun run cf:plan` against the real account.

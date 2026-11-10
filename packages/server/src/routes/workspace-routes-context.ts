@@ -19,6 +19,7 @@ import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PageLoadLog } from '../page-loads.ts';
+import type { PersonPresence } from '../person-presence.ts';
 import type { FeaturesOff } from '../project-profile.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
@@ -96,6 +97,8 @@ export interface WorkspaceRoutesContext {
   featuresOff: FeaturesOff;
   /** Where each agent points, in its boards' presence rooms. */
   agentSpots: AgentSpots;
+  /** Where the owner's attended tab is on each board, and moving it. */
+  personPresence: PersonPresence;
   /** Whether this request speaks for `agentId`: on this machine, with its
    *  token (`auth/agent-token.ts`), the check the agent's own feed uses.
    *  `requireToken` holds a route to the token whatever the server's

@@ -354,7 +354,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
       'refuses every caller today: 409 `model-switch-off`',
     ],
   ]),
-  ...family('routes/workspace-point.ts', [['trusted-local', '/workspaces/:ws/point', 'POST']]),
+  ...family('routes/workspace-point.ts', [
+    ['trusted-local', '/workspaces/:ws/point', 'POST'],
+    ['trusted-local', '/workspaces/:ws/person/watch', 'POST'],
+    ['trusted-local', '/workspaces/:ws/person/show', 'POST'],
+  ]),
 
   // Who has access, and at what level. The LIST is a member's — everything in
   // a workspace is available to everyone in it — and the writes are the

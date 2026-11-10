@@ -67,13 +67,19 @@ usage_report() {
 # The project repo's read-only deploy key, for git over SSH. It arrives
 # BASE64 in the environment and is written to a file only this user can
 # read; GitHub's host keys are pinned in the image (/etc/ssh/ssh_known_hosts).
+# ssh does not read HTTPS_PROXY, and behind the network wall this user
+# reaches only loopback, so there it goes out through the machine's proxy
+# with a CONNECT (lead-proxy.ts). The entrypoint sets HTTPS_PROXY only then.
 deploy_key() {
   [ -n "${CW_LEAD_GITHUB_DEPLOY_KEY:-}" ] || return 0
   local key="$HOME/.ssh/github_deploy_key"
   mkdir -p "$HOME/.ssh" && chmod 0700 "$HOME/.ssh" || return 1
   (umask 077 && printf '%s' "$CW_LEAD_GITHUB_DEPLOY_KEY" | base64 -d >"$key") || return 1
+  local via=""
+  [ -z "${HTTPS_PROXY:-}" ] ||
+    via=" -o 'ProxyCommand=bun $APP/infra/project-machine/lead-proxy.ts connect %h %p'"
   git config --global core.sshCommand \
-    "ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" || return 1
+    "ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes$via" || return 1
 }
 
 session() {

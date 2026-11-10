@@ -91,11 +91,20 @@ export interface Board {
 }
 
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
-const browserOf = new WeakMap<Cdp, { proc: ChildProcess; profile: string }>();
+const browserOf = new WeakMap<Cdp, { proc: ChildProcess; profile: string; port: number }>();
+
+/** The debugging port of the browser a person's page runs in, to open a
+ *  second tab in it. */
+export const debugPortOf = (cdp: Cdp): number | undefined => browserOf.get(cdp)?.port;
 let handle: ServerHandle | undefined;
 let dir = '';
 
-export async function bootBoard(tag: string): Promise<Board> {
+/** `extra` adds server options a driver needs, such as `identifyAgentCaller`
+ *  so an agent can hold its token. */
+export async function bootBoard(
+  tag: string,
+  extra: Partial<Parameters<typeof createServer>[0]> = {},
+): Promise<Board> {
   dir = mkdtempSync(join(tmpdir(), `${tag}-`));
   const widgetDist = join(dir, 'widget');
   await buildWidget(widgetDist);
@@ -122,6 +131,7 @@ export async function bootBoard(tag: string): Promise<Board> {
     widgetDistDir: widgetDist,
     markdownAppDistDir: appDist,
     requireSignInToWrite: false,
+    ...extra,
   });
   const server = handle;
   const base = `http://127.0.0.1:${server.port}`;

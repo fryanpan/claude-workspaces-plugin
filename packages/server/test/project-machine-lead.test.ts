@@ -80,6 +80,12 @@ function start(
 }
 
 const find = (recs: Rec[], prog: string) => recs.filter((r) => r.argv.split(' ')[0] === prog);
+/**
+ * The board server's records. Not any bun record: the network wall's apply,
+ * its probe and its proxy are bun too, and any of them can be recorded before
+ * the server starts.
+ */
+const servers = (recs: Rec[]) => find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -99,10 +105,32 @@ function cgroupRoot(root: string): string {
   return cg;
 }
 
+/** A /proc with no processes in it, so the memory watchdog runs and finds nothing. */
+function emptyProc(): string {
+  const proc = mkdtempSync(join(scratch, 'proc-'));
+  mkdirSync(join(proc, 'self'));
+  writeFileSync(join(proc, 'self', 'status'), 'Uid:\t0\t0\t0\t0\n');
+  return proc;
+}
+
+interface Egress {
+  /** apply fails, printing this. */
+  apply?: string;
+  /** the probe exits with this code, printing this line. */
+  probe?: [number, string];
+}
+
 /** The entrypoint, on a machine that has a lead: a sign-in and a board. */
-function leadMachine(extra: Record<string, string> = {}, prepare?: (volume: string) => void) {
+function leadMachine(
+  extra: Record<string, string> = {},
+  prepare?: (volume: string) => void,
+  egress: Egress = {},
+) {
   const s = stubs(scratch, '0', ['mkdir', 'ln']);
   prepare?.(s.volume);
+  if (egress.apply !== undefined) writeFileSync(join(s.log, '.egress-apply'), `${egress.apply}\n`);
+  if (egress.probe)
+    writeFileSync(join(s.log, '.egress-probe'), `${egress.probe[0]}\n${egress.probe[1]}\n`);
   const homes = join(s.root, 'home');
   mkdirSync(join(homes, 'lead'), { recursive: true });
   const run = start([entrypoint], {
@@ -114,6 +142,7 @@ function leadMachine(extra: Record<string, string> = {}, prepare?: (volume: stri
     FLY_APP_NAME: 'cw-riverbend',
     // The deploy names the org the token was made for (review H2).
     CW_LEAD_TOKEN_ORG: 'riverbend',
+    CW_MACHINE_PROC_ROOT: emptyProc(),
     ...extra,
   });
   return { ...s, ...run, homes };
@@ -131,14 +160,15 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
-        find(readRecords(log).recs, 'bun').length > 0,
+        servers(readRecords(log).recs).length > 0,
       { timeout: 20_000, describe: 'the lead and the server to start' },
     );
     const { recs, setprivArgv } = readRecords(log);
     const [lead] = find(recs, 'claude');
 
     expect(lead?.uid).toBe('lead');
-    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(1);
+    // The network wall's probe, then the supervisor.
+    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(2);
     expect(lead?.argv).toBe('claude --plugin-dir /app/packages/plugin');
     // POSITIVE CONTROL: the recorder sees the one secret the lead holds.
     expect(lead?.env.get('CLAUDE_CODE_OAUTH_TOKEN')).toBe(LEAD_TOKEN);
@@ -149,6 +179,16 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(lead?.env.get('HOME')).toBe(join(homes, 'lead'));
     expect(lead?.env.get('SHELL')).toBe('/bin/bash');
     expect(lead?.env.get('DISABLE_AUTOUPDATER')).toBe('1');
+    // Off the telemetry and connector hosts the proxy refuses, and not off
+    // Remote Control (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC would be).
+    expect(lead?.env.get('DISABLE_TELEMETRY')).toBe('1');
+    expect(lead?.env.has('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')).toBe(false);
+    // Out through the machine's proxy, by every spelling its tools read.
+    for (const v of ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']) {
+      expect(lead?.env.get(v)).toBe('http://127.0.0.1:3128');
+    }
+    expect(lead?.env.get('NO_PROXY')).toBe('localhost,127.0.0.1,::1');
+    expect(lead?.env.get('ENABLE_CLAUDEAI_MCP_SERVERS')).toBe('false');
 
     // Nothing else of root's: not the server's key, not the tunnel's or the
     // bucket's. An allowlist, so a new machine secret is kept out too. The
@@ -167,7 +207,15 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
         'CW_LEAD_TOKEN_LABEL',
         'CW_WORKSPACE_ID',
         'DISABLE_AUTOUPDATER',
+        'DISABLE_TELEMETRY',
+        'ENABLE_CLAUDEAI_MCP_SERVERS',
         'HOME',
+        'HTTPS_PROXY',
+        'HTTP_PROXY',
+        'NO_PROXY',
+        'http_proxy',
+        'https_proxy',
+        'no_proxy',
         'LOGNAME',
         'PATH',
         'SHELL',
@@ -182,7 +230,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(readFileSync(keyFile, 'utf8')).toBe(DEPLOY_KEY);
     expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     expect(lines(log, '.git')).toEqual([
-      `lead config --global core.sshCommand ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes`,
+      `lead config --global core.sshCommand ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o 'ProxyCommand=bun /app/infra/project-machine/lead-proxy.ts connect %h %p'`,
     ]);
 
     // The sign-in and the deploy key are the lead's alone: no process of any
@@ -205,7 +253,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
 
     // The server opens the board sockets, shares the lead's board's, and
     // admits only itself over TCP.
-    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    const [server] = servers(recs);
     expect(server?.env.get('CW_BOARD_SOCKET_DIR')).toBe(`${volume}/boards`);
     expect(server?.env.get('CW_BOARD_SOCKET_SHARED')).toBe(BOARD);
     // cw is the only uid admitted over loopback TCP, the tunnel only through
@@ -230,7 +278,11 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(readFileSync(join(cg, 'cw-lead', 'memory.max'), 'utf8').trim()).toBe('1280M');
     expect(readFileSync(join(cg, 'cw-lead', 'memory.oom.group'), 'utf8').trim()).toBe('1');
     expect(Number(readFileSync(join(cg, 'cw-lead', 'cgroup.procs'), 'utf8'))).toBeGreaterThan(0);
-    expect(m.out.join('')).toContain("the lead's memory is capped at 1280M");
+    expect(m.out.join('')).toContain(
+      `the lead's memory is capped at 1280M by its cgroup, ${cg}/cw-lead`,
+    );
+    // A cgroup needs no watchdog.
+    expect(m.out.join('')).not.toContain('watchdog');
 
     // Nobody is at the terminal to answer the first-run questions.
     const seeded = JSON.parse(readFileSync(join(homes, 'lead', '.claude.json'), 'utf8'));
@@ -248,11 +300,11 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
-        find(readRecords(log).recs, 'bun').length > 0,
+        servers(readRecords(log).recs).length > 0,
       { timeout: 20_000, describe: 'the lead and the server to start' },
     );
     const { recs, setprivArgv } = readRecords(log);
-    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    const [server] = servers(recs);
     // POSITIVE CONTROL: the recorder sees the credential where it belongs.
     expect(server?.uid).toBe('cw');
     expect(server?.env.get('CW_GITHUB_PUSH_KEYS')).toBe(PUSH);
@@ -283,13 +335,16 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
   }, 45_000);
 
   it('starts the lead’s supervisor again when the lead kills it, and leaves the server running', async () => {
-    // No cgroup at this root: the lead runs uncapped, and says so.
+    // No cgroup at this root: the watchdog caps the lead instead, and says so.
     const m = leadMachine({ CW_MACHINE_CGROUP_ROOT: join(scratch, 'no-cgroup') });
     await waitFor(() => lines(m.log, '.claude-pids').length === 1, {
       timeout: 20_000,
       describe: 'the first session',
     });
-    expect(m.out.join('')).toContain("the lead's memory is NOT capped");
+    expect(m.out.join('')).toContain(
+      "the lead's memory is capped at 1280M by a watchdog (lead-memory.sh)",
+    );
+    expect(m.out.join('')).not.toContain('NOT capped');
     const supervisors = () =>
       execSync('ps -Ao pid=,pgid=,command=', { encoding: 'utf8' })
         .split('\n')
@@ -308,11 +363,16 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
       describe: 'a new supervisor to take the session over',
     });
     expect(m.out.join('')).toContain("the lead's supervisor exited");
+    await waitFor(() => servers(readRecords(m.log).recs).length > 0, {
+      timeout: 20_000,
+      describe: 'the server',
+    });
     const { recs, setprivArgv } = readRecords(m.log);
-    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(2);
+    // The wall's probe once, then a supervisor twice.
+    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(3);
     // The same session, not a second one, and the server and tunnel once each.
     expect(lines(m.log, '.claude-pids')).toHaveLength(1);
-    expect(find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'))).toHaveLength(1);
+    expect(servers(recs)).toHaveLength(1);
     expect(find(recs, 'cloudflared')).toHaveLength(1);
     expect(m.child.exitCode).toBeNull();
   }, 45_000);
