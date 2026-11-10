@@ -13,7 +13,12 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { commentTrustOf, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import {
+  commentTrustOf,
+  isOwnerActor,
+  ownerDisplayNames,
+  ownerIdentityIds,
+} from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -240,6 +245,7 @@ const ANONYMOUS_ACTOR: User = {
 };
 
 import { createAgentSpots } from './agent-spots.ts';
+import { createPersonPresence, describeLanding } from './person-presence.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import { createFeedbackOwner } from './feedback-owner.ts';
 import {
@@ -1322,6 +1328,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       docStore.peek(workspaceDocId(workspaceId))?.peekAwareness() ?? null,
     listening: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
   });
+  // Where the owner's attended tab is, per board, and the one an agent may
+  // move (person-presence.ts). Transient: a landing is news only live.
+  const personPresence = createPersonPresence({
+    isOwner: (id) => isOwnerActor({ id }),
+    describe: (workspaceId, spot) => describeLanding(docStore, taskStore, workspaceId, spot),
+    deliver: (workspaceId, agentId, landing) =>
+      sse.sendToAgentTransient(`ws~${workspaceId}`, agentId, {
+        event: 'person.landed',
+        ...landing,
+      }),
+  });
   {
     const onAgentStreams = sse.onAgentStreams;
     sse.onAgentStreams = (channel, agentId) => {
@@ -2177,7 +2194,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
-    onBoardRoomOpen: (workspaceId, awareness) => agentSpots.restore(workspaceId, awareness),
+    onBoardRoomOpen: (workspaceId, awareness) => {
+      agentSpots.restore(workspaceId, awareness);
+      personPresence.attach(workspaceId, awareness);
+    },
   });
 
   /**
@@ -3156,6 +3176,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     agentSpots,
+    personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
     leadDiffRepo: (boardId, repo) => {
       const c = boardSocketRoots.containedOf(repo);
