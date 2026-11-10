@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.359";
+var version2 = "0.1.360";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -16876,7 +16876,7 @@ var TOOL_LIST = {
     },
     {
       name: "rank_review_item",
-      description: "Only for the lead of the plan board (Team Lead): rank one open review item on any board against this week's goals, and file it under the goal it serves, so Bryan's Home shows your Top 10 and then his asks by goal. Ranked items come first, lowest rank first; unranked items keep the plan order. key is the queue key a workspace.new_asks line names. Send rank, goal or both; a field left out is left as it was, and null clears it. goal is a plan-board goal id, urgent, not-this-week or drop. Both stop counting when Bryan moves that task himself afterwards. Any other caller is refused (ranked:false).",
+      description: "Only for the lead of the plan board (Team Lead): rank one open review item on any board against this week's goals, and file it under the goal it serves, so Bryan's Home shows your Top 10 and then his asks by goal. Ranked items come first, lowest rank first; unranked items keep the plan order. key is the queue key a workspace.new_asks line names. Send rank, goal or both; a field left out is left as it was, and null clears it. goal is a plan-board goal id, urgent, not-this-week or drop. Both stop counting when Bryan moves that task himself afterwards. Success returns ranked:true with the key, rank and goal the server stored; any other caller is refused (ranked:false).",
       inputSchema: {
         type: "object",
         properties: {
@@ -21922,7 +21922,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         ...goal !== undefined ? { goal } : {}
       };
       try {
-        return ok2(await http("POST", "/api/review-queue/rank", body));
+        const res = await http("POST", "/api/review-queue/rank", body);
+        return ok2({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
         if (!m)
