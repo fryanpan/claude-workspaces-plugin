@@ -171,6 +171,30 @@ describe('the joins between chunks of a spoken reply', () => {
   });
 });
 
+describe('a spoken reply on a network that delivers late', () => {
+  it('starts again with twice the headroom each time the queue runs dry, up to a bound', () => {
+    const { ctx, scheduled } = recordingContext(48_000);
+    const player = playerOn(ctx);
+    const leads: number[] = [];
+    player.push(voiceBytes(480));
+    for (let i = 0; i < 5; i++) {
+      // Each chunk arrives after the one before it has played out.
+      ctx.currentTime += 1;
+      player.push(voiceBytes(480));
+      leads.push(Math.round(((scheduled.at(-1)?.at ?? 0) - ctx.currentTime) * 1000));
+    }
+    expect(leads).toEqual([60, 120, 240, 240, 240]);
+    expect(player.facts()).toMatchObject({ chunks: 6, underruns: 5, leadMs: 240 });
+  });
+
+  it('counts no underrun while the queue stays ahead of the clock', () => {
+    const { ctx } = recordingContext(48_000);
+    const player = playerOn(ctx);
+    for (const c of chunked(voiceBytes(4_800), 962)) player.push(c);
+    expect(player.facts()).toMatchObject({ underruns: 0, leadMs: 30 });
+  });
+});
+
 describe('a meeting line, through the same player', () => {
   it('plays a streamed line at the context’s rate, whole, and says it played', async () => {
     const bytes = voiceBytes(4_800);

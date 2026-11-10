@@ -3797,3 +3797,23 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   measured; on these buffers it has no resampling left to do.
 - `voice-speak.ts` and `app-voice-entry.ts` in the widget still schedule
   buffers at the voice's rate.
+
+## On iOS, a live echo-cancelled mic crackles everything the page plays
+
+- The 24 kHz join fix above did not stop the crackle on Bryan's iPhone. WebKit
+  bug 326286 reports the likely cause: on iOS 26.2 and later, all page audio
+  (Web Audio and `<audio>`) crackles while a `getUserMedia` track with echo
+  cancellation is live, at 48 kHz everywhere. The reporters ruled out a
+  shared context, `latencyHint` and making the context after the mic.
+- The lead chat now releases the track while an answer plays and opens it
+  again into the same graph for the next question
+  (`SpokenCapture.pause`/`unpause`). Not yet heard on a phone: each spoken
+  answer sends a `LeadVoicePlayback` line (`mic released while it played`,
+  rate, latencies, underruns, least margin), so the next try shows whether
+  the crackle went with the mic.
+- "context running … clock 0 s": a context can say `running` while its clock
+  stands still. WebKit bugs 263627 and 276687 report this after another
+  page's audio lets go, and suspend-then-resume as the fix. The mic reads the
+  clock 1s after it opens and kicks the context if it has not moved. If the
+  clock is still stuck, it asks for one tap to rebuild instead of stopping.
+  A page that unloads for good now closes its audio at `pagehide`.

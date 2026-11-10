@@ -17,9 +17,16 @@
  * lead has taken the question to work on, the next question starts listening
  * by itself, and a question left working for `WORKING_MS` with nothing said
  * listens anyway. The microphone is opened once, inside the tap that turned
- * voice on, and stays open until voice is off; only a question that is
+ * voice on, and its graph stays until voice is off; only a question that is
  * listening sends its frames, and none go up while an answer is said, so
- * the lead's own voice is never sent back as the next question.
+ * the lead's own voice is never sent back as the next question. The track
+ * itself is let go while an answer is said and taken back for the next
+ * question: on iOS 26.2 and later, every sound a page plays crackles while
+ * an echo-cancelled microphone track is live (WebKit bug 326286), which is
+ * the crackle a 24 kHz join fix did not remove. Each spoken answer sends a
+ * one-line playback report (`playbackError`) on the path a stop is reported
+ * on, so a phone's next try names the context rate, latency, underruns and
+ * whether the mic was live.
  *
  * iOS Safari runs an AudioContext only when `resume()` is called inside the
  * gesture, so the tap makes the capture context AND resumes it
@@ -72,7 +79,14 @@ import {
   OWED_RETRY_MS,
   TAP_TO_LISTEN,
 } from './lead-chat-voice-api.ts';
-import { audioContext, defaultSetups, reportToPage, socketUrl } from './lead-chat-voice-io.ts';
+import {
+  PLAYBACK_REPORTS,
+  audioContext,
+  defaultSetups,
+  playbackError,
+  reportToPage,
+  socketUrl,
+} from './lead-chat-voice-io.ts';
 import { createLeadMic } from './lead-chat-voice-mic.ts';
 import { createListeningTab } from './listening-tab.ts';
 
@@ -114,8 +128,18 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let workTimer: ReturnType<typeof setTimeout> | null = null;
   /** The page is unloading: its socket closing is the move, not a stop. */
   let leaving = false;
-  const onPageHide = (): void => {
+  /** Playback reports this page has left to send. */
+  let reportsLeft = PLAYBACK_REPORTS;
+  /** Whether the microphone was live while the answer now playing began. */
+  let micWhileSaying: 'live' | 'released' | 'off' = 'off';
+  const onPageHide = (ev: Event): void => {
     leaving = true;
+    // A page that is going for good lets go of its audio now, rather than
+    // when the browser tears it down under the next page's contexts — the
+    // moment a running context on iOS can stop its clock (WebKit 276687).
+    if ((ev as PageTransitionEvent).persisted) return;
+    mic.stop();
+    player.release();
   };
   /** Back from the back-forward cache with the socket gone: voice is off. */
   const onPageShow = (): void => {
@@ -284,6 +308,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       set({ phase: 'listening', heard: '', notice: '', paused: true });
       return;
     }
+    mic.unpause();
     ensureSocket();
     const agent = opts.agent();
     const context = opts.getContext();
@@ -318,6 +343,15 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     if (on) listen();
   };
 
+  /** One line per spoken answer, on the path a stop is reported on, so a
+   *  try on a phone names what its playback met (`playbackError`). */
+  const reportPlayback = (): void => {
+    const facts = player.facts();
+    if (!facts || facts.chunks === 0 || reportsLeft <= 0) return;
+    reportsLeft--;
+    (opts.report ?? reportToPage)(playbackError(facts, micWhileSaying));
+  };
+
   /** The lead's answer reaching a page whose voice stopped by itself: the
    *  reader did not ask for silence, so it is said. It waits out no listener,
    *  because with voice off none is open. */
@@ -325,10 +359,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     if (hushed) return;
     if (m.type === 'reply' && m.route === LEAD_ANSWER && m.spoken) answering = true;
     if (!answering) return;
-    if (m.type === 'audio-start') player.begin(m.sampleRate);
+    if (m.type === 'audio-start') {
+      micWhileSaying = 'off';
+      player.begin(m.sampleRate);
+    }
     if (m.type === 'audio-end') {
       answering = false;
-      player.finish(() => {});
+      player.finish(reportPlayback);
     }
   }
 
@@ -369,13 +406,21 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       case 'audio-start':
         // An answer said while listening: the mic hears the speaker, and
         // none of it goes back as a question.
+        // The track is let go while it is said: with an echo-cancelled
+        // track live, iOS crackles everything the page plays (WebKit
+        // 326286). `listen` takes it back.
         forwarding = false;
         doneWorking();
+        mic.pause();
+        micWhileSaying = mic.live() ? 'live' : 'released';
         if (!st.paused) player.begin(m.sampleRate);
         set({ phase: 'speaking' });
         return;
       case 'audio-end':
-        player.finish(again);
+        player.finish(() => {
+          reportPlayback();
+          again();
+        });
         return;
       case 'error':
         halt(m.message);

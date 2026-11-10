@@ -152,6 +152,14 @@ export interface AudioPump {
    */
   contextState?(): string;
   resume?(): Promise<void>;
+  /** The context's clock, in seconds. A context that says it runs while this
+   *  stays put is not rendering (WebKit bugs 263627 and 276687). */
+  clock?(): number;
+  /** Suspend, then resume: what brings such a context's clock back. */
+  kick?(): Promise<void>;
+  /** Feed the graph from another stream, keeping the context and its
+   *  processor; the old stream's source is disconnected. */
+  replaceStream?(stream: MediaStream): void;
   /** One line for an error report: the context, the track, what arrived. */
   diag?(): string;
 }
@@ -297,7 +305,10 @@ export async function createAudioPump(
   // Not only `suspended`: iOS reports `interrupted` when getUserMedia takes
   // the audio session over a context that was already running.
   if (ctx.state !== 'running') void ctx.resume().catch(() => {});
-  const source = ctx.createMediaStreamSource(stream);
+  let source = ctx.createMediaStreamSource(stream);
+  let current = stream;
+  /** What the source feeds: the worklet or the script processor. */
+  let sink: AudioNode | null = null;
   let blocks = 0;
   let empty = 0;
   let path = 'worklet';
@@ -309,6 +320,23 @@ export async function createAudioPump(
     stop: () => {},
     contextState: () => ctx.state,
     resume: () => ctx.resume(),
+    clock: () => ctx.currentTime,
+    kick: async () => {
+      try {
+        await ctx.suspend();
+      } catch {}
+      try {
+        await ctx.resume();
+      } catch {}
+    },
+    replaceStream: (next) => {
+      source.disconnect();
+      current = next;
+      source = ctx.createMediaStreamSource(next);
+      if (sink) source.connect(sink);
+      // As at the first open: a new capture can mark the context interrupted.
+      if (ctx.state !== 'running') void ctx.resume().catch(() => {});
+    },
     diag: () =>
       [
         `context ${ctx.state} at ${ctx.sampleRate} Hz${rebuilt ? ', made for the track' : ''}`,
@@ -316,7 +344,7 @@ export async function createAudioPump(
         `${blocks} blocks, ${empty} renders without input`,
         `${path}, processor ${processor}`,
         `clock ${Math.round(ctx.currentTime * 100) / 100} s`,
-        `track ${liveTrack(stream)}`,
+        `track ${liveTrack(current)}`,
       ].join('; '),
   };
   const block = (samples: Float32Array): void => {
@@ -334,6 +362,7 @@ export async function createAudioPump(
       else block(ev.data as Float32Array);
     };
     source.connect(node);
+    sink = node;
     pump.stop = () => {
       node.port.onmessage = null;
       node.disconnect();
@@ -348,6 +377,7 @@ export async function createAudioPump(
     mute.gain.value = 0;
     node.onaudioprocess = (ev) => block(new Float32Array(ev.inputBuffer.getChannelData(0)));
     source.connect(node);
+    sink = node;
     node.connect(mute);
     mute.connect(ctx.destination);
     pump.stop = () => {
