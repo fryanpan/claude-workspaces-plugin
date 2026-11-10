@@ -264,7 +264,9 @@ export function renderMockHost(args: {
   const title = TITLE.exec(args.html)?.[1]?.trim() ?? '';
   const boardLink = args.visitor
     ? BOARD_LINK(args.workspaceId)
-    : (({ style, html }) => ({ style: style + NAV_ROOM, anchor: html }))(hostNav(args.workspaceId));
+    : (({ style, html }) => ({ style: style + NAV_ROOM, anchor: html }))(
+        hostNav(args.workspaceId, { dock: !!args.leadChatHref }),
+      );
   const items = JSON.stringify(args.items.map((i) => [i.taskId, i.reviewItemId]));
   const sandbox = args.frame ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
   const src = args.frame
