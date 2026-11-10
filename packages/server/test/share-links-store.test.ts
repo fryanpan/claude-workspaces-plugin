@@ -23,7 +23,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REGISTRY_UNREADABLE, ShareLinks } from '../src/share/share-links.ts';
+import { AUDIENCE_ONLY, REGISTRY_UNREADABLE, ShareLinks } from '../src/share/share-links.ts';
 
 const BOARD = 'w-board-1';
 const OTHER_BOARD = 'w-board-2';
@@ -45,6 +45,14 @@ describe('the share-link store', () => {
   afterEach(() => {
     rmSync(dataDir, { recursive: true, force: true });
   });
+
+  /**
+   * Is there a member row for them? Read off the list rather than asked of
+   * `isMember`, which lets in anybody the board's audience names and so
+   * would write the very row a test is checking was not written.
+   */
+  const rowOn = (ws: string, who: string): boolean =>
+    links.membersOf(ws).some((m) => m.email === who);
 
   const mint = (opts: { ttlSeconds?: number; workspaceId?: string } = {}) =>
     links.create({
@@ -89,7 +97,7 @@ describe('the share-link store', () => {
   describe('redeeming', () => {
     it('makes the verified email a member, and says it added one', () => {
       const link = mint();
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
       const first = links.redeem(link.linkId, REVIEWER);
       expect(first).toEqual({ ok: true, workspaceId: BOARD, added: true });
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
@@ -134,7 +142,7 @@ describe('the share-link store', () => {
       const link = mint({ workspaceId: OTHER_BOARD });
       const outcome = links.redeem(link.linkId, REVIEWER);
       expect(outcome).toEqual({ ok: true, workspaceId: OTHER_BOARD, added: true });
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
     });
   });
 
@@ -151,7 +159,7 @@ describe('the share-link store', () => {
       const link = mint({ ttlSeconds: 60 });
       const after = link.expiresAt! + 1;
       expect(links.redeem(link.linkId, REVIEWER, after)).toEqual({ ok: false, state: 'expired' });
-      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, REVIEWER)).toBe(false);
       // Positive control: the same link a moment earlier admits them, so the
       // refusal above is the expiry and not a dead store.
       expect(links.redeem(link.linkId, REVIEWER, link.expiresAt! - 1).ok).toBe(true);
@@ -165,7 +173,7 @@ describe('the share-link store', () => {
       expect(links.revoke(link.linkId)).toBe(true);
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
       expect(links.redeem(link.linkId, OTHER_REVIEWER)).toEqual({ ok: false, state: 'revoked' });
-      expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(false);
+      expect(rowOn(BOARD, OTHER_REVIEWER)).toBe(false);
     });
 
     it('revoking twice is not a second revocation', () => {
@@ -203,8 +211,43 @@ describe('the share-link store', () => {
     });
   });
 
+  describe('the board audience admits on its own', () => {
+    it('lets in an address it names on the first ask, with no link, as a regular member', () => {
+      expect(links.forWorkspace(BOARD)).toEqual([]);
+      expect(links.isMember(BOARD, REVIEWER)).toBe(true);
+      const row = links.membersOf(BOARD).find((m) => m.email === REVIEWER);
+      expect(row?.viaLinkId).toBe(AUDIENCE_ONLY);
+      expect(links.roleOf(BOARD, REVIEWER)).toBe('member');
+      // Written down, so a restart keeps them listed.
+      expect(new ShareLinks({ dataDir }).membersOf(BOARD).map((m) => m.email)).toEqual([REVIEWER]);
+    });
+
+    it('lets in nobody it does not name, and writes no row for them', () => {
+      expect(links.isMember(BOARD, 'alice@harborlight.example')).toBe(false);
+      expect(links.membersOf(BOARD)).toEqual([]);
+    });
+
+    it('ends on removal, and a removed person is not let back in by the domain', () => {
+      expect(links.isMember(BOARD, REVIEWER)).toBe(true);
+      expect(links.removeMember(BOARD, REVIEWER)).toBe(true);
+      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(true);
+      expect(links.removeFromAudience(BOARD, '@partner.example')).toEqual([OTHER_REVIEWER]);
+      expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(false);
+    });
+
+    it('does not cost a redeemed link its role', () => {
+      const owner = links.create({ workspaceId: BOARD, createdBy: 'Test Agent', role: 'owner' });
+      expect(links.redeem(owner.linkId, REVIEWER).ok).toBe(true);
+      expect(links.roleOf(BOARD, REVIEWER)).toBe('owner');
+    });
+  });
+
   describe('membership is per workspace', () => {
     it('a member of one board is not a member of another', () => {
+      // The other board's audience must not name them: an audience entry
+      // admits on its own (below).
+      links.removeFromAudience(OTHER_BOARD, '@partner.example');
       links.redeem(mint({ workspaceId: BOARD }).linkId, REVIEWER);
       expect(links.isMember(BOARD, REVIEWER)).toBe(true);
       expect(links.isMember(OTHER_BOARD, REVIEWER)).toBe(false);

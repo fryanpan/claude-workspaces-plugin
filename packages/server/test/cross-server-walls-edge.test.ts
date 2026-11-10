@@ -292,8 +292,12 @@ describe('a share-link invitation, and the membership it records', () => {
       expect(await onShare(other, `/s/${link}`, other.aud.share)).toBe(404);
       // The issuer's share stamp on the other server's share hostname.
       expect(await onShare(other, `/s/${link}`, issuer.aud.share)).toBe(401);
-      // The redemption made a member on the issuer only.
+      // The redemption made a member on the issuer only. The other board's
+      // audience is narrowed first, because an audience entry admits on its
+      // own and would answer 200 with no redemption anywhere.
+      other.handle.shareLinks.removeFromAudience(other.board, '@partner.example');
       expect(await onShare(other, boardJson(other), other.aud.share)).toBe(403);
+      other.handle.shareLinks.addToAudience(other.board, ['@partner.example'], 'Bryan');
       // CONTROL: the other server's own link admits the same guest there.
       expect(await onShare(other, `/s/${await mint(other)}`, other.aud.share)).toBe(302);
       expect(await onShare(other, boardJson(other), other.aud.share)).toBe(200);
