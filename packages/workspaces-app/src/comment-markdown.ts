@@ -64,6 +64,8 @@ export interface CommentMarkdownOpts {
    *  caller passes `false`: a pasted PR or CI link drawn as plain text cannot
    *  be opened on a phone at all, where nobody can select and copy it. */
   bareLinks?: boolean;
+  /** A task link's status as the board row's ring, not the pill (lead chat). */
+  statusMarks?: boolean;
 }
 
 /** The id a board link names: the task, goal, doc, mock or review. */
@@ -199,7 +201,7 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
       `${base} class="ws-link" data-ws-link="${escapeHtml(url)}"` +
       `${named ? '' : ' data-ws-custom=""'}${pending ? ' data-ws-pending=""' : ''}`;
     const text = title ? escapeHtml(title) : label;
-    return `<a ${attrs}>${text}${status ? statusChipHtml(status) : ''}</a>`;
+    return `<a ${attrs}>${withStatus(text, status, opts)}</a>`;
   });
   out = linkifyWorkspaceUrls(out, opts);
   return out;
@@ -257,6 +259,15 @@ function statusChipHtml(status: string): string {
   return `<span class="ws-status-chip ws-chip-${escapeHtml(status)}">${escapeHtml(statusChipLabel(status))}</span>`;
 }
 
+/** A link's words with its status: pill after, or ring before (`statusMarkEl`). */
+function withStatus(text: string, status: string | null | undefined, opts: CommentMarkdownOpts) {
+  if (!status) return text;
+  if (!opts.statusMarks) return `${text}${statusChipHtml(status)}`;
+  const s = escapeHtml(status);
+  const words = escapeHtml(statusChipLabel(status));
+  return `<span class="board-status-mark board-status-mark-${s}" role="img" aria-label="Task: ${words}" title="${words}"></span>${text}`;
+}
+
 /** Trailing characters that read as punctuation AFTER a pasted URL, entity
  *  spellings included — `see http://…/docs/x.` must not eat the period. */
 function trimUrlTail(s: string): string {
@@ -311,7 +322,7 @@ function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
         `${isAppPageHref(url, currentPageHref()) ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
       // Title text via escapeHtml (server data is not markup); the raw-URL
       // fallback is `trimmed`, which is already escaped text.
-      return `<a ${attrs}>${title ? escapeHtml(title) : trimmed}${status ? statusChipHtml(status) : ''}</a>${tail}`;
+      return `<a ${attrs}>${withStatus(title ? escapeHtml(title) : trimmed, status, opts)}</a>${tail}`;
     });
   });
   if (sawPending) scheduleLinkTitleHydration();

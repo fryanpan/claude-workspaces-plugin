@@ -100,6 +100,32 @@ export function statusChipEl(status: string, held = false): HTMLSpanElement {
   return chip;
 }
 
+/**
+ * The board row's own status mark — `.board-status-mark` with its
+ * `-<status>` modifier, the ring `board-island.tsx` draws on every task row —
+ * for a surface that wants a link to read like the board rather than carry
+ * the word pill. The lead chat is that surface: its links sit in a shadow
+ * root no page stylesheet reaches, so it ships the mark's rules beside it
+ * (`STATUS_MARK_STYLES`, `lead-chat/lead-chat-styles.ts`). The mark goes
+ * BEFORE the link's words, where the row puts it.
+ *
+ * A held draft keeps its status's ring, as its board row does; the words
+ * the ring stands for are its label, because a ring has no text of its own.
+ */
+export function statusMarkEl(status: string, held = false): HTMLSpanElement {
+  const mark = document.createElement('span');
+  mark.className = `board-status-mark board-status-mark-${status}`;
+  const words = held ? 'Draft' : statusChipLabel(status);
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', `Task: ${words}`);
+  mark.title = words;
+  return mark;
+}
+
+/** How a link shows its task's status: the word pill after the words, or
+ *  the board's ring before them. */
+export type LinkStatusStyle = 'chip' | 'mark';
+
 /** How many URLs one lookup carries — mirrors the route's own cap. */
 const BATCH_LIMIT = 100;
 
@@ -187,9 +213,12 @@ async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Pr
   return landed;
 }
 
+/** `style` picks how each link shows its status: the word pill by default,
+ *  the board's ring (`statusMarkEl`) where the caller asks for it. */
 export async function hydrateLinkTitles(
   root: ParentNode,
   fetcher: LinkTitleFetcher = fetch,
+  style: LinkStatusStyle = 'chip',
 ): Promise<void> {
   const anchors = [...root.querySelectorAll<HTMLAnchorElement>('a[data-ws-link][data-ws-pending]')];
   if (anchors.length === 0) return;
@@ -204,8 +233,9 @@ export async function hydrateLinkTitles(
     // textContent, never innerHTML — the title is server data, not markup.
     // A custom label (`data-ws-custom`) is the author's text and stays.
     if (info.title && !a.hasAttribute('data-ws-custom')) a.textContent = info.title;
-    a.querySelector('.ws-status-chip')?.remove();
-    if (info.status) a.append(statusChipEl(info.status, info.held));
+    a.querySelector('.ws-status-chip, .board-status-mark')?.remove();
+    if (info.status && style === 'mark') a.prepend(statusMarkEl(info.status, info.held));
+    else if (info.status) a.append(statusChipEl(info.status, info.held));
     a.removeAttribute('data-ws-pending');
   }
 }

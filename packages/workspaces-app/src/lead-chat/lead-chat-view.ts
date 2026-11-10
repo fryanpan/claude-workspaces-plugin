@@ -41,7 +41,7 @@ import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
 import { createPlacer } from './lead-chat-place.ts';
 import { drawMessage, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
-import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
+import { BUTTON_STYLES, LAYER_STYLES, STATUS_MARK_STYLES } from './lead-chat-styles.ts';
 import { drawBarLines, drawStatus } from './lead-chat-tail.ts';
 
 /** Fired on the pane when a full-screen chat must make way for a page. */
@@ -155,7 +155,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   layer.dataset.leadChat = 'layer';
   const root = layer.attachShadow({ mode: 'open' });
   const style = make(doc, 'style');
-  style.textContent = LAYER_STYLES + MEETING_STYLES + COMPOSER_STYLES;
+  style.textContent = LAYER_STYLES + STATUS_MARK_STYLES + MEETING_STYLES + COMPOSER_STYLES;
 
   const bar = make(doc, 'button', 'lc-bar');
   bar.type = 'button';
@@ -238,7 +238,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const markdown = (msg: LeadChatMessage): string => {
     const hit = drawn.get(msg.id);
     if (hit?.text === msg.text) return hit.html;
-    const html = renderCommentMarkdown(msg.text, { bareLinks: true });
+    const html = renderCommentMarkdown(msg.text, { bareLinks: true, statusMarks: true });
     drawn.set(msg.id, { text: msg.text, html });
     return html;
   };
@@ -315,7 +315,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     for (const row of drawnRows.values()) {
       if (titled.has(row.node)) continue;
       titled.add(row.node);
-      void hydrateLinkTitles(row.node);
+      // A task link wears the board row's status ring (STATUS_MARK_STYLES).
+      void hydrateLinkTitles(row.node, fetch, 'mark');
     }
     if (keepScroll) {
       list.scrollTop = prevTop;
