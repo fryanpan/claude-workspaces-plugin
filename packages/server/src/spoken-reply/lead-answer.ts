@@ -21,6 +21,7 @@
  * the lead the answer reached nobody.
  */
 import { type SpokenAnswer, shapedAnswer } from './answer.ts';
+import { withoutCues } from './cues.ts';
 
 /** How long a request waits for the lead. Long enough for a research request
  *  to come back while the board is still open. */
@@ -138,7 +139,8 @@ export class LeadAnswers {
     if (!w || !words || w.held) return false;
     if (w.from !== undefined && w.from !== by) return false;
     const kept = minute?.trim();
-    const shown = written?.trim() || words;
+    // The chat shows words: a tone cue is for the voice alone (`cues.ts`).
+    const shown = written?.trim() || withoutCues(words);
     const answer = { ...shapedAnswer(words, LEAD_ANSWER_ROUTE), ...(kept ? { minute: kept } : {}) };
     if (w.heir !== undefined) {
       w.held = { answer, text: shown };

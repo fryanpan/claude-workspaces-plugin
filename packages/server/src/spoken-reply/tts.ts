@@ -24,13 +24,15 @@
 import { SPOKEN_OUTPUT_RATE } from '@claude-workspaces/core/spoken-reply';
 import { fixedHostFetch } from '../outbound-fetch.ts';
 import type { EngineSocket, EngineSocketFactory } from '../transcribe-assemblyai.ts';
+import { withoutCues } from './cues.ts';
 
 /**
  * How one line is said, for the app voice (`app-voice/session.ts`), which
  * has already checked both. Only the Soniox voice reads them: `voice` goes in
  * the config frame and `tone` ahead of the text as a `[tone]` tag. The board's
  * own spoken reply and the meeting voice pass neither, so they keep
- * `SONIOX_TTS_VOICE`.
+ * `SONIOX_TTS_VOICE`; a tone there is a cue written in the text itself, which
+ * Soniox is sent unchanged (`cues.ts`).
  */
 export interface SpeakAs {
   voice?: string;
@@ -194,7 +196,11 @@ export function createElevenLabsVoice(opts: {
   return {
     name: 'elevenlabs',
     async speak(text, onAudio, signal) {
-      if (signal.aborted) return;
+      // Flash v2.5 documents no audio tags (ElevenLabs lists them for v3
+      // and v4), so a Soniox tone cue is taken out rather than risk it
+      // being read aloud (`cues.ts`).
+      const words = withoutCues(text);
+      if (signal.aborted || !words) return;
       const timeout = AbortSignal.timeout(timeoutMs);
       const both = AbortSignal.any([signal, timeout]);
       let res: Response;
@@ -202,7 +208,7 @@ export function createElevenLabsVoice(opts: {
         res = await doFetch(elevenLabsUrl(), {
           method: 'POST',
           headers: { 'xi-api-key': opts.apiKey, 'content-type': 'application/json' },
-          body: JSON.stringify({ text, model_id: ELEVENLABS_MODEL }),
+          body: JSON.stringify({ text: words, model_id: ELEVENLABS_MODEL }),
           signal: both,
         });
       } catch (err) {

@@ -22,6 +22,7 @@
  * made separately so the note can land as that point starts.
  */
 import { SPOKEN_MAX_WORDS } from '@claude-workspaces/core/spoken-reply';
+import { carryCues, splitAtCues, withoutCues } from './cues.ts';
 
 export interface ShapedReply {
   spoken: string;
@@ -58,24 +59,36 @@ export function sentences(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** A point's tokens: a whole tone cue (`[clears throat]`) or a word. */
+const TOKEN = /\[[^\]]*\]|\S+/g;
+
 /** The word cap across the points in order: a point past it is cut on a word
- *  boundary, and a point with no words left is dropped. */
+ *  boundary, and a point with no words left is dropped. A tone cue is not a
+ *  word: it is never said, so it never counts. */
 function capSays(parts: readonly string[]): string[] {
   const out: string[] = [];
   let left = SPOKEN_MAX_WORDS;
   for (const part of parts) {
     if (left <= 0) break;
-    const words = part.split(/\s+/).filter((w) => w.length > 0);
-    if (words.length <= left) out.push(part);
-    else out.push(`${words.slice(0, left).join(' ')}…`);
-    left -= words.length;
+    const tokens = part.match(TOKEN) ?? [];
+    const kept: string[] = [];
+    let words = 0;
+    for (const t of tokens) {
+      const cue = t.startsWith('[') && t.endsWith(']');
+      if (!cue && words === left) break;
+      kept.push(t);
+      if (!cue) words++;
+    }
+    const count = tokens.filter((t) => !(t.startsWith('[') && t.endsWith(']'))).length;
+    out.push(count <= left ? part : `${kept.join(' ')}…`);
+    left -= count;
   }
   return out;
 }
 
 function shaped(parts: readonly string[], detail: string[], asking: boolean): ShapedReply {
-  const says = capSays(parts);
-  return { spoken: says.join(' '), says, detail, asking };
+  const says = capSays(carryCues(parts.flatMap(splitAtCues)));
+  return { spoken: says.join(' '), says, detail: detail.map(withoutCues), asking };
 }
 
 export function shapeReply(ack: string): ShapedReply {

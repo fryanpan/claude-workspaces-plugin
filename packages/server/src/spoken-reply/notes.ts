@@ -12,6 +12,7 @@
  * listener has to act on comes first.
  */
 import type { SpokenPoint } from '@claude-workspaces/core/spoken-reply';
+import { withoutCues } from './cues.ts';
 
 export interface NoteContext {
   /** The router's word for what answered. */
@@ -53,7 +54,7 @@ export function noteFor(sentence: string, ctx: NoteContext): string | undefined 
 /** Each point with its note, when it earns one. */
 export function withNotes(says: readonly string[], route: string): SpokenPoint[] {
   return says.map((say, i) => {
-    const note = noteFor(say, { route, first: i === 0 });
+    const note = noteFor(withoutCues(say), { route, first: i === 0 });
     return note ? { say, note } : { say };
   });
 }
