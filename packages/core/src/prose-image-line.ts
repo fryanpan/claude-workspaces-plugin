@@ -23,28 +23,105 @@
  * anchor stops resolving, as it does for any block that is replaced.
  */
 import * as Y from 'yjs';
+import { findFootnotes, footnoteEndAt } from './footnotes.ts';
 import { resolveRelativePositionRaw } from './prose-fragment.ts';
 import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
 
-/** A line that is only a markdown image: `![alt](src)` or `![alt](src "title")`. */
+/**
+ * The parts of an image line. After the closing paren a line may carry a
+ * display width, `{width=480}` (pandoc's attribute syntax, whole pixels
+ * only), and then one or more `^[…]` footnotes. Both are written in exactly
+ * one spelling, so the line the serializer writes back is the line it read.
+ */
+interface ImageLine {
+  src: string;
+  alt: string;
+  title?: string;
+  width?: number;
+  footnotes?: string;
+}
+
+const IMAGE_HEAD = /^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)(?:\{width=([1-9]\d{0,4})\})?/;
+
+/** Whether `rest` is nothing but `^[…]` notes, back to back. */
+function isFootnoteRun(rest: string): boolean {
+  if (rest.length === 0) return false;
+  let i = 0;
+  while (i < rest.length) {
+    const end = footnoteEndAt(rest, i);
+    if (end < 0) return false;
+    i = end;
+  }
+  return true;
+}
+
+function readImageLine(s: string): ImageLine | null {
+  const line = s.trim();
+  if (!/^!\[[^\]]*\]\([^)]*\)/.test(line)) return null;
+  const m = line.match(IMAGE_HEAD);
+  if (!m) return null;
+  const rest = line.slice(m[0].length);
+  if (rest.length > 0 && !isFootnoteRun(rest)) return null;
+  return {
+    src: m[2] ?? '',
+    alt: m[1] ?? '',
+    ...(m[3] ? { title: m[3] } : {}),
+    ...(m[4] ? { width: Number(m[4]) } : {}),
+    ...(rest ? { footnotes: rest } : {}),
+  };
+}
+
+/** A line that is only a markdown image: `![alt](src)` or `![alt](src "title")`,
+ *  optionally followed by `{width=N}` and then `^[…]` footnotes. */
 export function isImageLine(s: string): boolean {
-  return /^!\[[^\]]*\]\([^)]*\)\s*$/.test(s.trim());
+  return readImageLine(s) !== null;
 }
 
 /**
  * Build an `image` node from a standalone image line. The node name matches
- * the Tiptap Image extension so it renders in the live editor; src, alt and
- * title round-trip as attributes. src is matched as a run of non-space
+ * the Tiptap Image extension so it renders in the live editor; src, alt,
+ * title and width round-trip as attributes, and trailing footnotes as the
+ * raw `^[…]` text in `footnotes`. src is matched as a run of non-space
  * characters, so remote URLs and relative paths both work and underscores in
  * the path are never parsed as emphasis.
  */
 export function imageFromLine(raw: string): Y.XmlElement {
-  const m = raw.trim().match(/^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)$/);
+  const parts = readImageLine(raw);
   const img = new Y.XmlElement('image');
-  img.setAttribute('src', m?.[2] ?? '');
-  img.setAttribute('alt', m?.[1] ?? '');
-  if (m?.[3]) img.setAttribute('title', m[3]);
+  img.setAttribute('src', parts?.src ?? '');
+  img.setAttribute('alt', parts?.alt ?? '');
+  if (parts?.title) img.setAttribute('title', parts.title);
+  if (parts?.width) img.setAttribute('width', parts.width as unknown as string);
+  if (parts?.footnotes) img.setAttribute('footnotes', parts.footnotes);
   return img;
+}
+
+/** A display width as the line writes it, or null for none. The editor may
+ *  hand back a number or a numeric string; anything else is no width. */
+export function imageWidthOf(value: unknown): number | null {
+  const n =
+    typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN;
+  return Number.isInteger(n) && n > 0 && n < 100_000 ? n : null;
+}
+
+/** The note bodies an image's `footnotes` attribute holds, in order — what
+ *  the editor and the first paint draw as the caption under the picture. */
+export function imageNotesOf(footnotes: unknown): string[] {
+  return typeof footnotes === 'string' ? findFootnotes(footnotes).map((f) => f.note) : [];
+}
+
+/** The markdown line an `image` node serializes to, or null when it has no src. */
+export function imageLineOf(node: Y.XmlElement): string | null {
+  const src = String(node.getAttribute('src') ?? '');
+  if (!src) return null;
+  const alt = String(node.getAttribute('alt') ?? '');
+  const title = node.getAttribute('title');
+  const titlePart = title ? ` "${String(title)}"` : '';
+  const width = imageWidthOf(node.getAttribute('width'));
+  const widthPart = width === null ? '' : `{width=${width}}`;
+  const notes = node.getAttribute('footnotes');
+  const notesPart = typeof notes === 'string' && isFootnoteRun(notes) ? notes : '';
+  return `![${alt}](${src}${titlePart})${widthPart}${notesPart}`;
 }
 
 /** The image line a paragraph holds as its whole, unmarked text, or null. */
