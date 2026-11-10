@@ -1,6 +1,8 @@
 /**
- * A share-link member opening a doc with a `::name{block="…"}` line on the
- * share hostname sees the board's embed frame, as the owner does.
+ * A share-link member opening a doc with `::name{block="…"}` lines on the
+ * share hostname sees the board's embed frames, as the owner does: one at an
+ * allowlisted https origin, and one at an app attached to the board, whose
+ * own page (text written by its own script) must render inside the frame.
  *
  * Reported on a shared board: the member saw the directive as plain text,
  * because the board's embed mapping was on no member route and the doc's
@@ -34,10 +36,23 @@ describe.skipIf(CHROME === null)("a share-link member sees the board's embed fra
     r = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? '') as ShareEmbedReading;
   }, SUITE_MS);
 
+  const APP_SRC = /^\/workspaces\/[^/]+\/apps\/[^/]+\/embed\/tide-chart\/\?/;
+
+  it(
+    "the owner's page draws both frames and renders the app (the control)",
+    () => {
+      expect(r.owner.embedsStatus).toBe(200);
+      expect(r.owner.originFrame?.src).toBe('https://harborlight.example/embed/ferry-map/');
+      expect(r.owner.appFrame?.src).toMatch(APP_SRC);
+      expect(r.owner.appRendered).toBe(true);
+    },
+    CASE_MS,
+  );
+
   it(
     "reads the board's embed mapping from the share hostname",
     () => {
-      expect(r.embedsStatus).toBe(200);
+      expect(r.member.embedsStatus).toBe(200);
     },
     CASE_MS,
   );
@@ -45,11 +60,21 @@ describe.skipIf(CHROME === null)("a share-link member sees the board's embed fra
   it(
     'draws the frame at the allowlisted origin for the directive',
     () => {
-      expect(r.frame).toEqual({
+      expect(r.member.originFrame).toEqual({
         src: 'https://harborlight.example/embed/ferry-map/',
         origin: 'https://harborlight.example',
         block: 'ferry-map',
       });
+    },
+    CASE_MS,
+  );
+
+  it(
+    "draws the app-mount frame and the app's own scripted page renders in it",
+    () => {
+      expect(r.member.appFrame?.src).toMatch(APP_SRC);
+      expect(r.member.appFrame?.block).toBe('tide-chart');
+      expect(r.member.appRendered).toBe(true);
     },
     CASE_MS,
   );

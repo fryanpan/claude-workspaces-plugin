@@ -1,9 +1,16 @@
 #!/usr/bin/env bun
 /**
- * A doc with a `::harborlight{block="ferry-map"}` line, opened by a share-link
- * member on the share hostname in headless Chromium against a real server and
- * the real doc bundle. The board's embed mapping names an allowlisted https
- * origin; the member's page must draw the frame the owner's page draws.
+ * A doc with two embed lines, opened by a share-link member on the share
+ * hostname in headless Chromium against a real server and the real doc
+ * bundle, and by the owner on their own host as the control:
+ *
+ *   - `::harborlight{block="ferry-map"}` names an allowlisted https origin;
+ *   - `::riverbend{block="tide-chart"}` names an app attached to the board,
+ *     served by a fixture dev server, so its frame is the board's own app
+ *     door `/workspaces/<ws>/apps/<id>/embed/tide-chart/`.
+ *
+ * The member's page must draw both frames the owner's page draws, and the
+ * app's own page must render inside its frame.
  *
  * The share hostname resolves to the test server through Chrome's own
  * host-resolver rules, and the Access token rides on every request as the
@@ -35,17 +42,36 @@ import {
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import { accessHarness } from '../../server/test/access-share.ts';
 
-export interface ShareEmbedReading {
-  /** The status the member's page got for the board's embed mapping. */
+interface Frame {
+  src: string | null;
+  block: string | null;
+}
+
+/** What one reader's page showed. */
+export interface EmbedView {
+  /** The status the page got for the board's embed mapping. */
   embedsStatus: number;
-  /** The frame the doc drew for the directive, or null when it drew none. */
-  frame: { src: string | null; origin: string | null; block: string | null } | null;
+  /** The frame drawn for the https-origin line, or null when none was. */
+  originFrame: (Frame & { origin: string | null }) | null;
+  /** The frame drawn for the app line, or null when none was. */
+  appFrame: Frame | null;
+  /** Whether the fixture app's own page text rendered in any frame. */
+  appRendered: boolean;
+}
+
+export interface ShareEmbedReading {
+  owner: EmbedView;
+  member: EmbedView;
+  /** Paths the fixture app was asked for, in order. */
+  appRequests: string[];
 }
 
 const SHARE_AUD = 'aud-share-embed';
 const SHARE_HOST = 'share.example.test';
 const ORIGIN = 'https://harborlight.example';
 const LINE = '::harborlight{block="ferry-map"}';
+const APP_LINE = '::riverbend{block="tide-chart"}';
+const APP_TEXT = 'Riverbend tide chart';
 
 const step = (what: string): void => {
   process.stderr.write(`[share-embed-driver] ${what}\n`);
@@ -62,6 +88,76 @@ async function until<T>(what: string, read: () => Promise<T | null>, ms = 30_000
 }
 
 let browser: { proc: ChildProcess; profile: string } | undefined;
+let fixtureApp: ReturnType<typeof Bun.serve> | undefined;
+
+interface FrameNode {
+  frame: { id: string };
+  childFrames?: FrameNode[];
+}
+
+/** The text of every frame on the page, read in an isolated world each. */
+async function frameTexts(cdp: Cdp): Promise<string[]> {
+  const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameNode };
+  const ids: string[] = [];
+  const walk = (n: FrameNode): void => {
+    ids.push(n.frame.id);
+    for (const c of n.childFrames ?? []) walk(c);
+  };
+  walk(frameTree);
+  const out: string[] = [];
+  for (const frameId of ids) {
+    try {
+      const { executionContextId } = (await cdp.send('Page.createIsolatedWorld', {
+        frameId,
+      })) as { executionContextId: number };
+      const r = (await cdp.send('Runtime.evaluate', {
+        expression: `document.body ? document.body.innerText : ''`,
+        contextId: executionContextId,
+        returnByValue: true,
+      })) as { result?: { value?: unknown } };
+      out.push(String(r.result?.value ?? ''));
+    } catch {
+      out.push('');
+    }
+  }
+  return out;
+}
+
+const FRAME_READ = (selector: string): string => `(() => {
+  const f = document.querySelector(${JSON.stringify(selector)});
+  return f ? { src: f.getAttribute('src'), block: f.dataset.embedBlock ?? null,
+               origin: f.dataset.embedOrigin ?? null } : null;
+})()`;
+
+async function readView(cdp: Cdp, url: string, ws: string): Promise<EmbedView> {
+  const loaded = cdp.once('Page.loadEventFired');
+  await cdp.send('Page.navigate', { url });
+  await loaded;
+  await until('the doc body', async () =>
+    cdp.evaluate(
+      `(document.querySelector('#editor')?.textContent ?? '').includes('Riverbend notes') || null`,
+    ),
+  );
+  const embedsStatus = Number(
+    await cdp.evaluate(`fetch('/workspaces/${ws}/embeds').then((r) => r.status)`),
+  );
+  const originFrame = (await until('the origin frame', async () =>
+    cdp.evaluate(FRAME_READ('#editor iframe[data-embed-origin]')),
+  ).catch(() => null)) as EmbedView['originFrame'];
+  const app = (await until('the app frame', async () =>
+    cdp.evaluate(FRAME_READ('#editor iframe[data-embed-block="tide-chart"]')),
+  ).catch(() => null)) as (Frame & { origin: string | null }) | null;
+  const appRendered = await until(
+    'the app page rendered',
+    async () => (await frameTexts(cdp)).some((t) => t.includes(APP_TEXT)) || null,
+  ).catch(() => false);
+  return {
+    embedsStatus,
+    originFrame,
+    appFrame: app ? { src: app.src, block: app.block } : null,
+    appRendered,
+  };
+}
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'share-embed-'));
@@ -84,7 +180,31 @@ async function main(): Promise<void> {
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, 'embed-origins.json'), JSON.stringify([ORIGIN]));
     const docPath = join(dir, 'ferry.md');
-    writeFileSync(docPath, `# Harborlight ferry\n\n${LINE}\n\nRiverbend notes below.\n`);
+    writeFileSync(
+      docPath,
+      `# Harborlight ferry\n\n${LINE}\n\n${APP_LINE}\n\nRiverbend notes below.\n`,
+    );
+    const appRequests: string[] = [];
+    fixtureApp = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch: (r) => {
+        const path = new URL(r.url).pathname;
+        appRequests.push(path);
+        // The text arrives from the app's own script, as a real app's does,
+        // so a frame whose subresources are refused renders nothing.
+        if (path.endsWith('/app.js')) {
+          return new Response(
+            `document.querySelector('h1').textContent = ${JSON.stringify(APP_TEXT)};`,
+            { headers: { 'content-type': 'text/javascript' } },
+          );
+        }
+        return new Response(
+          '<!doctype html><title>Riverbend</title><h1>loading</h1><script src="app.js"></script>',
+          { headers: { 'content-type': 'text/html' } },
+        );
+      },
+    });
     handle = createServer({
       port: 0,
       dataDir,
@@ -121,8 +241,20 @@ async function main(): Promise<void> {
       ).docId,
     );
     await local('POST', `/workspaces/${ws}/docs:attach`, { docId });
+    const appDocId = String(
+      (
+        await local('POST', `/workspaces/${ws}/apps`, {
+          docId: 'riverbend',
+          origin: `http://127.0.0.1:${fixtureApp.port}/`,
+          title: 'Riverbend',
+        })
+      ).docId,
+    );
     await local('PUT', `/workspaces/${ws}/embeds`, {
-      embeds: { harborlight: { origin: ORIGIN, pathTemplate: '{origin}/embed/{block}/' } },
+      embeds: {
+        harborlight: { origin: ORIGIN, pathTemplate: '{origin}/embed/{block}/' },
+        riverbend: { appDocId, pathTemplate: '{mount}/embed/{block}/' },
+      },
     });
     handle.shareLinks.addToAudience(ws, ['@example.com'], 'Harborlight');
     const minted = (await local('POST', '/api/share/workspace', {
@@ -141,6 +273,9 @@ async function main(): Promise<void> {
         chromeLaunchArgs({ width: 1180, height: 820 }, profile, [
           ...extraChromeArgs(),
           `--host-resolver-rules=MAP ${SHARE_HOST} 127.0.0.1, MAP harborlight.example ~NOTFOUND`,
+          // Every frame in one renderer, so the frame tree below reaches them all.
+          '--disable-site-isolation-trials',
+          '--disable-features=IsolateOrigins,site-per-process',
         ]),
       STARTUP_TIMEOUT_MS,
       `share-embed-${process.pid}`,
@@ -152,36 +287,21 @@ async function main(): Promise<void> {
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     await cdp.send('Network.enable');
-    await cdp.send('Network.setExtraHTTPHeaders', { headers: memberHeaders });
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
       source: `try { localStorage.setItem('feedback-user-name', 'Alice'); } catch {}`,
     });
+    const docPage = `/workspaces/${ws}/docs/${docId}`;
+    step('open the doc as the owner, on their own host');
+    const owner = await readView(cdp, `http://127.0.0.1:${port}${docPage}`, ws);
+    await cdp.send('Network.setExtraHTTPHeaders', { headers: memberHeaders });
     step('open the doc as a member, on the share hostname');
-    const loaded = cdp.once('Page.loadEventFired');
-    await cdp.send('Page.navigate', {
-      url: `http://${SHARE_HOST}:${port}/workspaces/${ws}/docs/${docId}`,
-    });
-    await loaded;
-    await until('the doc body', async () =>
-      cdp.evaluate(
-        `(document.querySelector('#editor')?.textContent ?? '').includes('Riverbend') || null`,
-      ),
-    );
-    const embedsStatus = Number(
-      await cdp.evaluate(`fetch('/workspaces/${ws}/embeds').then((r) => r.status)`),
-    );
-    const frame = (await until('the embed frame', async () =>
-      cdp.evaluate(`(() => {
-        const f = document.querySelector('#editor iframe[data-embed-origin]');
-        return f ? { src: f.getAttribute('src'), origin: f.dataset.embedOrigin ?? null,
-                     block: f.dataset.embedBlock ?? null } : null;
-      })()`),
-    ).catch(() => null)) as ShareEmbedReading['frame'];
+    const member = await readView(cdp, `http://${SHARE_HOST}:${port}${docPage}`, ws);
     cdp.close();
-    const reading: ShareEmbedReading = { embedsStatus, frame };
+    const reading: ShareEmbedReading = { owner, member, appRequests };
     process.stdout.write(`\n${JSON.stringify(reading)}\n`);
   } finally {
     if (browser) await stopBrowser(browser.proc, browser.profile);
+    fixtureApp?.stop(true);
     await handle?.stop();
     rmSync(dir, { recursive: true, force: true });
   }

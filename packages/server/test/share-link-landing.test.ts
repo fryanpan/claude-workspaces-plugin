@@ -326,22 +326,54 @@ describe('share link landing and the shared library', () => {
    * as plain text where the owner saw the frame.
    */
   describe("the board's embeds for a member", () => {
-    const EMBEDS = {
-      harborlight: {
-        origin: 'https://harborlight.example',
-        pathTemplate: '{origin}/embed/{block}/',
-      },
+    const ORIGIN_ENTRY = {
+      origin: 'https://harborlight.example',
+      pathTemplate: '{origin}/embed/{block}/',
     };
     const path = (ws: string) => `/workspaces/${ws}/embeds`;
+    let riverbend: ReturnType<typeof Bun.serve>;
+    let riverbendId: string;
+    const embeds = () => ({
+      harborlight: ORIGIN_ENTRY,
+      riverbend: { appDocId: riverbendId, pathTemplate: '{mount}/embed/{block}/' },
+    });
+    /** The address the doc draws for `::riverbend{block="tide-chart"}`. */
+    const appFrame = () =>
+      `/workspaces/${board}/apps/${encodeURIComponent(riverbendId)}/embed/tide-chart/`;
 
     beforeAll(async () => {
+      riverbend = Bun.serve({
+        port: 0,
+        hostname: '127.0.0.1',
+        fetch: (r) =>
+          new URL(r.url).pathname.endsWith('/app.js')
+            ? new Response('document.title = "Riverbend tide chart";', {
+                headers: { 'content-type': 'text/javascript' },
+              })
+            : new Response(
+                '<!doctype html><h1>Riverbend tide chart</h1><script src="app.js"></script>',
+                {
+                  headers: { 'content-type': 'text/html' },
+                },
+              ),
+      });
+      const app = await postLocal(`/workspaces/${board}/apps`, {
+        docId: 'riverbend',
+        origin: `http://127.0.0.1:${riverbend.port}/`,
+        title: 'Riverbend',
+      });
+      expect(app.status, await app.clone().text()).toBe(200);
+      riverbendId = ((await app.json()) as { docId: string }).docId;
       writeFileSync(join(dataDir, 'embed-origins.json'), '["https://harborlight.example"]');
       const set = await req(path(board), `localhost:${handle.port}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ embeds: EMBEDS }),
+        body: JSON.stringify({ embeds: embeds() }),
       });
       expect(set.status, await set.clone().text()).toBe(200);
+    });
+    afterAll(() => {
+      riverbend.stop(true);
     });
 
     it('reads the mapping, and the doc page puts no frame-src in its way', async () => {
@@ -349,7 +381,7 @@ describe('share link landing and the shared library', () => {
       expect((await onShareHost(`/s/${linkId}`, MEMBER)).status).toBe(302);
       const r = await onShareHost(path(board), MEMBER);
       expect(r.status, await r.clone().text()).toBe(200);
-      expect(await r.json()).toEqual({ workspaceId: board, embeds: EMBEDS });
+      expect(await r.json()).toEqual({ workspaceId: board, embeds: embeds() });
       const page = await onShareHost(
         `/workspaces/${board}/docs/${encodeURIComponent(docId)}`,
         MEMBER,
@@ -357,6 +389,19 @@ describe('share link landing and the shared library', () => {
       const csp = page.headers.get('content-security-policy') ?? '';
       const frameSrc = /(?:^|;)\s*(?:frame-src|child-src|default-src)\s+([^;]*)/.exec(csp);
       if (frameSrc) expect(frameSrc[1]).toContain('https://harborlight.example');
+    });
+
+    it("opens an app-mount embed's frame and its script, as the doc's frame asks for them", async () => {
+      const frame = await onShareHost(`${appFrame()}?cw-frame=1&cw-embed=1`, MEMBER, {
+        headers: { 'sec-fetch-dest': 'iframe' },
+      });
+      expect(frame.status, await frame.clone().text()).toBe(200);
+      expect(await frame.text()).toContain('Riverbend tide chart');
+      const script = await onShareHost(`${appFrame()}app.js`, MEMBER, {
+        headers: { 'sec-fetch-dest': 'script' },
+      });
+      expect(script.status).toBe(200);
+      expect(await script.text()).toContain('Riverbend tide chart');
     });
 
     it('refuses a member the write, a non-member the read, and another board', async () => {
@@ -368,9 +413,10 @@ describe('share link landing and the shared library', () => {
       expect(put.status).toBe(403);
       expect((await onShareHost(path(board), STRANGER)).status).toBe(403);
       expect((await onShareHost(path(otherBoard), MEMBER)).status).toBe(403);
+      expect((await onShareHost(appFrame(), STRANGER)).status).toBe(403);
       // The refused write changed nothing.
       const owner = await req(path(board), `localhost:${handle.port}`);
-      expect(((await owner.json()) as { embeds: unknown }).embeds).toEqual(EMBEDS);
+      expect(((await owner.json()) as { embeds: unknown }).embeds).toEqual(embeds());
     });
   });
 
