@@ -27,7 +27,12 @@
 import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
 import { currentPageHref, isAppPageHref } from './link-open.ts';
 import { withLinkStatus } from './link-status-html.ts';
-import { cachedLinkStatus, cachedLinkTitle, scheduleLinkTitleHydration } from './link-titles.ts';
+import {
+  cachedLinkStatus,
+  cachedLinkTitle,
+  reviewLandingHref,
+  scheduleLinkTitleHydration,
+} from './link-titles.ts';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) =>
@@ -185,7 +190,7 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
     // origin rule as the bare-URL pass — a foreign lookalike stays unmarked.
     const link = isSameOriginWorkspaceUrl(url) ? parseWorkspaceLink(url) : null;
     if (!link) return `<a href="${escapeHtml(href)}"${tabFor(href)}>${label}</a>`;
-    const base = `href="${escapeHtml(href)}"${tabFor(href)}`;
+    const base = `href="${escapeHtml(reviewLandingHref(href))}"${tabFor(href)}`;
     // A label that is only the address is not the author's words: it takes
     // the resource's name, as a bare URL does.
     const named = isAddressLabel(label, url, link);
@@ -296,7 +301,7 @@ function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
       const title = cachedLinkTitle(url);
       if (title === undefined) sawPending = true;
       const attrs =
-        `href="${escapeHtml(url)}" class="ws-link" data-ws-link="${escapeHtml(url)}"` +
+        `href="${escapeHtml(reviewLandingHref(url))}" class="ws-link" data-ws-link="${escapeHtml(url)}"` +
         `${title === undefined ? ' data-ws-pending=""' : ''}` +
         `${isAppPageHref(url, currentPageHref()) ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
       // Title text via escapeHtml (server data is not markup); the raw-URL

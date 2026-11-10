@@ -6,7 +6,9 @@
  * data, not markup, so it is escaped into both the class and the words.
  */
 import {
+  REVIEW_MARK_WORDS,
   cachedLinkBlocked,
+  cachedLinkNeedsReview,
   cachedLinkStatus,
   statusChipLabel,
   statusMarkWords,
@@ -16,8 +18,18 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
-/** `text` (already escaped) with the status of the row `url` names, if known. */
+/** The needs-review mark (`reviewMarkEl` is the DOM twin), after everything
+ *  else the link carries. */
+const REVIEW_MARK_HTML = `<span class="ws-review-mark" role="img" aria-label="${REVIEW_MARK_WORDS}" title="${REVIEW_MARK_WORDS}"></span>`;
+
+/** `text` (already escaped) with the status of the row `url` names, if known,
+ *  and the needs-review mark when its target waits on the reader. */
 export function withLinkStatus(text: string, url: string, marks: boolean): string {
+  const drawn = withStatus(text, url, marks);
+  return cachedLinkNeedsReview(url) ? `${drawn}${REVIEW_MARK_HTML}` : drawn;
+}
+
+function withStatus(text: string, url: string, marks: boolean): string {
   const status = cachedLinkStatus(url);
   if (!status) return text;
   const s = escapeHtml(status);
