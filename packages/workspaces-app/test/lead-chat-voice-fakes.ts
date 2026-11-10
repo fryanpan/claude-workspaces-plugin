@@ -128,7 +128,8 @@ export function fakeVoice(opts: { setups?: SpokenSetup[] } = {}) {
       if (!s) throw new Error('no socket opened');
       return s;
     },
-    speak: () => mic.onFrame?.(new Int16Array(800), true),
+    /** 50 ms of a voice: a frame with sound in it (`carriesSound`). */
+    speak: () => mic.onFrame?.(new Int16Array(800).fill(1200), true),
   };
 }
 

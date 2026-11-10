@@ -80,7 +80,9 @@ class FakeContext {
   }
   render(): void {
     if (this.state !== 'running' || this.still) return;
-    for (const s of this.sources) s.target?.port.onmessage?.({ data: new Float32Array(128) });
+    // A live mic: never all zero (`carriesSound`).
+    for (const s of this.sources)
+      s.target?.port.onmessage?.({ data: new Float32Array(128).fill(0.02) });
     this.rendered += 128;
   }
 }

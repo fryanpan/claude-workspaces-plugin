@@ -132,7 +132,8 @@ describe('the lead chat voice, taking the mic back after an answer', () => {
     const { fake, ws, voice } = await asking();
     fake.speak();
     await answer(ws);
-    fake.speak();
+    // 150 ms of it: one frame could be the tail of a mic that just went dead.
+    for (let i = 0; i < 3; i++) fake.speak();
     await vi.advanceTimersByTimeAsync(6_000);
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
   });
