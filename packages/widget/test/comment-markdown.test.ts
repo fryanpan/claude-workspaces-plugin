@@ -20,6 +20,15 @@ function render(text: string): HTMLElement {
 }
 
 describe('a comment rendered from markdown', () => {
+  it('never reads a URL as emphasis, bare or as a link target', () => {
+    // Board ids are base64url: `w--_xK3_P` holds `_xK3_`.
+    const mock = '/workspaces/w--_xK_-Pq/mockups/d-_Rb_tide';
+    const box = render(`[the mock](${mock}) and https://harborlight.example${mock}`);
+    expect(box.querySelector('em')).toBeNull();
+    expect(new URL(box.querySelector('a')?.href ?? '').pathname).toBe(mock);
+    expect(box.textContent).toBe(`the mock and https://harborlight.example${mock}`);
+  });
+
   it('draws a link, bold, italics, inline code and a list', () => {
     const box = render(
       'See [the timetable](https://example.com/riverbend?a=1&b=2) for **Harborlight**.\n' +

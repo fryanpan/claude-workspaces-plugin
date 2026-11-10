@@ -343,3 +343,45 @@ describe('relativeTargetHref — a relative link in a comment goes to the board 
     expect(out).toBe('<p><a href="/workspaces/w-harbor/open?path=..%2Fdir%2Ffile.md">note</a></p>');
   });
 });
+
+describe('a link address is never read as emphasis', () => {
+  // Board ids are base64url, so `_` and `-` sit side by side: `w--_xK3_P`
+  // read `_xK3_` as italics and the href became `w--<em>xK3</em>P`.
+  const WS = 'w--_xK_Pq';
+  const MOCK = `/workspaces/${WS}/mockups/d-_Rb_tide`;
+
+  it('keeps an explicit link target whole', () => {
+    const out = renderCommentMarkdown(`- [the mock](${MOCK})`);
+    expect(out).not.toContain('<em>');
+    const a = new DOMParser().parseFromString(out, 'text/html').querySelector('a');
+    expect(new URL(a?.getAttribute('href') ?? '', 'http://x/').pathname).toBe(MOCK);
+  });
+
+  it('keeps a bare URL whole, as text and as address', () => {
+    const url = 'https://saltmarsh.example/a_b_c/*x*/~~y~~';
+    const out = renderCommentMarkdown(`see ${url} and ${MOCK}`);
+    expect(out).not.toMatch(/<em>|<strong>|<del>/);
+    const doc = new DOMParser().parseFromString(out, 'text/html');
+    const hrefs = [...doc.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual([url, MOCK]);
+  });
+
+  it('still marks the words around and inside a link label', () => {
+    const out = renderCommentMarkdown(`_Alice_ wrote [*the* mock](${MOCK})`);
+    expect(out).toContain('<em>Alice</em> wrote');
+    expect(out).toContain('><em>the</em> mock</a>');
+  });
+
+  it('drops a set-aside marker typed into the comment itself', () => {
+    const forged = `${String.fromCharCode(0xe000)}0${String.fromCharCode(0xe001)}`;
+    const out = renderCommentMarkdown(`Bob ${forged} [a](https://saltmarsh.example/a_b_c)`);
+    expect(out).toBe(
+      '<p>Bob 0 <a href="https://saltmarsh.example/a_b_c" target="_blank" rel="noopener noreferrer">a</a></p>',
+    );
+  });
+
+  it('closes a mark that ends right after a URL', () => {
+    const out = renderCommentMarkdown('*see https://saltmarsh.example/tides*');
+    expect(out).toContain('<em>see <a href="https://saltmarsh.example/tides"');
+  });
+});

@@ -58,6 +58,9 @@ describe.skipIf(CHROME === null)('links in the lead chat, with voice on', () => 
 
   it('a board link opens in this tab, and the mock link from a closing message opens the mock', () => {
     const r = result();
+    // The driver's fixed ids carry `_` runs that once rendered as <em> in the href.
+    expect(r.docPath).toBe(`/workspaces/${r.workspaceId}/docs/d-_Rb_tide`);
+    expect(r.mockPath).toBe(`/workspaces/${r.workspaceId}/mockups/d-_Sm_-mud`);
     for (const [width, gesture] of [
       [1180, 'tap'],
       [430, 'touch'],
