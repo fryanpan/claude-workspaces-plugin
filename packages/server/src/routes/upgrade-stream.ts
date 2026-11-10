@@ -603,6 +603,11 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
             ...(presenceOnly ? { presenceOnly: true } : {}),
+            ...(socketOwnerProven()
+              ? { personProof: 'owner' as const }
+              : socketAuthor()
+                ? { personProof: 'other' as const }
+                : {}),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

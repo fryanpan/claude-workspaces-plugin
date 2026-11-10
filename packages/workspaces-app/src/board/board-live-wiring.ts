@@ -17,11 +17,16 @@ import { estimatesShown } from '@claude-workspaces/core/show-estimates';
  * is stale now". Crossing the two would paint a peer's transition twice, from
  * two sources.
  */
-import { PERSON_SPOT_FIELD, type PresenceSpot } from '@claude-workspaces/core/workspace-presence';
+import {
+  ATTENDING_FIELD,
+  PERSON_SPOT_FIELD,
+  type PresenceSpot,
+} from '@claude-workspaces/core/workspace-presence';
 import type { BootLocation } from '../boot-env.ts';
 import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
 import { messageLinkOf } from '../lead-chat/lead-chat-link.ts';
 import { staleTaskLinkStatuses } from '../link-titles.ts';
+import { watchAttention } from '../presence/attention.ts';
 import {
   type FollowStorage,
   type Follower,
@@ -192,6 +197,11 @@ export function wireBoardLive(deps: BoardLiveDeps): {
       ...(scroll === undefined ? {} : { scroll }),
     };
   };
+  // Whether this tab is the one its person is looking at (`attention.ts`).
+  const attention = watchAttention({ win: window, doc: document }, () => {
+    const cur = client.awareness.getLocalState() ?? {};
+    client.awareness.setLocalState({ ...cur, [ATTENDING_FIELD]: attention.attending() });
+  });
   client.awareness.setLocalState({
     // `id` rides along because the presence strip has to know WHO, and a
     // display name cannot answer that — two people called Alex would be one
@@ -202,6 +212,7 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     user: { id: user.id, name: user.name, color: user.color },
     surface: 'board',
     [PERSON_SPOT_FIELD]: here(),
+    [ATTENDING_FIELD]: attention.attending(),
     lastActive: Date.now(),
   });
   const moved = (): void => {

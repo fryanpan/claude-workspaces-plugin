@@ -13,7 +13,13 @@
  * a tap anywhere but the presence chips. Moving the view for them is only
  * welcome while they are watching.
  */
-import { type PresenceSpot, samePage } from '@claude-workspaces/core/workspace-presence';
+import {
+  DIRECTIVE_FIELD,
+  type PresenceSpot,
+  parseDirective,
+  parseSpot,
+  samePage,
+} from '@claude-workspaces/core/workspace-presence';
 import {
   type RoomStates,
   isBoardPagePath,
@@ -61,6 +67,24 @@ export interface Follower {
   refresh(): void;
 }
 
+/**
+ * The newest instruction the server addressed to THIS page (`show_person`),
+ * or null. The server writes one at a time and addresses it to the tab its
+ * person is attending to, so every other page reads past it.
+ */
+export function directiveFor(
+  states: RoomStates,
+  clientID: number,
+): { seq: number; spot: PresenceSpot } | null {
+  let best: { seq: number; spot: PresenceSpot } | null = null;
+  states.forEach((raw, id) => {
+    if (id === clientID) return;
+    const d = parseDirective((raw as Record<string, unknown> | undefined)?.[DIRECTIVE_FIELD]);
+    if (d && d.to === clientID && (!best || d.seq > best.seq)) best = { seq: d.seq, spot: d.spot };
+  });
+  return best;
+}
+
 interface Stored {
   key: string;
   /** The address the follow is sending this tab to, until it lands. */
@@ -68,6 +92,22 @@ interface Stored {
 }
 
 export const followStorageKey = (workspaceId: string): string => `cw-follow:${workspaceId}`;
+
+/** Where an agent's directive sent this tab, until the page there loads. */
+export const directedStorageKey = (workspaceId: string): string => `cw-directed:${workspaceId}`;
+
+function readDirected(
+  storage: FollowStorage,
+  slot: string,
+): { arriving: string; spot: PresenceSpot } | null {
+  try {
+    const v = JSON.parse(storage.getItem(slot) ?? 'null') as { arriving?: unknown; spot?: unknown };
+    const spot = parseSpot(v?.spot);
+    return v && typeof v.arriving === 'string' && spot ? { arriving: v.arriving, spot } : null;
+  } catch {
+    return null;
+  }
+}
 
 export function createFollower(deps: FollowerDeps): Follower {
   const slot = followStorageKey(deps.workspaceId);
@@ -84,6 +124,7 @@ export function createFollower(deps: FollowerDeps): Follower {
     else deps.storage.removeItem(slot);
   };
 
+  const directedSlot = directedStorageKey(deps.workspaceId);
   let current: string | null = null;
   let applied: string | null = null;
   const stored = read();
@@ -98,8 +139,9 @@ export function createFollower(deps: FollowerDeps): Follower {
     }
   }
 
-  /** Take this view to `spot`; a follow rides along to the next page. */
-  const goTo = (spot: PresenceSpot, following: string | null): void => {
+  /** Take this view to `spot`; a follow rides along to the next page, and
+   *  so does the place an agent sent this tab to (`directed`). */
+  const goTo = (spot: PresenceSpot, following: string | null, directed = false): void => {
     // A board spot names its page by address: the board shows its own tabs
     // and panels in place, and anything else is another page. The queue and
     // the workspaces list hold a follow but draw none of them.
@@ -116,6 +158,7 @@ export function createFollower(deps: FollowerDeps): Follower {
       return;
     }
     if (following) write({ key: following, arriving: href });
+    if (directed) deps.storage.setItem(directedSlot, JSON.stringify({ arriving: href, spot }));
     deps.go(href);
   };
   const refresh = (): void => {
@@ -128,7 +171,25 @@ export function createFollower(deps: FollowerDeps): Follower {
     goTo(spot, current);
   };
 
+  // An agent sending this tab somewhere: obeyed once, like a jump. A new
+  // page has a new client id, so nothing addressed to its predecessor
+  // reaches it.
+  let directiveSeq = 0;
+  const obey = (): void => {
+    const d = directiveFor(deps.room.getStates(), deps.room.clientID);
+    if (!d || d.seq <= directiveSeq) return;
+    directiveSeq = d.seq;
+    goTo(d.spot, null, true);
+  };
+  // Arrived where an agent sent this tab: show the place on this page once.
+  const arrived = readDirected(deps.storage, directedSlot);
+  if (arrived) {
+    deps.storage.removeItem(directedSlot);
+    if (arrived.arriving === deps.address()) deps.show(arrived.spot);
+  }
+
   deps.room.on('change', refresh);
+  deps.room.on('change', obey);
 
   return {
     key: () => current,

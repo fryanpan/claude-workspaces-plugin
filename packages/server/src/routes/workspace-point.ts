@@ -15,6 +15,11 @@
  *    thread, a block, a phrase (`quote`), a scroll fraction, or a
  *    whiteboard's `x`/`y`.
  *
+ * `POST /workspaces/<ws>/person/watch` and `/person/show` are the same
+ * family for the owner rather than for followers (`person-presence.ts`):
+ * hear where the owner's attended tab lands, and send that one tab to a
+ * place named exactly as `point` names one. Both hold to the agent token.
+ *
  * Gated as the voice answer route is: the caller proves it speaks for
  * `agentId` (on this machine, with its token) and that agent is attached to
  * this board. Share visitors are refused. Every id is checked to be on this
@@ -126,8 +131,9 @@ export async function handleWorkspacePoint(
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
   const { req, pathname, visitor } = rq;
-  const m = /^\/workspaces\/([^/]+)\/point$/.exec(pathname);
+  const m = /^\/workspaces\/([^/]+)\/(point|person\/watch|person\/show)$/.exec(pathname);
   if (!m || req.method !== 'POST') return undefined;
+  const verb = m[2];
   if (visitor) return ctx.j(403, { error: 'not available to share visitors' });
   let workspaceId: string;
   try {
@@ -138,15 +144,35 @@ export async function handleWorkspacePoint(
   const body = (await ctx.safeJson(req)) ?? {};
   const agentId = typeof body.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
-  const allowed = ctx.authorizeAgent(req, agentId);
+  // Hearing where the owner is and moving the tab they are reading are new
+  // routes no tokenless client ever called, so they hold to the token.
+  const allowed = ctx.authorizeAgent(req, agentId, { requireToken: verb !== 'point' });
   if (!allowed.ok) return ctx.j(allowed.status, allowed.body);
   const attached = ctx.taskStore.listAttachments(workspaceId).find((a) => a.agentId === agentId);
   if (!attached) return ctx.j(403, { error: 'not attached to this board' });
+  if (verb === 'person/watch') {
+    if (body.on !== undefined && typeof body.on !== 'boolean') {
+      return ctx.j(400, { error: 'on is true or false' });
+    }
+    const on = body.on !== false;
+    const landing = ctx.personPresence.watch(workspaceId, agentId, on);
+    return ctx.j(200, { ok: true, watching: on, landing });
+  }
   const built = buildSpot(ctx, workspaceId, body);
   if (!built.ok) return ctx.j(built.status, { error: built.error });
   // The chip's label: the agent's own name for itself, as its comments carry.
   const named = typeof body.agentName === 'string' ? body.agentName.trim() : '';
   const name = (named || agentId).slice(0, 80);
+  if (verb === 'person/show') {
+    const shown = ctx.personPresence.show(workspaceId, { id: agentId, name }, built.spot);
+    if (!shown.ok) {
+      return ctx.j(409, {
+        error: 'not-here',
+        message: 'The owner has no tab in front of them on this board.',
+      });
+    }
+    return ctx.j(200, { ok: true, spot: built.spot });
+  }
   ctx.agentSpots.pointOn(workspaceId, agentId, { ...built.spot, name });
   return ctx.j(200, { ok: true, spot: built.spot });
 }

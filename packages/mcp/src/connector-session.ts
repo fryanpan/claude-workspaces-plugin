@@ -35,6 +35,7 @@ import { type Watcher, createSseLoops } from './sse-loop.ts';
 import { TOOL_LIST } from './tool-schemas.ts';
 import { handleDocsTool } from './tools/docs.ts';
 import { handleInboxTool } from './tools/inbox.ts';
+import { handlePersonTool } from './tools/person.ts';
 import { handleTaskTool } from './tools/tasks.ts';
 import { handleWhiteboardTool } from './tools/whiteboard.ts';
 import { handleWorkspaceTool } from './tools/workspace.ts';
@@ -284,6 +285,7 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
       handleTaskTool,
       handleWorkspaceTool,
       handleInboxTool,
+      handlePersonTool,
       handleWhiteboardTool,
     ],
     err,
