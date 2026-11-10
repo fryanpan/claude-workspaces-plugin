@@ -25,6 +25,9 @@ import {
   LeadLineHold,
 } from './lead-line-hold.ts';
 
+/** How long after a "Lead, …" ask the lead's next line counts as its answer. */
+export const ADDRESSED_MS = 60_000;
+
 export type LeadHoldSetting = HoldArm | 'off';
 
 /** The arm `CW_MEETING_LEAD_HOLD` names; an unknown value is the default. */
@@ -54,7 +57,8 @@ interface Room {
   docId: string;
   hold: LeadLineHold;
   session: Promise<TranscriptionSession | null>;
-  addressed: boolean;
+  /** When a "Lead, …" ask reached the lead; null when none is open. */
+  addressed: number | null;
 }
 
 export class LeadLineHolds {
@@ -67,7 +71,7 @@ export class LeadLineHolds {
     if (this.deps.setting === 'off' || this.deps.setting === 'at-once') return;
     const had = this.rooms.get(workspaceId);
     if (had && had.meetingId === meeting.id && had.docId === meeting.docId) return;
-    const addressed = had?.meetingId === meeting.id && had.addressed;
+    const addressed = had?.meetingId === meeting.id ? had.addressed : null;
     if (had) this.close(workspaceId);
     const hold = new LeadLineHold({
       arm: this.deps.setting,
@@ -108,7 +112,7 @@ export class LeadLineHolds {
   addressed(workspaceId: string, meeting: { id: string; docId: string }): void {
     this.listen(workspaceId, meeting);
     const room = this.rooms.get(workspaceId);
-    if (room) room.addressed = true;
+    if (room) room.addressed = (this.deps.now ?? Date.now)();
   }
 
   /** Wait until the lead's line may be said, or is dropped. */
@@ -118,8 +122,10 @@ export class LeadLineHolds {
     this.listen(workspaceId, meeting);
     const room = this.rooms.get(workspaceId);
     if (!room) return now;
-    if (room.addressed) {
-      room.addressed = false;
+    const askedAt = room.addressed;
+    room.addressed = null;
+    // An answer comes soon after the ask; a line long after it is the lead's own.
+    if (askedAt !== null && (this.deps.now ?? Date.now)() - askedAt <= ADDRESSED_MS) {
       return now;
     }
     // Nothing to listen with means nothing to wait for.

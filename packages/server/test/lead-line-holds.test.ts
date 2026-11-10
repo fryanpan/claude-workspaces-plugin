@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { HOLD_TIMING, type HoldOutcome } from '../src/lead-chat/lead-line-hold.ts';
-import { LeadLineHolds, leadHoldArm } from '../src/lead-chat/lead-line-holds.ts';
+import { ADDRESSED_MS, LeadLineHolds, leadHoldArm } from '../src/lead-chat/lead-line-holds.ts';
 import { MeetingEars } from '../src/spoken-reply/meeting-ears.ts';
 import type { GateTimers } from '../src/spoken-reply/pause-gate.ts';
 import { waitFor } from './wait-for.ts';
@@ -77,6 +77,21 @@ describe('the lead line holds of a board', () => {
     ears.heard(M.docId, { turn: 1, text: 'Lead, what is the tide at six', final: false });
     holds.addressed('w-1', M);
     expect(await holds.wait('w-1', M)).toEqual({ said: true, waitedMs: 0, judged: 0 });
+
+    // An ask the lead never answered does not wave through a much later line.
+    holds.addressed('w-1', M);
+    clock.advanceTo(clock.now() + ADDRESSED_MS + 1);
+    ears.heard(M.docId, { turn: 2, text: 'And the other thing is', final: false });
+    let late: HoldOutcome | null = null;
+    void holds.wait('w-1', M).then((o) => {
+      late = o;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(late).toBeNull();
+    holds.end('w-1');
+    await waitFor(() => late !== null, { describe: 'the late line dropped at the end' });
+    expect(late).toEqual({ said: false, reason: 'ended' });
   });
 
   it('says at once when nothing can listen, and drops a waiting line at the end', async () => {
