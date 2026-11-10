@@ -6,7 +6,11 @@
  *
  * The token reaches this process on the keeper's stdout and leaves it only
  * into that file: never an argument, a log line or a printed line.
+ *
+ * Also the two file helpers step 4 uses to point the callers at the keeper's
+ * URL: the plist edit and the one-rename write.
  */
+import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { CALLER_HEADER, readCallerToken, writeCallerToken } from './keeper-callers.ts';
 import { API_HEADER } from './keeper-http.ts';
 
@@ -59,4 +63,27 @@ export async function ensureCallerToken(d: CallerStepDeps): Promise<CallerStep> 
     return { stop: `the keeper did not accept the caller token it just made (${d.path})` };
   }
   return { token, said: `wrote the keeper's caller token to ${d.path}, mode 600` };
+}
+
+/** The plist with CW_KEEPER_URL set in EnvironmentVariables, or null when it has none. */
+export function withKeeperUrl(xml: string, url: string): string | null {
+  const existing = /(<key>CW_KEEPER_URL<\/key>\s*<string>)[^<]*(<\/string>)/;
+  if (existing.test(xml)) return xml.replace(existing, `$1${url}$2`);
+  const dict = /(<key>EnvironmentVariables<\/key>\s*<dict>)(\s*)/;
+  const m = dict.exec(xml);
+  if (!m) return null;
+  const indent = m[2] ?? '\n        ';
+  return xml.replace(
+    dict,
+    `$1${indent}<key>CW_KEEPER_URL</key>${indent}<string>${url}</string>${indent}`,
+  );
+}
+
+/** Replace a file in one rename, keeping its mode (600 for a new one). */
+export function atomicWrite(path: string, text: string): void {
+  const tmp = `${path}.keeper-setup.tmp`;
+  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
+  writeFileSync(tmp, text, { mode });
+  chmodSync(tmp, mode);
+  renameSync(tmp, path);
 }
