@@ -245,9 +245,9 @@ const ANONYMOUS_ACTOR: User = {
 };
 
 import { createAgentSpots } from './agent-spots.ts';
-import { createPersonPresence, describeLanding } from './person-presence.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import { createFeedbackOwner } from './feedback-owner.ts';
+import { createPersonPresence, describeLanding } from './person-presence.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,

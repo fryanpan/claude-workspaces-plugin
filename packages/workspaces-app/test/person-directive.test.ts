@@ -141,12 +141,9 @@ describe('attention', () => {
   it('is attending only while visible and focused, and says so when that changes', () => {
     const h = host(true, true);
     let changes = 0;
-    const a = watchAttention(
-      { win: h.win, doc: h.doc as unknown as Document },
-      () => {
-        changes += 1;
-      },
-    );
+    const a = watchAttention({ win: h.win, doc: h.doc as unknown as Document }, () => {
+      changes += 1;
+    });
     expect(a.attending()).toBe(true);
     h.set(true, false, 'blur');
     expect(a.attending()).toBe(false);

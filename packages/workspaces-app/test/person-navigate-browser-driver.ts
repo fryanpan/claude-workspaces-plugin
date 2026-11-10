@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import type { Cdp } from '../../../scripts/headless-chrome.ts';
 /**
  * An agent taking the owner's tab somewhere, in headless Chromium against a
  * real server and the real bundles, at 1180x820 and 430x932.
@@ -14,7 +15,6 @@
  * Spawned by `person-navigate-browser.test.ts`, which reads the JSON it prints.
  */
 import { registerOwnerIdentity } from '../../server/src/actor-identity.ts';
-import type { Cdp } from '../../../scripts/headless-chrome.ts';
 import {
   ADDRESS,
   DOC_PHRASE,
@@ -149,8 +149,7 @@ async function main(): Promise<void> {
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
           body: JSON.stringify({ ...LEAD, on: false }),
         });
-        const landing = ((await st.json()) as { landing?: { spot?: { docId?: string } } })
-          .landing;
+        const landing = ((await st.json()) as { landing?: { spot?: { docId?: string } } }).landing;
         return landing?.spot?.docId === docId ? true : null;
       });
       if ((await show({ docId, scroll: 0 })) !== 200) throw new Error('show refused');

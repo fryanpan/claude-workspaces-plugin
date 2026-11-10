@@ -160,7 +160,9 @@ describe("an agent hearing and moving the owner's tab", () => {
       auth,
     );
     expect(shown.status, await shown.clone().text()).toBe(200);
-    await waitFor(() => directiveHeardBy(front) !== null, { describe: 'the directive reaches pages' });
+    await waitFor(() => directiveHeardBy(front) !== null, {
+      describe: 'the directive reaches pages',
+    });
     const d = directiveHeardBy(front);
     expect(d?.to).toBe(front.ydoc.clientID);
     expect(d?.to).not.toBe(background.ydoc.clientID);

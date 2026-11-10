@@ -11,11 +11,7 @@ import {
   type PresenceSpot,
   parseDirective,
 } from '@claude-workspaces/core/workspace-presence';
-import {
-  Awareness,
-  applyAwarenessUpdate,
-  encodeAwarenessUpdate,
-} from 'y-protocols/awareness';
+import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { type Landing, createPersonPresence } from '../src/person-presence.ts';
 
@@ -44,8 +40,7 @@ function harness() {
   const heard: Array<{ agentId: string; landing: Landing }> = [];
   const pp = createPersonPresence({
     isOwner: (id) => id === OWNER,
-    describe: (_w, spot) =>
-      spot.docId ? { kind: 'doc', id: spot.docId } : { kind: 'page' },
+    describe: (_w, spot) => (spot.docId ? { kind: 'doc', id: spot.docId } : { kind: 'page' }),
     deliver: (_w, agentId, landing) => heard.push({ agentId, landing }),
     now: () => clock,
     setTimer: (fn) => {
@@ -107,10 +102,14 @@ describe('person presence', () => {
     expect(h.pp.current('w-harbor')?.spot.docId).toBe('d-diff');
     ipad.set(at({ surface: 'doc', docId: 'd-plan' }, false));
     expect(h.pp.current('w-harbor')?.spot.docId).toBe('d-diff');
-    const shown = h.pp.show('w-harbor', { id: 'agent-a', name: 'Lead' }, {
-      surface: 'doc',
-      docId: 'd-plan',
-    });
+    const shown = h.pp.show(
+      'w-harbor',
+      { id: 'agent-a', name: 'Lead' },
+      {
+        surface: 'doc',
+        docId: 'd-plan',
+      },
+    );
     expect(shown).toMatchObject({ ok: true, to: laptop.id });
     const d = parseDirective(room.getLocalState()?.[DIRECTIVE_FIELD]);
     expect(d?.to).toBe(laptop.id);

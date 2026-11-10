@@ -57,9 +57,8 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
   const client = deps.connect(`${boardSocketUrl(deps.origin, deps.workspaceId)}&presence=1`);
   const { awareness } = client;
   let here = deps.here;
-  const attention = watchAttention(
-    deps.attention ?? { win: window, doc: document },
-    () => announce(),
+  const attention = watchAttention(deps.attention ?? { win: window, doc: document }, () =>
+    announce(),
   );
   const announce = (): void => {
     awareness.setLocalState({
