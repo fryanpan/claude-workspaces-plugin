@@ -79,6 +79,26 @@ export function unfinishedAsk(text: string): boolean {
   return OPENER.test(bare) && words.length <= OPENER_WORDS;
 }
 
+/** At most this many words, for a turn in another language to read as a
+ *  sound rather than a request. */
+const NOISE_WORDS = 3;
+
+/**
+ * Whether a settled turn is a short sound the listener wrote down in a
+ * language the speaker does not speak (3-4 Nov: a breath, a noise and a
+ * one-syllable "yeah" reached Bryan's lead as one-word Chinese, Swedish,
+ * Japanese and Portuguese lines). The listener is held to `language`, but
+ * Soniox calls that best-effort, so a short turn it still tags otherwise is
+ * dropped. A longer one is passed on: it is more likely speech than noise.
+ */
+export function foreignNoise(
+  turn: { text: string; final: boolean; language?: string },
+  language: string,
+): boolean {
+  if (!turn.final || turn.language === undefined || turn.language === language) return false;
+  return turn.text.trim().split(/\s+/).filter(Boolean).length <= NOISE_WORDS;
+}
+
 export class PauseGate {
   private timer: unknown = null;
   /** Words heard so far, so a repeated partial is not news. */
@@ -92,6 +112,10 @@ export class PauseGate {
     private timing: SpokenPause = SPOKEN_PAUSE_DEFAULT,
     /** What counts as not yet a sentence; a tapped request reads more. */
     private readonly unfinished: (text: string) => boolean = midSentence,
+    /** Whether the listener's final turn opens the gate. A meeting's lead
+     *  line waits for silence instead (`lead-line-hold.ts`): Soniox settles a
+     *  mid-thought stop in about 200ms, so a final says nothing there. */
+    private readonly finalOpens = true,
   ) {}
 
   /** What the listener heard: the turn so far, and whether it is final. */
@@ -102,7 +126,7 @@ export class PauseGate {
     if (news) this.called = false;
     if (!t || this.called) return;
     const unfinished = this.unfinished(t);
-    if (final && !unfinished) {
+    if (final && !unfinished && this.finalOpens) {
       this.cancel();
       this.call();
       return;

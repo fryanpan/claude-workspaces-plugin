@@ -78,6 +78,7 @@ import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './
 import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChatFiles } from './lead-chat/files.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
+import { LeadLineHolds, leadHoldArm } from './lead-chat/lead-line-holds.ts';
 import { LeadModels } from './lead-chat/lead-model.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
 import { LeadMeetingFeed, meetingLeadFeedEnabled } from './lead-chat/meeting-feed.ts';
@@ -191,6 +192,7 @@ import { interviewDocs, voicePointer } from './spoken-reply/interview-docs.ts';
 import { INTERVIEW_TIMINGS_FILE, InterviewLog } from './spoken-reply/interview-log.ts';
 import { PlanMinutes } from './spoken-reply/plan-minutes.ts';
 import { SpokenReplyRelay } from './spoken-reply/relay.ts';
+import { thoughtJudge } from './spoken-reply/thought-finished.ts';
 import { SPOKEN_TIMINGS_FILE, SpokenTimings } from './spoken-reply/timings.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
 import { channelForWatchKey, openAgentMuxStream } from './sse-mux.ts';
@@ -3179,6 +3181,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     leadChatMeetings,
     leadMeetingFeed:
       (opts.meetingLeadFeed ?? meetingLeadFeedEnabled(process.env)) ? leadMeetingFeed : null,
+    leadLineHolds: new LeadLineHolds({
+      ears: opts.leadHoldEars ?? meetingEars,
+      setting: opts.leadHold ?? leadHoldArm(process.env, opts.voiceComplete !== undefined),
+      judge: opts.voiceComplete ? thoughtJudge(opts.voiceComplete) : null,
+      ...(opts.leadHoldTiming ? { timing: opts.leadHoldTiming } : {}),
+    }),
     // What the lead says into a meeting is said in the board reply's voice.
     leadMeetingVoice: spokenEngines.voices[1] ?? spokenEngines.voices[2] ?? null,
     featuresOff: opts.featuresOff ?? {},

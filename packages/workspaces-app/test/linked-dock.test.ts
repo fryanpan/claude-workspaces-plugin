@@ -196,7 +196,7 @@ describe('the doc dock', () => {
     // CONTROL: the record WAS read and handed to the floats, so the missing
     // dock is about the record, not a mount that never ran.
     await vi.waitFor(() =>
-      expect(document.querySelectorAll('#editor-pane .plan-float').length).toBe(2),
+      expect(document.querySelectorAll('#editor-pane .plan-float').length).toBe(1),
     );
     await Promise.resolve();
     expect(document.querySelector('.doc-dock-host')).toBeNull();

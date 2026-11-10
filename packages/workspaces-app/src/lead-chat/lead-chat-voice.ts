@@ -20,13 +20,10 @@
  * voice on, and its graph stays until voice is off; only a question that is
  * listening sends its frames, and none go up while an answer is said, so
  * the lead's own voice is never sent back as the next question. The track
- * itself is let go while an answer is said and taken back for the next
- * question: on iOS 26.2 and later, every sound a page plays crackles while
- * an echo-cancelled microphone track is live (WebKit bug 326286), which is
- * the crackle a 24 kHz join fix did not remove. Each spoken answer sends a
- * one-line playback report (`playbackError`) on the path a stop is reported
- * on, so a phone's next try names the context rate, latency, underruns and
- * whether the mic was live.
+ * is let go while an answer is said (iOS crackles all page audio while an
+ * echo-cancelled track is live, WebKit 326286); each answer sends one
+ * playback line (`playbackError`). On return from the background the mic is
+ * checked and recovered (`LeadMic.recheck`).
  *
  * iOS Safari runs an AudioContext only when `resume()` is called inside the
  * gesture, so the tap makes the capture context AND resumes it
@@ -83,6 +80,7 @@ import {
   PLAYBACK_REPORTS,
   audioContext,
   defaultSetups,
+  onPageReturn,
   playbackError,
   reportToPage,
   socketUrl,
@@ -219,6 +217,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     onRefused: (message) => halt(message),
     onSilent: (detail) => halt(NO_SOUND, detail),
     askForTap: () => set({ notice: TAP_TO_LISTEN }),
+  });
+
+  // Back from the background: wake both contexts, check the mic.
+  const offReturn = onPageReturn(() => {
+    if (!on) return;
+    player.wake();
+    mic.recheck();
   });
 
   const stopCapture = (): void => {
@@ -482,6 +487,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     destroy() {
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
+      offReturn();
       on = false;
       if (owedTimer) clearTimeout(owedTimer);
       tab.destroy();

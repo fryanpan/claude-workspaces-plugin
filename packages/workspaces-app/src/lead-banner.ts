@@ -2,8 +2,8 @@ import { LEAD_PRESENCE_EVENT, type LeadPresence } from '@claude-workspaces/core'
 /**
  * The meeting doc's "nobody is listening" line.
  *
- * Every ask a meeting doc makes — the Make Plan and Review floats, a task or
- * research ask said aloud — is addressed to the board's lead agent, and all
+ * Every ask a meeting doc makes — a comment, a task or research ask said
+ * aloud — is addressed to the board's lead agent, and all
  * of them file fine into an empty seat. The person then waits on an answer
  * that is not coming, and finds out later. So while it is true, the doc
  * says it, plainly and persistently: no lead agent is listening, asks will
@@ -52,16 +52,6 @@ export interface LeadBanner {
    */
   watch(onChange: (presence: LeadPresence | null) => void): () => void;
   destroy(): void;
-}
-
-/** A float's receipt line — "Asked by X — …" — needs a second half that
- *  tells the truth about the wait. Null while a lead is live or unknown.
- *  Short on purpose: at phone width the receipt shares the row with Make
- *  Plan, and the first wording ("no lead agent attached, it will be
- *  answered when one attaches") ran to four lines and out of the pill. */
-export function leadReceiptSuffix(presence: LeadPresence | null): string | null {
-  if (!presence || presence.live) return null;
-  return 'no lead attached; answered when one joins';
 }
 
 async function defaultFetchJson(url: string): Promise<unknown> {

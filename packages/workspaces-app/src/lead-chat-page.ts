@@ -29,7 +29,13 @@ if (workspaceId) {
   // The host page is not where anybody is asked their name: the signed-in
   // identity, or the one this browser already chose.
   void ensureUserIdentity(null, storage, { suppressNamePrompt: true }).then((user) => {
+    // The button sits in the nav's dock, never over the frame: floated, it
+    // covered the frame's comment Cancel at 1100px and under.
+    const dock = document.querySelector('.cw-host-nav > .board-nav-dock');
+    const host = dock ? document.createElement('span') : null;
+    if (host) dock?.append(host);
     mountLeadChat({
+      ...(host ? { dock: host } : {}),
       workspaceId,
       author: { id: user.id, name: user.name, kind: user.kind },
       getContext: () => {

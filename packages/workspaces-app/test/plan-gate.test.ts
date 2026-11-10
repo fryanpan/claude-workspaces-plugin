@@ -1,8 +1,8 @@
 /**
- * The plan doc's floating control (src/plan-gate.ts) and its four faces:
- * Make Plan on an unasked plan doc, Plan requested once somebody has,
+ * The plan doc's floating control (src/plan-gate.ts) and its two faces:
  * Approve Plan while the drafts are held, and the ✓ Plan Approved receipt
- * for the seconds after a press. The one-line bar and the derived-work chip
+ * for the seconds after a press. Make Plan and Plan requested are asserted
+ * GONE (Bryan, 2026-11-09). The one-line bar and the derived-work chip
  * strip it replaced are asserted GONE — links in the prose carry task status
  * now (task-link-chips), so nothing renders above the prose on an ordinary
  * doc.
@@ -11,7 +11,7 @@
  * receipt's timer is injected too so nothing here sleeps. Fixtures are
  * synthetic (jordan@partner.example register).
  */
-import type { LeadPresence, User } from '@claude-workspaces/core';
+import type { User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountPlanGate } from '../src/plan-gate.ts';
 
@@ -31,8 +31,6 @@ interface DocAnswer {
   meta?: {
     planState?: string;
     huddleKind?: string;
-    planRequestedAt?: number;
-    planRequestedBy?: string;
     /** Not read by the gate — here so a fixture can change something in the
      *  meta map that ISN'T the plan, which is the negative control for the
      *  watcher: the RE-READ decides, not the event. */
@@ -260,169 +258,18 @@ describe('mountPlanGate', () => {
     gate.destroy();
   });
 
-  it('offers Make Plan on an unasked plan doc, naming the board lead', async () => {
-    const stub = stubFetch([
-      { meta: { huddleKind: 'plan' }, tasks: [], leadAgentId: 'Workspaces' },
-    ]);
-    const gate = mountPlanGate({
-      docId: 'd-goal',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stub.fetchJson,
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('make');
-    expect(approveBtn()?.hidden).toBe(false);
-    expect(label()).toBe('Make Plan');
-    expect(sub()).toBe('Ask Workspaces to create a plan');
-    gate.destroy();
-  });
-
-  it('falls back to "your agent" when the board names no lead', async () => {
-    const gate = mountPlanGate({
-      docId: 'd-unled',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([{ meta: { huddleKind: 'plan' }, tasks: [] }]).fetchJson,
-    });
-    await gate.ready;
-    expect(sub()).toBe('Ask your agent to create a plan');
-    gate.destroy();
-  });
-
-  it('a discussion huddle offers Make Plan too — a discussion arrives at plans', async () => {
-    // This used to assert the opposite. Bryan started a discussion, reached
-    // a plan, and had no button to ask for it (2026-09-01): "there should be
-    // a plan button in discussions too, not just planning sessions".
-    const gate = mountPlanGate({
-      docId: 'd-disc',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([{ meta: { huddleKind: 'discussion' }, tasks: [], leadAgentId: 'Ada' }])
-        .fetchJson,
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('make');
-    expect(approveBtn()?.hidden).toBe(false);
-    expect(sub()).toBe('Ask Ada to create a plan');
-    gate.destroy();
-  });
-
-  it('an ordinary doc with no huddle kind still offers no Make Plan', async () => {
-    // The narrowing control: widening to discussions must not reach a doc
-    // that is not a huddle at all — nothing is waiting on a goal there.
-    const gate = mountPlanGate({
-      docId: 'd-plain',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([{ meta: {}, tasks: [] }]).fetchJson,
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('none');
-    expect(approveBtn()?.hidden).toBe(true);
-    gate.destroy();
-  });
-
-  it('Make Plan asks over plan-request, and the doc then reads as requested', async () => {
-    const stub = stubFetch([
-      { meta: { huddleKind: 'plan' }, tasks: [], leadAgentId: 'Workspaces' },
-      { meta: { huddleKind: 'plan', planRequestedAt: 1e12 }, tasks: [], leadAgentId: 'Workspaces' },
-    ]);
-    const gate = mountPlanGate({
-      docId: 'd-ask',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stub.fetchJson,
-    });
-    await gate.ready;
-    approveBtn()?.click();
-    await vi.waitFor(() => expect(gate.face()).toBe('requested'));
-    const post = stub.calls.find((c) => c.init?.method === 'POST');
-    // The ask goes to plan-request — NOT to the plan gate, which would
-    // approve a plan that does not exist yet.
-    expect(post?.url).toBe(`/workspaces/${WS}/docs/d-ask/plan-request`);
-    expect(JSON.parse(String(post?.init?.body))).toEqual({ author: JORDAN });
-    expect(label()).toBe('Plan requested');
-    expect(sub()).toBe('Waiting for Workspaces');
-    // A receipt, not a control. It stayed pressable so a missed comment could
-    // be re-sent, and every press filed another identical thread.
-    expect(approveBtn()?.disabled).toBe(true);
-    gate.destroy();
-  });
-
-  it('names who asked, so the press has a receipt and not just a label', async () => {
-    const gate = mountPlanGate({
-      docId: 'd-receipt',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([
-        {
-          meta: { huddleKind: 'plan', planRequestedAt: 1e12, planRequestedBy: 'Jordan' },
-          tasks: [],
-          leadAgentId: 'Workspaces',
-        },
-      ]).fetchJson,
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('requested');
-    expect(sub()).toBe('Asked by Jordan — waiting for Workspaces');
-    gate.destroy();
-  });
-
-  it('files ONE request however many times the float is pressed', async () => {
-    // Three presses gave three identical threads, with nothing on screen
-    // saying the first had been heard.
-    const stub = stubFetch([
-      { meta: { huddleKind: 'plan' }, tasks: [], leadAgentId: 'Workspaces' },
-      {
-        meta: { huddleKind: 'plan', planRequestedAt: 1e12, planRequestedBy: 'Jordan' },
-        tasks: [],
-        leadAgentId: 'Workspaces',
-      },
-    ]);
-    const gate = mountPlanGate({
-      docId: 'd-once',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stub.fetchJson,
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('make');
-    for (let i = 0; i < 3; i++) {
-      approveBtn()?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    }
-    const requests = stub.calls.filter((c) => c.url.endsWith('/plan-request'));
-    expect(requests).toHaveLength(1);
-    expect(gate.face()).toBe('requested');
-    gate.destroy();
-  });
-
-  it('flips from requested to Approve when the plan lands, with no reload', async () => {
-    // The measured bug: the float sat on "Plan requested" for 12s after the
-    // agent had already set the plan pending, because the only subscription
-    // it ever opened was gated on state==='pending' — which it could not yet
-    // know — and nothing else re-read. It took a reload to advance.
+  it('flips to Approve when the plan lands, with no reload', async () => {
+    // The measured bug: the float sat unchanged for 12s after the agent had
+    // already set the plan pending, because the only subscription it ever
+    // opened was gated on state==='pending' — which it could not yet know —
+    // and nothing else re-read. It took a reload to advance.
     //
     // The doc's own meta map is what carries the arrival, so the watcher is
     // driven here the way Yjs drives it: fire, and the gate re-reads.
     let fire: (() => void) | undefined;
     let stopped = false;
     const stub = stubFetch([
-      {
-        meta: { huddleKind: 'plan', planRequestedAt: 1e12, planRequestedBy: 'Jordan' },
-        tasks: [],
-        leadAgentId: 'Workspaces',
-      },
+      { meta: { huddleKind: 'plan' }, tasks: [] },
       { meta: { huddleKind: 'plan', planState: 'pending' }, tasks: [] },
     ]);
     const gate = mountPlanGate({
@@ -439,7 +286,7 @@ describe('mountPlanGate', () => {
       },
     });
     await gate.ready;
-    expect(gate.face()).toBe('requested');
+    expect(gate.face()).toBe('none');
     // The watch is armed from mount, not from a state the client can't reach.
     expect(fire).toBeTypeOf('function');
 
@@ -459,26 +306,16 @@ describe('mountPlanGate', () => {
     // change to the doc's meta map — a title edit, a speaker rename — because
     // the map is one object and Yjs does not offer a per-key observer worth
     // the complexity here. So the re-read has to be what decides, not the
-    // event: a fire whose re-read still says "requested" must leave the float
+    // event: a fire whose re-read still says no plan must leave the float
     // exactly where it was. Without this, "it advanced" and "it advances on
     // any twitch" are the same passing test.
     let fire: (() => void) | undefined;
     const stub = stubFetch([
-      {
-        meta: { huddleKind: 'plan', planRequestedAt: 1e12, planRequestedBy: 'Jordan' },
-        tasks: [],
-        leadAgentId: 'Workspaces',
-      },
+      { meta: { huddleKind: 'plan' }, tasks: [] },
       // The doc changed — its title did — and the plan did NOT arrive.
       {
-        meta: {
-          huddleKind: 'plan',
-          planRequestedAt: 1e12,
-          planRequestedBy: 'Jordan',
-          title: 'Renamed while we waited',
-        },
+        meta: { huddleKind: 'plan', title: 'Renamed while we waited' },
         tasks: [],
-        leadAgentId: 'Workspaces',
       },
     ]);
     const gate = mountPlanGate({
@@ -493,49 +330,38 @@ describe('mountPlanGate', () => {
       },
     });
     await gate.ready;
-    expect(gate.face()).toBe('requested');
+    expect(gate.face()).toBe('none');
 
     fire?.();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(gate.face()).toBe('requested');
-    expect(label()).toBe('Plan requested');
-    gate.destroy();
-  });
-
-  it('a reader sees no Make Plan either', async () => {
-    const gate = mountPlanGate({
-      docId: 'd-goal-ro',
-      root,
-      user: JORDAN,
-      canWrite: false,
-      fetchJson: stubFetch([{ meta: { huddleKind: 'plan' }, tasks: [] }]).fetchJson,
-    });
-    await gate.ready;
     expect(gate.face()).toBe('none');
     expect(approveBtn()?.hidden).toBe(true);
     gate.destroy();
   });
 
-  it('a pending plan shows Approve even on a plan doc that was requested', async () => {
-    // planState outranks the request stamp everywhere it is read: the agent
-    // answered, so the doc is past asking.
-    const gate = mountPlanGate({
-      docId: 'd-answered',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([
-        { meta: { huddleKind: 'plan', planRequestedAt: 1e12, planState: 'pending' }, tasks: [] },
-      ]).fetchJson,
+  for (const huddleKind of ['plan', 'discussion']) {
+    it(`offers no Make Plan on a ${huddleKind} meeting's notes, even to a writer`, async () => {
+      // Bryan, 2026-11-09: "They're really confusing". A person asks for a
+      // plan in a comment; the doc carries no button for it.
+      const stub = stubFetch([{ meta: { huddleKind }, tasks: [], leadAgentId: 'Workspaces' }]);
+      const gate = mountPlanGate({
+        docId: 'd-notes',
+        root,
+        user: JORDAN,
+        canWrite: true,
+        fetchJson: stub.fetchJson,
+      });
+      await gate.ready;
+      expect(gate.face()).toBe('none');
+      expect(approveBtn()?.hidden).toBe(true);
+      approveBtn()?.click();
+      expect(stub.calls.some((c) => c.init?.method === 'POST')).toBe(false);
+      gate.destroy();
     });
-    await gate.ready;
-    expect(gate.face()).toBe('approve');
-    expect(label()).toBe('Approve Plan');
-    gate.destroy();
-  });
+  }
 
   it('a refused Approve stays visible with the reason, floating above the button', async () => {
     const calls: Array<RequestInit | undefined> = [];
@@ -598,46 +424,17 @@ describe('mountPlanGate', () => {
     expect(stops).toEqual(['w-test']);
     gate.destroy();
   });
-  it('the Plan requested receipt says when no lead agent is attached', async () => {
-    // Same second line as the Review float's receipt, off the same feed.
-    const feed: { push: (p: LeadPresence | null) => void } = { push: () => {} };
-    const gate = mountPlanGate({
-      docId: 'd-ask',
-      root,
-      user: JORDAN,
-      canWrite: true,
-      fetchJson: stubFetch([
-        {
-          meta: { huddleKind: 'discussion', planRequestedAt: 1e12, planRequestedBy: 'Sam' },
-          tasks: [],
-          leadAgentId: 'Workspaces',
-        },
-      ]).fetchJson,
-      watchLeadPresence: (onChange) => {
-        feed.push = onChange;
-        return () => {};
-      },
-    });
-    await gate.ready;
-    expect(gate.face()).toBe('requested');
-    expect(sub()).toBe('Asked by Sam — waiting for Workspaces');
-    feed.push({ event: 'lead.presence', docId: 'd-ask', workspaceId: 'w-1', live: false });
-    expect(sub()).toBe('Asked by Sam — no lead attached; answered when one joins');
-    feed.push({ event: 'lead.presence', docId: 'd-ask', workspaceId: 'w-1', live: true });
-    expect(sub()).toBe('Asked by Sam — waiting for Workspaces');
-    gate.destroy();
-  });
-  it('offers Make Plan on a plan huddle read from a server that also serves a page there', async () => {
+  it('offers Approve on a pending plan read from a server that also serves a page there', async () => {
     const gate = mountPlanGate({
       docId: 'd-plan',
       root,
       user: JORDAN,
       canWrite: true,
-      fetchJson: serverShapedFetch({ meta: { huddleKind: 'plan' }, tasks: [] }),
+      fetchJson: serverShapedFetch({ meta: { planState: 'pending' }, tasks: [] }),
     });
     await gate.ready;
-    expect(gate.face()).toBe('make');
-    expect(label()).toBe('Make Plan');
+    expect(gate.face()).toBe('approve');
+    expect(label()).toBe('Approve Plan');
     gate.destroy();
   });
 });

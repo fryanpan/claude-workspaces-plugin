@@ -293,6 +293,21 @@ it. Only the lead: no other session on the board is woken by the room.
   after ten in a row the route answers 409 `room-first` until somebody in the
   room speaks; without the stop, about fifty would round onto the room's turn
   and replace its line.
+- **The line waits for the speaker to finish the thought**
+  (`lead-chat/lead-line-holds.ts`, one `LeadLineHold` per meeting). The
+  route holds the call while the hold listens to the room through the
+  meeting's own transcript (`MeetingEars`). After 1.2s of quiet (3s after
+  words that stop mid-sentence) it asks Haiku once "is this thought
+  finished?" (`spoken-reply/thought-finished.ts`). Words heard during the
+  call, or in the 400ms after it was asked, put the line back on hold. A
+  question to the room ("Any questions?") skips the call, and so does a
+  line answering a "Lead, …" ask. A judge that keeps saying "unfinished"
+  is overruled after 4s of quiet. A line still held after 20s is dropped,
+  and the lead is told (`said:false`, `lapsed`). `CW_MEETING_LEAD_HOLD`
+  picks `judge` (the default with a Haiku key), `gate` (the tap path's
+  pause gate alone) or `off`. On 120 invented held-out requests the judge
+  started 11 lines mid-thought against the gate's 78, at a 1.98s median
+  wait (`scripts/lead-hold-replay.ts`, which names every arm).
 - **Only a microphone meeting's recording tab plays it.** That tab asks for
   the line voiced (`voice` on the meeting route, PCM16 from the planning
   voice's engine) and plays it (`lead-chat-meeting-voice.ts`). A watching tab
@@ -310,9 +325,7 @@ it. Only the lead: no other session on the board is woken by the room.
   words: "The slipway pricing" after "Who is the slipway pricing for?" is
   three words of six, and stays.
 - **Held to rare.** The start line (sent only with the feed on) tells the
-  lead to speak rarely and in one short sentence, and to keep other questions
-  in the lead chat until the meeting can tell when a speaker has finished a
-  thought.
+  lead to speak rarely and in one short sentence.
 - **Cost.** The batch window caps wakes at one a second, but a room settles a
   turn every few seconds, so a lead is woken about once per settled turn:
   several hundred times in an hour of steady talk.
@@ -2422,6 +2435,10 @@ plain markdown links into the notes; the doc editor's `TaskLinkChips`
 decoration (workspaces-app) renders title + live status chip beside them,
 refreshed on the board's `task.transitioned` SSE push, without ever touching
 stored content.
+
+**Retired 2026-11-09:** Bryan removed the Make Plan and Review floats from
+meeting-notes docs ("They're really confusing"); a person asks for a plan
+or a review in a comment. The paragraph below is the history.
 
 **Make Plan shows on both huddle kinds** (2026-09-01: Bryan started a
 discussion, reached a plan, and had no button). The plan gate's face rule

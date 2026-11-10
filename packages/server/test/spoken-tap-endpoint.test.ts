@@ -14,7 +14,7 @@ import {
 } from '../src/spoken-reply/agent-conversation.ts';
 import { SpokenAnswerer, type SpokenBoard } from '../src/spoken-reply/answer.ts';
 import { UNFINISHED_PAUSE_MS, unfinishedAsk } from '../src/spoken-reply/pause-gate.ts';
-import { SPOKEN_TAP_TUNING, SpokenSession } from '../src/spoken-reply/session.ts';
+import { SPOKEN_LANGUAGE, SPOKEN_TAP_TUNING, SpokenSession } from '../src/spoken-reply/session.ts';
 import { SpokenTimings } from '../src/spoken-reply/timings.ts';
 import type { SpokenVoice } from '../src/spoken-reply/tts.ts';
 import type { TranscriptionOpenOpts } from '../src/transcribe.ts';
@@ -70,9 +70,10 @@ async function leadSession() {
   await waitFor(() => opened.length === 1, { describe: 'listener opened' });
   const o = opened[0];
   if (!o) throw new Error('no listener');
-  const say = (text: string, final: boolean) => o.onTurn({ turn: 0, text, final });
+  const say = (text: string, final: boolean, language?: string) =>
+    o.onTurn({ turn: 0, text, final, ...(language ? { language } : {}) });
   const ended = () => json.filter((m) => m.type === 'turn-end');
-  return { clock, frames, say, ended, tuning: o.tuning };
+  return { clock, frames, say, ended, tuning: o.tuning, language: o.language };
 }
 
 describe('a tapped request to the lead', () => {
@@ -124,6 +125,47 @@ describe('a tapped request to the lead', () => {
     h.clock.advanceTo(UNFINISHED_PAUSE_MS);
     await waitFor(() => h.frames.length === 1, { describe: 'sent after the wait' });
     expect(h.frames[0]?.transcript).toBe('Can you check the, um.');
+  });
+});
+
+describe('a short sound the listener heard as another language', () => {
+  it('the listener is told the speaker speaks English', async () => {
+    const h = await leadSession();
+    expect(h.language).toBe(SPOKEN_LANGUAGE);
+    expect(SPOKEN_LANGUAGE).toBe('en');
+  });
+
+  it('a noise transcribed as one foreign word sends nothing to the lead', async () => {
+    const h = await leadSession();
+    h.say('嗯', false);
+    h.say('嗯', true, 'zh');
+    h.clock.advanceTo(20_000);
+    expect(h.frames).toEqual([]);
+    expect(h.ended()).toEqual([]);
+  });
+
+  it('a breath heard as Swedish, then a request: the lead gets only the request', async () => {
+    const h = await leadSession();
+    h.say('Ja.', true, 'sv');
+    h.say('Where are we on the Harborlight deck?', true, 'en');
+    await waitFor(() => h.frames.length === 1, { describe: 'the request reached the lead' });
+    expect(h.clock.now()).toBe(0);
+    expect(h.frames[0]?.transcript).toBe('Where are we on the Harborlight deck?');
+  });
+
+  it('an English sentence tagged English goes at the end of speech, with no wait', async () => {
+    const h = await leadSession();
+    h.say('Yeah.', true, 'en');
+    await waitFor(() => h.frames.length === 1, { describe: 'sent at the endpoint' });
+    expect(h.clock.now()).toBe(0);
+    expect(h.frames[0]?.transcript).toBe('Yeah.');
+  });
+
+  it('a long turn tagged another language is still passed on', async () => {
+    const h = await leadSession();
+    h.say('Pode olhar a revisão de Saltmarsh agora?', true, 'pt');
+    await waitFor(() => h.frames.length === 1, { describe: 'sent at the endpoint' });
+    expect(h.frames[0]?.transcript).toBe('Pode olhar a revisão de Saltmarsh agora?');
   });
 });
 

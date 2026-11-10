@@ -10,9 +10,9 @@
  * Split across files, that cache would need a second writer, which is exactly
  * the bug the cache exists to prevent.
  *
- * On a huddle doc a range selection grows the pointer pill instead (see
- * doc-pointer-pill.ts); the round pill survives there only in caret mode,
- * where pressing it opens the composer exactly as it does everywhere else.
+ * The same pill on every markdown doc. Meeting-notes and plan docs used to
+ * grow a separate "pointer pill" over a range selection instead, and Bryan
+ * lost the comment button there (2026-11-09); they now take this path too.
  */
 import type { EditorState } from '@tiptap/pm/state';
 import type { EditorHandle } from '../editor.ts';
@@ -21,12 +21,8 @@ import type { MountScope } from '../mount-scope.ts';
 import type { ChromeSelection } from './anchor-body.ts';
 import { showToast } from './chrome-dom.ts';
 import { keyboardClearDelta } from './composer-slot.ts';
-import type { PointerPillLayer } from './doc-pointer-pill.ts';
 
 export interface CommentPillOptions {
-  /** True on a huddle doc, where a range selection belongs to the pointer
-   *  pill and the round pill only ever appears in caret mode. */
-  huddle: boolean;
   editor: EditorHandle;
   /** The `#editor` element — the scroll container the pill is clamped to. */
   editorMount: HTMLElement;
@@ -34,8 +30,6 @@ export interface CommentPillOptions {
   composer: HTMLElement;
   commentPill: HTMLButtonElement;
   scope: MountScope;
-  /** The pointer pill a huddle doc shows over a range selection. */
-  pointer: PointerPillLayer;
   openComposer: () => void;
   /** Keep the caret clear of the on-screen keyboard (edit-viewport.ts).
    *  A no-op with no keyboard up. */
@@ -48,24 +42,14 @@ export interface CommentPillHandle {
   currentSelection: () => ChromeSelection | null;
   /** Re-read the editor's selection (the editor's own selection callback). */
   refreshSelection: () => void;
-  /** Hide the round pill AND the pointer pill. */
+  /** Hide the pill. */
   hide: () => void;
   /** Scroll the selection above the composer + keyboard, once it opens. */
   onComposerOpened: () => void;
 }
 
 export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
-  const {
-    huddle,
-    editor,
-    editorMount,
-    composer,
-    commentPill,
-    scope,
-    pointer,
-    openComposer,
-    follow,
-  } = opts;
+  const { editor, editorMount, composer, commentPill, scope, openComposer, follow } = opts;
 
   // =========================================================================
   // COMMENT PILL — small inline affordance
@@ -192,11 +176,6 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
         pillMode = 'range';
         caretParaRange = null;
         commentPill.classList.remove('caret');
-        if (huddle) {
-          commentPill.classList.add('hidden');
-          pointer.show(from, to);
-          return;
-        }
         // Prefer the DOM selection's LAST client rect — that's what the
         // user actually sees highlighted on iOS (where native selection
         // handles don't always stay in lockstep with ProseMirror's `to`).
@@ -257,7 +236,6 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
 
   function hidePill(): void {
     commentPill.classList.add('hidden');
-    pointer.hide();
     caretParaRange = null;
   }
 
@@ -282,14 +260,11 @@ export function mountCommentPill(opts: CommentPillOptions): CommentPillHandle {
       const sel = editor.getSelectionRel();
       if (sel) selection = sel;
     }
-    // ONE press, everywhere. On a huddle doc this used to end with the
-    // sentence selection it had just made and let `positionPill` grow the
-    // pointer pill over it — so the reader pressed 💬, was handed a second
-    // button reading Comment, and pressed that (Bryan, 2026-09-10: "after
-    // clicking that button, another comment button shows up, and then I can
-    // comment"). The round pill IS the comment affordance on every surface;
-    // the pointer pill still owns a RANGE selection, which is already one
-    // press, and which is the only shape the round pill defers to.
+    // ONE press, everywhere: the round pill IS the comment affordance on
+    // every surface, so the press opens the composer on the sentence it just
+    // selected rather than handing the reader a second button (Bryan,
+    // 2026-09-10: "after clicking that button, another comment button shows
+    // up, and then I can comment").
     openComposer();
   });
 
