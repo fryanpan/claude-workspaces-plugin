@@ -19,6 +19,7 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { PERSON_TOOLS } from './person-schemas.ts';
 import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
 
 /**
@@ -3461,5 +3462,6 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     ...WHITEBOARD_TOOLS,
+    ...PERSON_TOOLS,
   ],
 };

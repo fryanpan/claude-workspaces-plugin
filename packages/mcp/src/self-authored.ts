@@ -110,7 +110,7 @@ const ACTOR_ID_EVENTS = new Set(['review_item.viewed', 'review_item.answered']);
  * top-level actor at all, so they fail open and keep waking their addressee.
  * `whiteboard.changed` names who drew, so an agent's own strokes are dropped.
  */
-const ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard)\./;
+const ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard|person)\./;
 
 /**
  * The attachment family, whose subject IS its actor: `agent.attached` and

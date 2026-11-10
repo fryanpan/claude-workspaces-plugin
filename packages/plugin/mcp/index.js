@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.355";
+var version2 = "0.1.357";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -15066,6 +15066,38 @@ function reviewItemHeldLine(p) {
   return `[workspace.review_item_held] your review item ${ask}${on}${ids} was held off the queue by the quality gate${why}.${stood} ${fix}`;
 }
 
+// packages/mcp/src/person-line.ts
+var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+function personLandedLine(p) {
+  const who = p.person?.name || "The owner";
+  const r = p.resource ?? {};
+  const title = r.title ? ` "${clip(r.title, 80)}"` : "";
+  const page = r.kind && r.kind !== "page" && r.id ? `${r.kind} ${r.id}${title}` : `page ${p.spot?.path ?? "of the board"}`;
+  const s = p.spot ?? {};
+  const at = [];
+  if (s.threadId)
+    at.push(`thread ${s.threadId}`);
+  if (s.blockId)
+    at.push(`block ${s.blockId}`);
+  if (s.quote)
+    at.push(`"${clip(s.quote, 120)}"`);
+  if (at.length === 0 && typeof s.scroll === "number")
+    at.push(`${Math.round(s.scroll * 100)}% down`);
+  const place = at.length > 0 ? `, at ${at.join(", ")}` : "";
+  return `[person.landed] ${who} is now on ${page}${place}. show_person takes them somewhere; point_at only moves followers.`;
+}
+var DOC_KINDS = new Set(["doc", "diff", "mockup", "app", "whiteboard"]);
+function personLandedIds(p) {
+  const r = p.resource;
+  if (!r?.id || !r.kind)
+    return {};
+  if (DOC_KINDS.has(r.kind))
+    return { docId: r.id };
+  if (r.kind === "task")
+    return { taskId: r.id };
+  return {};
+}
+
 // packages/mcp/src/review-item-line.ts
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
@@ -15141,7 +15173,7 @@ function spawnRequestedLine(p) {
 var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
 var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
-var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard)\./;
+var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard|person)\./;
 var AGENT_FAMILY_RE = /^agent\./;
 function identifiesOneSession(selfId) {
   const id = selfId.trim();
@@ -15300,7 +15332,7 @@ function nowMs(deps) {
 function nowIso(deps) {
   return new Date(nowMs(deps)).toISOString();
 }
-var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach)\./;
+var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
 function dispatchReportedLine(p) {
   const who = p.agentName ?? p.actor?.name ?? "a builder";
   const commit = (p.headCommit ?? "").slice(0, 7);
@@ -15431,6 +15463,10 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = line;
       break;
     }
+    case "person.landed":
+      body = personLandedLine(rawPayload);
+      Object.assign(p, personLandedIds(rawPayload));
+      break;
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ""}`;
   }
@@ -16307,6 +16343,58 @@ function secretReadCommand(service) {
 
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
+
+// packages/mcp/src/person-schemas.ts
+var PERSON_TOOLS = [
+  {
+    name: "watch_person",
+    description: "Hear where the board's owner is looking. While on, a person.landed line arrives each time the tab they are attending to (visible and focused) lands on another page of this board: a doc, diff, mock, app, whiteboard, task, goal or board page, with the place in view. A scroll within a page is not a landing. The reply says where they are now (landing, or null when no tab of theirs on this board is in front of them). Live only: nothing is queued while your session is away. on:false stops it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: { type: "string", description: "The board to watch." },
+        on: { type: "boolean", description: "false stops the watch. Default true." }
+      },
+      required: ["workspaceId"]
+    }
+  },
+  {
+    name: "show_person",
+    description: "Take the board owner's tab to a place on this board, when they asked you to show them something. Only the tab they are attending to moves: a tab in the background or on another device stays where it is. Name the place as point_at does. shown:false with error not-here means no tab of theirs on this board is in front of them; post the link on the task instead. Use point_at, not this, to move people who chose to follow you.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: { type: "string", description: "The board the place is on." },
+        path: {
+          type: "string",
+          description: "A page of the board, relative to it: 'home', 'tasks', 'library', 'activity', 'home?item=<key>', '?task=<id>&tab=activity', 'library?list=files', '?settings=prompts'. Or '/review' for the review queue or '/' for the workspaces list. Any path also takes scroll."
+        },
+        taskId: { type: "string", description: "A task: opens its panel." },
+        goalId: { type: "string", description: "A goal: opens its panel." },
+        docId: {
+          type: "string",
+          description: "A doc, mock, app, whiteboard, or a file of a diff or folder on the board."
+        },
+        threadId: {
+          type: "string",
+          description: "A thread on the task, goal or doc named, opened where it is."
+        },
+        blockId: { type: "string", description: "A block of the doc, centred on screen." },
+        quote: {
+          type: "string",
+          description: "Words in the doc or mock, found and centred on screen. At most 500 characters."
+        },
+        scroll: {
+          type: "number",
+          description: "How far down the doc or page: 0 is the top, 1 the bottom."
+        },
+        x: { type: "number", description: "Whiteboard canvas x." },
+        y: { type: "number", description: "Whiteboard canvas y." }
+      },
+      required: ["workspaceId"]
+    }
+  }
+];
 
 // packages/mcp/src/whiteboard-schemas.ts
 var WORKSPACE_ID = {
@@ -19390,7 +19478,8 @@ var TOOL_LIST = {
         required: ["workspaceId"]
       }
     },
-    ...WHITEBOARD_TOOLS
+    ...WHITEBOARD_TOOLS,
+    ...PERSON_TOOLS
   ]
 };
 
@@ -20107,6 +20196,66 @@ async function handleInboxTool(name, a, ctx) {
     }
     default:
       return;
+  }
+}
+
+// packages/mcp/src/tools/person.ts
+function placeOf(a) {
+  const place = {};
+  for (const k of ["path", "docId", "taskId", "goalId", "threadId", "blockId", "quote"]) {
+    const v = a[k];
+    if (typeof v === "string" && v.trim())
+      place[k] = v.trim();
+  }
+  for (const k of ["scroll", "x", "y"]) {
+    if (typeof a[k] === "number")
+      place[k] = a[k];
+  }
+  return place;
+}
+function refusalOf(e, codes) {
+  const m = String(e).match(/→ (\d{3}): (.*)$/s);
+  if (!m || !codes.includes(Number(m[1])))
+    return null;
+  try {
+    const error2 = JSON.parse(m[2] ?? "").error;
+    if (typeof error2 === "string")
+      return { error: error2 };
+  } catch {}
+  return { error: `refused (${m[1]})` };
+}
+async function handlePersonTool(name, a, ctx) {
+  if (name !== "watch_person" && name !== "show_person")
+    return;
+  const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
+  if (!workspaceId)
+    return ctx.err("workspaceId is required");
+  const base = `/workspaces/${encodeURIComponent(workspaceId)}/person`;
+  const who = { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name };
+  if (name === "watch_person") {
+    const on = a.on !== false;
+    try {
+      const res = await ctx.http("POST", `${base}/watch`, { ...who, on });
+      return ctx.ok({ watching: on, landing: res.landing ?? null });
+    } catch (e) {
+      const refused = refusalOf(e, [400, 403, 404]);
+      if (!refused)
+        throw e;
+      return ctx.ok({ watching: false, ...refused });
+    }
+  }
+  try {
+    const res = await ctx.http("POST", `${base}/show`, { ...who, ...placeOf(a) });
+    return ctx.ok({ shown: true, spot: res.spot });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 403, 404, 409]);
+    if (!refused)
+      throw e;
+    return ctx.ok({
+      shown: false,
+      ...refused,
+      ...refused.error === "not-here" ? { note: "Nobody is looking at this board now. Post the link on the task instead." } : {}
+    });
   }
 }
 
@@ -21692,18 +21841,7 @@ async function handleWorkspaceTool(name, a, ctx) {
       const { workspaceId } = a;
       if (!workspaceId)
         return err2("workspaceId is required");
-      const place = {};
-      for (const k of ["path", "docId", "taskId", "goalId", "threadId", "blockId"]) {
-        const v = a[k];
-        if (typeof v === "string" && v.trim())
-          place[k] = v.trim();
-      }
-      if (typeof a.quote === "string" && a.quote.trim())
-        place.quote = a.quote.trim();
-      for (const k of ["scroll", "x", "y"]) {
-        if (typeof a[k] === "number")
-          place[k] = a[k];
-      }
+      const place = placeOf(a);
       try {
         const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
           agentId: AUTHOR.id,
@@ -21716,17 +21854,10 @@ async function handleWorkspaceTool(name, a, ctx) {
           note: "Anyone following you is taken there now. Nothing was written."
         });
       } catch (e) {
-        const m = String(e).match(/→ (400|403|404): (.*)$/s);
-        if (!m)
+        const refused = refusalOf(e, [400, 403, 404]);
+        if (!refused)
           throw e;
-        const error2 = (() => {
-          try {
-            return JSON.parse(m[2] ?? "").error;
-          } catch {
-            return;
-          }
-        })();
-        return ok2({ pointed: false, error: error2 ?? `refused (${m[1]})` });
+        return ok2({ pointed: false, ...refused });
       }
     }
     case "say_in_meeting": {
@@ -22283,6 +22414,7 @@ function createConnectorSession(deps) {
       handleTaskTool,
       handleWorkspaceTool,
       handleInboxTool,
+      handlePersonTool,
       handleWhiteboardTool
     ],
     err
