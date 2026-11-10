@@ -80,6 +80,12 @@ function start(
 }
 
 const find = (recs: Rec[], prog: string) => recs.filter((r) => r.argv.split(' ')[0] === prog);
+/**
+ * The board server's records. Not any bun record: the network wall's apply,
+ * its probe and its proxy are bun too, and any of them can be recorded before
+ * the server starts.
+ */
+const servers = (recs: Rec[]) => find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -154,7 +160,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
-        find(readRecords(log).recs, 'bun').length > 0,
+        servers(readRecords(log).recs).length > 0,
       { timeout: 20_000, describe: 'the lead and the server to start' },
     );
     const { recs, setprivArgv } = readRecords(log);
@@ -247,7 +253,7 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
 
     // The server opens the board sockets, shares the lead's board's, and
     // admits only itself over TCP.
-    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    const [server] = servers(recs);
     expect(server?.env.get('CW_BOARD_SOCKET_DIR')).toBe(`${volume}/boards`);
     expect(server?.env.get('CW_BOARD_SOCKET_SHARED')).toBe(BOARD);
     // cw is the only uid admitted over loopback TCP, the tunnel only through
@@ -294,11 +300,11 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
-        find(readRecords(log).recs, 'bun').length > 0,
+        servers(readRecords(log).recs).length > 0,
       { timeout: 20_000, describe: 'the lead and the server to start' },
     );
     const { recs, setprivArgv } = readRecords(log);
-    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    const [server] = servers(recs);
     // POSITIVE CONTROL: the recorder sees the credential where it belongs.
     expect(server?.uid).toBe('cw');
     expect(server?.env.get('CW_GITHUB_PUSH_KEYS')).toBe(PUSH);
@@ -357,12 +363,16 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
       describe: 'a new supervisor to take the session over',
     });
     expect(m.out.join('')).toContain("the lead's supervisor exited");
+    await waitFor(() => servers(readRecords(m.log).recs).length > 0, {
+      timeout: 20_000,
+      describe: 'the server',
+    });
     const { recs, setprivArgv } = readRecords(m.log);
     // The wall's probe once, then a supervisor twice.
     expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(3);
     // The same session, not a second one, and the server and tunnel once each.
     expect(lines(m.log, '.claude-pids')).toHaveLength(1);
-    expect(find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'))).toHaveLength(1);
+    expect(servers(recs)).toHaveLength(1);
     expect(find(recs, 'cloudflared')).toHaveLength(1);
     expect(m.child.exitCode).toBeNull();
   }, 45_000);
