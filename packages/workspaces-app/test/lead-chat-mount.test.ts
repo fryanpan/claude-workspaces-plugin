@@ -38,6 +38,7 @@ function fakeClient(canTalk = true) {
       fns.push(fn);
     },
     onLeadLine: () => {},
+    onTaskChange: () => {},
     uploadFile: async () => ({ ok: false, error: 'offline' }),
     loadOlder: async () => {},
     async send(text, author, context, via) {

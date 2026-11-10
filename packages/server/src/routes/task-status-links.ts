@@ -4,6 +4,7 @@
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `TaskRoutesContext` instead of the scope.
  */
+import { isBlocked } from '@claude-workspaces/core/task-blocked';
 import { classifyActor } from '../actor-identity.ts';
 import { linkTitlesFor } from '../link-titles.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
@@ -292,6 +293,12 @@ export async function handleTaskStatusAndLinks(
               // Only a Task can be a held draft; a GoalRow never
               // carries the field.
               ...('planHold' in t && t.planHold !== undefined ? { planHeld: true } : {}),
+              // The board row's barred ring, by the board's own reading.
+              ...('after' in t &&
+              t.archivedAt === undefined &&
+              isBlocked(t, (id) => taskStore.getTask(id))
+                ? { blocked: true }
+                : {}),
             };
           },
           workspaceName: (workspaceId) => taskStore.getWorkspace(workspaceId)?.name,

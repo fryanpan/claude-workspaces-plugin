@@ -71,6 +71,8 @@ export interface LeadChatClient {
   onChange(fn: (s: LeadChatState) => void): void;
   /** Called when the lead says a line into the meeting, as it arrives. */
   onLeadLine(fn: (meetingId: string, line: LeadChatMeetingLine) => void): void;
+  /** Called when a task on the board may now wear a different ring. */
+  onTaskChange(fn: () => void): void;
   send(
     text: string,
     author: { id: string; name: string; kind?: string },
@@ -94,6 +96,13 @@ export interface LeadChatClient {
   close(): void;
 }
 
+const TASK_RING_EVENTS = [
+  'task.transitioned',
+  'task.unblocked',
+  'task.archived',
+  'task.restored',
+] as const;
+
 export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   const doFetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const base = `/workspaces/${encodeURIComponent(opts.workspaceId)}`;
@@ -108,6 +117,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   };
   const listeners: Array<(s: LeadChatState) => void> = [];
   const leadLines: Array<(meetingId: string, line: LeadChatMeetingLine) => void> = [];
+  const taskChanges: Array<() => void> = [];
   const changed = (): void => {
     for (const fn of listeners) fn(state);
   };
@@ -219,6 +229,14 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       // A frame this page cannot read changes nothing.
     }
   });
+  // A link's ring moves when its row's status does, when what it waits on
+  // goes done, and when it leaves or rejoins the board — the same push the
+  // board's own rows ride. An edge added or removed emits no event.
+  for (const type of TASK_RING_EVENTS) {
+    stream.addEventListener(type, () => {
+      for (const fn of taskChanges) fn();
+    });
+  }
   stream.addEventListener('error', () => {
     dropped = true;
   });
@@ -266,6 +284,9 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     },
     onLeadLine: (fn) => {
       leadLines.push(fn);
+    },
+    onTaskChange: (fn) => {
+      taskChanges.push(fn);
     },
     loadOlder,
     async uploadFile(file) {

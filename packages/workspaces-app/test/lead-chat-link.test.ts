@@ -91,6 +91,7 @@ describe('a mounted chat sends the page link', () => {
         meeting: null,
       }),
       onLeadLine: () => {},
+      onTaskChange: () => {},
       onChange: () => {},
       uploadFile: async () => ({ ok: false, error: 'offline' }),
       async loadOlder() {},

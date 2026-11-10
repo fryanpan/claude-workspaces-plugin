@@ -81,6 +81,21 @@ describe('the lead chat client', () => {
     expect(client.state().messages.map((m) => m.id)).toEqual(['a']);
   });
 
+  it('says when a task changed anywhere on the board, so a link’s status can follow', async () => {
+    const { client, stream } = setup([{ lead: null, messages: [], canTalk: true }]);
+    await settle();
+    let heard = 0;
+    client.onTaskChange(() => heard++);
+    // The four that move a row's ring: its status, its blocker's, or it
+    // leaving or rejoining the board.
+    for (const type of ['task.transitioned', 'task.unblocked', 'task.archived', 'task.restored']) {
+      stream().fire(type, { event: type });
+    }
+    // Control: a retitle moves no ring.
+    stream().fire('task.retitled', { event: 'task.retitled' });
+    expect(heard).toBe(4);
+  });
+
   it('applies a frame in place, and a later frame for the same message replaces it', async () => {
     const { client, stream } = setup([{ lead: null, messages: [], canTalk: true }]);
     await settle();

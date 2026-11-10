@@ -29,6 +29,8 @@ interface LinkInfo {
   title: string | null;
   status: string | null;
   held: boolean;
+  /** The board draws the row with its barred ring: an open after-edge. */
+  blocked?: boolean;
 }
 
 const cache = new Map<string, LinkInfo>();
@@ -54,14 +56,20 @@ export function cachedLinkHeld(url: string): boolean {
   return cache.get(url)?.held === true;
 }
 
+/** Whether the board draws the URL's row as blocked. False covers "never asked". */
+export function cachedLinkBlocked(url: string): boolean {
+  return cache.get(url)?.blocked === true;
+}
+
 /** Seed the cache (tests, or a caller that already holds the answer). */
 export function primeLinkTitle(
   url: string,
   title: string | null,
   status: string | null = null,
   held = false,
+  blocked = false,
 ): void {
-  cache.set(url, { title, status, held });
+  cache.set(url, { title, status, held, blocked });
 }
 
 export function _resetLinkTitlesForTest(): void {
@@ -99,6 +107,38 @@ export function statusChipEl(status: string, held = false): HTMLSpanElement {
   chip.setAttribute('aria-label', `Task: ${words}`);
   return chip;
 }
+
+/**
+ * The board row's own status mark — `.board-status-mark` with its
+ * `-<status>` modifier, the ring `board-island.tsx` draws on every task row —
+ * for a surface that wants a link to read like the board rather than carry
+ * the word pill. The lead chat is that surface: its links sit in a shadow
+ * root no page stylesheet reaches, so it ships the mark's rules beside it
+ * (`STATUS_MARK_STYLES`, `lead-chat/lead-chat-styles.ts`). The mark goes
+ * BEFORE the link's words, where the row puts it.
+ *
+ * A held draft keeps its status's ring, as its board row does; a blocked
+ * row wears the barred ring, as its row does. The words the ring stands for
+ * are its label, because a ring has no text of its own.
+ */
+export function statusMarkEl(status: string, held = false, blocked = false): HTMLSpanElement {
+  const mark = document.createElement('span');
+  mark.className = `board-status-mark board-status-mark-${blocked ? 'blocked' : status}`;
+  const words = held ? 'Draft' : statusMarkWords(status, blocked);
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', `Task: ${words}`);
+  mark.title = words;
+  return mark;
+}
+
+/** What a ring says aloud: the status, and "blocked" when the row waits. */
+export function statusMarkWords(status: string, blocked: boolean): string {
+  return blocked ? `${statusChipLabel(status)}, blocked` : statusChipLabel(status);
+}
+
+/** How a link shows its task's status: the word pill after the words, or
+ *  the board's ring before them. */
+export type LinkStatusStyle = 'chip' | 'mark';
 
 /** How many URLs one lookup carries — mirrors the route's own cap. */
 const BATCH_LIMIT = 100;
@@ -172,12 +212,14 @@ async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Pr
         titles?: Record<string, string | null>;
         statuses?: Record<string, string>;
         planHeld?: Record<string, boolean>;
+        blocked?: Record<string, boolean>;
       };
       for (const u of chunk)
         cache.set(u, {
           title: data.titles?.[u] ?? null,
           status: data.statuses?.[u] ?? null,
           held: data.planHeld?.[u] === true,
+          blocked: data.blocked?.[u] === true,
         });
       landed = true;
     } catch {
@@ -187,9 +229,12 @@ async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Pr
   return landed;
 }
 
+/** `style` picks how each link shows its status: the word pill by default,
+ *  the board's ring (`statusMarkEl`) where the caller asks for it. */
 export async function hydrateLinkTitles(
   root: ParentNode,
   fetcher: LinkTitleFetcher = fetch,
+  style: LinkStatusStyle = 'chip',
 ): Promise<void> {
   const anchors = [...root.querySelectorAll<HTMLAnchorElement>('a[data-ws-link][data-ws-pending]')];
   if (anchors.length === 0) return;
@@ -204,8 +249,10 @@ export async function hydrateLinkTitles(
     // textContent, never innerHTML — the title is server data, not markup.
     // A custom label (`data-ws-custom`) is the author's text and stays.
     if (info.title && !a.hasAttribute('data-ws-custom')) a.textContent = info.title;
-    a.querySelector('.ws-status-chip')?.remove();
-    if (info.status) a.append(statusChipEl(info.status, info.held));
+    a.querySelector('.ws-status-chip, .board-status-mark')?.remove();
+    if (info.status && style === 'mark')
+      a.prepend(statusMarkEl(info.status, info.held, info.blocked));
+    else if (info.status) a.append(statusChipEl(info.status, info.held));
     a.removeAttribute('data-ws-pending');
   }
 }

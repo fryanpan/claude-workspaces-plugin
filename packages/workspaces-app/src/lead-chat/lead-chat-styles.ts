@@ -30,6 +30,25 @@ button[data-meeting="true"]::after { content: ""; position: absolute; top: 2px; 
 svg { display: block; width: 22px; height: 22px; pointer-events: none; }
 `;
 
+/**
+ * The board row's status ring (`.board-status-mark` in `board.css`, drawn by
+ * `board-island.tsx`), for a task link in a reply: the page's rule cannot
+ * reach this shadow root, so its declarations are repeated here, value for
+ * value. `lead-chat-task-status.test.ts` holds the two to the same computed
+ * style for every status, and the browser case to the same drawn ring.
+ */
+export const STATUS_MARK_STYLES = `
+.board-status-mark { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1.5px solid var(--fg-muted, #6e7781); border-radius: 50%; }
+.board-status-mark-triage { border-style: dashed; border-color: var(--yellow, #bf8700); }
+.board-status-mark-blocked { border-color: var(--fg-muted, #6e7781); }
+.board-status-mark-blocked::after { content: ""; width: 8px; height: 2px; border-radius: 1px; background: var(--fg-muted, #6e7781); }
+.board-status-mark-in-progress { border-color: var(--accent, #1c7ed6); }
+.board-status-mark-in-progress::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #1c7ed6); }
+.board-status-mark-done { border-color: var(--green, #2f9e44); background: var(--green, #2f9e44); }
+.board-status-mark-done::after { content: "✓"; color: var(--bg, #fff); font-size: 11px; font-weight: 700; line-height: 1; }
+.lc-md a .board-status-mark { margin-right: 5px; vertical-align: -4px; }
+`;
+
 /** The bar and the panel: one fixed layer over the page. */
 export const LAYER_STYLES = `
 :host { all: initial; }
