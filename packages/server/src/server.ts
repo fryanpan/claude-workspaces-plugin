@@ -42,6 +42,7 @@ import {
 import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/board-agent-token.ts';
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
+import { linkCandidateOf } from './board-links.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
 import { BoardSocketRoots, boardSocketRootsPath } from './board-socket-roots.ts';
 import { openBoardSockets } from './board-sockets.ts';
@@ -3287,6 +3288,28 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     serveUpgradeAndStreamRoutes,
     taskStore,
     workspacesOfMember,
+    boardLinkRoutesCtx: {
+      workspacesOfMember,
+      findReviewItem: (id) => taskStore.findReviewItem(id),
+      parseThreadReviewItemId,
+      docPagePath: (docId, workspaceId) => {
+        const meta = docStore.peekMeta(docId);
+        const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
+        if (!url) return undefined;
+        const u = new URL(url);
+        return `${u.pathname}${u.search}`;
+      },
+      // The docs listing's own reading of "on this board" (`routes/docs.ts`).
+      linkCandidates: (workspaceId) => {
+        const index = boardIndexForListing();
+        return docStore
+          .list()
+          .filter(
+            (m) => m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
+          )
+          .map(linkCandidateOf);
+      },
+    },
     opsRoutesCtx,
     docRoutesCtx,
     appRoutesCtx,

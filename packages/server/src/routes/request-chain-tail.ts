@@ -18,6 +18,7 @@
  * Always answers: the last line is the 404.
  */
 import { handleAccessRoutes } from './access.ts';
+import { handleBoardLinkRoutes } from './board-links.ts';
 import { handleCoachRoutes } from './coach.ts';
 import { handleLandingStreamRoute } from './landing-stream.ts';
 import { handleWebhookLogRoute } from './ops.ts';
@@ -49,6 +50,7 @@ export async function serveTopLevelRoutes(
     coachRoutesCtx,
     opsRoutesCtx,
     serveShellRoutes,
+    boardLinkRoutesCtx,
   } = ctx;
   const { req, url, pathname, gate, attribution, ownerProven } = rq;
   const { visitor, visitorHome } = gate;
@@ -198,6 +200,17 @@ export async function serveTopLevelRoutes(
   // than an address, and it redirects to the board with that task open.
   const taskPage = handleTaskPageRoutes({ method: req.method, pathname, url });
   if (taskPage) return taskPage;
+
+  // ── Board links in the wrong form ── see routes/board-links.ts. Beside
+  // the task address and for its reason: `review/<id>`, an escaped `?` and
+  // `open?path=` are addresses no route above claims, each redirected to the
+  // page it names or answered with a page naming it.
+  const boardLink = handleBoardLinkRoutes(boardLinkRoutesCtx, {
+    method: req.method,
+    pathname,
+    url,
+  });
+  if (boardLink) return boardLink;
 
   // ── Stale-client 410 ── see routes/stale-client.ts. Above the
   // wrong-prefix hint and below everything that exists: an address the

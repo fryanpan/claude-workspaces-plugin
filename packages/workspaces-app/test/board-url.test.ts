@@ -8,6 +8,7 @@ import {
   libraryPlaceOf,
   parseBoardLocation,
   resourceOf,
+  taskOfItemKey,
   taskShareUrl,
 } from '../src/board/board-url.ts';
 
@@ -215,5 +216,19 @@ describe('share URLs', () => {
     expect(goalShareUrl('http://mac.local:8787', 'w1', 'g1')).toBe(
       'http://mac.local:8787/workspaces/w1?goal=g1',
     );
+  });
+});
+
+describe('taskOfItemKey', () => {
+  it('reads the task from a ticket item, a ticket decision and a task thread', () => {
+    expect(taskOfItemKey('task-review:t-1:r-2')).toEqual({ taskId: 't-1', threadId: null });
+    expect(taskOfItemKey('decision:t-1')).toEqual({ taskId: 't-1', threadId: null });
+    expect(taskOfItemKey('task-thread:task:t-1:th-9')).toEqual({ taskId: 't-1', threadId: 'th-9' });
+  });
+  it('is null for a doc thread, a goal thread and a malformed key', () => {
+    expect(taskOfItemKey('doc-thread:d-1:th-1')).toBeNull();
+    expect(taskOfItemKey('goal-thread:goal:g-1:th-1')).toBeNull();
+    expect(taskOfItemKey('task-review:t-1')).toBeNull();
+    expect(taskOfItemKey('')).toBeNull();
   });
 });

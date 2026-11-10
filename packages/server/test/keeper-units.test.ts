@@ -295,6 +295,8 @@ describe('cloudflare policy', () => {
     expect(classifyCloudflare('POST', `${st}/t1/rotate`).kind).toBe('refused');
     expect(classifyCloudflare('POST', `${st}/t1/refresh`).kind).toBe('refused');
     expect(classifyCloudflare('PUT', `${st}/t1`).kind).toBe('refused');
+    expect(classifyCloudflare('PATCH', `${st}/t1`).kind).toBe('refused');
+    expect(classifyCloudflare('DELETE', `${st}/t1`).kind).toBe('refused');
     expect(classifyCloudflare('POST', '/accounts/abc/access/Service_Tokens').kind).toBe('refused');
     expect(classifyCloudflare('GET', st).kind).not.toBe('refused');
     expect(classifyCloudflare('GET', '/accounts/../user').kind).toBe('refused');
@@ -383,6 +385,22 @@ describe('grants', () => {
 
 describe('store', () => {
   const me = process.getuid?.() ?? 0;
+
+  it("a new Cloudflare token drops the old one's permission fingerprint", () => {
+    const dir = join(tmp, 'cf-stamp');
+    mkdirSync(dir, { mode: 0o700 });
+    const store = openKeeperStore(dir);
+    if ('error' in store) throw new Error(store.error);
+    store.setCredential('cloudflare-api-token', 'test-cf-Riverbend');
+    store.setCredential('cloudflare-token-permissions', '0123456789abcdef');
+    store.setCredential('cloudflare-account-id', '0123456789abcdef0123456789abcdef');
+    expect(store.credentials().cloudflare?.permissions).toBe('0123456789abcdef');
+    store.setCredential('cloudflare-api-token', 'test-cf-Saltmarsh');
+    expect(store.credentials().cloudflare).toEqual({
+      apiToken: 'test-cf-Saltmarsh',
+      accountId: '0123456789abcdef0123456789abcdef',
+    });
+  });
 
   it('CONTROL: a mode-700 folder opens, and every file it writes is 600', () => {
     const dir = join(tmp, 'ok');

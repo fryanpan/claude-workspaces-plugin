@@ -36,7 +36,7 @@
  * reaches the tail. A branch here for that case would be a second answer to a
  * question already settled, and one no request could reach.
  */
-import { renderBoardMemberNotFound } from '../shells.ts';
+import { askedAddress, renderBoardMemberNotFound } from '../shells.ts';
 import { matchWorkspaceRoute, wantsJson } from '../workspace-path.ts';
 
 /** The tail not-found page for an address under a board, or `undefined` for
@@ -50,7 +50,7 @@ export function handleWorkspaceNotFound(rq: {
   if (wantsJson(rq.url)) return undefined;
   const match = matchWorkspaceRoute(rq.pathname);
   if (!match) return undefined;
-  return new Response(renderBoardMemberNotFound(match.workspaceId, match.rest), {
+  return new Response(renderBoardMemberNotFound(match.workspaceId, askedAddress(rq.url)), {
     status: 404,
     headers: { 'content-type': 'text/html; charset=utf-8' },
   });

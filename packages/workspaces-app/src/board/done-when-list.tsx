@@ -35,6 +35,7 @@
 import { type DoneWhenVerdict, doneWhenChipLabel } from '@claude-workspaces/core/done-when';
 import type { ComponentChild } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { currentPageHref, isAppPageHref } from '../link-open.ts';
 import type { BoardDoneWhenLine, BoardTask } from './board-model.ts';
 
 /** What the panel hands this component. */
@@ -87,7 +88,11 @@ function ProofRow(props: { proof: { text: string; url?: string } }) {
     );
   }
   return (
-    <a class="dw-proof-row" href={href} target="_blank" rel="noreferrer">
+    <a
+      class="dw-proof-row"
+      href={href}
+      {...(isAppPageHref(href, currentPageHref()) ? {} : { target: '_blank', rel: 'noreferrer' })}
+    >
       <span class="dw-proof-what">{proof.text}</span>
       <span class="dw-proof-open" aria-hidden="true">
         Open

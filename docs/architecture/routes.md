@@ -309,6 +309,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
 | `/workspaces/:ws/mockups/:docId` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/next` | GET | `routes/workspace-next.ts` | trusted-local |  |
+| `/workspaces/:ws/open` | GET | `routes/board-links.ts` | trusted-local |  |
 | `/workspaces/:ws/parallelism-cap` | GET, PUT | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/point` | POST | `routes/workspace-point.ts` | trusted-local |  |
 | `/workspaces/:ws/refs:backfill` | POST | `routes/task-status-links.ts` | trusted-local |  |
@@ -319,6 +320,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/review-items` | GET | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/review-items/:itemId` | GET | `routes/workspace-home.ts` | trusted-local |  |
 | `/workspaces/:ws/review-items/viewed` | POST | `routes/workspace-home.ts` | share-scope |  |
+| `/workspaces/:ws/review/:id` | GET | `routes/board-links.ts` | trusted-local |  |
+| `/workspaces/:ws/reviews/:id` | GET | `routes/board-links.ts` | trusted-local |  |
 | `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | owner-in-handler | the guard admits both verbs; the GET is a member’s and `workspace-settings.ts` refuses a Regular User’s PUT itself — every field it writes is board-wide |
 | `/workspaces/:ws/tasks` | GET, POST | `routes/tasks-list-create.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId` | GET | `routes/task-page.ts` | trusted-local |  |
