@@ -45,6 +45,9 @@ export interface LeadMic {
   unpause(): void;
   /** Whether the microphone's track is live now, for the playback report. */
   live(): boolean;
+  /** The page is visible again after iOS put it in the background: check
+   *  the mic still sends, and recover it if not (`recheck` below). */
+  recheck(): void;
   stop(): void;
 }
 
@@ -58,8 +61,13 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   /** Frames the current capture has made, across its pauses. */
   let framesSeen = 0;
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
+  let recheckTimer: ReturnType<typeof setTimeout> | null = null;
   /** A context started outside a tap that is not running yet. */
   let waiting: AudioContext | null = null;
+  /** A tap is asked for to rebuild a capture whose own context is unknown. */
+  let tapRebuild = false;
+  /** The context the current capture was handed, if any. */
+  let handed: AudioContext | undefined;
   /** Voice started with no tap, and the one it may ask for has not come. */
   let tapDue = false;
   /** The context says it runs and nothing came: the tap rebuilds the graph. */
@@ -75,6 +83,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     soundTimer = null;
     if (clockTimer) clearTimeout(clockTimer);
     clockTimer = null;
+    if (recheckTimer) clearTimeout(recheckTimer);
+    recheckTimer = null;
+    tapRebuild = false;
     paused = false;
     if (tapTimer) clearTimeout(tapTimer);
     tapTimer = null;
@@ -87,6 +98,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     const mine = gen;
     let frames = 0;
     framesSeen = 0;
+    handed = ctx;
     void (opts.startCapture ?? startSpokenCapture)({
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
@@ -127,7 +139,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         soundTimer = null;
         if (mine !== gen || frames > 0) return;
         // Released while an answer is said: no frame is owed.
-        if (waiting || paused) {
+        if (waiting || tapRebuild || paused) {
           soundTimer = setTimeout(noSound, NO_SOUND_MS);
           return;
         }
@@ -150,26 +162,94 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     });
   };
 
+  /** Start a capture; `carried` when no tap is behind it, so a context that
+   *  does not run asks for one. */
+  const begin = (ctx: AudioContext | undefined, carried: boolean): void => {
+    tapDue = carried;
+    rebuild = false;
+    start(ctx);
+    if (!carried || !ctx) return;
+    tapTimer = setTimeout(() => {
+      tapTimer = null;
+      // Closed: the graph moved to a context at the mic's rate, which runs.
+      if (ctx.state === 'running' || ctx.state === 'closed') return;
+      waiting = ctx;
+      opts.askForTap();
+    }, TAP_WAIT_MS);
+  };
+
+  /** Ask for one tap, which rebuilds the capture inside it (`wake`). */
+  const askToRebuild = (): void => {
+    waiting = handed ?? null;
+    tapRebuild = true;
+    rebuild = true;
+    opts.askForTap();
+  };
+
+  /**
+   * Back from the background. iOS can end or mute the track there, leave a
+   * context `interrupted` or `suspended`, or leave one `running` with its
+   * clock stopped. So: resume the context at once, then give the mic
+   * `CLOCK_CHECK_MS` to send. If it has not: a track that ended or is muted
+   * is reopened (no tap needed while the page may capture; the tap is asked
+   * for if its context does not run). Otherwise the context is suspended and
+   * resumed, and if that brings nothing either, one tap rebuilds it.
+   */
+  const recheck = (): void => {
+    const held = capture;
+    if (!held || waiting || tapRebuild) return;
+    void held.resume?.();
+    // Released while an answer is said: `unpause` watches the track it takes.
+    if (!paused) watch(held, 'after the page came back');
+  };
+
+  /** Give `held` `CLOCK_CHECK_MS` to send, then recover it as `recheck`
+   *  describes. `when` names the moment, for the report. */
+  const watch = (held: SpokenCapture, when: string): void => {
+    const mine = gen;
+    const before = framesSeen;
+    // This check answers for the mic now; a no-sound clock that ran down in
+    // the background would only stop voice it can still recover.
+    if (soundTimer) clearTimeout(soundTimer);
+    soundTimer = null;
+    if (recheckTimer) clearTimeout(recheckTimer);
+    const look = (kicked: boolean): void => {
+      recheckTimer = setTimeout(() => {
+        recheckTimer = null;
+        if (mine !== gen || paused || waiting || framesSeen > before) return;
+        // Hidden again: the next return checks afresh.
+        if (document.visibilityState === 'hidden') return;
+        const h = held.health?.();
+        if (h && (h.track !== 'live' || h.muted)) {
+          const kept = how;
+          clear();
+          how = `${kept}, track ${h.track}${h.muted ? ' and muted' : ''} ${when}, reopened`;
+          begin(makeGestureContext(), true);
+          return;
+        }
+        if (!kicked) {
+          how += `, silent ${when}, suspended and resumed`;
+          void held.kick?.();
+          look(true);
+          return;
+        }
+        askToRebuild();
+      }, CLOCK_CHECK_MS);
+    };
+    look(false);
+  };
+
   return {
     open(ctx, carried) {
-      tapDue = carried;
-      rebuild = false;
       reopened = false;
       how = carried ? 'started without a tap' : 'started in a tap';
-      start(ctx);
-      if (!carried || !ctx) return;
-      tapTimer = setTimeout(() => {
-        tapTimer = null;
-        // Closed: the graph moved to a context at the mic's rate, which runs.
-        if (ctx.state === 'running' || ctx.state === 'closed') return;
-        waiting = ctx;
-        opts.askForTap();
-      }, TAP_WAIT_MS);
+      begin(ctx, carried);
     },
     wake() {
       const ctx = waiting;
-      if (!ctx) return false;
+      if (!ctx && !tapRebuild) return false;
       waiting = null;
+      tapRebuild = false;
       tapDue = false;
       const micRate = capture?.offRate?.();
       if (micRate || rebuild) {
@@ -181,7 +261,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         start(makeGestureContext(micRate ?? undefined));
       } else {
         // Inside the gesture: the one call Safari lets start the context.
-        void ctx.resume().catch(() => {});
+        void ctx?.resume().catch(() => {});
       }
       return true;
     },
@@ -202,18 +282,13 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           opts.onRefused('The microphone could not be opened again.');
           return;
         }
-        // The reopened track has its own chance to send nothing.
-        const before = framesSeen;
-        if (soundTimer) clearTimeout(soundTimer);
-        soundTimer = setTimeout(() => {
-          soundTimer = null;
-          if (mine !== gen || paused || framesSeen > before) return;
-          const said = held.diag?.() || 'no report';
-          opts.onSilent(`${said}; ${how}, reopened after an answer`);
-        }, NO_SOUND_MS);
+        // The reopened track has its own chance to send nothing, and is
+        // recovered the way a page coming back is.
+        watch(held, 'after an answer');
       });
     },
     live: () => capture !== null && !paused,
+    recheck,
     stop: clear,
   };
 }

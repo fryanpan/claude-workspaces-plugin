@@ -14,7 +14,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackContext } from '../src/board/spoken-reply-audio.ts';
 import { PLAYBACK_REPORTS } from '../src/lead-chat/lead-chat-voice-io.ts';
-import { type LeadVoice, NO_SOUND, createLeadVoice } from '../src/lead-chat/lead-chat-voice.ts';
+import {
+  type LeadVoice,
+  TAP_TO_LISTEN,
+  createLeadVoice,
+} from '../src/lead-chat/lead-chat-voice.ts';
 import { type FakeSocket, fakeVoice } from './lead-chat-voice-fakes.ts';
 
 /** Speakers at the phone's 48 kHz, with the latencies Safari reports. */
@@ -110,15 +114,18 @@ describe('the lead chat voice, while an answer is said on an iPhone', () => {
 });
 
 describe('the lead chat voice, taking the mic back after an answer', () => {
-  it('stops and reports it when the reopened mic sends nothing', async () => {
+  it('asks for one tap that rebuilds the mic when the reopened one sends nothing', async () => {
     const { fake, ws, voice, reports } = await asking();
     fake.speak();
     await answer(ws);
     expect(voice.state().phase).toBe('listening');
     await vi.advanceTimersByTimeAsync(6_000);
-    expect(voice.state()).toMatchObject({ phase: 'off', notice: NO_SOUND });
-    const stop = reports.find((e) => e.name === 'LeadVoiceStopped');
-    expect(stop?.message).toContain('reopened after an answer');
+    // Not stopped: a silent mic the reader can bring back with a tap.
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: TAP_TO_LISTEN });
+    expect(reports.filter((e) => e.name === 'LeadVoiceStopped')).toHaveLength(0);
+    expect(voice.wake()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect([fake.mic.starts, fake.mic.stops]).toEqual([2, 1]);
   });
 
   it('keeps listening when the reopened mic sends frames', async () => {
