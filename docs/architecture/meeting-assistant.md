@@ -2423,6 +2423,10 @@ decoration (workspaces-app) renders title + live status chip beside them,
 refreshed on the board's `task.transitioned` SSE push, without ever touching
 stored content.
 
+**Retired 2026-11-09:** Bryan removed the Make Plan and Review floats from
+meeting-notes docs ("They're really confusing"); a person asks for a plan
+or a review in a comment. The paragraph below is the history.
+
 **Make Plan shows on both huddle kinds** (2026-09-01: Bryan started a
 discussion, reached a plan, and had no button). The plan gate's face rule
 admitted only `huddleKind: 'plan'`; the plan-request route never refused a

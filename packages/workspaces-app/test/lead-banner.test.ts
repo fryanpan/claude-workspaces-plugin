@@ -5,12 +5,7 @@
  */
 import type { LeadPresence } from '@claude-workspaces/core';
 import { describe, expect, it } from 'vitest';
-import {
-  leadBannerText,
-  leadReceiptSuffix,
-  mountLeadBanner,
-  parseLeadPresence,
-} from '../src/lead-banner.ts';
+import { leadBannerText, mountLeadBanner, parseLeadPresence } from '../src/lead-banner.ts';
 
 const presence = (over: Partial<LeadPresence>): LeadPresence => ({
   event: 'lead.presence',
@@ -165,12 +160,6 @@ describe('lead banner', () => {
     stop();
     m.push(presence({ live: false }));
     expect(seen).toEqual([false, true]);
-    // And the receipt copy is one function, so both floats say one thing.
-    expect(leadReceiptSuffix(presence({ live: false }))).toBe(
-      'no lead attached; answered when one joins',
-    );
-    expect(leadReceiptSuffix(presence({ live: true }))).toBeNull();
-    expect(leadReceiptSuffix(null)).toBeNull();
   });
 
   it('a watcher registered before the first answer hears nothing until it lands', async () => {

@@ -20,7 +20,6 @@
 import type { User } from '@claude-workspaces/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  POINTER_PILL_ACTIONS,
   SPINOFF_ACTIONS,
   type SpinoffAnchor,
   type SpinoffDeps,
@@ -93,23 +92,6 @@ describe('the actions', () => {
     expect(SPINOFF_ACTIONS.map((a) => a.id)).toEqual(['research', 'task']);
     expect(SPINOFF_ACTIONS.map((a) => a.label)).toEqual(['Research', 'Create Task']);
     for (const a of SPINOFF_ACTIONS) expect(Object.keys(a).sort()).toEqual(['id', 'label']);
-  });
-
-  it('the pointer pill offers Comment and nothing else', () => {
-    // Bryan, 2026-09-04: "Change Research / Comment / Add Task to just
-    // comment". What the other two did is asked for in the comment itself.
-    expect(POINTER_PILL_ACTIONS.map((a) => a.id)).toEqual(['comment']);
-    expect(POINTER_PILL_ACTIONS.map((a) => a.label)).toEqual(['Comment']);
-  });
-
-  it('does not read its one action off the spin-off list', () => {
-    // The pill's list used to be built by spreading `SPINOFF_ACTIONS`, so
-    // anything added there appeared on the pill. That coupling is what this
-    // asserts is gone: a third verb tomorrow is a button only if somebody
-    // writes the button.
-    for (const spun of SPINOFF_ACTIONS) {
-      expect(POINTER_PILL_ACTIONS.map((a) => String(a.id))).not.toContain(spun.id);
-    }
   });
 });
 

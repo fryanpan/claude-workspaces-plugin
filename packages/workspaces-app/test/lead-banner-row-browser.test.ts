@@ -122,13 +122,9 @@ function page(): string {
     </div>
   </div>
   <div class="doc-floats">
-    <button type="button" class="plan-float plan-float--make">
-      <span class="plan-float-label">Make Plan</span>
-      <span class="plan-float-sub">Ask your agent to create a plan</span>
-    </button>
-    <button type="button" class="plan-float review-float review-float--ask">
-      <span class="plan-float-label">Review</span>
-      <span class="plan-float-sub">Ask your agent to review the notes</span>
+    <button type="button" class="plan-float plan-float--approve">
+      <span class="plan-float-label">Approve Plan</span>
+      <span class="plan-float-sub">Creates the goal and tickets, starts work</span>
     </button>
   </div>
 </section>

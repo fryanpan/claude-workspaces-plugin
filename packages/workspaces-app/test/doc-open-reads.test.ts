@@ -10,10 +10,9 @@ import { MountScope } from '../src/mount-scope.ts';
  * How many times opening a doc reads its JSON record.
  *
  * The router reads `/workspaces/<ws>/docs/<id>?format=json` to pick a surface,
- * then both floats (plan gate, Review) read it as they mount, then read it
- * again when the Yjs initial sync fires the `meta` map. Five identical
- * requests per open, measured in headless Chrome on staging, and Sentry
- * raised them as an N+1.
+ * then the floats read it as they mount, then read it again when the Yjs
+ * initial sync fires the `meta` map. Five identical requests per open,
+ * measured in headless Chrome on staging, and Sentry raised them as an N+1.
  *
  * The open is driven the way the page drives it: `fetchDocMeta` (the router's
  * call), then `mountDocFloats`, then the server's state arriving as a Yjs
@@ -37,17 +36,19 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** The server: a Yjs doc whose `meta` map is the synced half of the record. */
-function fakeServer() {
+/** The server: a Yjs doc whose `meta` map is the synced half of the record.
+ *  `unsynced` is record meta the map does not carry, so only a fresh read
+ *  can show it. */
+function fakeServer({ pending = true }: { pending?: boolean } = {}) {
   const ydoc = new Y.Doc();
   const meta = ydoc.getMap('meta');
   meta.set('contentRevision', 1);
+  if (pending) meta.set('planState', 'pending');
   const reads: string[] = [];
   const posts: string[] = [];
-  const board = { lead: 'harbor-agent' };
+  const unsynced: Record<string, unknown> = {};
   const record = () => ({
-    meta: { type: 'markdown', huddle: true, huddleKind: 'plan', ...meta.toJSON() },
-    leadAgentId: board.lead,
+    meta: { type: 'markdown', huddle: true, huddleKind: 'plan', ...meta.toJSON(), ...unsynced },
     tasks: [],
   });
   vi.stubGlobal(
@@ -56,19 +57,14 @@ function fakeServer() {
       const url = String(input);
       if (init?.method === 'POST') {
         posts.push(url);
-        if (url.endsWith('/plan-request')) {
-          ydoc.transact(() => {
-            meta.set('planRequestedAt', 1_789_000_000_000);
-            meta.set('planRequestedBy', 'Reviewer');
-          });
-        }
-        return new Response('{}', { status: 200 });
+        if (url.endsWith('/plan')) meta.set('planState', 'approved');
+        return new Response(JSON.stringify({ released: [] }), { status: 200 });
       }
       if (url === RECORD_URL) reads.push(url);
       return new Response(JSON.stringify(record()), { status: 200 });
     }),
   );
-  return { ydoc, meta, reads, posts, board };
+  return { ydoc, meta, reads, posts, unsynced };
 }
 
 /** Open the doc: router read, floats mount, first sync lands. */
@@ -103,16 +99,13 @@ async function openDoc(server: ReturnType<typeof fakeServer>) {
   return { ydoc, scope, sync };
 }
 
-const planFloat = () =>
-  document.querySelector<HTMLButtonElement>('#editor-pane .plan-float:not(.review-float)');
-const reviewFloat = () => document.querySelector<HTMLButtonElement>('#editor-pane .review-float');
+const planFloat = () => document.querySelector<HTMLButtonElement>('#editor-pane .plan-float');
 
 describe('opening a doc', () => {
-  it('reads the doc record once, and both floats render from that answer', async () => {
+  it('reads the doc record once, and the float renders from that answer', async () => {
     const server = fakeServer();
     const { sync } = await openDoc(server);
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
-    await vi.waitFor(() => expect(reviewFloat()?.dataset.face).toBe('ask'));
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
     sync();
     // Let any read the sync would have started go out.
     await new Promise((r) => setTimeout(r, 0));
@@ -124,7 +117,7 @@ describe('opening a doc', () => {
     const server = fakeServer();
     const { sync } = await openDoc(server);
     sync();
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
     const before = server.reads.length;
     server.meta.set('contentRevision', 2);
     server.meta.set('contentRevision', 3);
@@ -132,32 +125,24 @@ describe('opening a doc', () => {
     expect(server.reads.length).toBe(before);
   });
 
-  it('reads once more when a stamp moves, and both floats see it', async () => {
+  it('reads once more when a stamp moves, and the float sees it', async () => {
     const server = fakeServer();
     const { sync } = await openDoc(server);
     sync();
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
     const before = server.reads.length;
-    // One transaction, as `setReviewRequested` writes it.
-    server.ydoc.transact(() => {
-      server.meta.set('reviewRequestedAt', 1_789_000_000_001);
-      server.meta.set('reviewRequestedBy', 'Reviewer');
-    });
-    await vi.waitFor(() => expect(reviewFloat()?.dataset.face).toBe('requested'));
-    // Both floats woke; they shared the one read.
+    server.meta.set('planState', 'approved');
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('none'));
     expect(server.reads.length - before).toBe(1);
   });
 
   it('catches a stamp that moved between the router read and the sync', async () => {
-    const server = fakeServer();
+    const server = fakeServer({ pending: false });
     const { sync } = await openDoc(server);
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
-    server.ydoc.transact(() => {
-      server.meta.set('planRequestedAt', 1_789_000_000_002);
-      server.meta.set('planRequestedBy', 'Reviewer');
-    });
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('none'));
+    server.meta.set('planState', 'pending');
     sync();
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('requested'));
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
     expect(server.reads).toHaveLength(2);
   });
 
@@ -165,17 +150,20 @@ describe('opening a doc', () => {
     const server = fakeServer();
     const { sync } = await openDoc(server);
     sync();
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('make'));
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
+    const before = server.reads.length;
     planFloat()?.click();
-    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('requested'));
-    expect(server.posts.some((u) => u.endsWith('/plan-request'))).toBe(true);
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approved'));
+    expect(server.posts.some((u) => u.endsWith('/plan'))).toBe(true);
+    await vi.waitFor(() => expect(server.reads.length).toBeGreaterThan(before));
   });
+
   it('does not mount on an older read when the latest one fails', async () => {
-    const server = fakeServer();
+    const server = fakeServer({ pending: false });
     // A read whose mount never came: a superseded navigation.
     await fetchDocMeta(DOC);
     // Nothing in the synced map moves, so only a fresh read can show this.
-    server.board.lead = 'saltmarsh-agent';
+    server.unsynced.planState = 'pending';
     const fetchStub = globalThis.fetch;
     vi.stubGlobal(
       'fetch',
@@ -186,8 +174,8 @@ describe('opening a doc', () => {
     );
     const { sync } = await openDoc(server);
     sync();
-    // The floats asked the server rather than rendering the stale seed.
-    await vi.waitFor(() => expect(planFloat()?.textContent).toContain('saltmarsh-agent'));
+    // The float asked the server rather than rendering the stale seed.
+    await vi.waitFor(() => expect(planFloat()?.dataset.face).toBe('approve'));
   });
 });
 

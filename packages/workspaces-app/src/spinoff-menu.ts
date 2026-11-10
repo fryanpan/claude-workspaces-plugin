@@ -4,9 +4,9 @@
  * A discussion produces lines that are not discussion: a thing to do, a thing
  * to look up. Today the only gesture over a selection is "comment", so both
  * of those arrive as prose somebody has to re-read later and act on by hand.
- * This is what the pointer pill (`pointer-pill.ts`) puts behind that same
- * selection: two ways for a line to leave the doc as work, anchored on the
- * line itself so nothing has to be re-described.
+ * This is what a pill over that selection once offered: two ways for a line
+ * to leave the doc as work, anchored on the line itself so nothing has to be
+ * re-described.
  *
  * ONLY on huddle docs. An ordinary attachment's pill stays exactly what it
  * was — a comment affordance — because a doc under review is not a place work
@@ -30,8 +30,7 @@
  * lead to fill — the mock's flow, and the same comment channel Make Plan
  * and Review ride.
  *
- * Where the two buttons sit is `pointer-pill.ts`'s problem; this module is
- * the verbs behind them.
+ * This module is the verbs behind those buttons.
  *
  * THE BUTTONS ARE GONE (2026-09-04, Bryan's call: "Change Research / Comment
  * / Add Task to just comment"). The pill offers one action now, and the
@@ -94,25 +93,6 @@ export const SPINOFF_ACTIONS: readonly SpinoffAction[] = [
   { id: 'research', label: 'Research' },
   { id: 'task', label: 'Create Task' },
 ] as const;
-
-/**
- * What the pointer pill offers: Comment, and nothing else.
- *
- * The comment was nearly lost once already — dropping "Leave a comment" from
- * the old menu took the comment itself away with it, and a huddle doc's
- * selection became the one place a comment could not be left (owner,
- * 2026-09-01: "keep a comment option available"). It is now the whole pill.
- * It is not a spin-off: nothing is filed until the person sends it.
- *
- * Still a LIST of one rather than a bare button, because the pill is a
- * toolbar and the shape is what a second action would be added back to.
- */
-export type PointerPillActionId = 'comment';
-export const POINTER_PILL_ACTIONS: readonly {
-  id: PointerPillActionId;
-  label: string;
-  primary?: boolean;
-}[] = [{ id: 'comment', label: 'Comment' }];
 
 /** A task title is a line of a title, not a paragraph of one. */
 const TITLE_MAX = 80;
