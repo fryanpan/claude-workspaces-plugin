@@ -372,6 +372,14 @@ describe('a link address is never read as emphasis', () => {
     expect(out).toContain('><em>the</em> mock</a>');
   });
 
+  it('drops a set-aside marker typed into the comment itself', () => {
+    const forged = `${String.fromCharCode(0xe000)}0${String.fromCharCode(0xe001)}`;
+    const out = renderCommentMarkdown(`Bob ${forged} [a](https://saltmarsh.example/a_b_c)`);
+    expect(out).toBe(
+      '<p>Bob 0 <a href="https://saltmarsh.example/a_b_c" target="_blank" rel="noopener noreferrer">a</a></p>',
+    );
+  });
+
   it('closes a mark that ends right after a URL', () => {
     const out = renderCommentMarkdown('*see https://saltmarsh.example/tides*');
     expect(out).toContain('<em>see <a href="https://saltmarsh.example/tides"');

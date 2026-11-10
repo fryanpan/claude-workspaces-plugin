@@ -145,14 +145,14 @@ export function relativeTargetHref(target: string, pathname: string): string | n
 /** Inline marks on an ALREADY-escaped string. Order matters: code first so
  *  its contents aren't re-marked, links last so labels can carry marks. */
 function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
-  let out = escaped.replace(/[]/g, '');
+  let out = escaped.replace(HOLD_MARKS, '');
   out = out.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
   // An address is not prose. Board ids are base64url, so `w--_xK3_P` holds
   // `_xK3_`, and the marks below turned it into `<em>` inside the href. Each
   // link target and bare URL is set aside before the marks run and put back
   // after, so only the words around it are marked.
   const held: string[] = [];
-  const hold = (s: string): string => `${held.push(s) - 1}`;
+  const hold = (s: string): string => `${HOLD_OPEN}${held.push(s) - 1}${HOLD_CLOSE}`;
   out = out.replace(/\]\(([^)]+)\)/g, (_m, url: string) => `](${hold(url)})`);
   // A mark closing right after a URL (`*see https://x*`) keeps its delimiter.
   out = out.replace(ADDRESS, (m) => {
@@ -164,7 +164,7 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
   // single *italic* / _italic_ — the ** case is already consumed above.
   out = out.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<em>$2</em>');
   out = out.replace(/(^|[^_\w])_([^_\s][^_]*?)_/g, '$1<em>$2</em>');
-  out = out.replace(/(\d+)/g, (_m, n: string) => held[Number(n)] ?? '');
+  out = out.replace(HELD, (_m, n: string) => held[Number(n)] ?? '');
   out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label: string, rawUrl: string) => {
     // The URL text was HTML-escaped; unescape &amp; for parsing, then re-escape.
     const url = rawUrl.replace(/&amp;/g, '&');
@@ -217,9 +217,19 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
  */
 const BARE_URL = /(?:https?:\/\/[^\s()]+|(?<=^|[\s(])\/workspaces\/[^\s()]+)/g;
 
+/** The markers around a set-aside address: two private-use characters, which
+ *  are stripped from the input first so a comment cannot forge one. */
+const HOLD_OPEN = String.fromCharCode(0xe000);
+const HOLD_CLOSE = String.fromCharCode(0xe001);
+const HOLD_MARKS = new RegExp(`[${HOLD_OPEN}${HOLD_CLOSE}]`, 'g');
+const HELD = new RegExp(`${HOLD_OPEN}(\\d+)${HOLD_CLOSE}`, 'g');
+
 /** The same candidate as `BARE_URL`, found before the marks run, so it stops
  *  at a tag (`</code>`) and at a set-aside address's own markers. */
-const ADDRESS = /(?:https?:\/\/[^\s()<]+|(?<=^|[\s(])\/workspaces\/[^\s()<]+)/g;
+const ADDRESS = new RegExp(
+  String.raw`(?:https?:\/\/[^\s()<${HOLD_OPEN}${HOLD_CLOSE}]+|(?<=^|[\s(])\/workspaces\/[^\s()<${HOLD_OPEN}${HOLD_CLOSE}]+)`,
+  'g',
+);
 
 /**
  * Only a link to THIS page's own server may earn a trusted title. A foreign
