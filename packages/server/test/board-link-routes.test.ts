@@ -196,39 +196,6 @@ describe('board links over HTTP', () => {
     expect(elsewhere.status).toBe(404);
   });
 
-  it('opens a mock or doc link that names the wrong board under the board that holds it', async () => {
-    // `attach_mockup` files on the agent's own board; the link names the
-    // board the person is reading (9 Nov: "Nothing on this board answers to").
-    const source = join(dataDir, 'saltmarsh-mock.html');
-    writeFileSync(source, '<!doctype html><html><body><h1>Saltmarsh</h1></body></html>');
-    const mockId = (
-      (await post(`/workspaces/${otherWs}/docs`, {
-        docId: 'saltmarsh-mock',
-        type: 'mockup',
-        sourceUrl: source,
-      })) as { docId: string }
-    ).docId;
-    for (const name of ['saltmarsh-mock', mockId]) {
-      const got = await location(`/workspaces/${ws}/mockups/${name}?thread=t-1`);
-      expect(got.status, name).toBe(302);
-      expect(got.location, name).toBe(`/workspaces/${otherWs}/mockups/${name}?thread=t-1`);
-      // Positive control: the address it sends the reader to is the mock.
-      const landed = await location(got.location ?? '');
-      expect(landed.status, name).toBe(200);
-    }
-    const doc = await location(`/workspaces/${otherWs}/docs/${planDocId}`);
-    expect(doc.location).toBe(`/workspaces/${ws}/docs/${planDocId}`);
-  });
-
-  it('still names the address when no board holds the id, and answers a JSON caller data', async () => {
-    const none = await location(`/workspaces/${ws}/mockups/d-nowhere`);
-    expect(none.status).toBe(404);
-    expect(none.body).toContain(`/workspaces/${ws}/mockups/d-nowhere`);
-    const json = await local(`/workspaces/${otherWs}/docs/${planDocId}?format=json`);
-    expect(json.status).toBe(404);
-    expect(json.headers.get('location')).toBeNull();
-  });
-
   it('leaves a JSON caller and a write alone', async () => {
     const json = await local(`/workspaces/${ws}/review/${itemId}?format=json`);
     expect(json.status).toBe(404);

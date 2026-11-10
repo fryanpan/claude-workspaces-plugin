@@ -118,40 +118,6 @@ export function handleBoardLinkRoutes(
   return undefined;
 }
 
-/** The page collections whose member may be filed on a board other than the
- *  one a link names. */
-const PAGE_ON_OTHER_BOARD = /^(docs|mockups|whiteboards)\/([^/]+)$/;
-
-/**
- * A page link that names the wrong board: `/workspaces/<B>/mockups/<id>` for
- * a mock filed on board A. An agent writes the board it is talking on, and
- * `attach_mockup` files the mock on the agent's own board, so the link and
- * the filing disagree while both the mock and the board exist. The scope
- * middleware refuses it, rightly, because the member is not on B; this turns
- * that refusal into a redirect to the same page under the board that holds
- * it (9 Nov: such a link opened "Nothing on this board answers to …").
- *
- * Called by the scope middleware's not-found page, only for a person's GET
- * that no share or collaboration visitor made: a visitor's scope is one
- * board, and the host guard has already refused them a member it does not
- * hold. The target is built from the board id the store answered and the
- * id and collection the caller sent, which matched the pattern above, so it
- * cannot leave `/workspaces/`.
- */
-export function pageOnOtherBoard(
-  workspacesOfMember: BoardLinkRoutesContext['workspacesOfMember'],
-  rq: { method: string; rest: string; url: URL },
-): Response | undefined {
-  if (rq.method !== 'GET' || wantsJson(rq.url)) return undefined;
-  const page = PAGE_ON_OTHER_BOARD.exec(rq.rest);
-  if (!page) return undefined;
-  const kind = page[1] ?? '';
-  const raw = page[2] ?? '';
-  const owner = workspacesOfMember(kind, safeDecodeSegment(raw))[0];
-  if (owner === undefined) return undefined;
-  return redirect(`/workspaces/${encodeURIComponent(owner)}/${kind}/${raw}${rq.url.search}`);
-}
-
 /** Where `review/<id>` should have gone, or undefined when nothing on this
  *  board answers to the id. */
 function legacyTarget(
