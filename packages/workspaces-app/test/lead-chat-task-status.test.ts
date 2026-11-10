@@ -37,6 +37,13 @@ describe('a task link drawn for the lead chat', () => {
     expect(a.querySelector('.ws-status-chip')).toBeNull();
   });
 
+  it('wears the barred ring for a row the board draws as blocked', () => {
+    primeLinkTitle(TASK_URL, 'Moor the Riverbend ferry', 'todo', false, true);
+    const mark = linkIn(renderCommentMarkdown(TASK_URL, { statusMarks: true })).firstElementChild;
+    expect(mark?.className).toBe('board-status-mark board-status-mark-blocked');
+    expect(mark?.getAttribute('aria-label')).toBe('Task: To do, blocked');
+  });
+
   it('keeps the word pill everywhere else', () => {
     primeLinkTitle(TASK_URL, 'Moor the Riverbend ferry', 'in-progress');
     const a = linkIn(renderCommentMarkdown(TASK_URL));

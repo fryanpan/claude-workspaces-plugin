@@ -46,10 +46,13 @@ export interface MarkRead {
 
 export interface TaskStatusWidthRun {
   width: number;
-  /** Per task status ('in-progress', 'todo'): the board row's element. */
+  /** Per task state ('in-progress', 'todo', 'blocked'): the board row's element. */
   board: Record<string, MarkRead | null>;
   /** Per task status: the element beside the chat's link to that task. */
   chat: Record<string, MarkRead | null>;
+  /** Last size only: after the in-progress task goes done elsewhere, with the
+   *  chat already open, the class each chat link's element reaches. */
+  live?: { done: string | null; unblocked: string | null };
 }
 
 export interface TaskStatusRun {
@@ -182,11 +185,22 @@ async function main(): Promise<void> {
     const ids: Record<string, string> = {
       'in-progress': make('Paint the Saltmarsh slipway'),
       todo: make('Moor the Riverbend ferry'),
+      blocked: make('Load the Harborlight barge'),
     };
     const moved = server.tasks.transition(ids['in-progress'] as string, 'in-progress', {
       actor: ALICE,
     });
     if (!moved.ok) throw new Error('the transition was refused');
+    // Blocked: waits on the in-progress task, so its row wears the barred
+    // ring. Through the route, which refreshes the board's projection; the
+    // store's own setter emits no event and the board would never hear it.
+    const edge = await fetch(`${base}/workspaces/${ws}/tasks/${ids.blocked}/after`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ after: [ids['in-progress']], author: ALICE }),
+    });
+    if (!edge.ok)
+      throw new Error(`the after-edge was refused: ${edge.status} ${await edge.text()}`);
 
     const board = `/workspaces/${ws}`;
     const link = (id: string): string => `${base}${board}?task=${id}`;
@@ -206,10 +220,11 @@ async function main(): Promise<void> {
       role: 'agent',
       author: { id: LEAD.agentId, name: LEAD.agentName },
       text: [
-        'The two tasks:',
+        'The three tasks:',
         '',
         `- ${link(ids['in-progress'] as string)}`,
         `- ${link(ids.todo as string)}`,
+        `- ${link(ids.blocked as string)}`,
       ].join('\n'),
       ts: t0 + 1000,
       replyTo: 'ask',
@@ -240,21 +255,21 @@ async function main(): Promise<void> {
         return (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null;
       });
       await click(cdp, btn.x, btn.y);
+      // The element a chat link carries once its status has landed, whatever
+      // it is called: the pill before this branch, the ring after it.
+      const readChat = async (id: string): Promise<MarkRead | null> =>
+        (await cdp.evaluate(`(() => {
+          const root = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
+          const a = [...(root?.querySelectorAll('.lc-msg[data-message-id="reply"] .lc-md a') ?? [])]
+            .find((x) => (x.getAttribute('data-ws-link') || x.getAttribute('href') || '').includes('${id}'));
+          if (!a || a.hasAttribute('data-ws-pending')) return null;
+          return (${READ_MARK})(a.querySelector("span"));
+        })()`)) as MarkRead | null;
       const chatRead: Record<string, MarkRead | null> = {};
       for (const [status, id] of Object.entries(ids)) {
-        // The element the link carries once its status has landed, whatever
-        // it is called: the pill before this branch, the ring after it.
         chatRead[status] = await until(
           `the chat link for ${status}`,
-          async () => {
-            return (await cdp.evaluate(`(() => {
-              const root = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
-              const a = [...(root?.querySelectorAll('.lc-msg[data-message-id="reply"] .lc-md a') ?? [])]
-                .find((x) => (x.getAttribute('data-ws-link') || x.getAttribute('href') || '').includes('${id}'));
-              if (!a || a.hasAttribute('data-ws-pending')) return null;
-              return (${READ_MARK})(a.querySelector("span"));
-            })()`)) as MarkRead | null;
-          },
+          () => readChat(id),
           8000,
         ).catch(() => null);
       }
@@ -270,11 +285,34 @@ async function main(): Promise<void> {
           data: string;
         };
         writeFileSync(
-          join(shotDir, `chat-task-status-${width}.png`),
+          join(shotDir, `chat-task-status-${width}-blocked.png`),
           Buffer.from(png.data, 'base64'),
         );
       }
-      widths.push({ width, board: boardRead, chat: chatRead });
+      let live: TaskStatusWidthRun['live'];
+      if (width === 430) {
+        // A change made elsewhere, with this chat already open: the task the
+        // blocked one waits on goes done. Both links must follow, no reload.
+        step('live: the blocker goes done');
+        const done = server.tasks.transition(ids['in-progress'] as string, 'done', {
+          actor: ALICE,
+        });
+        if (!done.ok) throw new Error('the done transition was refused');
+        const reach = (id: string, want: string): Promise<string | null> =>
+          until(
+            `the chat link to read ${want}`,
+            async () => {
+              const c = (await readChat(id))?.className ?? '';
+              return c.endsWith(want) ? c : null;
+            },
+            3000,
+          ).catch(async () => (await readChat(id))?.className ?? null);
+        live = {
+          done: await reach(ids['in-progress'] as string, 'board-status-mark-done'),
+          unblocked: await reach(ids.blocked as string, 'board-status-mark-todo'),
+        };
+      }
+      widths.push({ width, board: boardRead, chat: chatRead, ...(live ? { live } : {}) });
       cdp.close();
     }
     process.stdout.write(`\n${JSON.stringify({ widths } satisfies TaskStatusRun)}\n`);

@@ -21,7 +21,7 @@ const DRIVER = join(import.meta.dirname, 'lead-chat-task-status-browser-driver.t
 /** One bundle build, two launches, two page loads. */
 const SUITE_MS = 200_000;
 const SPAWN_MS = 190_000;
-const STATUSES = ['in-progress', 'todo'] as const;
+const STATUSES = ['in-progress', 'todo', 'blocked'] as const;
 
 let run: TaskStatusRun | null = null;
 const result = (): TaskStatusRun => {
@@ -51,6 +51,14 @@ describe.skipIf(CHROME === null)('a task link in the lead’s reply', () => {
         expect(w.chat[status]?.className, `${w.width} ${status} chat`).toBe(board?.className);
       }
     }
+  }, 60_000);
+
+  it('follows a change made elsewhere into the open chat, with no reload', () => {
+    const last = result().widths.at(-1);
+    expect(last?.live).toEqual({
+      done: 'board-status-mark board-status-mark-done',
+      unblocked: 'board-status-mark board-status-mark-todo',
+    });
   }, 60_000);
 
   it('draws the same ring the board row draws', () => {

@@ -26,12 +26,8 @@
  */
 import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
 import { currentPageHref, isAppPageHref } from './link-open.ts';
-import {
-  cachedLinkStatus,
-  cachedLinkTitle,
-  scheduleLinkTitleHydration,
-  statusChipLabel,
-} from './link-titles.ts';
+import { withLinkStatus } from './link-status-html.ts';
+import { cachedLinkStatus, cachedLinkTitle, scheduleLinkTitleHydration } from './link-titles.ts';
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) =>
@@ -201,7 +197,7 @@ function inline(escaped: string, opts: CommentMarkdownOpts = {}): string {
       `${base} class="ws-link" data-ws-link="${escapeHtml(url)}"` +
       `${named ? '' : ' data-ws-custom=""'}${pending ? ' data-ws-pending=""' : ''}`;
     const text = title ? escapeHtml(title) : label;
-    return `<a ${attrs}>${withStatus(text, status, opts)}</a>`;
+    return `<a ${attrs}>${withLinkStatus(text, url, opts.statusMarks === true)}</a>`;
   });
   out = linkifyWorkspaceUrls(out, opts);
   return out;
@@ -252,22 +248,6 @@ function isSameOriginWorkspaceUrl(url: string): boolean {
   }
 }
 
-/** The chip a task/goal link wears, built for the escaped-HTML string path.
- *  The status is server data, not markup — escaped into both the class and
- *  the words. */
-function statusChipHtml(status: string): string {
-  return `<span class="ws-status-chip ws-chip-${escapeHtml(status)}">${escapeHtml(statusChipLabel(status))}</span>`;
-}
-
-/** A link's words with its status: pill after, or ring before (`statusMarkEl`). */
-function withStatus(text: string, status: string | null | undefined, opts: CommentMarkdownOpts) {
-  if (!status) return text;
-  if (!opts.statusMarks) return `${text}${statusChipHtml(status)}`;
-  const s = escapeHtml(status);
-  const words = escapeHtml(statusChipLabel(status));
-  return `<span class="board-status-mark board-status-mark-${s}" role="img" aria-label="Task: ${words}" title="${words}"></span>${text}`;
-}
-
 /** Trailing characters that read as punctuation AFTER a pasted URL, entity
  *  spellings included — `see http://…/docs/x.` must not eat the period. */
 function trimUrlTail(s: string): string {
@@ -314,7 +294,6 @@ function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
         return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${trimmed}</a>${tail}`;
       }
       const title = cachedLinkTitle(url);
-      const status = cachedLinkStatus(url);
       if (title === undefined) sawPending = true;
       const attrs =
         `href="${escapeHtml(url)}" class="ws-link" data-ws-link="${escapeHtml(url)}"` +
@@ -322,7 +301,7 @@ function linkifyWorkspaceUrls(html: string, opts: CommentMarkdownOpts): string {
         `${isAppPageHref(url, currentPageHref()) ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
       // Title text via escapeHtml (server data is not markup); the raw-URL
       // fallback is `trimmed`, which is already escaped text.
-      return `<a ${attrs}>${withStatus(title ? escapeHtml(title) : trimmed, status, opts)}</a>${tail}`;
+      return `<a ${attrs}>${withLinkStatus(title ? escapeHtml(title) : trimmed, url, opts.statusMarks === true)}</a>${tail}`;
     });
   });
   if (sawPending) scheduleLinkTitleHydration();

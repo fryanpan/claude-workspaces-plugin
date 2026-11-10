@@ -44,10 +44,9 @@ export interface LinkTitleSources {
    *  machine — title, home board, and status. The board check needs the
    *  workspaceId; the status becomes the chip. `planHeld` marks a draft row
    *  held behind an unapproved plan (goals never carry it), so the chip can
-   *  say what the row IS rather than "triage". */
-  task(
-    taskId: string,
-  ): { title: string; workspaceId: string; status: TaskStatus; planHeld?: boolean } | undefined;
+   *  say what the row IS rather than "triage". `blocked` marks a row its
+   *  board draws with the barred ring (an open after-edge). */
+  task(taskId: string): (TaskLinkFacts & { workspaceId: string }) | undefined;
   workspaceName(workspaceId: string): string | undefined;
 }
 
@@ -58,12 +57,26 @@ export interface ResolvedLink {
   title: string | null;
   status?: TaskStatus;
   planHeld?: boolean;
+  blocked?: boolean;
+}
+
+/** What a task source says about one row. */
+interface TaskLinkFacts {
+  title: string;
+  status: TaskStatus;
+  planHeld?: boolean;
+  blocked?: boolean;
 }
 
 /** The task-source answer folded into a ResolvedLink — one spot so the three
  *  task-backed URL shapes cannot disagree on how `planHeld` rides along. */
-function taskLink(t: { title: string; status: TaskStatus; planHeld?: boolean }): ResolvedLink {
-  return { title: t.title, status: t.status, ...(t.planHeld === true ? { planHeld: true } : {}) };
+function taskLink(t: TaskLinkFacts): ResolvedLink {
+  return {
+    title: t.title,
+    status: t.status,
+    ...(t.planHeld === true ? { planHeld: true } : {}),
+    ...(t.blocked === true ? { blocked: true } : {}),
+  };
 }
 
 export function linkInfoFor(url: string, sources: LinkTitleSources): ResolvedLink {
@@ -129,6 +142,7 @@ export const LINK_TITLE_BATCH_LIMIT = 100;
  * `statuses` holds an entry ONLY for task/goal-backed URLs, and `planHeld`
  * only for the subset of those that are drafts held behind an unapproved
  * plan (so the chip reads "Draft" rather than the hold's technical status).
+ * `blocked` holds only the rows the board draws as blocked.
  */
 export function linkTitlesFor(
   urls: string[],
@@ -137,16 +151,19 @@ export function linkTitlesFor(
   titles: Record<string, string | null>;
   statuses: Record<string, TaskStatus>;
   planHeld: Record<string, boolean>;
+  blocked: Record<string, boolean>;
 } {
   const titles: Record<string, string | null> = {};
   const statuses: Record<string, TaskStatus> = {};
   const planHeld: Record<string, boolean> = {};
+  const blocked: Record<string, boolean> = {};
   for (const url of urls.slice(0, LINK_TITLE_BATCH_LIMIT)) {
     if (typeof url !== 'string') continue;
     const info = linkInfoFor(url, sources);
     titles[url] = info.title;
     if (info.status !== undefined) statuses[url] = info.status;
     if (info.planHeld === true) planHeld[url] = true;
+    if (info.blocked === true) blocked[url] = true;
   }
-  return { titles, statuses, planHeld };
+  return { titles, statuses, planHeld, blocked };
 }

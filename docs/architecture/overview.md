@@ -1159,6 +1159,11 @@ security.md says why.
 The panel draws the lead's messages with the comments' escape-first
 markdown renderer (`comment-markdown.ts`, which gains pipe tables and an
 opt-in link for a bare URL) and a person's own as plain text.
+A task link there wears the board row's own status ring rather than the
+threads' word pill (`link-status-html.ts` draws either into the renderer's
+string; the barred ring comes from `blocked` on the link lookup), and the
+client's `onTaskChange` re-asks every ring when a task moves on the board
+stream.
 The chat also mirrors the lead's own Claude Code session, through the
 plugin's hooks: UserPromptSubmit (a prompt typed in its terminal, or a board
 event it took, to `routes/prompt-marks.ts`), Stop (the message a turn ended

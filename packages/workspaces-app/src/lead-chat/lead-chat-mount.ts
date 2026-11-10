@@ -237,6 +237,8 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     meet?.sync();
     render();
   });
+  // Live: a task changed anywhere, so every ring in the chat asks again.
+  client.onTaskChange(() => view.refreshTaskLinks());
 
   /** Where the reader is, with the link to what they have open, and
    *  whether they can read the chat as well as hear the answer. */

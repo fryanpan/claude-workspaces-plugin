@@ -42,6 +42,7 @@ describe('POST /workspaces/<ws>/links:titles', () => {
     titles: Record<string, string | null>;
     statuses: Record<string, string>;
     planHeld: Record<string, boolean>;
+    blocked?: Record<string, boolean>;
   }> => {
     const r = await post(`/workspaces/${wsId}/links:titles`, { urls });
     expect(r.status).toBe(200);
@@ -49,6 +50,7 @@ describe('POST /workspaces/<ws>/links:titles', () => {
       titles: Record<string, string | null>;
       statuses: Record<string, string>;
       planHeld: Record<string, boolean>;
+      blocked?: Record<string, boolean>;
     };
   };
 
@@ -264,6 +266,26 @@ describe('POST /workspaces/<ws>/links:titles', () => {
       const after = await lookup([heldUrl]);
       expect(after.planHeld[heldUrl]).toBeUndefined();
       expect(after.statuses[heldUrl]).toBe('todo');
+    });
+    it('marks a task blocked while an after-edge is open, as its board row draws it', async () => {
+      const actor = { id: 'known-alice', name: 'Alice', kind: 'person' as const };
+      const make = (title: string): string => {
+        const made = handle.tasks.createTask(wsId, { title, body: 'Alice can moor.', actor });
+        if (!made.ok) throw new Error('refused');
+        return made.task.id;
+      };
+      const first = make('Dredge the Riverbend channel');
+      const waits = make('Moor at Riverbend');
+      expect(handle.tasks.setDependencies(waits, { after: [first] }, { actor }).ok).toBe(true);
+      const waitsUrl = `${base}/workspaces/${wsId}?task=${waits}`;
+      const firstUrl = `${base}/workspaces/${wsId}?task=${first}`;
+      const before = await lookup([waitsUrl, firstUrl]);
+      expect(before.statuses[waitsUrl]).toBe('todo');
+      expect(before.blocked?.[waitsUrl]).toBe(true);
+      // Control: the blocker itself waits on nothing.
+      expect(before.blocked?.[firstUrl]).toBeUndefined();
+      expect(handle.tasks.transition(first, 'done', { actor }).ok).toBe(true);
+      expect((await lookup([waitsUrl])).blocked?.[waitsUrl]).toBeUndefined();
     });
   });
 
