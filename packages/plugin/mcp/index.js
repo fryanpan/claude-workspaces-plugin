@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.357";
+var version2 = "0.1.358";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -17683,7 +17683,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. To add, edit or remove a row of a table, use find_and_replace on its pipe rows, not replace_block on the table. Markdown in each edit is parsed either way.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Replacing such a block with markdown that holds an image writes the image directly and strikes the old words as a suggestion. An image line takes a display width in pixels and footnotes after it: ![alt](src){width=480}^[note]. To add, edit or remove a row of a table, use find_and_replace on its pipe rows, not replace_block on the table. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
