@@ -118,6 +118,21 @@ describe('keeper-bin', () => {
     expect(r.out).not.toContain(value);
     const empty = keeper(['check'], { CW_KEEPER_DIR: storeDir('held-none', 0o700) });
     expect(empty.out).toContain('credentials: none\napps: none\n');
+    expect(empty.out).toContain('cloudflare-token-permissions: none\n');
+  });
+
+  it("check prints the Cloudflare token's permission fingerprint, and import takes only hex", () => {
+    const env = { CW_KEEPER_DIR: storeDir('stamp', 0o700) };
+    const bad = keeper(['import', 'cloudflare-token-permissions'], env, 'not-a-fingerprint');
+    if (bad.out.includes('unsafe:')) return; // guard refused, as above
+    expect(bad.status).toBe(1);
+    expect(bad.out).toContain('16 hex characters');
+    expect(keeper(['import', 'cloudflare-token-permissions'], env, '0123456789abcdef').status).toBe(
+      0,
+    );
+    expect(keeper(['check'], env).out).toContain(
+      'cloudflare-token-permissions: 0123456789abcdef\n',
+    );
   });
 
   it('check names a store others can open', () => {

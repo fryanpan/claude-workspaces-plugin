@@ -7,9 +7,10 @@
  * touches a real Keychain, Fly, Cloudflare or launchd.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cfPermissionsStamp, manualTokenSteps } from '../src/keeper/keeper-setup-cloudflare.ts';
 import { CF_TOKEN_PERMISSIONS } from '../src/keeper/keeper-setup.ts';
 import {
   ACCOUNT,
@@ -56,6 +57,7 @@ describe('keeper-setup', () => {
       'keeper import fly-org-slug',
       'fetch POST api.cloudflare.com/client/v4/user/tokens',
       'keeper import cloudflare-api-token',
+      'keeper import cloudflare-token-permissions',
       'keeper import cloudflare-account-id',
       'fly apps list --json --org harborlight-org',
       'keeper adopt cw-harborlight',
@@ -80,6 +82,7 @@ describe('keeper-setup', () => {
     expect(cred(w, 'fly-org-slug')).toBe('harborlight-org');
     expect(cred(w, 'cloudflare-api-token')).toBe(NEW_CF);
     expect(cred(w, 'cloudflare-account-id')).toBe(ACCOUNT);
+    expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
     expect(readFileSync(join(w.state, 'apps'), 'utf8')).toBe('cw-harborlight\ncw-riverbend\n');
 
     // The new Cloudflare token names every permission, on this one account.
@@ -148,6 +151,80 @@ describe('keeper-setup', () => {
     expect(r.out).not.toContain(PASTED_CF);
   });
 
+  it("makes the keeper's token again when it was made without Access: Service Tokens Edit", async () => {
+    expect((await run(w)).status).toBe(0);
+    // The token the setup made before Edit was in the list.
+    const before = CF_TOKEN_PERMISSIONS.filter((p) => p.api !== 'Access: Service Tokens Write');
+    writeFileSync(join(w.state, 'cred-cloudflare-token-permissions'), cfPermissionsStamp(before));
+    const r = await run(w);
+    expect(r.status).toBe(0);
+    expect(r.confirms).toBe(1);
+    expect(r.out).toContain("the keeper's lacks this release's permissions; a new one is made");
+    // The account is read through the keeper's current token, then a new one is made.
+    const order = [
+      'fetch GET localhost:45678/v1/cloudflare/accounts',
+      'fetch POST api.cloudflare.com/client/v4/user/tokens',
+      'keeper import cloudflare-api-token',
+      'keeper import cloudflare-token-permissions',
+      'keeper import cloudflare-account-id',
+    ];
+    const idx = order.map((p) => at(r.calls, p));
+    expect(idx).toEqual([...idx].sort((a, b) => a - b));
+    expect(JSON.stringify(r.cf.minted[0])).toContain(
+      `"pg${CF_TOKEN_PERMISSIONS.findIndex((p) => p.api === 'Access: Service Tokens Write')}"`,
+    );
+    expect(cred(w, 'cloudflare-api-token')).toBe(NEW_CF);
+    expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
+    expect(r.out).toContain("The keeper's previous Cloudflare token is no longer used");
+    // Fly and the apps were done already and are left alone.
+    expect(r.calls.some((c) => /^(fly tokens|keeper import fly|keeper adopt)/.test(c))).toBe(false);
+    for (const s of SECRETS) expect(r.out).not.toContain(s);
+    // And the run after that has nothing to make.
+    const again = await run(w);
+    expect(again.calls.some((c) => c.startsWith('keeper import'))).toBe(false);
+  });
+
+  it('treats a token stored before the fingerprint existed as one to make again', async () => {
+    expect((await run(w)).status).toBe(0);
+    rmSync(join(w.state, 'cred-cloudflare-token-permissions'));
+    const dry = await run(w, { dryRun: true });
+    expect(dry.out).toContain("would replace the keeper's token, made without these permissions");
+    expect(dry.out).toContain('- Access: Service Tokens Edit');
+    expect(dry.calls.some((c) => c.startsWith('keeper import') || c.startsWith('fetch'))).toBe(
+      false,
+    );
+    const r = await run(w, { cf: { canMint: false, minted: [] }, pasted: PASTED_CF });
+    expect(r.status).toBe(0);
+    expect(r.asked).toBe(1);
+    expect(cred(w, 'cloudflare-api-token')).toBe(PASTED_CF);
+    expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
+  });
+
+  it("makes the token again even when the keeper's old one can no longer read the account", async () => {
+    expect((await run(w)).status).toBe(0);
+    rmSync(join(w.state, 'cred-cloudflare-token-permissions'));
+    // The keeper's agent API stays up; its Cloudflare read now fails.
+    const r = await run(w, { keeperAccountsFail: true });
+    expect(r.status).toBe(0);
+    // The account is confirmed after the new token is made, before it is stored.
+    expect(r.confirms).toBe(2);
+    expect(r.out).toContain(`Cloudflare account: ${ACCOUNT_NAME}`);
+    expect(cred(w, 'cloudflare-api-token')).toBe(NEW_CF);
+    expect(cred(w, 'cloudflare-token-permissions')).toBe(cfPermissionsStamp());
+  });
+
+  it('an earlier run that stored the token and its fingerprint only adds the account id', async () => {
+    expect((await run(w)).status).toBe(0);
+    rmSync(join(w.state, 'cred-cloudflare-account-id'));
+    const r = await run(w);
+    expect(r.status).toBe(0);
+    expect(r.calls.filter((c) => c.startsWith('keeper import'))).toEqual([
+      'keeper import cloudflare-account-id',
+    ]);
+    expect(r.calls.some((c) => c.includes('api.cloudflare.com'))).toBe(false);
+    expect(cred(w, 'cloudflare-account-id')).toBe(ACCOUNT);
+  });
+
   it('stops when this user can read the keeper store', async () => {
     chmodSync(join(w.root, 'state'), 0o700);
     const r = await run(w);
@@ -166,6 +243,25 @@ describe('keeper-setup', () => {
     expect(r.status).toBe(1);
     expect(r.out).toContain('unsafe: /x is writable');
     expect(r.calls.some((c) => c.startsWith('fly'))).toBe(false);
+  });
+});
+
+describe("the keeper's Cloudflare permission list", () => {
+  it('grants Access: Service Tokens Edit on the account, and the dashboard steps name it', () => {
+    expect(CF_TOKEN_PERMISSIONS).toContainEqual({
+      dashboard: 'Access: Service Tokens Edit',
+      api: 'Access: Service Tokens Write',
+      scope: 'account',
+    });
+    expect(manualTokenSteps()).toContain('       - Access: Service Tokens Edit');
+    // Still no API Tokens permission of any kind.
+    expect(CF_TOKEN_PERMISSIONS.some((p) => p.api.startsWith('API Tokens'))).toBe(false);
+  });
+
+  it('fingerprints the list without regard to order, and changes when it changes', () => {
+    expect(cfPermissionsStamp([...CF_TOKEN_PERMISSIONS].reverse())).toBe(cfPermissionsStamp());
+    expect(cfPermissionsStamp(CF_TOKEN_PERMISSIONS.slice(1))).not.toBe(cfPermissionsStamp());
+    expect(cfPermissionsStamp()).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 

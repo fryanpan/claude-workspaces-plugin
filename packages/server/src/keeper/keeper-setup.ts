@@ -21,22 +21,16 @@
  * retiring the old tokens, is deliberately not here: that one is Bryan's.
  */
 import { spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SECRET_ACCOUNT, storedSecretService } from '../../../core/src/secret-name.ts';
 import { CALLER_HEADER, CALLER_TOKEN_FILE } from './keeper-callers.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
-import { ensureCallerToken } from './keeper-setup-callers.ts';
+import { atomicWrite, ensureCallerToken, withKeeperUrl } from './keeper-setup-callers.ts';
 import {
   type CfAccount,
+  cfPermissionsStamp,
+  cfTokenNeed,
   manualTokenSteps,
   mintKeeperToken,
   oneAccount,
@@ -200,24 +194,33 @@ async function steps(o: SetupOptions): Promise<void> {
     );
   if (!FLY_SLUG.test(slug)) throw new Stop(`the Keychain's Fly org slug '${slug}' is not a slug`);
   const needFly = !held.has('fly-org-token') || !held.has('fly-org-slug');
-  const needCf = !(held.has('cloudflare-api-token') && held.has('cloudflare-account-id'));
+  const cfNeed = cfTokenNeed(held, [...listed('cloudflare-token-permissions')][0] ?? null);
+  const needCf = cfNeed !== 'done';
   let account: CfAccount | null = null;
   let current: string | null = null;
   if (needCf && !o.dryRun) {
-    if (held.has('cloudflare-api-token')) {
-      // An earlier run stored the token and stopped: ask through the keeper.
+    if (cfNeed !== 'make') {
+      // The keeper holds a token: ask through it which account it sees.
       const r = await o.fetch(`${url}/v1/cloudflare/accounts`, { headers: api });
       const body = (await r.json().catch(() => ({}))) as { result?: unknown };
       const one = theOneAccount(body.result);
-      if ('why' in one) throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
-      account = one;
-    } else {
-      current = keychain('cloudflare-api-token');
+      // A remake replaces that token anyway; the new token's account is then
+      // confirmed after it is made, as for a pasted one.
+      if ('why' in one && cfNeed === 'account')
+        throw new Stop(`the keeper's Cloudflare token: ${one.why}`);
+      if (!('why' in one)) account = one;
+    }
+    if (cfNeed !== 'account') current = keychain('cloudflare-api-token');
+    if (cfNeed === 'make') {
       const one = current ? await oneAccount(o.fetch, current) : null;
       if (one && !('why' in one)) account = one;
     }
   }
   o.print(`   Fly org:            ${slug}`);
+  if (cfNeed === 'remake')
+    o.print(
+      "   Cloudflare token:   the keeper's lacks this release's permissions; a new one is made",
+    );
   if (!needCf) o.print('   Cloudflare account: stored already');
   else if (account) o.print(`   Cloudflare account: ${account.name}`);
   else if (o.dryRun)
@@ -257,20 +260,22 @@ async function steps(o: SetupOptions): Promise<void> {
 
   step('2. A new Cloudflare token, and the one account it sees');
   if (!needCf) {
-    ok('the keeper holds a Cloudflare token and account id already');
+    ok('the keeper holds a Cloudflare token with these permissions, and the account id, already');
   } else if (o.dryRun) {
+    if (cfNeed === 'remake') would("replace the keeper's token, made without these permissions");
     would('make a token with the current one; if it cannot, ask you to make one, with:');
     for (const l of manualTokenSteps()) o.print(`   ${l}`);
     would('import the token, and the account id Cloudflare returns for it');
-  } else if (held.has('cloudflare-api-token')) {
+  } else if (cfNeed === 'account') {
     importValue('cloudflare-account-id', (account as CfAccount).id);
   } else {
-    const name = `claude-workspaces keeper ${new Date().toISOString().slice(0, 10)}`;
+    const name = `claude-workspaces keeper ${new Date().toISOString().slice(0, 16)}`;
     const minted = current
       ? await mintKeeperToken(o.fetch, current, name)
       : { why: 'the Keychain holds no cloudflare-api-token' };
     let token: string;
     let remove: string;
+    const keep = 'token' in minted ? `"${name}"` : 'the one you just made';
     if ('token' in minted) {
       token = minted.token;
       remove = `Delete the token "${name}" in the Cloudflare dashboard: My Profile > API Tokens`;
@@ -298,7 +303,12 @@ async function steps(o: SetupOptions): Promise<void> {
         throw new Stop(`you did not confirm; nothing was stored. ${remove}`);
     }
     importValue('cloudflare-api-token', token, remove);
+    importValue('cloudflare-token-permissions', cfPermissionsStamp());
     importValue('cloudflare-account-id', seen.id);
+    if (cfNeed === 'remake')
+      o.print(
+        `   The keeper's previous Cloudflare token is no longer used. In the dashboard (My Profile > API Tokens) keep ${keep} and delete the older claude-workspaces keeper token.`,
+      );
   }
 
   step('3. Adopt the project apps made before the keeper');
@@ -441,29 +451,6 @@ async function probe(
   if (!gone.ok)
     throw new Stop(`could not withdraw the probe; open ${body.approveUrl} and press Deny`);
   ok('withdrew the probe, so it created nothing and no tap can run it');
-}
-
-/** The plist with CW_KEEPER_URL set in EnvironmentVariables, or null when it has none. */
-export function withKeeperUrl(xml: string, url: string): string | null {
-  const existing = /(<key>CW_KEEPER_URL<\/key>\s*<string>)[^<]*(<\/string>)/;
-  if (existing.test(xml)) return xml.replace(existing, `$1${url}$2`);
-  const dict = /(<key>EnvironmentVariables<\/key>\s*<dict>)(\s*)/;
-  const m = dict.exec(xml);
-  if (!m) return null;
-  const indent = m[2] ?? '\n        ';
-  return xml.replace(
-    dict,
-    `$1${indent}<key>CW_KEEPER_URL</key>${indent}<string>${url}</string>${indent}`,
-  );
-}
-
-/** Replace a file in one rename, keeping its mode (600 for a new one). */
-function atomicWrite(path: string, text: string): void {
-  const tmp = `${path}.keeper-setup.tmp`;
-  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
-  writeFileSync(tmp, text, { mode });
-  chmodSync(tmp, mode);
-  renameSync(tmp, path);
 }
 
 /**

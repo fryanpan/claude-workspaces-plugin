@@ -18,6 +18,7 @@ import {
   type BoardMembersView,
   accessLinkLabel,
   accessWriteOf,
+  cloudflareStep,
   mountBoardMembers,
   readAccessMatch,
   roleLabel,
@@ -254,6 +255,20 @@ describe('who has access', () => {
     expect(m.toasts).toEqual(['Filed @riverbend.example for the owner’s approval']);
     await submit(m, 'ops@riverbend.example');
     expect(m.error.textContent).toBe('this board is locked against sharing');
+  });
+
+  it('says the Cloudflare Access step is still needed after an add lands, and not after a proposal', async () => {
+    const results: AccessWriteResult[] = [{ ok: true }, { ok: true, proposed: true }];
+    let n = 0;
+    const m = mount({ add: async () => results[n++] as AccessWriteResult });
+    await m.handle.refresh();
+    await submit(m, 'alice@harborlight.example');
+    expect(m.toasts).toEqual(['alice@harborlight.example can now sign in']);
+    expect(m.error.textContent).toBe(cloudflareStep('alice@harborlight.example'));
+    expect(m.error.textContent).toContain('Cloudflare Access');
+    expect(m.error.classList.contains('acc-ask')).toBe(true);
+    await submit(m, 'alice@saltmarsh.example');
+    expect(m.error.textContent).toBe('');
   });
 
   it('points the link at what is waiting for this board', async () => {
