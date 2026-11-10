@@ -124,6 +124,14 @@ hands a second caller the request already in flight and forgets it the moment
 that round settles, which is a shared read and not a cache with a lifetime.
 `link-titles.ts` holds the same shape for its lookup POST, keyed per URL.
 
+**A link says when what it points at waits on the reader.** The same lookup
+answers `needsReview` per URL: `server/src/link-review-marks.ts` decides it
+from the rules the Home queue already uses (a task's open review count, a
+doc's own declared thread asks, and ticket items that link the doc), and the
+route cuts the answer to the visitor's scope (`share/ref-scope.ts`). The
+client draws one mark after the link and re-asks on the board stream's
+review, thread and transition events.
+
 **A destructive action asks for a recent sign-in, decided in one place on
 each side.** `core/src/counted-routes.ts` is the one list of the counted
 methods and paths; `server/src/fresh-signin.ts` reads it, decides the
