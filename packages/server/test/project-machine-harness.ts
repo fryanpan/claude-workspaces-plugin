@@ -96,7 +96,26 @@ done
 exec "$@"`,
   );
   // The release check answers nothing, so the machine runs the image's app.
-  write('bun', `${record}\ncase "$*" in *bin.ts*) exec /bin/sleep 1000;; esac\nexit 0`);
+  // The lead's network wall (lead-egress.ts) applies, its proxy stays up and
+  // its probe holds,
+  // unless a test leaves `.egress-apply` (the reason it fails) or
+  // `.egress-probe` (an exit code, then the probe's line) in the log folder:
+  // the entrypoint gives bun only PATH, so a file is how a test reaches it.
+  write(
+    'bun',
+    `${record}
+case "$*" in
+  *bin.ts*) exec /bin/sleep 1000;;
+  *"lead-egress.ts apply"*)
+    if [ -e "${log}/.egress-apply" ]; then cat "${log}/.egress-apply"; exit 1; fi
+    echo "allowed: stub"; exit 0;;
+  *"lead-egress.ts probe"*)
+    if [ -e "${log}/.egress-probe" ]; then { read -r c; cat; } < "${log}/.egress-probe"; exit "$c"; fi
+    echo "stub probe held"; exit 0;;
+  *"lead-proxy.ts serve"*) echo "[lead-proxy] listening (stub)"; exec /bin/sleep 1000;;
+esac
+exit 0`,
+  );
   // The health probe: no answer, unless a test says otherwise. Never the
   // real curl: port 8787 on a developer's machine is somebody's server.
   write('curl', 'printf 000');

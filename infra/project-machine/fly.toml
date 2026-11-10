@@ -37,7 +37,13 @@
 #                                 transcription, ElevenLabs and Gemini
 #   CW_LEAD_AGENT_NAME            the lead's agent name; `<project>-lead` unless set
 #   CW_LEAD_REMOTE_CONTROL        `1` starts the lead's session with Remote Control
-#   CW_LEAD_MEMORY_MAX            the lead's cgroup memory ceiling; 1280M unless set
+#   CW_LEAD_MEMORY_MAX            the lead's memory ceiling; 1280M unless set. Its
+#                                 cgroup's memory.max, or without a cgroup v2
+#                                 memory controller a watchdog's (lead-memory.sh)
+#   CW_LEAD_EGRESS                `open` runs the lead and the dev server without
+#                                 their network wall and its proxy
+#                                 (lead-egress.allow); unset, neither runs when
+#                                 the wall cannot be applied
 #   CW_RELEASE_POLL_SECONDS       how often the machine checks for a signed release;
 #                                 300 unless set
 #   CW_RELEASE_CHANNEL_URL        where it checks; this repo's server-channel

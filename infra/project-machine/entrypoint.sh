@@ -20,11 +20,17 @@
 #   lead      the lead agent's Claude Code session (lead.sh), with its own
 #             sign-in, its board's socket and its repo's deploy key, and
 #             nothing else. The server refuses its loopback TCP calls, so it
-#             reaches only its own board, through that board's socket.
+#             reaches only its own board, through that board's socket. Its
+#             connections reach loopback only, and out only through the
+#             proxy to the hosts in lead-egress.allow (wall_network); its
+#             memory has a ceiling (lead_cgroup, else lead-memory.sh).
+#   cwproxy   that proxy (lead-proxy.ts), with PATH and nothing else.
 #   cwdev     the project's dev server, when CW_DEV_SERVER_CMD names one, with
-#             PATH and nothing else. It binds loopback; the board proxies it
+#             PATH and the proxy's address. It binds loopback; the board proxies it
 #             (attach_app) behind the board's own sign-in. The server refuses
 #             its loopback TCP calls, and it is in no board's socket group.
+#             It runs code the lead writes, so it is behind the lead's
+#             network wall too.
 #
 # A user's processes can read each other's environment (/proc/<pid>/environ),
 # so a secret kept from the server has to live under another uid, not merely
@@ -70,6 +76,10 @@ RELEASE_KEY="$APP/infra/project-machine/release-signing-key.pub"
 BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
+# The lead's uid, fixed in the Dockerfile, and /proc. Overridable only so a
+# test can run this off a machine.
+LEAD_UID=10004
+PROC="${CW_MACHINE_PROC_ROOT:-/proc}"
 # The dev server's folder. Group cwdevsrc (cwdev and lead, fixed in the
 # Dockerfile) owns it, setgid, so the lead's checkout there is the one the
 # dev server reads and the dev server's caches are ones the lead can clear.
@@ -194,11 +204,85 @@ else
 fi
 pids+=($!)
 
+# The lead and the dev server's network wall (lead-egress.ts): their
+# connections reach loopback and nothing else, DNS included. Their way out is
+# the CONNECT proxy on 127.0.0.1:3128 (lead-proxy.ts), run as cwproxy, which
+# the wall does not hold; it opens a connection only to a host name in
+# lead-egress.allow. Both run only behind it, because the dev server runs
+# code the lead writes, so either could carry a board's data out. Applied
+# once, by whichever of them starts first; CW_LEAD_EGRESS=open (a Fly
+# secret, for a machine whose kernel cannot load the rules) runs both
+# without it. The rules are applied as root, then a probe as the lead checks
+# that a public address, an unlisted name and the proxy to an unlisted name
+# are refused, and that the model API answers through the proxy. Every
+# outcome is logged.
+EGRESS_STATE=""
+PROXY_URL=http://127.0.0.1:3128
+egress() { (only_env PATH; bun "$HERE/lead-egress.ts" "$@"); }
+wall_network() {
+  if [ -n "$EGRESS_STATE" ]; then
+    [ "$EGRESS_STATE" != failed ]
+    return
+  fi
+  if [ "${CW_LEAD_EGRESS:-walled}" = open ]; then
+    EGRESS_STATE=open
+    log "the lead's network is NOT walled: CW_LEAD_EGRESS=open, so the lead and the dev server may connect anywhere"
+    return 0
+  fi
+  local out status=0
+  out=$(egress apply 2>&1) || status=$?
+  if [ "$status" != 0 ]; then
+    EGRESS_STATE=failed
+    log "the lead's network is NOT walled: ${out:-lead-egress.ts apply exited $status}"
+    return 1
+  fi
+  log "the lead's network wall is in: $out"
+  # The proxy, started again 5s after it exits: a lead that crashes it loses
+  # its own way out for 5s and never stops the machine.
+  (
+    while :; do
+      (
+        only_env PATH
+        run_as cwproxy bun "$HERE/lead-proxy.ts" serve
+      ) 2>&1 | while IFS= read -r line; do log "$line"; done
+      log "the lead's proxy exited; starting it again in 5s"
+      sleep 5
+    done
+  ) &
+  pids+=($!)
+  status=0
+  out=$( (only_env PATH; run_as lead bun "$HERE/lead-egress.ts" probe) 2>&1) || status=$?
+  case $status in
+    0) log "the lead's network wall holds: $out" ;;
+    3) log "the lead's network wall is in but UNPROVEN: $out" ;;
+    *)
+      EGRESS_STATE=failed
+      log "the lead's network is NOT walled: the probe as the lead says: ${out:-it exited $status}"
+      return 1
+      ;;
+  esac
+  EGRESS_STATE=walled
+}
+
+# The proxy's address, for a walled child's environment. Every client the
+# lead runs reads one of these spellings: Claude Code and Bun the upper case,
+# git (libcurl) and curl the lower. ssh reads neither (lead.sh).
+proxy_env() {
+  [ "$EGRESS_STATE" = walled ] || return 0
+  export HTTPS_PROXY="$PROXY_URL" HTTP_PROXY="$PROXY_URL" https_proxy="$PROXY_URL" \
+    http_proxy="$PROXY_URL" NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1
+}
+PROXY_VARS="HTTPS_PROXY HTTP_PROXY https_proxy http_proxy NO_PROXY no_proxy"
+
 # The lead agent's memory: a cgroup v2 group of its own with a ceiling, so a
 # lead that grows is killed alone and the server keeps running. Prints the
-# group, or fails when the machine has no memory controller to use.
+# group, or fails when the machine has no memory controller to use. A
+# machine whose init mounted no cgroup filesystem gets one mounted here.
 lead_cgroup() {
   local cg="$CGROUP/cw-lead"
+  if [ -d "$CGROUP" ] && [ ! -e "$CGROUP/cgroup.controllers" ]; then
+    mount -t cgroup2 cgroup2 "$CGROUP" 2>/dev/null || true
+  fi
   grep -qw memory "$CGROUP/cgroup.controllers" 2>/dev/null || return 1
   grep -qw memory "$CGROUP/cgroup.subtree_control" 2>/dev/null ||
     echo +memory >"$CGROUP/cgroup.subtree_control" 2>/dev/null || return 1
@@ -241,12 +325,23 @@ elif [ -z "$LEAD_BOARD" ]; then
   log "CW_LEAD_BOARD unset: no lead agent runs"
 elif ! lead_token_ok; then
   log "the lead's sign-in was not made for ${LEAD_ORG:-this org} (CW_LEAD_TOKEN_ORG does not match it): no lead agent runs; machine:deploy on the Mac sets it one, or machine:tokens move"
+elif ! wall_network; then
+  log "no lead agent runs, because its network is not walled (CW_LEAD_EGRESS=open runs it without the wall)"
 else
+  # Without a cgroup, a root watchdog kills the lead's processes once their
+  # total passes the cap (lead-memory.sh). A watchdog that cannot run says
+  # so and leaves the machine up.
   if cg=$(lead_cgroup); then
-    log "the lead's memory is capped at $LEAD_MEMORY_MAX"
+    log "the lead's memory is capped at $LEAD_MEMORY_MAX by its cgroup, $cg"
   else
     cg=""
-    log "the lead's memory is NOT capped: no cgroup v2 memory controller at $CGROUP"
+    log "no cgroup v2 memory controller at $CGROUP: the lead's memory is capped at $LEAD_MEMORY_MAX by a watchdog (lead-memory.sh) that kills its processes once their total passes it"
+    (
+      bash "$HERE/lead-memory.sh" watch "$LEAD_MEMORY_MAX" "$LEAD_UID" ||
+        log "the lead's memory is NOT capped: its watchdog exited"
+      exec sleep infinity
+    ) &
+    pids+=($!)
   fi
   (
     child=""
@@ -256,15 +351,26 @@ else
         if [ -n "$cg" ]; then
           echo "$BASHPID" >"$cg/cgroup.procs" || log "could not join $cg"
         fi
+        # First for the kernel's OOM killer, cgroup or not, so a machine that
+        # runs out before the cap is reached loses the lead and not the
+        # server. Root's write also sets the floor, so the lead cannot lower it.
+        echo 1000 >"$PROC/$BASHPID/oom_score_adj" 2>/dev/null ||
+          log "could not set the lead's oom_score_adj"
         app="${FLY_APP_NAME:-project}"
         export CW_BOARD_SOCKET="$SOCKETS/$LEAD_BOARD.sock" CW_WORKSPACE_ID="$LEAD_BOARD" \
           CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
           CW_LEAD_ROOT="$LEAD_ROOT" CW_LEAD_TOKEN_LABEL="$LEAD_TOKEN_LABEL" \
-          DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash
+          DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash \
+          DISABLE_TELEMETRY=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
+        # The last two keep Claude Code off the telemetry and connector hosts
+        # the proxy refuses. Not CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+        # which turns off Remote Control as well.
+        proxy_env
+        # shellcheck disable=SC2086
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
           CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_TOKEN_LABEL CW_LEAD_REMOTE_CONTROL \
           CW_LEAD_GITHUB_DEPLOY_KEY \
-          DISABLE_AUTOUPDATER
+          DISABLE_AUTOUPDATER DISABLE_TELEMETRY ENABLE_CLAUDEAI_MCP_SERVERS $PROXY_VARS
         # 007, not 077: a file's group is the lead's own group, which holds
         # nobody else, except in the setgid dev folder, where it is
         # cwdevsrc's, so the dev server can read the checkout there.
@@ -283,14 +389,16 @@ else
 fi
 
 # The project's dev server, when CW_DEV_SERVER_CMD names one: a command line
-# run by bash in $DEV_ROOT/work as cwdev, with PATH and nothing else, so it
+# run by bash in $DEV_ROOT/work as cwdev, with PATH and the proxy's address, so it
 # holds no secret and reaches the board only as the internet does. It must
 # bind 127.0.0.1 on a port of its own (the server's, 8787, is refused at
 # attach). It is started again when it exits, after a wait that doubles from
 # 5s to 60s and resets once a run lasts 5 minutes; it never stops the
 # machine. The command is an operator setting (fly secrets set), never a
 # value the lead or a board can write.
-if [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
+if [ -n "${CW_DEV_SERVER_CMD:-}" ] && ! wall_network; then
+  log "no dev server runs, because its network is not walled (CW_LEAD_EGRESS=open runs it without the wall)"
+elif [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
   (
     cmd="$CW_DEV_SERVER_CMD"
     child=""
@@ -299,7 +407,9 @@ if [ -n "${CW_DEV_SERVER_CMD:-}" ]; then
     while :; do
       started=$SECONDS
       (
-        only_env PATH
+        proxy_env
+        # shellcheck disable=SC2086
+        only_env PATH $PROXY_VARS
         umask 007
         cd "$DEV_ROOT" || exit 1
         # The folder is made by cwdev, so it is cwdev's and cwdevsrc's.

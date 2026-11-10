@@ -47,8 +47,11 @@ FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14
 # and the lead and nobody else: the lead's board socket is that group's
 # (entrypoint.sh). `cwdevsrc` holds the lead and the dev server's user
 # (`cwdev`) and nobody else: the dev server's folder is that group's.
+# `iptables` (nft and legacy, IPv4 and IPv6) loads the lead's network wall
+# (lead-egress.ts). `cwproxy` runs the proxy that is the wall's one way out
+# (lead-proxy.ts); the wall does not hold it.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini tmux \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iptables openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
@@ -56,15 +59,16 @@ RUN apt-get update \
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \
   && useradd --uid 10005 --create-home --shell /usr/sbin/nologin cwdev \
   && useradd --uid 10006 --create-home --shell /usr/sbin/nologin cwrelease \
+  && useradd --uid 10007 --create-home --shell /usr/sbin/nologin cwproxy \
   && groupadd --gid 10010 cwboard \
   && groupadd --gid 10011 cwdevsrc \
   && usermod -aG cwboard cw \
   && usermod -aG cwboard lead \
   && usermod -aG cwdevsrc cwdev \
   && usermod -aG cwdevsrc lead \
-  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev /home/cwrelease
+  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev /home/cwrelease /home/cwproxy
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
-# The lead clones and pushes its project's repo over SSH with a deploy key
+# The lead clones and fetches its project's repo over SSH with a deploy key
 # (lead.sh); GitHub's host keys are pinned, not learned on first use.
 COPY infra/project-machine/github-known-hosts.txt /etc/ssh/ssh_known_hosts
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
