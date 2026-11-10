@@ -62,6 +62,8 @@ function harness(
     flushTimeoutMs?: number;
     /** Advanced options on the open, as the relay would pass them. */
     tuning?: Record<string, number | string | boolean | string[]>;
+    /** The one language the speaker speaks, as the spoken panel passes it. */
+    language?: string;
   } = {},
 ) {
   const sockets: FakeSocket[] = [];
@@ -85,6 +87,7 @@ function harness(
     sampleRate: 16_000,
     detectSpeakers: opts.detectSpeakers ?? true,
     ...(opts.tuning ? { tuning: opts.tuning } : {}),
+    ...(opts.language ? { language: opts.language } : {}),
     onTurn: (t) => {
       raw.push({ ...t });
       const { engineMs: _engineMs, audioEndMs: _audioEndMs, ...rest } = t;
@@ -219,6 +222,51 @@ describe('soniox config frame', () => {
     await h.opening;
     const first = JSON.parse(h.fake().textFrames()[0] ?? '{}') as Record<string, unknown>;
     expect(first.endpoint_sensitivity).toBe(-0.4);
+  });
+});
+
+describe('soniox language', () => {
+  it('a session that names its language hints it strictly and asks for the tags', () => {
+    const config = sonioxConfig(16_000, false, undefined, 'en');
+    expect(config.language_hints).toEqual(['en']);
+    expect(config.language_hints_strict).toBe(true);
+    expect(config.enable_language_identification).toBe(true);
+  });
+
+  it('a session that names none, a meeting, leaves detection to the vendor', () => {
+    const config = sonioxConfig(16_000, true);
+    expect('language_hints' in config).toBe(false);
+    expect('language_hints_strict' in config).toBe(false);
+    expect('enable_language_identification' in config).toBe(false);
+  });
+
+  it('a person’s own hints still win over the session language', () => {
+    expect(sonioxConfig(16_000, false, { language_hints: ['es'] }, 'en').language_hints).toEqual([
+      'es',
+    ]);
+  });
+
+  it('a settled turn carries the language most of its words were tagged', async () => {
+    const h = harness({ detectSpeakers: false, language: 'en' });
+    h.fake().open();
+    await h.opening;
+    const first = JSON.parse(h.fake().textFrames()[0] ?? '{}') as Record<string, unknown>;
+    expect(first.language_hints).toEqual(['en']);
+    h.fake().tokens([
+      { text: 'Ja', is_final: true, end_ms: 200, language: 'sv' },
+      { text: END_TOKEN, is_final: true },
+    ]);
+    h.fake().tokens([
+      { text: 'Ship', is_final: true, end_ms: 900, language: 'en' },
+      { text: ' Harborlight', is_final: true, end_ms: 1200, language: 'de' },
+      { text: ' now.', is_final: true, end_ms: 1400, language: 'en' },
+      { text: END_TOKEN, is_final: true },
+    ]);
+    const finals = h.turns.filter((t) => t.final);
+    expect(finals.map((t) => [t.text, t.language])).toEqual([
+      ['Ja', 'sv'],
+      ['Ship Harborlight now.', 'en'],
+    ]);
   });
 });
 

@@ -48,6 +48,7 @@ import type {
   EngineSocketArgs,
   EngineSocketFactory,
 } from './transcribe-assemblyai.ts';
+import { mostTagged, readToken } from './transcribe-soniox-tokens.ts';
 import type {
   TranscriptionEngine,
   TranscriptionOpenOpts,
@@ -55,6 +56,8 @@ import type {
 } from './transcribe.ts';
 
 const STREAM_URL = 'wss://stt-rt.soniox.com/transcribe-websocket';
+
+export { speakerLetter } from './transcribe-soniox-tokens.ts';
 
 /** The current real-time model. v4 is an alias for it until 2026-06-30. */
 export const SONIOX_MODEL = 'stt-rt-v5';
@@ -143,6 +146,7 @@ export function sonioxConfig(
   sampleRate: number,
   detectSpeakers: boolean,
   tuning?: MeetingTuning,
+  language?: string,
 ): Record<string, unknown> {
   const { context_terms: contextTerms, ...rest } = tuning ?? {};
   return {
@@ -160,6 +164,15 @@ export function sonioxConfig(
     // same rule as AssemblyAI holds: a session nobody called a conversation
     // does not ask, so a solo transcript never grows invented voices.
     ...(detectSpeakers ? { enable_speaker_diarization: true } : {}),
+    // A speaker of one known language: without a hint a breath is
+    // transcribed as a word of any language (`foreignNoise`, pause-gate.ts).
+    ...(language
+      ? {
+          language_hints: [language],
+          language_hints_strict: true,
+          enable_language_identification: true,
+        }
+      : {}),
     // AFTER the fixed fields it could never be allowed to override — the
     // sanitizer only passes spec keys, and none of them collide, but the
     // order states the intent.
@@ -167,43 +180,6 @@ export function sonioxConfig(
     ...(Array.isArray(contextTerms) && contextTerms.length > 0
       ? { context: { terms: contextTerms } }
       : {}),
-  };
-}
-
-/**
- * Soniox numbers its speakers ("1", "2"); the rest of the product — the
- * rename UI, the roster, the record — speaks AssemblyAI's letters ("A",
- * "B"). One deterministic map so a turn's speaker means the same thing
- * whichever engine labelled it; a label past "Z" or non-numeric passes
- * through untouched rather than being invented around.
- */
-export function speakerLetter(raw: unknown): string | undefined {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return undefined;
-  const s = String(raw).trim();
-  if (!s) return undefined;
-  const n = Number(s);
-  if (Number.isInteger(n) && n >= 1 && n <= 26) return String.fromCharCode(64 + n);
-  return s;
-}
-
-/** One token as the wire carries it, reduced to what this adapter reads. */
-interface SonioxToken {
-  text: string;
-  isFinal: boolean;
-  speaker?: string;
-  endMs?: number;
-}
-
-function readToken(raw: unknown): SonioxToken | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const t = raw as Record<string, unknown>;
-  if (typeof t.text !== 'string') return null;
-  const endMs = typeof t.end_ms === 'number' && Number.isFinite(t.end_ms) ? t.end_ms : undefined;
-  return {
-    text: t.text,
-    isFinal: t.is_final === true,
-    ...(speakerLetter(t.speaker) !== undefined ? { speaker: speakerLetter(t.speaker) } : {}),
-    ...(endMs !== undefined ? { endMs } : {}),
   };
 }
 
@@ -282,6 +258,8 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
         let finalEndMs: number | undefined;
         /** End offset of the last token seen at all, for partials. */
         let lastEndMs: number | undefined;
+        /** The languages this turn's final words were tagged, counted. */
+        let languages = new Map<string, number>();
 
         const finishClose = (): void => {
           const fn = settleClose;
@@ -301,6 +279,7 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
           // `finalText`. See `EngineTurn.settledText` for why the notes
           // ceiling needs it.
           const settled = final ? '' : finalText.trim();
+          const language = final ? mostTagged(languages) : undefined;
           sessionOpts.onTurn({
             turn,
             text,
@@ -308,6 +287,7 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
             ...(speaker !== undefined ? { speaker } : {}),
             ...(audioEndMs !== undefined ? { audioEndMs } : {}),
             ...(settled !== '' ? { settledText: settled } : {}),
+            ...(language !== undefined ? { language } : {}),
             engineMs,
           });
         };
@@ -321,6 +301,7 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
           speaker = undefined;
           finalEndMs = undefined;
           lastEndMs = undefined;
+          languages = new Map();
         };
 
         const cancelConnect = timer(connectTimeoutMs, () => {
@@ -348,6 +329,7 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
                   sessionOpts.sampleRate,
                   sessionOpts.detectSpeakers,
                   sessionOpts.tuning,
+                  sessionOpts.language,
                 ),
               }),
             );
@@ -404,6 +386,8 @@ export function createSonioxEngine(opts: SonioxOptions = {}): TranscriptionEngin
                   settleTurn(engineMs);
                 }
                 finalText += token.text;
+                if (token.language !== undefined)
+                  languages.set(token.language, (languages.get(token.language) ?? 0) + 1);
                 if (speaker === undefined) speaker = token.speaker;
                 if (token.endMs !== undefined) {
                   finalEndMs = token.endMs;
