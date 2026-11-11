@@ -27,7 +27,9 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-function setup(opts: { lead?: string | null; sent?: number | null; dataDir?: string } = {}) {
+function setup(
+  opts: { lead?: string | null; sent?: number | null; dataDir?: string; frozen?: boolean } = {},
+) {
   const dataDir = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'cw-lead-chat-'));
   if (!opts.dataDir) dirs.push(dataDir);
   const frames: AgentVoiceFrame[] = [];
@@ -48,7 +50,8 @@ function setup(opts: { lead?: string | null; sent?: number | null; dataDir?: str
     leadOf: () => (lead ? { agentId: lead, name: 'Riverbend' } : null),
     broadcast: (_ws, f) => pages.push(f),
     newId: () => `id-${++idSeq}`,
-    now: () => (now += 10),
+    // A frozen clock is a fast machine: every step lands in one millisecond.
+    now: () => (opts.frozen ? now : (now += 10)),
   });
   return { chat, frames, pages, dataDir, line };
 }
@@ -185,6 +188,36 @@ describe('the mirror of the lead’s session', () => {
       'Two fields left.',
       'Two fields left. Filed the rest.',
     ]);
+  });
+
+  it('keeps a message acked mid-turn for the next turn, even in the millisecond the turn began', () => {
+    const { chat, frames } = setup({ frozen: true });
+    chat.mirrorPrompt(WS, 'Riverbend', { typed: true, text: 'Tidy the Saltmarsh docs' });
+    const sent = chat.post(WS, BRYAN, 'Also the Riverbend notes?', undefined);
+    if (!sent.ok) throw new Error('post failed');
+    const queueId = frames[0]?.queueId ?? '';
+    expect(chat.received(WS, queueId)).toBe(true);
+    const state = () => chat.snapshot(WS).messages.find((m) => m.id === sent.message.id)?.state;
+    chat.mirrorTurnEnd(WS, 'Riverbend', 'Saltmarsh docs tidied.');
+    expect(state()).toBe('received');
+    chat.mirrorPrompt(WS, 'Riverbend', {
+      typed: false,
+      channel: { author: 'Bryan', text: '[voice.request] by Bryan', queueId },
+    });
+    chat.mirrorTurnEnd(WS, 'Riverbend', 'Riverbend notes done too.');
+    expect(state()).toBe('done');
+  });
+
+  it('marks a message done at the end of the turn whose prompt delivered it', () => {
+    const { chat, frames } = setup({ frozen: true });
+    const sent = chat.post(WS, BRYAN, 'And Riverbend?', undefined);
+    if (!sent.ok) throw new Error('post failed');
+    chat.mirrorPrompt(WS, 'Riverbend', {
+      typed: false,
+      channel: { author: 'Bryan', text: '[voice.request] by Bryan', queueId: frames[0]?.queueId },
+    });
+    chat.mirrorTurnEnd(WS, 'Riverbend', 'Riverbend is done.');
+    expect(chat.snapshot(WS).messages.find((m) => m.id === sent.message.id)?.state).toBe('done');
   });
 
   it('moves only a message on this board to received, and only once', () => {
