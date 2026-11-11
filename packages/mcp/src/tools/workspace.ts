@@ -921,7 +921,8 @@ export async function handleWorkspaceTool(
         ...(goal !== undefined ? { goal } : {}),
       };
       try {
-        return ok(await http('POST', '/api/review-queue/rank', body));
+        const res = (await http('POST', '/api/review-queue/rank', body)) as Record<string, unknown>;
+        return ok({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
         if (!m) throw e;
