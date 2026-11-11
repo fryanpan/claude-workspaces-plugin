@@ -12,7 +12,12 @@ import { describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SPEECH_WATCH_SCRIPT } from '@claude-workspaces/core/page-speech';
 import { injectFrameScripts } from '../src/mockup-frame.ts';
+
+/** The speech watch every frame gets first, built bundle or not
+ *  (`core/page-speech.ts`). */
+const SPEECH = `<script data-feedback-widget>${SPEECH_WATCH_SCRIPT}</script>`;
 
 describe('what the server writes into a mock frame', () => {
   it('inlines the bridge first, and the widget and live scripts in place of their tags', () => {
@@ -33,14 +38,19 @@ describe('what the server writes into a mock frame', () => {
     );
     rmSync(dist, { recursive: true, force: true });
     expect(out.indexOf('window.bridge=1')).toBeLessThan(out.indexOf('mine()'));
+    // The speech watch wraps the engine before the page's own scripts run.
+    expect(out.indexOf(SPEECH)).toBeGreaterThan(out.indexOf('window.bridge=1'));
+    expect(out.indexOf(SPEECH)).toBeLessThan(out.indexOf('mine()'));
     expect(out).not.toContain('src="/widget.iife.js"');
     expect(out).not.toContain('src="/widget/mockup-live.js"');
     expect(out).toContain('<script data-feedback-widget>var s="<\\/script><\\!--";</script>');
     expect(out).toContain(
       '<script data-feedback-widget data-cw-live data-doc-id="d-1" data-versions="[1,2]">window.live=1;</script>',
     );
-    // Without a built bundle the page is left exactly as it was.
-    expect(injectFrameScripts(page, new URL('http://board.test/'), null, null)).toBe(page);
+    // Without a built bundle the page gets the speech watch and nothing else.
+    expect(injectFrameScripts(page, new URL('http://board.test/'), null, null)).toBe(
+      page.replace('<head>', `<head>${SPEECH}`),
+    );
   });
 
   it('writes every board script the mock names into the frame, and leaves what it cannot', () => {
@@ -72,19 +82,20 @@ describe('what the server writes into a mock frame', () => {
     const out = injectFrameScripts(page, pageUrl, widget, app);
     rmSync(root, { recursive: true, force: true });
     expect(out).toBe(
-      [
-        '<script type="module" data-stand=\'1\'>window.harbor=1;</script>',
-        '<script>window.harbor=1;</script>',
-        '<script data-feedback-widget defer>window.widget=1;</script>',
-        '<script data-feedback-widget>window.voice=1;</script>',
-        '<script src="https://cdn.saltmarsh.test/app/harbor.js"></script>',
-        '<script src="/app/chunked.js"></script>',
-        '<script src="/app/%2e%2e/outside.js"></script>',
-        '<script src="/widget/%2F..%2Foutside.js"></script>',
-        '<script src="/app/missing.js"></script>',
-        '<script data-src="/app/harbor.js"></script>',
-        '<script>var t=\'<link rel="stylesheet" href="/app/tokens.css">\';</script>',
-      ].join(''),
+      SPEECH +
+        [
+          '<script type="module" data-stand=\'1\'>window.harbor=1;</script>',
+          '<script>window.harbor=1;</script>',
+          '<script data-feedback-widget defer>window.widget=1;</script>',
+          '<script data-feedback-widget>window.voice=1;</script>',
+          '<script src="https://cdn.saltmarsh.test/app/harbor.js"></script>',
+          '<script src="/app/chunked.js"></script>',
+          '<script src="/app/%2e%2e/outside.js"></script>',
+          '<script src="/widget/%2F..%2Foutside.js"></script>',
+          '<script src="/app/missing.js"></script>',
+          '<script data-src="/app/harbor.js"></script>',
+          '<script>var t=\'<link rel="stylesheet" href="/app/tokens.css">\';</script>',
+        ].join(''),
     );
   });
 
@@ -110,18 +121,19 @@ describe('what the server writes into a mock frame', () => {
     const withoutDist = injectFrameScripts(page, pageUrl, null, null);
     rmSync(root, { recursive: true, force: true });
     expect(out).toBe(
-      [
-        '<style data-cw-inlined="/app/tokens-3f2a.css">:root{--stand:#fc0}</style>',
-        '<style data-cw-inlined="/app/board.css" media="print">.menu{content:"<\\/style>"}</style>',
-        '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
-        '<link rel="icon" href="/app/board.css">',
-        '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
-        '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
-        '<link rel="stylesheet" href="/app/missing.css">',
-        '<link rel="stylesheet" href="/demo/board.css">',
-      ].join(''),
+      SPEECH +
+        [
+          '<style data-cw-inlined="/app/tokens-3f2a.css">:root{--stand:#fc0}</style>',
+          '<style data-cw-inlined="/app/board.css" media="print">.menu{content:"<\\/style>"}</style>',
+          '<link rel="stylesheet" href="https://fonts.riverbend.test/app/board.css">',
+          '<link rel="icon" href="/app/board.css">',
+          '<link rel="stylesheet" href="/app/%2e%2e/outside.css">',
+          '<link rel="stylesheet" href="/app/%2F..%2Foutside.css">',
+          '<link rel="stylesheet" href="/app/missing.css">',
+          '<link rel="stylesheet" href="/demo/board.css">',
+        ].join(''),
     );
     expect(out).not.toContain('.leak');
-    expect(withoutDist).toBe(page);
+    expect(withoutDist).toBe(SPEECH + page);
   });
 });
