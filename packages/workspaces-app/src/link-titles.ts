@@ -191,10 +191,18 @@ export const REVIEW_FOCUS_PARAM = 'focus';
  * click or per draw from the cache.
  */
 export function reviewLandingHref(href: string): string {
-  if (!cachedLinkNeedsReview(href) || parseWorkspaceLink(href)?.kind !== 'task') return href;
+  const lands = cachedLinkNeedsReview(href) && parseWorkspaceLink(href)?.kind === 'task';
+  return lands ? withReviewFocus(href, true) : href;
+}
+
+/** `href` with the landing parameter added or taken off, in the form it was
+ *  written: an absolute link stays absolute and a relative one relative. */
+function withReviewFocus(href: string, on: boolean): string {
   try {
     const u = new URL(href, 'http://placeholder.invalid');
-    u.searchParams.set(REVIEW_FOCUS_PARAM, 'review');
+    if (on === (u.searchParams.get(REVIEW_FOCUS_PARAM) === 'review')) return href;
+    if (on) u.searchParams.set(REVIEW_FOCUS_PARAM, 'review');
+    else u.searchParams.delete(REVIEW_FOCUS_PARAM);
     return /^https?:\/\//i.test(href.trim()) ? u.toString() : `${u.pathname}${u.search}${u.hash}`;
   } catch {
     return href;
@@ -329,7 +337,14 @@ export async function hydrateLinkTitles(
       a.prepend(statusMarkEl(info.status, info.held, info.blocked));
     else if (info.status) a.append(statusChipEl(info.status, info.held));
     if (info.needsReview) a.append(reviewMarkEl());
-    if (a.hasAttribute('href')) a.setAttribute('href', reviewLandingHref(url));
+    // The anchor's own href, which may be written differently from its
+    // lookup key: only the landing parameter is added or taken off.
+    const href = a.getAttribute('href');
+    if (href !== null) {
+      const lands = info.needsReview === true && parseWorkspaceLink(url)?.kind === 'task';
+      const next = withReviewFocus(href, lands);
+      if (next !== href) a.setAttribute('href', next);
+    }
     a.removeAttribute('data-ws-pending');
   }
 }
