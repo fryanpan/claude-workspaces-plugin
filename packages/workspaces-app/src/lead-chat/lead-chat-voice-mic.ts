@@ -218,7 +218,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
    * `CLOCK_CHECK_MS` to send. If it has not: a track that ended or is muted
    * is reopened (no tap needed while the page may capture; the tap is asked
    * for if its context does not run). Otherwise the context is suspended and
-   * resumed, and if that brings nothing either, one tap rebuilds it.
+   * resumed, and if that brings nothing either, one tap rebuilds it. A
+   * window in which sound began but fell short is looked at once more first,
+   * so a graph that returns as the reader starts talking is not disturbed.
    */
   const recheck = (): void => {
     const held = capture;
@@ -238,7 +240,10 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
     if (recheckTimer) clearTimeout(recheckTimer);
+    /** A window in which sound began but fell short was looked at again. */
+    let extended = false;
     const look = (kicked: boolean): void => {
+      const from = framesSeen;
       recheckTimer = setTimeout(() => {
         recheckTimer = null;
         if (mine !== gen || paused || waiting) return;
@@ -255,6 +260,15 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           return;
         }
         if (framesSeen - before >= SOUNDING_FRAMES) return;
+        // Sound began in this window but fell short: a graph that came back
+        // late, as the reader started talking, or a dead source's buffered
+        // tail. One more window tells them apart, and a suspend or a rebuild
+        // here would cut the sentence off (Bryan, 10 Nov: "Uh, Dr.").
+        if (framesSeen > from && !extended) {
+          extended = true;
+          look(kicked);
+          return;
+        }
         if (!kicked) {
           how += `, silent ${when}, suspended and resumed`;
           void held.kick?.();
