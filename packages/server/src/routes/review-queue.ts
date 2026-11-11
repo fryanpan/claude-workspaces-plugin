@@ -12,7 +12,11 @@
  *   POST /api/review-queue/rank  the plan lead ranks or tags one item:
  *                                `{ agentId, key, rank?: 1..10000 | null,
  *                                goal?: <plan goal id> | "urgent" |
- *                                "not-this-week" | "drop" | null }`
+ *                                "not-this-week" | "drop" | null }`;
+ *                                `key` is any name the item goes by
+ *                                (`review-key.ts`). A 404's `error` says
+ *                                why a filed item is off the queue
+ *                                (`held`, `task-done`, …) or `not-found`.
  *   GET /review                  the page that walks the queue
  *
  * All of them are about ACROSS boards, which is why none is on the share or
@@ -152,9 +156,16 @@ async function handleRank(ctx: ReviewQueueRoutesContext, req: Request): Promise<
   if (typeof key !== 'string' || key.length === 0 || key.length > MAX_KEY) {
     return j(400, { error: 'bad-key', message: 'key is the queue key the feed named' });
   }
-  const { item } = await ctx.crossReview.item(key);
+  const { item, notQueued } = await ctx.crossReview.item(key);
+  if (!item && notQueued) {
+    return j(404, { error: notQueued.reason, message: notQueued.message });
+  }
   if (!item) {
-    return j(404, { error: 'not-found', message: 'No open review item has that key.' });
+    return j(404, {
+      error: 'not-found',
+      message:
+        'No review item has that key. Send the key a workspace.new_asks line names, the item= value of a Home link, or the r- id of a ticket review item.',
+    });
   }
   if (hasRank) ctx.ranks.set(item.key, rank, agentId);
   if (hasGoal) ctx.ranks.setGoal(item.key, goal, agentId);
