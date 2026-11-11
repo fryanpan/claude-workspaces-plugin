@@ -38,6 +38,13 @@ import {
   visibleAtOf,
 } from './review-answer-ledger.ts';
 import {
+  type FiledItem,
+  type NotQueuedReason,
+  findQueueItem,
+  ticketItemRef,
+  whyNotQueued,
+} from './review-key.ts';
+import {
   type RankedProject,
   ReviewPlanStore,
   rankProjects,
@@ -82,9 +89,15 @@ export interface CrossReview {
   prepare(opts?: { includeRetired?: boolean }): Promise<number>;
   /** Every open item on every live board, top project first. */
   queue(): Promise<CrossReviewQueue & { planWorkspaceId?: string }>;
-  /** One open item by its queue key, with the plan board it was read
-   *  against. Not a read the reader was shown, so the ledger ignores it. */
-  item(key: string): Promise<{ item?: CrossReviewItem; planWorkspaceId?: string }>;
+  /** One open item by any name it goes by (`review-key.ts`), with the plan
+   *  board it was read against — or, when a ticket item the name points at
+   *  is off the queue, why. Not a read the reader was shown, so the ledger
+   *  ignores it. */
+  item(key: string): Promise<{
+    item?: CrossReviewItem;
+    planWorkspaceId?: string;
+    notQueued?: { reason: NotQueuedReason; message: string };
+  }>;
   ledger: ReviewAnswerLedger;
   /** Measure and record one answer now. Exposed for tests; the listeners
    *  call it a tick after the answer. */
@@ -210,12 +223,35 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     return q;
   };
 
+  /** The ticket item a key points at, wherever it is filed. Read only on a
+   *  miss, so the walk over every board's tasks costs nothing on a hit. */
+  const filedItem = (key: string): FiledItem | undefined => {
+    const ref = ticketItemRef(key);
+    if (!ref) return undefined;
+    const tasks = ref.taskId
+      ? [taskStore.getTask(ref.taskId)].flatMap((t) => (t ? [t] : []))
+      : taskStore
+          .listWorkspaces()
+          .flatMap((w) => taskStore.listTasks(w.id, { includeArchived: true }));
+    for (const task of tasks) {
+      const found = taskStore.listReviewItems(task.id).find((i) => i.id === ref.itemId);
+      if (!found) continue;
+      // A key naming a board names that board's item and no other.
+      if (ref.workspaceId !== undefined && ref.workspaceId !== task.workspaceId) return undefined;
+      const w = taskStore.getWorkspace(task.workspaceId);
+      return { item: found, task, boardLive: w !== undefined && !isRetired(w) };
+    }
+    return undefined;
+  };
+
   const item: CrossReview['item'] = async (key) => {
     await prepare();
     const q = compute();
-    const found = q.items.find((i) => i.key === key);
+    const found = findQueueItem(q.items, key);
+    const notQueued = found ? undefined : whyNotQueued(filedItem(key));
     return {
       ...(found ? { item: found } : {}),
+      ...(notQueued ? { notQueued } : {}),
       ...(q.planWorkspaceId ? { planWorkspaceId: q.planWorkspaceId } : {}),
     };
   };
