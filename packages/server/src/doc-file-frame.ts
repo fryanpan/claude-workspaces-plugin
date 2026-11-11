@@ -68,6 +68,7 @@
 import { realpathSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { extname, join, sep } from 'node:path';
+import { SPEECH_WATCH_SCRIPT } from '@claude-workspaces/core/page-speech';
 import { GuardRefused, readBytesChecked } from './bound-path-guard.ts';
 import { isGitListed } from './doc-file-listing.ts';
 import { resolveInside } from './doc-image-store.ts';
@@ -347,5 +348,7 @@ export async function frameHtml(
     const media = attr(tag, 'media');
     return `<style${media ? ` media="${media.replace(/"/g, '&quot;')}"` : ''}>${css}</style>`;
   });
-  return prepend(out, FETCH_RELAY(base));
+  // The speech watch, so the lead chat's mic is muted while the page speaks
+  // (`core/page-speech.ts`).
+  return prepend(out, FETCH_RELAY(base) + SPEECH_WATCH_SCRIPT);
 }

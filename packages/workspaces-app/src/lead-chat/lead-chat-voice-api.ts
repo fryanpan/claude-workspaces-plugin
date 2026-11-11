@@ -10,6 +10,7 @@ import type {
 } from '../board/spoken-reply-audio.ts';
 import type { SpokenSocket } from '../board/spoken-reply-client.ts';
 import type { ListeningTab, ListeningTabOpts } from './listening-tab.ts';
+import type { PageSpeechWatch } from './page-speech.ts';
 
 export type LeadVoicePhase = 'off' | 'listening' | 'working' | 'speaking';
 
@@ -45,6 +46,9 @@ export interface LeadVoiceOpts {
   report?: (err: Error) => void;
   /** Which of the reader's tabs hears them; injected by tests. */
   listeningTab?: (o: ListeningTabOpts) => ListeningTab;
+  /** Whether the page or a frame on it speaks, so the mic sends silence
+   *  meanwhile (`page-speech.ts`); injected by tests. */
+  pageSpeech?: PageSpeechWatch;
 }
 
 export interface LeadVoice {

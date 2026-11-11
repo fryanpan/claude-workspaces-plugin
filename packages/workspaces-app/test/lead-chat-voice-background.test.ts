@@ -328,6 +328,30 @@ describe('the lead chat mic, back from the background', () => {
     expect(speaker.state).toBe('running');
   });
 
+  // Bryan, 10 Nov, iPhone: back from the background, a question reached the
+  // lead as "Uh, Dr." The graph came back late in the check's first second,
+  // just as he started talking, and the check suspended and resumed it in
+  // the middle of his sentence.
+  it('leaves alone a mic that starts sending late in the first second back, as the reader talks', async () => {
+    const reports: Error[] = [];
+    const { voice, mic, fake, frames } = await listeningThenHidden(reports);
+    // The graph's clock stands still for most of the first second back.
+    mic.still = true;
+    setVisible('visible');
+    await vi.advanceTimersByTimeAsync(950);
+    mic.still = false;
+    const before = frames();
+    await renderFor(3_000);
+    expect(mic.kicks).toBe(0);
+    expect(tracks).toHaveLength(1);
+    expect(FakeContext.made).toHaveLength(1);
+    // Every 50 ms of the sentence went up: 3s of rendering, no gap.
+    expect(frames() - before).toBeGreaterThanOrEqual(58);
+    expect(voice.state()).toMatchObject({ phase: 'listening', notice: '' });
+    expect(fake.socket().closed).toBe(false);
+    expect(reports).toHaveLength(0);
+  });
+
   it('changes nothing when the mic still sends after the page comes back', async () => {
     const reports: Error[] = [];
     const { mic } = await listeningThenHidden(reports);
@@ -383,7 +407,9 @@ describe('the lead chat mic, when its graph renders only silence', () => {
     expect(voice.state().phase).toBe('listening');
     expect(tracks).toHaveLength(2);
     expect(tracks[1]?.readyState).toBe('live');
-    await renderFor(2_500);
+    // The buffered tail of the released track carries sound into the first
+    // window, so the check looks once more before it acts.
+    await renderFor(3_500);
     // A suspend and resume first, then the tap.
     expect(mic.kicks).toBe(1);
     expect(voice.state()).toMatchObject({ phase: 'listening', notice: TAP_TO_LISTEN });

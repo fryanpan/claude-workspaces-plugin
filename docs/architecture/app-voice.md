@@ -176,6 +176,49 @@ holds has expired, it stops trying and sends `close`. A close for being idle
 sends `close` and does not reconnect. After the two-hour close (4002) it
 reconnects as after any drop.
 
+## A page speaking with the browser's own engine
+
+A page may also speak with `speechSynthesis`, the browser's engine, as a
+turn-by-turn navigator did on 9 Nov. The lead chat's mic was listening on
+the page around it and sent the app's turn calls up as the owner's requests.
+
+The mic's echo cancellation does not remove that speech. Chrome's canceller
+subtracts only audio that Chrome itself renders, and Safari's
+voice-processing unit only audio played through its own output. Both
+engines hand `speechSynthesis` to the operating system's speech service,
+which plays it outside the page's audio. We have not measured this on a
+device; it is what the engines' design implies, and the 9 Nov report
+shows it happening. The page around the frame cannot read the frame's
+`speechSynthesis`, because the frame's origin is opaque or another host's.
+
+So the frame says when it speaks.
+
+1. The server writes `installSpeechWatch` (`core/src/page-speech.ts`) into
+   the head of every mock, app and doc-file frame, before the page's own
+   scripts (`injectFrameScripts`, `frameHtml`). It wraps
+   `SpeechSynthesis.prototype.speak` and `cancel`.
+2. When the page calls `speak`, the watch posts `{cw: 'speaking', on: true}`
+   to the parent, before the engine plays anything. It posts the same
+   message every 500 ms while the engine speaks, and `{on: false}` once.
+3. The lead chat (`lead-chat/page-speech.ts`) takes the message only from
+   its own window or from the window of a frame on the page. It runs the
+   same watch on its own page.
+4. While anything speaks, the mic sends frames of silence of the same
+   length (`lead-chat-voice-mic.ts`). The question stays open and hears a
+   quiet room, so words the owner said before the line still end the turn.
+   The mic waits 300 ms after the last line for its echo. A frame that
+   stops posting for 2 s counts as stopped, so a frame removed mid-line
+   does not mute the mic.
+
+The lead's own spoken answers release the microphone track instead. That
+costs a new `getUserMedia` per answer, which is acceptable for one answer
+but not for a navigator that speaks every few seconds, and it stops frames,
+which would leave the open question with no audio.
+
+This does not cover speech an app plays as audio (an `<audio>` element, Web
+Audio, or `cwAppVoice.speak`), a frame on another host that the server does
+not serve, or a frame inside a frame.
+
 ## What does not work yet
 
 - **The microphone in an opaque frame.** Chrome refuses `getUserMedia` in
@@ -232,6 +275,13 @@ reconnects as after any drop.
 - `packages/widget/test/app-voice-mock.test.ts`: a served mock in headless
   Chromium speaks and hears a turn end through the relay. It runs only when
   `CW_BROWSER_TESTS` is set, as it is in CI.
+- `packages/workspaces-app/test/lead-chat-voice-app-speech-browser.test.ts`:
+  a mock in its frame, and then the host page, speak a line while the lead
+  chat listens through Chromium's fake microphone. The listener gets only
+  silence while the line plays, files nothing, and files the owner's next
+  question. Behind `CW_BROWSER_TESTS`. The unit tests are
+  `core/src/page-speech.test.ts`, `workspaces-app/test/page-speech.test.ts`
+  and `workspaces-app/test/lead-chat-voice-app-speech.test.ts`.
 - `packages/widget/test/app-voice-mic.test.ts`: a served mock tapped to
   listen through Chromium's fake microphone. On the frame-only hostname the
   audio reaches the server and the turn comes back; in the opaque frame

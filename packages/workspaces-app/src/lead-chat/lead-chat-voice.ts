@@ -209,6 +209,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
 
   const mic = createLeadMic({
     startCapture: opts.startCapture,
+    pageSpeech: opts.pageSpeech,
     onFrame: (pcm) => {
       if (!forwarding) return;
       keepContext();
