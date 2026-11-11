@@ -21,7 +21,7 @@
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
-import { hydrateLinkTitles, staleTaskLinkStatuses } from '../link-titles.ts';
+import { hydrateLinkTitles, staleLinkReviewMarks } from '../link-titles.ts';
 import { COMPOSER_STYLES } from './lead-chat-composer-styles.ts';
 import {
   type Composer,
@@ -363,13 +363,11 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     meeting,
     root,
     refreshTaskLinks() {
-      // The board page's own wiring may have emptied the cache first, which
-      // leaves `staleTaskLinkStatuses` nothing to mark, so every ringed link
-      // here is marked waiting by hand before the one lookup.
-      staleTaskLinkStatuses(list);
-      for (const a of list.querySelectorAll('a[data-ws-link]')) {
-        if (a.querySelector('.board-status-mark')) a.setAttribute('data-ws-pending', '');
-      }
+      // Every board link here is marked waiting before the one lookup: a doc
+      // link carries no ring and can still gain or lose its review mark.
+      staleLinkReviewMarks(list);
+      for (const a of list.querySelectorAll('a[data-ws-link]'))
+        a.setAttribute('data-ws-pending', '');
       void hydrateLinkTitles(list, fetch, 'mark');
     },
     render(m) {

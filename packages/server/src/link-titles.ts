@@ -48,6 +48,9 @@ export interface LinkTitleSources {
    *  board draws with the barred ring (an open after-edge). */
   task(taskId: string): (TaskLinkFacts & { workspaceId: string }) | undefined;
   workspaceName(workspaceId: string): string | undefined;
+  /** Whether a doc or mock, reached through the board `workspaceId` names,
+   *  holds an item waiting on the reader. Absent answers no. */
+  docNeedsReview?(docId: string, workspaceId: string): boolean;
 }
 
 /** What one URL resolves to. `status` only ever appears on task/goal-backed
@@ -58,6 +61,9 @@ export interface ResolvedLink {
   status?: TaskStatus;
   planHeld?: boolean;
   blocked?: boolean;
+  /** The target has an open review item waiting on the reader. Task, goal,
+   *  doc and mock addresses only; only ever `true`. */
+  needsReview?: boolean;
 }
 
 /** What a task source says about one row. */
@@ -66,6 +72,7 @@ interface TaskLinkFacts {
   status: TaskStatus;
   planHeld?: boolean;
   blocked?: boolean;
+  needsReview?: boolean;
 }
 
 /** The task-source answer folded into a ResolvedLink — one spot so the three
@@ -76,6 +83,7 @@ function taskLink(t: TaskLinkFacts): ResolvedLink {
     status: t.status,
     ...(t.planHeld === true ? { planHeld: true } : {}),
     ...(t.blocked === true ? { blocked: true } : {}),
+    ...(t.needsReview === true ? { needsReview: true } : {}),
   };
 }
 
@@ -122,7 +130,10 @@ export function linkInfoFor(url: string, sources: LinkTitleSources): ResolvedLin
       // `relPath`) falls back one step further, to its file's own basename —
       // same convention the doc-tree listing uses (`basenameOf` in
       // server.ts) — so a Related Links entry is NEVER the raw doc id.
-      return { title: meta.title ?? meta.relPath ?? basenameOfSourceUrl(meta.sourceUrl) };
+      const title = meta.title ?? meta.relPath ?? basenameOfSourceUrl(meta.sourceUrl);
+      return sources.docNeedsReview?.(link.docId, link.workspaceId) === true
+        ? { title, needsReview: true }
+        : { title };
     }
     // A review's landing URL redirects to its entry doc; the set itself
     // stores no display title today, so the raw URL stands.
@@ -142,7 +153,8 @@ export const LINK_TITLE_BATCH_LIMIT = 100;
  * `statuses` holds an entry ONLY for task/goal-backed URLs, and `planHeld`
  * only for the subset of those that are drafts held behind an unapproved
  * plan (so the chip reads "Draft" rather than the hold's technical status).
- * `blocked` holds only the rows the board draws as blocked.
+ * `blocked` holds only the rows the board draws as blocked, and
+ * `needsReview` only the targets with an item waiting on the reader.
  */
 export function linkTitlesFor(
   urls: string[],
@@ -152,11 +164,13 @@ export function linkTitlesFor(
   statuses: Record<string, TaskStatus>;
   planHeld: Record<string, boolean>;
   blocked: Record<string, boolean>;
+  needsReview: Record<string, boolean>;
 } {
   const titles: Record<string, string | null> = {};
   const statuses: Record<string, TaskStatus> = {};
   const planHeld: Record<string, boolean> = {};
   const blocked: Record<string, boolean> = {};
+  const needsReview: Record<string, boolean> = {};
   for (const url of urls.slice(0, LINK_TITLE_BATCH_LIMIT)) {
     if (typeof url !== 'string') continue;
     const info = linkInfoFor(url, sources);
@@ -164,6 +178,7 @@ export function linkTitlesFor(
     if (info.status !== undefined) statuses[url] = info.status;
     if (info.planHeld === true) planHeld[url] = true;
     if (info.blocked === true) blocked[url] = true;
+    if (info.needsReview === true) needsReview[url] = true;
   }
-  return { titles, statuses, planHeld, blocked };
+  return { titles, statuses, planHeld, blocked, needsReview };
 }

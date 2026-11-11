@@ -1800,6 +1800,20 @@ body.threads-resizing {
   border-color: var(--green);
   color: var(--green);
 }
+/* Needs-review mark on a workspace link (link-titles `reviewMarkEl`): the
+   target holds an item waiting on the reader. One small steady dot after the
+   link's words and after its status, in the accent the Home queue marks its
+   current row with. No motion and no count (calm by default). Inline-block of
+   a fixed size, so nothing before it moves when it comes or goes. */
+.ws-review-mark {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 0.15em;
+}
 .thread .body li {
   margin: 0.1em 0;
 }

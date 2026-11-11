@@ -96,6 +96,7 @@ import {
   reviewShapeBadge,
 } from './board-review-model.ts';
 import { panelReviewQueue } from './board-review-render.ts';
+import { takeReviewFocus } from './board-url.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
 import { GateHoldLine, GateLessSpecificNote } from './review-gate-note.tsx';
@@ -1364,6 +1365,21 @@ function TaskDetailPanel(props: {
     );
     if (focus && typeof focus.scrollIntoView === 'function')
       focus.scrollIntoView({ block: 'center' });
+  });
+
+  // A needs-review link opened this task (`?focus=review`, from link-titles'
+  // `reviewLandingHref`): land on its open items, once per open, as soon as
+  // the queue is drawn — an item on a thread arrives with the discussion.
+  const reviewLanding = useRef<boolean | null>(null);
+  reviewLanding.current ??= takeReviewFocus(task.id);
+  useLayoutEffect(() => {
+    if (!reviewLanding.current) return;
+    const queue = panelRef.current?.querySelector<HTMLElement>(
+      '.board-decide:not(.board-decide--answered)',
+    );
+    if (!queue) return;
+    reviewLanding.current = false;
+    if (typeof queue.scrollIntoView === 'function') queue.scrollIntoView({ block: 'start' });
   });
 
   const archived = isTaskArchived(task);
