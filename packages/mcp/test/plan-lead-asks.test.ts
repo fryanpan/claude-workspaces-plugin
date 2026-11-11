@@ -96,13 +96,13 @@ const text = (r: unknown) => (r as { content: { text: string }[] }).content[0]?.
 const KEY = 'w-harbor:task-review:t-1:r-1';
 
 describe('rank_review_item', () => {
-  it('posts the rank as this agent', async () => {
+  it('posts the rank as this agent and answers ranked:true', async () => {
     const { calls, ctx } = ctxFor(() => ({ key: KEY, rank: 2 }));
     const r = await handleWorkspaceTool('rank_review_item', { key: KEY, rank: 2 }, ctx);
     expect(calls).toEqual([
       ['POST', '/api/review-queue/rank', { agentId: 'agent-team-lead', key: KEY, rank: 2 }],
     ]);
-    expect(JSON.parse(text(r))).toEqual({ key: KEY, rank: 2 });
+    expect(JSON.parse(text(r))).toEqual({ key: KEY, rank: 2, ranked: true });
   });
 
   it('posts a goal tag alone, leaving the rank out so the server keeps it', async () => {

@@ -21,6 +21,27 @@ const TAP_WAIT_MS = 600;
  *  is the workaround both threads report. */
 const CLOCK_CHECK_MS = 1_000;
 
+/** How many frames with sound a check must see before it believes the mic.
+ *  A source that just went dead still sends what its graph had buffered (9
+ *  blocks in the measurement below, under two 50 ms frames); a live mic
+ *  sends 20 a second. */
+const SOUNDING_FRAMES = 3;
+
+/**
+ * Whether a frame carries any sound. Every check below counts these, never
+ * frames: a running graph hands its processor a block every render quantum
+ * whatever its source does, and a source whose track ended, was muted, or
+ * holds the device and delivers nothing renders zeros. Measured in headless
+ * Chrome, 10 Nov: 388 blocks in the second after `track.stop()`, all but 9 of
+ * them zero. Counted as frames, those zeros told every check the mic was
+ * sending, and an iPhone sat on "Listening…" with the mic light on and no
+ * word heard. A live microphone's noise floor is not all zero.
+ */
+export function carriesSound(pcm: Int16Array): boolean {
+  for (let i = 0; i < pcm.length; i++) if (pcm[i] !== 0) return true;
+  return false;
+}
+
 export interface LeadMicOpts {
   startCapture: LeadVoiceOpts['startCapture'];
   onFrame(pcm: Int16Array): void;
@@ -58,7 +79,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let clockTimer: ReturnType<typeof setTimeout> | null = null;
   /** The track is released while an answer is said. */
   let paused = false;
-  /** Frames the current capture has made, across its pauses. */
+  /** Frames with sound the current capture has made, across its pauses. */
   let framesSeen = 0;
   let tapTimer: ReturnType<typeof setTimeout> | null = null;
   let recheckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -96,14 +117,18 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
 
   const start = (ctx: AudioContext | undefined): void => {
     const mine = gen;
+    /** Frames with sound, and frames of nothing but zeros (`carriesSound`). */
     let frames = 0;
+    let zeros = 0;
     framesSeen = 0;
     handed = ctx;
     void (opts.startCapture ?? startSpokenCapture)({
       ...(ctx ? { context: ctx } : {}),
       onFrame: (pcm) => {
-        frames++;
-        framesSeen++;
+        if (carriesSound(pcm)) {
+          frames++;
+          framesSeen++;
+        } else zeros++;
         if (mine === gen) opts.onFrame(pcm);
       },
     }).then((r) => {
@@ -156,7 +181,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
         // What the mic's track and the graph's context said, so the report
         // answers why (`AudioPump.diag`).
         const said = diag?.() || `context ${ctx?.state ?? 'none'} at ${ctx?.sampleRate ?? 0} Hz`;
-        opts.onSilent(`${said}; ${how}`);
+        opts.onSilent(`${said}; ${zeros} frames all zero; ${how}`);
       };
       soundTimer = setTimeout(noSound, NO_SOUND_MS);
     });
@@ -216,9 +241,11 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     const look = (kicked: boolean): void => {
       recheckTimer = setTimeout(() => {
         recheckTimer = null;
-        if (mine !== gen || paused || waiting || framesSeen > before) return;
+        if (mine !== gen || paused || waiting) return;
         // Hidden again: the next return checks afresh.
         if (document.visibilityState === 'hidden') return;
+        // Read before any frame is believed: an ended or muted track's
+        // graph still renders, in zeros.
         const h = held.health?.();
         if (h && (h.track !== 'live' || h.muted)) {
           const kept = how;
@@ -227,6 +254,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           begin(makeGestureContext(), true);
           return;
         }
+        if (framesSeen - before >= SOUNDING_FRAMES) return;
         if (!kicked) {
           how += `, silent ${when}, suspended and resumed`;
           void held.kick?.();

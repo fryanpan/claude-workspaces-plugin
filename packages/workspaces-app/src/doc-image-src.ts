@@ -1,3 +1,5 @@
+import { imageNotesOf } from '@claude-workspaces/core/prose';
+import { mergeAttributes } from '@tiptap/core';
 import { Image } from '@tiptap/extension-image';
 import { Plugin } from '@tiptap/pm/state';
 import type * as Y from 'yjs';
@@ -27,7 +29,16 @@ export function docImageExtension(base: string | undefined, ydoc?: Y.Doc) {
               ? { src: toDisplaySrc(attrs.src, base, versionOf(attrs.src)) }
               : {},
         },
+        // The `^[…]` notes written after the image line. Kept on the node so a
+        // person's edit writes the line back whole; drawn as a caption below.
+        footnotes: { default: null, rendered: false },
       };
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      const img = ['img', mergeAttributes(this.options.HTMLAttributes, HTMLAttributes)] as const;
+      const notes = imageNotesOf(node.attrs.footnotes);
+      if (notes.length === 0) return img;
+      return ['figure', { class: 'doc-image-figure' }, img, ['figcaption', {}, notes.join(' ')]];
     },
     // An image whose file is not there yet is asked for again (doc-image-retry.ts),
     // and one whose file changed is asked for at its new version.

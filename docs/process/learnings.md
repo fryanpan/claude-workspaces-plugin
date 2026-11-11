@@ -3826,3 +3826,16 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   and checks the mic (`LeadMic.recheck`). If no frame arrives within 1s, it
   reopens an ended or muted track, otherwise suspends and resumes the
   context, and if that does not help either, asks for one tap to rebuild.
+- That check never fired in a real browser. Bryan, 10 Nov, iPhone:
+  "Listening…", the mic light on, no words shown. A running graph hands
+  its processor a block every render quantum whatever its source does; a
+  source whose track ended, was muted or delivers nothing renders ZEROS.
+  Measured in headless Chrome: 388 blocks in the second after
+  `track.stop()`, all but 9 zero. Every mic check counted frames, so the
+  zeros read as a sending mic, and the ended-or-muted test sat behind that
+  gate. The tests passed because their fake graph sent no block from a dead
+  track, which no browser does. The checks now count only frames with a
+  non-zero sample (`carriesSound`), read the track's health first, and a
+  NO_SOUND report says how many frames were all zero. A fake audio graph
+  must render zeros from a dead source, or it tests a browser that does not
+  exist.

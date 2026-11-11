@@ -21,7 +21,7 @@ import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
 import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
-import { imageFromLine, isImageLine } from './prose-image-line.ts';
+import { imageFromLine, imageLineOf, isImageLine } from './prose-image-line.ts';
 import {
   MATH_DISPLAY_LANGUAGE,
   mathDollars,
@@ -1221,14 +1221,8 @@ function serializeBlock(node: Y.XmlElement | Y.XmlText): string | null {
       return serializeList(node, '');
     case 'table':
       return serializeTable(node);
-    case 'image': {
-      const src = String(node.getAttribute('src') ?? '');
-      if (!src) return null;
-      const alt = String(node.getAttribute('alt') ?? '');
-      const title = node.getAttribute('title');
-      const titlePart = title ? ` "${String(title)}"` : '';
-      return `![${alt}](${src}${titlePart})`;
-    }
+    case 'image':
+      return imageLineOf(node);
     default:
       return textContent(node);
   }

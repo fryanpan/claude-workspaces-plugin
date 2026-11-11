@@ -71,7 +71,14 @@ export type { SourceLayout } from './prose-keep-source.ts';
 export { isMdxPath, MDX_FLOW_LANGUAGE, mdxFlowEnd } from './prose-mdx.ts';
 export type { MarkdownParseOptions } from './prose-mdx.ts';
 export { retypeMdxParagraphs } from './prose-mdx-retype.ts';
-export { imageFromLine, isImageLine, promoteImageParagraphs } from './prose-image-line.ts';
+export {
+  imageFromLine,
+  imageLineOf,
+  imageNotesOf,
+  imageWidthOf,
+  isImageLine,
+  promoteImageParagraphs,
+} from './prose-image-line.ts';
 export {
   MATH_DISPLAY_LANGUAGE,
   mathDisplayTex,

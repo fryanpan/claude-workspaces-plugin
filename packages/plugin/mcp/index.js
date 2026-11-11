@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.357";
+var version2 = "0.1.360";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -16801,7 +16801,7 @@ var TOOL_LIST = {
     },
     {
       name: "answer_voice",
-      description: 'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead.',
+      description: 'Answer a spoken request (a voice.request line names its queueId). The text is said aloud on the page that asked, and voice is slow: give the shortest answer that works, with no preamble. "No." beats a sentence, and one sentence beats two. When the line says their chat panel is open, speak one sentence in text and put the detail in written: the chat shows written in place of text, and only text is ever said. delivered:false means that page has closed: post the answer on the task or a thread instead. To set the tone, put a Soniox tag in square brackets before the words it changes, at the start or after any sentence: "[warm] It shipped. [curious] Want the next one?". The tags that work include warm, curious, calm, happy, excited, serious, reassuringly, sighs, laughs and pause. A tag stays in effect until the next tag. Use one or two tags in an answer, not more. Tags are never shown in the chat, and the ElevenLabs voice ignores them.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16809,7 +16809,7 @@ var TOOL_LIST = {
           queueId: { type: "string", description: "From the voice.request line." },
           text: {
             type: "string",
-            description: "What to say: the shortest answer that works, one sentence at most."
+            description: "What to say: the shortest answer that works, one sentence at most. It can include tone tags such as [warm] or [curious]."
           },
           written: {
             type: "string",
@@ -16876,7 +16876,7 @@ var TOOL_LIST = {
     },
     {
       name: "rank_review_item",
-      description: "Only for the lead of the plan board (Team Lead): rank one open review item on any board against this week's goals, and file it under the goal it serves, so Bryan's Home shows your Top 10 and then his asks by goal. Ranked items come first, lowest rank first; unranked items keep the plan order. key is the queue key a workspace.new_asks line names. Send rank, goal or both; a field left out is left as it was, and null clears it. goal is a plan-board goal id, urgent, not-this-week or drop. Both stop counting when Bryan moves that task himself afterwards. Any other caller is refused (ranked:false).",
+      description: "Only for the lead of the plan board (Team Lead): rank one open review item on any board against this week's goals, and file it under the goal it serves, so Bryan's Home shows your Top 10 and then his asks by goal. Ranked items come first, lowest rank first; unranked items keep the plan order. key is the queue key a workspace.new_asks line names. Send rank, goal or both; a field left out is left as it was, and null clears it. goal is a plan-board goal id, urgent, not-this-week or drop. Both stop counting when Bryan moves that task himself afterwards. Success returns ranked:true with the key, rank and goal the server stored; any other caller is refused (ranked:false).",
       inputSchema: {
         type: "object",
         properties: {
@@ -17683,7 +17683,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. To add, edit or remove a row of a table, use find_and_replace on its pipe rows, not replace_block on the table. Markdown in each edit is parsed either way.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Replacing such a block with markdown that holds an image writes the image directly and strikes the old words as a suggestion. An image line takes a display width in pixels and footnotes after it: ![alt](src){width=480}^[note]. To add, edit or remove a row of a table, use find_and_replace on its pipe rows, not replace_block on the table. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
@@ -21922,7 +21922,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         ...goal !== undefined ? { goal } : {}
       };
       try {
-        return ok2(await http("POST", "/api/review-queue/rank", body));
+        const res = await http("POST", "/api/review-queue/rank", body);
+        return ok2({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
         if (!m)

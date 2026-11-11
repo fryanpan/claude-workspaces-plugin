@@ -17,7 +17,7 @@
  * images. A diagram, chart or equation shows its source until the editor
  * renders it.
  */
-import { getProseFragment } from '@claude-workspaces/core/prose';
+import { getProseFragment, imageNotesOf, imageWidthOf } from '@claude-workspaces/core/prose';
 import * as Y from 'yjs';
 import { docAssetsBase, toDisplaySrc } from '../doc-image-path.ts';
 import {
@@ -91,7 +91,16 @@ function renderElement(node: Y.XmlElement, doc: Document, imageBase: string): HT
     const img = doc.createElement('img');
     if (typeof attrs.src === 'string') img.src = toDisplaySrc(attrs.src, imageBase);
     if (typeof attrs.alt === 'string') img.alt = attrs.alt;
-    return img;
+    const width = imageWidthOf(attrs.width);
+    if (width !== null) img.setAttribute('width', String(width));
+    const notes = imageNotesOf(attrs.footnotes);
+    if (notes.length === 0) return img;
+    const figure = doc.createElement('figure');
+    figure.className = 'doc-image-figure';
+    const caption = doc.createElement('figcaption');
+    caption.textContent = notes.join(' ');
+    figure.append(img, caption);
+    return figure;
   }
   let el: HTMLElement;
   let inner: HTMLElement;
