@@ -33,6 +33,7 @@ import {
   upsertMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
 import { boardStreamUrl, openBoardStream } from '../board-stream.ts';
+import { LINK_REVIEW_EVENTS } from '../link-titles.ts';
 import type { VoiceContext } from '../voice-capture.ts';
 
 export interface LeadChatClientOpts {
@@ -96,12 +97,9 @@ export interface LeadChatClient {
   close(): void;
 }
 
-const TASK_RING_EVENTS = [
-  'task.transitioned',
-  'task.unblocked',
-  'task.archived',
-  'task.restored',
-] as const;
+/** A link's ring or needs-review mark may now be wrong: its row moved, what
+ *  it waits on went done, or an item waiting on the reader came or went. */
+const TASK_RING_EVENTS = [...new Set([...LINK_REVIEW_EVENTS, 'task.unblocked'])];
 
 export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   const doFetch = opts.fetch ?? ((u, i) => fetch(u, i));

@@ -6,6 +6,7 @@
  */
 import { isBlocked } from '@claude-workspaces/core/task-blocked';
 import { classifyActor } from '../actor-identity.ts';
+import { docNeedsReview, taskNeedsReview } from '../link-review-marks.ts';
 import { linkTitlesFor } from '../link-titles.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { runRefsBackfill } from '../refs-backfill.ts';
@@ -265,6 +266,13 @@ export async function handleTaskStatusAndLinks(
     // actually needs it — the membership question is the same one the
     // /api/docs listing answers, asked through the same index.
     let boardIndex: Map<string, string[]> | null = null;
+    // The needs-review fact is held to the caller's own board, by the rule
+    // that decides which refs they may write: a member reaches a task's or a
+    // doc's items only where the board they were given holds it. The owner
+    // and every agent (`visitor` null) are answered in full.
+    const reviewInScope = (
+      ref: { kind: 'task'; taskId: string } | { kind: 'doc'; docId: string },
+    ) => refInVisitorScope(ref, visitor, workspacesOfDoc);
     // `titles` + `statuses` at the top level — the old `{ titles }`
     // shape is preserved for clients on a pre-status bundle.
     return j(
@@ -299,9 +307,26 @@ export async function handleTaskStatusAndLinks(
               isBlocked(t, (id) => taskStore.getTask(id))
                 ? { blocked: true }
                 : {}),
+              // Waiting on a person: a task's items and its thread asks, a
+              // goal's thread asks (a goal has no ticket items).
+              ...(taskNeedsReview(
+                t,
+                taskStore.reviewState(t.id)?.open ?? taskStore.openThreadAsks(t.id),
+              ) && reviewInScope({ kind: 'task', taskId: t.id })
+                ? { needsReview: true }
+                : {}),
             };
           },
           workspaceName: (workspaceId) => taskStore.getWorkspace(workspaceId)?.name,
+          docNeedsReview: (docId, workspaceId) =>
+            reviewInScope({ kind: 'doc', docId }) &&
+            docNeedsReview(docId, {
+              openThreads: (id) => docStore.listThreads(id, { status: 'open' }),
+              boardTasks: () => taskStore.listTasks(workspaceId),
+              reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
+              canonical: (id) => docStore.resolveDocId(id),
+              owner: visitor === null,
+            }),
         },
       ),
     );

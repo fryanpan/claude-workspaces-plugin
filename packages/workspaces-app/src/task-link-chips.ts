@@ -5,10 +5,14 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import {
+  LINK_REVIEW_EVENTS,
   cachedLinkHeld,
+  cachedLinkNeedsReview,
   cachedLinkStatus,
   fetchLinkInfos,
-  staleTaskLinkStatuses,
+  isLinkInfoStale,
+  reviewMarkEl,
+  staleLinkReviewMarks,
   statusChipEl,
 } from './link-titles.ts';
 
@@ -107,6 +111,20 @@ function build(doc: ProseNode): ChipState {
       pending.add(run.url);
       continue;
     }
+    // A stale answer is asked again and still drawn meanwhile, so the chip
+    // and the mark hold their place until the new answer replaces them.
+    if (isLinkInfoStale(run.url)) pending.add(run.url);
+    // Waiting on the reader: one steady mark after the link (and after its
+    // chip, so the chip never moves when the mark comes or goes).
+    if (cachedLinkNeedsReview(run.url)) {
+      decos.push(
+        Decoration.widget(run.to, () => reviewMarkEl(), {
+          key: `${run.url}|review`,
+          side: 2,
+          ignoreSelection: true,
+        }),
+      );
+    }
     if (status === null) continue; // resolved: not a task, no chip
     // A plan-held draft's chip reads "Draft" — the doc's own links are the
     // one surface that shows the plan gate's state now the strip is gone.
@@ -160,7 +178,9 @@ export const TaskLinkChips = Extension.create({
             void fetchLinkInfos(pending)
               .then((landed) => {
                 inflight = false;
-                asked = new Set([...asked].filter((u) => cachedLinkStatus(u) === undefined));
+                asked = new Set(
+                  [...asked].filter((u) => cachedLinkStatus(u) === undefined || isLinkInfoStale(u)),
+                );
                 if (landed && !(view as { isDestroyed?: boolean }).isDestroyed) {
                   refreshTaskLinkChips(view);
                 }
@@ -185,21 +205,35 @@ export function refreshTaskLinkChips(view: EditorView): void {
   view.dispatch(tr);
 }
 
+/** How long a burst of board events is gathered into one lookup. Short of
+ *  the 1s every surface has to follow a change in. */
+export const LINK_REFRESH_GATHER_MS = 150;
+
 /**
- * Keep this editor's chips live: the board's `task.transitioned` push stales
- * every cached status and the next rebuild re-asks — the same event the board
- * refreshes its own chips on. Returns the teardown; callers bind it to the
- * mount scope so navigation closes the stream.
+ * Keep this editor's chips and needs-review marks live: a status or review
+ * change on the board stales the cached answers and the next rebuild re-asks,
+ * while the old answer stays drawn. A burst of events — a reply on every
+ * thread of a review round — is one lookup. Returns the teardown; callers
+ * bind it to the mount scope so navigation closes the stream.
  */
 export function watchTaskLinkStatuses(workspaceId: string, view: EditorView): () => void {
   const es = new EventSource(`/workspaces/${encodeURIComponent(workspaceId)}/events:stream`);
-  const onTransition = (): void => {
-    staleTaskLinkStatuses();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  // `staleLinkReviewMarks` stales every status as well, so a transition —
+  // which can move both — needs nothing more.
+  const flush = (): void => {
+    timer = null;
+    if ((view as { isDestroyed?: boolean }).isDestroyed) return;
+    staleLinkReviewMarks();
     refreshTaskLinkChips(view);
   };
-  es.addEventListener('task.transitioned', onTransition);
+  const onEvent = (): void => {
+    timer ??= setTimeout(flush, LINK_REFRESH_GATHER_MS);
+  };
+  for (const name of LINK_REVIEW_EVENTS) es.addEventListener(name, onEvent);
   return () => {
-    es.removeEventListener('task.transitioned', onTransition);
+    for (const name of LINK_REVIEW_EVENTS) es.removeEventListener(name, onEvent);
+    if (timer) clearTimeout(timer);
     es.close();
   };
 }

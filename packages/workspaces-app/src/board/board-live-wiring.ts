@@ -25,7 +25,7 @@ import {
 import type { BootLocation } from '../boot-env.ts';
 import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connection-state.ts';
 import { messageLinkOf } from '../lead-chat/lead-chat-link.ts';
-import { staleTaskLinkStatuses } from '../link-titles.ts';
+import { LINK_REVIEW_EVENTS, staleLinkReviewMarks } from '../link-titles.ts';
 import { watchAttention } from '../presence/attention.ts';
 import {
   type FollowStorage,
@@ -345,9 +345,9 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   // were all opened. No task row records that, so nothing else repaints it.
   es.addEventListener('task.transitioned', () => void loadReviewItems());
   es.addEventListener('review_item.withdrawn', () => void loadReviewItems());
-  // …and stales every status chip a pasted task/goal link is wearing, so the
-  // chips re-ask on the same push instead of showing the old status forever.
-  es.addEventListener('task.transitioned', () => staleTaskLinkStatuses());
+  // …and stales every status chip and needs-review mark a pasted link is
+  // wearing, so they re-ask on the same push instead of going stale forever.
+  for (const name of LINK_REVIEW_EVENTS) es.addEventListener(name, () => staleLinkReviewMarks());
 
   // ── Catching up after the stream could not reach us ────────────────────
   //

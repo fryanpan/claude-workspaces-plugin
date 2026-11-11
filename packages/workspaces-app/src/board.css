@@ -6453,12 +6453,15 @@ label.board-sched-chip:hover {
    off hold, rather than growing a second layout that drifts from this one.
    Everything here is spacing and alignment — no colours the surrounding card
    does not already own — so it can be dropped into another container. */
+/* `scroll-margin-top`: a needs-review link lands the panel on this queue
+   (`?focus=review`), under the sticky head rather than beneath it. */
 .board-decide {
   margin: 24px 0 0;
   padding: 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-panel, var(--bg-subtle, #fafafa));
+  scroll-margin-top: var(--board-detail-head-h, 96px);
 }
 /* The queue's own header: what kind of thing is waiting, and — only when there
    is more than one — where you are in them. `justify-content: space-between`

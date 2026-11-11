@@ -19,6 +19,7 @@
  * retries. Nothing here ever throws into a render path.
  */
 
+import { parseWorkspaceLink } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 /** What one URL resolved to. `status` is null when the target is not a
@@ -31,9 +32,21 @@ interface LinkInfo {
   held: boolean;
   /** The board draws the row with its barred ring: an open after-edge. */
   blocked?: boolean;
+  /** The target has a review item waiting on the reader. */
+  needsReview?: boolean;
 }
 
 const cache = new Map<string, LinkInfo>();
+
+/**
+ * Cached answers that may be out of date, each with the stale pass that marked
+ * it. A stale answer is still DRAWN — the ring and the mark stay where they
+ * are while the lookup is out, so nothing beside them moves — and the next
+ * lookup asks for it again. A lookup clears only the marks made before it
+ * set off: a change that lands while it is in flight is asked about again.
+ */
+const stale = new Map<string, number>();
+let stalePass = 0;
 
 /** URLs a lookup is out for right now, each pointing at the round that will
  *  answer it. Emptied as each round settles — see `fetchLinkInfos`. */
@@ -61,6 +74,16 @@ export function cachedLinkBlocked(url: string): boolean {
   return cache.get(url)?.blocked === true;
 }
 
+/** Whether the URL's target has a review item waiting on the reader. */
+export function cachedLinkNeedsReview(url: string): boolean {
+  return cache.get(url)?.needsReview === true;
+}
+
+/** Whether the cached answer for this URL is waiting to be asked again. */
+export function isLinkInfoStale(url: string): boolean {
+  return stale.has(url);
+}
+
 /** Seed the cache (tests, or a caller that already holds the answer). */
 export function primeLinkTitle(
   url: string,
@@ -68,13 +91,16 @@ export function primeLinkTitle(
   status: string | null = null,
   held = false,
   blocked = false,
+  needsReview = false,
 ): void {
-  cache.set(url, { title, status, held, blocked });
+  cache.set(url, { title, status, held, blocked, needsReview });
+  stale.delete(url);
 }
 
 export function _resetLinkTitlesForTest(): void {
   cache.clear();
   inFlight.clear();
+  stale.clear();
 }
 
 /** Chip words, mirroring board-model's STATUS_LABEL — copied rather than
@@ -136,6 +162,53 @@ export function statusMarkWords(status: string, blocked: boolean): string {
   return blocked ? `${statusChipLabel(status)}, blocked` : statusChipLabel(status);
 }
 
+/** What the needs-review mark says aloud and on hover. */
+export const REVIEW_MARK_WORDS = 'Waiting on your review';
+
+/**
+ * The needs-review mark: one small steady dot after the link's words, in the
+ * accent the Home queue marks its current row with. Separate from the status
+ * (pill or ring) on purpose — a task can be to do AND waiting on the reader,
+ * and the two facts must not share one element.
+ */
+export function reviewMarkEl(): HTMLSpanElement {
+  const mark = document.createElement('span');
+  mark.className = 'ws-review-mark';
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', REVIEW_MARK_WORDS);
+  mark.title = REVIEW_MARK_WORDS;
+  return mark;
+}
+
+/** The query parameter a needs-review task link opens its task with, so the
+ *  panel lands on the open items (`reviewFocusOf`, board-url.ts). */
+export const REVIEW_FOCUS_PARAM = 'focus';
+
+/**
+ * Where following `href` should land. A task link whose task is waiting on
+ * the reader opens the task AT its open review items; every other link opens
+ * where it points. The stored link is never rewritten — this is computed per
+ * click or per draw from the cache.
+ */
+export function reviewLandingHref(href: string): string {
+  const lands = cachedLinkNeedsReview(href) && parseWorkspaceLink(href)?.kind === 'task';
+  return lands ? withReviewFocus(href, true) : href;
+}
+
+/** `href` with the landing parameter added or taken off, in the form it was
+ *  written: an absolute link stays absolute and a relative one relative. */
+function withReviewFocus(href: string, on: boolean): string {
+  try {
+    const u = new URL(href, 'http://placeholder.invalid');
+    if (on === (u.searchParams.get(REVIEW_FOCUS_PARAM) === 'review')) return href;
+    if (on) u.searchParams.set(REVIEW_FOCUS_PARAM, 'review');
+    else u.searchParams.delete(REVIEW_FOCUS_PARAM);
+    return /^https?:\/\//i.test(href.trim()) ? u.toString() : `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return href;
+  }
+}
+
 /** How a link shows its task's status: the word pill after the words, or
  *  the board's ring before them. */
 export type LinkStatusStyle = 'chip' | 'mark';
@@ -161,7 +234,7 @@ export async function fetchLinkInfos(
   urls: readonly string[],
   fetcher: LinkTitleFetcher = fetch,
 ): Promise<boolean> {
-  const wanted = [...new Set(urls.filter((u) => u && !cache.has(u)))];
+  const wanted = [...new Set(urls.filter((u) => u && (!cache.has(u) || stale.has(u))))];
   // A URL already out for lookup is JOINED, not asked again. The cache only
   // fills when a response lands, so two hydration passes inside one round
   // trip both read `cache.has(u) === false` and both posted the identical
@@ -184,9 +257,10 @@ export async function fetchLinkInfos(
  *  `finally` rather than a success path: a throw that left them registered
  *  would wedge every later pass onto a promise that already settled. */
 function startLookup(urls: readonly string[], fetcher: LinkTitleFetcher): Promise<boolean> {
+  const pass = stalePass;
   const round = (async () => {
     try {
-      return await askServer(urls, fetcher);
+      return await askServer(urls, fetcher, pass);
     } finally {
       for (const u of urls) inFlight.delete(u);
     }
@@ -195,7 +269,11 @@ function startLookup(urls: readonly string[], fetcher: LinkTitleFetcher): Promis
   return round;
 }
 
-async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Promise<boolean> {
+async function askServer(
+  urls: readonly string[],
+  fetcher: LinkTitleFetcher,
+  pass: number,
+): Promise<boolean> {
   let landed = false;
   // Every uncached URL gets asked, one route-sized batch at a time — a page
   // with more links than one batch must not leave the tail raw forever.
@@ -213,14 +291,18 @@ async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Pr
         statuses?: Record<string, string>;
         planHeld?: Record<string, boolean>;
         blocked?: Record<string, boolean>;
+        needsReview?: Record<string, boolean>;
       };
-      for (const u of chunk)
+      for (const u of chunk) {
         cache.set(u, {
           title: data.titles?.[u] ?? null,
           status: data.statuses?.[u] ?? null,
           held: data.planHeld?.[u] === true,
           blocked: data.blocked?.[u] === true,
+          needsReview: data.needsReview?.[u] === true,
         });
+        if ((stale.get(u) ?? Number.POSITIVE_INFINITY) <= pass) stale.delete(u);
+      }
       landed = true;
     } catch {
       break; // network failure: raw URLs stay visible, retry later
@@ -249,10 +331,20 @@ export async function hydrateLinkTitles(
     // textContent, never innerHTML — the title is server data, not markup.
     // A custom label (`data-ws-custom`) is the author's text and stays.
     if (info.title && !a.hasAttribute('data-ws-custom')) a.textContent = info.title;
-    a.querySelector('.ws-status-chip, .board-status-mark')?.remove();
+    for (const old of a.querySelectorAll('.ws-status-chip, .board-status-mark, .ws-review-mark'))
+      old.remove();
     if (info.status && style === 'mark')
       a.prepend(statusMarkEl(info.status, info.held, info.blocked));
     else if (info.status) a.append(statusChipEl(info.status, info.held));
+    if (info.needsReview) a.append(reviewMarkEl());
+    // The anchor's own href, which may be written differently from its
+    // lookup key: only the landing parameter is added or taken off.
+    const href = a.getAttribute('href');
+    if (href !== null) {
+      const lands = info.needsReview === true && parseWorkspaceLink(url)?.kind === 'task';
+      const next = withReviewFocus(href, lands);
+      if (next !== href) a.setAttribute('href', next);
+    }
     a.removeAttribute('data-ws-pending');
   }
 }
@@ -275,20 +367,27 @@ export function scheduleLinkTitleHydration(): void {
 }
 
 /**
- * A task somewhere changed status: forget every cached status and mark the
- * chipped anchors pending again, so the next hydration pass re-asks. Wired to
- * the board's `task.transitioned` SSE event — the chip's freshness rides the
- * same push every other REST-fed region refreshes on. Whole-cache on purpose:
- * the event does not say which URL the row was pasted under, and the refetch
- * is one debounced batch.
+ * Mark cached answers stale and the anchors drawn from them pending, so the
+ * next hydration pass asks again while the old answer stays drawn. `which`
+ * picks the answers a change can move: `status` the task and goal rows (a
+ * transition), `review` everything that can be waiting on a person — those
+ * rows and every doc, mock and whiteboard (an item filed, answered or taken
+ * back). Whole-cache by kind on purpose: an event does not say which URL its
+ * target was pasted under, and the refetch is one debounced batch.
  */
-export function staleTaskLinkStatuses(root: ParentNode | null = null): void {
+function staleLinks(root: ParentNode | null, which: 'status' | 'review'): void {
   const staleUrls = new Set<string>();
+  stalePass += 1;
   for (const [url, info] of cache) {
-    if (info.status) {
-      staleUrls.add(url);
-      cache.delete(url);
-    }
+    const kind = parseWorkspaceLink(url)?.kind;
+    const moves =
+      info.status !== null ||
+      (which === 'review' && (kind === 'doc' || kind === 'mockup' || kind === 'whiteboard'));
+    if (!moves) continue;
+    staleUrls.add(url);
+    stale.set(url, stalePass);
+    // A lookup already out for it set off before this change: ask anew.
+    inFlight.delete(url);
   }
   if (staleUrls.size === 0) return;
   const scope = root ?? (typeof document === 'undefined' ? null : document);
@@ -298,3 +397,48 @@ export function staleTaskLinkStatuses(root: ParentNode | null = null): void {
   }
   scheduleLinkTitleHydration();
 }
+
+/**
+ * A task somewhere changed status: every cached status is asked again, and
+ * the chipped anchors are marked pending so the next pass redraws them. Wired
+ * to the board's `task.transitioned` SSE event — the chip's freshness rides
+ * the same push every other REST-fed region refreshes on.
+ */
+export function staleTaskLinkStatuses(root: ParentNode | null = null): void {
+  staleLinks(root, 'status');
+}
+
+/**
+ * Something that waits on a person changed: every task, goal, doc and mock
+ * link is asked again, so its needs-review mark follows. Wired to
+ * `LINK_REVIEW_EVENTS`.
+ */
+export function staleLinkReviewMarks(root: ParentNode | null = null): void {
+  staleLinks(root, 'review');
+}
+
+/**
+ * The board-stream events after which a link's needs-review mark may be
+ * wrong: an item filed, revised, answered, asked back on or taken back, on a
+ * ticket (`review_item.*`, `decision.*`) or on a thread (`thread.*`, which
+ * reaches the board's stream for every doc filed on it), and a row finished,
+ * archived or restored. `review_item.answered` is not here: it never reaches
+ * a stream (`ANALYTICS_ONLY_EVENTS`), and `decision.answered` is the frame
+ * every ticket answer emits beside it.
+ */
+export const LINK_REVIEW_EVENTS = [
+  'review_item.added',
+  'review_item.revised',
+  'review_item.withdrawn',
+  'decision.answered',
+  'decision.partly_answered',
+  'decision.answer_withdrawn',
+  'decision.info_requested',
+  'thread.created',
+  'thread.replied',
+  'thread.resolved',
+  'thread.reopened',
+  'task.transitioned',
+  'task.archived',
+  'task.restored',
+] as const;

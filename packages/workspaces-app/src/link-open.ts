@@ -11,6 +11,7 @@
  */
 import { SPEAKER_TAG_SCHEME } from '@claude-workspaces/core';
 import { docHref } from './doc-path.ts';
+import { reviewLandingHref } from './link-titles.ts';
 
 const UNSAFE_SCHEME = /^(?:javascript|data|vbscript):/i;
 
@@ -34,6 +35,16 @@ export function safeLinkHref(href: string | null | undefined): string | null {
   }
   if (UNSAFE_SCHEME.test(forSchemeCheck)) return null;
   return trimmed;
+}
+
+/**
+ * The href a click on a link in a doc follows: `safeLinkHref`'s filter, then
+ * where it should land — a task link whose task waits on the reader opens at
+ * its open review items (`reviewLandingHref`).
+ */
+export function followedLinkHref(href: string | null | undefined): string | null {
+  const safe = safeLinkHref(href);
+  return safe ? reviewLandingHref(safe) : null;
 }
 
 const ANY_SCHEME = /^[a-z][a-z0-9+.-]*:/i;

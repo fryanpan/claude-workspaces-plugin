@@ -124,6 +124,14 @@ hands a second caller the request already in flight and forgets it the moment
 that round settles, which is a shared read and not a cache with a lifetime.
 `link-titles.ts` holds the same shape for its lookup POST, keyed per URL.
 
+**A link says when what it points at waits on the reader.** The same lookup
+answers `needsReview` per URL: `server/src/link-review-marks.ts` decides it
+from the rules the Home queue already uses (a task's open review count, a
+doc's own declared thread asks, and ticket items that link the doc), and the
+route cuts the answer to the visitor's scope (`share/ref-scope.ts`). The
+client draws one mark after the link and re-asks on the board stream's
+review, thread and transition events.
+
 **A destructive action asks for a recent sign-in, decided in one place on
 each side.** `core/src/counted-routes.ts` is the one list of the counted
 methods and paths; `server/src/fresh-signin.ts` reads it, decides the
@@ -1199,6 +1207,12 @@ in its nav dock, the doc page floats it bottom-left, and the mock host loads
 `WS /workspaces/<ws>/voice/converse` with the lead named in `start`, so the
 audio reaches only this server and the listener it already uses. There is no
 browser speech recognition, because Chrome's sends the audio to Google.
+While the page or a frame on it speaks with the browser's `speechSynthesis`,
+the mic sends silence instead of what it hears, so an app's spoken line never
+reaches the lead as a request. The server writes the speech watch
+(`core/src/page-speech.ts`, a new top-level core module) into every mock, app
+and doc-file frame, and `lead-chat/page-speech.ts` reads what the frames
+post; the reasons are in [app-voice](app-voice.md).
 
 **Tab titles.** Every page's browser tab starts with its workspace's name,
 then the page's own name (`Harborlight · tides.md · Workspaces`), so several

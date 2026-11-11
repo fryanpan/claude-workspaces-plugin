@@ -309,7 +309,10 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
     scope,
     chrome: reviewChrome,
     editor,
-    workspaceId: ctx.workspaceId,
+    // The board this doc sits on, for its links' live chips and marks.
+    // `ctx.workspaceId` is a diff or folder's grouping id, blank on an
+    // ordinary doc, which left every doc's chips unwatched.
+    workspaceId: ctx.backTo?.workspaceId || ctx.workspaceId || undefined,
     notesLinkRefs,
     renderSetNav: () => setNav.render(),
     onFirstSync: revealLinkedThread,

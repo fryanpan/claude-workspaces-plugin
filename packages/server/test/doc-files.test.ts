@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+import { SPEECH_WATCH_SCRIPT } from '@claude-workspaces/core/page-speech';
 import { DOC_PAGE_CSP, frameHtml, landsInside, resolveRef } from '../src/doc-file-frame.ts';
 import { LISTING_AGES, listingScanCount } from '../src/doc-file-listing.ts';
 import { PAGE_RECHECK, pageBuildCount } from '../src/doc-file-page-cache.ts';
@@ -386,6 +387,21 @@ describe('GET …/docs/<id>/files/<path>', () => {
 });
 
 describe('frameHtml', () => {
+  it("writes the speech watch in before the page's own scripts", async () => {
+    const read = async () => new TextEncoder().encode('window.mapReady=1;');
+    const page = await frameHtml(
+      '<head><script>speakTurns()</script><script src="map.js"></script></head>',
+      ['index.html'],
+      '/f/',
+      read,
+      1_000_000,
+    );
+    expect(page).not.toBeNull();
+    const at = page?.indexOf(SPEECH_WATCH_SCRIPT) ?? -1;
+    expect(at).toBeGreaterThan(0);
+    expect(at).toBeLessThan(page?.indexOf('speakTurns()') ?? -1);
+  });
+
   it('reads a file named many times once, and refuses a page past its cap before reading on', async () => {
     const reads: string[] = [];
     const read = async (segs: string[]) => {

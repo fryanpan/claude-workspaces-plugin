@@ -47,6 +47,7 @@ export const STATUS_MARK_STYLES = `
 .board-status-mark-done { border-color: var(--green, #2f9e44); background: var(--green, #2f9e44); }
 .board-status-mark-done::after { content: "✓"; color: var(--bg, #fff); font-size: 11px; font-weight: 700; line-height: 1; }
 .lc-md a .board-status-mark { margin-right: 5px; vertical-align: -4px; }
+.ws-review-mark { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--accent, #1c7ed6); vertical-align: 0.15em; }
 `;
 
 /** The bar and the panel: one fixed layer over the page. */

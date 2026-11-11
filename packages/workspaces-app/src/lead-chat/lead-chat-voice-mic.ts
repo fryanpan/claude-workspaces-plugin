@@ -1,12 +1,14 @@
 /**
  * The lead chat voice's microphone: one capture for as long as voice is on,
  * the clock that says it sends no sound, and the tap a page with no gesture
- * behind it may need (the reasons are in `lead-chat-voice.ts`).
+ * behind it may need (the reasons are in `lead-chat-voice.ts`). While the
+ * page or a frame on it speaks, it sends silence (`page-speech.ts`).
  */
 import type { SpokenCapture } from '../board/spoken-reply-audio.ts';
 import { startSpokenCapture } from '../board/spoken-reply-audio.ts';
 import { makeGestureContext } from '../meeting-audio.ts';
 import type { LeadVoiceOpts } from './lead-chat-voice-api.ts';
+import { watchPageSpeech } from './page-speech.ts';
 
 /** How long an open mic may send nothing before voice stops and says so. */
 const NO_SOUND_MS = 5_000;
@@ -51,6 +53,8 @@ export interface LeadMicOpts {
   onSilent(detail: string): void;
   /** A tap would start the audio: ask for one. */
   askForTap(): void;
+  /** Whether the page or a frame on it is speaking; omitted, `watchPageSpeech`. */
+  pageSpeech?: LeadVoiceOpts['pageSpeech'];
 }
 
 export interface LeadMic {
@@ -97,6 +101,10 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
   let reopened = false;
   /** How this capture started, for the report. */
   let how = 'started in a tap';
+  /** The page or a frame on it is speaking: frames go on as silence, so the
+   *  open question hears a quiet room rather than the app's words. */
+  let muted = false;
+  let unwatch: (() => void) | null = null;
 
   const clear = (): void => {
     gen++;
@@ -129,7 +137,7 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           frames++;
           framesSeen++;
         } else zeros++;
-        if (mine === gen) opts.onFrame(pcm);
+        if (mine === gen) opts.onFrame(muted ? new Int16Array(pcm.length) : pcm);
       },
     }).then((r) => {
       if (mine !== gen) {
@@ -218,7 +226,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
    * `CLOCK_CHECK_MS` to send. If it has not: a track that ended or is muted
    * is reopened (no tap needed while the page may capture; the tap is asked
    * for if its context does not run). Otherwise the context is suspended and
-   * resumed, and if that brings nothing either, one tap rebuilds it.
+   * resumed, and if that brings nothing either, one tap rebuilds it. A
+   * window in which sound began but fell short is looked at once more first,
+   * so a graph that returns as the reader starts talking is not disturbed.
    */
   const recheck = (): void => {
     const held = capture;
@@ -238,7 +248,10 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     if (soundTimer) clearTimeout(soundTimer);
     soundTimer = null;
     if (recheckTimer) clearTimeout(recheckTimer);
+    /** A window in which sound began but fell short was looked at again. */
+    let extended = false;
     const look = (kicked: boolean): void => {
+      const from = framesSeen;
       recheckTimer = setTimeout(() => {
         recheckTimer = null;
         if (mine !== gen || paused || waiting) return;
@@ -255,6 +268,15 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
           return;
         }
         if (framesSeen - before >= SOUNDING_FRAMES) return;
+        // Sound began in this window but fell short: a graph that came back
+        // late, as the reader started talking, or a dead source's buffered
+        // tail. One more window tells them apart, and a suspend or a rebuild
+        // here would cut the sentence off (Bryan, 10 Nov: "Uh, Dr.").
+        if (framesSeen > from && !extended) {
+          extended = true;
+          look(kicked);
+          return;
+        }
         if (!kicked) {
           how += `, silent ${when}, suspended and resumed`;
           void held.kick?.();
@@ -269,6 +291,9 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
 
   return {
     open(ctx, carried) {
+      unwatch ??= (opts.pageSpeech ?? watchPageSpeech)((speaking) => {
+        muted = speaking;
+      });
       reopened = false;
       how = carried ? 'started without a tap' : 'started in a tap';
       begin(ctx, carried);
@@ -317,6 +342,11 @@ export function createLeadMic(opts: LeadMicOpts): LeadMic {
     },
     live: () => capture !== null && !paused,
     recheck,
-    stop: clear,
+    stop() {
+      clear();
+      unwatch?.();
+      unwatch = null;
+      muted = false;
+    },
   };
 }

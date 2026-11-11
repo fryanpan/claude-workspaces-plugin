@@ -30,7 +30,7 @@ import { boardEmbedFramesFor } from './doc/board-embed-frames.ts';
 import { FootnoteDecorations } from './doc/footnote-decorations.ts';
 import { FIRST_PAINT_CLASS } from './doc/prose-paint.ts';
 import { RemoteEditsKeepScroll } from './doc/remote-edit-scroll.ts';
-import { currentPageHref, isAppPageHref, resolveDocLink, safeLinkHref } from './link-open.ts';
+import { currentPageHref, followedLinkHref, isAppPageHref, resolveDocLink } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MassDeleteUndo } from './mass-delete-undo.ts';
 import { MathInline } from './math-inline.ts';
@@ -341,7 +341,7 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     // where the comment's range starts and ends, and only the target is
     // inside both spellings.
     if (!ev.metaKey && !ev.ctrlKey && target?.closest?.('.thread-range')) return;
-    const href = safeLinkHref(anchor.getAttribute('href'));
+    const href = followedLinkHref(anchor.getAttribute('href'));
     if (!href) return;
     ev.preventDefault();
     ev.stopPropagation();
