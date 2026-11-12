@@ -37,6 +37,8 @@ export type CardPlacement = 'inline' | 'balloon';
 
 /** Enough width for the 260px margin column beside the prose. */
 export const BALLOON_ROOM_QUERY = '(min-width: 1101px)';
+/** The same bound in pixels, for the page the docked lead chat leaves. */
+const BALLOON_ROOM_PX = 1101;
 
 /**
  * The placement, given how much room there is.
@@ -62,11 +64,27 @@ export const PREVIEW_OPEN_CLASS = 'preview-open';
 /** Fired on `window` when something other than the width changes the room. */
 export const ROOM_CHANGE_EVENT = 'cw:room-change';
 
+/**
+ * What the lead chat docked on the right takes off the page, in pixels; 0
+ * when it is not docked. `lead-chat/lead-chat-dock.ts` publishes the two
+ * values read here and fires `ROOM_CHANGE_EVENT` when they change. At 1180
+ * the 420px panel leaves 760px, where a 260px margin would squeeze the prose
+ * to a column under 500px, so the cards go into the flow.
+ */
+function dockedChatWidth(): number {
+  if (typeof document === 'undefined') return 0;
+  const html = document.documentElement;
+  if (html?.dataset.lcDocked !== 'true') return 0;
+  return Number.parseFloat(html.style.getPropertyValue('--lc-dock-w')) || 0;
+}
+
 /** Is there room beside the prose for a margin column? */
 export function roomForMargin(): boolean {
   const previewOpen =
     typeof document !== 'undefined' && document.body?.classList.contains(PREVIEW_OPEN_CLASS);
-  return media(BALLOON_ROOM_QUERY) && !previewOpen;
+  if (!media(BALLOON_ROOM_QUERY) || previewOpen) return false;
+  const docked = dockedChatWidth();
+  return docked === 0 || window.innerWidth - docked >= BALLOON_ROOM_PX;
 }
 
 /** Where the cards go at this width. */
