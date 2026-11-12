@@ -7,7 +7,7 @@ read the tokens. Agents ask it to act instead:
 - **Routine calls run at once:** reads, and starting or stopping a machine of
   an app the keeper made.
 - **Risky calls wait for your passkey:** a new project, an Access app, a
-  secret, a deploy, a Cloudflare Terraform apply.
+  secret, a deploy, CI's Cloudflare secrets, a config sync.
 - **Calls whose answer would hand over a credential are refused.**
 
 What it allows and refuses is in [security.md](../architecture/security.md),
@@ -99,7 +99,14 @@ prints, step by step:
    ok: set CW_KEEPER_URL in ~/.claude/settings.json; sessions launched from now on have it
    ok: set CW_KEEPER_URL in ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist
    ok: restarted com.fryanpan.claude-workspaces; it runs with CW_KEEPER_URL
-== 5. Check it
+== 5. CI credentials
+   Cloudflare account: <account name>
+   GitHub repository:  fryanpan/claude-workspaces-plugin
+   Make the four CI credentials? [y/N] y
+   ok: made the apply token, the plan token and two R2 keys
+   The write waits for your passkey: http://localhost:<port>/approve/<id>
+   ok: wrote the CI credentials to fryanpan/claude-workspaces-plugin: the environment cloudflare-prod and the repository
+== 6. Check it
    ok: /Users/cw-relay/keeper/state/credentials.json: Permission denied
    ok: the probe waits for your passkey at http://localhost:<port>/approve/<id>
    ok: withdrew the probe, so it created nothing and no tap can run it
@@ -159,6 +166,24 @@ prints, step by step:
   environment until they restart. A later `scripts/launchd/install.sh`
   keeps the plist's `CW_KEEPER_URL` unless you set the variable yourself
   (`CW_KEEPER_URL=` clears it).
+- **CI credentials:** the four Cloudflare credentials
+  `.github/workflows/cloudflare.yml` runs with. The apply token and a
+  read-write key on the state bucket go to the environment `cloudflare-prod`;
+  the plan token (the Read form of each permission) and a read-only key go to
+  the repository. They are made with the Keychain's `cloudflare-api-token`;
+  when that cannot make tokens, the step asks you to paste one that can (User
+  > API Tokens > Edit), uses it for this step only, and keeps it nowhere. The
+  values go straight into one request to the keeper, whose approval page
+  lists the secret names and never a value; your tap writes them. If the
+  write certainly did not run (denied, expired, withdrawn, refused), every
+  token the step made is deleted again; if it may have run, the tokens are
+  kept and the step says to run setup again. It needs the
+  keeper's GitHub token ("The GitHub token", below), with the classic `repo`
+  scope; without the token the step says so and is skipped, and without the
+  scope it stops before making anything. The keeper also refuses the write
+  unless `cloudflare-prod` deploys from `main` only. The step is skipped once
+  GitHub holds all six names and Cloudflare shows the four tokens active; a
+  name whose token is gone makes it remake all four.
 - **The check:** the probe asks the keeper for `fly apps create
   cw-keeper-probe`, prints the approval link, and withdraws the request, so
   nothing is created and no tap can run it later.
@@ -167,52 +192,59 @@ prints, step by step:
 reads a named tunnel's token from the API with the Keychain's token, which
 the keeper refuses because the answer is a credential.
 
-## Cloudflare Terraform: `cf:plan` and `cf:apply`
+## Cloudflare: CI applies, the keeper plans and syncs
 
-The keeper runs these itself, from its own release, with its own Cloudflare
-token, so they work after section 5 deletes the Keychain's
+Only CI applies Cloudflare changes (`.github/workflows/cloudflare.yml`). A
+pull request that touches `infra/cloudflare/` or either Worker applies when
+it merges to main: the merge is the approval, and nobody runs anything.
+`bun run cf:apply` only prints this and changes nothing. The keeper refuses
+an apply.
+
+The keeper runs the rest itself, from its own release, with its own
+Cloudflare token, so they work after section 5 deletes the Keychain's
 `cloudflare-api-token`. Your terminal sends the keeper the configs and the
 state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
 
 - **`bun run cf:plan`** runs at once and prints the plan. No passkey.
-- **`bun run cf:apply`** prints the plan, then prints an approval link and
-  puts it on your Home. The page shows what changes, who each project's
-  sign-in list gains or loses, and the whole plan. Your tap applies exactly
-  that plan. If nothing would change, there is no tap.
+- **`bun run cf:sync-config`** is how a change to the gitignored configs
+  (people, domains, session length, a project's service tokens) reaches CI.
+  The keeper plans the configs, then prints an approval link and puts it on
+  your Home. The page names the GitHub secrets it writes, who each project's
+  sign-in list gains or loses, and any service token it makes. Your tap makes
+  those tokens, writes the configs to the repository secrets
+  `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG` and `CF_SHARE_LINK_CONFIG`, and
+  starts `cloudflare.yml` on main, which applies. Each new token's client id
+  and secret go into your Keychain without being printed.
 - **Read the sign-in list.** The keeper plans with its own `.tf` files, but
   from the configs your terminal sent, which any agent running as you can
   edit. The plan text prints `(sensitive value)` where the addresses are, so
-  the "Who can sign in" list is the only place an added address shows. The
-  list is shown on the approval page, which any program on the Mac can load;
-  cf:apply never prints it. Hostnames an application covers are in the plan
-  text, not in this list.
-- **A plan too long to show** (over 512 KB of text) is marked "cut short" on
-  the page, which then offers only Deny: the keeper does not apply a plan
-  you could not read in full.
-- **A new Access service token** takes one more tap. The first page lists
-  the tokens it makes. After your tap, cf:apply puts each token's client id
-  and secret into your Keychain without printing them. The second page is
-  the plan that adopts them. This step needs the keeper's token to hold
-  Access: Service Tokens **Edit**, which the setup grants. This is the only
-  way the keeper makes a service token: it refuses every other write under
-  `service_tokens`, because the answer is the new secret. A keeper set up
-  before Edit was granted needs the install command (section 1) run once
-  more, at the merge commit that grants it; its setup step makes the new
-  token.
+  the "Who can sign in" list on the page is the only place an added address
+  shows. Any program on the Mac can load the page; cf:sync-config never
+  prints the list.
+- **`bun run cf:rotate-token "<name>"`** gives one existing service token a
+  new secret, on one tap whose page names the token. The old secret keeps
+  working for 24 hours, and the new pair replaces the old one in your
+  Keychain. A second rotation inside those 24 hours ends the old secret at
+  once.
+
+Making and rotating service tokens needs the keeper's token to hold Access:
+Service Tokens **Edit**, which the setup grants. These two are the only ways
+the keeper writes under `service_tokens`: it refuses every other write there,
+because the answer is the new secret.
 
 The keeper needs its own `terraform` for this. The install script copies
 yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from
-`KEEPER_TERRAFORM=/path/to/terraform`. A keeper installed before this
-change needs one more run of the install command (section 1) at the merge
-commit that adds it. Until then, cf:plan answers that the keeper has no
-terraform. CI's plan and apply are unchanged.
+`KEEPER_TERRAFORM=/path/to/terraform`.
 
 ## The GitHub token
 
-The keeper registers each project's push deploy keys with a GitHub token
-of yours (`packages/server/src/keeper/keeper-push-keys.ts`). It uses the
-token only to add, list and remove deploy keys, and never sends it to a
-project machine. Store it once, piping it in so it is never an argument:
+The keeper uses a GitHub token of yours for two things: each project's push
+deploy keys (`packages/server/src/keeper/keeper-push-keys.ts`), and Cloudflare
+CI's Actions secrets and its dispatch (`keeper-github.ts`). It only ever
+names one repository for the secrets, `fryanpan/claude-workspaces-plugin`,
+and never sends the token to a project machine. Writing Actions secrets needs
+a classic token with the `repo` scope; the keeper checks the scope GitHub
+reports and refuses before writing without it. Store it once, piping it in so it is never an argument:
 
 ```bash
 /bin/zsh -f -c 'security find-generic-password -s cw-github-push-token -w | /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR=/Users/cw-relay/keeper/state /Users/cw-relay/keeper/bin/bun /Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts import github-token'

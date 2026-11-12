@@ -1,5 +1,5 @@
 # The prod environment's Cloudflare configuration. Run it through
-# `bun run cf:plan prod` / `bun run cf:apply prod` (README.md), which
+# `bun run cf:plan prod` and CI's apply (README.md), which
 # assemble the variables and put the credentials into terraform's
 # environment only.
 # On main, CI applies it (.github/workflows/cloudflare.yml).

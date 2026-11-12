@@ -58,7 +58,7 @@ describe('the tunnel Terraform made', () => {
 
   it('is refused, naming the origin to give it, when the state has none', () => {
     expect(() => appliedTunnel(outputs(null), cfg)).toThrow('riverbend-origin.<zone>');
-    expect(() => appliedTunnel(outputs(null), cfg)).toThrow('bun run cf:apply');
+    expect(() => appliedTunnel(outputs(null), cfg)).toThrow('bun run cf:sync-config');
   });
 
   it('is refused when the state names a different tunnel or origin', () => {

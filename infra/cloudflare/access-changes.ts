@@ -5,8 +5,8 @@
  * `modules/access/main.tf` marks each `people` policy's `include` sensitive,
  * so the plan text prints `(sensitive value)` where the addresses are. The
  * JSON form still carries the values, so the keeper reads them here and puts
- * them on its approval page, and nowhere else: never the requester's answer,
- * a log line or a board artifact (`keeper-terraform.ts`).
+ * them on the `cf:sync-config` approval page, and nowhere else: never the requester's answer,
+ * a log line or a board artifact (`keeper-cf-sync.ts`).
  */
 
 interface PolicyChange {

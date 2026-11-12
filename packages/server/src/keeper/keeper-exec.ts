@@ -1,7 +1,7 @@
 /**
  * How the keeper runs what it allowed: `fly` with the org token in its
- * environment, the Cloudflare API with the token in a header, and the
- * Cloudflare Terraform run (`infra/cloudflare/keeper-run.ts`, from the
+ * environment, the Cloudflare API and GitHub's with each token in a header,
+ * and the Cloudflare Terraform run (`infra/cloudflare/keeper-run.ts`, from the
  * keeper's own release) with the token in its environment.
  *
  * A credential goes into a child's environment or a request header and
@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { GuardedFetch } from '../outbound-fetch.ts';
+import type { GithubScopedApi } from './keeper-github.ts';
 import { ed25519Pair, makePushKeys } from './keeper-push-keys.ts';
 import type { CloudflareResult, Executors, FlyResult } from './keeper-requests.ts';
 import type { KeeperStore } from './keeper-store.ts';
@@ -152,25 +153,34 @@ export function keeperExecutors(opts: {
       });
       return { status: res.status, body: await res.text() };
     },
-    async pushKeys(app, repos): Promise<CloudflareResult> {
+    async github(method, path, body) {
       const token = opts.store.credentials().github?.token;
-      if (!token)
+      if (!token) {
+        const error = JSON.stringify({ message: 'the keeper holds no GitHub token' });
+        return { status: 503, body: error, scopes: null };
+      }
+      const res = await opts.fetch(`${GITHUB_API}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return {
+        status: res.status,
+        body: await res.text(),
+        scopes: res.headers.get('x-oauth-scopes'),
+      };
+    },
+    async pushKeys(app, repos): Promise<CloudflareResult> {
+      if (!opts.store.credentials().github?.token)
         return { status: 503, body: JSON.stringify({ error: 'the keeper holds no GitHub token' }) };
       return makePushKeys(
         {
-          github: async (method, path, body) => {
-            const res = await opts.fetch(`${GITHUB_API}${path}`, {
-              method,
-              headers: {
-                authorization: `Bearer ${token}`,
-                accept: 'application/vnd.github+json',
-                'x-github-api-version': '2022-11-28',
-                ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-              },
-              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-            });
-            return { status: res.status, body: await res.text() };
-          },
+          github: (method, path, body) => (exec.github as GithubScopedApi)(method, path, body),
           keygen: async (comment) => ed25519Pair(comment),
           fly: (args, input) => exec.fly(args, input),
         },
