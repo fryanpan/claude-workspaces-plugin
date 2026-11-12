@@ -21,6 +21,11 @@ import { isPrivateMetaKey } from './private-meta.ts';
  *  circular import; DocStore passes itself). */
 export interface BindHost {
   get(docId: string): LiveDoc | undefined;
+  /** The doc if it is in memory, without hydrating it or stamping it as
+   *  reached. */
+  peek(docId: string): LiveDoc | undefined;
+  /** The file a doc is bound to right now, if any. */
+  boundPathOf(docId: string): string | undefined;
   /** Force a persistence pass for a doc whose in-memory meta changed without
    *  a CRDT update — the private sidecar keys have no Yjs write to ride. */
   persistMeta(docId: string): void;
@@ -101,6 +106,24 @@ export function refreshDiffMeta(
   entry: DiffFileEntry,
   group?: { group: string; rank: number; details?: string },
 ): void {
+  const changed = diffMetaChanges(doc.meta, entry, group);
+  if (changed.length === 0) return;
+  const m = doc.ydoc.getMap('meta');
+  doc.ydoc.transact(() => {
+    for (const [k, v] of changed) m.set(k, v);
+  });
+  for (const [k, v] of changed) {
+    (doc.meta as unknown as Record<string, unknown>)[k] = v;
+  }
+}
+
+/** The derived diff fields `refreshDiffMeta` would write onto `meta`. Empty
+ *  means the member's diff has not moved. Undefined values are skipped. */
+export function diffMetaChanges(
+  meta: DocMeta,
+  entry: DiffFileEntry,
+  group?: { group: string; rank: number; details?: string },
+): Array<[keyof DocMeta, unknown]> {
   const next: Partial<DocMeta> = {
     diffStatus: entry.status,
     diffOldPath: entry.oldPath,
@@ -108,23 +131,48 @@ export function refreshDiffMeta(
     diffDeletions: entry.deletions,
     // Explicitly false, not undefined: a file that STOPS being whitespace-only
     // (the agent added a real edit on a working-tree review) must clear the
-    // flag, and refreshDiffMeta skips undefined values.
+    // flag, and undefined values are skipped.
     diffWhitespaceOnly: entry.whitespaceOnly === true,
     diffGroup: group?.group,
     diffGroupRank: group?.rank,
     diffGroupDetails: group?.details,
   };
-  const m = doc.ydoc.getMap('meta');
-  const changed = (Object.entries(next) as Array<[keyof DocMeta, unknown]>).filter(
-    ([k, v]) => v !== undefined && doc.meta[k] !== v,
+  return (Object.entries(next) as Array<[keyof DocMeta, unknown]>).filter(
+    ([k, v]) => v !== undefined && meta[k] !== v,
   );
-  if (changed.length === 0) return;
-  doc.ydoc.transact(() => {
-    for (const [k, v] of changed) m.set(k, v);
-  });
-  for (const [k, v] of changed) {
-    (doc.meta as unknown as Record<string, unknown>)[k] = v;
-  }
+}
+
+/**
+ * Whether a re-bind can leave this existing member alone: its diff has not
+ * moved, it is not stale, and it is either out of memory or already bound
+ * to `absPath`. Re-binding such a member would change nothing but its
+ * residency clock — `getOrCreate` stamps a doc as reached — and a live
+ * review is re-bound on every listing change, so no member of a review a
+ * page held open would ever leave memory (`doc-residency.ts`). One that is
+ * out of memory comes back bound to the current file when anybody opens it.
+ */
+export function memberUnchanged(
+  host: BindHost,
+  meta: DocMeta | undefined,
+  entry: DiffFileEntry,
+  assigned: { group: string; rank: number; details?: string } | undefined,
+  explicitGroups: boolean,
+  absPath: string,
+): boolean {
+  if (!meta || meta.stale) return false;
+  // The same rule `bindDiff` writes groups by: explicit wins, else only a
+  // member that has none yet takes the heuristic one.
+  const group = explicitGroups || meta.diffGroup === undefined ? assigned : undefined;
+  if (diffMetaChanges(meta, entry, group).length > 0) return false;
+  if (!host.peek(meta.docId)) return true;
+  return entry.status === 'deleted' || host.boundPathOf(meta.docId) === absPath;
+}
+
+/** A review's members by docId, off the listing — which hydrates nothing. */
+export function membersOf(host: BindHost, setId: string): Map<string, DocMeta> {
+  const out = new Map<string, DocMeta>();
+  for (const m of host.list()) if (attachmentIdOf(m) === setId) out.set(m.docId, m);
+  return out;
 }
 
 /**
@@ -151,7 +199,11 @@ export function rememberWorkspaceConfig(
   if (opts.maxFiles !== undefined) next.push(['workspaceMaxFiles', opts.maxFiles]);
   if (next.length === 0) return;
   for (const m of host.list()) {
-    if (attachmentIdOf(m) === setId) writeMeta(host, m.docId, next);
+    if (attachmentIdOf(m) !== setId) continue;
+    // Judged on the listed meta first: `writeMeta` hydrates and stamps the
+    // doc as reached, and a refresh replays this config onto every member.
+    if (next.every(([k, v]) => JSON.stringify(m[k]) === JSON.stringify(v))) continue;
+    writeMeta(host, m.docId, next);
   }
 }
 

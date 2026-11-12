@@ -17,6 +17,8 @@ import {
   deriveWorkspaceId,
   isExcluded,
   memberDocId,
+  memberUnchanged,
+  membersOf,
   normalizeExcludes,
   refreshDiffMeta,
   rememberWorkspaceConfig,
@@ -397,18 +399,32 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     opts.groups,
   );
 
-  const out: Array<{
-    docId: string;
-    relPath: string;
-    type: DocType;
-    title: string;
-    status: DocMeta['diffStatus'];
-    additions?: number;
-    deletions?: number;
-    group?: string;
-  }> = [];
+  const out: Extract<BindDiffResult, { ok: true }>['files'] = [];
+  const prior = membersOf(host, reviewId);
   for (const { entry, text } of accepted) {
     const docId = memberDocId(reviewId, entry.relPath);
+    const { relPath, status, additions, deletions } = entry;
+    const assigned = groupOf.get(relPath);
+    const row = {
+      docId,
+      relPath,
+      type: 'diff' as const,
+      title: relPath,
+      status,
+      additions,
+      deletions,
+      group: assigned?.group,
+    };
+    // A working-tree re-bind leaves a member whose diff has not moved where
+    // it is, so a refresh does not hold the whole review in memory.
+    const was = prior.get(docId);
+    if (
+      !target &&
+      memberUnchanged(host, was, entry, assigned, !!opts.groups, join(root, relPath))
+    ) {
+      out.push(row);
+      continue;
+    }
     const doc = host.getOrCreate(docId, {
       type: 'diff',
       setId: reviewId,
@@ -459,16 +475,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       const isMd = entry.relPath.toLowerCase().endsWith('.md');
       await host.attachFlatFileAsync(docId, join(root, entry.relPath), { writeBack: !isMd });
     }
-    out.push({
-      docId,
-      relPath: entry.relPath,
-      type: 'diff',
-      title: entry.relPath,
-      status: entry.status,
-      additions: entry.additions,
-      deletions: entry.deletions,
-      group: groupOf.get(entry.relPath)?.group,
-    });
+    out.push(row);
   }
 
   // AFTER the loop, and across EVERY member — not just the ones this bind
