@@ -65,6 +65,7 @@ describe('keeper-setup', () => {
       'launchctl print gui/501/com.example.board',
       'launchctl bootout',
       'launchctl bootstrap',
+      'fetch GET localhost:45678/v1/github-status',
       'fetch POST localhost:45678/v1/fly',
       'fetch DELETE localhost:45678/v1/requests/req1',
     ];
@@ -101,6 +102,7 @@ describe('keeper-setup', () => {
       new RegExp(`<key>CW_KEEPER_URL</key>\\s*<string>${KEEPER}</string>`),
     );
 
+    expect(r.out).toContain('GitHub holds the CI credentials already');
     expect(r.out).toContain(`${KEEPER}/approve/req1`);
     expect(r.out).toContain('Permission denied');
     expect(r.out).toContain('The keeper is set up');

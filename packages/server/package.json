@@ -7,10 +7,12 @@
   "dependencies": {
     "@claude-workspaces/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@noble/hashes": "1.8.0",
     "@sentry/bun": "^10.71.0",
     "fractional-indexing": "3.2.0",
     "jose": "^5.9.6",
     "lib0": "^0.2.117",
+    "tweetnacl": "1.0.3",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.30"
   }

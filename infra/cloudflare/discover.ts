@@ -23,7 +23,7 @@
  *
  * A service token the config names and the account lacks is not refused. It
  * is listed in `missing_service_tokens`, a plan shows Terraform making it,
- * and `cf:apply` on the Mac makes it first, so its secret never enters the
+ * and `cf:sync-config` makes it first, through the keeper, so its secret never enters the
  * state (`service-tokens.ts`). A token is looked up as `<name_prefix><name>`.
  *
  * Tested against a fake account by

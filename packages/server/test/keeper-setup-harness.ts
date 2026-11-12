@@ -213,6 +213,12 @@ export function fakeFetch(w: World, cf: Cf, keeperAccountsFail = false): typeof 
         );
       }
       if (method === 'DELETE' && url.pathname === '/v1/requests/req1') return json({ ok: true });
+      // GitHub holds the CI credentials already, so the CI step skips; its
+      // own cases are keeper-setup-ci.test.ts.
+      if (method === 'GET' && url.pathname === '/v1/github-status') {
+        const all = ['CLOUDFLARE_API_TOKEN', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+        return json({ scopes: ['repo'], names: { repository: all, 'cloudflare-prod': all } });
+      }
       // The generic Cloudflare route, read with the keeper's own token.
       if (method === 'GET' && url.pathname === '/v1/cloudflare/accounts')
         return keeperAccountsFail

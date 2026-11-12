@@ -83,7 +83,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   const host = p?.hosts[0];
   if (!p || !host) {
     skipped.push(
-      `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: the Terraform state has no Access application for ${project} (add it to access.local.json; bun run cf:apply)`,
+      `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: the Terraform state has no Access application for ${project} (add it to access.local.json; bun run cf:sync-config)`,
     );
     return { settings, skipped };
   }

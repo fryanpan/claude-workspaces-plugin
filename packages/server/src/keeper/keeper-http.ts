@@ -8,9 +8,9 @@
  * - **Every request** must come from a loopback peer, name the keeper's own
  *   host (`localhost:<port>` or `127.0.0.1:<port>`, so a rebound DNS name
  *   cannot reach it from a browser), and carry no `cf-ray`.
- * - **The agent API** (`POST /v1/fly`, `/v1/terraform`, `/v1/cloudflare/*`, `GET` and
- *   `DELETE /v1/requests/<id>`) must also carry `x-cw-keeper: 1`, which a web
- *   page cannot add without a CORS preflight the keeper never grants, and the
+ * - **The agent API** (`POST /v1/fly`, `/v1/terraform`, `/v1/cloudflare/*`,
+ *   the CI requests in `CI_PATHS`, `GET` and `DELETE /v1/requests/<id>`) must
+ *   also carry `x-cw-keeper: 1`, which a web page cannot add without a CORS preflight the keeper never grants, and the
  *   caller token in `x-cw-keeper-caller`, which only a process that can read
  *   the caller token file holds (`keeper-callers.ts`). So another macOS user,
  *   a lead user among them, and a walled lead cannot reach `fly logs`, a
@@ -33,6 +33,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { CALLER_HEADER, callerVerdict } from './keeper-callers.ts';
+import { resultIsSecret } from './keeper-ci-calls.ts';
 import { type Page, alarmPage, approvePage, enrollPage, indexPage } from './keeper-page.ts';
 import type { HeldRequest, KeeperCall, KeeperRequests, Submitted } from './keeper-requests.ts';
 import { type KeeperStore, hashToken } from './keeper-store.ts';
@@ -50,6 +51,14 @@ const MAX_BODY = 1024 * 1024;
  */
 export const RELAYED_PEER = 'launchd-relay';
 const LOOPBACK_PEERS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', RELAYED_PEER]);
+
+/** The CI requests (`keeper-ci-calls.ts`): each path, and the call its body makes. */
+const CI_PATHS: Record<string, (b: Record<string, unknown>) => KeeperCall> = {
+  '/v1/github-secrets': (b) => ({ type: 'github-secrets', secrets: b.secrets as never }),
+  '/v1/github-status': () => ({ type: 'github-status' }),
+  '/v1/cf-sync': (b) => ({ type: 'cf-sync', input: str(b.input) }),
+  '/v1/service-token-rotate': (b) => ({ type: 'service-token-rotate', name: str(b.name) }),
+};
 
 export interface KeeperHttpDeps {
   requests: KeeperRequests;
@@ -191,6 +200,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         path === '/v1/terraform' ||
         path === '/v1/move-grant' ||
         path === '/v1/push-keys' ||
+        Object.hasOwn(CI_PATHS, path) ||
         path.startsWith('/v1/cloudflare/') ||
         (path.startsWith('/v1/requests/') && (method === 'GET' || method === 'DELETE'))
       ) {
@@ -223,11 +233,16 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         const body = await readJson(req);
         const call: KeeperCall = {
           type: 'terraform',
-          command: body.command as 'plan' | 'apply',
+          command: body.command as 'plan',
           env: body.env as 'prod' | 'staging',
           input: str(body.input),
         };
         return answer(await requests.submit(call, requester));
+      }
+      const ci = Object.hasOwn(CI_PATHS, path) ? CI_PATHS[path] : undefined;
+      if (ci && method === (path === '/v1/github-status' ? 'GET' : 'POST')) {
+        const body = method === 'GET' ? {} : await readJson(req);
+        return answer(await requests.submit(ci(body), requester));
       }
       if (method === 'POST' && path === '/v1/push-keys') {
         const body = await readJson(req);
@@ -311,8 +326,8 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         try {
           if (verb === 'deny') return json(200, view(requests.deny(id, pageToken, assertion)));
           const r = await requests.approve(id, pageToken, assertion);
-          // A Terraform result can carry a new service token's secret: only its requester reads it.
-          if (r.call.type === 'terraform') {
+          // A sync or a rotation can carry a service token's secret: only its requester reads it.
+          if (resultIsSecret(r.call)) {
             const { result: _, ...shown } = view(r);
             return json(200, { ...shown, status: r.result?.status });
           }
