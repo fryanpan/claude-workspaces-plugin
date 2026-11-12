@@ -110,6 +110,15 @@
 #shell {
   height: calc(100dvh - var(--doc-dock-h, 0px));
 }
+/* The lead chat docked on the right (lead-chat/lead-chat-dock.ts publishes
+   `data-lc-docked` and `--lc-dock-w`) takes its width from the page rather
+   than lying over the prose: the shell, top bar included, ends at the
+   panel's left edge, as the board's column does (board.css, PANE LAYOUT).
+   Only a wide screen docks; at 1100px and under the chat is a sheet with its
+   own Close, and no column is reserved. */
+html[data-lc-docked] #shell {
+  margin-right: var(--lc-dock-w, 0px);
+}
 #toast {
   bottom: calc(var(--kb-bottom, 0px) + 24px + var(--safe-bottom) + var(--doc-dock-h, 0px));
 }
