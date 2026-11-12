@@ -111,7 +111,7 @@ Every row but the first comes from the Terraform outputs
 the environment `--tf-env` names), so deploy reads no Cloudflare API for
 them; it needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
 or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
-application in the state yet (`bun run cf:apply` makes it) gets only the
+application in the state yet (CI's apply makes it, after `bun run cf:sync-config`) gets only the
 owner address, and the run says which settings it left unset; it does not
 fail. Nor does a state it cannot read: it says why and skips the same rows.
 
@@ -145,10 +145,11 @@ path. It proves the machine can be reached; it is not a way in.
 
 `--tunnel named` is the production path. `machine:deploy` makes no
 Cloudflare call; Terraform (`infra/cloudflare/README.md`, applied by CI on
-main or `bun run cf:apply`) makes the tunnel, for every project in `router.local.json` whose origin is
+main) makes the tunnel, for every project in `router.local.json` whose origin is
 `<project>-origin.<zone>`. So the order is: add
 `"<project>": "<project>-origin.<zone>"` to the router's `projects`, run
-`bun run cf:plan`, read it, run `bun run cf:apply`, then `machine:deploy
+`bun run cf:plan`, read it, run `bun run cf:sync-config` and tap, wait for
+CI's apply, then `machine:deploy
 --tunnel named`. The apply makes:
 
 1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a

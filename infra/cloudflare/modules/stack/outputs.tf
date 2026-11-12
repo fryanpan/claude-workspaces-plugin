@@ -1,4 +1,4 @@
-# Read back by `cf:apply` and by `machine:deploy` (`infra/cloudflare/outputs.ts`).
+# Read back by `machine:deploy` (`infra/cloudflare/outputs.ts`).
 # None is a credential: the state holds no token or secret.
 
 output "access" {

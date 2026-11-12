@@ -20,8 +20,8 @@ in the routes. The config manages this Worker only once that file lists
 routes, each a `<host>/share/*` pattern in `router.local.json`'s zone:
 
 ```sh
-bun run cf:plan
-bun run cf:apply
+bun run cf:plan         # what would change
+bun run cf:sync-config  # sends the routes to CI, which applies them
 ```
 
 The config leaves the Worker's workers.dev setting as it finds it. Its HMAC key is the one step outside
