@@ -1,4 +1,3 @@
-import { heapStats } from 'bun:jsc';
 /**
  * A live diff review held open for hours must not hold every file it lists
  * in memory.
@@ -28,6 +27,7 @@ import { waitFor } from './wait-for.ts';
 
 const MINUTE = 60_000;
 const FILES = 40;
+const HEAP_PROBE = join(import.meta.dir, 'fixtures', 'diff-review-heap-probe.ts');
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], {
@@ -49,12 +49,6 @@ function source(bytes: number): string {
     s += `export function harborlight${i}(x: number): number {\n  return x * ${i} + ${i};\n}\n\n`;
   }
   return s;
-}
-
-function heapBytes(): number {
-  Bun.gc(true);
-  Bun.gc(true);
-  return heapStats().heapSize;
 }
 
 describe('a live diff review held open across refresh ticks', () => {
@@ -102,35 +96,33 @@ describe('a live diff review held open across refresh ticks', () => {
     await store.evictIdleDocs();
   }
 
-  it('keeps only the members whose diff moved, and heap falls back as the rest age out', async () => {
-    // Warm up under another review id and let it age out, so code the bind
-    // path compiles on first use is not counted as doc heap below.
-    const warm = await store.bindDiff({ repoPath: repo, base, reviewId: 'warm-up' });
-    if (!warm.ok) throw new Error(`warm-up bind failed: ${JSON.stringify(warm)}`);
-    store.flush();
-    clock += 31 * MINUTE;
-    await store.evictIdleDocs();
-    expect(store.stats().residentDocs).toBe(0);
-    const h0 = heapBytes();
-
+  it('keeps only the members whose diff moved across thirty refresh ticks', async () => {
     const bound = await store.bindDiff({ repoPath: repo, base });
     if (!bound.ok) throw new Error(`bind failed: ${JSON.stringify(bound)}`);
     expect(store.stats().residentDocs).toBe(FILES);
-    const hBound = heapBytes();
-
     // Two and a half hours of an agent working one file while the review
     // stays open: thirty ticks, five minutes apart.
     for (let n = 1; n <= 30; n++) await tick(bound.reviewId, n, 0);
-
     // The file being worked on stays; the thirty-nine nobody reached left.
     expect(store.stats().residentDocs).toBeLessThanOrEqual(2);
-    // What the bind added (~40 × 176KB) is gone again once the evicted
-    // docs' last timers have let go of them. Measured on the base commit,
-    // which keeps all forty: 0.43 of it remains. With the fix: below zero.
-    await waitFor(() => (heapBytes() - h0) / (hBound - h0) < 0.2, {
-      interval: 250,
-      describe: 'heap to fall back below a fifth of what the bind added',
+  }, 60_000);
+
+  it('gives back the heap the bind added once the rest age out', async () => {
+    // In a child process: the heap is process-wide, and the suite's other
+    // files allocate into the same figure. Measured on the base commit, which
+    // keeps all forty members: 11.2MB after the bind, 13.8MB after the ticks.
+    // With the fix: 11.2MB, then 8.3MB.
+    const child = Bun.spawn(['bun', 'run', HEAP_PROBE], {
+      env: { ...process.env, CW_TEST_TIMING_SCALE: '0.1' },
+      stdout: 'pipe',
+      stderr: 'ignore',
     });
+    const out = await new Response(child.stdout).text();
+    expect(await child.exited).toBe(0);
+    const line = out.trim().split('\n').pop() ?? '';
+    const heap = JSON.parse(line) as { resident: number; hBound: number; hAfter: number };
+    expect(heap.resident).toBeLessThanOrEqual(2);
+    expect(heap.hAfter).toBeLessThan(heap.hBound);
   }, 60_000);
 
   it('leaves unchanged members alone when the review was bound with groups and a file cap', async () => {
