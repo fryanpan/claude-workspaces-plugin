@@ -4,7 +4,13 @@
 #                 summarised on the PR. Skipped, not failed, when the plan
 #                 secrets are absent (a fork's PR, or before they are set).
 #   push to main  the same check, then apply to prod in the GitHub Environment
-#                 `cloudflare-prod`.
+#                 `cloudflare-prod`. A merged pull request is the approval: the
+#                 environment has no required reviewer.
+#   dispatch      the same as a push, when run on main. The keeper dispatches
+#                 it after `bun run cf:sync-config` writes the gitignored
+#                 configs' secrets (infra/cloudflare/README.md, "CI"); a
+#                 dispatch on any other branch runs the check and applies
+#                 nothing.
 #
 # No Fly token is used here. Project machines take new server code from the
 # signed releases server-release.yml publishes, and an image change is
@@ -42,6 +48,7 @@ on:
       - infra/board-router-worker/worker.js
       - infra/share-link-worker/worker.js
       - .github/workflows/cloudflare.yml
+  workflow_dispatch: {}
 
 permissions: {}
 
@@ -122,7 +129,7 @@ jobs:
         run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/plan.md"
 
   apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: check
     runs-on: ubuntu-latest
     environment: cloudflare-prod
