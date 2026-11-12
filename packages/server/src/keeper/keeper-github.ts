@@ -174,6 +174,46 @@ async function repoScope(gh: GithubScopedApi): Promise<Result | null> {
   return null;
 }
 
+/**
+ * The refusal when `cloudflare-prod` would release its secrets to a branch
+ * other than main. The environment's write token is safe only because a pull
+ * request cannot deploy to it, so the keeper checks the policy itself before
+ * putting a write secret there: custom branch policies, exactly one, a branch
+ * named `main`. "Protected branches" is refused too, because which branches
+ * are protected is a setting the keeper cannot see from here.
+ */
+export async function mainOnlyEnvironment(gh: GithubScopedApi): Promise<Result | null> {
+  const env = `/repos/${CI_REPO}/environments/${CI_ENVIRONMENT}`;
+  const r = await gh('GET', env);
+  const refuse = (what: string) =>
+    fail(
+      403,
+      `the environment ${CI_ENVIRONMENT} ${what}, so nothing was written. In GitHub: Settings > Environments > ${CI_ENVIRONMENT} > Deployment branches and tags: Selected branches and tags, with the one rule main.`,
+    );
+  if (r.status === 404) return refuse('does not exist');
+  if (r.status !== 200)
+    return fail(502, `GitHub answered ${r.status} for ${CI_ENVIRONMENT}: ${why(r.body)}`);
+  type Policy = { protected_branches?: unknown; custom_branch_policies?: unknown };
+  let policy: Policy | null = null;
+  try {
+    const parsed = JSON.parse(r.body) as { deployment_branch_policy?: Policy | null };
+    policy = parsed.deployment_branch_policy ?? null;
+  } catch {}
+  if (!policy || policy.custom_branch_policies !== true || policy.protected_branches === true)
+    return refuse('may deploy from branches other than main');
+  const l = await gh('GET', `${env}/deployment-branch-policies?per_page=100`);
+  if (l.status !== 200)
+    return fail(502, `GitHub answered ${l.status} for ${CI_ENVIRONMENT}'s branch rules`);
+  let rules: { name?: unknown; type?: unknown }[] = [];
+  try {
+    rules = (JSON.parse(l.body) as { branch_policies?: typeof rules }).branch_policies ?? [];
+  } catch {}
+  const only = rules.length === 1 ? rules[0] : undefined;
+  if (!only || only.name !== CI_REF || (only.type !== undefined && only.type !== 'branch'))
+    return refuse('may deploy from branches other than main');
+  return null;
+}
+
 /** The token's scope names and the secret names already set, per target. */
 export async function githubStatus(gh: GithubScopedApi): Promise<Result> {
   const r = await gh('GET', `/repos/${CI_REPO}`);
@@ -200,6 +240,10 @@ export async function writeGithubSecrets(
 ): Promise<Result> {
   const refused = await repoScope(gh);
   if (refused) return refused;
+  if (secrets.some((s) => s.target === CI_ENVIRONMENT)) {
+    const open = await mainOnlyEnvironment(gh);
+    if (open) return open;
+  }
   const keys = new Map<SecretTarget, { key_id: string; key: string }>();
   const written: string[] = [];
   for (const s of secrets) {

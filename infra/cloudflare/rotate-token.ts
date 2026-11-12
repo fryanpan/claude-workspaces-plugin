@@ -4,7 +4,8 @@
  * service token, through the keeper on one passkey tap
  * (`packages/server/src/keeper/keeper-rotate.ts`). For a token whose secret
  * nobody holds. The token keeps its id and client id, so Terraform sees no
- * change; the old secret keeps working for 24 hours.
+ * change; the old secret keeps working for 24 hours. A second rotation
+ * inside those 24 hours ends the old secret at once, so the command says so.
  *
  * The new pair goes into the Keychain over the old one, under the services
  * a new token's pair uses (`service-tokens.ts` `tokenServices`), and is never
@@ -60,7 +61,7 @@ export async function rotateToken(name: string, io: RotateIo): Promise<number> {
     return 1;
   }
   io.out(
-    `Rotated "${name}"; the new pair is in ${services.clientId} and ${services.secret}. The old secret works until ${String(answer.previousSecretExpiresAt)}.\n`,
+    `Rotated "${name}"; the new pair is in ${services.clientId} and ${services.secret}. The old secret works until ${String(answer.previousSecretExpiresAt)}. Do not rotate it again before then: a second rotation ends the old secret at once, and anything still using it stops signing in.\n`,
   );
   return 0;
 }

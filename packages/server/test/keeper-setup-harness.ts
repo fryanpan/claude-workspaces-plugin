@@ -178,6 +178,16 @@ export function fakeFetch(w: World, cf: Cf, keeperAccountsFail = false): typeof 
       if (!known) return json({ success: false }, 401);
       if (path === '/accounts')
         return json({ success: true, result: [{ id: ACCOUNT, name: ACCOUNT_NAME }] });
+      // The four CI tokens behind the names GitHub holds (below), all active.
+      if (path === '/user/tokens' && method === 'GET') {
+        const kinds = ['apply', 'plan', 'state read-write', 'state read-only'];
+        const result = kinds.map((k, i) => ({
+          id: `ci${i}`,
+          name: `claude-workspaces CI ${k} 2026-11-12T09:00`,
+          status: 'active',
+        }));
+        return json({ success: true, result });
+      }
       if (!cf.canMint) return json({ success: false, errors: [{ message: 'forbidden' }] }, 403);
       if (path === '/user/tokens/permission_groups') {
         return json({

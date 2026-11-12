@@ -17,10 +17,14 @@
  * pastes for this step; neither is stored. The values go from Cloudflare's
  * answer into one `github-secrets` request and nowhere else: never printed,
  * never in a file or an argument. The keeper holds that request for a passkey
- * tap whose page lists the secret names only. If anything after the first
- * token fails, every token made in this run is deleted again.
+ * tap whose page lists the secret names only. If a later step fails before
+ * the write can have run (a mint, a denied or withdrawn tap), every token
+ * made in this run is deleted again; once the write may have run, none is,
+ * because GitHub may hold it.
  *
- * Skipped when GitHub already holds all six names, and, with a line saying
+ * Skipped when GitHub already holds all six names and an active token of
+ * each of the four kinds exists (a name says nothing about a token deleted
+ * since); when that cannot be checked it asks. Skipped too, with a line saying
  * so, when the keeper holds no GitHub token yet; refused, before anything is
  * made, when its GitHub token lacks the classic `repo` scope that writing
  * Actions secrets needs.
@@ -127,8 +131,32 @@ export async function ciCredentials(io: CiStepIo): Promise<CiStepResult> {
   const has = (t: SecretTarget) =>
     CREDENTIAL_SECRETS.every((n) => (read.names?.[t] ?? []).includes(n));
   if (has('repository') && has(CI_ENVIRONMENT)) {
-    ok(`GitHub holds the CI credentials already (${CI_REPO})`);
-    return { ok: true };
+    if (io.dryRun) {
+      would('confirm the four tokens behind the six names GitHub holds are still active');
+      return { ok: true };
+    }
+    const behind = await tokensBehind(io.fetch, io.current());
+    if (behind === 'active') {
+      ok(`GitHub holds the CI credentials already, and their tokens are active (${CI_REPO})`);
+      return { ok: true };
+    }
+    if ('missing' in behind) {
+      io.print(
+        `   GitHub holds the six names, but these tokens are gone or not active: ${behind.missing.join(', ')}. They are made again.`,
+      );
+    } else {
+      io.print(
+        `   GitHub holds the six names; the tokens behind them could not be checked (${behind.why}).`,
+      );
+      if (
+        !/^\s*y(es)?\s*$/i.test(
+          await io.readLine('   Make the four CI credentials again anyway? [y/N] '),
+        )
+      ) {
+        ok('kept the CI credentials GitHub holds');
+        return { ok: true };
+      }
+    }
   }
   if (!(read.scopes ?? []).includes('repo'))
     return {
@@ -233,13 +261,46 @@ export async function ciCredentials(io: CiStepIo): Promise<CiStepResult> {
     try {
       error = (JSON.parse(written.body) as { error?: string }).error ?? error;
     } catch {}
-    return undo(`GitHub did not take the secrets (${error})`);
+    // Delete only what nothing can be using: once the write may have run,
+    // GitHub may hold these tokens, and deleting them would leave six names
+    // pointing at nothing.
+    if (written.notRun) return undo(`the keeper did not write the secrets (${error})`);
+    return {
+      stop: `the write may have run, but did not report success (${error}). The tokens it made are kept (${made.map((m) => m.id).join(', ')}). Run this again: it checks which names GitHub holds and whether their tokens are active, and makes them again if not`,
+    };
   }
   ok(
     `wrote the CI credentials to ${CI_REPO}: the environment ${CI_ENVIRONMENT} and the repository`,
   );
   if (maker.pasted) io.print('   Delete the token you pasted: My Profile > API Tokens.');
   return { ok: true };
+}
+
+const LABELS = ['apply', 'plan', 'state read-write', 'state read-only'];
+
+/**
+ * Whether an active token of each label exists (`GET /user/tokens`, which the
+ * token that makes them can read). The names GitHub holds say nothing about
+ * whether the tokens behind them were deleted since.
+ */
+async function tokensBehind(
+  doFetch: typeof fetch,
+  token: string | null,
+): Promise<'active' | { missing: string[] } | { why: string }> {
+  if (!token) return { why: 'the Keychain holds no cloudflare-api-token' };
+  const r = await cfCall(doFetch, token, 'GET', '/user/tokens?per_page=100');
+  if (!r.ok) return { why: r.why };
+  const live = (Array.isArray(r.result) ? r.result : []) as { name?: unknown; status?: unknown }[];
+  const missing = LABELS.filter(
+    (label) =>
+      !live.some(
+        (t) =>
+          t.status === 'active' &&
+          typeof t.name === 'string' &&
+          t.name.startsWith(`claude-workspaces CI ${label} `),
+      ),
+  );
+  return missing.length ? { missing } : 'active';
 }
 
 async function permissionGroups(

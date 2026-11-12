@@ -195,7 +195,10 @@ The jobs hand the R2 pair to terraform as `AWS_ACCESS_KEY_ID` /
 is an optional repository variable; the default bucket is
 `claude-workspaces-tfstate`. `cloudflare-prod` must allow deployments from
 `main` only: that rule keeps its write tokens out of a pull request's reach,
-including one that edits this workflow.
+including one that edits this workflow. The keeper refuses to write the
+environment's secrets unless that rule is in place. The apply job hands the
+write token and the read-write key to the "Apply prod" step only, so `bun
+install` never sees them.
 
 ## State
 

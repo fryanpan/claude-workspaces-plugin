@@ -18,7 +18,9 @@
  *   keeper-run.ts tokens <env>  make exactly the missing service tokens a
  *                               config sync's approval named and report their
  *                               pairs, for the requester to put in Bryan's
- *                               Keychain (`service-tokens.ts`)
+ *                               Keychain (`service-tokens.ts`); when one
+ *                               fails, the pairs already made ride the
+ *                               failure back, since nothing else holds them
  *
  * stdin is one JSON object the keeper writes (`KeeperRunInput`): the configs
  * and the state bucket's credential the requester sent, and the expected
@@ -100,7 +102,16 @@ export type KeeperRunReport =
       cut?: { shown: number; total: number };
     }
   | { ok: true; mode: 'tokens'; minted: MintedToken[] }
-  | { ok: false; error: string; refusals?: string[] };
+  | {
+      ok: false;
+      error: string;
+      refusals?: string[];
+      /**
+       * Tokens a `tokens` run made and kept before a later one failed. Their
+       * pairs exist nowhere else, so they ride the failure to the requester.
+       */
+      minted?: MintedToken[];
+    };
 
 /** The most plan text a report carries, in characters. */
 export const MAX_TEXT = 512 * 1024;
@@ -151,14 +162,28 @@ export async function keeperRun(
     }
     const stored: Array<{ services: TokenServices; clientId: string; secret: string }> = [];
     const errors: string[] = [];
-    const minted = await mintServiceTokens(api, found.runtime.account_id, want, {
-      keychainHasService: () => false,
-      storeToken: (services, clientId, secret) => stored.push({ services, clientId, secret }),
-      confirm: () => true,
-      out: () => {},
-      err: (s) => errors.push(s.trim()),
-    });
-    if (!minted.ok) return fail(errors.join(' ') || 'a service token could not be made');
+    const names = Object.values(want);
+    // A token made before a later one fails is real and kept, and this run
+    // holds its only copy of the secret: hand it back with the failure.
+    const made = (): MintedToken[] =>
+      stored.map((s, i) => ({ name: names[i] ?? '', id: '', ...s }));
+    let minted: Awaited<ReturnType<typeof mintServiceTokens>>;
+    try {
+      minted = await mintServiceTokens(api, found.runtime.account_id, want, {
+        keychainHasService: () => false,
+        storeToken: (services, clientId, secret) => stored.push({ services, clientId, secret }),
+        confirm: () => true,
+        out: () => {},
+        err: (s) => errors.push(s.trim()),
+      });
+    } catch (e) {
+      errors.push(e instanceof Error ? e.message : String(e));
+      minted = { ok: false };
+    }
+    if (!minted.ok) {
+      const error = errors.join(' ') || 'a service token could not be made';
+      return stored.length ? { ok: false, error, minted: made() } : fail(error);
+    }
     return {
       ok: true,
       mode: 'tokens',

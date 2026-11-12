@@ -63,7 +63,8 @@ function apiHeaders(token: string | null): Record<string, string> {
   return { [API_HEADER]: '1', ...(token ? { [CALLER_HEADER]: token } : {}) };
 }
 
-type Waited<T> = { ok: true; result: T } | { ok: false; error: string };
+/** `notRun`: the keeper is known not to have run it (denied, expired, withdrawn). */
+type Waited<T> = { ok: true; result: T } | { ok: false; error: string; notRun?: true };
 
 /** Give up on a held request: the keeper drops it, so no later tap runs it. */
 export async function withdrawRequest(
@@ -110,7 +111,7 @@ async function waitForApproval<T>(
       return { ok: false, error: view.error ?? 'the approved command did not run' };
     }
     if (view.status === 'denied' || view.status === 'expired' || view.status === 'withdrawn') {
-      return { ok: false, error: `${held.summary} was ${view.status}` };
+      return { ok: false, error: `${held.summary} was ${view.status}`, notRun: true };
     }
     // Approved: the tap wait no longer applies, the run's own limit does.
     if (view.status === 'running' && !running) {
@@ -121,9 +122,13 @@ async function waitForApproval<T>(
   if (running) {
     return { ok: false, error: `${held.summary} was approved and is still running past the wait` };
   }
+  // A tap that lands as the wait ends makes this withdraw fail ("not
+  // waiting"), and then the call may be running: only a withdraw the keeper
+  // took proves it never ran.
   const withdrawn = await withdrawRequest(origin, held, doFetch, callerToken);
   return {
     ok: false,
+    ...(withdrawn ? { notRun: true as const } : {}),
     error: withdrawn
       ? 'no approval within the wait; the request was withdrawn, so ask again'
       : `no approval within the wait, and it could not be withdrawn; deny it at ${held.approveUrl}`,
@@ -250,7 +255,7 @@ export async function keeperHeld(
   path: string,
   body: Record<string, unknown>,
   opts: KeeperClientOptions = {},
-): Promise<CloudflareResult> {
+): Promise<CloudflareResult & { notRun?: true }> {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
   const caller = callerOf(opts);
   const res = await doFetch(`${origin}${path}`, {
@@ -266,11 +271,17 @@ export async function keeperHeld(
     const text = await res.text().catch(() => '');
     const status = res.ok ? 502 : res.status;
     const reason = res.ok ? `the keeper ran ${path} without a tap` : text.slice(0, 300);
-    return { status, body: JSON.stringify({ error: reason }) };
+    // A refusal at submit ran nothing; a call that ran without a tap did run.
+    return { status, body: JSON.stringify({ error: reason }), ...(res.ok ? {} : { notRun: true }) };
   }
   const held = (await res.json()) as HeldAnswer;
   const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
-  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+  if (waited.ok) return waited.result;
+  return {
+    status: 403,
+    body: JSON.stringify({ error: waited.error }),
+    ...(waited.notRun ? { notRun: true as const } : {}),
+  };
 }
 
 /** A routine read through the keeper's agent API: the status and body it answered. */

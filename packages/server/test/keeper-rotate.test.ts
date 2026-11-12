@@ -155,6 +155,7 @@ describe('cf:rotate-token', () => {
       },
     ]);
     expect(w.printed.join('')).not.toContain(SECRET);
+    expect(w.printed.join('')).toContain('a second rotation ends the old secret at once');
   });
 
   it('says the secret is lost, without printing it, when the Keychain refuses it', async () => {

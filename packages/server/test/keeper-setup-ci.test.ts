@@ -40,6 +40,12 @@ const github: GithubScopedApi = async (method, path, body) => {
     scopes: gh.scopes,
   });
   if (path === `/repos/${CI_REPO}`) return ok(200);
+  if (path === `/repos/${CI_REPO}/environments/cloudflare-prod`)
+    return ok(200, {
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+  if (path.includes('/deployment-branch-policies'))
+    return ok(200, { branch_policies: [{ name: 'main', type: 'branch' }] });
   if (path.endsWith('/public-key')) {
     const key = Buffer.from(gh.pairs[target].publicKey).toString('base64');
     return ok(200, { key_id: `k-${target}`, key });
@@ -91,6 +97,14 @@ function fakeFetch(): typeof fetch {
       return json({ success: false, errors: [{ message: 'forbidden' }] }, 403);
     if (path === '/user/tokens/permission_groups')
       return json({ success: true, result: names.map((name, i) => ({ id: `pg${i}`, name })) });
+    if (path === '/user/tokens' && method === 'GET') {
+      const live = cf.made.map((t, i) => ({
+        id: `tok-${i + 1}`,
+        name: t.name,
+        status: cf.deleted.includes(`tok-${i + 1}`) ? 'expired' : 'active',
+      }));
+      return json({ success: true, result: live.filter((t) => t.status === 'active') });
+    }
     if (path === '/user/tokens' && method === 'POST') {
       cf.made.push(JSON.parse(String(init?.body)));
       const n = cf.made.length;
@@ -184,16 +198,36 @@ describe('the CI credentials step', () => {
     expect(CF_PLAN_PERMISSIONS).toHaveLength(CF_APPLY_PERMISSIONS.length);
   });
 
-  it('skips, making nothing, when GitHub holds all six names', async () => {
+  it('skips, making nothing, when GitHub holds all six names and their tokens are active', async () => {
     reset();
     const { io, printed } = setup();
     await runAndTap(io, printed);
-    cf.made = [];
-    cf.calls = 0;
     const again = setup();
     expect(await ciCredentials(again.io)).toEqual({ ok: true });
-    expect(cf.calls).toBe(0);
-    expect(again.printed.join('\n')).toContain('holds the CI credentials already');
+    expect(cf.made).toHaveLength(4);
+    expect(again.printed.join('\n')).toContain('their tokens are active');
+  });
+
+  it('makes them again when GitHub holds the names but a token behind them is gone', async () => {
+    reset();
+    const first = setup();
+    await runAndTap(first.io, first.printed);
+    cf.deleted.push('tok-3');
+    const again = setup();
+    expect(await runAndTap(again.io, again.printed)).toEqual({ ok: true });
+    expect(cf.made).toHaveLength(8);
+    expect(again.printed.join('\n')).toContain('not active: state read-write');
+    expect(gh.stored['cloudflare-prod/R2_ACCESS_KEY_ID']).toBe('tok-7');
+  });
+
+  it('asks before making them again when the tokens behind the names cannot be checked', async () => {
+    reset();
+    const first = setup();
+    await runAndTap(first.io, first.printed);
+    const again = setup({ current: () => null, readLine: async () => 'n' });
+    expect(await ciCredentials(again.io)).toEqual({ ok: true });
+    expect(cf.made).toHaveLength(4);
+    expect(again.printed.join('\n')).toContain('could not be checked');
   });
 
   it('refuses before making anything when the GitHub token lacks the repo scope', async () => {
@@ -234,13 +268,44 @@ describe('the CI credentials step', () => {
     expect(printed.join('\n')).not.toContain(PASTED);
   });
 
-  it('deletes every token it made when GitHub refuses the write', async () => {
+  it('keeps every token when the write ran and failed, since GitHub may hold some', async () => {
     reset();
     gh.failPut = true;
     const { io, printed } = setup();
     const r = await runAndTap(io, printed);
+    expect('stop' in r && r.stop).toContain('the write may have run');
+    expect(cf.deleted).toEqual([]);
+  });
+
+  it('deletes every token it made when the tap never came and the keeper took the withdraw', async () => {
+    reset();
+    const { io } = setup({ waitMs: 60 });
+    const r = await ciCredentials(io);
     expect('stop' in r && r.stop).toContain('Every token this step made was deleted again');
     expect(cf.deleted).toEqual(['tok-1', 'tok-2', 'tok-3', 'tok-4']);
+    expect(gh.stored).toEqual({});
+  });
+
+  it('a tap that lands as the wait expires: the write runs, no token is deleted, and a second run skips', async () => {
+    reset();
+    const base = fakeFetch();
+    // The wait has run out and the client withdraws; the tap reaches the
+    // keeper just before the withdraw does.
+    const racing = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'DELETE' && url.pathname.startsWith('/v1/requests/'))
+        expect((await k.approve(url.pathname.split('/').pop() ?? '')).status).toBe(200);
+      return base(input, init);
+    }) as typeof fetch;
+    const { io } = setup({ fetch: racing, waitMs: 60 });
+    const r = await ciCredentials(io);
+    expect('stop' in r && r.stop).toContain('the write may have run');
+    expect(cf.deleted).toEqual([]);
+    expect(Object.keys(gh.stored)).toHaveLength(6);
+    const again = setup();
+    expect(await ciCredentials(again.io)).toEqual({ ok: true });
+    expect(cf.made).toHaveLength(4);
+    expect(again.printed.join('\n')).toContain('their tokens are active');
   });
 
   it('makes nothing when the person does not confirm, or in a dry run', async () => {

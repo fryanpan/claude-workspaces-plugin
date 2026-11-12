@@ -22,7 +22,14 @@ interface Job {
   if?: string;
   needs?: string | string[];
   environment?: string;
-  steps?: { name?: string; run?: string; if?: string }[];
+  env?: Record<string, string>;
+  steps?: {
+    name?: string;
+    run?: string;
+    if?: string;
+    uses?: string;
+    env?: Record<string, string>;
+  }[];
 }
 interface Workflow {
   on: Record<string, { paths?: string[]; branches?: string[] } | null>;
@@ -131,6 +138,27 @@ describe('cloudflare.yml', () => {
   it("the keeper's dispatch on main is accepted and reaches the apply job", () => {
     expect(Object.keys(wf.on)).toContain('workflow_dispatch');
     expect(runs('apply', event('workflow_dispatch', MAIN))).toBe(true);
+  });
+
+  it("the apply job's write secrets reach only the Apply prod step, never bun install", () => {
+    const apply = wf.jobs.apply;
+    const secretIn = (env?: Record<string, string>) =>
+      Object.values(env ?? {}).some((v) => /\bsecrets\.(CLOUDFLARE_API_TOKEN|R2_)/.test(v));
+    const values = (env?: Record<string, string>) => Object.values(env ?? {}).join(' ');
+    expect(secretIn(apply?.env)).toBe(false);
+    const steps = apply?.steps ?? [];
+    const install = steps.find((st) => st.run?.includes('bun install'));
+    expect(install).toBeDefined();
+    expect(install?.env).toBeUndefined();
+    const step = steps.find((st) => st.name === 'Apply prod');
+    expect(values(step?.env)).toContain('secrets.CLOUDFLARE_API_TOKEN');
+    expect(values(step?.env)).toContain('secrets.R2_SECRET_ACCESS_KEY');
+    const holders = steps.filter(
+      (st) =>
+        /secrets\.(CLOUDFLARE_API_TOKEN|R2_SECRET)/.test(values(st.env)) &&
+        !/!= ''/.test(values(st.env)),
+    );
+    expect(holders.map((st) => st.name)).toEqual(['Apply prod']);
   });
 
   it('a dispatch on another branch, and a pull request, apply nothing', () => {

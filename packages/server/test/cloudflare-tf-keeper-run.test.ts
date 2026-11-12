@@ -60,6 +60,8 @@ interface WorldOpts {
   more?: unknown[];
   /** What `terraform show -no-color` prints. */
   planText?: string;
+  /** Token POSTs after this many fail, as Cloudflare refusing one would. */
+  postsBeforeFailure?: number;
 }
 
 const ALICE = 'alice@harborlight.test';
@@ -98,6 +100,9 @@ function world(opts: WorldOpts = {}): World {
   };
   const api = (async (method: string, path: string, body?: unknown) => {
     if (method === 'POST') {
+      if (w.posts.length >= (opts.postsBeforeFailure ?? Number.POSITIVE_INFINITY)) {
+        throw new Error(`${method} ${path} failed (400): refused`);
+      }
       w.posts.push((body as { name: string }).name);
       return { id: 'token-1', client_id: 'c0ffee.access', client_secret: SECRET };
     }
@@ -281,6 +286,25 @@ describe('keeperRun tokens', () => {
     );
     expect(r).toMatchObject({ ok: false });
     expect(w.posts).toEqual([]);
+  });
+
+  it('hands back the pair of a token it made when a later one fails', async () => {
+    const w = world({ postsBeforeFailure: 1 });
+    const want = { 'agent moi': 'agent moi', 'agent two': 'agent two' };
+    const r = await keeperRun('tokens', 'prod', input(Object.keys(want), { expect: want }), w.io);
+    expect(w.posts).toEqual(['agent moi']);
+    expect(r).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('failed (400)'),
+      minted: [{ name: 'agent moi', clientId: 'c0ffee.access', secret: SECRET }],
+    });
+  });
+
+  it('hands back nothing when the first token fails', async () => {
+    const w = world({ postsBeforeFailure: 0 });
+    const want = { 'agent moi': 'agent moi' };
+    const r = await keeperRun('tokens', 'prod', input(Object.keys(want), { expect: want }), w.io);
+    expect(r).toEqual({ ok: false, error: expect.stringContaining('failed (400)') });
   });
 });
 

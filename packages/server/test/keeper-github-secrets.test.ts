@@ -40,7 +40,17 @@ interface Call {
   body?: unknown;
 }
 
-function fakeGithub(opts: { scopes?: string | null; failPut?: string } = {}) {
+interface Policy {
+  env?: unknown;
+  rules?: { name: string; type?: string }[];
+}
+const MAIN_ONLY: Policy = {
+  env: { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } },
+  rules: [{ name: 'main', type: 'branch' }],
+};
+
+function fakeGithub(opts: { scopes?: string | null; failPut?: string; policy?: Policy } = {}) {
+  const policy = opts.policy ?? MAIN_ONLY;
   const pairs = { repository: nacl.box.keyPair(), 'cloudflare-prod': nacl.box.keyPair() };
   const calls: Call[] = [];
   const stored: Record<string, string> = {};
@@ -52,6 +62,12 @@ function fakeGithub(opts: { scopes?: string | null; failPut?: string } = {}) {
       : 'repository';
     const ok = (status: number, b: unknown = {}) => ({ status, body: JSON.stringify(b), scopes });
     if (path === `/repos/${CI_REPO}`) return ok(200, { full_name: CI_REPO });
+    if (path === `/repos/${CI_REPO}/environments/cloudflare-prod`)
+      return policy.env === undefined ? ok(404) : ok(200, policy.env);
+    if (
+      path.startsWith(`/repos/${CI_REPO}/environments/cloudflare-prod/deployment-branch-policies`)
+    )
+      return ok(200, { branch_policies: policy.rules ?? [] });
     if (path.endsWith('/public-key')) {
       return ok(200, {
         key_id: `kid-${target}`,
@@ -85,7 +101,35 @@ const WRITES: SecretWrite[] = [
   { target: 'repository', name: 'R2_SECRET_ACCESS_KEY', value: R2_SECRET },
 ];
 
+/**
+ * A known answer from real libsodium (1.0.22, Homebrew): a test-only key pair,
+ * `crypto_box_seal` of the message to it, and the nonce libsodium derives,
+ * `crypto_generichash(24, epk || pk)`, computed there too. Opening it here
+ * with nacl and that hard-coded nonce does not depend on this repo's own
+ * `sealNonce` or `sealedBox`, so it checks both against libsodium itself.
+ */
+const KAT = {
+  pk: 'Rd1KBc66eY/AhUmVHnyYfYfYUdANLrMjKgo5BO0CeGA=',
+  sk: 'fd+mYpaZnzysRwTX584/2IpwuLh1C3ghm2OXfquhfsw=',
+  ct: 'bIFUIoG5VJvoXZVbY+l8WkKjfciEFN1xRyQANFGsOSS/Y7u9tD6LUA84kIlktfABMTy1zYFnoMwkR1VIniZcf6OZ/yIEsDUmsTduLfGR5A==',
+  nonce: '86bbc286dc2ff13ba947f4e73508b6e73260e011b1adf68b',
+  message: 'fixture-Harborlight-apply-token',
+};
+
 describe('sealedBox', () => {
+  it('opens a libsodium crypto_box_seal ciphertext, and derives the nonce libsodium does', () => {
+    const b = (x: string) => new Uint8Array(Buffer.from(x, 'base64'));
+    const ct = b(KAT.ct);
+    const eph = ct.slice(0, 32);
+    const nonce = new Uint8Array(Buffer.from(KAT.nonce, 'hex'));
+    const opened = nacl.box.open(ct.slice(32), nonce, eph, b(KAT.sk));
+    expect(opened && new TextDecoder().decode(opened)).toBe(KAT.message);
+    expect(Buffer.from(sealNonce(eph, b(KAT.pk))).toString('hex')).toBe(KAT.nonce);
+    // And what this repo seals to that key opens with libsodium's own pair.
+    const pair = { publicKey: b(KAT.pk), secretKey: b(KAT.sk) };
+    expect(sealOpen(sealedBox(KAT.message, KAT.pk), pair)).toBe(KAT.message);
+  });
+
   it('opens with the recipient key as libsodium would, and never twice the same', () => {
     const pair = nacl.box.keyPair();
     const pk = Buffer.from(pair.publicKey).toString('base64');
@@ -127,6 +171,38 @@ describe('writeGithubSecrets', () => {
       expect(JSON.parse(r.body).error).toContain('does not have the classic repo scope');
       expect(gh.calls.filter((c) => c.method !== 'GET')).toEqual([]);
     }
+  });
+
+  it('refuses before any write unless cloudflare-prod deploys from main alone', async () => {
+    const open = (protectedBranches: boolean, custom: boolean) => ({
+      deployment_branch_policy: {
+        protected_branches: protectedBranches,
+        custom_branch_policies: custom,
+      },
+    });
+    const cases: Policy[] = [
+      {},
+      { env: { deployment_branch_policy: null } },
+      { env: open(true, false) },
+      { env: open(false, true), rules: [{ name: 'main' }, { name: 'release/*' }] },
+      { env: open(false, true), rules: [{ name: '*' }] },
+      { env: open(false, true), rules: [{ name: 'main', type: 'tag' }] },
+    ];
+    for (const policy of cases) {
+      const gh = fakeGithub({ policy });
+      const r = await writeGithubSecrets(gh.api, WRITES);
+      expect(r.status).toBe(403);
+      expect(JSON.parse(r.body).error).toContain('cloudflare-prod');
+      expect(gh.calls.filter((c) => c.method === 'PUT')).toEqual([]);
+    }
+  });
+
+  it('CONTROL: main alone passes, and a repository-only write never reads the environment', async () => {
+    expect((await writeGithubSecrets(fakeGithub().api, WRITES)).status).toBe(200);
+    const gh = fakeGithub({ policy: {} });
+    const repoOnly = WRITES.filter((w) => w.target === 'repository');
+    expect((await writeGithubSecrets(gh.api, repoOnly)).status).toBe(200);
+    expect(gh.calls.some((c) => c.path.includes('/environments/'))).toBe(false);
   });
 
   it('stops at a refused write and names what it wrote before it', async () => {

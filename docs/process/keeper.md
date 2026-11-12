@@ -175,11 +175,15 @@ prints, step by step:
   > API Tokens > Edit), uses it for this step only, and keeps it nowhere. The
   values go straight into one request to the keeper, whose approval page
   lists the secret names and never a value; your tap writes them. If the
-  write fails, every token the step made is deleted again. It needs the
+  write certainly did not run (denied, expired, withdrawn, refused), every
+  token the step made is deleted again; if it may have run, the tokens are
+  kept and the step says to run setup again. It needs the
   keeper's GitHub token ("The GitHub token", below), with the classic `repo`
   scope; without the token the step says so and is skipped, and without the
-  scope it stops before making anything. It is skipped once GitHub holds all
-  six names.
+  scope it stops before making anything. The keeper also refuses the write
+  unless `cloudflare-prod` deploys from `main` only. The step is skipped once
+  GitHub holds all six names and Cloudflare shows the four tokens active; a
+  name whose token is gone makes it remake all four.
 - **The check:** the probe asks the keeper for `fly apps create
   cw-keeper-probe`, prints the approval link, and withdraws the request, so
   nothing is created and no tap can run it later.
@@ -220,7 +224,8 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
 - **`bun run cf:rotate-token "<name>"`** gives one existing service token a
   new secret, on one tap whose page names the token. The old secret keeps
   working for 24 hours, and the new pair replaces the old one in your
-  Keychain.
+  Keychain. A second rotation inside those 24 hours ends the old secret at
+  once.
 
 Making and rotating service tokens needs the keeper's token to hold Access:
 Service Tokens **Edit**, which the setup grants. These two are the only ways
