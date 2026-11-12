@@ -63,7 +63,8 @@ function apiHeaders(token: string | null): Record<string, string> {
   return { [API_HEADER]: '1', ...(token ? { [CALLER_HEADER]: token } : {}) };
 }
 
-type Waited<T> = { ok: true; result: T } | { ok: false; error: string };
+/** `notRun`: the keeper is known not to have run it (denied, expired, withdrawn). */
+type Waited<T> = { ok: true; result: T } | { ok: false; error: string; notRun?: true };
 
 /** Give up on a held request: the keeper drops it, so no later tap runs it. */
 export async function withdrawRequest(
@@ -110,7 +111,7 @@ async function waitForApproval<T>(
       return { ok: false, error: view.error ?? 'the approved command did not run' };
     }
     if (view.status === 'denied' || view.status === 'expired' || view.status === 'withdrawn') {
-      return { ok: false, error: `${held.summary} was ${view.status}` };
+      return { ok: false, error: `${held.summary} was ${view.status}`, notRun: true };
     }
     // Approved: the tap wait no longer applies, the run's own limit does.
     if (view.status === 'running' && !running) {
@@ -121,9 +122,13 @@ async function waitForApproval<T>(
   if (running) {
     return { ok: false, error: `${held.summary} was approved and is still running past the wait` };
   }
+  // A tap that lands as the wait ends makes this withdraw fail ("not
+  // waiting"), and then the call may be running: only a withdraw the keeper
+  // took proves it never ran.
   const withdrawn = await withdrawRequest(origin, held, doFetch, callerToken);
   return {
     ok: false,
+    ...(withdrawn ? { notRun: true as const } : {}),
     error: withdrawn
       ? 'no approval within the wait; the request was withdrawn, so ask again'
       : `no approval within the wait, and it could not be withdrawn; deny it at ${held.approveUrl}`,
@@ -184,13 +189,13 @@ export function keeperFly(
 }
 
 /**
- * One Cloudflare Terraform run through the keeper (`keeper-terraform.ts`):
- * a plan answers at once; an apply is planned, then waits for a tap. `input`
- * is the configs and the state bucket's credential, as JSON.
+ * One Cloudflare Terraform plan through the keeper (`keeper-terraform.ts`),
+ * which answers at once. `input` is the configs and the state bucket's
+ * credential, as JSON. The keeper refuses an apply: applies run in CI.
  */
 export function keeperTerraform(
   origin: string,
-  command: 'plan' | 'apply',
+  command: 'plan',
   env: 'prod' | 'staging',
   input: string,
   opts: KeeperClientOptions = {},
@@ -241,66 +246,78 @@ async function postAndWait(
 }
 
 /**
- * Ask the keeper to make `app`'s push deploy keys on `repos`
- * (`keeper-push-keys.ts`). Always a tap. The answer names each key's id and
- * public half; the private halves went to the app's secret and are not in it.
+ * Ask the keeper for something that is always a tap (`path`, with `body`),
+ * and wait for the owner. A call the keeper ran without a tap is an error,
+ * because nothing sent here should run without one.
  */
-export async function keeperPushKeys(
+export async function keeperHeld(
   origin: string,
-  app: string,
-  repos: readonly string[],
+  path: string,
+  body: Record<string, unknown>,
   opts: KeeperClientOptions = {},
-): Promise<CloudflareResult> {
+): Promise<CloudflareResult & { notRun?: true }> {
   const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
   const caller = callerOf(opts);
-  const res = await doFetch(`${origin}/v1/push-keys`, {
+  const res = await doFetch(`${origin}${path}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       ...apiHeaders(caller.token),
       ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
     },
-    body: JSON.stringify({ app, repos }),
+    body: JSON.stringify(body),
   });
   if (!res.headers.has(HELD_HEADER)) {
     const text = await res.text().catch(() => '');
     const status = res.ok ? 502 : res.status;
-    const reason = res.ok ? 'the keeper ran a push-key request without a tap' : text.slice(0, 300);
-    return { status, body: JSON.stringify({ error: reason }) };
+    const reason = res.ok ? `the keeper ran ${path} without a tap` : text.slice(0, 300);
+    // A refusal at submit ran nothing; a call that ran without a tap did run.
+    return { status, body: JSON.stringify({ error: reason }), ...(res.ok ? {} : { notRun: true }) };
   }
   const held = (await res.json()) as HeldAnswer;
   const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
-  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+  if (waited.ok) return waited.result;
+  return {
+    status: 403,
+    body: JSON.stringify({ error: waited.error }),
+    ...(waited.notRun ? { notRun: true as const } : {}),
+  };
+}
+
+/** A routine read through the keeper's agent API: the status and body it answered. */
+export async function keeperGet(
+  origin: string,
+  path: string,
+  opts: KeeperClientOptions = {},
+): Promise<CloudflareResult> {
+  const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
+  const res = await doFetch(`${origin}${path}`, { headers: apiHeaders(callerOf(opts).token) });
+  return { status: res.status, body: await res.text().catch(() => '') };
+}
+
+/**
+ * Ask the keeper to make `app`'s push deploy keys on `repos`
+ * (`keeper-push-keys.ts`). Always a tap. The answer names each key's id and
+ * public half; the private halves went to the app's secret and are not in it.
+ */
+export function keeperPushKeys(
+  origin: string,
+  app: string,
+  repos: readonly string[],
+  opts: KeeperClientOptions = {},
+): Promise<CloudflareResult> {
+  return keeperHeld(origin, '/v1/push-keys', { app, repos }, opts);
 }
 
 /**
  * Ask for one board's move grant on `app` (`keeper-grants.ts`). Always a tap.
  * The call returns once the owner approved or denied.
  */
-export async function keeperMoveGrant(
+export function keeperMoveGrant(
   origin: string,
   app: string,
   board: string,
   opts: KeeperClientOptions = {},
 ): Promise<CloudflareResult> {
-  const doFetch = opts.fetchImpl ?? configuredHostFetch([origin]);
-  const caller = callerOf(opts);
-  const res = await doFetch(`${origin}/v1/move-grant`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...apiHeaders(caller.token),
-      ...(opts.requester ? { 'x-cw-requester': opts.requester } : {}),
-    },
-    body: JSON.stringify({ app, board }),
-  });
-  if (!res.headers.has(HELD_HEADER)) {
-    const text = await res.text().catch(() => '');
-    const status = res.ok ? 502 : res.status;
-    const reason = res.ok ? 'the keeper opened a move grant without a tap' : text.slice(0, 300);
-    return { status, body: JSON.stringify({ error: reason }) };
-  }
-  const held = (await res.json()) as HeldAnswer;
-  const waited = await waitForApproval<CloudflareResult>(origin, held, opts, doFetch, caller.token);
-  return waited.ok ? waited.result : { status: 403, body: JSON.stringify({ error: waited.error }) };
+  return keeperHeld(origin, '/v1/move-grant', { app, board }, opts);
 }

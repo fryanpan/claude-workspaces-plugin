@@ -72,7 +72,8 @@ copy_bin() {
 }
 copy_bin bun "$(find_bin bun "${KEEPER_BUN:-}" "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun)"
 copy_bin fly "$(find_bin fly "${KEEPER_FLY:-}" "$HOME/.fly/bin/flyctl" /opt/homebrew/bin/flyctl /usr/local/bin/flyctl)"
-# cf:plan and cf:apply run terraform inside the keeper (keeper-terraform.ts).
+# cf:plan and cf:sync-config run terraform inside the keeper (keeper-terraform.ts,
+# keeper-cf-sync.ts). Applies run in CI.
 copy_bin terraform "$(find_bin terraform "${KEEPER_TERRAFORM:-}" "$HOME/.local/bin/terraform" /opt/homebrew/bin/terraform /usr/local/bin/terraform)"
 
 step "3. The keeper's own clone"

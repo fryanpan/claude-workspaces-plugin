@@ -19,6 +19,8 @@
     "machine:tokens": "bun run infra/project-machine/tokens.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",
     "cf:apply": "bun run infra/cloudflare/run.ts apply",
+    "cf:sync-config": "bun run infra/cloudflare/sync-config.ts",
+    "cf:rotate-token": "bun run infra/cloudflare/rotate-token.ts",
     "check:cloudflare-tf": "bun run infra/cloudflare/check.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",

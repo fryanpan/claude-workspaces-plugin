@@ -77,3 +77,13 @@ export function grantCovers(
     );
   });
 }
+
+/** The id of the Access application a create answered with, or null. */
+export function accessAppId(body: string): string | null {
+  try {
+    const id = (JSON.parse(body) as { result?: { id?: unknown } }).result?.id;
+    return typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}

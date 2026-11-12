@@ -1,8 +1,8 @@
 /**
  * The keeper's own Terraform run (`infra/cloudflare/keeper-run.ts`): a plan
- * saves its file under the keeper's id and reports text, summary and missing
- * tokens; an apply applies exactly that file; a mint makes exactly the tokens
- * the keeper approved. The configs are the requester's, the committed tfvars
+ * reports text, summary and missing tokens and removes its file; there is no
+ * apply mode, because applies run in CI; `tokens` makes exactly the tokens a
+ * config sync's approval named. The configs are the requester's, the committed tfvars
  * the release's, and the token is in terraform's environment and never an
  * argument. The run imports nothing outside `infra/` and no package, because
  * the keeper's release has no `node_modules`. A fake account and a fake
@@ -25,7 +25,6 @@ import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts
 const ZONE = 'harborlight.test';
 const ACCOUNT = 'a'.repeat(32);
 const TOKEN = 'fixture-token-Riverbend-0000000000';
-const PLAN_ID = 'keeper-plan-id-000000001';
 const SECRET = 'feedface'.repeat(8);
 const TFVARS =
   'name_prefix = ""\nrouter_script_name = "board-router"\nshare_link_script_name = "share-link-gate"\n';
@@ -42,7 +41,6 @@ const input = (tokens: string[], extra: Partial<KeeperRunInput> = {}): KeeperRun
     }),
   },
   state: { accessKeyId: 'fixture-r2-id', secretAccessKey: 'fixture-r2-secret' },
-  planId: PLAN_ID,
   ...extra,
 });
 
@@ -62,6 +60,8 @@ interface WorldOpts {
   more?: unknown[];
   /** What `terraform show -no-color` prints. */
   planText?: string;
+  /** Token POSTs after this many fail, as Cloudflare refusing one would. */
+  postsBeforeFailure?: number;
 }
 
 const ALICE = 'alice@harborlight.test';
@@ -100,6 +100,9 @@ function world(opts: WorldOpts = {}): World {
   };
   const api = (async (method: string, path: string, body?: unknown) => {
     if (method === 'POST') {
+      if (w.posts.length >= (opts.postsBeforeFailure ?? Number.POSITIVE_INFINITY)) {
+        throw new Error(`${method} ${path} failed (400): refused`);
+      }
       w.posts.push((body as { name: string }).name);
       return { id: 'token-1', client_id: 'c0ffee.access', client_secret: SECRET };
     }
@@ -149,16 +152,20 @@ function world(opts: WorldOpts = {}): World {
 
 const argsOf = (w: World) => w.tf.map((t) => t.args.join(' ')).join('\n');
 
+/** The plan file the run wrote, by the name it gave terraform. */
+const planFileOf = (w: World) =>
+  (w.tf[1]?.args.find((a) => a.startsWith('-out=')) ?? '').replace('-out=/work/', '');
+
 describe('keeperRun plan', () => {
-  it('saves the plan under the keeper id and reports its text, summary and changes', async () => {
+  it('reports its text, summary and changes, and removes its plan file', async () => {
     const w = world({ changes: 2 });
-    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    const r = await keeperRun('plan', 'prod', input([], { access: true }), w.io);
     expect(r).toMatchObject({ ok: true, mode: 'plan', changes: 2, missing: {} });
     expect(r.ok && r.mode === 'plan' && r.text).toBe('Plan: 0 to add, 1 to change.\n');
     expect(w.tf.map((t) => t.args[0])).toEqual(['init', 'plan', 'show', 'show']);
-    expect(w.tf[1]?.args).toContain(`-out=/work/plan-${PLAN_ID}.tfplan`);
+    expect(planFileOf(w)).toMatch(/^plan-[A-Za-z0-9_-]{24}\.tfplan$/);
     expect(w.tf[1]?.args).toContain('-lock=false');
-    expect(w.removed).toEqual([]);
+    expect(w.removed).toEqual([planFileOf(w)]);
   });
 
   it('puts the token in terraform environment and never in an argument or a file', async () => {
@@ -170,14 +177,12 @@ describe('keeperRun plan', () => {
     expect(w.tf[0]?.env.AWS_ACCESS_KEY_ID).toBe('fixture-r2-id');
   });
 
-  it('removes a plan it was not asked to keep, and one that would make a service token', async () => {
-    const plain = world();
-    await keeperRun('plan', 'prod', input([]), plain.io);
-    expect(plain.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+  it('names a missing service token and makes nothing', async () => {
     const minting = world();
-    const r = await keeperRun('plan', 'prod', input(['agent moi'], { keep: true }), minting.io);
+    const r = await keeperRun('plan', 'prod', input(['agent moi'], { access: true }), minting.io);
     expect(r).toMatchObject({ ok: true, missing: { 'agent moi': 'agent moi' } });
-    expect(minting.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+    expect(minting.posts).toEqual([]);
+    expect(minting.removed).toEqual([planFileOf(minting)]);
   });
 
   it("reads the committed tfvars from the release, never from the requester's input", async () => {
@@ -190,40 +195,38 @@ describe('keeperRun plan', () => {
     );
   });
 
-  it("reports who a kept plan adds to and removes from each project's sign-in list", async () => {
+  it("reports, when asked, who a plan adds to and removes from each project's sign-in list", async () => {
     const w = world({ more: [PEOPLE_CHANGE] });
-    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    const r = await keeperRun('plan', 'prod', input([], { access: true }), w.io);
     expect(r.ok && r.mode === 'plan' && r.access).toEqual([
       { project: 'riverbend', added: [ALICE], removed: [BOB] },
     ]);
   });
 
-  it('leaves the sign-in changes out of a plan that is not kept, whose report goes to the requester', async () => {
+  it('leaves the sign-in changes out of a plan not asked for them, whose report goes to the requester', async () => {
     const w = world({ more: [PEOPLE_CHANGE] });
     const r = await keeperRun('plan', 'prod', input([]), w.io);
     expect(r.ok && r.mode === 'plan').toBe(true);
     expect(JSON.stringify(r)).not.toContain(ALICE);
   });
 
-  it('keeps no saved plan when it cannot read who a plan lets sign in', async () => {
+  it('removes its plan file when it cannot read who a plan lets sign in', async () => {
     const unread = { ...PEOPLE_CHANGE, change: { ...PEOPLE_CHANGE.change, after: {} } };
     const w = world({ more: [unread] });
-    await expect(keeperRun('plan', 'prod', input([], { keep: true }), w.io)).rejects.toThrow(
+    await expect(keeperRun('plan', 'prod', input([], { access: true }), w.io)).rejects.toThrow(
       'the plan does not say who can sign in to riverbend',
     );
-    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
+    expect(w.removed).toEqual([planFileOf(w)]);
   });
 
-  it('marks text cut at the limit and keeps no saved plan for it', async () => {
+  it('marks text cut at the limit', async () => {
     const w = world({ planText: 'x'.repeat(MAX_TEXT + 10) });
-    const r = await keeperRun('plan', 'prod', input([], { keep: true }), w.io);
+    const r = await keeperRun('plan', 'prod', input([]), w.io);
     expect(r.ok && r.mode === 'plan' && r.cut).toEqual({ shown: MAX_TEXT, total: MAX_TEXT + 10 });
     expect(r.ok && r.mode === 'plan' && r.text.length).toBe(MAX_TEXT);
-    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
     const whole = world({ planText: 'x'.repeat(MAX_TEXT) });
-    const full = await keeperRun('plan', 'prod', input([], { keep: true }), whole.io);
+    const full = await keeperRun('plan', 'prod', input([]), whole.io);
     expect(full.ok && full.mode === 'plan' && full.cut).toBeUndefined();
-    expect(whole.removed).toEqual([]);
   });
 
   it("plans from the requester's configs, not from any config file in the release", async () => {
@@ -235,35 +238,20 @@ describe('keeperRun plan', () => {
     expect(Object.values(w.files).join('\n')).toContain(`riverbend-workspaces.${ZONE}`);
   });
 
-  it('refuses a plan id the keeper did not shape', async () => {
+  it('names its plan file itself, whatever the input carries', async () => {
     const w = world();
-    const r = await keeperRun('plan', 'prod', input([], { planId: '../../x' }), w.io);
-    expect(r).toMatchObject({ ok: false });
-    expect(w.tf).toEqual([]);
+    const odd = { ...input([]), planId: '../../x' } as KeeperRunInput;
+    await keeperRun('plan', 'prod', odd, w.io);
+    expect(planFileOf(w)).not.toContain('..');
+    expect(w.tf.some((t) => t.args[0] === 'apply')).toBe(false);
   });
 });
 
-describe('keeperRun apply', () => {
-  it('applies the saved plan the keeper named and removes it', async () => {
-    const w = world();
-    const r = await keeperRun('apply', 'prod', input([]), w.io);
-    expect(r).toMatchObject({ ok: true, mode: 'apply', audiences: [] });
-    expect(w.tf.map((t) => t.args[0])).toEqual(['init', 'apply', 'output']);
-    expect(w.tf[1]?.args).toEqual([
-      'apply',
-      '-input=false',
-      '-lock-timeout=5m',
-      `/work/plan-${PLAN_ID}.tfplan`,
-    ]);
-    expect(w.removed).toEqual([`plan-${PLAN_ID}.tfplan`]);
-  });
-});
-
-describe('keeperRun mint', () => {
+describe('keeperRun tokens', () => {
   it('makes exactly the approved tokens and reports their pairs', async () => {
     const w = world();
     const r = await keeperRun(
-      'mint',
+      'tokens',
       'prod',
       input(['agent moi'], { expect: { 'agent moi': 'agent moi' } }),
       w.io,
@@ -271,7 +259,7 @@ describe('keeperRun mint', () => {
     expect(w.posts).toEqual(['agent moi']);
     expect(r).toEqual({
       ok: true,
-      mode: 'mint',
+      mode: 'tokens',
       minted: [
         {
           name: 'agent moi',
@@ -291,13 +279,32 @@ describe('keeperRun mint', () => {
   it('makes nothing when the missing tokens differ from what was approved', async () => {
     const w = world();
     const r = await keeperRun(
-      'mint',
+      'tokens',
       'prod',
       input(['agent moi', 'agent two'], { expect: { 'agent moi': 'agent moi' } }),
       w.io,
     );
     expect(r).toMatchObject({ ok: false });
     expect(w.posts).toEqual([]);
+  });
+
+  it('hands back the pair of a token it made when a later one fails', async () => {
+    const w = world({ postsBeforeFailure: 1 });
+    const want = { 'agent moi': 'agent moi', 'agent two': 'agent two' };
+    const r = await keeperRun('tokens', 'prod', input(Object.keys(want), { expect: want }), w.io);
+    expect(w.posts).toEqual(['agent moi']);
+    expect(r).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('failed (400)'),
+      minted: [{ name: 'agent moi', clientId: 'c0ffee.access', secret: SECRET }],
+    });
+  });
+
+  it('hands back nothing when the first token fails', async () => {
+    const w = world({ postsBeforeFailure: 0 });
+    const want = { 'agent moi': 'agent moi' };
+    const r = await keeperRun('tokens', 'prod', input(Object.keys(want), { expect: want }), w.io);
+    expect(r).toEqual({ ok: false, error: expect.stringContaining('failed (400)') });
   });
 });
 
