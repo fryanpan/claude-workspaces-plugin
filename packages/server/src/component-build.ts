@@ -48,9 +48,17 @@ export const MAX_BUNDLE_BYTES = 6 * 1024 * 1024;
 /** The file a folder holds to declare its files components (decision 4). */
 export const COMPONENT_MANIFEST = 'component.json';
 
-const RUNTIME_FILE = fileURLToPath(
-  import.meta.resolve('@claude-workspaces/core/mdx-component-runtime'),
-);
+/** The runtime's source, resolved on the first build: vitest's module
+ *  runner, which loads this file through the scripts suite, has no
+ *  `import.meta.resolve`. */
+let runtimeSource: string | null = null;
+const readRuntime = (): string => {
+  runtimeSource ??= readFileSync(
+    fileURLToPath(import.meta.resolve('@claude-workspaces/core/mdx-component-runtime')),
+    'utf8',
+  );
+  return runtimeSource;
+};
 const RUNTIME_SPECIFIERS = new Set(['cw:runtime', 'cw/jsx-runtime', 'cw/jsx-dev-runtime']);
 
 export interface BuildGuards {
@@ -247,7 +255,7 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
         };
       });
       b.onLoad({ filter: /.*/, namespace: 'cw-runtime' }, () => ({
-        contents: readFileSync(RUNTIME_FILE, 'utf8'),
+        contents: readRuntime(),
         loader: 'ts',
       }));
       b.onLoad({ filter: /.*/, namespace: 'cdn' }, async (args) => {
