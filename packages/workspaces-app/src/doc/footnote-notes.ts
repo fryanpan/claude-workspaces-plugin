@@ -106,7 +106,7 @@ function found(prose: HTMLElement): FoundNote[] {
   for (const el of prose.querySelectorAll<HTMLElement>('.cw-fn[data-cw-fn]')) {
     const n = el.dataset.cwFn ?? '';
     // Only the run's closing `]` carries the number, so each note is found
-    // once; the guard stays for a doc rendered by an older decoration set.
+    // once; `seen` drops a number a doc repeats rather than drawing it twice.
     if (n === '' || seen.has(n)) continue;
     seen.add(n);
     out.push({
