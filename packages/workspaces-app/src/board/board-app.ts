@@ -545,6 +545,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     fetchJson,
     send,
     navigate: (href) => location.assign(href),
+    toast: showToast,
     history,
     here: (list, place) => libraryHref(location.href, list, place),
     requestedPlace: () => libraryPlaceOf(location.search),

@@ -1,7 +1,7 @@
 /**
  * The Library's two mock-v2 additions, driven: the time column's header is a
  * "Last Modified" / "Created" sort, and "Where files live" sits folded shut
- * after both lists, opening onto each kind's real locations, each a tap from
+ * after Recent files and the folders, opening onto each kind's real locations, each a tap from
  * the docs living there.
  *
  * All fixtures synthetic.
@@ -86,9 +86,10 @@ const PAYLOAD: LibraryPayload = {
 
 const drive = (payload: LibraryPayload = PAYLOAD) => driveLibrary(WS, payload, NOW, { payload });
 
-const table = (root: ParentNode, i: number) => root.querySelectorAll('.library-tbl')[i] as Element;
+/** Recent files: the first table; the folder tree follows it. */
+const recent = (root: ParentNode) => root.querySelector('.library-tbl') as Element;
 const cells = (root: ParentNode) =>
-  [...root.querySelectorAll('.library-row')].map((r) => [
+  [...root.querySelectorAll('.library-row:not(.lf-folder)')].map((r) => [
     r.querySelector('.library-name')?.textContent,
     r.querySelector('.library-when')?.textContent,
   ]);
@@ -103,71 +104,72 @@ afterEach(() => {
 });
 
 describe('the time column', () => {
-  it('is headed "Last Modified" on both lists, a date past a week, and re-sorts by Created', async () => {
+  it('is headed "Last Modified", a date past a week, and re-sorts by Created', async () => {
     const { page, root } = drive();
     await page.open();
     const sorts = [...root.querySelectorAll<HTMLSelectElement>('.library-sort')];
-    expect(sorts.map((s) => s.selectedOptions[0]?.textContent)).toEqual([
-      'Last Modified',
-      'Last Modified',
-    ]);
+    expect(sorts.map((s) => s.selectedOptions[0]?.textContent)).toEqual(['Last Modified']);
     expect([...(sorts[0] as HTMLSelectElement).options].map((o) => o.textContent)).toEqual([
       'Last Modified',
       'Created',
     ]);
-    expect(cells(table(root, 1))).toEqual([
+    expect(cells(recent(root))).toEqual([
       ['delay-alerts.md', '1h ago'],
+      ['Booking flow walkthrough', '3h ago'],
       ['dock-survey.md', '2d ago'],
       ['README.md', '3d ago'],
+      // Ten days ago is a date, not "1w ago".
+      ['Kickoff', expect.not.stringMatching(/ago$/)],
     ]);
-    // Ten days ago is a date, not "1w ago".
-    expect(cells(table(root, 0))[1]?.[1]).not.toMatch(/ago$/);
 
-    await choose(sorts[1] as HTMLSelectElement, 'created');
+    await choose(sorts[0] as HTMLSelectElement, 'created');
     // Newest creation first, a file with no birth time last, and the column
     // now reads the clock it is sorted by.
-    expect(cells(table(root, 1))).toEqual([
+    expect(cells(recent(root))).toEqual([
       ['dock-survey.md', '2h ago'],
+      ['Booking flow walkthrough', '4h ago'],
+      ['Kickoff', expect.not.stringMatching(/ago$/)],
       ['delay-alerts.md', expect.not.stringMatching(/ago$/)],
       ['README.md', '—'],
     ]);
     const again = root.querySelector<HTMLSelectElement>('.library-sort[data-list=files]');
     expect(again?.value).toBe('created');
     expect(document.activeElement).toBe(again);
-    // The other list keeps its own order.
-    expect(root.querySelector<HTMLSelectElement>('.library-sort[data-list=meetings]')?.value).toBe(
-      'modified',
-    );
   });
 
-  it('keeps "See all" under each list, and the full list keeps the chosen sort', async () => {
+  it('keeps "See all" under Recent files, and the full list keeps the chosen sort', async () => {
     const many: LibraryPayload = {
       ...PAYLOAD,
-      meetings: Array.from({ length: 7 }, (_, i) => ({
+      meetings: Array.from({ length: 9 }, (_, i) => ({
         name: `Delay alert timing ${i + 1}`,
         at: NOW - i * HOUR,
-        created: NOW - (7 - i) * HOUR,
+        created: NOW - (12 - i) * HOUR,
         href: `/m/${i}`,
       })),
     };
     const { page, root } = drive(many);
     await page.open();
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
-      'See all meetings',
+      'See all files',
     ]);
     await choose(
-      root.querySelector('.library-sort[data-list=meetings]') as HTMLSelectElement,
+      root.querySelector('.library-sort[data-list=files]') as HTMLSelectElement,
       'created',
     );
-    await click(root.querySelector('.library-more[data-list=meetings]') as HTMLElement);
-    expect(cells(root).map((c) => c[0])).toEqual(
-      Array.from({ length: 7 }, (_, i) => `Delay alert timing ${7 - i}`),
-    );
+    await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+    // By creation: dock-survey.md (2h), the nine meetings (4-12h, the last
+    // made first), delay-alerts.md (20d), then README.md, with no birth time.
+    expect(cells(root).map((c) => c[0])).toEqual([
+      'dock-survey.md',
+      ...Array.from({ length: 9 }, (_, i) => `Delay alert timing ${9 - i}`),
+      'delay-alerts.md',
+      'README.md',
+    ]);
   });
 });
 
 describe('where files live', () => {
-  it('is folded shut after both lists, and opens onto each kind and its locations', async () => {
+  it('is folded shut after Recent files and the folders, and opens onto each kind', async () => {
     const { page, root } = drive();
     await page.open();
     const body = root.querySelector('.library-body') as HTMLElement;
@@ -176,10 +178,9 @@ describe('where files live', () => {
     expect(fold.open).toBe(false);
     expect(fold.querySelector('summary')?.textContent).toBe('Where files live');
     // Everything the Library opened on before still comes first.
-    expect([...body.querySelectorAll(':scope > h2')].map((h) => h.textContent)).toEqual([
-      'Recent meetings',
-      'Recent files',
-    ]);
+    expect(
+      [...body.querySelectorAll(':scope > h2, .lf-section-head h2')].map((h) => h.textContent),
+    ).toEqual(['Recent files', 'Folders']);
 
     const kinds = [...fold.querySelectorAll('.library-where-type')].map((t) => [
       t.querySelector('.library-where-name')?.textContent,
