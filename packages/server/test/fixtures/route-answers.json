@@ -369,6 +369,7 @@
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/insert_after": "400 application/json error=text required — a non-empty string. A new block goes to insert_blocks_after (its field is markdown). {error}",
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/insert_blocks_after": "409 application/json error=anchor-not-found {error,ok}",
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/linked-items": "400 application/json error=author required {error}",
+  "POST /workspaces/:ws/docs/:docId/threads/:threadId/progress": "400 application/json error=state must be 'working', 'done' or 'open' {error}",
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/promote": "404 application/json error=thread not found {error}",
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/reanchor": "400 application/json error=anchor required {error}",
   "POST /workspaces/:ws/docs/:docId/threads/:threadId/reopen": "404 application/json error=thread not found {error}",
