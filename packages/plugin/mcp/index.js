@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.360";
+var version2 = "0.1.361";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -19385,6 +19385,35 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "get_doc_metadata",
+      description: "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board the doc is filed on." },
+          docId: { type: "string", description: "The doc to read." }
+        },
+        required: ["workspaceId", "docId"]
+      }
+    },
+    {
+      name: "set_doc_metadata",
+      description: "Set a doc's metadata fields in its YAML front matter. fields maps a field name to its value: text, a number, true/false, or a list of text, as the schema says; null or an empty value removes the field. Only the lines of the fields you set change, and every open page and the file get the change within about a second. A field the schema does not declare, a read-only field or a wrong type is refused, nothing is written, and the answer names each wrong field. Refused with no-schema when no schema governs the doc.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board the doc is filed on." },
+          docId: { type: "string", description: "The doc to change." },
+          fields: {
+            type: "object",
+            description: 'Field name to value, e.g. {"status": "draft", "tags": ["fares"]}.',
+            additionalProperties: true
+          }
+        },
+        required: ["workspaceId", "docId", "fields"]
+      }
+    },
+    {
       name: "move_doc_to_project",
       description: "Move a markdown doc into a folder of this board's project. The doc keeps its id, comments and history, and the Library then shows it as a project file. The old copy stays on disk. The target must be inside a mounted folder or the meetings folder. The server refuses mockups, a doc on another board, a file that exists, and a meeting that is recording.",
       inputSchema: {
@@ -21786,6 +21815,12 @@ async function handleWorkspaceTool(name, a, ctx) {
     case "set_doc_title": {
       const { workspaceId, docId, title } = a;
       return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`, { title }));
+    }
+    case "get_doc_metadata":
+    case "set_doc_metadata": {
+      const { workspaceId, docId, fields } = a;
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/metadata`;
+      return ok2(name === "get_doc_metadata" ? await http("GET", path) : await http("PUT", path, { fields: fields ?? {} }));
     }
     case "move_doc_to_project": {
       const { workspaceId, docId, relPath } = a;

@@ -1530,6 +1530,103 @@ body.preview-open #preview-pane {
    last looked wears no red "new" mark, and a revealed thread does not wink —
    the scroll already puts it in front of the reader. */
 
+/* ================= DOC METADATA (doc/doc-metadata.ts) =================
+   The fields a metadata schema declares, as a compact form above the prose,
+   standing in for the raw front matter. Same measure as the prose so its
+   first label sits over the first word. Every control is one height whatever
+   it holds, and the error shares the label's line, so a wrong value moves
+   nothing. The grid fits as many 200px columns as the measure allows: two or
+   three on the iPad, one at 430. */
+.doc-metadata {
+  max-width: min(100%, 1200px);
+  margin: 0 auto 18px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  font-family: var(--sans);
+}
+body.is-reading-width #editor > .doc-metadata {
+  max-width: 36rem;
+}
+body[data-cards="inline"]:not(.is-reading-width) #editor > .doc-metadata {
+  max-width: min(100%, 900px);
+}
+.doc-metadata-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 14px;
+}
+.doc-metadata-field {
+  min-width: 0;
+}
+.doc-metadata-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.doc-metadata-head label {
+  flex: none;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.doc-metadata-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--red-strong);
+}
+.doc-metadata-control {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 2px 0 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px / 30px var(--sans);
+}
+.doc-metadata-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.doc-metadata-field.is-invalid .doc-metadata-control {
+  border-color: var(--red);
+}
+/* Read-only fields read as text, not as a box to type in. */
+.doc-metadata-control:disabled {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+  opacity: 1;
+  -webkit-text-fill-color: var(--fg);
+}
+/* A value the editor supplies (the file's last git change), not the file's. */
+.doc-metadata-field.is-default .doc-metadata-control {
+  color: var(--fg-muted);
+  -webkit-text-fill-color: var(--fg-muted);
+}
+/* The form stands in for the raw block it edits. */
+#editor.has-doc-metadata > .ProseMirror > .cm-frontmatter:first-child {
+  display: none;
+}
+@media (max-width: 720px) {
+  .doc-metadata {
+    margin-bottom: 14px;
+  }
+  /* 16px stops iOS zooming the page when a field takes focus. */
+  .doc-metadata-control {
+    font-size: 16px;
+  }
+}
+
 /* ================= MEETING RECORD CHROME =================
    What a meeting leaves on its notes doc: the meeting's heading, the link
    back to its task, the lead banner, and the speaker tags. The doc's own
@@ -3411,6 +3508,12 @@ body.redline-mode .ProseMirror del.cw-del {
    are about, exactly as on a doc with no heading. `width: 100%` for the same
    reason as the prose above. */
 #editor.redline-layout > .doc-heading {
+  grid-column: 1;
+  width: 100%;
+}
+/* The metadata form (doc/doc-metadata.ts) sits in the prose column the same
+   way, between the heading and the prose. */
+#editor.redline-layout > .doc-metadata {
   grid-column: 1;
   width: 100%;
 }

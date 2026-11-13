@@ -110,6 +110,7 @@ any I/O because `covers` is true.
 | `doc-store.ts` boot rebind `existsSync(src)` (1669) | is the file there | follows a link | `guards.exists` |
 | `doc-store-workspaces.ts` `existsSync(root)` (260) | is the set's root there | follows a link | `guards.exists` |
 | `routes/workspace-content.ts` huddle seed (367–369) | creates a meeting file | the meetings home is never a covered folder (`mounts.refuses`) | unchanged; add a test |
+| `doc-metadata.ts` `findMetadataSchema` | the metadata schema search, from the doc's folder up to the repository top | `guards.exists` and `guards.readBoundedSync` → `tree-fs` | unchanged (added after this inventory) |
 
 ### B. Folder and diff sets
 
@@ -206,6 +207,7 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 | `git-diff.ts` `gitAsync` (57–59) | the diff review's reads | sandboxed |
 | `git-diff.ts` `gitSync` (35–36) | the same | barred (sync) |
 | `git-provenance.ts` (94–97) | provenance, the conflict hint and the uncommitted mark | barred (sync) |
+| `doc-git-modified.ts` | `log -1 --format=%cs`, a metadata field's git default | barred: `log` is not a contained subcommand, so the default is blank (added after this inventory) |
 
 Out of scope: `git-push/git.ts` runs git in a temp repository the server makes
 from the lead's bundle, with the server's own config. A bundle carries no

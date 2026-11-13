@@ -746,6 +746,20 @@ export async function handleWorkspaceTool(
         ),
       );
     }
+    case 'get_doc_metadata':
+    case 'set_doc_metadata': {
+      const { workspaceId, docId, fields } = a as {
+        workspaceId: string;
+        docId: string;
+        fields?: Record<string, unknown>;
+      };
+      const path = `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/metadata`;
+      return ok(
+        name === 'get_doc_metadata'
+          ? await http('GET', path)
+          : await http('PUT', path, { fields: fields ?? {} }),
+      );
+    }
     case 'move_doc_to_project': {
       const { workspaceId, docId, relPath } = a as {
         workspaceId: string;

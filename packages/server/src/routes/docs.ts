@@ -83,6 +83,7 @@ import { treeFsMode } from '../tree-fs.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
+import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
@@ -726,6 +727,7 @@ export async function handleDocResourceRoutes(
     (await handleDocAssetsRoute(ctx, docRq)) ??
     (await handleDocFilesRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
+    (await handleDocMetadataRoute(ctx, docRq)) ??
     (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
     (await handleDocThreadLinkedItemRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??
