@@ -18,6 +18,9 @@
  *   the roots registered for the board, as the folder bind below is held;
  * - `POST /workspaces/<board>/docs/<doc>/content` — a whole-doc rewrite
  *   (`set_doc_content`) of a doc on that board;
+ * - `POST /workspaces/<board>/docs/<doc>/move-file` — `move_doc_file` on a
+ *   doc on that board. A walled folder only takes `repoint`, and the new path
+ *   must be one the lead may write (`routes/doc-file-move.ts`);
  * - `POST /workspaces` — a folder bind (`attach_folder`). The path names no
  *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
  *   board must be the lead's, the folder one of the roots registered for it
@@ -92,7 +95,8 @@ export function leadScopeAllows(
   const parts = rest.split('/').map(decoded);
   if (parts.length !== 3 || m !== 'POST') return false;
   const [collection, id = '', verb] = parts;
-  if (collection === 'docs' && verb === 'content') return onBoard(workspacesOf, id, boardId);
+  if (collection === 'docs' && (verb === 'content' || verb === 'move-file'))
+    return onBoard(workspacesOf, id, boardId);
   if (collection === 'tasks' && verb === 'notes')
     return onBoard(workspacesOf, `task:${id}`, boardId);
   if (collection === 'agents') return AGENT_VERBS.includes(verb ?? '') && id !== '';

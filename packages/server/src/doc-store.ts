@@ -3545,6 +3545,17 @@ export class DocStore {
     return this.bindings.exportAndRebind(doc, absPath);
   }
 
+  /** The binding seam `doc-file-relocate.ts` drives. See
+   *  `FileBindings.followMovedFile`. */
+  readonly fileMoves = {
+    inFlight: (docId: string): boolean => this.bindings.writeInFlight(docId),
+    pendingWrite: (docId: string): boolean => this.bindings.hasPendingWrite(docId),
+    flushNow: (docId: string): void => this.bindings.flushWrite(docId, this.get(docId)),
+    boundAt: (absPath: string): string[] => this.bindings.docsBoundAt(absPath),
+    follow: (doc: LiveDoc, absPath: string, preread: PrereadFile): void =>
+      this.bindings.followMovedFile(doc, absPath, preread),
+  };
+
   /** Unpin: the doc keeps whatever binding it has. */
   clearDocOriginRepo(docId: string): { ok: boolean } {
     return this.bindings.clearDocOriginRepo(docId);

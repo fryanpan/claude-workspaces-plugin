@@ -1375,6 +1375,35 @@ export class FileBindings {
   }
 
   /**
+   * Follow a bound file that has moved to `absPath` (`doc-file-relocate.ts`).
+   *
+   * Unlike `retargetHomeBinding`, the old binding's bookkeeping is KEPT: the
+   * file at the new path is the same file, so its `lastWritten` is still the
+   * right `prior` for the attach's arbitration. Live edits not yet on disk are
+   * reasserted onto the new path, and an outside edit made while the doc was
+   * idle is read in. The flush that follows puts any owed write on disk before
+   * the caller answers.
+   */
+  followMovedFile(doc: LiveDoc, absPath: string, preread: PrereadFile): void {
+    doc.meta.sourceUrl = absPath;
+    this.attachFile(doc.docId, absPath, { preread });
+    this.flushWrite(doc.docId, doc);
+    this.p.schedulePersist(doc);
+  }
+
+  /** A write-back for this doc is on the thread pool right now. */
+  writeInFlight(docId: string): boolean {
+    return this.bindings.get(docId)?.writeInFlight === true;
+  }
+
+  /** Every doc bound to exactly `absPath`. */
+  docsBoundAt(absPath: string): string[] {
+    const out: string[] = [];
+    for (const [docId, binding] of this.bindings) if (binding.path === absPath) out.push(docId);
+    return out;
+  }
+
+  /**
    * Point a home-pinned doc's binding at `absPath` (the freshly-resolved
    * home) with a CLEAN attach. The old binding's bookkeeping is about the
    * old file — letting `attachFile` read its `lastWritten` as `prior` would

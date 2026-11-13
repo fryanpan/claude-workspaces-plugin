@@ -83,6 +83,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/doc-image-store.ts': 'tree-fs',
   'packages/server/src/doc-index.ts': 'not-in-inventory',
   'packages/server/src/doc-key.ts': 'refused-when-covered',
+  'packages/server/src/doc-file-relocate.ts': 'tree-fs',
   'packages/server/src/doc-move.ts': 'never-covered',
   'packages/server/src/doc-origin-repo.ts': 'refused-when-covered',
   'packages/server/src/doc-store-workspaces.ts': 'tree-fs',
