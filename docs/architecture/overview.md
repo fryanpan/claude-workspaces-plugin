@@ -51,7 +51,7 @@ flowchart TB
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
-    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
+    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
@@ -331,6 +331,19 @@ places, among them the Recall status webhook immediately above the
 resource catch-all. So every mounted entry's handler is the same front door an
 unmatched address reaches through `fetch`, and the table is the registry
 rather than the router.
+
+**Hono, below the gates (M12).** Route families are moving onto Hono one
+family per PR. The gates — the preflight, the cross-origin write gates, the
+home feed and GitHub hub, admission, the local-only gate, attribution and the
+two sign-in gates — are `routes/request-chain-gates.ts`, and they run once per
+request, above both routers. Below them the chain tries the Hono app
+(`routes/hono-front.ts`) first, handing it what the gates proved as `c.env`;
+an address no Hono family claims falls through to the rest of the chain
+unchanged, and a websocket upgrade never enters Hono. The shared types are the
+top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
+names one of them. `test/route-answers.test.ts` drives one request per
+route-table row and holds every answer to `test/fixtures/route-answers.json`,
+so a family that moves and answers anything differently fails CI.
 
 **How a family wires itself in.** `feature-module.ts` is the shape: a family's
 `start` takes the long-lived values it reads and returns its routes, its
