@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
+import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
   type LibrarySources,
   type ProjectFile,
@@ -81,6 +83,20 @@ export interface LibraryRouteRequest {
   scope?: WorkspaceScope<BoardWorkspace>;
   req: Request;
   visitor: ShareTarget | null;
+  /** The request's author: a proven session outranks the claim it is handed. */
+  authorFor?: (claimed: unknown) => User | undefined;
+}
+
+/**
+ * The person whose Recently Viewed list a request reads. A signed-in
+ * session decides it; without one, the `viewer` the page names — the same
+ * id its views were recorded under. Share visitors read none.
+ */
+export function viewerOf(rq: LibraryRouteRequest): string | null {
+  if (rq.visitor || !rq.authorFor) return null;
+  const id = new URL(rq.req.url).searchParams.get('viewer');
+  const claimed = id ? { id, name: id, kind: 'known' } : undefined;
+  return personKeyOf(rq.authorFor(claimed));
 }
 
 /**
@@ -113,7 +129,10 @@ export async function handleLibraryRoutes(
   if (items && req.method === 'GET') {
     const onBox = !visitor && isOnBox(ctx, req);
     const src = sourcesFor(ctx, scope, onBox);
-    return j(200, buildLibrary(visitor ? visitorSources(src) : src));
+    const payload = buildLibrary(visitor ? visitorSources(src) : src);
+    const onBoard = new Set(scope.board.docIds);
+    const viewed = viewsFor(scope.board, viewerOf(rq), (id) => onBoard.has(id));
+    return j(200, viewed.length ? { ...payload, viewed } : payload);
   }
   if (visitor) return j(403, { error: 'the library is not available to share visitors' });
   if (open && req.method === 'POST') return openFile(ctx, scope, req);

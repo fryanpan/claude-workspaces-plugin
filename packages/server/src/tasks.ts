@@ -25,6 +25,7 @@ import type {
 import { classifyActor } from './actor-identity.ts';
 import type { DecisionShapeGap } from './decision-shape.ts';
 import type { LibraryFolder } from './library-folders.ts';
+import { type LibraryView, recordView } from './library-views.ts';
 import {
   type BoardPromptMigration,
   endBoardPromptBeforeMarkdown,
@@ -454,6 +455,9 @@ export interface BoardWorkspace {
   libraryFolders?: LibraryFolder[];
   /** Which Library folder each doc was put in (`library-folders.ts`). */
   docFolders?: Record<string, string>;
+  /** What each person opened here, newest first (`library-views.ts`). Read
+   *  back only by that person; never projected onto the board's wire. */
+  libraryViews?: Record<string, LibraryView[]>;
   createdAt: number;
 }
 
@@ -2483,6 +2487,19 @@ export class TaskStore {
       this.onBoardDocsChanged?.(workspaceId);
     }
     return res;
+  }
+
+  /**
+   * `person` opened `docId` on this board. Saved; the open Library hears it
+   * only when the person's list changed in a way they would see.
+   */
+  recordLibraryView(workspaceId: string, person: string, docId: string, at: number): boolean {
+    const state = this.workspaces.get(workspaceId);
+    if (!state) return false;
+    const visible = recordView(state.workspace, person, docId, at);
+    this.scheduleSave(workspaceId);
+    if (visible) this.onBoardDocsChanged?.(workspaceId);
+    return true;
   }
 
   workspaceOfDoc(docId: string): string | null {

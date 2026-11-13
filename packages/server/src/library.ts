@@ -105,6 +105,9 @@ export interface LibraryPayload {
   where?: LibraryWhere[];
   /** The board's live Library folders (`library-folders.ts`). */
   folders?: FolderView[];
+  /** What the reading person opened here, newest first (`library-views.ts`).
+   *  Added by the route, which knows who is asking. */
+  viewed?: Array<{ docId: string; at: number }>;
 }
 
 export type { ProjectFile } from './library-lister.ts';

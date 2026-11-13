@@ -56,6 +56,8 @@ export interface LibraryPayload {
   where?: LibraryWhere[];
   /** The board's live folders. */
   folders?: LibraryFolder[];
+  /** What the reader opened here, newest first; only theirs, never an agent's. */
+  viewed?: Array<{ docId: string; at: number }>;
 }
 
 /** The three kinds of thing a board files. */

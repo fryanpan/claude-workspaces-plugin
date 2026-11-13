@@ -19,6 +19,7 @@ const rows = (prefix: string, n: number, extra: Partial<LibraryRow> = {}): Libra
   Array.from({ length: n }, (_, i) => ({
     name: `${prefix} ${i + 1}`,
     at: NOW - i * HOUR,
+    created: NOW - i * HOUR,
     href: `/workspaces/${WS}/docs/${prefix.toLowerCase().replace(/ /g, '-')}-${i + 1}`,
     ...extra,
   }));
@@ -26,9 +27,13 @@ const rows = (prefix: string, n: number, extra: Partial<LibraryRow> = {}): Libra
 /** Meetings half an hour behind the files, so Recent files interleaves them. */
 const PAYLOAD: LibraryPayload = {
   project: { name: 'riverbend', path: '~/dev/riverbend' },
-  meetings: rows('Harborlight sync', 7).map((r) => ({ ...r, at: (r.at ?? NOW) - HOUR / 2 })),
+  meetings: rows('Harborlight sync', 7).map((r) => ({
+    ...r,
+    at: (r.at ?? NOW) - HOUR / 2,
+    created: (r.at ?? NOW) - HOUR / 2,
+  })),
   files: [
-    { name: 'Tide gauge notes', at: NOW, open: 'docs/tide-gauge.md' },
+    { name: 'Tide gauge notes', at: NOW, created: NOW, open: 'docs/tide-gauge.md' },
     ...rows('Saltmarsh plan', 3),
   ],
 };
@@ -45,7 +50,7 @@ describe('the Library front page', () => {
     document.body.innerHTML = '';
   });
 
-  it('shows the newest files, meetings among them, in one list with a way to the rest', async () => {
+  it('shows the newest-made files, meetings among them, in one list with a way to the rest', async () => {
     const { page, root } = drive();
     await page.open();
     expect(root.querySelector('.library-proj')?.textContent).toBe('riverbend');
@@ -62,10 +67,13 @@ describe('the Library front page', () => {
       'Harborlight sync 5',
       'Harborlight sync 6',
     ]);
-    // The separate recent-meetings list is gone: one heading, one "See all".
+    // The separate recent-meetings list is gone: one "See all", under
+    // Recently Created.
     const body = root.querySelector('.library-body') as HTMLElement;
-    expect([...body.querySelectorAll(':scope > h2')].map((h) => h.textContent)).toEqual([
-      'Recent files',
+    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
+      'Recently Created',
+      'Recently Viewed',
+      'Folders',
     ]);
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
       'See all files',
@@ -114,12 +122,14 @@ describe('the Library front page', () => {
     const edit = (name: string, hoursAgo: number): LibraryRow => ({
       name,
       at: NOW - hoursAgo * HOUR,
+      created: NOW - hoursAgo * HOUR,
       open: `notes/${name}`,
       folder: 'notes',
     });
     const burstRows = Array.from({ length: 7 }, (_, i) => ({
       name: `2026-09-12-clip-${i + 1}.md`,
       at: NOW - 3 * HOUR - i * 4_000,
+      created: NOW - 3 * HOUR - i * 4_000,
       open: `clippings/c${i}/2026-09-12-clip-${i + 1}.md`,
       folder: `clippings/c${i}`,
     }));
@@ -142,7 +152,7 @@ describe('the Library front page', () => {
         (n) => n.querySelector('.library-name')?.textContent,
       );
 
-    it('is one line of Recent files, so every edit around it stays on the front page', async () => {
+    it('is one line of Recently Created, so every edit around it stays on the front page', async () => {
       const { page, root } = drive({ payload: BURST });
       await page.open();
       expect(lines(root)).toEqual([
@@ -454,7 +464,7 @@ describe('the Library on the board', () => {
         ...PAYLOAD.meetings,
       ],
     });
-    const reads = () => server.calls.filter((c) => c.url.endsWith('/library/items')).length;
+    const reads = () => server.calls.filter((c) => c.url.includes('/library/items')).length;
     const before = reads();
     boardFeed().dispatchEvent(new Event('library.changed'));
     await settle();
@@ -466,7 +476,7 @@ describe('the Library on the board', () => {
   it('a Library that is not showing does not re-read on the frame', async () => {
     await bootTestBoard();
     await settle();
-    const reads = () => server.calls.filter((c) => c.url.endsWith('/library/items')).length;
+    const reads = () => server.calls.filter((c) => c.url.includes('/library/items')).length;
     const before = reads();
     boardFeed().dispatchEvent(new Event('library.changed'));
     await settle();

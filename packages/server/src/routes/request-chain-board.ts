@@ -33,6 +33,7 @@ import { handleReviewFileRoutes } from './review-files.ts';
 import { handleDispatchAndNoteRoutes, handleTaskRoutes } from './tasks.ts';
 import { handleWhiteboardCreateRoute } from './whiteboard-routes.ts';
 import { handleLibraryFolderRoutes } from './workspace-library-folders.ts';
+import { handleLibraryViewRoutes } from './workspace-library-views.ts';
 import { handleLibraryRoutes } from './workspace-library.ts';
 import {
   handleWorkspaceAttachmentRoutes,
@@ -367,14 +368,17 @@ export async function serveBoardRoutes(
     });
     if (handled) return handled;
   }
-  // --- The board's Library --- ./routes/workspace-library.ts, and its
-  // folders, ./routes/workspace-library-folders.ts. Every one of their
-  // paths sits under `library/`, which no other family claims, so the
-  // position is not load-bearing.
+  // --- The board's Library --- ./routes/workspace-library.ts, its
+  // folders, ./routes/workspace-library-folders.ts, and its views,
+  // ./routes/workspace-library-views.ts. Every one of their paths sits under
+  // `library/`, which no other family claims, so the position is not
+  // load-bearing.
   {
+    const rq = { scope, req, visitor, authorFor };
     const handled =
-      (await handleLibraryRoutes(libraryRoutesCtx, { scope, req, visitor })) ??
-      (await handleLibraryFolderRoutes(libraryRoutesCtx, { scope, req, visitor }));
+      (await handleLibraryRoutes(libraryRoutesCtx, rq)) ??
+      (await handleLibraryFolderRoutes(libraryRoutesCtx, rq)) ??
+      (await handleLibraryViewRoutes(libraryRoutesCtx, rq));
     if (handled) return handled;
   }
   // --- Moving a doc into its project --- ./routes/doc-move.ts. Its one

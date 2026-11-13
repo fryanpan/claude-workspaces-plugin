@@ -14,6 +14,7 @@ import { openThreadId } from './doc/open-thread.ts';
 import { paintProse } from './doc/prose-paint.ts';
 import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
+import { recordLibraryView } from './library-view.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
 import {
@@ -169,6 +170,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       const paintsFirst = ctx.docType === 'markdown';
       if (paintsFirst) reportLoad.mounted(ctx);
       presence?.moveTo({ surface: 'doc', docId: ctx.docId });
+      // Recently Viewed: every kind of doc page counts, each arrival once.
+      if (board && writeAccess.canWrite) {
+        recordLibraryView(board, ctx.docId, { id: user.id, name: user.name, kind: user.kind });
+      }
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad.mounted(ctx);
       // A follow that brought this doc here shows its spot now the doc is up.

@@ -5238,6 +5238,16 @@ html:has(.board-walk-cred-form) {
 .lf-newfolder:hover {
   text-decoration: underline;
 }
+/* Recently Viewed's "Show more" holds the right of its heading at the width of
+   its longer label, so neither label moves it or the heading. */
+.lf-viewed-head .lf-viewmore {
+  justify-content: flex-end;
+  min-width: 6.5em;
+  margin-left: auto;
+}
+.lf-colhead {
+  justify-self: end;
+}
 .lf-folder {
   width: calc(100% + 16px);
 }

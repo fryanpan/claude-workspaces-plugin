@@ -40,6 +40,7 @@ import {
   searchLibrary,
   sortRows,
 } from './library-model.ts';
+import { fixedTable, viewedRows, viewedSectionHtml } from './library-recent.ts';
 import { createLibraryTree } from './library-tree.ts';
 
 export interface LibraryPageDeps {
@@ -67,6 +68,9 @@ export interface LibraryPageDeps {
    */
   takeRequestedOpen?: () => string | null;
   now?: () => number;
+  /** Who is reading, so the server answers their own Recently Viewed. A
+   *  signed-in session outranks it. */
+  viewerId?: () => string | null;
   /** The board's one-line report, with an optional Undo (`showToast`). */
   toast?: (msg: string, action?: { label: string; run: () => void; ms?: number }) => void;
 }
@@ -101,6 +105,8 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   let whereOpen = false;
   /** The bursts a reader has opened, by `burstKey`. Survives a re-render. */
   const expanded = new Set<string>();
+  /** Whether Recently Viewed is showing its longer list. */
+  let viewedOpen = false;
 
   root.innerHTML = `<div class="library-page">
     <header class="library-top">
@@ -229,8 +235,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
    * as the newest file's clock, because that is where the run sits in a list
    * ordered by it.
    */
-  function entryHtml(entry: LibraryFileEntry): string {
-    const clock = sort.files;
+  function entryHtml(entry: LibraryFileEntry, clock: LibrarySort = sort.files): string {
     if (entry.kind === 'file') return tree.rowHtml(entry.row, { clock, showFolder: true });
     const key = burstKey(entry.rows);
     const open = expanded.has(key);
@@ -280,25 +285,29 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       body.innerHTML = placeListHtml(payload, place);
       return;
     }
-    // Meetings are files here: they sit in Recent files with everything
-    // else, and in their own folder below (the separate list is gone).
-    const recent = recentRows(payload, sort.files);
+    // Meetings are files here: they sit in both lists with everything else,
+    // and in their own folder below (the separate list is gone).
     if (list !== 'main') {
-      const all = recent.map((r) => tree.rowHtml(r, { clock: sort.files, showFolder: true }));
+      const all = recentRows(payload, sort.files).map((r) =>
+        tree.rowHtml(r, { clock: sort.files, showFolder: true }),
+      );
       body.innerHTML = `<section class="library-all"><button type="button" class="library-back">← Library</button><h2>All files</h2>${filesTable(all.join(''))}</section>`;
       tree.afterRender();
       return;
     }
-    // Counted in ENTRIES: a burst is one line of the ten, so a generator's
-    // run cannot push everything else off the front page.
+    // Recently Created, counted in ENTRIES: a burst is one line of the ten,
+    // so a generator's run cannot push everything else off the front page.
     const meetings = new Set(payload.meetings);
-    const entries = fileEntries(recent, sort.files, (r) => meetings.has(r));
+    const created = recentRows(payload, 'created');
+    const entries = fileEntries(created, 'created', (r) => meetings.has(r));
     const more =
       entries.length > LIBRARY_RECENT.files
         ? '<button type="button" class="library-more" data-list="files">See all files</button>'
         : '';
-    const table = filesTable(entries.slice(0, LIBRARY_RECENT.files).map(entryHtml).join(''));
-    body.innerHTML = `<h2>Recent files</h2>${table}${more}${tree.html()}${payload.where ? whereHtml(payload.where) : ''}`;
+    const shown = entries.slice(0, LIBRARY_RECENT.files).map((e) => entryHtml(e, 'created'));
+    const table = fixedTable('Created', shown.join(''), 'No files yet.');
+    const viewed = viewedSectionHtml(viewedRows(payload), viewedOpen, tree.rowHtml);
+    body.innerHTML = `<h2>Recently Created</h2>${table}${more}${viewed}${tree.html()}${payload.where ? whereHtml(payload.where) : ''}`;
     tree.afterRender();
   }
 
@@ -359,6 +368,12 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const target = e.target as Element;
     if (target.closest('.library-new-whiteboard')) {
       void newWhiteboard();
+      return;
+    }
+    if (target.closest('[data-lf-viewmore]')) {
+      viewedOpen = !viewedOpen;
+      render();
+      root.querySelector<HTMLElement>('[data-lf-viewmore]')?.focus();
       return;
     }
     const burst = target.closest<HTMLElement>('.library-burst-head');
@@ -424,8 +439,14 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     render();
   });
 
+  /** The list, read as this reader, so it carries their own views. */
+  function itemsUrl(): string {
+    const viewer = deps.viewerId?.() ?? null;
+    return viewer ? `${base}/items?viewer=${encodeURIComponent(viewer)}` : `${base}/items`;
+  }
+
   async function refresh(): Promise<void> {
-    const next = await deps.fetchJson<LibraryPayload>(`${base}/items`);
+    const next = await deps.fetchJson<LibraryPayload>(itemsUrl());
     // A failed re-read keeps the list up: unlike an arrival, the reader is
     // looking at rows that were true a moment ago, and the next frame or
     // reconnect reads again.
@@ -446,7 +467,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       list = at.list === 'files' || at.list === 'meetings' ? 'files' : 'main';
       place = at.place;
       render();
-      const next = await deps.fetchJson<LibraryPayload>(`${base}/items`);
+      const next = await deps.fetchJson<LibraryPayload>(itemsUrl());
       failed = next === null;
       // The last list is DROPPED on a failure rather than left up. Rows here
       // are an invitation to tap, and a list the server can no longer vouch

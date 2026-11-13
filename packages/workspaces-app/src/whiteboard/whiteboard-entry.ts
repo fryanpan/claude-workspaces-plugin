@@ -18,6 +18,7 @@ import { connect } from '@claude-workspaces/core';
 import { allSceneElements, sceneMap } from '@claude-workspaces/core/whiteboard-scene';
 import { docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
+import { recordLibraryView } from '../library-view.ts';
 import type { CanvasHandle } from './canvas-island.ts';
 import {
   commitLocal,
@@ -59,6 +60,10 @@ async function boot(): Promise<void> {
     },
     { suppressNamePrompt: true },
   );
+  // Recently Viewed: a person opening a whiteboard counts like a doc.
+  if (workspaceId && user.kind !== 'anon') {
+    recordLibraryView(workspaceId, docId, { id: user.id, name: user.name, kind: user.kind });
+  }
   // Its own chunk, and never waited for: it is not the page's content.
   if (workspaceId) {
     void import('../lead-chat/lead-chat-mount.ts').then(({ mountLeadChat }) =>
