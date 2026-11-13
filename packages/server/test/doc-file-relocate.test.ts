@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -256,6 +257,58 @@ describe('POST /workspaces/:ws/docs/:docId/move-file', () => {
     await sleep(pastWriteBack());
     expect(existsSync(join(repo, 'ferry.md'))).toBe(false);
     expect(handle.docStore.boundPathOf(docId)).toBe(file);
+  });
+
+  it('repoint: follows a doc whose binding dropped after git mv moved its folder, and keeps its thread', async () => {
+    const docId = await bind('dock-notes', join(repo, 'dock-notes.md'));
+    const found = await ok(
+      await send('POST', docPath(docId, '/threads/by_find'), {
+        author: AGENT,
+        text: 'Which supplier carries amber lamps?',
+        find: 'amber lamps',
+      }),
+    );
+    const threadId = String((found.thread as { id: string }).id);
+    await handle.stop();
+    // The folder moves while the server is down, so the restarted server finds
+    // no file at the recorded path and leaves the doc unbound.
+    git(repo, 'mv', 'dock-notes.md', 'harbour-notes.md');
+    mkdirSync(join(repo, 'research'));
+    git(repo, 'mv', 'harbour-notes.md', 'research/dock-notes.md');
+    handle = createServer({ port: 0, dataDir });
+    expect(handle.docStore.get(docId)).toBeDefined();
+    // CONTROL: the precondition the fix is for.
+    expect(handle.docStore.boundPathOf(docId)).toBeUndefined();
+    editLive(docId, 'Riverbend Marine stocks the lamps.');
+
+    const file = join(repo, 'research', 'dock-notes.md');
+    const moved = await ok(await moveFile(docId, 'research/dock-notes.md', 'repoint'));
+    expect(moved).toMatchObject({
+      ok: true,
+      docId,
+      mode: 'repoint',
+      path: file,
+      previousPath: join(repo, 'dock-notes.md'),
+    });
+    expect(handle.docStore.boundPathOf(docId)).toBe(file);
+    expect(readFileSync(file, 'utf8')).toContain('Riverbend Marine');
+    const thread = (await ok(await send('GET', docPath(docId, `/threads/${threadId}`)))) as {
+      thread?: { comments?: unknown[] };
+      comments?: unknown[];
+    };
+    expect((thread.thread?.comments ?? thread.comments ?? []).length).toBe(1);
+    // timed: past the write-back window, nothing recreates the old path.
+    await sleep(pastWriteBack());
+    expect(existsSync(join(repo, 'dock-notes.md'))).toBe(false);
+
+    // Move still needs a live binding: it renames that file.
+    const other = await bind('ferry', join(repo, 'ferry.md'));
+    await handle.stop();
+    git(repo, 'mv', 'ferry.md', 'research/ferry.md');
+    handle = createServer({ port: 0, dataDir });
+    handle.docStore.get(other);
+    const refused = await moveFile(other, 'research/ferry-2.md', 'move');
+    expect(((await refused.json()) as { error: string }).error).toBe('not-bound');
   });
 
   it('repoint: an outside edit made to the moved file while the doc was idle is read in', async () => {
