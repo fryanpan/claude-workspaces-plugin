@@ -208,7 +208,13 @@ const BAR_STYLE =
   '.cw-comments:hover{border-color:#2e7dd7}' +
   '.cw-comments[aria-pressed=true]{border-color:#2e7dd7;color:#2e7dd7;box-shadow:inset 0 0 0 1px #2e7dd7}' +
   '.cw-new{display:inline-block;width:8px;height:8px;border-radius:50%;background:#5b3f8f}' +
-  '.cw-new[hidden]{display:inline-block;visibility:hidden}';
+  '.cw-new[hidden]{display:inline-block;visibility:hidden}' +
+  // The mock's star (`doc-star.ts`, mounted by the lead-chat script): the
+  // doc page's square, its outline filling when pressed, so nothing moves.
+  '.doc-star{flex:0 0 auto;width:40px;height:36px;padding:0;border:1px solid #d1d5da;border-radius:6px;' +
+  'background:#fff;color:#1b1f23;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}' +
+  '.doc-star[hidden]{display:none}.doc-star svg{fill:none}' +
+  '.doc-star[aria-pressed=true]{color:#2e7dd7}.doc-star[aria-pressed=true] svg{fill:currentColor}';
 
 const BAR = (title: string): string =>
   `<div class="cw-bar"><span class="cw-bar-title">${title.replace(/</g, '&lt;')}</span>` +

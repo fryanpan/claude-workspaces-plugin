@@ -19,6 +19,7 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { FOLDER_TOOLS } from './folder-schemas.ts';
 import { PERSON_TOOLS } from './person-schemas.ts';
 import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
 
@@ -202,7 +203,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_docs',
       description:
-        'List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.',
+        "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. A row filed in one of the board's Library folders names it as folder: {id, path}. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -3362,7 +3363,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'get_doc_metadata',
       description:
-        "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
+        "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc, and schemaReason says why: not-file-bound (the doc has no file), file-not-answering (its file is not responding; try later), no-file (no schema file between the doc's folder and the repo top), unreadable or invalid (the schema file is there but cannot be used; schemaError says how). Works on a doc nobody has opened, without opening it. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -3525,5 +3526,6 @@ export const TOOL_LIST: ListToolsResult = {
     },
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
+    ...FOLDER_TOOLS,
   ],
 };

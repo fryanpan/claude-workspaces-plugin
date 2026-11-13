@@ -14,6 +14,9 @@ export interface DriveOptions {
   payload?: LibraryPayload | null | (LibraryPayload | null)[];
   openAnswer?: { ok: boolean; status: number; data: Record<string, unknown> | null };
   requestedOpen?: string;
+  /** Who is reading; omitted, an anonymous reader who cannot star. */
+  viewer?: { id: string; name: string; kind: string };
+  toasts?: string[];
 }
 
 export interface Driven {
@@ -63,6 +66,8 @@ export function driveLibrary(
       return wanted;
     },
     now: () => NOW,
+    viewer: () => opts.viewer ?? null,
+    toast: (msg) => opts.toasts?.push(msg),
   });
   return { page, root, history, sent, navigated };
 }

@@ -4,6 +4,7 @@ import { createConflictWith } from '../doc-create-conflict.ts';
 import { RESERVED_DOC_PREFIXES, isReservedDocId } from '../doc-ids.ts';
 import { compactDocRow, matchesDocFilters, pageDocs, parseListDocsQuery } from '../doc-listing.ts';
 import { normalizeDocOriginRepo, resolveOriginRepoCheckout } from '../doc-origin-repo.ts';
+import { filedFolder } from '../library-folders.ts';
 /**
  * The doc, thread and bind REST block, in the order it is matched.
  *
@@ -533,6 +534,7 @@ export async function handleDocCreateListRoutes(
           const row = compactDocRow(decorate(m), {
             boardId: homeForDocIndexed(boardIndex, m),
             threads: docStore.threadCounts(m.docId),
+            folder: filedFolder(scope.board, m, ctx.dataDir),
           });
           if (visitor) row.sourceUrl = undefined;
           return row;
@@ -712,7 +714,11 @@ export async function handleDocResourceRoutes(
   // server, which then flushed weeks-old content over files on disk. Every
   // other subroute below can edit, so every other subroute takes the binding
   // hydrate. See `DocStore.getForRead`.
-  const readOnly = rq.req.method === 'GET' && (rest === 'threads' || rest.startsWith('threads/'));
+  // A metadata GET is a read too: it finds the file from the doc's meta
+  // (`DocStore.recordedPathOf`) and reads the front matter from the `.ydoc`.
+  const readOnly =
+    rq.req.method === 'GET' &&
+    (rest === 'threads' || rest.startsWith('threads/') || rest === 'metadata');
   const doc = readOnly ? docStore.getForRead(addressed) : docStore.get(addressed);
   if (!doc) return j(404, { error: 'doc not found' });
   // Canonicalize ONCE, here, and the ~30 subroutes below inherit both
