@@ -82,6 +82,7 @@ import { placeableGoals } from '../task-queue.ts';
 import { clipToWordBoundary } from '../task-title.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
+import { handleDocComponentsRoute } from './doc-components.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocFileMoveRoute } from './doc-file-move.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
@@ -732,6 +733,7 @@ export async function handleDocResourceRoutes(
   return (
     (await handleDocResourceCore(ctx, docRq)) ??
     (await handleDocAssetsRoute(ctx, docRq)) ??
+    (await handleDocComponentsRoute(ctx, docRq)) ??
     (await handleDocFilesRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
     (await handleDocFileMoveRoute(ctx, docRq)) ??

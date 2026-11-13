@@ -213,6 +213,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/assets` | POST | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/assets/*` | GET, HEAD | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/audio` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/components/*` | GET, HEAD | `routes/doc-components.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | GET | `routes/doc-edit-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/delete_block_at_anchor` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |

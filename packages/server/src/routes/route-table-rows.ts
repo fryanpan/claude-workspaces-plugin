@@ -595,6 +595,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/doc-files.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/files/*', 'GET HEAD'],
   ]),
+  ...family('routes/doc-components.ts', [
+    ['share-scope', '/workspaces/:ws/docs/:docId/components/*', 'GET HEAD'],
+  ]),
   ...family('routes/doc-metadata.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
   ]),

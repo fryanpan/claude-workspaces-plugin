@@ -1256,6 +1256,32 @@ body.is-archived #editor .ProseMirror {
 #editor > .ProseMirror .mdx-edit-error[hidden] {
   display: none;
 }
+/* A component tag drawn live (mdx-component.ts). The component lays itself
+   out; the host only gives it the column and a normal cursor, since a tap
+   inside works the component rather than opening the source. */
+#editor > .ProseMirror .mdx-live {
+  cursor: auto;
+  min-width: 0;
+}
+/* A built-in drawn inside a component (a <PlotChart> slide) takes the width
+   of whatever holds it: a chart is drawn at its box's width, so a box that
+   shrank to fit its content would keep the chart at its first, narrow size. */
+#editor > .ProseMirror .mdx-live .mdx-builtin {
+  width: 100%;
+  min-width: 0;
+}
+#editor > .ProseMirror .mdx-live-status {
+  margin-top: 6px;
+  font: 13px / 1.4 var(--sans);
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+}
+#editor > .ProseMirror .mdx-live-status.is-error {
+  color: var(--red);
+}
+#editor > .ProseMirror .mdx-live-status[hidden] {
+  display: none;
+}
 /* A ```choice block (choice-block.ts): a row of buttons, its source hidden
    while it parses. Every button is the same size picked or not, and only its
    colours change, so a tap moves nothing. 44px is a thumb's target. */

@@ -55,6 +55,8 @@
     "./goal-effort": "./src/goal-effort.ts",
     "./identity": "./src/identity.ts",
     "./image-versions": "./src/image-versions.ts",
+    "./mdx-components": "./src/mdx-components.ts",
+    "./mdx-component-runtime": "./src/mdx-component-runtime.ts",
     "./board-embeds": "./src/board-embeds.ts",
     "./note-suggestion": "./src/note-suggestion.ts",
     "./related-work": "./src/related-work.ts",

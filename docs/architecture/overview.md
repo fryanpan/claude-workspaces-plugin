@@ -2586,6 +2586,18 @@ the doc does not move when it does. It fetches Plot and `buildPlot`
 from `/app/plot/plot.js` the first time a doc shows one, for KaTeX's reason
 below; `plot-entry.ts` is what the build compiles to that path.
 
+A component tag in an `.mdx` doc runs, not just previews, and the modules
+that do it are described in [mdx-components](mdx-components.md). Core's
+`mdx-components.ts` joins the document-model tier: it decides which tags
+are component tags and the key each build is filed under, and
+`mdx-component-runtime.ts` is the JSX runtime each bundle carries. On the
+server, `component-build.ts` builds one tag with esbuild and holds the rules
+on what a build may read, `component-cdn.ts` fetches and stores esm.sh
+modules, `doc-component-builds.ts` is the sweep that builds what changed in
+each open doc (a `doc-*.ts` the diagram draws), and `routes/doc-components.ts`
+serves a bundle. On the client, `mdx-component.ts` mounts the bundle in the
+`mdx-flow` node view. None of them changes the picture.
+
 `prose-math.ts` joins the same tier and does not move the picture. It is the
 grammar of a remark-math equation — `$x$` inline, `$$` … `$$` on lines of
 their own — measured against remark-math 6, with two places where it reads
