@@ -48,6 +48,12 @@
  * is a value Bun holds rather than a document that rots, and the drift test
  * reads the same object.
  *
+ * HONO (M12). Families are moving one at a time into the Hono app in
+ * `hono-front.ts`, which the chain tries below its gates and above every
+ * family it still holds. A row's `module` names whichever module answers it;
+ * `test/route-answers.test.ts` records what every row answers and fails when a
+ * move changes any of it.
+ *
  * ADDING A ROUTE. Add its row here in the same commit. The rendered table is
  * `docs/architecture/routes.md`, regenerated with `bun run routes:table`, and
  * the drift test fails until the two agree.

@@ -37,6 +37,7 @@ import type { DocMoveRoutesContext } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
 import type { GithubHubRoutesContext } from './github-hub.ts';
 import type { HomeFeedRoutesContext } from './home-feed.ts';
+import type { HonoFront } from './hono-front.ts';
 import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
 import type { MountRoutesContext } from './mounts.ts';
@@ -85,6 +86,9 @@ export interface RequestChainContext {
     admitted: AttributableRequest,
     widgetIdentity: IdentityRecord | null,
   ) => Promise<Response | null>;
+  /** The Hono app (`hono-front.ts`), tried below the gates and above every
+   *  family the chain still holds. */
+  honoFront: HonoFront;
   authShareRoutesCtx: AuthShareRoutesContext;
   voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
   recallWebhookRoutesCtx: RecallWebhookRoutesContext;

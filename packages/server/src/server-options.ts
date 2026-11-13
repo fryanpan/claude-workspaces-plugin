@@ -28,6 +28,7 @@ import type { PushCredential } from './git-push/credential.ts';
 import type { GitRunner } from './git-push/git.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
 import type { FetchLike, HomeRemotesConfig } from './home-remotes.ts';
+import type { HonoFamily } from './hono-env.ts';
 import type { ReplyTransport } from './inbox/send-transport.ts';
 import type { HoldTiming } from './lead-chat/lead-line-hold.ts';
 import type { LeadHoldSetting } from './lead-chat/lead-line-holds.ts';
@@ -975,4 +976,16 @@ export interface ServerOptions {
    * deliberately is reported without the suite waiting a real second.
    */
   loopBlockThresholdMs?: number;
+  /**
+   * Families mounted on the Hono app after `HONO_FAMILIES`
+   * (`routes/hono-front.ts`, types in `hono-env.ts`). Production passes none; a test mounts a probe
+   * route so it can show the gates run before Hono answers.
+   */
+  honoFamilies?: readonly HonoFamily[];
+  /**
+   * Called once each time request admission decides a request, with the path
+   * and the verdict. Production passes none; the test that admission runs
+   * once per request — whichever router answers — counts these.
+   */
+  observeAdmission?: (pathname: string, admitted: boolean) => void;
 }

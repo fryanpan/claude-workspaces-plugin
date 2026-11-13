@@ -126,7 +126,11 @@ import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { scanSettledDocRefs } from './refs-backfill.ts';
-import { createOriginPolicy, createRequestAdmission } from './request-admission.ts';
+import {
+  type RequestAdmission,
+  createOriginPolicy,
+  createRequestAdmission,
+} from './request-admission.ts';
 import { createRequestAttribution } from './request-attribution.ts';
 import { BLOCKING_WAIT_WINDOW_MS, blockingWait } from './review-answer-ledger.ts';
 import {
@@ -155,6 +159,7 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { HONO_FAMILIES, createHonoFront } from './routes/hono-front.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
@@ -3300,7 +3305,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     homeFeedCtx,
     githubHubCtx,
-    admit,
+    admit: opts.observeAdmission ? observedAdmit(admit, opts.observeAdmission) : admit,
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
@@ -3311,6 +3316,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
         { shares, now: Date.now() },
       ),
+    honoFront: createHonoFront([...HONO_FAMILIES, ...(opts.honoFamilies ?? [])]),
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,
@@ -3887,4 +3893,16 @@ async function safeJson(req: Request): Promise<Record<string, unknown> | null> {
   } catch {
     return null;
   }
+}
+
+/** Admission that also tells `observeAdmission` each verdict (tests only). */
+function observedAdmit(
+  admit: RequestAdmission['admit'],
+  observe: (pathname: string, admitted: boolean) => void,
+): RequestAdmission['admit'] {
+  return async (req, o) => {
+    const gate = await admit(req, o);
+    observe(o.pathname, gate.admitted);
+    return gate;
+  };
 }
