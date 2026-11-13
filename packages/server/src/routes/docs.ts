@@ -713,7 +713,11 @@ export async function handleDocResourceRoutes(
   // server, which then flushed weeks-old content over files on disk. Every
   // other subroute below can edit, so every other subroute takes the binding
   // hydrate. See `DocStore.getForRead`.
-  const readOnly = rq.req.method === 'GET' && (rest === 'threads' || rest.startsWith('threads/'));
+  // A metadata GET is a read too: it finds the file from the doc's meta
+  // (`DocStore.recordedPathOf`) and reads the front matter from the `.ydoc`.
+  const readOnly =
+    rq.req.method === 'GET' &&
+    (rest === 'threads' || rest.startsWith('threads/') || rest === 'metadata');
   const doc = readOnly ? docStore.getForRead(addressed) : docStore.get(addressed);
   if (!doc) return j(404, { error: 'doc not found' });
   // Canonicalize ONCE, here, and the ~30 subroutes below inherit both

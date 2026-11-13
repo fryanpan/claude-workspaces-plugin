@@ -148,24 +148,43 @@ one second). Front matter the form does not touch round-trips byte for byte,
 inner blank lines and comments included.
 
 The tests: `packages/server/test/doc-metadata.test.ts` (the schema search, the
-write-back to disk, an open page receiving a set, the file unchanged by a read)
-and `packages/workspaces-app/test/doc-metadata.test.ts` (the form over the real
+write-back to disk, an open page receiving a set, the file unchanged by a read),
+`packages/server/test/doc-metadata-dormant.test.ts` (a doc with no armed
+binding: the GET finds its schema and arms none, a set lands, each
+`schemaReason`) and `packages/workspaces-app/test/doc-metadata.test.ts` (the form over the real
 editor).
 
 ## For agents
 
-- `get_doc_metadata(workspaceId, docId)` answers `schema` (null when no schema
-  governs the doc), `schemaAt` (the schema's path relative to the doc's
-  folder), `values`, `errors` and `defaults`.
+- `get_doc_metadata(workspaceId, docId)` answers `schema`, `schemaAt` (the
+  schema's path relative to the doc's folder), `values`, `errors` and
+  `defaults`. When no schema governs the doc, `schema` is null and
+  `schemaReason` says why:
+
+  | `schemaReason` | Meaning |
+  | --- | --- |
+  | `not-file-bound` | The doc has no file, so there is nowhere to search from. |
+  | `file-not-answering` | The doc's file stopped answering and is quarantined, so its folders are not searched. Try again once it answers. |
+  | `no-file` | No schema file between the doc's folder and the search's top. |
+  | `unreadable` | A schema file is there but could not be read safely, or is over 64 KB. `schemaError` says which. |
+  | `invalid` | A schema file is there but is not JSON, or uses a type outside the subset above. `schemaError` says which. |
 - `set_doc_metadata(workspaceId, docId, fields)` sets fields, where `fields`
   maps a field name to a value, and null or an empty value clears it. A key
   the schema does not declare, a read-only field or a wrong type is refused
   with 400 `invalid-fields`, naming each field, and nothing is written. No
-  schema answers 409 `no-schema`.
+  schema answers 409 `no-schema`, with the same `schemaReason`.
 
 Both are `GET` and `PUT /workspaces/<ws>/docs/<docId>/metadata`, behind the
 trusted-local gate. A share visitor is refused, because the schema search
 reads the doc's folders and a set writes its file.
+
+The doc's file comes from its meta (`DocStore.recordedPathOf`: the pinned
+origin repo's current checkout, else `sourceUrl`), not from its live binding.
+A doc nobody has opened since the server started has no binding armed, and
+neither has one a threads read brought into memory; reading only the binding
+answered both `schema: null`. The `GET` is a read, like a threads read: it
+loads the `.ydoc` and arms no binding (`DocStore.getForRead`). The `PUT` edits
+the doc, so it binds it as every edit does.
 
 ## In a walled lead's folders
 
