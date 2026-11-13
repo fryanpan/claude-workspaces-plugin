@@ -1205,9 +1205,10 @@ export function renderLanding(
   notesWorkspaceName: string,
   assets: AssetManifest = {},
   review: LandingReview = { items: [], rankOf: new Map(), summaryOf: () => undefined },
-  /** Incoming Messages with its styles, second on the page (inbox/landing.ts). */
+  /** Incoming Messages with its styles, below the coach (inbox/landing.ts). */
   inbox = '',
-  /** The week's goals and the coach's nudge, first on the page (coach/landing.ts). */
+  /** The week's goals and the coach's nudge, below the review items: his
+   *  review items lead Home (coach/landing.ts). */
   coach = '',
   /** A board to reach the Workspaces feedback doc at, or '' for no widget.
    *  The board shell's widget, for the same reasons; '' for a visitor. */
@@ -1282,8 +1283,8 @@ export function renderLanding(
 <claude-feedback-widget workspace-id="${escape(feedbackWorkspaceId)}" doc-id="${escape(BOARD_FEEDBACK_DOC_ID)}" view="All workspaces" identity-scope="host"></claude-feedback-widget>`
         : ''
     }
-${coach}
 <div id="landing-review">${renderReviewBar(review)}${remote}</div>
+${coach}
 ${inbox}
 <div id="landing-boards">${active}
 ${inactive}
