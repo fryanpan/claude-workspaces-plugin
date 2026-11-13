@@ -6,7 +6,8 @@ form at the top of each doc, and the values live in the doc's YAML front
 matter, where a site build or any other tool reads them without the board.
 
 This page is the contract. Another repository can rely on what it says, and
-the code that implements it is `packages/core/src/doc-metadata.ts`.
+the code that implements it is `packages/core/src/doc-metadata.ts` and
+`doc-metadata-schema.ts` beside it.
 
 ## Where the schema lives
 
