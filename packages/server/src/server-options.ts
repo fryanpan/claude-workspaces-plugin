@@ -146,6 +146,11 @@ export interface ServerOptions {
    */
   requireSignInToWrite?: boolean;
   /**
+   * How a component build reaches esm.sh (`component-cdn.ts`). Tests hand in
+   * a fake so no build leaves the machine; absent, the real host.
+   */
+  componentFetch?: (url: string) => Promise<Response>;
+  /**
    * Whether the two agent-id-keyed routes refuse a caller that presents no
    * `at1` agent token: `GET /api/agents/<id>/watches` and
    * `GET /events/agent/<id>`.
