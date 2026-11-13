@@ -4,11 +4,13 @@
  * `createServer` composes; this answers. It used to be `handleRequest` and
  * its inner `route()` inside `createServer`, and it moved whole: the front
  * door (the bad-path refusal, the hydration prewarm, the Sentry span,
- * compression, CORS and the slow-request line), then the gates in the order
- * they must run — the CORS preflight, the cross-origin write gate, the home
- * feed and the GitHub hub, admission, the local-only gate, attribution, the sign-in write gate,
- * the sign-in and share routes, the two vendor callbacks, the upgrades and
- * streams, and the workspace scope — and then the two halves below them:
+ * compression, CORS and the slow-request line), then the gates
+ * (`request-chain-gates.ts`: the CORS preflight, the cross-origin write gate,
+ * the home feed and the GitHub hub, admission, the local-only gate,
+ * attribution and the two sign-in gates), then the Hono app
+ * (`hono-front.ts`), then the sign-in and share routes, the two vendor
+ * callbacks, the upgrades and streams, and the workspace scope — and then the
+ * two halves below them:
  * the board and REST families (`request-chain-board.ts`) and the top-level
  * families with the tail (`request-chain-tail.ts`).
  *
@@ -26,30 +28,18 @@
 import { isOwnerActor } from '../actor-identity.ts';
 import { withAppDoorCacheRule } from '../app-proxy.ts';
 import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
-import { LOCAL_ONLY_REFUSAL, addressesLocalOnlySet, isOnBox } from '../attachment-privacy.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
-import {
-  crossOriginCredentialedWrite,
-  isAllowedBrowserOrigin,
-} from '../middleware/browser-origin.ts';
 import { refusedWriteLine } from '../middleware/refused-write-log.ts';
-import {
-  type WorkspaceScope,
-  memberAddressed,
-  resolveWorkspaceScope,
-} from '../middleware/workspace-scope.ts';
-import { isGatedWrite, signInRequiredBody } from '../middleware/write-gate.ts';
+import { type WorkspaceScope, resolveWorkspaceScope } from '../middleware/workspace-scope.ts';
 import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
 import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
-import { matchWorkspaceRoute } from '../workspace-path.ts';
 import { handleAuthShareRoutes } from './auth-share.ts';
-import { handleGithubHubRoute } from './github-hub.ts';
-import { handleHomeFeedRoute } from './home-feed.ts';
 import { handleRecallWebhookRoute } from './recall-webhook.ts';
 import { serveBoardRoutes } from './request-chain-board.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
+import { createRequestGates } from './request-chain-gates.ts';
 import { serveTopLevelRoutes } from './request-chain-tail.ts';
 import { handleVoiceAgentLlmRoute } from './voice-agent-llm.ts';
 
@@ -69,11 +59,6 @@ export function createRequestChain(
     policyFor,
     isValidDocId,
     j,
-    requestAddress,
-    homeFeedCtx,
-    admit,
-    localOnlyGate,
-    attributeRequest,
     requireSignInToWrite,
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
@@ -82,30 +67,7 @@ export function createRequestChain(
     taskStore,
     workspacesOfMember,
   } = ctx;
-
-  /**
-   * A folder member a link names before anybody opened it becomes its doc.
-   * Only for a set filed on the board in the path; `openListedMember` opens
-   * only what the set's listing holds, so this reaches what `context-file`
-   * does and nothing more. A local-only set's member is not opened for a
-   * caller off the box, whom the gate below refuses anyway.
-   */
-  async function openUnopenedMember(req: Request, pathname: string): Promise<void> {
-    const match = matchWorkspaceRoute(pathname);
-    const member = match ? memberAddressed(match.rest) : undefined;
-    if (!match || member?.collection !== 'docs') return;
-    const id = member.memberId;
-    const cut = id.indexOf(':');
-    if (cut <= 0 || docStore.docExists(id)) return;
-    const setId = id.slice(0, cut);
-    if (!workspacesOfMember('attachments', setId).includes(match.workspaceId)) return;
-    if (
-      localOnlyGate.isLocalOnlySet(setId) &&
-      !isOnBox(req.headers, requestAddress(req) ?? undefined)
-    )
-      return;
-    await docStore.openListedMember(id);
-  }
+  const runGates = createRequestGates(ctx);
 
   return async function handleRequest(req: Request): Promise<Response | undefined> {
     const startedAt = performance.now();
@@ -187,94 +149,16 @@ export function createRequestChain(
       const url = new URL(req.url);
       const { pathname } = url;
 
-      // --- CORS preflight ---
-      // The canonical embed loads the widget bundle from this server but
-      // runs on a different origin (e.g. an Astro dev server on :4321).
-      // Every REST call from the widget is therefore cross-origin and
-      // browsers preflight non-simple requests (POST + JSON body) with an
-      // OPTIONS. Reply once here so we don't have to thread the response
-      // through every route handler.
-      // The wrapper above attaches the CORS headers when the origin is
-      // allowed. A disallowed origin gets a bare 204 with no
-      // Access-Control-Allow-* — which is exactly how the browser learns no.
-      if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 204 });
-      }
-
-      // --- Cross-origin WRITE gate ---
-      // Withholding CORS headers only hides the RESPONSE. A "simple request"
-      // — POST with content-type text/plain — is never preflighted, so the
-      // browser sends it and the write lands; the page just can't read the
-      // reply. safeJson() parses the body whatever the content-type says, so
-      // that was a working CSRF write: post comments as someone else, or
-      // create a doc bound to any file on the machine.
-      //
-      // GET stays open on purpose. Its response is already withheld by CORS,
-      // and refusing it would break <script>/<img>-style loads of the widget
-      // bundle from arbitrary dev sites (those send no Origin at all).
-      if (
-        req.method !== 'GET' &&
-        req.method !== 'HEAD' &&
-        !isAllowedBrowserOrigin(req.headers.get('origin'), policyFor(req))
-      ) {
-        return j(403, { error: 'origin_not_allowed' });
-      }
-      // An allowed origin that is not this server's own may write only
-      // without the reader's credentials — `crossOriginCredentialedWrite`.
-      if (crossOriginCredentialedWrite(req.method, req.headers, policyFor(req))) {
-        return j(403, {
-          error: 'cross_origin_credentials',
-          message:
-            'A page on another origin may not write with your sign-in. Use this server’s own pages.',
-        });
-      }
-
-      // ── Home feed, GitHub hub ── ABOVE admission, own gates: callers name nobody.
-      const above =
-        (await handleHomeFeedRoute(homeFeedCtx, req, pathname)) ??
-        (await handleGithubHubRoute(ctx.githubHubCtx, req, pathname));
-      if (above) return above;
-
-      // ── Request admission ── see request-admission.ts.
-      // The gate ANSWERS this request or hands back what it proved. A
-      // refused answer carries no per-request value with it, so nothing
-      // below can read a visitor off a request that never got in — the
-      // union is what makes that a compile error rather than a review note.
-      const gate = await admit(req, { pathname });
-      if (!gate.admitted) return gate.response;
-      // Below admission, so only a caller the set is open to reaches it, and
-      // ABOVE the local-only gate and the upgrades, which then judge the doc
-      // the member became rather than an id nothing holds.
-      await openUnopenedMember(req, pathname);
-      // A local-only attachment set's files stay on this machine. Here,
-      // below admission and ABOVE the upgrades, because a socket is
-      // authorized once at open and a gate below it would never see one.
-      if (
-        !isOnBox(req.headers, requestAddress(req) ?? undefined) &&
-        addressesLocalOnlySet(pathname, localOnlyGate)
-      ) {
-        return j(403, LOCAL_ONLY_REFUSAL);
-      }
+      // ── The gates ── see routes/request-chain-gates.ts.
+      // The preflight, the cross-origin write gates, the home feed and the
+      // GitHub hub, admission, the local-only gate, attribution and both
+      // sign-in gates, in that order. They run ONCE, here, above both
+      // routers: a `Response` is a gate's answer and no router sees the
+      // request; otherwise the result is what they proved.
+      const passed = await runGates(req, pathname);
+      if (passed instanceof Response) return passed;
+      const { gate, attribution } = passed;
       const { visitor, visitorShareId, visitorMemberKey, widgetDoorGrant } = gate;
-
-      // --- REST: email login ---
-      // Reachability (the host gate, Access, a share session) and identity
-      // (who you are) stay orthogonal: a local host still bypasses the host
-      // guard — it may REACH the server — and still has to say who it is.
-      // These routes are what "saying who you are" means.
-      //
-      // They sit AFTER the host decision on purpose, so a share visitor
-      // reaches them only if `shareScopeAllows` lets them, and it does not:
-      // a share visitor is already proven by Cloudflare Access, and this is
-      // not a second way to claim an identity on a share host.
-      // ── Request attribution ── see request-attribution.ts.
-      // Chained after admission rather than composed beside it, because its
-      // input is what the gate just proved. Called from the position the
-      // widget-token gate held — that gate lives inside, and its 401 has to
-      // land exactly here. `attributed: false` carries no helpers at all, so
-      // no route can name an author on a request whose token was refused.
-      const attribution = attributeRequest(req, gate);
-      if (!attribution.attributed) return attribution.response;
       const {
         widgetIdentity,
         provenIdentityFor,
@@ -291,29 +175,25 @@ export function createRequestChain(
         return proven !== null && isOwnerActor({ id: proven.id });
       };
 
-      // --- Sign-in write gate ---
-      // Every ordinary write — a comment, a task edit, a review answer, a
-      // doc bind — passes through here, because every one of them is a
-      // non-GET and every route on this server lives below this line. The
-      // predicate is method-keyed rather than a route list on purpose: a
-      // list is a thing that silently stops being complete.
+      // ── The Hono app ── see routes/hono-front.ts.
+      // Tried first among the routers, below the gates, with what they
+      // proved. An address no Hono family claims is null here and falls
+      // through to the ordered chain below exactly as it did before Hono
+      // existed. A websocket upgrade never enters it: the Yjs and audio
+      // sockets stay on Bun's `server.upgrade`, in the stream block below.
+      const fronted = await ctx.honoFront(req, { gate, attribution, ownerProven });
+      if (fronted) return fronted;
+
+      // --- REST: email login ---
+      // Reachability (the host gate, Access, a share session) and identity
+      // (who you are) stay orthogonal: a local host still bypasses the host
+      // guard — it may REACH the server — and still has to say who it is.
+      // These routes are what "saying who you are" means.
       //
-      // Reads are untouched, agents are untouched (see write-gate.ts for
-      // what tells them apart and what that boundary is worth), and the
-      // refusal carries the URL that fixes it — a bare 401 is
-      // indistinguishable from a bug, and the client turns this body into
-      // a sign-in prompt.
-      //
-      // Order: below the widget-token gate so a valid token counts as
-      // proof, and below the host/Access gates so an Access visitor's
-      // verified email is already in hand.
-      if (requireSignInToWrite && isGatedWrite(req.method, pathname) && browserProvedNobody()) {
-        return j(401, signInRequiredBody());
-      }
-      // --- Fresh sign-in for a person's destructive action --- (fresh-signin.ts)
-      // Above every route it guards; below the gates that proved the person.
-      const staleSignIn = await ctx.freshSignInGate(req, pathname, gate, widgetIdentity);
-      if (staleSignIn) return staleSignIn;
+      // They sit AFTER the host decision on purpose, so a share visitor
+      // reaches them only if `shareScopeAllows` lets them, and it does not:
+      // a share visitor is already proven by Cloudflare Access, and this is
+      // not a second way to claim an identity on a share host.
 
       // --- Sign-in, session and share links (routes/auth-share.ts) ---
       // Extracted whole and called from the position the block occupied, so
