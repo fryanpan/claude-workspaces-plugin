@@ -59,6 +59,17 @@ export const VIEW_CSS = [
   '.cw-back{display:none}',
   '.panel.cw-detail .cw-back{display:flex;align-items:center;border-bottom:1px solid #eaeef2;margin:0 -8px 4px;padding:0 4px}',
   '.cw-back button{min-height:44px;min-width:44px;padding:0 12px;border:0;background:none;color:#2e7dd7;font-size:14px;font-weight:600;cursor:pointer}',
+  // An agent's mark (`comment-extras.ts`): a steady word in a slot sized for
+  // the widest, empty on an unmarked thread, and the dot to match.
+  '.thread .meta .time{margin-left:auto}',
+  '.cw-state{flex:none;width:86px;display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;font-size:11px;color:#57606a;white-space:nowrap}',
+  '.cw-state[data-state=open]{visibility:hidden}',
+  '.cw-state i{width:10px;height:10px;border-radius:50%;box-sizing:border-box;flex:none}',
+  `.cw-state[data-state=working] i,.thread:has(.cw-state[data-state=working]) .dot{background:linear-gradient(90deg,#fff 50%,${MARK} 50%);box-shadow:inset 0 0 0 1.5px ${MARK}}`,
+  '.cw-state[data-state=done]{color:#1a7f37}',
+  `.cw-state[data-state=done] i,.thread:has(.cw-state[data-state=done]) .dot{background:${STATUS_COLORS.resolved}}`,
+  '.cw-progress{margin:6px 0 2px;padding:6px 8px;border-radius:6px;background:#f6f8fa;font-size:12px;color:#57606a}',
+  '.cw-progress[data-state=done]{background:#e8f5ed;color:#1a7f37}',
   // A linked review item: a steady marked row in the thread (calm rule).
   '.cw-linked{margin:8px 0 4px;border:1px solid #c8dcf3;border-left:3px solid #2e7dd7;background:#f4f8fd;border-radius:6px;padding:8px 10px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center}',
   '.cw-linked .from{grid-column:1/-1;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#2e7dd7}',
@@ -71,6 +82,10 @@ export const PAGE_CSS = [
   // The steady ring on the pin being shown, until the next tap on the page.
   '.cfw-pin[data-hl]:after{content:"";position:absolute;left:5px;top:2px;width:34px;height:34px;box-sizing:border-box;border-radius:50%;border:3px solid #2e7dd7}',
   '.cfw-pin[data-hl]{opacity:1}',
+  // An agent's mark on the pin: half filled while it works, filled green when
+  // done. White-and-green outline stays the resolved pin's.
+  `.cfw-pin[data-state=working]:before{background:linear-gradient(45deg,#fff 50%,${MARK} 50%)}`,
+  `.cfw-pin[data-state=done]:before{background:${STATUS_COLORS.resolved}}`,
   `.cw-link-badge{position:fixed;width:20px;height:20px;border-radius:50%;background:${MARK};color:#fff;border:2px solid #fff;box-sizing:border-box;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;z-index:2147483646}`,
   // Wide, a mock in the board narrows beside the open view rather than
   // running under it.
