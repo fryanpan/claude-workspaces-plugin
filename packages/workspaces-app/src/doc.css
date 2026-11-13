@@ -3982,12 +3982,16 @@ body.redline-mode .ProseMirror del.cw-del {
    PARENT's font, and the run's is 0, so the number floated barely above the
    baseline. A relative offset moves only the paint, so the line keeps its
    height. The text colour, not muted: the small size is subtlety enough
-   (Bryan, 2026-10-01). */
+   (Bryan, 2026-10-01).
+
+   Drawn only on the piece carrying `data-cw-fn` — the closing `]`. A link or
+   a comment highlight inside a note cuts the run into several spans, and a
+   number on each drew "2 2 2". */
 .cw-fn {
   font-size: 0;
   letter-spacing: 0;
 }
-.cw-fn::after {
+.cw-fn[data-cw-fn]::after {
   content: attr(data-cw-fn);
   display: inline;
   font: 400 11px / 0 var(--sans);
@@ -4002,7 +4006,7 @@ body.redline-mode .ProseMirror del.cw-del {
   letter-spacing: inherit;
   color: var(--fg-muted);
 }
-.cw-fn-open::after {
+.cw-fn-open[data-cw-fn]::after {
   content: none;
 }
 
