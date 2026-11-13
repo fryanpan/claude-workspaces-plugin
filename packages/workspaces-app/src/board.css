@@ -4762,9 +4762,9 @@ html:has(.board-walk-cred-form) {
 
 /* ################# BOARD · LIBRARY #################
    The Library tab (`board/library-page.ts`), ported from the approved mock
-   (front page, round 4): a sticky header naming the project, then two short
-   tables — recent meetings, recent files — each a title and one time, whose
-   header is the sort; then "Where files live", folded shut (mock v2).
+   (front page, round 4): a sticky header naming the project, then Recent
+   files — meetings among them — each a title and one time, whose header is
+   the sort; then the folder tree; then "Where files live", folded shut.
    A row is one line at every width; a long title ends in an ellipsis. */
 .library-page {
   font-size: 15px;
@@ -5137,6 +5137,352 @@ html:has(.board-walk-cred-form) {
 }
 .library-place-note.is-stray {
   color: var(--warn-fg, #b25e09);
+}
+/* Folders: the tree under Recent files (`board/library-tree.ts`, layout A of
+   the folders mock). A file row gains a third column for its ⋯ menu, and
+   every row, ⋯ and menu item is 44px tall at every width: a pointer query
+   cannot be trusted to name the owner's iPad, and a 34px target misses there. */
+.library-page {
+  --lf-more-w: 44px;
+  --lf-hit: 44px;
+}
+.lf-tbl .library-cols,
+.lf-tbl .library-row {
+  grid-template-columns: minmax(0, 1fr) 104px var(--lf-hit) var(--lf-more-w);
+}
+/* The reader's star on each row (`board/library-starred.ts`): a fixed square
+   whose outline fills when pressed, so flipping it moves nothing. */
+.lf-star,
+.lf-star-gap {
+  width: var(--lf-hit);
+  height: var(--lf-hit);
+}
+.lf-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.lf-star svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+}
+.lf-star:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.lf-star.is-on {
+  color: var(--accent);
+}
+.lf-star.is-on svg {
+  fill: currentColor;
+}
+/* A starred folder in the Starred list opens the folder in the tree. */
+.lf-starred-folder > .library-main {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lf-row {
+  min-height: var(--lf-hit);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.lf-row > .library-main {
+  align-items: center;
+  align-self: stretch;
+  color: inherit;
+  text-decoration: none;
+  gap: 7px;
+}
+.lf-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+}
+.lf-ico svg {
+  width: 16px;
+  height: 16px;
+}
+.lf-meet .lf-ico {
+  color: var(--accent);
+}
+.lf-more,
+.lf-more-gap {
+  width: var(--lf-more-w);
+  height: var(--lf-hit);
+}
+.lf-more {
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lf-more:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.lf-folderlabel {
+  flex: 0 3 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 40%;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-folderlabel svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.lf-section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* One height for every front-page heading, with or without a 44px
+     control in it, so the sections keep one rhythm. */
+  min-height: var(--lf-hit);
+  margin: 10px 0 0;
+}
+.library-body .lf-section-head h2 {
+  margin: 0;
+}
+.lf-newfolder {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--lf-hit);
+  padding: 0 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--accent);
+  cursor: pointer;
+}
+.lf-newfolder:hover {
+  text-decoration: underline;
+}
+/* Recently Viewed's "Show more" holds the right of its heading at the width of
+   its longer label, so neither label moves it or the heading. */
+.lf-viewed-head .lf-viewmore {
+  justify-content: flex-end;
+  min-width: 6.5em;
+  margin-left: auto;
+}
+.lf-colhead {
+  justify-self: end;
+}
+.lf-folder {
+  width: calc(100% + 16px);
+}
+.lf-folder .library-name {
+  flex: 0 1 auto;
+  font-weight: 550;
+}
+.lf-folder[aria-expanded="true"] .library-caret {
+  transform: rotate(90deg);
+}
+.lf-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lf-landhint {
+  /* Gives its room up long before the folder's name does. */
+  flex: 0 1000 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-children {
+  margin-left: 3px;
+  padding-left: 13px;
+  border-left: 1px solid var(--border);
+}
+.lf-empty-hint {
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+.lf-drop {
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.lf-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  min-height: var(--lf-hit);
+  padding: 3px 0;
+}
+.lf-name-input {
+  flex: 1 1 120px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  outline: none;
+}
+.lf-err {
+  flex: 1 0 100%;
+  padding-left: 23px;
+  font-size: 12px;
+  color: var(--danger, #c0392b);
+}
+/* The ⋯ menus and the Move to… sheet, over a scrim that closes them. */
+.lf-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.28);
+}
+.lf-scrim.is-clear {
+  background: transparent;
+}
+.lf-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+}
+.lf-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--lf-hit);
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--fg);
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.lf-menu-item:hover {
+  background: var(--bg-hover);
+}
+.lf-menu-item[disabled] {
+  color: var(--fg-muted);
+  cursor: default;
+  background: none;
+}
+.lf-menu-note {
+  max-width: 240px;
+  padding: 4px 10px 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.lf-sheet {
+  position: fixed;
+  z-index: 71;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 60px));
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  box-sizing: border-box;
+}
+.lf-sheet h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+.lf-sheet p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  cursor: pointer;
+}
+.lf-sheet-row:hover {
+  background: var(--bg-hover);
+}
+.lf-sheet-row[disabled] {
+  color: var(--fg-muted);
+  cursor: default;
+  background: none;
+}
+.lf-nm {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lf-cancel {
+  float: right;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+@media (max-width: 600px) {
+  /* The name needs the room on a phone; the folder it is in is one tap away. */
+  .lf-folderlabel {
+    display: none;
+  }
 }
 @media (max-width: 1100px) {
   .library-row {

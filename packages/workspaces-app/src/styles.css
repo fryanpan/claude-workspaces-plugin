@@ -416,6 +416,22 @@ body.view-mode #toggle-format {
 .icon-btn .badge {
   display: none;
 }
+/* An item's star in its top bar (doc-star.ts) — the doc page and the
+   whiteboard both reach it, so it lives here: a fixed square whose outline fills when pressed, so the bar never shifts. */
+.doc-star {
+  flex: 0 0 auto;
+}
+.doc-star svg {
+  fill: none;
+}
+.doc-star[aria-pressed="true"] {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--accent);
+}
+.doc-star[aria-pressed="true"] svg {
+  fill: currentColor;
+}
 
 /* ================= EDITOR ================= */
 

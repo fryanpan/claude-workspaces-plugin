@@ -19,15 +19,21 @@ const rows = (prefix: string, n: number, extra: Partial<LibraryRow> = {}): Libra
   Array.from({ length: n }, (_, i) => ({
     name: `${prefix} ${i + 1}`,
     at: NOW - i * HOUR,
+    created: NOW - i * HOUR,
     href: `/workspaces/${WS}/docs/${prefix.toLowerCase().replace(/ /g, '-')}-${i + 1}`,
     ...extra,
   }));
 
+/** Meetings half an hour behind the files, so Recent files interleaves them. */
 const PAYLOAD: LibraryPayload = {
   project: { name: 'riverbend', path: '~/dev/riverbend' },
-  meetings: rows('Harborlight sync', 7),
+  meetings: rows('Harborlight sync', 7).map((r) => ({
+    ...r,
+    at: (r.at ?? NOW) - HOUR / 2,
+    created: (r.at ?? NOW) - HOUR / 2,
+  })),
   files: [
-    { name: 'Tide gauge notes', at: NOW, open: 'docs/tide-gauge.md' },
+    { name: 'Tide gauge notes', at: NOW, created: NOW, open: 'docs/tide-gauge.md' },
     ...rows('Saltmarsh plan', 3),
   ],
 };
@@ -36,53 +42,75 @@ const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
 
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
+/** The front page's Recent files table — the first table; the tree follows. */
+const recentTable = (root: ParentNode) =>
+  root.querySelector(
+    '.lf-created-head + .library-tbl, .library-all > h2 + .library-tbl',
+  ) as Element;
 
 describe('the Library front page', () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('shows the newest meetings and files, and a way to the rest', async () => {
+  it('shows the newest-made files, meetings among them, in one list with a way to the rest', async () => {
     const { page, root } = drive();
     await page.open();
     expect(root.querySelector('.library-proj')?.textContent).toBe('riverbend');
     expect(root.querySelector('.library-repo')?.textContent).toBe('~/dev/riverbend');
-    const [meetings, files] = [...root.querySelectorAll('.library-tbl')];
-    expect(names(meetings as Element)).toEqual(PAYLOAD.meetings.slice(0, 5).map((r) => r.name));
-    expect(names(files as Element)).toEqual(PAYLOAD.files.map((r) => r.name));
-    // Seven meetings earn a "See all"; four files do not.
-    expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
-      'See all meetings',
+    expect(names(recentTable(root))).toEqual([
+      'Tide gauge notes',
+      'Saltmarsh plan 1',
+      'Harborlight sync 1',
+      'Saltmarsh plan 2',
+      'Harborlight sync 2',
+      'Saltmarsh plan 3',
+      'Harborlight sync 3',
+      'Harborlight sync 4',
+      'Harborlight sync 5',
+      'Harborlight sync 6',
     ]);
-    // A row is its title and how long ago — nothing else.
-    // A row is what it is called, what tells it apart, and its one clock
-    // reading — in two slots, so it stays one grid line at every width.
-    const first = root.querySelector('.library-row') as HTMLElement;
-    expect([...first.children].map((c) => c.className)).toEqual(['library-main', 'library-when']);
+    // The separate recent-meetings list is gone: one "See all", under
+    // Recently Created.
+    const body = root.querySelector('.library-body') as HTMLElement;
+    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
+      'Recently Viewed',
+      'Recently Created',
+      'Folders',
+    ]);
+    expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
+      'See all files',
+    ]);
+    // A row is its name and its one clock reading, then its star (an empty
+    // square for a reader with no name) and its ⋯ menu — one grid line at
+    // every width. A project file nobody opened yet can be filed too.
+    const first = recentTable(root).querySelector('.library-row') as HTMLElement;
+    expect([...first.children].map((c) => c.className)).toEqual([
+      'library-main',
+      'library-when',
+      'lf-star-gap',
+      'lf-more',
+    ]);
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
   });
 
-  /** Ten recent files, not five; meetings keep their five (library-model.ts). */
   it('shows ten of fourteen files, newest first, and "See all files" for the rest', async () => {
-    const many: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', 14) };
+    const many: LibraryPayload = { ...PAYLOAD, meetings: [], files: rows('Saltmarsh plan', 14) };
     const { page, root } = drive({ payload: many });
     await page.open();
-    const [meetings, files] = [...root.querySelectorAll('.library-tbl')];
-    expect(names(files as Element)).toEqual(many.files.slice(0, 10).map((r) => r.name));
-    expect(names(meetings as Element)).toHaveLength(5);
+    expect(names(recentTable(root))).toEqual(many.files.slice(0, 10).map((r) => r.name));
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
-      'See all meetings',
       'See all files',
     ]);
     await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
-    expect(names(root)).toHaveLength(14);
+    expect(names(recentTable(root))).toHaveLength(14);
   });
 
   it.each([9, 10])('shows all %i files, with no filler and no "See all"', async (n) => {
-    const few: LibraryPayload = { ...PAYLOAD, files: rows('Saltmarsh plan', n) };
+    const few: LibraryPayload = { ...PAYLOAD, meetings: [], files: rows('Saltmarsh plan', n) };
     const { page, root } = drive({ payload: few });
     await page.open();
-    const files = root.querySelectorAll('.library-tbl')[1] as Element;
+    const files = recentTable(root);
     expect(names(files)).toEqual(few.files.map((r) => r.name));
     expect(files.querySelectorAll('.library-row')).toHaveLength(n);
     expect(files.querySelector('.library-empty')).toBeNull();
@@ -99,12 +127,14 @@ describe('the Library front page', () => {
     const edit = (name: string, hoursAgo: number): LibraryRow => ({
       name,
       at: NOW - hoursAgo * HOUR,
+      created: NOW - hoursAgo * HOUR,
       open: `notes/${name}`,
       folder: 'notes',
     });
     const burstRows = Array.from({ length: 7 }, (_, i) => ({
       name: `2026-09-12-clip-${i + 1}.md`,
       at: NOW - 3 * HOUR - i * 4_000,
+      created: NOW - 3 * HOUR - i * 4_000,
       open: `clippings/c${i}/2026-09-12-clip-${i + 1}.md`,
       folder: `clippings/c${i}`,
     }));
@@ -121,13 +151,13 @@ describe('the Library front page', () => {
         edit('tide-gauge.md', 7),
       ],
     };
-    const filesTable = (root: ParentNode) => root.querySelectorAll('.library-tbl')[1] as Element;
+    const filesTable = recentTable;
     const lines = (root: ParentNode) =>
       [...filesTable(root).querySelectorAll('.library-list > *')].map(
         (n) => n.querySelector('.library-name')?.textContent,
       );
 
-    it('is one line of Recent files, so every edit around it stays on the front page', async () => {
+    it('is one line of Recently Created, so every edit around it stays on the front page', async () => {
       const { page, root } = drive({ payload: BURST });
       await page.open();
       expect(lines(root)).toEqual([
@@ -157,7 +187,7 @@ describe('the Library front page', () => {
       expect([...members].map((m) => m.querySelector('.library-name')?.textContent)).toEqual(
         burstRows.map((r) => r.name),
       );
-      await click(members[0] as HTMLElement);
+      await click(members[0]?.querySelector('a') as HTMLElement);
       expect(sent.map((s) => s.body)).toEqual([{ path: burstRows[0]?.open }]);
       await click(filesTable(root).querySelector('.library-burst-head') as HTMLElement);
       expect(filesTable(root).querySelector('.library-burst-rows')).toBeNull();
@@ -172,7 +202,7 @@ describe('the Library front page', () => {
       await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
       // The full list is every file, one row each: nothing a burst held is
       // further than "See all" away.
-      expect(names(root)).toHaveLength(BURST.files.length + more.length);
+      expect(names(recentTable(root))).toHaveLength(BURST.files.length + more.length);
       expect(root.querySelector('.library-burst-head')).toBeNull();
     });
   });
@@ -184,10 +214,16 @@ describe('the Library front page', () => {
   it('gives a meeting row no second label, only its time on the right', async () => {
     const { page, root } = drive();
     await page.open();
-    const meetings = root.querySelectorAll('.library-tbl')[0] as Element;
-    expect(meetings.querySelectorAll('.library-sub')).toHaveLength(0);
-    const row = meetings.querySelector('.library-row') as HTMLElement;
-    expect([...row.children].map((c) => c.className)).toEqual(['library-main', 'library-when']);
+    expect(recentTable(root).querySelectorAll('.library-sub')).toHaveLength(0);
+    const row = [...recentTable(root).querySelectorAll('.library-row')].find(
+      (r) => r.querySelector('.library-name')?.textContent === 'Harborlight sync 1',
+    ) as HTMLElement;
+    expect([...row.children].map((c) => c.className)).toEqual([
+      'library-main',
+      'library-when',
+      'lf-star-gap',
+      'lf-more-gap',
+    ]);
     expect(row.querySelector('.library-main')?.textContent).toBe('Harborlight sync 1');
   });
 
@@ -205,14 +241,14 @@ describe('the Library front page', () => {
   it('opens a full list, with its own history entry and a way back', async () => {
     const { page, root, history } = drive();
     await page.open();
-    await click(root.querySelector('.library-more[data-list=meetings]') as HTMLElement);
-    expect(root.querySelector('.library-all h2')?.textContent).toBe('All meetings');
-    expect(names(root)).toHaveLength(7);
+    await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+    expect(root.querySelector('.library-all h2')?.textContent).toBe('All files');
+    expect(names(root)).toHaveLength(11);
     expect(history.entries).toEqual([
       {
         kind: 'push',
-        url: `/workspaces/${WS}/library?list=meetings`,
-        state: { libraryList: 'meetings' },
+        url: `/workspaces/${WS}/library?list=files`,
+        state: { libraryList: 'files' },
       },
     ]);
     // "← Library" steps back through that entry rather than stacking another.
@@ -230,13 +266,13 @@ describe('the Library front page', () => {
     await click(root.querySelector('.library-back') as HTMLElement);
     expect(history.entries.some((e) => e.kind === 'back')).toBe(false);
     expect(root.querySelector('.library-all')).toBeNull();
-    expect(root.querySelectorAll('.library-tbl')).toHaveLength(2);
+    expect(root.querySelector('.lf-tree')).not.toBeNull();
   });
 
   it('opens a listed file in one tap: bind, then go to the page the server names', async () => {
     const { page, root, sent, navigated } = drive();
     await page.open();
-    const row = root.querySelector('.library-row[data-open]') as HTMLElement;
+    const row = root.querySelector('.library-row [data-open]') as HTMLElement;
     expect(row.textContent).toContain('Tide gauge notes');
     await click(row);
     expect(sent).toEqual([
@@ -278,7 +314,7 @@ describe('the Library front page', () => {
       openAnswer: { ok: false, status: 404, data: { error: 'not-listed' } },
     });
     await page.open();
-    await click(root.querySelector('.library-row[data-open]') as HTMLElement);
+    await click(root.querySelector('.library-row [data-open]') as HTMLElement);
     expect(navigated).toEqual([]);
     expect(root.querySelector('.library-error')?.textContent).toBe(
       'That file could not be opened.',
@@ -317,8 +353,11 @@ describe('the Library front page', () => {
   it('a doc the board holds is a plain link to its page', async () => {
     const { page, root } = drive();
     await page.open();
-    const link = root.querySelector('.library-row:not([data-open])') as HTMLAnchorElement;
+    const link = [...recentTable(root).querySelectorAll('a.library-main')].find(
+      (a) => a.textContent === 'Harborlight sync 1',
+    ) as HTMLAnchorElement;
     expect(link.getAttribute('href')).toBe(`/workspaces/${WS}/docs/harborlight-sync-1`);
+    expect(link.hasAttribute('data-open')).toBe(false);
   });
 
   it('searches both lists, marking the match, and Escape brings the front page back', async () => {
@@ -334,7 +373,7 @@ describe('the Library front page', () => {
     expect(hits[0]?.querySelector('.library-hitpath')?.textContent).toBe('files');
     box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(box.value).toBe('');
-    expect(root.querySelectorAll('.library-tbl')).toHaveLength(2);
+    expect(root.querySelector('.lf-tree')).not.toBeNull();
   });
 
   it('drops the list it can no longer vouch for when a reload fails', async () => {
@@ -417,10 +456,8 @@ describe('the Library on the board', () => {
   it('an open Library redraws a meeting filed elsewhere, on the list it shows', async () => {
     await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library` });
     await settle();
-    await click(
-      el('board-library').querySelector('.library-more[data-list=meetings]') as HTMLElement,
-    );
-    expect(el('board-library').querySelector('h2')?.textContent).toBe('All meetings');
+    await click(el('board-library').querySelector('.library-more[data-list=files]') as HTMLElement);
+    expect(el('board-library').querySelector('h2')?.textContent).toBe('All files');
     expect(names(el('board-library'))).not.toContain('Saltmarsh review');
     server.on(`/workspaces/${WS}/library/items`, {
       ...PAYLOAD,
@@ -433,19 +470,19 @@ describe('the Library on the board', () => {
         ...PAYLOAD.meetings,
       ],
     });
-    const reads = () => server.calls.filter((c) => c.url.endsWith('/library/items')).length;
+    const reads = () => server.calls.filter((c) => c.url.includes('/library/items')).length;
     const before = reads();
     boardFeed().dispatchEvent(new Event('library.changed'));
     await settle();
     expect(reads()).toBe(before + 1);
     expect(names(el('board-library'))).toContain('Saltmarsh review');
-    expect(el('board-library').querySelector('h2')?.textContent).toBe('All meetings');
+    expect(el('board-library').querySelector('h2')?.textContent).toBe('All files');
   });
 
   it('a Library that is not showing does not re-read on the frame', async () => {
     await bootTestBoard();
     await settle();
-    const reads = () => server.calls.filter((c) => c.url.endsWith('/library/items')).length;
+    const reads = () => server.calls.filter((c) => c.url.includes('/library/items')).length;
     const before = reads();
     boardFeed().dispatchEvent(new Event('library.changed'));
     await settle();

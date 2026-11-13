@@ -7,13 +7,15 @@ import {
   docSocketUrl,
   workspaceIdFromPath,
 } from './doc-path.ts';
-import { el } from './doc/chrome-dom.ts';
+import { type DocStar, mountDocStar } from './doc-star.ts';
+import { el, showToast } from './doc/chrome-dom.ts';
 import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { wireDocSwitcher } from './doc/doc-switcher.ts';
 import { openThreadId } from './doc/open-thread.ts';
 import { paintProse } from './doc/prose-paint.ts';
 import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
+import { libraryIdOf, recordLibraryView } from './library-view.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
 import {
@@ -143,6 +145,8 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   // doc's own.
   let presence: import('./presence/page-presence.ts').PagePresence | null = null;
   let presenceJoining = false;
+  /** The top bar's star, made on the first doc a named reader opens. */
+  let docStar: DocStar | null = null;
   const joinPresence = async (): Promise<void> => {
     if (!board || presenceJoining) return;
     presenceJoining = true;
@@ -169,6 +173,19 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       const paintsFirst = ctx.docType === 'markdown';
       if (paintsFirst) reportLoad.mounted(ctx);
       presence?.moveTo({ surface: 'doc', docId: ctx.docId });
+      // Recently Viewed: every kind of doc page counts, each arrival once.
+      // A diff file's page counts as, and stars, its whole review.
+      const item = libraryIdOf(ctx);
+      if (board && writeAccess.canWrite) {
+        const author = { id: user.id, name: user.name, kind: user.kind };
+        if (item) recordLibraryView(board, item, author);
+        // The item's star, beside its name, for a reader who has one.
+        const name = document.getElementById('doc-switcher');
+        if (!docStar && name && user.kind !== 'anon') {
+          docStar = mountDocStar({ workspaceId: board, author, after: name, onRefused: showToast });
+        }
+        docStar?.show(item);
+      }
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad.mounted(ctx);
       // A follow that brought this doc here shows its spot now the doc is up.
