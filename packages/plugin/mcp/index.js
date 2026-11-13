@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.362";
+var version2 = "0.1.364";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -19474,7 +19474,7 @@ var TOOL_LIST = {
     },
     {
       name: "get_doc_metadata",
-      description: "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
+      description: "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc, and schemaReason says why: not-file-bound (the doc has no file), file-not-answering (its file is not responding; try later), no-file (no schema file between the doc's folder and the repo top), unreadable or invalid (the schema file is there but cannot be used; schemaError says how). Works on a doc nobody has opened, without opening it. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
       inputSchema: {
         type: "object",
         properties: {
