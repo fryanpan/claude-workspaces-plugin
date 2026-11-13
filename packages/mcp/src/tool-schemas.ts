@@ -3415,6 +3415,36 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'move_doc_file',
+      description:
+        'Move the file of a bound markdown doc, or point the doc at a file that git already moved. The doc keeps its id, comments, anchors, links and front matter, and edits not yet saved to disk go to the new path. mode "move": the server renames the file. mode "repoint": the file is already at the new path, for example after git mv. The new path must stay inside the same repository. The server refuses a file that exists (move), a missing file (repoint), and a path another doc is bound to. In a walled folder, use git mv and then "repoint".',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description: 'The board the doc is filed on.',
+          },
+          docId: {
+            type: 'string',
+            description: 'The doc whose file moves.',
+          },
+          path: {
+            type: 'string',
+            description:
+              'The new file: absolute, or relative to the repository root, ending in .md, .mdx or .markdown, e.g. "docs/plans/ferry.md".',
+          },
+          mode: {
+            type: 'string',
+            enum: ['move', 'repoint'],
+            description:
+              '"move" renames the file. "repoint" follows a file that is already at the new path.',
+          },
+        },
+        required: ['workspaceId', 'docId', 'path', 'mode'],
+      },
+    },
+    {
       name: 'request_plugin_refresh',
       description:
         "Ask this machine to fetch the newest plugin from the marketplace. Call it when a board's settings panel says sessions are running an older bundle. It requests rather than forces: nothing running is interrupted, and each session picks the new bundle up at its next restart. `changed: false` with matching versions means the cache was already current.",

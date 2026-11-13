@@ -774,6 +774,21 @@ export async function handleWorkspaceTool(
         ),
       );
     }
+    case 'move_doc_file': {
+      const { workspaceId, docId, path, mode } = a as {
+        workspaceId: string;
+        docId: string;
+        path: string;
+        mode: string;
+      };
+      return ok(
+        await http(
+          'POST',
+          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move-file`,
+          { path, mode },
+        ),
+      );
+    }
     // Leaving is the server's DELETE plus this process's own half: the board's
     // stream and its keepalive. The server drops the board's watch key with
     // the row, so a restart restores neither; the unwatch here closes the
