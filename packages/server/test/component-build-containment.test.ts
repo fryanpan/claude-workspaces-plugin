@@ -128,9 +128,9 @@ describe('git for a component build', () => {
       expect(plain.stdout.trim()).toBe(other);
       expect(await gitWorkTree(mine)).toBe(mine);
     } finally {
-      if (saved.dir === undefined) delete process.env.GIT_DIR;
+      if (saved.dir === undefined) Reflect.deleteProperty(process.env, 'GIT_DIR');
       else process.env.GIT_DIR = saved.dir;
-      if (saved.tree === undefined) delete process.env.GIT_WORK_TREE;
+      if (saved.tree === undefined) Reflect.deleteProperty(process.env, 'GIT_WORK_TREE');
       else process.env.GIT_WORK_TREE = saved.tree;
     }
   });
