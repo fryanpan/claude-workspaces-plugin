@@ -312,6 +312,17 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/library/items', 'GET'],
     ['trusted-local', '/workspaces/:ws/library/open', 'POST'],
   ]),
+  // Sorting the board's docs into folders is board configuration, written by
+  // the owner's browser and by agents; a member sees the folders through
+  // `library/items` above.
+  ...family('routes/workspace-library-folders.ts', [
+    ['trusted-local', '/workspaces/:ws/library/folders', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/rename', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/move', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/archive', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/unarchive', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/docs/:docId/folder', 'PUT'],
+  ]),
 
   ...family('routes/doc-move.ts', [['trusted-local', '/workspaces/:ws/docs/:docId/move', 'POST']]),
 

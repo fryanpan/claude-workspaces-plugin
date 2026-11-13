@@ -188,6 +188,7 @@ function sourcesFor(
     : [];
   return {
     workspaceId: scope.workspaceId,
+    folders: scope.board,
     docs,
     docKeyOf: (docId) => docStore.repos.primaryKeyFor(docId),
     lastMeeting: (docId) => {

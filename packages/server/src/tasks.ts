@@ -24,6 +24,7 @@ import type {
 } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import type { DecisionShapeGap } from './decision-shape.ts';
+import type { LibraryFolder } from './library-folders.ts';
 import {
   type BoardPromptMigration,
   endBoardPromptBeforeMarkdown,
@@ -449,6 +450,10 @@ export interface BoardWorkspace {
    * `estimatesShown` in `@claude-workspaces/core/show-estimates` is the reader.
    */
   showEstimates?: true;
+  /** The Library's folders (`library-folders.ts`). Absent: only Meetings. */
+  libraryFolders?: LibraryFolder[];
+  /** Which Library folder each doc was put in (`library-folders.ts`). */
+  docFolders?: Record<string, string>;
   createdAt: number;
 }
 
@@ -2458,6 +2463,25 @@ export class TaskStore {
   ): { ok: true; removed: boolean } | { ok: false; error: 'workspace-not-found' } {
     const res = this.workspaceStore.detachDoc(workspaceId, docId);
     if (res.ok && res.removed) this.onBoardDocsChanged?.(workspaceId);
+    return res;
+  }
+
+  /**
+   * Change this board's Library folders through one `library-folders.ts`
+   * operation. A change is saved and tells the open Library, the same way a
+   * doc linked to the board does.
+   */
+  updateLibraryFolders<T extends { ok: boolean }>(
+    workspaceId: string,
+    op: (board: BoardWorkspace) => T,
+  ): T | { ok: false; error: 'workspace-not-found' } {
+    const state = this.workspaces.get(workspaceId);
+    if (!state) return { ok: false, error: 'workspace-not-found' };
+    const res = op(state.workspace);
+    if (res.ok) {
+      this.scheduleSave(workspaceId);
+      this.onBoardDocsChanged?.(workspaceId);
+    }
     return res;
   }
 

@@ -1,11 +1,11 @@
-import type { Stats } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, posix } from 'node:path';
+import { basename, posix } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
 import { attachmentIdOf } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
-import { scanFolderPaths } from './fs-scan.ts';
+import { type FolderState, type FolderView, folderOfDoc, liveFolders } from './library-folders.ts';
+import type { ProjectFile } from './library-lister.ts';
 import {
   type LibraryWhere,
   type Placed,
@@ -13,7 +13,6 @@ import {
   placeAll,
   placedDoc,
 } from './library-location.ts';
-import { boundFiles } from './slow-fs.ts';
 
 /**
  * A board's Library: the meetings and the files a person comes to the board to
@@ -85,6 +84,10 @@ export interface LibraryRow {
    * under it rather than printing it on a row.
    */
   folder?: string;
+  /** The board doc this row opens, so the page can file it in a folder. */
+  docId?: string;
+  /** The Library folder it is filed in (`library-folders.ts`); absent: none. */
+  folderId?: string;
 }
 
 export interface LibraryProject {
@@ -100,16 +103,12 @@ export interface LibraryPayload {
   /** Where each kind of doc on this board really lives. Absent when the
    *  caller supplied no `placing`. */
   where?: LibraryWhere[];
+  /** The board's live Library folders (`library-folders.ts`). */
+  folders?: FolderView[];
 }
 
-/** One file in the project, as a lister found it. */
-export interface ProjectFile {
-  /** POSIX, relative to the repo root. */
-  relPath: string;
-  mtimeMs: number;
-  /** Birth time, when the filesystem reports one. */
-  createdMs?: number;
-}
+export type { ProjectFile } from './library-lister.ts';
+export { birthOf, createMarkdownLister } from './library-lister.ts';
 
 /** One file in the project's mounted folders. */
 export interface MountedProjectFile extends ProjectFile {
@@ -146,6 +145,8 @@ export interface LibrarySources {
   mountedFiles: (repoKey: string) => readonly MountedProjectFile[];
   /** The home directory, for abbreviating the project path. */
   home?: string;
+  /** The board's folders; absent, no row is filed and no `folders` sent. */
+  folders?: FolderState;
 }
 
 const isMarkdownPath = (relPath: string): boolean => relPath.toLowerCase().endsWith('.md');
@@ -320,6 +321,7 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
 
 /** A board doc bound for the Files list, held until every path is known. */
 interface DocFileRow {
+  docId: string;
   /** The repo its key names, when it has one. */
   repoKey?: string;
   /** Its path in that repo — what it is NAMED by, when the repo is this
@@ -373,6 +375,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
         at: src.fileMtime(meta.docId) ?? meta.lastActivityAt ?? startedAt,
         created: startedAt,
         href,
+        docId: meta.docId,
       };
       meetings.push(row);
       placed.push({ row, doc: placedDoc(meta, 'meetings', parsed, src.fileMtime(meta.docId)) });
@@ -383,6 +386,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     const fileRow: DocFileRow = {
       repoKey: parsed?.repoKey,
       relPath: keyRel,
+      docId: meta.docId,
       title,
       href,
       at: src.fileMtime(meta.docId),
@@ -426,9 +430,10 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     ...loose.map((f) => f.relPath),
   ]);
   // Optional keys are left off rather than written as undefined.
-  const extra = (d: { created?: number; place?: string }) => ({
+  const extra = (d: { created?: number; place?: string; docId?: string }) => ({
     ...(d.created === undefined ? {} : { created: d.created }),
     ...(d.place === undefined ? {} : { place: d.place }),
+    ...(d.docId === undefined ? {} : { docId: d.docId }),
   });
   const files: LibraryRow[] = docFiles.map((d) => {
     const rel = named(d);
@@ -450,49 +455,21 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
 
   meetings.sort(byRecency);
   files.sort(byRecency);
-  return where ? { project, meetings, files, where } : { project, meetings, files };
-}
-
-/** A stat's birth time, when the filesystem keeps one (0 or less means it
- *  does not). */
-export function birthOf(st: { birthtimeMs: number }): { createdMs?: number } {
-  return st.birthtimeMs > 0 ? { createdMs: st.birthtimeMs } : {};
-}
-
-/** How long one repo walk is reused. A Library load is a page view, and a
- *  person flipping between the page and a doc should not re-walk the repo. */
-const SCAN_TTL_MS = 10_000;
-
-/**
- * The project's markdown files, from `git ls-files --cached --others
- * --exclude-standard` — the listing the all-files tree already trusts, with
- * its credential-name floor — plus each file's mtime.
- *
- * `statSync` rather than a read: a stat never materializes a cloud-synced
- * file, so an online-only file costs a syscall, not a download.
- */
-export function createMarkdownLister(
-  now: () => number = Date.now,
-): (root: string) => readonly ProjectFile[] {
-  const cache = new Map<string, { at: number; files: ProjectFile[] }>();
-  return (root) => {
-    const hit = cache.get(root);
-    if (hit && now() - hit.at < SCAN_TTL_MS) return hit.files;
-    const files: ProjectFile[] = [];
-    for (const relPath of scanFolderPaths(root)) {
-      if (!isMarkdownPath(relPath)) continue;
-      // Missing, now a file (ENOTDIR) or unreadable (EACCES): one bad path
-      // drops its own row, and the page owes the reader every other file.
-      let st: Stats;
-      try {
-        // Guarded: a plain stat follows a link out of a walled lead's project.
-        st = boundFiles.guards.statSync(join(root, relPath));
-      } catch {
-        continue;
-      }
-      if (st.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs, ...birthOf(st) });
+  const out: LibraryPayload = where
+    ? { project, meetings, files, where }
+    : { project, meetings, files };
+  const filed = src.folders;
+  if (!filed) return out;
+  // A meeting nobody filed is in Meetings; any other unfiled doc is in none.
+  for (const [rows, meeting] of [
+    [meetings, true],
+    [files, false],
+  ] as const) {
+    for (const row of rows) {
+      const folderId = row.docId ? folderOfDoc(filed, row.docId, meeting) : null;
+      if (folderId) row.folderId = folderId;
     }
-    cache.set(root, { at: now(), files });
-    return files;
-  };
+  }
+  out.folders = liveFolders(filed);
+  return out;
 }

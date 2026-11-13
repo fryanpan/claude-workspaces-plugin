@@ -162,6 +162,7 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   owner: 'o-1',
   eventId: 'ev-1',
   fileId: 'f-1',
+  folderId: 'fo-1',
   // The access page's sections: `waiting`, or one board's id.
   section: 'waiting',
   // A voice feedback recording — the handler matches `seg-<N>.wav` exactly.

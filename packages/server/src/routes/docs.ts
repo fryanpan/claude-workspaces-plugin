@@ -4,6 +4,7 @@ import { createConflictWith } from '../doc-create-conflict.ts';
 import { RESERVED_DOC_PREFIXES, isReservedDocId } from '../doc-ids.ts';
 import { compactDocRow, matchesDocFilters, pageDocs, parseListDocsQuery } from '../doc-listing.ts';
 import { normalizeDocOriginRepo, resolveOriginRepoCheckout } from '../doc-origin-repo.ts';
+import { filedFolder } from '../library-folders.ts';
 /**
  * The doc, thread and bind REST block, in the order it is matched.
  *
@@ -531,6 +532,7 @@ export async function handleDocCreateListRoutes(
           const row = compactDocRow(decorate(m), {
             boardId: homeForDocIndexed(boardIndex, m),
             threads: docStore.threadCounts(m.docId),
+            folder: filedFolder(scope.board, m, ctx.dataDir),
           });
           if (visitor) row.sourceUrl = undefined;
           return row;

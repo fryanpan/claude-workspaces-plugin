@@ -300,6 +300,12 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/lead-chat/meeting` | POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/model` | POST | `routes/workspace-lead-chat-model.ts` | trusted-local | refuses every caller today: 409 `model-switch-off` |
 | `/workspaces/:ws/library` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/workspaces/:ws/library/docs/:docId/folder` | PUT | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders` | GET, POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/archive` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/move` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/rename` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/unarchive` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
 | `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | share-scope |  |
 | `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |

@@ -213,7 +213,14 @@ describe('buildLibrary', () => {
       { name: 'README.md', at: 3_000, open: 'README.md', folder: '' },
       // The bound doc is its FILE here — same name it had before anybody
       // opened it, same clock as the rows around it.
-      { name: 'plan.md', at: 2_000, href: '/workspaces/w-test/docs/d-plan', folder: 'docs' },
+      // It carries its doc id, so the page can file it in a Library folder.
+      {
+        name: 'plan.md',
+        at: 2_000,
+        href: '/workspaces/w-test/docs/d-plan',
+        folder: 'docs',
+        docId: 'd-plan',
+      },
     ]);
   });
 
