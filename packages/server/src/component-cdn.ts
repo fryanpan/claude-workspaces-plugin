@@ -18,7 +18,16 @@
  *
  * The request leaves through `configuredHostFetch` (`outbound-fetch.ts`): the
  * host is a constant here, no redirect is followed, and a test hands in its
- * own fetch.
+ * own fetch. Each fetch is bounded: it is given up after
+ * `CDN_FETCH_TIMEOUT_MS`, headers and body alike, and the body is read in
+ * chunks and abandoned past `MAX_CDN_MODULE_BYTES`, so a stalled or endless
+ * answer cannot hold a doc's build.
+ *
+ * A module is stored, and asked for, under its address without the query.
+ * An author's import may not carry one; esm.sh writes `?target=es2022` on
+ * the imports inside a module, and the request adds that back. So the
+ * number of stored modules is bounded by the paths esm.sh serves, not by
+ * the queries a module could spell.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -31,11 +40,23 @@ export const CDN_HOSTS: readonly string[] = ['esm.sh'];
 /** The most one fetched module may weigh. */
 export const MAX_CDN_MODULE_BYTES = 8 * 1024 * 1024;
 
-export type CdnFetch = (url: string) => Promise<Response>;
+/** How long one module's fetch, headers and body, may take. */
+export const CDN_FETCH_TIMEOUT_MS = 20_000;
+
+export type CdnFetch = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
 const productionFetch = configuredHostFetch(CDN_HOSTS.map((h) => `https://${h}`));
 
-export const defaultCdnFetch: CdnFetch = (url) => productionFetch(url);
+export const defaultCdnFetch: CdnFetch = (url, init) => productionFetch(url, init);
+
+/** `url` without its query or fragment: the key a module is stored and
+ *  asked for under. */
+export function cdnModuleKey(url: string): string {
+  const u = new URL(url);
+  u.search = '';
+  u.hash = '';
+  return u.href;
+}
 
 const EXACT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -53,6 +74,9 @@ export function cdnImportRefusal(spec: string): string | null {
   if (url.protocol !== 'https:') return `'${spec}' is not https: write it as https://esm.sh/…`;
   if (!CDN_HOSTS.includes(url.hostname)) {
     return `'${spec}' is not on an allowed host: import it from https://esm.sh/<package>@<exact version>`;
+  }
+  if (url.search || url.hash) {
+    return `'${spec}' carries a query or fragment, which is refused: import the address without it`;
   }
   const m = /^\/((?:@[^/@]+\/)?[^/@]+)(?:@([^/?#]*))?/.exec(url.pathname);
   const pkg = m?.[1];
@@ -78,7 +102,7 @@ export function resolveCdnImport(spec: string, importer: string): string | null 
   }
   const from = new URL(importer);
   if (url.protocol !== 'https:' || url.host !== from.host) return null;
-  return url.href;
+  return cdnModuleKey(url.href);
 }
 
 /** The address actually requested: esm.sh picks its build by User-Agent, so
@@ -112,10 +136,12 @@ export class CdnStore {
   constructor(
     private readonly dir: string,
     private readonly fetcher: CdnFetch = defaultCdnFetch,
+    private readonly timeoutMs = CDN_FETCH_TIMEOUT_MS,
   ) {}
 
   /** The module's text: the stored copy, or fetched and stored now. */
-  load(url: string): Promise<string> {
+  load(address: string): Promise<string> {
+    const url = cdnModuleKey(address);
     const pending = this.inFlight.get(url);
     if (pending) return pending;
     const p = this.loadOnce(url).finally(() => this.inFlight.delete(url));
@@ -132,17 +158,7 @@ export class CdnStore {
     const { body, meta } = this.paths(url);
     const stored = this.readStored(body, meta);
     if (stored !== null) return stored;
-    const res = await this.fetcher(requestUrl(url));
-    if (res.status !== 200) {
-      await res.body?.cancel().catch(() => {});
-      throw new Error(`${url} answered ${res.status}`);
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > MAX_CDN_MODULE_BYTES) {
-      throw new Error(
-        `${url} is ${bytes.byteLength} bytes, over the ${MAX_CDN_MODULE_BYTES} limit`,
-      );
-    }
+    const bytes = await this.fetchBounded(url);
     this.fetched++;
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const record: Stored = {
@@ -156,6 +172,54 @@ export class CdnStore {
     writeFileSync(`${meta}.tmp`, JSON.stringify(record));
     renameSync(`${meta}.tmp`, meta);
     return new TextDecoder().decode(bytes);
+  }
+
+  /** The module's bytes, given up after the timeout or past the size cap. */
+  private async fetchBounded(url: string): Promise<Uint8Array> {
+    const ctl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        ctl.abort();
+        reject(new Error(`${url} did not answer within ${this.timeoutMs} ms`));
+      }, this.timeoutMs);
+      timer.unref?.();
+    });
+    // A fetch that ignores the signal still loses the race.
+    timedOut.catch(() => {});
+    try {
+      const res = await Promise.race([
+        this.fetcher(requestUrl(url), { signal: ctl.signal }),
+        timedOut,
+      ]);
+      if (res.status !== 200 || !res.body) {
+        await res.body?.cancel().catch(() => {});
+        throw new Error(`${url} answered ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await Promise.race([reader.read(), timedOut]);
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_CDN_MODULE_BYTES) {
+          await reader.cancel().catch(() => {});
+          throw new Error(`${url} is over the ${MAX_CDN_MODULE_BYTES}-byte limit`);
+        }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(total);
+      let at = 0;
+      for (const c of chunks) {
+        bytes.set(c, at);
+        at += c.byteLength;
+      }
+      return bytes;
+    } finally {
+      clearTimeout(timer);
+      ctl.abort();
+    }
   }
 
   /** The stored copy, or null when there is none. A copy whose bytes no

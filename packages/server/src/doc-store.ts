@@ -403,7 +403,7 @@ export interface WorkspaceTree {
 export interface DocStoreConfig {
   dataDir: string;
   /** How a component build reaches esm.sh; see `ServerOptions.componentFetch`. */
-  componentFetch?: (url: string) => Promise<Response>;
+  componentFetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   /** Called on new thread / reply / status change to dispatch webhooks + SSE. */
   sse: SseBus;
   webhooks: WebhookDispatcher;

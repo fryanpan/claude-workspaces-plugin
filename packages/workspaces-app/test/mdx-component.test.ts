@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { createEditor } from '../src/editor.ts';
-import { setComponentLoaderForTest } from '../src/mdx-component.ts';
+import { setComponentDoc, setComponentLoaderForTest } from '../src/mdx-component.ts';
 
 /**
  * A component tag in a bound `.mdx` draws the bundle the server filed for it
@@ -60,12 +60,13 @@ afterEach(() => {
   setComponentLoaderForTest(null);
 });
 
-function mount(md: string): { server: Y.Doc } {
+function mount(md: string, isMdx = true): { server: Y.Doc } {
   const server = new Y.Doc();
   prose.getProseFragment(server).push(prose.parseMarkdownBlocks(md, { mdx: true }));
   const client = new Y.Doc();
   Y.applyUpdate(client, Y.encodeStateAsUpdate(server));
   server.on('update', (u: Uint8Array) => Y.applyUpdate(client, u));
+  setComponentDoc(client, isMdx);
   const parent = document.createElement('div');
   parent.id = 'editor';
   document.body.appendChild(parent);
@@ -135,6 +136,14 @@ describe('a component tag on the doc page', () => {
     expect(statuses()[0]?.classList.contains('is-error')).toBe(true);
     expect(hosts()[0]?.textContent).toBe('ferry aaaa');
     expect(mounts).toEqual([HASH_A]);
+  });
+
+  it('draws nothing live in a .md doc, whatever its map names', async () => {
+    const { server } = mount(DOC, false);
+    file(server, keyOf(TAG), { hash: HASH_A });
+    await settle(() => mounts.length > 0);
+    expect(hosts()).toHaveLength(0);
+    expect(loads).toEqual([]);
   });
 
   it('keeps the preview for a tag no buildable import names', async () => {

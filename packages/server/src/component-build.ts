@@ -26,7 +26,15 @@
  * inlined from the server's environment (`define` is empty).
  *
  * A doc inside a walled lead's folder builds nothing: the resolver asks the
- * bound-path guards before it touches a file.
+ * bound-path guards before it touches a file, and a path they refuse reads
+ * exactly as a missing one, so a refusal says nothing about what exists
+ * there. Git runs only where `gitBarred` allows it, and then with the
+ * repository's program-running settings off (`git-hardening.ts`): a doc whose
+ * `.git` points into a lead's repository has no work tree, so it builds
+ * nothing.
+ *
+ * One build fetches at most `MAX_CDN_MODULES_PER_BUILD` esm.sh modules and
+ * `MAX_CDN_BYTES_PER_BUILD` bytes of them.
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -41,9 +49,16 @@ import {
 } from '@claude-workspaces/core/mdx-components';
 import * as esbuild from 'esbuild';
 import { type CdnStore, cdnImportRefusal, resolveCdnImport } from './component-cdn.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /** The most a built bundle may weigh. */
 export const MAX_BUNDLE_BYTES = 6 * 1024 * 1024;
+
+/** The most esm.sh modules one build may read. */
+export const MAX_CDN_MODULES_PER_BUILD = 400;
+
+/** The most bytes of esm.sh modules one build may read. */
+export const MAX_CDN_BYTES_PER_BUILD = 24 * 1024 * 1024;
 
 /** The file a folder holds to declare its files components (decision 4). */
 export const COMPONENT_MANIFEST = 'component.json';
@@ -80,11 +95,14 @@ export type BuildOutcome =
   | { ok: true; code: string; hash: string; watch: string[] }
   | { ok: false; error: string; watch: string[] };
 
-/** The git work tree `dir` is in, as a real path, or null. */
+/** The git work tree `dir` is in, as a real path, or null. Null too where
+ *  no git may run (`gitBarred`). */
 export function gitWorkTree(dir: string): Promise<string | null> {
+  if (gitBarred(dir)) return Promise.resolve(null);
   return new Promise((done) => {
-    const child = spawn('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
+    const child = spawn('git', hardenedGitArgs(['-C', dir, 'rev-parse', '--show-toplevel']), {
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: hardenedGitEnv(),
     });
     let out = '';
     child.stdout.on('data', (b: Buffer) => {
@@ -103,11 +121,14 @@ export function gitWorkTree(dir: string): Promise<string | null> {
   });
 }
 
-/** Whether git ignores `rel` in `workTree`. A tracked file is never ignored. */
+/** Whether git ignores `rel` in `workTree`. A tracked file is never ignored.
+ *  Where no git may run, every file counts as ignored. */
 function gitIgnores(workTree: string, rel: string): Promise<boolean> {
+  if (gitBarred(workTree)) return Promise.resolve(true);
   return new Promise((done) => {
-    const child = spawn('git', ['-C', workTree, 'check-ignore', '-q', '--', rel], {
+    const child = spawn('git', hardenedGitArgs(['-C', workTree, 'check-ignore', '-q', '--', rel]), {
       stdio: 'ignore',
+      env: hardenedGitEnv(),
     });
     child.on('error', () => done(true));
     child.on('close', (code) => done(code !== 1));
@@ -162,14 +183,33 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
     return done('Components are built only for a doc inside a git work tree.');
   }
 
+  const refused = (spec: string): esbuild.OnResolveResult => ({
+    errors: [
+      {
+        text: `'${spec}' is missing, or is not a file this doc may import: a component lives in the doc's git work tree`,
+      },
+    ],
+  });
+  const allowed = (p: string) => req.guards.allows(p) && !req.guards.covers(p);
   const local = async (spec: string, resolveDir: string): Promise<esbuild.OnResolveResult> => {
     const asked = resolve(resolveDir, spec);
+    // The guards answer before anything is stat'ed or watched, and a path
+    // they refuse reads as missing: the message is the same either way.
     const found = candidates(asked).find((c) => {
+      if (!allowed(c)) return false;
       watch.add(c);
       return isFile(c);
     });
-    if (!found) return { errors: [{ text: `'${spec}' is not a file` }] };
-    const ext = extname(found).toLowerCase();
+    if (!found) return refused(spec);
+    let real: string;
+    try {
+      real = realpathSync(found);
+    } catch {
+      return refused(spec);
+    }
+    if (!allowed(real) || !real.startsWith(workTree + sep)) return refused(spec);
+    // Judged on where a link lands: `chart.tsx -> data.json` is a JSON file.
+    const ext = extname(real).toLowerCase();
     if (!(COMPONENT_EXTENSIONS as readonly string[]).includes(ext)) {
       return {
         errors: [
@@ -177,20 +217,6 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
             text: `'${spec}' is a ${ext || 'extension-less'} file; a component is one of ${COMPONENT_EXTENSIONS.join(' ')}`,
           },
         ],
-      };
-    }
-    if (!req.guards.allows(found) || req.guards.covers(found)) {
-      return { errors: [{ text: `'${spec}' is inside a walled lead's folder` }] };
-    }
-    let real: string;
-    try {
-      real = realpathSync(found);
-    } catch {
-      return { errors: [{ text: `'${spec}' is not a file` }] };
-    }
-    if (!real.startsWith(workTree + sep)) {
-      return {
-        errors: [{ text: `'${spec}' is outside the doc's git work tree, so it is not built` }],
       };
     }
     const manifest = declaringManifest(real, workTree, watch);
@@ -215,6 +241,9 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
     }
     return { path: real };
   };
+
+  let cdnModules = 0;
+  let cdnBytes = 0;
 
   const policy: esbuild.Plugin = {
     name: 'cw-component-policy',
@@ -259,8 +288,26 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
         loader: 'ts',
       }));
       b.onLoad({ filter: /.*/, namespace: 'cdn' }, async (args) => {
+        if (++cdnModules > MAX_CDN_MODULES_PER_BUILD) {
+          return {
+            errors: [
+              {
+                text: `this component imports more than ${MAX_CDN_MODULES_PER_BUILD} esm.sh modules`,
+              },
+            ],
+          };
+        }
         try {
-          return { contents: await req.cdn.load(args.path), loader: 'js' };
+          const contents = await req.cdn.load(args.path);
+          cdnBytes += contents.length;
+          if (cdnBytes > MAX_CDN_BYTES_PER_BUILD) {
+            return {
+              errors: [
+                { text: `this component's esm.sh modules pass ${MAX_CDN_BYTES_PER_BUILD} bytes` },
+              ],
+            };
+          }
+          return { contents, loader: 'js' };
         } catch (err) {
           return { errors: [{ text: err instanceof Error ? err.message : String(err) }] };
         }

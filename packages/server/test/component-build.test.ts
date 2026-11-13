@@ -213,7 +213,7 @@ describe('what a build refuses, each with the fix', () => {
     writeFileSync(join(outside, 'far.tsx'), 'export default () => {};');
     symlinkSync(join(outside, 'far.tsx'), join(repo, 'components', 'far.tsx'));
     const error = await refusal("import Far from './components/far.tsx'\n\n<Far />");
-    expect(error).toContain("outside the doc's git work tree");
+    expect(error).toContain('is missing, or is not a file this doc may import');
   });
 
   it('a doc a walled lead holds', async () => {

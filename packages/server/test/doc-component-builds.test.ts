@@ -26,7 +26,7 @@ import { seedBoard } from './workspace-seed.ts';
 
 const MSG_SYNC = 0;
 
-/** A page holding the doc open: it syncs, and only listens. */
+/** A page holding the doc open: it syncs, and sends what it writes. */
 function openPage(url: string) {
   const ydoc = new Y.Doc();
   const ws = new WebSocket(url);
@@ -45,12 +45,22 @@ function openPage(url: string) {
     syncProtocol.readSyncMessage(dec, enc, ydoc, ws);
     if (encoding.length(enc) > 1) ws.send(encoding.toUint8Array(enc));
   });
+  ydoc.on('update', (update: Uint8Array, origin: unknown) => {
+    if (origin === ws || ws.readyState !== WebSocket.OPEN) return;
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, MSG_SYNC);
+    syncProtocol.writeUpdate(enc, update);
+    ws.send(encoding.toUint8Array(enc));
+  });
   return { ydoc, close: () => ws.close() };
 }
 
 const GREET = (word: string) =>
   `export default function mount(el: HTMLElement) { el.textContent = ${JSON.stringify(word)}; }\n`;
 const TAG = "import Greet from './components/greet.tsx'\n\n<Greet />";
+const OTHER_TAG = "import Other from './components/other.tsx'\n\n<Other />";
+const OTHER_KEY =
+  componentInputs(["import Other from './components/other.tsx'", '<Other />'])[0]?.key ?? '';
 const KEY =
   componentInputs(["import Greet from './components/greet.tsx'", '<Greet />'])[0]?.key ?? '';
 
@@ -78,6 +88,8 @@ beforeAll(async () => {
   writeFileSync(join(repo, 'components', 'component.json'), '{}');
   writeFileSync(join(repo, 'components', 'greet.tsx'), GREET('Harborlight ferry'));
   writeFileSync(join(repo, 'post.mdx'), `# Riverbend\n\n${TAG}\n`);
+  writeFileSync(join(repo, 'components', 'other.tsx'), GREET('Alice other'));
+  writeFileSync(join(repo, 'other.mdx'), `# Bob\n\n${OTHER_TAG}\n`);
   handle = createServer({
     port: 0,
     dataDir: join(root, 'data'),
@@ -91,6 +103,12 @@ beforeAll(async () => {
     body: JSON.stringify({ docId: 'post', type: 'markdown', sourceUrl: join(repo, 'post.mdx') }),
   });
   expect(created.ok).toBe(true);
+  const other = await fetch(`${base}/workspaces/${WS}/docs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ docId: 'other', type: 'markdown', sourceUrl: join(repo, 'other.mdx') }),
+  });
+  expect(other.ok).toBe(true);
 });
 
 afterAll(async () => {
@@ -163,6 +181,35 @@ describe('a component tag on an open page', () => {
       });
     } finally {
       page.close();
+    }
+  });
+
+  it('serves no other doc’s bundle, whatever an editor writes in the map', async () => {
+    const at = (doc: string) => `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${doc}/y`;
+    const otherPage = openPage(at('other'));
+    const editor = openPage(at('post'));
+    const watcher = openPage(at('post'));
+    try {
+      const theirs = await waitFor(
+        () => componentBuildOf(componentBuildsMap(otherPage.ydoc), OTHER_KEY)?.hash,
+        { describe: 'the other doc’s build' },
+      );
+      const served = await fetch(`${base}/workspaces/${WS}/docs/other/components/${theirs}.js`);
+      expect(served.status).toBe(200);
+      const builds = componentBuildsMap(editor.ydoc);
+      await waitFor(() => componentBuildOf(builds, KEY)?.hash, { describe: 'this doc’s build' });
+      // An editor of this doc points its tag at the other doc's bundle; a
+      // second page seeing it proves the server holds the write.
+      builds.set(KEY, { hash: theirs, at: Date.now() });
+      await waitFor(
+        () => componentBuildOf(componentBuildsMap(watcher.ydoc), KEY)?.hash === theirs || undefined,
+        { describe: 'the forged entry reaching the server' },
+      );
+      expect((await bundle(theirs)).status).toBe(404);
+    } finally {
+      editor.close();
+      watcher.close();
+      otherPage.close();
     }
   });
 

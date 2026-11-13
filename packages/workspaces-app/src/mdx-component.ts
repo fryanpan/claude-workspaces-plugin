@@ -38,12 +38,24 @@ export interface ComponentLive {
   base: string;
 }
 
+/** The synced docs whose page said they are bound to an `.mdx` file. Only
+ *  those run components: in a `.md` doc an `mdx-flow` block is something an
+ *  editor typed, not a tag the server builds. */
+const componentDocs = new WeakSet<Y.Doc>();
+
+/** Say whether `ydoc`'s page is an `.mdx` doc. Called before the editor is
+ *  made, since node views read it while it is made. */
+export function setComponentDoc(ydoc: Y.Doc, isMdx: boolean): void {
+  if (isMdx) componentDocs.add(ydoc);
+  else componentDocs.delete(ydoc);
+}
+
 /** The doc and address a node view's components come from, or null on a
- *  surface that is not a synced doc page. */
+ *  surface that is not a synced `.mdx` doc page. */
 export function componentLiveOf(editor: Editor): ComponentLive | null {
   const state = ySyncPluginKey.getState(editor.state) as { doc?: Y.Doc } | undefined;
   const docId = typeof location === 'undefined' ? null : docIdFromPathOrNull(location.pathname);
-  if (!state?.doc || !docId) return null;
+  if (!state?.doc || !docId || !componentDocs.has(state.doc)) return null;
   return { ydoc: state.doc, base: api(`docs/${encodeURIComponent(docId)}/components`) };
 }
 

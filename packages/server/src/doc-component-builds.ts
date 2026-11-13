@@ -13,10 +13,13 @@
  *
  * A failed rebuild keeps the last good hash beside its error, so a page keeps
  * the component that worked and shows why the edit did not build. Bundles are
- * written to the data dir under their content hash and served by
- * `routes/doc-components.ts`, which serves a hash only while this doc's map
- * names it.
+ * written to the data dir under their content hash, in a folder of the
+ * doc's own, and served by `routes/doc-components.ts`, which serves a hash
+ * only while this doc's map names it AND this server built it for this doc.
+ * The map is synced, so any editor can write it; the folder is the server's
+ * own record, so a map entry pointing at another doc's bundle serves nothing.
  */
+import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
@@ -37,6 +40,7 @@ import {
 import { type CdnFetch, CdnStore } from './component-cdn.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import type { LiveDoc } from './doc-store.ts';
+import { gitBarred } from './git-hardening.ts';
 import { boundFiles } from './slow-fs.ts';
 
 /** The transaction origin of every write here. Not an authoring origin. */
@@ -117,12 +121,22 @@ export class DocComponentBuilds {
     if (open === 0) this.stop();
   }
 
-  /** The bundle file for `hash`, while `docId`'s map names it; else null. */
+  /** The folder this server writes `docId`'s bundles to. */
+  private docBundleDir(docId: string): string {
+    const name = createHash('sha256').update(docId).digest('hex').slice(0, 32);
+    return join(this.bundleDir, name);
+  }
+
+  /** The bundle file for `hash` in `doc`'s own folder, while the doc's map
+   *  names it; else null. The caller finds no file for a hash this server
+   *  never built for this doc. */
   bundlePathFor(doc: LiveDoc, hash: string): string | null {
     if (!/^[a-f0-9]{32}$/.test(hash)) return null;
     const map = componentBuildsMap(doc.ydoc);
     for (const key of map.keys()) {
-      if (componentBuildOf(map, key)?.hash === hash) return join(this.bundleDir, `${hash}.js`);
+      if (componentBuildOf(map, key)?.hash === hash) {
+        return join(this.docBundleDir(doc.docId), `${hash}.js`);
+      }
     }
     return null;
   }
@@ -182,6 +196,8 @@ export class DocComponentBuilds {
 
   private workTreeOf(md: string): Promise<string | null> {
     const dir = join(md, '..');
+    // Asked every time: a lead's root can be registered after the first build.
+    if (gitBarred(dir)) return Promise.resolve(null);
     let p = this.workTrees.get(dir);
     if (!p) {
       p = gitWorkTree(dir);
@@ -212,8 +228,9 @@ export class DocComponentBuilds {
     const before = componentBuildOf(map, key);
     let next: ComponentBuild;
     if (outcome.ok) {
-      mkdirSync(this.bundleDir, { recursive: true, mode: 0o700 });
-      const file = join(this.bundleDir, `${outcome.hash}.js`);
+      const dir = this.docBundleDir(doc.docId);
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = join(dir, `${outcome.hash}.js`);
       writeFileSync(`${file}.tmp`, outcome.code);
       renameSync(`${file}.tmp`, file);
       if (before?.hash === outcome.hash && before.error === undefined) return;
