@@ -1610,6 +1610,12 @@ server's storage into a mounted or meetings folder of the board's project. It
 writes the file, rebinds the doc through `file-binding.ts`, claims the file's
 address in `repo-registry.ts` so the Library above reads it as one document,
 and moves a meeting's filing record with it. `routes/doc-move.ts` answers it.
+`doc-file-relocate.ts` joins the same box under the same glob and changes
+none of the picture either: `move_doc_file`, which renames a bound doc's file
+inside its repository, or points the doc at a file `git mv` already moved.
+It flushes the doc, renames, rebinds through `file-binding.ts` keeping the
+old binding's write-back record, and aliases the address in
+`repo-registry.ts`. `routes/doc-file-move.ts` answers it.
 
 `core/src/meeting-transcript-fold.ts` and `core/src/speech-lexicon.ts` join
 the shared tier and move nothing in the picture, but they are the reason a

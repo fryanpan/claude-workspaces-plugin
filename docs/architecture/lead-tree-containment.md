@@ -103,6 +103,7 @@ any I/O because `covers` is true.
 | `file-binding.ts` seed read (826) | the doc's first read at boot | `guards.readSync` → `tree-fs` | unchanged |
 | `file-binding.ts` `existsSync(abs)` / `existsSync(binding.path)` (825, 1094, 1291, 1553, 1934, 2021, 2294, 2317, 2913) | "is the file there" | plain `existsSync`, follows a link | `guards.exists` → new `existsTree` |
 | `file-binding.ts` `exportAndRebind` (1359–1364) | moving a doc into a project | `guards.mkdirSync` + `guards.writeSync`; the `existsSync` before it follows a link | `existsTree`; the write is unchanged |
+| `doc-file-relocate.ts` `relocateDocFile` | `move_doc_file` | under a root: refuses `move`; `repoint` reads the new file through `boundFiles.read` and rebinds through `attachFile` | unchanged; a contained rename does not exist, so the server never renames under a root |
 | `file-binding.ts` `retargetHomeBinding` (1406–1412) | first write of a pinned doc | guarded write; `existsSync` follows a link | `existsTree` |
 | `doc-store.ts` (1988) | a reparse read | `boundFiles.read` → `tree-fs` | unchanged |
 | `file-stamp.ts` `statStampSync` (46) | the size and mtime at attach | plain `statSync` (PR 1440 follow-up 6) | `guards.statSync` |

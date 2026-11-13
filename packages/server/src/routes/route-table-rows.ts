@@ -314,6 +314,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
 
   ...family('routes/doc-move.ts', [['trusted-local', '/workspaces/:ws/docs/:docId/move', 'POST']]),
+  ...family('routes/doc-file-move.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/move-file', 'POST'],
+  ]),
 
   // A doc on the board draws its embed frames from this mapping for every
   // reader, so a member reads it; writing it is board configuration.

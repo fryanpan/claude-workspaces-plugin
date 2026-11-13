@@ -82,6 +82,7 @@ import { clipToWordBoundary } from '../task-title.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
+import { handleDocFileMoveRoute } from './doc-file-move.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
 import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
@@ -311,7 +312,7 @@ export async function handleDocCreateListRoutes(
         hint:
           conflict === 'type'
             ? `"${docId}" is already a ${existing.meta.type ?? 'doc'}, and a create cannot change a doc's type. Pick a name that is not in use.`
-            : `"${docId}" is already bound to another file, and a create cannot repoint it. Edit the file it serves from, or pick a name that is not in use.`,
+            : `"${docId}" is already bound to another file, and a create cannot repoint it. If the file moved, call move_doc_file with mode "repoint"; otherwise edit the file it serves from, or pick a name that is not in use.`,
       });
     }
     const created = docStore.createForCaller(docId, {
@@ -727,6 +728,7 @@ export async function handleDocResourceRoutes(
     (await handleDocAssetsRoute(ctx, docRq)) ??
     (await handleDocFilesRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
+    (await handleDocFileMoveRoute(ctx, docRq)) ??
     (await handleDocMetadataRoute(ctx, docRq)) ??
     (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
     (await handleDocThreadLinkedItemRoute(ctx, docRq)) ??

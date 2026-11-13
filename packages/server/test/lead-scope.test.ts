@@ -37,6 +37,12 @@ const CASES: Array<[string, string, string]> = [
     `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`,
     `/workspaces/${RIVERBEND}/docs/river-plan/content`,
   ],
+  // `move_doc_file`; `routes/doc-file-move.ts` holds the new path to the board's roots.
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/docs/harbor-plan/move-file`,
+    `/workspaces/${RIVERBEND}/docs/river-plan/move-file`,
+  ],
   [
     'POST',
     `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/notes`,
@@ -111,6 +117,7 @@ describe('leadScopeAllows', () => {
   it('refuses a rewrite of another board’s doc spelled under its own board', () => {
     expect(allows(`/workspaces/${HARBORLIGHT}/docs/river-plan/content`, 'POST')).toBe(false);
     expect(allows(`/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`, 'GET')).toBe(false);
+    expect(allows(`/workspaces/${HARBORLIGHT}/docs/river-plan/move-file`, 'POST')).toBe(false);
   });
 
   it('names its verbs, and nothing else', () => {
