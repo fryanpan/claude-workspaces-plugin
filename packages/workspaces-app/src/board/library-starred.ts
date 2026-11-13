@@ -1,6 +1,6 @@
 /**
  * The reader's stars in the Library: which items and folders they starred,
- * the star toggle each row carries, and the Starred list at the top of the
+ * the Star / Unstar item in each row's ⋯ menu, and the Starred list at the top of the
  * front page. One person's stars, kept by the server per person
  * (`packages/server/src/library-stars.ts`).
  *

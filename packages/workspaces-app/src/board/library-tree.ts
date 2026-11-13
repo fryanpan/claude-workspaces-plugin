@@ -8,7 +8,7 @@
  * A component so layout B (the tree in the left nav) can reuse it. It owns
  * its state and paints `html()` for its host plus an overlay of its own for
  * menus and the Move to… sheet; events are delegated from the host's root.
- * Each row carries the reader's star toggle (`library-starred.ts`).
+ * Each ⋯ menu carries the reader's Star / Unstar item (`library-starred.ts`).
  *
  * Every write is one call to the folder routes
  * (`packages/server/src/routes/workspace-library-folders.ts`), then the host's
