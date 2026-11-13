@@ -35,7 +35,7 @@ export function viewedRows(payload: LibraryPayload): LibraryRow[] {
 /** A front-page table: two fixed headers, no sort to choose. */
 export function fixedTable(timeHeader: string, inner: string, empty: string): string {
   const list = inner || `<div class="library-empty">${escapeHtml(empty)}</div>`;
-  return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">Name</span><span class="lf-colhead">${escapeHtml(timeHeader)}</span><span aria-hidden="true"></span><span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
+  return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">Name</span><span class="lf-colhead">${escapeHtml(timeHeader)}</span><span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
 }
 
 /**

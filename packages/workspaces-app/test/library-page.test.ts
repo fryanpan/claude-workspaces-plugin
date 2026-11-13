@@ -81,14 +81,13 @@ describe('the Library front page', () => {
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
       'See all files',
     ]);
-    // A row is its name and its one clock reading, then its star (an empty
-    // square for a reader with no name) and its ⋯ menu — one grid line at
-    // every width. A project file nobody opened yet can be filed too.
+    // A row is its name and its one clock reading, then its ⋯ menu — one
+    // grid line at every width, the star kept in the menu so the name gets
+    // the width. A project file nobody opened yet can be filed too.
     const first = recentTable(root).querySelector('.library-row') as HTMLElement;
     expect([...first.children].map((c) => c.className)).toEqual([
       'library-main',
       'library-when',
-      'lf-star-gap',
       'lf-more',
     ]);
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
@@ -221,7 +220,6 @@ describe('the Library front page', () => {
     expect([...row.children].map((c) => c.className)).toEqual([
       'library-main',
       'library-when',
-      'lf-star-gap',
       'lf-more-gap',
     ]);
     expect(row.querySelector('.library-main')?.textContent).toBe('Harborlight sync 1');

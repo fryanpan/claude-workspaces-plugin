@@ -1,6 +1,6 @@
 /**
  * The Library's Starred list, driven: a reader stars and unstars an item
- * from its row, stars a folder and opens it from the list, a reader with no
+ * from its row's ⋯ menu, stars a folder and opens it from the list, a reader with no
  * name has no stars to flip, and a star made in another tab reaches an open
  * Library over the board's feed.
  *
@@ -47,29 +47,37 @@ const createdRow = (root: ParentNode, name: string) =>
       '.library-row',
     ),
   ].find((r) => r.querySelector('.library-name')?.textContent === name) as HTMLElement;
+/** Open a row's ⋯ menu and return its Star / Unstar item, or null. */
+const starItem = async (row: Element) => {
+  await click(row.querySelector('.lf-more') as HTMLElement);
+  return document.querySelector<HTMLElement>('.lf-menu [data-lf-star]');
+};
+/** Star or unstar through a row's ⋯ menu. */
+const flipStar = async (row: Element) => click((await starItem(row)) as HTMLElement);
 
 describe('Starred', () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('stars an item from its row: it heads the page, and the toggle keeps its place', async () => {
+  it('stars an item from its ⋯ menu: it heads the page, and the menu then says Unstar', async () => {
     const { page, root, sent } = driveLibrary(WS, PAYLOAD, NOW, { viewer: ALICE });
     await page.open();
     expect(starredNames(root)).toBeNull();
+    // The row carries no star of its own: the name gets that width.
+    expect(root.querySelector('.library-row [data-lf-star]')).toBeNull();
     const before = [...createdRow(root, 'Riverbend note 2').children].map((c) => c.className);
-    const star = createdRow(root, 'Riverbend note 2').querySelector('.lf-star') as HTMLElement;
-    expect(star.getAttribute('aria-pressed')).toBe('false');
+    const star = (await starItem(createdRow(root, 'Riverbend note 2'))) as HTMLElement;
+    expect(star.textContent).toBe('Star');
     await click(star);
+    // Picking it closes the menu.
+    expect(document.querySelector('.lf-menu')).toBeNull();
     expect(starredNames(root)).toEqual(['Riverbend note 2']);
     // Starred comes first on the page.
     expect(root.querySelector('.library-body h2')?.textContent).toBe('Starred');
     const after = createdRow(root, 'Riverbend note 2');
-    expect(after.querySelector('.lf-star')?.getAttribute('aria-pressed')).toBe('true');
-    // Same cells in the same order: the toggle flipped in place.
-    expect([...after.children].map((c) => c.className)).toEqual(
-      before.map((c) => (c === 'lf-star' ? 'lf-star is-on' : c)),
-    );
+    expect([...after.children].map((c) => c.className)).toEqual(before);
+    expect((await starItem(after))?.textContent).toBe('Unstar');
     expect(sent.filter((c) => c.path.endsWith('/library/stars'))).toEqual([
       {
         path: `/workspaces/${WS}/library/stars`,
@@ -85,7 +93,7 @@ describe('Starred', () => {
     await page.open();
     expect(starredNames(root)).toEqual(['Riverbend note 1']);
     const head = root.querySelector('.lf-starred-head') as Element;
-    await click(head.nextElementSibling?.querySelector('.lf-star') as HTMLElement);
+    await flipStar(head.nextElementSibling?.querySelector('.library-row') as Element);
     expect(starredNames(root)).toBeNull();
     expect(sent.at(-1)?.body).toEqual({
       kind: 'doc',
@@ -101,7 +109,7 @@ describe('Starred', () => {
     const harbor = [...root.querySelectorAll<HTMLElement>('.lf-tree [data-lf-folder]')].find(
       (r) => r.dataset.lfFolder === 'f-harbor',
     ) as HTMLElement;
-    await click(harbor.querySelector('.lf-star') as HTMLElement);
+    await flipStar(harbor);
     expect(sent.at(-1)?.body).toEqual({
       kind: 'folder',
       id: 'f-harbor',
@@ -118,6 +126,11 @@ describe('Starred', () => {
     await click(root.querySelector('[data-lf-reveal="f-harbor"]') as HTMLElement);
     expect(treeRow('f-harbor')?.getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(treeRow('f-harbor'));
+    // The starred folder's own ⋯ is the folder menu, where it is unstarred.
+    const link = root.querySelector('.lf-starred-folder') as Element;
+    expect((await starItem(link))?.textContent).toBe('Unstar');
+    await click(document.querySelector('.lf-menu [data-lf-star]') as HTMLElement);
+    expect(starredNames(root)).toBeNull();
   });
 
   it('opens a starred subfolder with the folder above it', async () => {
@@ -138,17 +151,17 @@ describe('Starred', () => {
       openAnswer: { ok: false, status: 500, data: null },
     });
     await page.open();
-    await click(createdRow(root, 'Riverbend note 1').querySelector('.lf-star') as HTMLElement);
+    await flipStar(createdRow(root, 'Riverbend note 1'));
     await settle();
     expect(starredNames(root)).toBeNull();
     expect(toasts).toEqual(['Could not star that.']);
   });
 
-  it('gives a reader with no name no star to flip, in a square of the same size', async () => {
+  it('gives a reader with no name no Star item in the ⋯ menu', async () => {
     const { page, root } = driveLibrary(WS, PAYLOAD, NOW);
     await page.open();
-    expect(root.querySelector('.lf-star')).toBeNull();
-    expect(createdRow(root, 'Riverbend note 1').querySelector('.lf-star-gap')).not.toBeNull();
+    expect(await starItem(createdRow(root, 'Riverbend note 1'))).toBeNull();
+    expect(document.querySelector('.lf-menu [data-lf-act="moveto"]')).not.toBeNull();
   });
 });
 
