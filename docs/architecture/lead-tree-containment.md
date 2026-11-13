@@ -112,6 +112,7 @@ any I/O because `covers` is true.
 | `doc-store-workspaces.ts` `existsSync(root)` (260) | is the set's root there | follows a link | `guards.exists` |
 | `routes/workspace-content.ts` huddle seed (367–369) | creates a meeting file | the meetings home is never a covered folder (`mounts.refuses`) | unchanged; add a test |
 | `doc-metadata.ts` `findMetadataSchema` | the metadata schema search, from the doc's folder up to the repository top | `guards.exists` and `guards.readBoundedSync` → `tree-fs` | unchanged (added after this inventory) |
+| `component-build.ts` `leadLocal`, `leadLoad` | a component tag's imports and their `component.json`, for an `.mdx` doc under a root | `guards.stat` and `guards.readBytes` → `tree-fs`. The root holding the doc is the boundary: a candidate counts only when `containedOf` names the same root. The resolver answers in its own esbuild namespace and the loader hands over the bytes, so esbuild opens no path under the root. No git runs, so there is no git-ignore check (the lead could commit any file anyway). `doc-component-builds.ts` stamps the watched paths through `boundFiles.statMtime` → `tree-fs` | unchanged (added after this inventory; `component-build-lead-root.test.ts`) |
 
 ### B. Folder and diff sets
 
@@ -209,7 +210,7 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 | `git-diff.ts` `gitSync` (35–36) | the same | barred (sync) |
 | `git-provenance.ts` (94–97) | provenance, the conflict hint and the uncommitted mark | barred (sync) |
 | `doc-git-modified.ts` | `log -1 --format=%cs`, a metadata field's git default | barred: `log` is not a contained subcommand, so the default is blank (added after this inventory) |
-| `component-build.ts` `gitWorkTree`, `gitIgnores` | `rev-parse --show-toplevel`, `check-ignore -q`, hardened args and env | barred: no work tree, and every file counts as ignored, so a component tag builds nothing. `doc-component-builds.ts` asks `gitBarred` again before reusing a cached work tree, since a root can be registered later (added after this inventory) |
+| `component-build.ts` `gitWorkTree`, `gitIgnores` | `rev-parse --show-toplevel`, `check-ignore -q`, hardened args and env | not called for a doc under a root: its build uses the root as the boundary and reads through `tree-fs` (section A). Elsewhere, barred: a doc whose `.git` points into a lead's repository has no work tree and builds nothing. `doc-component-builds.ts` asks `gitBarred` again before reusing a cached work tree, since a root can be registered later (added after this inventory) |
 
 Out of scope: `git-push/git.ts` runs git in a temp repository the server makes
 from the lead's bundle, with the server's own config. A bundle carries no

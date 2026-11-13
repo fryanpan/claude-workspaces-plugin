@@ -25,20 +25,29 @@
  * doc's repository cannot send an import around the resolver, and nothing is
  * inlined from the server's environment (`define` is empty).
  *
- * A doc inside a walled lead's folder builds nothing: the resolver asks the
- * bound-path guards before it touches a file, and a path they refuse reads
- * exactly as a missing one, so a refusal says nothing about what exists
- * there. Git runs only where `gitBarred` allows it, and then with the
- * repository's program-running settings off (`git-hardening.ts`): a doc whose
- * `.git` points into a lead's repository has no work tree, so it builds
- * nothing.
+ * A doc inside a walled lead's registered folder builds with that lead root
+ * as its boundary in place of the work tree, and no git runs there
+ * (`gitBarred`). Under a root every file is found and read through the
+ * bound-path guards, which send it to `tree-fs.ts` (a judged descriptor, no
+ * link anywhere on the path, one name): the resolver answers each import with
+ * a path in its own namespace, and the loader hands esbuild the contents, so
+ * esbuild never opens a path there itself. A candidate counts only when the
+ * guards place it under the same root as the doc. The git-ignore check does
+ * not run there: it needs git, and the lead could commit any file it likes,
+ * so it would not protect anything from the lead.
+ *
+ * Elsewhere, a path the guards refuse reads exactly as a missing one, so a
+ * refusal says nothing about what exists there. Git runs only where
+ * `gitBarred` allows it, and then with the repository's program-running
+ * settings off (`git-hardening.ts`): a doc whose `.git` points into a lead's
+ * repository has no work tree, so it builds nothing.
  *
  * One build fetches at most `MAX_CDN_MODULES_PER_BUILD` esm.sh modules and
  * `MAX_CDN_BYTES_PER_BUILD` bytes of them.
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { type BigIntStats, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -50,6 +59,7 @@ import {
 import * as esbuild from 'esbuild';
 import { type CdnStore, cdnImportRefusal, resolveCdnImport } from './component-cdn.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
+import type { Contained } from './tree-fs.ts';
 
 /** The most a built bundle may weigh. */
 export const MAX_BUNDLE_BYTES = 6 * 1024 * 1024;
@@ -76,10 +86,29 @@ const readRuntime = (): string => {
 };
 const RUNTIME_SPECIFIERS = new Set(['cw:runtime', 'cw/jsx-runtime', 'cw/jsx-dev-runtime']);
 
+/** The part of `PathGuards` a build uses. Without the last three, a doc in a
+ *  walled lead's folder builds nothing. */
 export interface BuildGuards {
   allows(path: string): boolean;
   covers(path: string): boolean;
+  containedOf?(path: string): Contained | null;
+  stat?(path: string): Promise<BigIntStats>;
+  readBytes?(
+    path: string,
+    max: number,
+  ): Promise<{ bytes: Uint8Array<ArrayBuffer>; st: BigIntStats } | 'too-large' | null>;
 }
+
+/** The namespace of a module read from a lead root: esbuild opens no path in it. */
+const LEAD_NAMESPACE = 'cw-lead';
+
+const LOADERS: Record<string, esbuild.Loader> = {
+  '.ts': 'ts',
+  '.tsx': 'tsx',
+  '.js': 'js',
+  '.jsx': 'jsx',
+  '.mjs': 'js',
+};
 
 export interface BuildRequest {
   /** The bound `.mdx` file. */
@@ -87,7 +116,8 @@ export interface BuildRequest {
   input: ComponentInput;
   cdn: CdnStore;
   guards: BuildGuards;
-  /** The doc's git work tree, when the caller already knows it. */
+  /** The doc's git work tree, when the caller already knows it. Not used
+   *  for a doc under a lead root, where no git runs. */
   workTree?: string | null;
 }
 
@@ -171,27 +201,124 @@ const isFile = (p: string) => {
   }
 };
 
+/** The lead root holding `path`, as the guards spell it; null where the
+ *  guards cannot read it through `tree-fs.ts` (off macOS, or a fake). */
+function containedIn(guards: BuildGuards, path: string): Contained | null {
+  if (!guards.containedOf || !guards.stat || !guards.readBytes) return null;
+  if (!guards.allows(path)) return null;
+  try {
+    return guards.containedOf(path);
+  } catch {
+    return null;
+  }
+}
+
 export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
-  const docDir = dirname(req.docPath);
   const watch = new Set<string>();
   const done = (error: string): BuildOutcome => ({ ok: false, error, watch: [...watch] });
-  if (!req.guards.allows(req.docPath) || req.guards.covers(req.docPath)) {
-    return done("Components are not built for a doc inside a walled lead's folder.");
+  const walled = "Components are not built for a doc inside a walled lead's folder.";
+  if (!req.guards.allows(req.docPath)) return done(walled);
+  let lead: Contained | null = null;
+  if (req.guards.covers(req.docPath)) {
+    lead = containedIn(req.guards, req.docPath);
+    if (!lead) return done(walled);
   }
-  const workTree = req.workTree === undefined ? await gitWorkTree(docDir) : req.workTree;
-  if (!workTree) {
-    return done('Components are built only for a doc inside a git work tree.');
+  const leadRoot = lead?.root ?? null;
+  const docDir = dirname(lead ? lead.abs : req.docPath);
+  let workTree = '';
+  if (!lead) {
+    const found = req.workTree === undefined ? await gitWorkTree(docDir) : req.workTree;
+    if (!found) return done('Components are built only for a doc inside a git work tree.');
+    workTree = found;
   }
 
-  const refused = (spec: string): esbuild.OnResolveResult => ({
+  const refused = (spec: string) => ({
     errors: [
       {
         text: `'${spec}' is missing, or is not a file this doc may import: a component lives in the doc's git work tree`,
       },
     ],
   });
+  const notComponent = (spec: string, ext: string) => ({
+    errors: [
+      {
+        text: `'${spec}' is a ${ext || 'extension-less'} file; a component is one of ${COMPONENT_EXTENSIONS.join(' ')}`,
+      },
+    ],
+  });
+  const undeclared = (spec: string, top: string, file: string) => ({
+    errors: [
+      {
+        text: `'${spec}' is not in a declared folder: add ${COMPONENT_MANIFEST} to ${relative(top, dirname(file)) || '.'}/ (or a folder above it, below the repository root) to let docs import it`,
+      },
+    ],
+  });
+
+  /** `path` as the doc's lead root holds it, or null: under another root,
+   *  outside every root, or refused by the guards. */
+  const inLead = (path: string): Contained | null => {
+    const c = containedIn(req.guards, path);
+    return c && c.root === leadRoot ? c : null;
+  };
+  /** Whether `tree-fs.ts` opens `path` as a regular file with one name. */
+  const leadFile = async (path: string): Promise<boolean> => {
+    try {
+      await req.guards.stat?.(path);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const leadLocal = async (spec: string, resolveDir: string): Promise<esbuild.OnResolveResult> => {
+    if (!leadRoot) return refused(spec);
+    let found: string | null = null;
+    for (const cand of candidates(resolve(resolveDir, spec))) {
+      const c = inLead(cand);
+      if (!c) continue;
+      watch.add(c.abs);
+      if (await leadFile(c.abs)) {
+        found = c.abs;
+        break;
+      }
+    }
+    if (!found) return refused(spec);
+    const ext = extname(found).toLowerCase();
+    if (!(COMPONENT_EXTENSIONS as readonly string[]).includes(ext)) return notComponent(spec, ext);
+    let declared = false;
+    for (let dir = dirname(found); dir.startsWith(leadRoot + sep); dir = dirname(dir)) {
+      const m = join(dir, COMPONENT_MANIFEST);
+      watch.add(m);
+      if (inLead(m) && (await leadFile(m))) {
+        declared = true;
+        break;
+      }
+    }
+    if (!declared) return undeclared(spec, leadRoot, found);
+    return { path: found, namespace: LEAD_NAMESPACE, pluginData: { spec } };
+  };
+  const leadLoad = async (path: string, spec: string): Promise<esbuild.OnLoadResult> => {
+    const c = inLead(path);
+    if (!c) return refused(spec);
+    let got: Awaited<ReturnType<NonNullable<BuildGuards['readBytes']>>>;
+    try {
+      got = (await req.guards.readBytes?.(c.abs, MAX_BUNDLE_BYTES)) ?? null;
+    } catch {
+      return refused(spec);
+    }
+    if (got === null) return refused(spec);
+    if (got === 'too-large') {
+      return { errors: [{ text: `'${spec}' is over ${MAX_BUNDLE_BYTES} bytes` }] };
+    }
+    return {
+      contents: got.bytes,
+      loader: LOADERS[extname(c.abs).toLowerCase()] ?? 'js',
+      resolveDir: dirname(c.abs),
+    };
+  };
+
   const allowed = (p: string) => req.guards.allows(p) && !req.guards.covers(p);
   const local = async (spec: string, resolveDir: string): Promise<esbuild.OnResolveResult> => {
+    if (lead) return leadLocal(spec, resolveDir);
     const asked = resolve(resolveDir, spec);
     // The guards answer before anything is stat'ed or watched, and a path
     // they refuse reads as missing: the message is the same either way.
@@ -210,26 +337,9 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
     if (!allowed(real) || !real.startsWith(workTree + sep)) return refused(spec);
     // Judged on where a link lands: `chart.tsx -> data.json` is a JSON file.
     const ext = extname(real).toLowerCase();
-    if (!(COMPONENT_EXTENSIONS as readonly string[]).includes(ext)) {
-      return {
-        errors: [
-          {
-            text: `'${spec}' is a ${ext || 'extension-less'} file; a component is one of ${COMPONENT_EXTENSIONS.join(' ')}`,
-          },
-        ],
-      };
-    }
+    if (!(COMPONENT_EXTENSIONS as readonly string[]).includes(ext)) return notComponent(spec, ext);
     const manifest = declaringManifest(real, workTree, watch);
-    if (!manifest) {
-      const folder = relative(workTree, dirname(real)) || '.';
-      return {
-        errors: [
-          {
-            text: `'${spec}' is not in a declared folder: add ${COMPONENT_MANIFEST} to ${folder}/ (or a folder above it, below the repository root) to let docs import it`,
-          },
-        ],
-      };
-    }
+    if (!manifest) return undeclared(spec, workTree, real);
     if (await gitIgnores(workTree, relative(workTree, real))) {
       return {
         errors: [
@@ -283,6 +393,9 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
           ],
         };
       });
+      b.onLoad({ filter: /.*/, namespace: LEAD_NAMESPACE }, (args) =>
+        leadLoad(args.path, String((args.pluginData as { spec?: string } | undefined)?.spec)),
+      );
       b.onLoad({ filter: /.*/, namespace: 'cw-runtime' }, () => ({
         contents: readRuntime(),
         loader: 'ts',
