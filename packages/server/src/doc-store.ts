@@ -2907,6 +2907,15 @@ export class DocStore {
     return this.docThreads.reopen(docId, threadId, author, opts);
   }
 
+  setProgress(
+    docId: string,
+    threadId: string,
+    state: 'working' | 'done' | 'open',
+    author: User,
+  ): Thread | 'not-found' | 'resolved' {
+    return this.docThreads.setProgress(docId, threadId, state, author);
+  }
+
   reanchor(docId: string, threadId: string, anchor: Anchor): Thread | null {
     return this.docThreads.reanchor(docId, threadId, anchor);
   }
