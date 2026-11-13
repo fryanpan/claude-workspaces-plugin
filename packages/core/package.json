@@ -14,6 +14,7 @@
     "./anchor/context": "./src/anchor/context.ts",
     "./prose": "./src/prose.ts",
     "./prose-math": "./src/prose-math.ts",
+    "./doc-metadata": "./src/doc-metadata.ts",
     "./spoken-reply": "./src/spoken-reply.ts",
     "./lead-chat": "./src/lead-chat.ts",
     "./board-nav": "./src/board-nav.ts",

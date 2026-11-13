@@ -17,6 +17,7 @@
  * Builds on `prose-fragment.ts`. Imports no sibling in the family.
  */
 import * as Y from 'yjs';
+import { frontMatterLines } from './doc-metadata.ts';
 import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
@@ -683,14 +684,7 @@ export function parseMarkdownSource(
     let j = i + 1;
     while (j < lines.length && (lines[j] ?? '').trim() !== '---') j++;
     if (j < lines.length) {
-      const yamlLines: string[] = [];
-      for (let k = i + 1; k < j; k++) {
-        const ln = lines[k] ?? '';
-        // Drop blank lines so frontmatter that was previously round-tripped
-        // through the old parser (which left blank lines between values)
-        // self-heals on the next reparse.
-        if (ln.trim() !== '') yamlLines.push(ln);
-      }
+      const yamlLines = frontMatterLines(lines.slice(i + 1, j));
       if (yamlLines.length > 0) {
         const cb = new Y.XmlElement('codeBlock');
         cb.setAttribute('language', 'yaml-frontmatter');

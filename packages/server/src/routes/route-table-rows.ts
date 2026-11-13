@@ -592,6 +592,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/doc-files.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/files/*', 'GET HEAD'],
   ]),
+  ...family('routes/doc-metadata.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
+  ]),
   ...family('routes/doc-voice-feedback.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback.md', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback/:file', 'GET'],
