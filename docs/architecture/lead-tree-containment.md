@@ -209,6 +209,7 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 | `git-diff.ts` `gitSync` (35–36) | the same | barred (sync) |
 | `git-provenance.ts` (94–97) | provenance, the conflict hint and the uncommitted mark | barred (sync) |
 | `doc-git-modified.ts` | `log -1 --format=%cs`, a metadata field's git default | barred: `log` is not a contained subcommand, so the default is blank (added after this inventory) |
+| `component-build.ts` `gitWorkTree`, `gitIgnores` | `rev-parse --show-toplevel`, `check-ignore -q`, hardened args and env | barred: no work tree, and every file counts as ignored, so a component tag builds nothing. `doc-component-builds.ts` asks `gitBarred` again before reusing a cached work tree, since a root can be registered later (added after this inventory) |
 
 Out of scope: `git-push/git.ts` runs git in a temp repository the server makes
 from the lead's bundle, with the server's own config. A bundle carries no

@@ -1,3 +1,4 @@
+import { isMdxPath } from '@claude-workspaces/core/prose';
 /**
  * The markdown surface's mount: everything a markdown doc needs once its text
  * is on screen — the Tiptap editor, the review chrome, the margin, the
@@ -11,6 +12,7 @@
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
+import { setComponentDoc } from '../mdx-component.ts';
 import type { MountContext } from '../mount-context.ts';
 import { wireDocSpot } from '../presence/doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
@@ -107,6 +109,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   const docLink = ctx.workspaceId
     ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
     : undefined;
+  setComponentDoc(ydoc, isMdxPath(ctx.relPath) || isMdxPath(ctx.sourceUrl));
   const editor: EditorHandle = createEditor({
     parent: editorMount,
     ydoc,
