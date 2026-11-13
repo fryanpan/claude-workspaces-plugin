@@ -44,6 +44,22 @@ async function navOf(
   return entries.map((e) => ({ ...e, onPage: html.includes(`id="${e.id}"`) }));
 }
 
+/** Home's four regions, in the order a browser meets them on the page. */
+async function regionOrder(html: string): Promise<string[]> {
+  const wanted = new Set(['landing-review', 'coach', 'inbox', 'landing-boards']);
+  const seen: string[] = [];
+  await new HTMLRewriter()
+    .on('[id]', {
+      element(el) {
+        const id = el.getAttribute('id') ?? '';
+        if (wanted.has(id)) seen.push(id);
+      },
+    })
+    .transform(new Response(html))
+    .text();
+  return seen;
+}
+
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'landing-section-nav-'));
   dataDir = join(root, 'data');
@@ -82,6 +98,16 @@ describe("Home's section bar", () => {
       { id: 'inbox', label: 'Inbox', onPage: true, icon: true },
       { id: 'landing-boards', label: 'Projects', onPage: true, icon: true },
       { id: 'coach', label: 'Coach', onPage: true, icon: true },
+    ]);
+  });
+
+  it("puts the owner's review items first, with the coach below them", async () => {
+    const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
+    expect(await regionOrder(await landing(owner.headers))).toEqual([
+      'landing-review',
+      'coach',
+      'inbox',
+      'landing-boards',
     ]);
   });
 
