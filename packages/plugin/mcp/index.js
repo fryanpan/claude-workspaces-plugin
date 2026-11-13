@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.363";
+var version2 = "0.1.365";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
