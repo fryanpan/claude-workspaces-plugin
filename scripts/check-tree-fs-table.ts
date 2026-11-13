@@ -75,6 +75,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/doc-file-frame.ts': 'tree-fs',
   'packages/server/src/doc-file-listing.ts': 'tree-fs',
   'packages/server/src/doc-file-page-cache.ts': 'tree-fs',
+  'packages/server/src/doc-git-modified.ts': 'refused-when-covered',
   'packages/server/src/doc-identity-check.ts': 'not-in-inventory',
   'packages/server/src/doc-identity-journal.ts': 'not-in-inventory',
   'packages/server/src/doc-identity-migration.ts': 'not-in-inventory',

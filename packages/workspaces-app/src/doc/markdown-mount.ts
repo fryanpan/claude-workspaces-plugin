@@ -26,6 +26,7 @@ import { mountDocFloats } from './doc-floats.ts';
 import { wireDocGates } from './doc-gates.ts';
 import { mountMeetingHeading } from './doc-heading.ts';
 import { mountDocMargin } from './doc-margin.ts';
+import { mountDocMetadata } from './doc-metadata.ts';
 import { mountDocPreview } from './doc-preview.ts';
 import { wireDocReady } from './doc-ready.ts';
 import { mountDocSaveState } from './doc-save-state.ts';
@@ -203,6 +204,14 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       canWrite,
       scope,
       whenSynced: (cb) => client.onReady(cb),
+    });
+    // The fields a metadata schema declares, above the prose.
+    mountDocMetadata({
+      editor: editor.editor,
+      editorMount,
+      docId,
+      canWrite,
+      onCleanup: (fn) => scope.onCleanup(fn),
     });
     // The agent's cursor (`agent-focus.ts`).
     wireAgentFocus({ editor, presence: awareness, scroller: editorMount, scope });
