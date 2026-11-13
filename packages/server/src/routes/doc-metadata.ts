@@ -53,17 +53,23 @@ export async function handleDocMetadataRoute(
     contentKind(doc.meta.type) === 'prose'
       ? (ctx.docStore.boundPathOf(docId) ?? ctx.docStore.recordedPathOf(docId))
       : undefined;
-  const lookup = path
-    ? findMetadataSchema(path, boundFiles.guards, doc.meta.workspaceRoot)
-    : ({ found: false } as const);
+  // A doc whose file stopped answering is parked, not bound; the search
+  // would stat that file's folder on the main thread, so it is skipped.
+  const quarantined = path !== undefined && boundFiles.quarantined(path);
+  const lookup =
+    path && !quarantined
+      ? findMetadataSchema(path, boundFiles.guards, doc.meta.workspaceRoot)
+      : ({ found: false } as const);
   const schema: MetadataSchema | null = lookup.found && 'schema' in lookup ? lookup.schema : null;
   const schemaReason: SchemaReason | undefined = !path
     ? 'not-file-bound'
-    : !lookup.found
-      ? 'no-file'
-      : 'reason' in lookup
-        ? lookup.reason
-        : undefined;
+    : quarantined
+      ? 'file-not-answering'
+      : !lookup.found
+        ? 'no-file'
+        : 'reason' in lookup
+          ? lookup.reason
+          : undefined;
 
   if (req.method === 'PUT') {
     if (!schema) {

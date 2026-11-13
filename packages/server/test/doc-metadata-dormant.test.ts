@@ -19,11 +19,12 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { boundFiles } from '../src/slow-fs.ts';
+import { makeFifo, releaseFifosIn } from './fifo.ts';
 import { waitFor, waitForFileToBe } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -51,6 +52,8 @@ describe('doc metadata on a dormant doc', () => {
   afterEach(async () => {
     await handle?.stop();
     handle = null;
+    for (const d of dirs) await releaseFifosIn(join(d, 'papers'));
+    boundFiles.reset();
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
@@ -229,6 +232,26 @@ describe('doc metadata on a dormant doc', () => {
       schemaReason: 'invalid',
       schemaAt: '../.workspaces/doc-metadata.schema.json',
       schemaError: 'the schema file is not valid JSON',
+    });
+  });
+
+  // A file that stopped answering (the 2026-09-04 shape, reproduced with a
+  // named pipe nobody writes to) is quarantined by the request's read-ahead.
+  // The search would stat its folder on the main thread, so it is skipped
+  // and the answer says so.
+  it('says file-not-answering for a doc whose file is quarantined', async () => {
+    const root = makeRepo({
+      '.workspaces/doc-metadata.schema.json': JSON.stringify(SCHEMA),
+      'papers/fares.md': DOC,
+    });
+    const path = join(root, 'papers/fares.md');
+    const { base, ws } = await dormant([{ docId: 'fares', sourceUrl: path }]);
+    unlinkSync(path);
+    makeFifo(path);
+
+    expect(await metadata(base, ws, 'fares')).toMatchObject({
+      schema: null,
+      schemaReason: 'file-not-answering',
     });
   });
 });

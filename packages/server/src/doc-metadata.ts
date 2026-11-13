@@ -42,11 +42,17 @@ export const METADATA_ORIGIN = 'agent-metadata';
 
 /**
  * Why a doc has no schema: `not-file-bound` (no file to search from),
- * `no-file` (no schema file between the doc and the search's top),
+ * `file-not-answering` (the doc's file is quarantined, so its folders are not
+ * searched), `no-file` (no schema file between the doc and the search's top),
  * `unreadable` (found, but could not be read safely or is too large), or
  * `invalid` (read, but not JSON or not a schema this module understands).
  */
-export type SchemaReason = 'not-file-bound' | 'no-file' | 'unreadable' | 'invalid';
+export type SchemaReason =
+  | 'not-file-bound'
+  | 'file-not-answering'
+  | 'no-file'
+  | 'unreadable'
+  | 'invalid';
 
 export type SchemaLookup =
   | { found: false }

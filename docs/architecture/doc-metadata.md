@@ -164,6 +164,7 @@ editor).
   | `schemaReason` | Meaning |
   | --- | --- |
   | `not-file-bound` | The doc has no file, so there is nowhere to search from. |
+  | `file-not-answering` | The doc's file stopped answering and is quarantined, so its folders are not searched. Try again once it answers. |
   | `no-file` | No schema file between the doc's folder and the search's top. |
   | `unreadable` | A schema file is there but could not be read safely, or is over 64 KB. `schemaError` says which. |
   | `invalid` | A schema file is there but is not JSON, or uses a type outside the subset above. `schemaError` says which. |
