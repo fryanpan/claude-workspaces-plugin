@@ -323,10 +323,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/library/folders/:folderId/unarchive', 'POST'],
     ['trusted-local', '/workspaces/:ws/library/docs/:docId/folder', 'PUT'],
   ]),
-  // A person opened an item here: the record behind Recently Viewed. Only a
-  // browser's request whose author is a person is recorded.
+  // A person opened or starred an item here: the records behind Recently
+  // Viewed and Starred. Only a browser's request whose author is a person is
+  // recorded.
   ...family('routes/workspace-library-views.ts', [
     ['trusted-local', '/workspaces/:ws/library/views', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/stars', 'GET'],
+    ['trusted-local', '/workspaces/:ws/library/stars', 'POST'],
   ]),
 
   ...family('routes/doc-move.ts', [['trusted-local', '/workspaces/:ws/docs/:docId/move', 'POST']]),

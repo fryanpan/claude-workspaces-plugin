@@ -41,6 +41,7 @@ import {
   sortRows,
 } from './library-model.ts';
 import { fixedTable, viewedRows, viewedSectionHtml } from './library-recent.ts';
+import { type StarViewer, createLibraryStars, starredSectionHtml } from './library-starred.ts';
 import { createLibraryTree } from './library-tree.ts';
 
 export interface LibraryPageDeps {
@@ -68,9 +69,9 @@ export interface LibraryPageDeps {
    */
   takeRequestedOpen?: () => string | null;
   now?: () => number;
-  /** Who is reading, so the server answers their own Recently Viewed. A
-   *  signed-in session outranks it. */
-  viewerId?: () => string | null;
+  /** Who is reading, so the server answers their own Recently Viewed and
+   *  Starred, and who stars. A signed-in session outranks it. */
+  viewer?: () => StarViewer | null;
   /** The board's one-line report, with an optional Undo (`showToast`). */
   toast?: (msg: string, action?: { label: string; run: () => void; ms?: number }) => void;
 }
@@ -123,9 +124,18 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   const repo = root.querySelector('.library-repo') as HTMLElement;
   const search = root.querySelector('.library-search') as HTMLInputElement;
   const body = root.querySelector('.library-body') as HTMLElement;
+  const stars = createLibraryStars({
+    workspaceId,
+    send: deps.send,
+    viewer: () => deps.viewer?.() ?? null,
+    rerender: () => render(),
+    toast: deps.toast ?? (() => {}),
+    now,
+  });
   const tree = createLibraryTree({
     root,
     workspaceId,
+    stars,
     send: deps.send,
     toast: deps.toast ?? (() => {}),
     refresh: () => refresh(),
@@ -243,7 +253,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const members = open
       ? `<div class="library-burst-rows">${entry.rows.map((r) => tree.rowHtml(r, { clock, showFolder: true })).join('')}</div>`
       : '';
-    return `<div class="library-burst"><button type="button" class="library-row library-burst-head" data-burst="${escapeHtml(key)}" aria-expanded="${open}"><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="library-name">${escapeHtml(burstLabel(entry))}</span></span><span class="library-when">${escapeHtml(libraryWhenColumn(newest, now(), clock))}</span><span class="lf-more-gap" aria-hidden="true"></span></button>${members}</div>`;
+    return `<div class="library-burst"><button type="button" class="library-row library-burst-head" data-burst="${escapeHtml(key)}" aria-expanded="${open}"><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="library-name">${escapeHtml(burstLabel(entry))}</span></span><span class="library-when">${escapeHtml(libraryWhenColumn(newest, now(), clock))}</span><span class="lf-star-gap" aria-hidden="true"></span><span class="lf-more-gap" aria-hidden="true"></span></button>${members}</div>`;
   }
 
   function markHtml(name: string, needle: string): string {
@@ -307,14 +317,18 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const shown = entries.slice(0, LIBRARY_RECENT.files).map((e) => entryHtml(e, 'created'));
     const table = fixedTable('Created', shown.join(''), 'No files yet.');
     const viewed = viewedSectionHtml(viewedRows(payload), viewedOpen, tree.rowHtml);
-    body.innerHTML = `<h2>Recently Created</h2>${table}${more}${viewed}${tree.html()}${payload.where ? whereHtml(payload.where) : ''}`;
+    const rows = [...payload.meetings, ...payload.files];
+    const starred = starredSectionHtml(stars.list(), rows, tree.rowHtml, tree.folderLinkHtml);
+    // Starred first (it is short, and the reader chose it), then what they
+    // opened, then what is new; the tree below.
+    body.innerHTML = `${starred}${viewed}<div class="lf-section-head lf-created-head"><h2>Recently Created</h2></div>${table}${more}${tree.html()}${payload.where ? whereHtml(payload.where) : ''}`;
     tree.afterRender();
   }
 
   /** Recent or all files: rows with a ⋯ menu, so a third column for it. */
   function filesTable(inner: string): string {
     const list = inner || '<div class="library-empty">No files yet.</div>';
-    return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">${FIRST_COLUMN.files}</span>${sortHeader('files')}<span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
+    return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">${FIRST_COLUMN.files}</span>${sortHeader('files')}<span aria-hidden="true"></span><span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
   }
 
   function showList(next: LibraryList, at: string | null = null): void {
@@ -441,7 +455,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
 
   /** The list, read as this reader, so it carries their own views. */
   function itemsUrl(): string {
-    const viewer = deps.viewerId?.() ?? null;
+    const viewer = deps.viewer?.()?.id ?? null;
     return viewer ? `${base}/items?viewer=${encodeURIComponent(viewer)}` : `${base}/items`;
   }
 
@@ -453,6 +467,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     if (next === null) return;
     failed = false;
     payload = next;
+    stars.load(next);
     render();
   }
 
@@ -474,6 +489,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       // for offers meetings and files that may not be there any more; saying
       // so is the honest page.
       payload = next;
+      if (next) stars.load(next);
       render();
       // Opened after the list, so a refusal's message is not painted over.
       if (wanted) await openFile(wanted);

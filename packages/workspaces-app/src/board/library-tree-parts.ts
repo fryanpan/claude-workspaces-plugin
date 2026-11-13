@@ -124,3 +124,31 @@ export function wireDrag(
     dragging = null;
   });
 }
+
+/** A folder name being typed, with its Save, Cancel and any refusal. */
+export function inputHtml(e: { value: string; error: string }, placeholder: string): string {
+  const err = e.error ? `<span class="lf-err" role="alert">${escapeHtml(e.error)}</span>` : '';
+  return `<div class="lf-input-row"><span class="lf-ico">${ICON.folder}</span><input type="text" class="lf-name-input" placeholder="${placeholder}" aria-label="${placeholder}" maxlength="80" value="${escapeHtml(e.value)}"><button type="button" class="lf-newfolder" data-lf-save>Save</button><button type="button" class="lf-newfolder" data-lf-cancel>Cancel</button>${err}</div>`;
+}
+
+/** Where a 220px menu `height` tall opens under `btn`, kept on screen. */
+export function menuSpot(btn: HTMLElement, height: number): At {
+  const r = btn.getBoundingClientRect();
+  const width = 220;
+  return {
+    x: Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8)),
+    y: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - height)),
+  };
+}
+
+/** One folder's row in the tree: caret, name, count, star toggle and ⋯. */
+export function folderRowHtml(
+  f: LibraryFolder,
+  open: boolean,
+  count: number,
+  star: string,
+): string {
+  const hint = f.meetings ? '<span class="lf-landhint">new meetings land here</span>' : '';
+  const drag = f.meetings ? '' : ` draggable="true" data-lf-dragfolder="${escapeHtml(f.id)}"`;
+  return `<div class="library-row lf-row lf-folder${f.meetings ? ' lf-meet' : ''}" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${escapeHtml(f.id)}" data-lf-drop="${escapeHtml(f.id)}"${drag}><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${f.meetings ? ICON.meet : ICON.folder}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${count}</span>${hint}</span><span class="library-when"></span>${star}<button type="button" class="lf-more" data-lf-foldermenu="${escapeHtml(f.id)}" aria-label="More for folder ${escapeHtml(f.name)}">⋯</button></div>`;
+}

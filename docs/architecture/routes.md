@@ -308,6 +308,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/library/folders/:folderId/unarchive` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
 | `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | share-scope |  |
 | `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |
+| `/workspaces/:ws/library/stars` | GET | `routes/workspace-library-views.ts` | trusted-local |  |
+| `/workspaces/:ws/library/stars` | POST | `routes/workspace-library-views.ts` | trusted-local |  |
 | `/workspaces/:ws/library/views` | POST | `routes/workspace-library-views.ts` | trusted-local |  |
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |

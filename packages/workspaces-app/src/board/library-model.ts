@@ -58,6 +58,8 @@ export interface LibraryPayload {
   folders?: LibraryFolder[];
   /** What the reader opened here, newest first; only theirs, never an agent's. */
   viewed?: Array<{ docId: string; at: number }>;
+  /** What the reader starred here, newest first: items and folders. */
+  starred?: Array<{ kind: 'doc' | 'folder'; id: string; at: number }>;
 }
 
 /** The three kinds of thing a board files. */

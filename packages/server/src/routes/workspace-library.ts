@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import type { User } from '@claude-workspaces/core';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
+import { liveFolders } from '../library-folders.ts';
+import { starsFor } from '../library-stars.ts';
 import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
   type LibrarySources,
@@ -131,8 +133,17 @@ export async function handleLibraryRoutes(
     const src = sourcesFor(ctx, scope, onBox);
     const payload = buildLibrary(visitor ? visitorSources(src) : src);
     const onBoard = new Set(scope.board.docIds);
-    const viewed = viewsFor(scope.board, viewerOf(rq), (id) => onBoard.has(id));
-    return j(200, viewed.length ? { ...payload, viewed } : payload);
+    const viewer = viewerOf(rq);
+    const viewed = viewsFor(scope.board, viewer, (id) => onBoard.has(id));
+    const folders = new Set(liveFolders(scope.board).map((f) => f.id));
+    const starred = starsFor(scope.board, viewer, (s) =>
+      s.kind === 'doc' ? onBoard.has(s.id) : folders.has(s.id),
+    );
+    return j(200, {
+      ...payload,
+      ...(viewed.length ? { viewed } : {}),
+      ...(starred.length ? { starred } : {}),
+    });
   }
   if (visitor) return j(403, { error: 'the library is not available to share visitors' });
   if (open && req.method === 'POST') return openFile(ctx, scope, req);

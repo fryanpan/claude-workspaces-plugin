@@ -7,6 +7,7 @@ import {
   docSocketUrl,
   workspaceIdFromPath,
 } from './doc-path.ts';
+import { type DocStar, mountDocStar } from './doc-star.ts';
 import { el } from './doc/chrome-dom.ts';
 import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { wireDocSwitcher } from './doc/doc-switcher.ts';
@@ -144,6 +145,8 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   // doc's own.
   let presence: import('./presence/page-presence.ts').PagePresence | null = null;
   let presenceJoining = false;
+  /** The top bar's star, made on the first doc a named reader opens. */
+  let docStar: DocStar | null = null;
   const joinPresence = async (): Promise<void> => {
     if (!board || presenceJoining) return;
     presenceJoining = true;
@@ -172,7 +175,14 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       presence?.moveTo({ surface: 'doc', docId: ctx.docId });
       // Recently Viewed: every kind of doc page counts, each arrival once.
       if (board && writeAccess.canWrite) {
-        recordLibraryView(board, ctx.docId, { id: user.id, name: user.name, kind: user.kind });
+        const author = { id: user.id, name: user.name, kind: user.kind };
+        recordLibraryView(board, ctx.docId, author);
+        // The doc's star, beside its name, for a reader who has one.
+        const name = document.getElementById('doc-switcher');
+        if (!docStar && name && user.kind !== 'anon') {
+          docStar = mountDocStar({ workspaceId: board, author, after: name });
+        }
+        docStar?.show(ctx.docId);
       }
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad.mounted(ctx);

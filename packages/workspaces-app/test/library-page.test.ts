@@ -43,7 +43,10 @@ const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
 /** The front page's Recent files table — the first table; the tree follows. */
-const recentTable = (root: ParentNode) => root.querySelector('.library-tbl') as Element;
+const recentTable = (root: ParentNode) =>
+  root.querySelector(
+    '.lf-created-head + .library-tbl, .library-all > h2 + .library-tbl',
+  ) as Element;
 
 describe('the Library front page', () => {
   afterEach(() => {
@@ -71,19 +74,21 @@ describe('the Library front page', () => {
     // Recently Created.
     const body = root.querySelector('.library-body') as HTMLElement;
     expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
-      'Recently Created',
       'Recently Viewed',
+      'Recently Created',
       'Folders',
     ]);
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
       'See all files',
     ]);
-    // A row is its name and its one clock reading, then its ⋯ menu — one grid
-    // line at every width. A project file nobody opened yet can be filed too.
+    // A row is its name and its one clock reading, then its star (an empty
+    // square for a reader with no name) and its ⋯ menu — one grid line at
+    // every width. A project file nobody opened yet can be filed too.
     const first = recentTable(root).querySelector('.library-row') as HTMLElement;
     expect([...first.children].map((c) => c.className)).toEqual([
       'library-main',
       'library-when',
+      'lf-star-gap',
       'lf-more',
     ]);
     expect(first.querySelector('.library-when')?.textContent).toBe('just now');
@@ -216,6 +221,7 @@ describe('the Library front page', () => {
     expect([...row.children].map((c) => c.className)).toEqual([
       'library-main',
       'library-when',
+      'lf-star-gap',
       'lf-more-gap',
     ]);
     expect(row.querySelector('.library-main')?.textContent).toBe('Harborlight sync 1');

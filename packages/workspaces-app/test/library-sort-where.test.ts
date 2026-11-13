@@ -87,7 +87,10 @@ const PAYLOAD: LibraryPayload = {
 const drive = (payload: LibraryPayload = PAYLOAD) => driveLibrary(WS, payload, NOW, { payload });
 
 /** Recently Created: the first table; Recently Viewed and the tree follow. */
-const recent = (root: ParentNode) => root.querySelector('.library-tbl') as Element;
+const recent = (root: ParentNode) =>
+  root.querySelector(
+    '.lf-created-head + .library-tbl, .library-all > h2 + .library-tbl',
+  ) as Element;
 const cells = (root: ParentNode) =>
   [...root.querySelectorAll('.library-row:not(.lf-folder)')].map((r) => [
     r.querySelector('.library-name')?.textContent,
@@ -193,7 +196,7 @@ describe('where files live', () => {
     // Everything the Library opened on before still comes first.
     expect(
       [...body.querySelectorAll(':scope > h2, .lf-section-head h2')].map((h) => h.textContent),
-    ).toEqual(['Recently Created', 'Recently Viewed', 'Folders']);
+    ).toEqual(['Recently Viewed', 'Recently Created', 'Folders']);
 
     const kinds = [...fold.querySelectorAll('.library-where-type')].map((t) => [
       t.querySelector('.library-where-name')?.textContent,

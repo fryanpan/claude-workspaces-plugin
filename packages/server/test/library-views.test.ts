@@ -73,10 +73,10 @@ describe('library views', () => {
     const ws = store.createWorkspace('Harborlight');
     const told: string[] = [];
     store.onBoardDocsChanged = (id) => told.push(id);
-    expect(store.recordLibraryView(ws.id, 'known-alice', 'd-plan', Date.now())).toBe(true);
+    expect(store.recordLibraryView(ws.id, 'known-alice', 'd-plan', 1_000)).toBe(true);
     expect(told).toEqual([ws.id]);
     // The same doc again straight away changes nothing a reader sees.
-    store.recordLibraryView(ws.id, 'known-alice', 'd-plan', Date.now());
+    store.recordLibraryView(ws.id, 'known-alice', 'd-plan', 1_000);
     expect(told).toEqual([ws.id]);
     expect(store.recordLibraryView('no-such-board', 'known-alice', 'd-plan', 1)).toBe(false);
   });

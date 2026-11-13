@@ -5,17 +5,14 @@
  * folder — each answered by a toast carrying Undo (layout A of the folders
  * mock).
  *
- * A component of its own so a second place can hold the same tree (layout B,
- * the tree in the left nav). It owns its state — what is open, what is being
- * named, which menu or sheet is up — and paints in two parts: `html()`, which
- * its host puts where the tree goes and repaints on every render, and an
- * overlay element of its own for the menus and the Move to… sheet. Events are
- * delegated from the host's root, so a repaint never has to rewire anything.
+ * A component so layout B (the tree in the left nav) can reuse it. It owns
+ * its state and paints `html()` for its host plus an overlay of its own for
+ * menus and the Move to… sheet; events are delegated from the host's root.
+ * Each row carries the reader's star toggle (`library-starred.ts`).
  *
  * Every write is one call to the folder routes
- * (`packages/server/src/routes/workspace-library-folders.ts`), followed by the
- * host's re-read. The server's `library.changed` frame does the same for a
- * change made in another tab or by an agent.
+ * (`packages/server/src/routes/workspace-library-folders.ts`), then the host's
+ * re-read; `library.changed` does the same for another tab or an agent.
  */
 import { escapeHtml } from '@claude-workspaces/core';
 import {
@@ -27,11 +24,15 @@ import {
 } from './library-folders-model.ts';
 import type { LibraryFolder, LibraryPayload, LibraryRow, LibrarySort } from './library-model.ts';
 import { libraryWhenColumn } from './library-model.ts';
+import { type LibraryStars, folderLinkHtml } from './library-starred.ts';
 import {
   ICON,
   type Moving,
   docMenuHtml,
   folderMenuHtml,
+  folderRowHtml,
+  inputHtml,
+  menuSpot,
   sheetHtml,
   wireDrag,
 } from './library-tree-parts.ts';
@@ -54,6 +55,8 @@ export interface LibraryTreeDeps {
   /** Bind a project file nobody has opened yet, answering its new doc id. */
   bind: (path: string) => Promise<string | null>;
   now: () => number;
+  /** The reader's stars: each row's toggle reads and flips them. */
+  stars: LibraryStars;
 }
 
 export interface LibraryTree {
@@ -66,6 +69,10 @@ export interface LibraryTree {
   rowHtml(row: LibraryRow, opts: { clock: LibrarySort; showFolder?: boolean }): string;
   /** Called by the host after each repaint: focus a name being typed. */
   afterRender(): void;
+  /** A starred folder's row for the Starred list; '' once it is gone. */
+  folderLinkHtml(id: string): string;
+  /** Open a folder in the tree, with every folder above it, and go to it. */
+  reveal(id: string): void;
 }
 
 /** The "No folder" group's key in `expanded`. */
@@ -115,20 +122,15 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
       ? `<button type="button" class="lf-more" data-lf-docmenu="${escapeHtml(key)}" aria-label="More for ${escapeHtml(row.name)}">⋯</button>`
       : '<span class="lf-more-gap" aria-hidden="true"></span>';
     const drag = row.docId ? ` draggable="true" data-lf-doc="${escapeHtml(row.docId)}"` : '';
-    return `<div class="library-row lf-row lf-doc"${drag}><a class="library-main" ${target} title="${escapeHtml(row.name)}"><span class="lf-ico">${ICON.doc}</span><span class="library-name">${escapeHtml(row.name)}</span>${label}</a><span class="library-when">${escapeHtml(libraryWhenColumn(row, deps.now(), opts.clock))}</span>${more}</div>`;
-  }
-
-  function inputHtml(e: Edit, placeholder: string): string {
-    const err = e.error ? `<span class="lf-err" role="alert">${escapeHtml(e.error)}</span>` : '';
-    return `<div class="lf-input-row"><span class="lf-ico">${ICON.folder}</span><input type="text" class="lf-name-input" placeholder="${placeholder}" aria-label="${placeholder}" maxlength="80" value="${escapeHtml(e.value)}"><button type="button" class="lf-newfolder" data-lf-save>Save</button><button type="button" class="lf-newfolder" data-lf-cancel>Cancel</button>${err}</div>`;
+    const star = deps.stars.toggleHtml('doc', row.docId, row.name);
+    return `<div class="library-row lf-row lf-doc"${drag}><a class="library-main" ${target} title="${escapeHtml(row.name)}"><span class="lf-ico">${ICON.doc}</span><span class="library-name">${escapeHtml(row.name)}</span>${label}</a><span class="library-when">${escapeHtml(libraryWhenColumn(row, deps.now(), opts.clock))}</span>${star}${more}</div>`;
   }
 
   function folderHtml(f: LibraryFolder): string {
     if (edit?.kind === 'rename' && edit.id === f.id) return inputHtml(edit, 'Folder name');
     const open = expanded.has(f.id);
-    const hint = f.meetings ? '<span class="lf-landhint">new meetings land here</span>' : '';
-    const drag = f.meetings ? '' : ` draggable="true" data-lf-dragfolder="${escapeHtml(f.id)}"`;
-    const row = `<div class="library-row lf-row lf-folder${f.meetings ? ' lf-meet' : ''}" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${escapeHtml(f.id)}" data-lf-drop="${escapeHtml(f.id)}"${drag}><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${f.meetings ? ICON.meet : ICON.folder}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${countIn(folders, rows, f.id)}</span>${hint}</span><span class="library-when"></span><button type="button" class="lf-more" data-lf-foldermenu="${escapeHtml(f.id)}" aria-label="More for folder ${escapeHtml(f.name)}">⋯</button></div>`;
+    const star = deps.stars.toggleHtml('folder', f.id, f.name);
+    const row = folderRowHtml(f, open, countIn(folders, rows, f.id), star);
     if (!open) return row;
     const inner = levelHtml(f.id);
     return `${row}<div class="lf-children" role="group">${inner || '<div class="lf-empty-hint">Empty. Drag a doc here, or use ⋯ › Move to….</div>'}</div>`;
@@ -153,7 +155,7 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
   function noneHtml(): string {
     const loose = docsIn(rows, null, sort);
     const open = expanded.has(NONE);
-    const row = `<div class="library-row lf-row lf-folder lf-none" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${NONE}" data-lf-drop=""><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${ICON.tray}</span><span class="library-name">No folder</span><span class="lf-count">${loose.length}</span></span><span class="library-when"></span><span class="lf-more-gap" aria-hidden="true"></span></div>`;
+    const row = `<div class="library-row lf-row lf-folder lf-none" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${NONE}" data-lf-drop=""><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${ICON.tray}</span><span class="library-name">No folder</span><span class="lf-count">${loose.length}</span></span><span class="library-when"></span><span class="lf-star-gap" aria-hidden="true"></span><span class="lf-more-gap" aria-hidden="true"></span></div>`;
     if (!open) return row;
     const inner = loose.map((r) => rowHtml(r, { clock: sort })).join('');
     return `${row}<div class="lf-children" role="group">${inner || '<div class="lf-empty-hint">Every doc is in a folder.</div>'}</div>`;
@@ -356,18 +358,18 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
   }
 
   function openMenu(btn: HTMLElement, m: Menu): void {
-    const r = btn.getBoundingClientRect();
-    const width = 220;
-    const height = m.kind === 'doc' ? 110 : 260;
-    const x = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
-    const y = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - height));
-    menu = { ...m, x, y };
+    menu = { ...m, ...menuSpot(btn, m.kind === 'doc' ? 110 : 260) };
     paintOverlay();
   }
 
   // ── Events, delegated from the host's root ────────────────────────────
   root.addEventListener('click', (ev) => {
     const t = ev.target as Element;
+    const star = t.closest<HTMLElement>('[data-lf-star]');
+    const kind = star?.dataset.lfStar === 'folder' ? 'folder' : 'doc';
+    if (star) return void deps.stars.toggle(kind, star.dataset.lfStarId ?? '');
+    const reveal = t.closest<HTMLElement>('[data-lf-reveal]');
+    if (reveal) return revealFolder(reveal.dataset.lfReveal ?? '');
     if (t.closest('[data-lf-save]')) return void commitEdit();
     if (t.closest('[data-lf-cancel]')) {
       edit = null;
@@ -435,12 +437,24 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
     if (folder) toggle(folder.dataset.lfFolder ?? '');
   });
 
+  function revealFolder(id: string): void {
+    for (let f = folderById(id); f; f = folderById(f.parentId)) expanded.add(f.id);
+    deps.rerender();
+    focusFolder(id)?.scrollIntoView?.({ block: 'start' });
+  }
+
   function toggle(id: string): void {
     if (!expanded.delete(id)) expanded.add(id);
     deps.rerender();
-    for (const row of root.querySelectorAll<HTMLElement>('[data-lf-folder]')) {
-      if (row.dataset.lfFolder === id) row.focus();
-    }
+    focusFolder(id);
+  }
+
+  /** Focus a folder's row in the tree, answering it. */
+  function focusFolder(id: string): HTMLElement | undefined {
+    const rowEls = root.querySelectorAll<HTMLElement>('.lf-tree [data-lf-folder]');
+    const row = [...rowEls].find((r) => r.dataset.lfFolder === id);
+    row?.focus();
+    return row;
   }
 
   root.addEventListener('keydown', (ev) => {
@@ -477,5 +491,10 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
     html,
     rowHtml,
     afterRender: focusName,
+    folderLinkHtml: (id) => {
+      const f = folderById(id);
+      return f ? folderLinkHtml(f, countIn(folders, rows, f.id), deps.stars) : '';
+    },
+    reveal: revealFolder,
   };
 }

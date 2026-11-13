@@ -108,6 +108,8 @@ export interface LibraryPayload {
   /** What the reading person opened here, newest first (`library-views.ts`).
    *  Added by the route, which knows who is asking. */
   viewed?: Array<{ docId: string; at: number }>;
+  /** The reader's stars, newest first: board items and folders. */
+  starred?: Array<{ kind: 'doc' | 'folder'; id: string; at: number }>;
 }
 
 export type { ProjectFile } from './library-lister.ts';
@@ -393,7 +395,9 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       title,
       href,
       at: src.fileMtime(meta.docId),
-      created: src.fileBirth?.(meta.docId),
+      // Birth of the bytes, else when the record was made: an agent's doc
+      // counts as created on the board as much as a person's.
+      created: src.fileBirth?.(meta.docId) ?? meta.createdAt,
     };
     docFiles.push(fileRow);
     const kind = meta.type === 'mockup' || meta.type === 'whiteboard' ? 'mockups' : 'documents';

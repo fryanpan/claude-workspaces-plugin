@@ -25,6 +25,7 @@ import type {
 import { classifyActor } from './actor-identity.ts';
 import type { DecisionShapeGap } from './decision-shape.ts';
 import type { LibraryFolder } from './library-folders.ts';
+import { type LibraryStar, type StarKind, setStar } from './library-stars.ts';
 import { type LibraryView, recordView } from './library-views.ts';
 import {
   type BoardPromptMigration,
@@ -458,6 +459,8 @@ export interface BoardWorkspace {
   /** What each person opened here, newest first (`library-views.ts`). Read
    *  back only by that person; never projected onto the board's wire. */
   libraryViews?: Record<string, LibraryView[]>;
+  /** What each person starred here, newest first (`library-stars.ts`). */
+  libraryStars?: Record<string, LibraryStar[]>;
   createdAt: number;
 }
 
@@ -2499,6 +2502,24 @@ export class TaskStore {
     const visible = recordView(state.workspace, person, docId, at);
     this.scheduleSave(workspaceId);
     if (visible) this.onBoardDocsChanged?.(workspaceId);
+    return true;
+  }
+
+  /** `person` starred or unstarred an item here. Saved, and the open
+   *  Library hears it when anything changed. */
+  setLibraryStar(
+    workspaceId: string,
+    person: string,
+    star: { kind: StarKind; id: string },
+    on: boolean,
+    at: number,
+  ): boolean {
+    const state = this.workspaces.get(workspaceId);
+    if (!state) return false;
+    if (setStar(state.workspace, person, star, on, at)) {
+      this.scheduleSave(workspaceId);
+      this.onBoardDocsChanged?.(workspaceId);
+    }
     return true;
   }
 

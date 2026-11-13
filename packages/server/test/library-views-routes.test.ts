@@ -108,6 +108,72 @@ describe('library view routes', () => {
     expect(get.status).toBe(405);
   });
 
+  const star = async (body: Record<string, unknown>, headers: Record<string, string>) => {
+    const res = await fetch(`${base}/workspaces/${WS}/library/stars`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as { recorded?: boolean } };
+  };
+  const starsOf = async (viewer: string) =>
+    (
+      (await (
+        await fetch(`${base}/workspaces/${WS}/library/stars?viewer=${viewer}`, { headers: host })
+      ).json()) as { starred: Array<{ kind: string; id: string }> }
+    ).starred.map((s) => `${s.kind}:${s.id}`);
+
+  it('stars and unstars a doc and a folder, each person their own', async () => {
+    const plan = await makeDoc('riverbend-plan');
+    const made = await fetch(`${base}/workspaces/${WS}/library/folders`, {
+      method: 'POST',
+      headers: { ...host, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Saltmarsh' }),
+    });
+    const folderId = ((await made.json()) as { folder: { id: string } }).folder.id;
+    expect(
+      (await star({ kind: 'doc', id: plan, starred: true, author: ALICE }, browser())).body
+        .recorded,
+    ).toBe(true);
+    expect(
+      (await star({ kind: 'folder', id: folderId, starred: true, author: ALICE }, browser())).body
+        .recorded,
+    ).toBe(true);
+    expect(await starsOf('known-alice')).toEqual([`folder:${folderId}`, `doc:${plan}`]);
+    // The Library's own read carries them too.
+    expect((await items('known-alice')).starred?.map((s) => s.id)).toEqual([folderId, plan]);
+    // Bob sees none of Alice's.
+    expect(await starsOf('known-bob')).toEqual([]);
+    expect((await items('known-bob')).starred).toBeUndefined();
+    // Unstar.
+    await star({ kind: 'doc', id: plan, starred: false, author: ALICE }, browser());
+    expect(await starsOf('known-alice')).toEqual([`folder:${folderId}`]);
+  });
+
+  it('never stars for an agent, and refuses what is not on the board', async () => {
+    const plan = await makeDoc('riverbend-plan');
+    const agent = { id: 'agent-harborlight-lead', name: 'Lead', kind: 'agent' };
+    expect(
+      (await star({ kind: 'doc', id: plan, starred: true, author: agent }, browser())).body
+        .recorded,
+    ).toBe(false);
+    expect(
+      (await star({ kind: 'doc', id: plan, starred: true, author: ALICE }, host)).body.recorded,
+    ).toBe(false);
+    expect(await starsOf('known-alice')).toEqual([]);
+    expect(
+      (await star({ kind: 'doc', id: 'nope', starred: true, author: ALICE }, browser())).status,
+    ).toBe(404);
+    expect(
+      (await star({ kind: 'folder', id: 'f-nope', starred: true, author: ALICE }, browser()))
+        .status,
+    ).toBe(404);
+    expect(
+      (await star({ kind: 'task', id: plan, starred: true, author: ALICE }, browser())).status,
+    ).toBe(400);
+    expect((await star({ kind: 'doc', id: plan, author: ALICE }, browser())).status).toBe(400);
+  });
+
   // End to end only: a doc's own arrival sends two Library frames, so this
   // case alone cannot tell a view's frame from a late one of those. The case
   // that fails when a view stops telling the Library is in library-views.test.ts.

@@ -145,7 +145,9 @@ const typeName = async (root: ParentNode, value: string) => {
 };
 const recentRow = (root: ParentNode, name: string) =>
   [
-    ...(root.querySelector('.library-tbl') as Element).querySelectorAll<HTMLElement>('.lf-doc'),
+    ...(
+      root.querySelector('.lf-created-head + .library-tbl') as Element
+    ).querySelectorAll<HTMLElement>('.lf-doc'),
   ].find((r) => r.querySelector('.library-name')?.textContent === name) as HTMLElement;
 
 afterEach(() => {

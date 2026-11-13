@@ -123,6 +123,23 @@ html[data-lc-docked] #shell {
   bottom: calc(var(--kb-bottom, 0px) + 24px + var(--safe-bottom) + var(--doc-dock-h, 0px));
 }
 
+/* The doc's star, right after its name in the top bar (doc-star.ts): a
+   fixed square whose outline fills when pressed, so the bar never shifts. */
+.doc-star {
+  flex: 0 0 auto;
+}
+.doc-star svg {
+  fill: none;
+}
+.doc-star[aria-pressed="true"] {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--accent);
+}
+.doc-star[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+
 /* ================= ATTACHMENT-SET SIDEBAR + DROPDOWN ================= */
 
 #set-pane {
