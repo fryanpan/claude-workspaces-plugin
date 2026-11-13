@@ -19,6 +19,7 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { FOLDER_TOOLS } from './folder-schemas.ts';
 import { PERSON_TOOLS } from './person-schemas.ts';
 import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
 
@@ -202,7 +203,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_docs',
       description:
-        'List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.',
+        "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. A row filed in one of the board's Library folders names it as folder: {id, path}. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -3464,5 +3465,6 @@ export const TOOL_LIST: ListToolsResult = {
     },
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
+    ...FOLDER_TOOLS,
   ],
 };

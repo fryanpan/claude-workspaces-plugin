@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.360";
+var version2 = "0.1.361";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -16344,6 +16344,94 @@ function secretReadCommand(service) {
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 
+// packages/mcp/src/folder-schemas.ts
+var WORKSPACE_ID = {
+  type: "string",
+  description: "The board whose Library holds the folders."
+};
+var FOLDER_ID = {
+  type: "string",
+  description: 'The folder id that list_folders or create_folder returned. Meetings is "meetings".'
+};
+var PARENT_ID = {
+  type: ["string", "null"],
+  description: "The folder to put it in. null or omitted is the top level."
+};
+var ANSWERS = "Returns the board’s live folders as {id, name, parentId, path}. A person with the Library open sees the change within a second.";
+var FOLDER_TOOLS = [
+  {
+    name: "list_folders",
+    description: `List a board's Library folders. Meetings is built in: new meetings land in it, and it cannot be moved or archived. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID },
+      required: ["workspaceId"]
+    }
+  },
+  {
+    name: "create_folder",
+    description: `Make a folder in a board's Library, at the top level or inside another folder. A name already used in the same place is refused. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        name: { type: "string", description: "At most 80 characters, no slash." },
+        parentId: PARENT_ID
+      },
+      required: ["workspaceId", "name"]
+    }
+  },
+  {
+    name: "rename_folder",
+    description: `Rename a Library folder. A name already used beside it is refused. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, name: { type: "string" } },
+      required: ["workspaceId", "folderId", "name"]
+    }
+  },
+  {
+    name: "move_folder",
+    description: `Move a Library folder, with everything in it, into another folder or to the top level. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, parentId: PARENT_ID },
+      required: ["workspaceId", "folderId"]
+    }
+  },
+  {
+    name: "archive_folder",
+    description: `Archive a Library folder. Reversible with unarchive_folder: its docs and subfolders show as in no folder until then, and nothing is deleted. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      required: ["workspaceId", "folderId"]
+    }
+  },
+  {
+    name: "unarchive_folder",
+    description: `Bring back an archived Library folder with its docs and subfolders where they were. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      required: ["workspaceId", "folderId"]
+    }
+  },
+  {
+    name: "move_doc_to_folder",
+    description: `File a doc on this board in a Library folder, or in no folder with folderId null. Board data only: the doc's file, path and id do not change. list_docs rows name each doc's folder. ${ANSWERS}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: { type: "string" },
+        folderId: { ...FOLDER_ID, type: ["string", "null"] }
+      },
+      required: ["workspaceId", "docId", "folderId"]
+    }
+  }
+];
+
 // packages/mcp/src/person-schemas.ts
 var PERSON_TOOLS = [
   {
@@ -16397,7 +16485,7 @@ var PERSON_TOOLS = [
 ];
 
 // packages/mcp/src/whiteboard-schemas.ts
-var WORKSPACE_ID = {
+var WORKSPACE_ID2 = {
   type: "string",
   description: "The board this whiteboard is on. get_workspace lists the boards you are attached to."
 };
@@ -16431,7 +16519,7 @@ var WHITEBOARD_TOOLS = [
     description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you. Returns `url`, the absolute link to the whiteboard. Give that link to a person.",
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, title: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID2, title: { type: "string" } },
       required: ["workspaceId"]
     }
   },
@@ -16441,7 +16529,7 @@ var WHITEBOARD_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID,
+        workspaceId: WORKSPACE_ID2,
         docId: { type: "string" },
         shapes: { type: "array", items: SHAPE },
         mode: { type: "string", enum: ["add", "replace"] },
@@ -16459,7 +16547,7 @@ var WHITEBOARD_TOOLS = [
     description: `Read a whiteboard as shapes: {shapes: [{id, kind, x, y, w, h, text, from, to}], count}. A box's words are its text. A person's pen stroke reads kind "freedraw" with its bounding box.`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, docId: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID2, docId: { type: "string" } },
       required: ["workspaceId", "docId"]
     }
   }
@@ -16587,7 +16675,7 @@ var TOOL_LIST = {
   tools: [
     {
       name: "list_docs",
-      description: "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
+      description: "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. A row filed in one of the board's Library folders names it as folder: {id, path}. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19479,7 +19567,8 @@ var TOOL_LIST = {
       }
     },
     ...WHITEBOARD_TOOLS,
-    ...PERSON_TOOLS
+    ...PERSON_TOOLS,
+    ...FOLDER_TOOLS
   ]
 };
 
@@ -20171,6 +20260,43 @@ async function handleDocsTool(name, a, ctx) {
     }
   }
   return;
+}
+
+// packages/mcp/src/tools/folders.ts
+var idOf2 = (v) => typeof v === "string" ? v : "";
+var orNull = (v) => typeof v === "string" && v !== "" ? v : null;
+async function handleFolderTool(name, a, ctx) {
+  const folder = (verb) => {
+    const id = idOf2(a.folderId);
+    if (id === "")
+      throw new Error(`${name} needs a folderId`);
+    return `${boardPathOf(name, a)}/library/folders/${encodeURIComponent(id)}/${verb}`;
+  };
+  switch (name) {
+    case "list_folders":
+      return ctx.ok(await ctx.http("GET", `${boardPathOf(name, a)}/library/folders`));
+    case "create_folder":
+      return ctx.ok(await ctx.http("POST", `${boardPathOf(name, a)}/library/folders`, {
+        name: a.name,
+        parentId: orNull(a.parentId)
+      }));
+    case "rename_folder":
+      return ctx.ok(await ctx.http("POST", folder("rename"), { name: a.name }));
+    case "move_folder":
+      return ctx.ok(await ctx.http("POST", folder("move"), { parentId: orNull(a.parentId) }));
+    case "archive_folder":
+      return ctx.ok(await ctx.http("POST", folder("archive")));
+    case "unarchive_folder":
+      return ctx.ok(await ctx.http("POST", folder("unarchive")));
+    case "move_doc_to_folder": {
+      const docId = idOf2(a.docId);
+      if (docId === "")
+        return ctx.err("move_doc_to_folder needs a docId");
+      return ctx.ok(await ctx.http("PUT", `${boardPathOf(name, a)}/library/docs/${encodeURIComponent(docId)}/folder`, { folderId: orNull(a.folderId) }));
+    }
+    default:
+      return;
+  }
 }
 
 // packages/mcp/src/tools/inbox.ts
@@ -22419,7 +22545,8 @@ function createConnectorSession(deps) {
       handleWorkspaceTool,
       handleInboxTool,
       handlePersonTool,
-      handleWhiteboardTool
+      handleWhiteboardTool,
+      handleFolderTool
     ],
     err
   });
