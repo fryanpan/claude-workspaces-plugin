@@ -18,6 +18,9 @@
  * not hold are written to the new path, and an outside edit made while the
  * doc was idle is read in.
  *
+ * A repoint also accepts a doc whose binding dropped when its file vanished:
+ * the old path is then the one its meta records.
+ *
  * Every refusal is decided before anything is written. The caller has
  * already refused share visitors and browsers.
  */
@@ -65,7 +68,10 @@ export type RelocateResult =
   | { ok: false; error: RelocateError; message: string };
 
 export interface RelocateDeps {
-  docStore: Pick<DocStore, 'get' | 'boundPathOf' | 'repos' | 'persistMeta' | 'fileMoves'>;
+  docStore: Pick<
+    DocStore,
+    'get' | 'boundPathOf' | 'recordedPathOf' | 'repos' | 'persistMeta' | 'fileMoves'
+  >;
   /** Wait between checks for a write-back already on the pool. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -147,7 +153,12 @@ export async function relocateDocFile(
   if (doc.meta.docHome !== undefined) {
     return refuse('home-pinned', 'This doc is pinned to a branch. Clear its home first.');
   }
-  const old = docStore.boundPathOf(docId);
+  // A doc whose file git moved away is usually unbound by now: the binding
+  // drops once its file is gone. Repoint follows it from the path its meta
+  // still records. Move needs a live binding, because it renames that file.
+  const old =
+    docStore.boundPathOf(docId) ??
+    (mode === 'repoint' ? docStore.recordedPathOf(docId) : undefined);
   if (!old) return refuse('not-bound', 'This doc is not bound to a file.');
 
   // The root the file must stay inside: a walled lead's registered root, or
