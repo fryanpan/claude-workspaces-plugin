@@ -64,7 +64,8 @@ export async function hoverReading(editor: ReturnType<typeof createEditor>): Pro
   // The reader clicked into the doc at some point: the caret sits at the end
   // of a sourced sentence, just before its note's characters.
   const view = editor.editor.view;
-  const at = document.querySelector<HTMLElement>('.cw-fn[data-cw-fn="2"]') as HTMLElement;
+  // The run's FIRST piece: the number sits on its closing `]`, inside it.
+  const at = document.querySelector<HTMLElement>('.cw-fn[data-cw-fn-run="2"]') as HTMLElement;
   view.focus();
   editor.editor.commands.setTextSelection(view.posAtDOM(at, 0));
   await frame();

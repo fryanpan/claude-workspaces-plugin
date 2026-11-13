@@ -26,7 +26,9 @@
  * `paired` reads both numbers as the browser drew them; at 430 a tap on note 3
  * opens a card that starts with 3. `lift` walks a column through the
  * painted number: it sat on the baseline (0.15) while the run's 0px font
- * made `vertical-align: super` raise it by almost nothing.
+ * made `vertical-align: super` raise it by almost nothing. `numbers` counts
+ * every number painted in the prose: note 1 holds a link, which cuts its run
+ * into pieces, and each piece used to paint its own copy ("2 2 2").
  *
  * ONE LINE UNTIL ASKED. With twenty-odd sources at three or four lines each
  * the margin was a wall of grey (Bryan, 2026-11-02: "way too cramped").
@@ -210,6 +212,9 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
         // Every run shows its number, and every card starts with it.
         expect(p.superscripts).toBe(p.notes);
         expect(p.paired).toBe(p.notes);
+        // ONE NUMBER PER NOTE, though a link cuts note 1 into pieces.
+        expect(p.linkedPieces).toBeGreaterThanOrEqual(3);
+        expect(p.numbers).toBe(p.notes);
         // …raised clear of the baseline, as a superscript is, and in the
         // text's own colour.
         expect(p.lift).toBeGreaterThan(0.3);
@@ -265,6 +270,8 @@ describe.skipIf(CHROME === null)('margin notes stay beside their lines while scr
       expect(p.cards).toBe(0);
       expect(p.compact).toBeNull();
       expect(p.superscripts).toBe(p.notes);
+      expect(p.linkedPieces).toBeGreaterThanOrEqual(3);
+      expect(p.numbers).toBe(p.notes);
       expect(p.popNumber).toBe('"3"');
       // No margin, so nothing to fold: the tapped note still opens in full.
       expect(p.popHeight).toBeGreaterThanOrEqual(2 * (p.popLineHeight ?? 0));

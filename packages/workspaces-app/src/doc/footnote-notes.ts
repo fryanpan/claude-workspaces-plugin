@@ -105,8 +105,8 @@ function found(prose: HTMLElement): FoundNote[] {
   const seen = new Set<string>();
   for (const el of prose.querySelectorAll<HTMLElement>('.cw-fn[data-cw-fn]')) {
     const n = el.dataset.cwFn ?? '';
-    // A run split by another mark renders as two spans carrying the same
-    // number; the first one is the anchor and the second is not a note.
+    // Only the run's closing `]` carries the number, so each note is found
+    // once; the guard stays for a doc rendered by an older decoration set.
     if (n === '' || seen.has(n)) continue;
     seen.add(n);
     out.push({
@@ -401,7 +401,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     // prose closes the open caption.
     if (marginVisible()) {
       closePop();
-      const n = target?.dataset.cwFn ?? null;
+      const n = target?.dataset.cwFnRun ?? null;
       expand(n === null || n === expandedN ? null : n);
       return;
     }
@@ -409,7 +409,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       closePop();
       return;
     }
-    const n = target.dataset.cwFn ?? '';
+    const n = target.dataset.cwFnRun ?? '';
     const was = openN === n;
     closePop();
     if (was) return;
@@ -451,7 +451,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   // caption's listeners are wired in `noteEl`.
   scope.listen(prose, 'mouseover', (ev) => {
     const el = (ev.target as HTMLElement | null)?.closest?.('.cw-fn') as HTMLElement | null;
-    hover(el?.dataset.cwFn ?? null);
+    hover(el?.dataset.cwFnRun ?? null);
   });
   scope.listen(prose, 'mouseout', () => hover(null));
 
