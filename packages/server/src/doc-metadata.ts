@@ -40,10 +40,18 @@ const MAX_DEPTH = 32;
 /** The transaction origin of a metadata set. Not 'file-watch', so it flushes. */
 export const METADATA_ORIGIN = 'agent-metadata';
 
+/**
+ * Why a doc has no schema: `not-file-bound` (no file to search from),
+ * `no-file` (no schema file between the doc and the search's top),
+ * `unreadable` (found, but could not be read safely or is too large), or
+ * `invalid` (read, but not JSON or not a schema this module understands).
+ */
+export type SchemaReason = 'not-file-bound' | 'no-file' | 'unreadable' | 'invalid';
+
 export type SchemaLookup =
   | { found: false }
   | { found: true; at: string; schema: MetadataSchema }
-  | { found: true; at: string; error: string };
+  | { found: true; at: string; error: string; reason: 'unreadable' | 'invalid' };
 
 /**
  * The schema governing the file at `mdPath`. `at` is the schema's path
@@ -73,21 +81,31 @@ export function findMetadataSchema(
       } catch (err) {
         const why =
           err instanceof GuardRefused ? 'it could not be read safely' : 'it is unreadable';
-        return { found: true, at, error: `the schema file was found but ${why}` };
+        return {
+          found: true,
+          at,
+          error: `the schema file was found but ${why}`,
+          reason: 'unreadable',
+        };
       }
       if (text === 'too-large') {
-        return { found: true, at, error: `the schema file is over ${SCHEMA_MAX_BYTES} bytes` };
+        return {
+          found: true,
+          at,
+          error: `the schema file is over ${SCHEMA_MAX_BYTES} bytes`,
+          reason: 'unreadable',
+        };
       }
       let json: unknown;
       try {
         json = JSON.parse(text);
       } catch {
-        return { found: true, at, error: 'the schema file is not valid JSON' };
+        return { found: true, at, error: 'the schema file is not valid JSON', reason: 'invalid' };
       }
       const parsed = parseMetadataSchema(json);
       return parsed.ok
         ? { found: true, at, schema: parsed.schema }
-        : { found: true, at, error: parsed.error };
+        : { found: true, at, error: parsed.error, reason: 'invalid' };
     }
     let isTop = dir === stopAt || dir === home;
     try {

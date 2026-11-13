@@ -2011,21 +2011,28 @@ export class DocStore {
   async prewarmHydration(docId: string): Promise<void> {
     const target = this.catalog.aliasTarget(docId) ?? docId;
     if (this.docs.has(target)) return; // resident: no hydrate ahead of us
-    if (isBoardOwnedDoc(target)) return; // never file-bound (§3.3)
-    // The index row carries the whole DocMeta, so the bound path is known
-    // WITHOUT loading the `.ydoc` — which is the point: nothing about this
-    // may pull the doc into memory as a side effect.
-    const meta = this.catalog.entry(target)?.meta;
-    if (!meta) return;
-    let path: string | undefined;
-    if (meta.docHome && contentKind(meta.type) === 'prose') {
-      const placement = resolveOriginRepoCheckout(meta.docHome);
-      path = placement.placed ? placement.absPath : undefined;
-    } else {
-      path = meta.sourceUrl;
-    }
+    const path = this.recordedPathOf(target);
     if (!path) return;
     await boundFiles.read(path);
+  }
+
+  /**
+   * The file a doc's meta says it is bound to, whether or not the binding is
+   * armed: the origin repo's current checkout for a pinned doc, else
+   * `sourceUrl`. Reads the resident meta or the index row, so it loads no
+   * `.ydoc` and arms nothing. `boundPathOf` answers only for an armed
+   * binding, which a dormant doc, or one a threads read left unbound, lacks.
+   */
+  recordedPathOf(docId: string): string | undefined {
+    const target = this.catalog.aliasTarget(docId) ?? docId;
+    if (isBoardOwnedDoc(target)) return undefined; // never file-bound (§3.3)
+    const meta = this.docs.get(target)?.meta ?? this.catalog.entry(target)?.meta;
+    if (!meta) return undefined;
+    if (meta.docHome && contentKind(meta.type) === 'prose') {
+      const placement = resolveOriginRepoCheckout(meta.docHome);
+      return placement.placed ? placement.absPath : undefined;
+    }
+    return meta.sourceUrl;
   }
 
   getOrCreate(
