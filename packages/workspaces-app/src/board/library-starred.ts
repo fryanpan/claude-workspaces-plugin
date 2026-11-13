@@ -1,6 +1,6 @@
 /**
  * The reader's stars in the Library: which items and folders they starred,
- * the star toggle each row carries, and the Starred list at the top of the
+ * the Star / Unstar item in each row's ⋯ menu, and the Starred list at the top of the
  * front page. One person's stars, kept by the server per person
  * (`packages/server/src/library-stars.ts`).
  *
@@ -43,8 +43,8 @@ export interface LibraryStars {
   has(kind: StarKind, id: string): boolean;
   /** The reader's stars, newest first. */
   list(): readonly Star[];
-  /** The toggle for one row, or an empty square where none applies. */
-  toggleHtml(kind: StarKind, id: string | undefined, name: string): string;
+  /** The Star or Unstar item for one ⋯ menu, or nothing where none applies. */
+  menuItemHtml(kind: StarKind, id: string | undefined): string;
   /** Flip one star: shown at once, then sent. */
   toggle(kind: StarKind, id: string): Promise<void>;
 }
@@ -74,11 +74,10 @@ export function createLibraryStars(deps: LibraryStarsDeps): LibraryStars {
     },
     has,
     list: () => stars,
-    toggleHtml(kind, id, name) {
-      if (!id || !deps.viewer()) return '<span class="lf-star-gap" aria-hidden="true"></span>';
+    menuItemHtml(kind, id) {
+      if (!id || !deps.viewer()) return '';
       const on = has(kind, id);
-      const label = `${on ? 'Unstar' : 'Star'} ${name}`;
-      return `<button type="button" class="lf-star${on ? ' is-on' : ''}" data-lf-star="${kind}" data-lf-star-id="${escapeHtml(id)}" aria-pressed="${on}" aria-label="${escapeHtml(label)}" title="${on ? 'Starred' : 'Star'}">${STAR_SVG}</button>`;
+      return `<button type="button" class="lf-menu-item lf-star-item${on ? ' is-on' : ''}" data-lf-star="${kind}" data-lf-star-id="${escapeHtml(id)}" role="menuitem">${STAR_SVG}${on ? 'Unstar' : 'Star'}</button>`;
     },
     async toggle(kind, id) {
       const author = deps.viewer();
@@ -98,13 +97,13 @@ export function createLibraryStars(deps: LibraryStarsDeps): LibraryStars {
 const FOLDER_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>';
 
-/** A starred folder in the Starred list: tapping it opens the folder in the tree. */
+/** A starred folder in the Starred list: tapping it opens the folder in the
+ *  tree, and its ⋯ is the folder's own menu, where Unstar lives. */
 export function folderLinkHtml(
   f: { id: string; name: string; path: string },
   count: number,
-  stars: Pick<LibraryStars, 'toggleHtml'>,
 ): string {
-  return `<div class="library-row lf-row lf-folder lf-starred-folder"><button type="button" class="library-main" data-lf-reveal="${escapeHtml(f.id)}" title="${escapeHtml(f.path)}"><span class="lf-ico">${FOLDER_SVG}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${count}</span></button><span class="library-when"></span>${stars.toggleHtml('folder', f.id, f.name)}<span class="lf-more-gap" aria-hidden="true"></span></div>`;
+  return `<div class="library-row lf-row lf-folder lf-starred-folder"><button type="button" class="library-main" data-lf-reveal="${escapeHtml(f.id)}" title="${escapeHtml(f.path)}"><span class="lf-ico">${FOLDER_SVG}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${count}</span></button><span class="library-when"></span><button type="button" class="lf-more" data-lf-foldermenu="${escapeHtml(f.id)}" aria-label="More for folder ${escapeHtml(f.name)}">⋯</button></div>`;
 }
 
 /**

@@ -5148,40 +5148,20 @@ html:has(.board-walk-cred-form) {
 }
 .lf-tbl .library-cols,
 .lf-tbl .library-row {
-  grid-template-columns: minmax(0, 1fr) 104px var(--lf-hit) var(--lf-more-w);
+  grid-template-columns: minmax(0, 1fr) 104px var(--lf-more-w);
 }
-/* The reader's star on each row (`board/library-starred.ts`): a fixed square
-   whose outline fills when pressed, so flipping it moves nothing. */
-.lf-star,
-.lf-star-gap {
-  width: var(--lf-hit);
-  height: var(--lf-hit);
-}
-.lf-star {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: var(--radius-sm);
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-.lf-star svg {
-  width: 18px;
-  height: 18px;
+/* Star / Unstar in a row's ⋯ menu (`board/library-starred.ts`), so the name
+   keeps the width a per-row star would take (Bryan, 13 Nov). */
+.lf-star-item svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
   fill: none;
 }
-.lf-star:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-.lf-star.is-on {
-  color: var(--accent);
-}
-.lf-star.is-on svg {
+.lf-star-item.is-on svg {
   fill: currentColor;
+  color: var(--accent);
 }
 /* A starred folder in the Starred list opens the folder in the tree. */
 .lf-starred-folder > .library-main {

@@ -26,23 +26,23 @@ type At = { x: number; y: number };
 const at = (p: At) => `left:${p.x}px;top:${p.y}px`;
 const SCRIM = '<div class="lf-scrim is-clear" data-lf-close></div>';
 
-/** A doc's ⋯ menu: open it, or move it. */
-export function docMenuHtml(p: At, row: LibraryRow | undefined): string {
+/** A doc's ⋯ menu: open it, star it, or move it. `star` is the Star item, or ''. */
+export function docMenuHtml(p: At, row: LibraryRow | undefined, star: string): string {
   const open = row?.href
     ? `<a class="lf-menu-item" href="${escapeHtml(row.href)}" role="menuitem">Open</a>`
     : '<button type="button" class="lf-menu-item" data-lf-act="open" role="menuitem">Open</button>';
-  return `${SCRIM}<div class="lf-menu" style="${at(p)}" role="menu">${open}<button type="button" class="lf-menu-item" data-lf-act="moveto" role="menuitem">Move to…</button></div>`;
+  return `${SCRIM}<div class="lf-menu" style="${at(p)}" role="menu">${open}${star}<button type="button" class="lf-menu-item" data-lf-act="moveto" role="menuitem">Move to…</button></div>`;
 }
 
 /** A folder's ⋯ menu. Meetings cannot be moved or archived, and says why. */
-export function folderMenuHtml(p: At, f: LibraryFolder | undefined): string {
+export function folderMenuHtml(p: At, f: LibraryFolder | undefined, star: string): string {
   const fixed = f?.meetings ? ' disabled' : '';
   const note = f?.meetings
     ? '<div class="lf-menu-note">New meetings land in this folder, so it stays at the top and cannot be archived.</div>'
     : '';
   const item = (act: string, text: string, extra = '') =>
     `<button type="button" class="lf-menu-item" data-lf-act="${act}" role="menuitem"${extra}>${text}</button>`;
-  return `${SCRIM}<div class="lf-menu" style="${at(p)}" role="menu">${item('new', 'New folder inside')}${item('rename', 'Rename')}${item('moveto', 'Move to…', fixed)}${item('archive', 'Archive', fixed)}${note}</div>`;
+  return `${SCRIM}<div class="lf-menu" style="${at(p)}" role="menu">${star}${item('new', 'New folder inside')}${item('rename', 'Rename')}${item('moveto', 'Move to…', fixed)}${item('archive', 'Archive', fixed)}${note}</div>`;
 }
 
 export interface SheetArgs {
@@ -141,14 +141,9 @@ export function menuSpot(btn: HTMLElement, height: number): At {
   };
 }
 
-/** One folder's row in the tree: caret, name, count, star toggle and ⋯. */
-export function folderRowHtml(
-  f: LibraryFolder,
-  open: boolean,
-  count: number,
-  star: string,
-): string {
+/** One folder's row in the tree: caret, name, count and ⋯. */
+export function folderRowHtml(f: LibraryFolder, open: boolean, count: number): string {
   const hint = f.meetings ? '<span class="lf-landhint">new meetings land here</span>' : '';
   const drag = f.meetings ? '' : ` draggable="true" data-lf-dragfolder="${escapeHtml(f.id)}"`;
-  return `<div class="library-row lf-row lf-folder${f.meetings ? ' lf-meet' : ''}" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${escapeHtml(f.id)}" data-lf-drop="${escapeHtml(f.id)}"${drag}><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${f.meetings ? ICON.meet : ICON.folder}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${count}</span>${hint}</span><span class="library-when"></span>${star}<button type="button" class="lf-more" data-lf-foldermenu="${escapeHtml(f.id)}" aria-label="More for folder ${escapeHtml(f.name)}">⋯</button></div>`;
+  return `<div class="library-row lf-row lf-folder${f.meetings ? ' lf-meet' : ''}" role="treeitem" tabindex="0" aria-expanded="${open}" data-lf-folder="${escapeHtml(f.id)}" data-lf-drop="${escapeHtml(f.id)}"${drag}><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="lf-ico">${f.meetings ? ICON.meet : ICON.folder}</span><span class="library-name">${escapeHtml(f.name)}</span><span class="lf-count">${count}</span>${hint}</span><span class="library-when"></span><button type="button" class="lf-more" data-lf-foldermenu="${escapeHtml(f.id)}" aria-label="More for folder ${escapeHtml(f.name)}">⋯</button></div>`;
 }

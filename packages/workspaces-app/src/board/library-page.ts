@@ -253,7 +253,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const members = open
       ? `<div class="library-burst-rows">${entry.rows.map((r) => tree.rowHtml(r, { clock, showFolder: true })).join('')}</div>`
       : '';
-    return `<div class="library-burst"><button type="button" class="library-row library-burst-head" data-burst="${escapeHtml(key)}" aria-expanded="${open}"><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="library-name">${escapeHtml(burstLabel(entry))}</span></span><span class="library-when">${escapeHtml(libraryWhenColumn(newest, now(), clock))}</span><span class="lf-star-gap" aria-hidden="true"></span><span class="lf-more-gap" aria-hidden="true"></span></button>${members}</div>`;
+    return `<div class="library-burst"><button type="button" class="library-row library-burst-head" data-burst="${escapeHtml(key)}" aria-expanded="${open}"><span class="library-main"><span class="library-caret" aria-hidden="true"></span><span class="library-name">${escapeHtml(burstLabel(entry))}</span></span><span class="library-when">${escapeHtml(libraryWhenColumn(newest, now(), clock))}</span><span class="lf-more-gap" aria-hidden="true"></span></button>${members}</div>`;
   }
 
   function markHtml(name: string, needle: string): string {
@@ -328,7 +328,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   /** Recent or all files: rows with a ⋯ menu, so a third column for it. */
   function filesTable(inner: string): string {
     const list = inner || '<div class="library-empty">No files yet.</div>';
-    return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">${FIRST_COLUMN.files}</span>${sortHeader('files')}<span aria-hidden="true"></span><span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
+    return `<div class="library-tbl lf-tbl"><div class="library-cols"><span aria-hidden="true">${FIRST_COLUMN.files}</span>${sortHeader('files')}<span aria-hidden="true"></span></div><div class="library-list">${list}</div></div>`;
   }
 
   function showList(next: LibraryList, at: string | null = null): void {
