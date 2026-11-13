@@ -44,31 +44,35 @@ export function withExtras(el: FeedbackWidgetEl, t: Thread): Thread {
   };
 }
 
-/** The card's state word, in a slot sized for the widest one and kept, empty,
- *  on a thread with no mark, so nothing beside it moves as the mark changes. */
+/** The card's state word: the one marker of the mark on a card. Absent on an
+ *  unmarked card, so the card's times line up as they always have. */
 export function progressSlot(t: Thread): string {
   const p = t.progress;
   const title = p ? ` title="${esc(p.by.name)} · ${formatTime(p.at)}"` : '';
-  return `<span class="cw-state" data-state="${p?.state ?? 'open'}"${title}><i></i>${p ? LABEL[p.state] : ''}</span>`;
+  return `<span class="cw-state" data-state="${p?.state ?? 'open'}"${title}>${p ? LABEL[p.state] : ''}</span>`;
 }
 
 /** The opened thread's line saying who is on it, above the reply box; and on
- *  a done thread, Resolve is the button that leads. */
+ *  a done thread, Resolve is the button that leads. The line's room is there,
+ *  empty, on every opened thread, so Reply and Resolve do not move when an
+ *  agent's mark arrives as the reader goes to tap one. */
 export function decorateProgress(pop: HTMLElement, t: Thread): void {
   const p = t.progress;
   const actions = pop.querySelector('.actions');
-  if (!p || !actions || pop.querySelector('.cw-progress')) return;
-  const who = esc(p.by.name);
-  const at = formatTime(p.at);
+  if (!actions || pop.querySelector('.cw-progress')) return;
+  const who = p ? esc(p.by.name) : '';
+  const at = p ? formatTime(p.at) : '';
   actions.insertAdjacentHTML(
     'beforebegin',
-    `<div class="cw-progress" data-state="${p.state}">${
-      p.state === 'done'
-        ? `${who} marked this done · ${at}. Resolve it when you are happy, or reply to send it back.`
-        : `${who} is working on this · ${at}`
+    `<div class="cw-progress" data-state="${p?.state ?? 'open'}">${
+      !p
+        ? ''
+        : p.state === 'done'
+          ? `${who} marked this done · ${at}. Resolve it when you are happy, or reply to send it back.`
+          : `${who} is working on this · ${at}`
     }</div>`,
   );
-  if (p.state === 'done') {
+  if (p?.state === 'done') {
     actions.querySelector('.submit')?.classList.remove('primary');
     actions.querySelector('.resolve')?.classList.add('primary');
   }

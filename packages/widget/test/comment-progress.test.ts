@@ -60,11 +60,21 @@ const slot = (el: ReturnType<typeof seeded>['el']) =>
   el.shadow.querySelector<HTMLElement>('.thread[data-thread-id="t-one"] .cw-state');
 
 describe("an agent's mark in the comment view", () => {
-  it('keeps an empty slot on an unmarked card, so the mark moves nothing beside it', () => {
+  it('puts no word on an unmarked card', () => {
     const { el } = seeded();
     expect(slot(el)?.dataset.state).toBe('open');
     expect(slot(el)?.textContent).toBe('');
     expect(pinOf(el, 't-one')?.dataset.state).toBe('open');
+  });
+
+  it("keeps the note's room in an unmarked opened card, so the buttons do not move when a mark arrives", () => {
+    const { el } = seeded();
+    (el.shadow.querySelector('.thread[data-thread-id="t-one"]') as HTMLElement).click();
+    const note = el.shadow.querySelector<HTMLElement>('.thread.active .cw-progress');
+    expect(note?.dataset.state).toBe('open');
+    expect(note?.textContent).toBe('');
+    // Before the buttons, as the marked one is.
+    expect(note?.nextElementSibling?.classList.contains('actions')).toBe(true);
   });
 
   it('shows In progress, then Done, on the card and the pin', () => {
