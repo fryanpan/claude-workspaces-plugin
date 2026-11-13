@@ -1,9 +1,8 @@
 /**
- * The Library's folder tree: folders, the docs filed in each, and a "No
- * folder" group, with every change a person makes to them — a new folder,
- * rename, move, archive, filing a doc by its ⋯ menu or by dragging it onto a
- * folder — each answered by a toast carrying Undo (layout A of the folders
- * mock).
+ * The Library's folder tree (layout A of the folders mock): folders, the docs
+ * filed in each, and a "No folder" group. Every change a person makes — a new
+ * folder, rename, move, archive, filing a doc by its ⋯ menu or by dragging it
+ * onto a folder — is answered by a toast carrying Undo.
  *
  * A component so layout B (the tree in the left nav) can reuse it. It owns
  * its state and paints `html()` for its host plus an overlay of its own for
@@ -24,7 +23,7 @@ import {
 } from './library-folders-model.ts';
 import type { LibraryFolder, LibraryPayload, LibraryRow, LibrarySort } from './library-model.ts';
 import { libraryWhenColumn } from './library-model.ts';
-import { type LibraryStars, folderLinkHtml } from './library-starred.ts';
+import { type LibraryStars, type StarKind, folderLinkHtml } from './library-starred.ts';
 import {
   ICON,
   type Moving,
@@ -130,8 +129,7 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
     const open = expanded.has(f.id);
     const row = folderRowHtml(f, open, countIn(folders, rows, f.id));
     if (!open) return row;
-    const inner = levelHtml(f.id);
-    return `${row}<div class="lf-children" role="group">${inner || '<div class="lf-empty-hint">Empty. Drag a doc here, or use ⋯ › Move to….</div>'}</div>`;
+    return `${row}<div class="lf-children" role="group">${levelHtml(f.id) || '<div class="lf-empty-hint">Empty. Drag a doc here, or use ⋯ › Move to….</div>'}</div>`;
   }
 
   /** One level: a folder being made here, the folders, then the docs. */
@@ -184,13 +182,10 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
     let h = '';
     if (menu) {
       const pos = { x: menu.x, y: menu.y };
+      const row = menu.kind === 'doc' ? byKey.get(menu.key) : undefined;
       h +=
         menu.kind === 'doc'
-          ? docMenuHtml(
-              pos,
-              byKey.get(menu.key),
-              deps.stars.menuItemHtml('doc', byKey.get(menu.key)?.docId),
-            )
+          ? docMenuHtml(pos, row, deps.stars.menuItemHtml('doc', row?.docId))
           : folderMenuHtml(pos, folderById(menu.id), deps.stars.menuItemHtml('folder', menu.id));
     }
     if (moving) {
@@ -368,11 +363,10 @@ export function createLibraryTree(deps: LibraryTreeDeps): LibraryTree {
   root.addEventListener('click', (ev) => {
     const t = ev.target as Element;
     const star = t.closest<HTMLElement>('[data-lf-star]');
-    const kind = star?.dataset.lfStar === 'folder' ? 'folder' : 'doc';
     if (star) {
       menu = null;
       paintOverlay();
-      return void deps.stars.toggle(kind, star.dataset.lfStarId ?? '');
+      return void deps.stars.toggle(star.dataset.lfStar as StarKind, star.dataset.lfStarId ?? '');
     }
     const reveal = t.closest<HTMLElement>('[data-lf-reveal]');
     if (reveal) return revealFolder(reveal.dataset.lfReveal ?? '');
