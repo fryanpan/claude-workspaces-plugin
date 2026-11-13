@@ -5,6 +5,7 @@ import type { User } from '@claude-workspaces/core';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
 import { liveFolders } from '../library-folders.ts';
+import { diffReviewsOn, setRow } from '../library-sets.ts';
 import { starsFor } from '../library-stars.ts';
 import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
@@ -187,7 +188,8 @@ function sourcesFor(
   // applies to a local-only project.
   const setHidden = (m: { setId?: string; workspaceId?: string }): boolean =>
     !onBox && (ctx.isLocalOnlySet?.(m.setId ?? m.workspaceId) ?? false);
-  const docs = docStore.list().filter((m) => ids.has(m.docId) && !setHidden(m));
+  const all = docStore.list();
+  const docs = all.filter((m) => ids.has(m.docId) && !setHidden(m));
   const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
   // One stat per bound doc per load, shared by both of its clocks.
   const stats = new Map<string, { mtimeMs: number; birthtimeMs: number } | undefined>();
@@ -220,6 +222,9 @@ function sourcesFor(
     workspaceId: scope.workspaceId,
     folders: scope.board,
     docs,
+    sets: diffReviewsOn(all, (setId) => ids.has(setId) && !setHidden({ setId })).map((s) =>
+      setRow(scope.workspaceId, s),
+    ),
     docKeyOf: (docId) => docStore.repos.primaryKeyFor(docId),
     lastMeeting: (docId) => {
       let latest: { startedAt: number; endedAt: number | null } | undefined;

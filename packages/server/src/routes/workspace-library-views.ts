@@ -36,7 +36,7 @@ import {
  *   GET  /workspaces/<id>/library/stars?viewer=<id>         → { starred }
  *   POST /workspaces/<id>/library/stars { kind, id, starred, author? } → { recorded }
  *
- * `kind` is `doc` (any board item: a doc, mock, whiteboard or meeting) or
+ * `kind` is `doc` (any board item: a doc, mock, whiteboard, meeting or diff review) or
  * `folder`; the id must name one still on the board.
  */
 export async function handleLibraryViewRoutes(

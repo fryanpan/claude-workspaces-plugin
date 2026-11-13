@@ -31,3 +31,22 @@ export function recordLibraryView(
     // Best-effort; never throw from a page's arrival.
   }
 }
+
+/**
+ * The id the Library knows this page's item by, or null when it lists none.
+ *
+ * A diff review is one Library item, filed on the board under its review id
+ * (the doc's `workspaceId`, which only a review's or a folder browse's files
+ * carry), so every diff file page answers the REVIEW: a view of any file
+ * counts as a view of the review, and the page's star stars the review. A
+ * folder browse's files belong to no Library item, so they answer null and
+ * the page shows no star. Anything else is its own doc.
+ */
+export function libraryIdOf(meta: {
+  docId: string;
+  docType?: string;
+  workspaceId?: string;
+}): string | null {
+  if (!meta.workspaceId) return meta.docId;
+  return meta.docType === 'diff' ? meta.workspaceId : null;
+}

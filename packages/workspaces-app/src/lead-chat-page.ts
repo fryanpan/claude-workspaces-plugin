@@ -11,6 +11,7 @@
  * frame.
  */
 import { connect } from '@claude-workspaces/core';
+import { mountDocStar } from './doc-star.ts';
 import { ensureUserIdentity } from './identity-prompt.ts';
 import { mountLeadChat } from './lead-chat/lead-chat-mount.ts';
 import { recordLibraryView } from './library-view.ts';
@@ -32,7 +33,11 @@ if (workspaceId) {
   void ensureUserIdentity(null, storage, { suppressNamePrompt: true }).then((user) => {
     // Recently Viewed: a person opening a mock counts like opening a doc.
     if (docId && user.kind !== 'anon') {
-      recordLibraryView(workspaceId, docId, { id: user.id, name: user.name, kind: user.kind });
+      const author = { id: user.id, name: user.name, kind: user.kind };
+      recordLibraryView(workspaceId, docId, author);
+      // Its star, in the bar's actions just before Comments (`doc-star.ts`).
+      const comments = document.querySelector<HTMLElement>('.cw-bar [data-cw-comments]');
+      if (comments) mountDocStar({ workspaceId, author, before: comments }).show(docId);
     }
     // The button sits in the nav's dock, never over the frame: floated, it
     // covered the frame's comment Cancel at 1100px and under.

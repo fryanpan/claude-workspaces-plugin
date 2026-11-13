@@ -1,27 +1,32 @@
 /**
- * The star in a doc page's top bar: the same star as the Library row's, for
- * the doc on screen (`board/library-starred.ts`, and the server's
- * `routes/workspace-library-views.ts`).
+ * The star in an item's own top bar: the same star as the Library row's, for
+ * the item on screen (`board/library-starred.ts`, and the server's
+ * `routes/workspace-library-views.ts`). Three pages use it: a doc page (a diff
+ * file's page stars its whole review, `libraryIdOf`), a whiteboard and a mock.
  *
- * It sits right after the doc's name, a fixed square whose outline fills when
+ * It sits beside the item's name, a fixed square whose outline fills when
  * pressed, so flipping it moves nothing in the bar. It reads the reader's
  * stars when it arrives and again on every `library.changed` frame of the
- * board's stream, so a star flipped in another tab shows here too.
+ * board's stream, so a star flipped in another tab shows here too. A refused
+ * flip is put back AND said, through `onRefused`.
  */
 import { openBoardStream } from './board-stream.ts';
 
 export interface DocStarDeps {
   workspaceId: string;
   author: { id: string; name: string; kind: string };
-  /** Where the button goes: it is inserted right after this element. */
-  after: HTMLElement;
+  /** Where the button goes: right after `after`, or else right before `before`. */
+  after?: HTMLElement;
+  before?: HTMLElement;
+  /** Tells the reader a flip was refused and put back. */
+  onRefused?: (message: string) => void;
   fetch?: typeof fetch;
   openStream?: (workspaceId: string) => Pick<EventSource, 'addEventListener'>;
 }
 
 export interface DocStar {
-  /** Point the star at the doc now on screen. */
-  show(docId: string): void;
+  /** Point the star at the item now on screen; null hides it. */
+  show(docId: string | null): void;
 }
 
 const SVG =
@@ -35,7 +40,8 @@ export function mountDocStar(deps: DocStarDeps): DocStar {
   btn.className = 'icon-btn doc-star';
   btn.innerHTML = SVG;
   btn.hidden = true;
-  deps.after.after(btn);
+  if (deps.after) deps.after.after(btn);
+  else deps.before?.before(btn);
   let docId: string | null = null;
   /** Ids the reader starred, as the server last said, plus a flip in flight. */
   let starred = new Set<string>();
@@ -44,7 +50,7 @@ export function mountDocStar(deps: DocStarDeps): DocStar {
     const on = docId !== null && starred.has(docId);
     btn.hidden = docId === null;
     btn.setAttribute('aria-pressed', String(on));
-    btn.setAttribute('aria-label', on ? 'Unstar this doc' : 'Star this doc');
+    btn.setAttribute('aria-label', on ? 'Unstar' : 'Star');
     btn.title = on ? 'Starred' : 'Star';
   }
 
@@ -78,6 +84,7 @@ export function mountDocStar(deps: DocStarDeps): DocStar {
     if (on) starred.delete(id);
     else starred.add(id);
     paint();
+    deps.onRefused?.(on ? 'Could not star that.' : 'Could not unstar that.');
   });
 
   (deps.openStream ?? openBoardStream)(deps.workspaceId).addEventListener(

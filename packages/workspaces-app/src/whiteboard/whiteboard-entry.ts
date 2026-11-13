@@ -17,6 +17,7 @@ import { connect } from '@claude-workspaces/core';
  */
 import { allSceneElements, sceneMap } from '@claude-workspaces/core/whiteboard-scene';
 import { docSocketUrl } from '../doc-path.ts';
+import { mountDocStar } from '../doc-star.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
 import { recordLibraryView } from '../library-view.ts';
 import type { CanvasHandle } from './canvas-island.ts';
@@ -62,7 +63,11 @@ async function boot(): Promise<void> {
   );
   // Recently Viewed: a person opening a whiteboard counts like a doc.
   if (workspaceId && user.kind !== 'anon') {
-    recordLibraryView(workspaceId, docId, { id: user.id, name: user.name, kind: user.kind });
+    const author = { id: user.id, name: user.name, kind: user.kind };
+    recordLibraryView(workspaceId, docId, author);
+    // Its star, right after its title in the top bar (`doc-star.ts`).
+    const title = document.getElementById('wb-title');
+    if (title) mountDocStar({ workspaceId, author, after: title }).show(docId);
   }
   // Its own chunk, and never waited for: it is not the page's content.
   if (workspaceId) {

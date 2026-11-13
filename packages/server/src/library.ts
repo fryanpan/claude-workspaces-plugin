@@ -152,6 +152,8 @@ export interface LibrarySources {
   home?: string;
   /** The board's folders; absent, no row is filed and no `folders` sent. */
   folders?: FolderState;
+  /** The board's diff reviews, one row each (`library-sets.ts`). */
+  sets?: readonly LibraryRow[];
 }
 
 const isMarkdownPath = (relPath: string): boolean => relPath.toLowerCase().endsWith('.md');
@@ -460,6 +462,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     }
   }
 
+  for (const row of src.sets ?? []) files.push({ ...row });
   meetings.sort(byRecency);
   files.sort(byRecency);
   const out: LibraryPayload = where
