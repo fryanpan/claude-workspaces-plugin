@@ -171,7 +171,9 @@ export async function relocateDocFile(
   }
   if (target === old) return refuse('same-path', 'The doc is already bound to this path.');
   const relPath = relInside(root, target);
-  if (relPath === null || placementEscapesRoot(root, relPath)) {
+  // Under a walled root the containment is `containedOf` below, and the
+  // server reaches that root only through `PathGuards`: no realpath here.
+  if (relPath === null || (!contained && placementEscapesRoot(root, relPath))) {
     return refuse(
       'outside-root',
       'The new path must stay inside the same repository as the old one.',

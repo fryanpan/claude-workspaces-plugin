@@ -275,7 +275,7 @@ describe('POST /workspaces/:ws/docs/:docId/move-file', () => {
     const docId = await bind('ferry', join(repo, 'ferry.md'));
     const page = openPage(
       `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${docId}/y`,
-      `http://localhost:${handle.port}`,
+      `http://127.0.0.1:${handle.port}`,
     );
     try {
       await page.ready;
