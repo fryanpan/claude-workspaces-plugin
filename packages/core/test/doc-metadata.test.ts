@@ -214,6 +214,15 @@ describe('setMetadataFields', () => {
 });
 
 describe('checkUpdates', () => {
+  it('refuses a value too long to be a field', () => {
+    expect(checkUpdates(schema(), { summary: 'x'.repeat(2001) })).toEqual({
+      summary: 'must be at most 2000 characters',
+    });
+    expect(checkUpdates(schema(), { tags: Array.from({ length: 101 }, () => 'a') })).toEqual({
+      tags: 'must hold at most 100 items',
+    });
+  });
+
   it('refuses unknown, read-only and wrongly typed fields', () => {
     expect(
       checkUpdates(schema(), {

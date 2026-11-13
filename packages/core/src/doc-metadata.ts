@@ -350,8 +350,22 @@ function plainKind(text: string): 'null' | 'boolean' | 'number' | 'string' {
   return 'string';
 }
 
+/** Longest text one field may hold, and most items one list may: a field,
+ *  not a document. */
+export const MAX_VALUE_CHARS = 2000;
+export const MAX_LIST_ITEMS = 100;
+
 /** A value the caller has in hand, judged against one field. */
 export function checkValue(field: MetadataField, value: MetadataValue): string | null {
+  if (typeof value === 'string' && value.length > MAX_VALUE_CHARS) {
+    return `must be at most ${MAX_VALUE_CHARS} characters`;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_LIST_ITEMS) return `must hold at most ${MAX_LIST_ITEMS} items`;
+    if (value.some((v) => typeof v === 'string' && v.length > MAX_VALUE_CHARS)) {
+      return `each item must be at most ${MAX_VALUE_CHARS} characters`;
+    }
+  }
   switch (field.type) {
     case 'string': {
       if (typeof value !== 'string') return 'must be text';
