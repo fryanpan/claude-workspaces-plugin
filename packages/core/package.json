@@ -41,6 +41,8 @@
     "./review-access": "./src/review-access.ts",
     "./show-estimates": "./src/show-estimates.ts",
     "./plot-spec": "./src/plot-spec.mjs",
+    "./map-spec": "./src/map-spec.ts",
+    "./map-basemaps": "./src/map-basemaps.ts",
     "./trace-privacy": "./src/trace-privacy.ts",
     "./types": "./src/types.ts",
     "./summary-prompt": "./src/summary-prompt.ts",
