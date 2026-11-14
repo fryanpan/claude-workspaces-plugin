@@ -12,8 +12,9 @@
  * THREE ROUTES, one of them everybody's:
  *
  *   GET    /workspaces/<id>/members              the list, plus YOUR own role
- *   POST   /workspaces/<id>/members/<email>/role promote or demote  (owner)
+ *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
+ *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
  *
  * The READ is a member's, deliberately: everything in a workspace is available
  * to everyone in it (`.claude/rules/workspace-board.md`), and a Regular User
@@ -39,7 +40,7 @@ import { normalizeEmail } from '@claude-workspaces/core';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
-import { normalizeBoardRole } from '../share/board-role.ts';
+import { parseAccessRole, parseRolesMode, seatAndAccess } from '../share/board-access.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
@@ -51,7 +52,7 @@ export async function handleWorkspaceMembers(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { shareLinks, accessProposals, docStore, sse, j, safeJson } = ctx;
+  const { shareLinks, accessProposals, docStore, sse, collabRooms, j, safeJson } = ctx;
   const { req, scope, accessEmail, roleFor, requireOwner, visitor } = rq;
   if (!scope) return undefined;
   const { workspaceId } = scope;
@@ -71,6 +72,8 @@ export async function handleWorkspaceMembers(
   /** Hang up what these members still have open on this board. */
   const hangUp = (emails: readonly string[]): { closedSockets: number; closedStreams: number } => {
     const keys = new Set(emails.map((e) => shareMemberKey(workspaceId, e)));
+    // And the core's room hosts, whose connections carry no member key.
+    collabRooms.recheck();
     return {
       closedSockets: docStore.closeSocketsForShareMembers((k) => keys.has(k)),
       closedStreams: sse.closeForShareMembers((k) => keys.has(k)),
@@ -93,7 +96,15 @@ export async function handleWorkspaceMembers(
       you: {
         email: accessEmail ? normalizeEmail(accessEmail) : null,
         role: roleFor(workspaceId),
+        // The four-word role (`share/board-access.ts`), read the way a
+        // socket's is (`board-membership.ts` `boardAccessOf`).
+        accessRole:
+          roleFor(workspaceId) === 'owner'
+            ? 'owner'
+            : (shareLinks.accessRoleOf(workspaceId, accessEmail) ?? 'edit'),
       },
+      // Whether comment and view are enforced on this board yet.
+      rolesMode: shareLinks.rolesModeOf(workspaceId),
       // Role spelled out on the wire even when the row omits it, and each
       // person filed under the entry that admits them (`share/access-view.ts`).
       members: accessPeople(shareLinks, workspaceId),
@@ -113,12 +124,16 @@ export async function handleWorkspaceMembers(
     // come back as a 500 rather than as the 404 it is.
     const email = safeDecodeSegment(roleMatch[1] ?? '');
     const body = await safeJson(req);
-    // Undefined rather than a fallback: `normalizeBoardRole` refuses anything
-    // that is not one of the two words, so a typo'd "Owner" is a 400 and never
-    // a silent demotion.
-    const role = normalizeBoardRole(body?.role);
-    if (!role) return j(400, { error: "role must be 'owner' or 'member'" });
+    // Undefined rather than a fallback: anything that is not one of the four
+    // words (or `member`, the old spelling of edit) is a 400 and never a
+    // silent demotion.
+    const accessRole = parseAccessRole(body?.role);
+    if (!accessRole) {
+      return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
+    }
+    const { seat: role, access } = seatAndAccess(accessRole);
     const before = shareLinks.roleOf(workspaceId, email);
+    const accessBefore = shareLinks.accessRoleOf(workspaceId, email);
     if (before === null) return j(404, { error: 'not a member', workspaceId });
     // A promotion by anything but the owner's own browser is a proposal.
     if (role === 'owner' && before !== 'owner' && !proven()) {
@@ -135,10 +150,36 @@ export async function handleWorkspaceMembers(
         accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
       );
     }
-    if (!shareLinks.setMemberRole(workspaceId, email, role)) {
+    if (!shareLinks.setMemberRole(workspaceId, email, role, access)) {
       return j(404, { error: 'not a member', workspaceId });
     }
-    return j(200, { ok: true, workspaceId, email: normalizeEmail(email), role });
+    // A socket's role is read once, at its upgrade, so a change hangs up what
+    // they have open and they reconnect under the new one.
+    const closed = accessBefore === accessRole ? {} : hangUp([email]);
+    return j(200, {
+      ok: true,
+      workspaceId,
+      email: normalizeEmail(email),
+      role,
+      accessRole,
+      ...closed,
+    });
+  }
+
+  // ── Turn comment and view enforcement on or off ───────────────────────
+  //
+  // Every board starts report-only: a comment or view socket's edit is
+  // applied and logged. `enforce` drops it (`socket-write-gate.ts`). The
+  // mode is read per frame, so open sockets follow it without a reconnect.
+  if (scope.rest === 'roles-mode' && req.method === 'POST') {
+    const denied = refuseVisitor();
+    if (denied) return denied;
+    const body = await safeJson(req);
+    const mode = parseRolesMode(body?.mode);
+    if (!mode) return j(400, { error: "mode must be 'report-only' or 'enforce'" });
+    shareLinks.setRolesMode(workspaceId, mode);
+    console.error(`[roles] board ${workspaceId} roles mode set to ${mode}`);
+    return j(200, { ok: true, workspaceId, rolesMode: mode });
   }
 
   // ── End one person's access ───────────────────────────────────────────

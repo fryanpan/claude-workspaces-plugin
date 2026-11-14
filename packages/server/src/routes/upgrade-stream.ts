@@ -66,6 +66,7 @@ import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
 import { type PresenceRoster, type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
+import type { AccessRole, RolesMode, SocketAccess } from '../share/board-access.ts';
 import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
 import { channelForWatchKey, openAgentMuxStream } from '../sse-mux.ts';
@@ -126,6 +127,11 @@ export interface UpgradeStreamContext {
    *  the doc socket's upgrade for a mockup. `requested` is the board the
    *  canonical path named. */
   fileUnderBoardWorkspace: (docId: string, requested?: string) => void;
+  /** The four-word role a person holds on a board (`board-membership.ts`),
+   *  stamped on every doc and board socket and sent to it at connect. */
+  boardAccessOf: (workspaceId: string, email: string | null, isVisitor: boolean) => AccessRole;
+  /** Whether a board's narrow roles are enforced, read per frame. */
+  rolesModeOf: (workspaceId: string) => RolesMode;
   /**
    * Which boards hold this member — THE SAME function
    * `middleware/workspace-scope.ts` runs for every REST route, injected here
@@ -197,6 +203,9 @@ export interface UpgradeStreamRequest {
    *  sweeps can find it again. */
   visitorShareId: string | null;
   visitorMemberKey: string | null;
+  /** The Access address admission proved, or null — what the socket's role
+   *  is read for. */
+  accessEmail?: string | null;
   /** Whether this request comes from a browser that has proven nobody.
    *  Passed rather than hoisted: it closes over the request being decided,
    *  and the widget-token identity it reads is resolved per request. */
@@ -278,6 +287,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     isValidDocId,
     canonicalDocId,
     fileUnderBoardWorkspace,
+    boardAccessOf,
+    rolesModeOf,
     workspacesOfMember,
     j,
     requestAddress,
@@ -345,6 +356,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     visitor,
     visitorShareId,
     visitorMemberKey,
+    accessEmail,
     browserProvedNobody,
     provenAuthor,
     ownerProven,
@@ -392,6 +404,14 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         owner: roster.owner,
         ...(roster.reservedName ? { reservedName: roster.reservedName } : {}),
       });
+    // The role a doc or board socket is told at connect and judged by on
+    // every write (`socket-write-gate.ts`). Read once, here: a role change
+    // hangs the socket up (`routes/workspace-members.ts`).
+    const socketAccess = (workspaceId: string): SocketAccess => ({
+      role: boardAccessOf(workspaceId, accessEmail ?? null, visitor !== null),
+      workspaceId,
+      mode: () => rolesModeOf(workspaceId),
+    });
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
@@ -641,6 +661,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
             ...(presenceOnly ? { presenceOnly: true } : {}),
+            access: socketAccess(boardRoom.workspaceId),
             presenceUser: presenceUser(roomReadOnly),
             ...(socketOwnerProven()
               ? { personProof: 'owner' as const }
@@ -738,6 +759,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(readOnly ? { readOnly: true } : {}),
             ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
             ...(editor ? { editor } : {}),
+            access: socketAccess(workspaceId),
             presenceUser: presenceUser(readOnly),
           },
         });

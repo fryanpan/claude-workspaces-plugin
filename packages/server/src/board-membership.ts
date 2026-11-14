@@ -41,6 +41,7 @@
 import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
+import type { AccessRole } from './share/board-access.ts';
 import { boardAudienceAdmits } from './share/board-audience.ts';
 import { type BoardRole, DEFAULT_BOARD_ROLE } from './share/board-role.ts';
 import {
@@ -219,6 +220,9 @@ export interface BoardMembership {
   redeemShareLink: (linkId: string, email: string | null) => Response;
   /** What this caller may DO on this board — see the implementation. */
   boardRoleOf: (workspaceId: string, email: string | null, isVisitor: boolean) => BoardRole;
+  /** The four-word role (`share/board-access.ts`): the seat, then the row's
+   *  access level for a member. */
+  boardAccessOf: (workspaceId: string, email: string | null, isVisitor: boolean) => AccessRole;
   /** Who has access to this board, and at what level. */
   boardMembersOf: (workspaceId: string) => ShareLinkMember[];
   /** Every board a doc's discussion actually reaches. */
@@ -584,6 +588,15 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     const who = email ? normalizeEmail(email) : '';
     if (who !== '' && proxiedTrustedEmails.has(who)) return 'owner';
     return shareLinks.roleOf(workspaceId, who) ?? DEFAULT_BOARD_ROLE;
+  };
+
+  const boardAccessOf = (
+    workspaceId: string,
+    email: string | null,
+    isVisitor: boolean,
+  ): AccessRole => {
+    if (boardRoleOf(workspaceId, email, isVisitor) === 'owner') return 'owner';
+    return shareLinks.accessRoleOf(workspaceId, email) ?? 'edit';
   };
 
   /**
@@ -966,6 +979,7 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
     boardMembersOf,
     boardsForDoc,
     boardIndexForListing,

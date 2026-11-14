@@ -147,6 +147,7 @@ import {
   type ScopedEditGuard,
   type ScopedEditRefusal,
 } from './scoped-edit-guard.ts';
+import type { SocketAccess } from './share/board-access.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
 import type { ScheduleArgs, ThreadSummarizer } from './summarize.ts';
@@ -243,6 +244,13 @@ export type WsCtx = {
    * doc editing socket only; absent elsewhere.
    */
   editor?: SocketEditor;
+  /**
+   * The person's access on the board this socket is addressed under, and
+   * the board's roles mode (`share/board-access.ts`). Sent at connect and
+   * judged on every write by `socket-write-gate.ts`. Set on doc and board
+   * room sockets.
+   */
+  access?: SocketAccess;
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
