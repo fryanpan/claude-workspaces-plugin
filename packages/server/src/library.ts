@@ -260,12 +260,22 @@ export function displayNames(relPaths: readonly string[]): Map<string, string> {
  *  when it came from one. */
 type LooseFile = ProjectFile & { fileId?: string };
 
+/**
+ * Whether a doc belongs to an attachment set, whose own page lists it. A set
+ * id that is this board's own id names no set: coach setup used to write the
+ * Coach board's id there, and those docs are filed on the board.
+ */
+function inAttachmentSet(meta: DocMeta, workspaceId: string): boolean {
+  const id = attachmentIdOf(meta);
+  return id !== undefined && id !== workspaceId;
+}
+
 /** The doc keys this board's docs already hold — the files the repo listing
  *  must not offer a second time, and a second bind for. */
 function coveredKeys(src: LibrarySources): Set<string> {
   const covered = new Set<string>();
   for (const meta of src.docs) {
-    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    if (inAttachmentSet(meta, src.workspaceId) || isReservedDocId(meta.docId)) continue;
     const key = src.docKeyOf(meta.docId);
     if (key) covered.add(key);
   }
@@ -354,7 +364,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     // A review's member (a diff file, a folder bind's opened file) belongs to
     // that review's own page, and a task's description is the task. Neither
     // is a document somebody files on a board.
-    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    if (inAttachmentSet(meta, src.workspaceId) || isReservedDocId(meta.docId)) continue;
     const href = docHref(src.workspaceId, meta);
     if (!href) continue;
     const key = src.docKeyOf(meta.docId);

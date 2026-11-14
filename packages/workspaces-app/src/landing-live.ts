@@ -4,11 +4,9 @@
  * `/` is server-rendered, so a change is not applied here: the server sends
  * `landing.changed` on one stream (`packages/server/src/landing-changes.ts`),
  * naming the parts of the page that changed, and this re-reads `/` and swaps
- * those parts in place, as `landing-coach.ts` does for its section after an
- * answer:
+ * those parts in place:
  *
  *  - `boards`: `#landing-review` and `#landing-boards`;
- *  - `coach`: `#coach`;
  *  - `inbox`: `#inbox`, through `landing-inbox.ts`, which keeps the open line
  *    and its card and holds the swap while the reader types or a modal is
  *    open;
@@ -28,12 +26,9 @@
  */
 import { swapInboxFrom } from './landing-inbox.ts';
 
-type Part = 'boards' | 'coach' | 'inbox' | 'meeting';
-const PARTS: readonly Part[] = ['boards', 'coach', 'inbox', 'meeting'];
-const REGIONS: Record<'boards' | 'coach', string[]> = {
-  boards: ['#landing-review', '#landing-boards'],
-  coach: ['#coach'],
-};
+type Part = 'boards' | 'inbox' | 'meeting';
+const PARTS: readonly Part[] = ['boards', 'inbox', 'meeting'];
+const BOARD_REGIONS = ['#landing-review', '#landing-boards'];
 export const LANDING_STREAM_URL = '/landing/events:stream';
 
 /** The parts a frame names; none named is the board list, as before. */
@@ -109,8 +104,7 @@ async function redraw(parts: ReadonlySet<Part>, held: () => boolean): Promise<Pa
   if (!res.ok) return [];
   const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
   if (held()) return fromPage;
-  if (parts.has('boards')) swapRegions(doc, REGIONS.boards);
-  if (parts.has('coach')) swapRegions(doc, REGIONS.coach);
+  if (parts.has('boards')) swapRegions(doc, BOARD_REGIONS);
   if (parts.has('inbox') && !swapInboxFrom(doc)) return ['inbox'];
   return [];
 }

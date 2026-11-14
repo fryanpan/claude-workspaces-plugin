@@ -10,7 +10,7 @@
  * No session is attached, so nothing here reaches a model.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
@@ -52,6 +52,14 @@ const ownerHeaders = async (browser: Record<string, string> = SAME_ORIGIN) => ({
   'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
   ...browser,
 });
+
+/** What the coach store holds, read off this test's own data dir: Home no
+ *  longer draws it, so the routes' effects are read where they land. */
+const coachState = () =>
+  JSON.parse(readFileSync(join(root, 'data', 'coach', 'state.json'), 'utf8')) as {
+    offBoards: string[];
+    moments: { state: string }[];
+  };
 
 const landingAsOwner = async () =>
   (await req('/', OWNER_HOST, { headers: await ownerHeaders({}) })).text();
@@ -108,10 +116,20 @@ const ids = () => {
   return { workspaceId: decodeURIComponent(m?.[1] ?? ''), docId: decodeURIComponent(m?.[2] ?? '') };
 };
 
-describe('Your coach on the front page, and setup', () => {
-  it('offers setup to the owner and nothing to an agent here', async () => {
-    expect(await landingAsOwner()).toContain('data-act="setup"');
-    expect(await (await req('/', local())).text()).not.toContain('id="coach"');
+/** What Home carries of the coach: its section, its setup button, its nav
+ *  entry, or the script that mounted the card. */
+const coachOnHome = (html: string) =>
+  ['id="coach"', 'data-act="setup"', 'href="#coach"', 'coach-front'].filter((s) =>
+    html.includes(s),
+  );
+
+describe('the coach is not on Home, and setup', () => {
+  it('draws no coach on Home, for the owner or an agent here', async () => {
+    const owner = await landingAsOwner();
+    // Positive control: the owner's own page, which links to who has access.
+    expect(owner).toContain('href="/access"');
+    expect(coachOnHome(owner)).toEqual([]);
+    expect(coachOnHome(await (await req('/', local())).text())).toEqual([]);
   });
 
   it('makes the learning-goals and memory docs once, bound and on their own board', async () => {
@@ -131,13 +149,24 @@ describe('Your coach on the front page, and setup', () => {
     const doc = (await (
       await req(`/workspaces/${workspaceId}/docs/${docId}?format=json`, local())
     ).json()) as {
-      meta: { title: string; sourceUrl: string };
+      meta: { title: string; sourceUrl: string; workspaceId?: string; setId?: string };
     };
     expect(doc.meta.title).toBe('Learning goals');
+    // Filed on the board, not a member of a set: a set field would hide it
+    // from the board's Library.
+    expect(doc.meta.workspaceId).toBeUndefined();
+    expect(doc.meta.setId).toBeUndefined();
     expect(doc.meta.sourceUrl.endsWith(join('data', 'coach', 'learning-goals.md'))).toBe(true);
-    const page = await landingAsOwner();
-    expect(page).toContain(`href="${goalsUrl}">Learning goals</a>`);
-    expect(page).toContain('No goals yet.');
+    // The Learning goals doc (titled above) is on the Coach board, where the
+    // card shows; Home carries none of it.
+    const board = (await (await req(`/workspaces/${workspaceId}?format=json`, local())).json()) as {
+      workspace: { name: string; docIds: string[] };
+    };
+    expect(board.workspace.name).toBe('Coach');
+    expect(board.workspace.docIds).toContain(docId);
+    const home = await landingAsOwner();
+    expect(home).not.toContain(goalsUrl);
+    expect(coachOnHome(home)).toEqual([]);
   });
 
   it('refuses an agent here, another origin, and a share visitor', async () => {
@@ -160,18 +189,25 @@ describe('the owner’s settings and answers', () => {
       400,
     );
     expect((await postJson('/coach/prefs', { readiness: 'more' }, h, OWNER_HOST)).status).toBe(200);
-    expect(await landingAsOwner()).toContain('data-readiness="more" aria-pressed="true"');
   });
 
-  it('tells an open workspaces list that the coach changed, whoever changed it', async () => {
+  it('a coach change sends an open Home nothing that would draw the coach', async () => {
     const feed = landingFrames(await req('/landing/events:stream', local()));
     try {
       const h = await ownerHeaders();
       expect((await postJson('/coach/prefs', { readiness: 'less' }, h, OWNER_HOST)).status).toBe(
         200,
       );
-      await waitFor(() => feed.parts().has('coach'), { describe: 'a coach frame' });
-      expect(await landingAsOwner()).toContain('data-readiness="less" aria-pressed="true"');
+      // Positive control: the feed is live. A task on the Coach board is a
+      // board change, which an open Home is told about.
+      const made = handle.tasks.createTask(ids().workspaceId, {
+        title: 'Practise the Riverbend walk',
+        actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
+      });
+      expect(made.ok).toBe(true);
+      await waitFor(() => feed.parts().has('boards'), { describe: 'a boards frame' });
+      expect([...feed.parts()]).not.toContain('coach');
+      expect(coachOnHome(await landingAsOwner())).toEqual([]);
     } finally {
       feed.stop();
     }
@@ -222,13 +258,11 @@ describe('POST /coach/boards — Coach off for this board', () => {
     expect(
       (await postJson('/coach/boards', { workspaceId, off: true }, h, OWNER_HOST)).status,
     ).toBe(200);
-    const page = await landingAsOwner();
-    expect(page).toContain('Coach off for:');
-    expect(page).toContain(`data-coach-on="${workspaceId}"`);
+    expect(coachState().offBoards).toEqual([workspaceId]);
     expect(
       (await postJson('/coach/boards', { workspaceId, off: false }, h, OWNER_HOST)).status,
     ).toBe(200);
-    expect(await landingAsOwner()).not.toContain('Coach off for:');
+    expect(coachState().offBoards).toEqual([]);
   });
 });
 
@@ -410,7 +444,7 @@ describe('POST /coach/moments — the coach session, this machine only', () => {
       200,
     );
     expect(await answerWith({ answer: 'up' })).toBe(404);
-    expect(await landingAsOwner()).toContain('This week: 1 moment · Helpful 0 · Not helpful 1');
+    expect(coachState().moments.map((m) => m.state)).toEqual(['down']);
     // A tab loaded before the thumbs still sends the old words, and they count.
     const again = await postJson('/coach/moments', MOMENT, {}, local());
     const second = ((await again.json()) as { id: string }).id;
@@ -421,6 +455,6 @@ describe('POST /coach/moments — the coach session, this machine only', () => {
       OWNER_HOST,
     );
     expect(old.status).toBe(200);
-    expect(await landingAsOwner()).toContain('This week: 2 moments · Helpful 1 · Not helpful 1');
+    expect(coachState().moments.map((m) => m.state)).toEqual(['down', 'up']);
   });
 });

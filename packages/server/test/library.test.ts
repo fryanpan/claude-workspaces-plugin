@@ -184,6 +184,22 @@ describe('buildLibrary', () => {
     expect(lib.files.map((r) => r.name)).toEqual(['Kept']);
   });
 
+  // Coach setup wrote the Coach board's own id into the set field of the
+  // Learning goals and Coach memory docs, so the Library read them as a set's
+  // members and listed neither. With Home's coach section gone, the Library is
+  // where the Learning goals doc is reached.
+  it("lists a doc whose set field names this board itself, and still leaves out a real set's member", () => {
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-goals', { title: 'Learning goals', workspaceId: 'w-test' }),
+          meta('d-member', { title: 'A set member', workspaceId: 'r-2' }),
+        ],
+      }),
+    );
+    expect(lib.files.map((r) => r.name)).toEqual(['Learning goals']);
+  });
+
   it('offers every project markdown file no board doc holds, and a mounted file at its address', () => {
     const docs = [meta('d-plan', { title: 'Riverbend project plan' })];
     const keys: Record<string, string> = { 'd-plan': makeDocKey(REPO, 'docs/plan.md') };

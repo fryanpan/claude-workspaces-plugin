@@ -1,5 +1,5 @@
 /**
- * The coach on a board, a doc or the front page: what the owner is looking at
+ * The coach on a board, a doc or the review walk: what the owner is looking at
  * and writing, sent to the server, and the coach's "Hi, I'm noticing…" card
  * when it has something to say.
  *
@@ -15,12 +15,11 @@
  *
  * Only the owner has a coach. Anyone else's first POST gets an empty 204,
  * and the page then stops: no more beacons, and the stream is never opened.
- * The front page and the review walk name no board, so each says which page
- * it is (`page`) and nothing more: no heading, no passage. They are where he
- * answers review items, most of all from his phone, and a page that said
- * nothing left those stays out of every digest. The server draws the front
- * page's coach section only for the owner, and the front page mounts the
- * card only when the section is there.
+ * The review walk names no board, so it says which page it is (`page`) and
+ * nothing more: no heading, no passage. It is where he answers review items,
+ * most of all from his phone, and a page that said nothing left those stays
+ * out of every digest. Home carries no coach at all (Bryan: "Coach should
+ * not be on home page").
  *
  * The card: calm by default. It sits in the bottom-left corner of every
  * page he has open (above the lead chat's button where that floats there,
@@ -65,10 +64,10 @@ const OFF_HERE = 'Coach is off for this board';
 const TURN_OFF = 'Coach off for this board';
 
 export interface CoachCardOptions {
-  /** The board, or none on the front page and the review walk. */
+  /** The board, or none on the review walk. */
   workspaceId?: string;
-  /** A page that names no board: the front page or the review walk. */
-  page?: 'home' | 'review';
+  /** A page that names no board: the review walk. */
+  page?: 'review';
   docId?: string;
   /** The doc's editor, whose headings say which part he is reading. */
   root?: HTMLElement;

@@ -108,9 +108,9 @@ describe('what he is looking at and writing', () => {
     c.destroy();
   });
 
-  it('the front page and the review walk say which page he is on, and when it hides, but not each scroll', async () => {
+  it('the review walk says which page he is on, and when it hides, but not each scroll', async () => {
     const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-    for (const page of ['home', 'review'] as const) {
+    for (const page of ['review'] as const) {
       posted = [];
       const c = mount({ workspaceId: undefined, page });
       await flush();
