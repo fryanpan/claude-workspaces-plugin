@@ -15,7 +15,7 @@
  * resident doc, which is the state an idle sweep leaves.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
@@ -63,6 +63,22 @@ function task(h: ServerHandle, ws: string, title: string): string {
   return res.task.id;
 }
 
+const HOUR = 3_600_000;
+
+/** Move every timestamp in a board's task file back by `by`, at rest. */
+function backdateRows(ws: string, by: number): void {
+  const path = join(dataDir, 'workspaces', `${ws}.tasks.json`);
+  const shift = (v: unknown): unknown => {
+    if (typeof v === 'number' && v > 1_000_000_000_000) return v - by;
+    if (Array.isArray(v)) return v.map(shift);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shift(x)]));
+    }
+    return v;
+  };
+  writeFileSync(path, JSON.stringify(shift(JSON.parse(readFileSync(path, 'utf8')))));
+}
+
 /** Release the four task bodies, as the idle sweep does after its window. */
 function releaseAll(h: ServerHandle): void {
   for (const id of [liveTask, doneTask, archivedTask, retiredTask]) {
@@ -89,16 +105,14 @@ beforeAll(async () => {
   first.tasks.transition(doneTask, 'done', { actor: AGENT });
   first.tasks.archiveTask(archivedTask, { actor: AGENT });
   first.tasks.setWorkspaceRetired(retired, true, { actor: AGENT });
-  // After the archive, so the comment rather than the row's own update is the
-  // board's newest activity: only a thread read can find it.
-  const archivedAt = first.tasks.getTask(archivedTask)?.updatedAt ?? 0;
-  // A spin, not a sleep: it waits at most until the next millisecond.
-  while (Date.now() <= archivedAt) {}
   await comment(board, archivedTask, 'Old feed is gone.');
   archivedCommentAt = Math.max(
     ...first.docStore.listThreads(`task:${archivedTask}`).map((t) => t.lastActivity),
   );
   await first.stop();
+  // Every row's own update an hour back, so the archived row's comment is the
+  // board's newest activity and only a thread reading can find it.
+  backdateRows(board, HOUR);
 
   handle = createServer({ port: 0, dataDir });
   base = `http://127.0.0.1:${handle.port}`;
