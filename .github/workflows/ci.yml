@@ -329,3 +329,25 @@ jobs:
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
       - name: Coverage
         run: bun run coverage --reuse --list
+
+  # The one check branch protection on main requires. It runs no gate of its
+  # own: it fails unless every job it needs succeeded, so a cancelled, skipped
+  # or failed job fails it too. Requiring this one name instead of each job's
+  # means adding a job or a matrix shard never changes the branch rule, and a
+  # new job only has to be added to `needs` below (`bun run verify:parity`
+  # fails until it is).
+  ci:
+    runs-on: ubuntu-latest
+    needs: [gates, client, server, coverage]
+    if: always()
+    permissions: {}
+    steps:
+      - name: Every needed job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "results: $RESULTS"
+          if [ "$(echo "$RESULTS" | jq -r 'all(. == "success")')" != "true" ]; then
+            echo "::error::a needed job did not succeed: $RESULTS"
+            exit 1
+          fi
