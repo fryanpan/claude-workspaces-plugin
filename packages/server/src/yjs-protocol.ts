@@ -6,6 +6,12 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { clientStateIsDead, peekSyncFrame } from './board-sync-gate.ts';
 import type { FeedbackWs, LiveDoc } from './doc-store.ts';
+import {
+  type PresenceUser,
+  guestPresenceUser,
+  newSocketSeed,
+  stampAwarenessUpdate,
+} from './presence-identity.ts';
 import { captureServerError } from './sentry.ts';
 
 /**
@@ -56,6 +62,8 @@ type WsState = {
    * from its `open` handler and step 2 only from a later `message`.
    */
   deadState?: boolean;
+  /** The stamp for a socket its upgrade gave none: a guest, made once. */
+  fallbackStamp?: PresenceUser;
 };
 
 function state(ws: FeedbackWs): WsState {
@@ -66,8 +74,10 @@ function state(ws: FeedbackWs): WsState {
 
 /**
  * The name this connection's presence announces (`user.name` in its
- * awareness state), or undefined. Unverified: it is whatever the page set.
- * Read by `edit-sessions.ts` for a socket that proved no identity.
+ * awareness state), or undefined. The server set it: `onMessage` stamps
+ * every state a socket sends with that socket's `presenceUser`
+ * (`presence-identity.ts`). Read by `edit-sessions.ts` for a socket that
+ * proved no identity.
  */
 export function announcedNameOf(doc: LiveDoc, ws: FeedbackWs): string | undefined {
   const states = doc.peekAwareness()?.getStates();
@@ -77,6 +87,29 @@ export function announcedNameOf(doc: LiveDoc, ws: FeedbackWs): string | undefine
     if (typeof user?.name === 'string' && user.name.trim() !== '') return user.name.trim();
   }
   return undefined;
+}
+
+/** The presence identity this socket's states are stamped with. A socket
+ *  its upgrade stamped nothing on is a guest — fail closed. */
+function stampOf(ws: FeedbackWs): PresenceUser {
+  if (ws.data.presenceUser) return ws.data.presenceUser;
+  const st = state(ws);
+  st.fallbackStamp ??= guestPresenceUser(newSocketSeed(), null);
+  return st.fallbackStamp;
+}
+
+/**
+ * Whether a client id belongs to someone other than `ws`: the server's own
+ * awareness, or a client id another open socket introduced first.
+ */
+function foreignTo(doc: LiveDoc, ws: FeedbackWs): (clientId: number) => boolean {
+  return (clientId) => {
+    if (clientId === doc.awareness.clientID) return true;
+    for (const peer of doc.conns) {
+      if (peer !== ws && state(peer).knownClientIds.has(clientId)) return true;
+    }
+    return false;
+  };
 }
 
 /**
@@ -260,7 +293,14 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
         return;
       }
       case MSG_AWARENESS: {
-        const payload = decoding.readVarUint8Array(dec);
+        // The server sets the name: every state gets this socket's stamp, and
+        // an entry for another socket's client id or the server's own is
+        // dropped (`presence-identity.ts`).
+        const payload = stampAwarenessUpdate(decoding.readVarUint8Array(dec), {
+          stamp: stampOf(ws),
+          isForeign: foreignTo(doc, ws),
+        });
+        if (payload === null) return;
         // Track which client IDs this ws is contributing so disconnect only
         // removes *their* awareness states, not every peer's.
         const before = new Set(doc.awareness.getStates().keys());

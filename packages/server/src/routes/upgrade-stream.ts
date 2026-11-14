@@ -43,6 +43,7 @@
  */
 import type { DocType, User } from '@claude-workspaces/core';
 import { APP_VOICE_TOKEN_PARAM, APP_VOICE_VERB } from '@claude-workspaces/core/app-voice';
+import { ownerDisplayNames, ownerIdentityIds } from '../actor-identity.ts';
 import {
   type AgentWatches,
   SHARED_AGENT_IDS,
@@ -62,6 +63,7 @@ import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
+import { type PresenceUser, newSocketSeed, presenceUserFor } from '../presence-identity.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
@@ -167,7 +169,25 @@ export interface UpgradeStreamContext {
   offBoxView: (
     payload: { event: string } & Record<string, unknown>,
   ) => { event: string } | undefined;
+  /** Who a presence socket is when it proved nobody on a deployment that
+   *  lets it write (the owner), and whether a proven id is an agent's.
+   *  Absent in a test's fake context: the owner registry, and no agents. */
+  presenceRoster?: PresenceRoster;
 }
+
+/** The roster reads `presenceUserFor` needs (`presence-identity.ts`). */
+export interface PresenceRoster {
+  owner: () => { id: string; name: string };
+  isAgent: (id: string) => boolean;
+}
+
+const REGISTRY_ROSTER: PresenceRoster = {
+  owner: () => ({
+    id: ownerIdentityIds().at(-1) ?? 'owner',
+    name: ownerDisplayNames()[0] ?? 'Owner',
+  }),
+  isAgent: () => false,
+};
 
 /** The address this request is asking about, and what admission proved. */
 export interface UpgradeStreamRequest {
@@ -267,6 +287,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     frameOrigin,
     offBoxView,
   } = ctx;
+  const roster = ctx.presenceRoster ?? REGISTRY_ROSTER;
 
   /** Whether this stream leaves the machine: through the tunnel, or to a
    *  socket peer that is not loopback. */
@@ -354,6 +375,19 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     // passed the origin rule, and the cookie beside it did not.
     const socketOwnerProven = (): boolean =>
       !crossOriginCredentials(req.headers, policyFor(req)) && ownerProven();
+    // Who every peer sees this socket's presence as: never what the page
+    // announces (`presence-identity.ts`).
+    const presenceUser = (readOnly: boolean): PresenceUser =>
+      presenceUserFor({
+        proven: socketAuthor(),
+        isAgent: roster.isAgent,
+        shareKey: visitor
+          ? (visitorShareId ?? visitorMemberKey ?? visitor.workspaceId ?? '')
+          : null,
+        readOnly,
+        owner: roster.owner,
+        socketSeed: newSocketSeed(),
+      });
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
@@ -603,6 +637,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
             ...(presenceOnly ? { presenceOnly: true } : {}),
+            presenceUser: presenceUser(roomReadOnly),
             ...(socketOwnerProven()
               ? { personProof: 'owner' as const }
               : socketAuthor()
@@ -699,6 +734,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(readOnly ? { readOnly: true } : {}),
             ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
             ...(editor ? { editor } : {}),
+            presenceUser: presenceUser(readOnly),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

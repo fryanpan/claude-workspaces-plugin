@@ -16,13 +16,19 @@ export interface RoomPage {
   ydoc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
   ready: Promise<void>;
+  /** Send a raw frame, for a page that does not play by the protocol. */
+  send(frame: Uint8Array): void;
   close(): void;
 }
 
-export function joinRoom(url: string, origin: string): RoomPage {
+export function joinRoom(
+  url: string,
+  origin: string,
+  headers: Record<string, string> = {},
+): RoomPage {
   const ydoc = new Y.Doc();
   const awareness = new awarenessProtocol.Awareness(ydoc);
-  const ws = new WebSocket(url, { headers: { origin } } as unknown as string[]);
+  const ws = new WebSocket(url, { headers: { origin, ...headers } } as unknown as string[]);
   ws.binaryType = 'arraybuffer';
   let synced: () => void = () => {};
   const ready = new Promise<void>((r) => {
@@ -62,7 +68,7 @@ export function joinRoom(url: string, origin: string): RoomPage {
     if (encoding.length(enc) > 1) ws.send(encoding.toUint8Array(enc));
     if (type === syncProtocol.messageYjsSyncStep2) synced();
   });
-  return { ydoc, awareness, ready, close: () => ws.close() };
+  return { ydoc, awareness, ready, send: (frame) => ws.send(frame), close: () => ws.close() };
 }
 
 /** Every frame an agent's board stream is sent, in order. */

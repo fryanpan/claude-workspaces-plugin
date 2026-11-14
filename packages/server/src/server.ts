@@ -2353,6 +2353,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
+    // Who an unproven writable presence socket is (the owner, on a
+    // deployment that needs no sign-in), and which proven ids are agents.
+    presenceRoster: {
+      owner: () => {
+        const id = ownerIdentityIds().at(-1) ?? 'owner';
+        return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
+      },
+      isAgent: (id) => identities.get(id)?.kind === 'agent',
+    },
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
     offBoxView: (payload) =>

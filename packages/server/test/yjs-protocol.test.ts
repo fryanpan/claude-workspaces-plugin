@@ -252,12 +252,14 @@ describe('onMessage — a read-only socket may read and may not write', () => {
 });
 
 describe('onMessage — awareness', () => {
-  it('applies a peer’s presence into the doc', () => {
+  it('applies a peer’s presence into the doc, under the name the server set', () => {
     const r = doc();
     const a = socket();
     onOpen(r, a.ws);
     onMessage(r, a.ws, awarenessFrame(4242, 'Alice'));
-    expect(r.awareness.getStates().get(4242)).toEqual({ user: { name: 'Alice' } });
+    // A socket its upgrade stamped nothing on is a guest, whatever it typed.
+    const user = (r.awareness.getStates().get(4242) as { user?: { name?: string } }).user;
+    expect(user?.name).toMatch(/^Guest /);
   });
 
   it('broadcasts presence to the other peers but not to its origin', () => {
