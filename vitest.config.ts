@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { defineConfig } from 'vitest/config';
 import { BrowserFirstSequencer } from './scripts/vitest-sequencer.ts';
 
@@ -19,9 +20,30 @@ const testFilesIn = (pkg: string) => [
   `packages/${pkg}/src/**/*.test.{ts,tsx}`,
 ];
 
+// `core/plot-chart.ts` imports Plot from the esm.sh address a doc build
+// accepts. Here it is the copy workspaces-app installs, the same version, as
+// a site's bundler maps it (templates/astro-chart/astro.config.mjs).
+const PLOT_FROM_ESM_SH = 'https://esm.sh/@observablehq/plot@0.6.17';
+const installedPlot = createRequire(
+  new URL('./packages/workspaces-app/package.json', import.meta.url),
+).resolve('@observablehq/plot');
+
 const EXCLUDE = ['packages/server/test/**', 'node_modules/**', 'dist/**'];
 
 export default defineConfig({
+  // The address is rewritten in the importing source, not resolved: vitest's
+  // module runner hands an `https://` import to Node as an external URL
+  // before `resolve.alias` or a plugin's `resolveId` sees it.
+  plugins: [
+    {
+      name: 'plot-from-esm-sh',
+      enforce: 'pre',
+      transform: (code: string) =>
+        code.includes(PLOT_FROM_ESM_SH)
+          ? code.replaceAll(`'${PLOT_FROM_ESM_SH}'`, JSON.stringify(installedPlot))
+          : null,
+    },
+  ],
   // Preact JSX for .tsx files (mirrors jsx/jsxImportSource in tsconfig.base.json).
   esbuild: { jsx: 'automatic', jsxImportSource: 'preact' },
   test: {

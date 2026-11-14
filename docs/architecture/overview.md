@@ -2659,6 +2659,17 @@ each open doc (a `doc-*.ts` the diagram draws), and `routes/doc-components.ts`
 serves a bundle. On the client, `mdx-component.ts` mounts the bundle in the
 `mdx-flow` node view. None of them changes the picture.
 
+Two more core modules serve the components a site shares with a doc, and
+neither changes the picture. `plot-chart.ts` is the library chart: one
+component file over `plot-spec.mjs` that a doc builds from the pair copied
+side by side, and an Astro page imports as it is. It imports Plot from
+esm.sh at an exact version, which a doc build accepts; `esm-sh-plot.d.ts`
+types that address, and vitest and a site's bundler map it to the installed
+copy. `component-snapshot.ts` is the host wrapper for a page that is not a
+doc: a state hook over a JSON snapshot, whose writes stay on the page.
+`templates/astro-chart` is the Astro page that proves the chart runs there
+unchanged.
+
 `prose-math.ts` joins the same tier and does not move the picture. It is the
 grammar of a remark-math equation — `$x$` inline, `$$` … `$$` on lines of
 their own — measured against remark-math 6, with two places where it reads
