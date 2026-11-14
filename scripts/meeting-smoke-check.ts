@@ -573,7 +573,7 @@ async function run(o: Options): Promise<number> {
     //    newest thing said (or, on this recording tab, the words still being
     //    heard), so it must carry words of the script rather than its first
     //    sentence, which later lines have replaced.
-    const vocabulary = [...new Set(SCRIPT.flatMap((t) => words(t.settled)))];
+    const vocabulary = [...new Set(SCRIPT.flatMap((t) => words(t.settled ?? '')))];
     await until(
       cdp,
       `(() => { const row = ${LAYER}.querySelector('.lc-notes .lc-line');
