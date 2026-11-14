@@ -5,7 +5,7 @@
  * derived from it, the three gitignored configs and (when given) the Fly
  * token to GitHub Actions (README.md, "CI's credentials").
  *
- *   CLOUDFLARE_API_TOKEN  a token that can make tokens (User > API Tokens > Edit)
+ *   CLOUDFLARE_API_TOKEN  a token that can make account tokens (Account API Tokens Edit)
  *   GITHUB_TOKEN          a classic token with repo scope, which writing
  *                         Actions secrets needs
  *   FLY_API_TOKEN         optional: written to the environment's FLY_API_TOKEN

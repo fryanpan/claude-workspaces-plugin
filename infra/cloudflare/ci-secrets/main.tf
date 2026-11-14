@@ -7,7 +7,8 @@
 #
 # The Cloudflare provider reads CLOUDFLARE_API_TOKEN and the GitHub provider
 # GITHUB_TOKEN, both from the environment. The Cloudflare token must be able
-# to make tokens (User > API Tokens > Edit).
+# to make account-owned tokens (Account API Tokens Edit). The deploy token is
+# account-owned too, so it outlives any one person's login.
 
 provider "cloudflare" {}
 
@@ -71,20 +72,22 @@ locals {
 }
 
 # Read from Cloudflare unless var.permission_groups gives the list.
-data "cloudflare_api_token_permission_groups_list" "all" {
-  count     = var.permission_groups == null ? 1 : 0
-  max_items = 1000
+data "cloudflare_account_api_token_permission_groups_list" "all" {
+  count      = var.permission_groups == null ? 1 : 0
+  account_id = var.account_id
+  max_items  = 1000
 }
 
 locals {
   groups = var.permission_groups != null ? var.permission_groups : [
-    for g in data.cloudflare_api_token_permission_groups_list.all[0].result :
+    for g in data.cloudflare_account_api_token_permission_groups_list.all[0].result :
     { id = g.id, name = g.name, scopes = g.scopes }
   ]
 }
 
-resource "cloudflare_api_token" "ci_deploy" {
-  name = var.token_name
+resource "cloudflare_account_token" "ci_deploy" {
+  account_id = var.account_id
+  name       = var.token_name
 
   policies = [
     for kind in ["account", "zone", "bucket"] : {
@@ -108,19 +111,19 @@ resource "cloudflare_api_token" "ci_deploy" {
     # in-place update that lost it would write empty secrets.
     postcondition {
       condition     = self.value != null && self.value != ""
-      error_message = "The token has no value in the state; nothing more was written. Replace it on purpose: terraform apply -replace=cloudflare_api_token.ci_deploy (through cf:ci-secrets, with --drop)."
+      error_message = "The token has no value in the state; nothing more was written. Replace it on purpose: terraform apply -replace=cloudflare_account_token.ci_deploy (through cf:ci-secrets, with --drop)."
     }
   }
 }
 
 locals {
   # The state bucket's S3 key, from the token.
-  r2_access_key_id     = cloudflare_api_token.ci_deploy.id
-  r2_secret_access_key = sha256(cloudflare_api_token.ci_deploy.value)
+  r2_access_key_id     = cloudflare_account_token.ci_deploy.id
+  r2_secret_access_key = sha256(cloudflare_account_token.ci_deploy.value)
 
   environment_secrets = merge(
     {
-      CLOUDFLARE_API_TOKEN = cloudflare_api_token.ci_deploy.value
+      CLOUDFLARE_API_TOKEN = cloudflare_account_token.ci_deploy.value
       R2_ACCESS_KEY_ID     = local.r2_access_key_id
       R2_SECRET_ACCESS_KEY = local.r2_secret_access_key
     },
