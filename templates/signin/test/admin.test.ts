@@ -65,6 +65,17 @@ describe('registering a user', () => {
     expect(await exists('riverbend4@example.com')).toBe(false);
   });
 
+  it("an admin's key without the users:create permission cannot", async () => {
+    // The key an admin makes through Better Auth's own route carries no
+    // permissions; only /api/agent-keys grants users:create.
+    const unscoped = await admin.post('/api/auth/api-key/create', { name: 'read-only' });
+    expect(unscoped.status).toBe(200);
+    const { key } = (await unscoped.json()) as { key: string };
+    const res = await h.client().post('/api/users', newUser(8), { headers: { 'x-api-key': key } });
+    expect(res.status).toBe(403);
+    expect(await exists('riverbend8@example.com')).toBe(false);
+  });
+
   it('a plain user cannot grant the permission to their own key', async () => {
     const res = await plain.post('/api/auth/api-key/create', {
       name: 'sneaky',

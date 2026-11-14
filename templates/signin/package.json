@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "wrangler dev --local",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "test": "vitest run --root ../.. templates/signin"
+    "db:auth-sql": "bun scripts/auth-schema-sql.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.22",
@@ -15,6 +17,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261113.1",
+    "@types/node": "22.19.17",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
     "wrangler": "4.161.0"
   }
 }
