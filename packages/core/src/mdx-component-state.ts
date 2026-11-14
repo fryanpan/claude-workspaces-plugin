@@ -21,21 +21,28 @@
  * as data (design "Trust model").
  */
 import * as Y from 'yjs';
+import {
+  type PlainOp as Op,
+  STATE_LIMITS,
+  applyPlain,
+  byteLength,
+  componentSizeRefusal,
+  isContainer,
+  kb,
+  opRefusal,
+  rateRefusal,
+  recentWrites,
+  segments,
+} from './component-state-rules.ts';
 import type { StateHook, StatePath, StateWrite } from './mdx-component-runtime.ts';
 
 export type { StateHook, StatePath, StateWrite };
+export { STATE_LIMITS };
 
 export const COMPONENT_STATE_PREFIX = 'component-state:';
 
 /** A component id: the existing block-name pattern. */
 export const COMPONENT_STATE_ID = /^[a-z0-9-]{1,64}$/;
-
-export const STATE_LIMITS = {
-  instanceBytes: 256 * 1024,
-  docBytes: 2 * 1024 * 1024,
-  depth: 8,
-  writesPerSecond: 20,
-} as const;
 
 export function componentStateMap(ydoc: Y.Doc, id: string): Y.Map<unknown> {
   return ydoc.getMap(COMPONENT_STATE_PREFIX + id);
@@ -74,8 +81,6 @@ export interface OwnedStateHook extends StateHook {
  *  two tags with one id spend one budget. */
 const writeTimes = new WeakMap<Y.Doc, Map<string, number[]>>();
 
-type Op = { kind: 'set'; value: unknown } | { kind: 'push'; value: unknown } | { kind: 'delete' };
-
 export function createStateHook(ydoc: Y.Doc, id: string, opts: StateHookOptions): OwnedStateHook {
   const root = componentStateMap(ydoc, id);
   const now = opts.now ?? (() => Date.now());
@@ -88,7 +93,7 @@ export function createStateHook(ydoc: Y.Doc, id: string, opts: StateHookOptions)
       );
     }
     const segs = segments(path);
-    const bad = checkOp(segs, op);
+    const bad = opRefusal(segs, op);
     if (bad) return refuse(bad);
     let next: unknown;
     try {
@@ -172,7 +177,7 @@ export function applyStateOps(
   for (const [i, raw] of ops.entries()) {
     const parsed = parseOp(raw, i);
     if (typeof parsed === 'string') return refuse(parsed);
-    const bad = checkOp(parsed.segs, parsed.op);
+    const bad = opRefusal(parsed.segs, parsed.op);
     if (bad) return refuse(`ops[${i}]: ${bad}`);
     // The plain copy gets a copy of the value: a later op in the batch
     // changes the copy in place, and must not change what this op writes.
@@ -212,23 +217,11 @@ function parseOp(raw: unknown, i: number): { segs: string[]; op: Op } | string {
   return `ops[${i}].op must be "set", "push" or "delete".`;
 }
 
-/** Why `op` at `segs` is refused before it is tried, or null. */
-function checkOp(segs: string[], op: Op): string | null {
-  const where = segs.join('.') || '(the whole state)';
-  if (segs.includes('__proto__')) return `State has no key "__proto__" (at "${where}").`;
-  return op.kind === 'delete' ? null : notJson(op.value, where);
-}
-
 /** Why `next` as component `id`'s state is past a size limit, or null. */
 function overLimit(ydoc: Y.Doc, id: string, next: unknown): string | null {
-  const depth = depthOf(next);
-  if (depth > STATE_LIMITS.depth) {
-    return `Component "${id}" state would be nested ${depth} levels deep, over the limit of ${STATE_LIMITS.depth}.`;
-  }
+  const over = componentSizeRefusal(id, next);
+  if (over) return over;
   const bytes = byteLength(next);
-  if (bytes > STATE_LIMITS.instanceBytes) {
-    return `Component "${id}" state would be ${kb(bytes)} KB, over the 256 KB limit for one component. Keep large data in a file the component imports.`;
-  }
   let total = bytes;
   for (const other of componentStateIds(ydoc)) {
     if (other !== id) total += byteLength(readComponentState(ydoc, other));
@@ -243,10 +236,11 @@ function overLimit(ydoc: Y.Doc, id: string, next: unknown): string | null {
 function spendWrite(ydoc: Y.Doc, id: string, t: number): string | null {
   const perDoc = writeTimes.get(ydoc) ?? new Map<string, number[]>();
   writeTimes.set(ydoc, perDoc);
-  const recent = (perDoc.get(id) ?? []).filter((at) => t - at < 1000);
-  if (recent.length >= STATE_LIMITS.writesPerSecond) {
+  const recent = recentWrites(perDoc.get(id) ?? [], t);
+  const tooFast = rateRefusal(recent, id);
+  if (tooFast) {
     perDoc.set(id, recent);
-    return `Component "${id}" wrote more than ${STATE_LIMITS.writesPerSecond} times a second, so this write was refused. Write a drag's position when it ends, or at most every 50 ms.`;
+    return tooFast;
   }
   recent.push(t);
   perDoc.set(id, recent);
@@ -254,109 +248,6 @@ function spendWrite(ydoc: Y.Doc, id: string, t: number): string | null {
 }
 
 const refuse = (error: string): StateWrite => ({ ok: false, error });
-
-function segments(path: StatePath): string[] {
-  const parts = typeof path === 'string' ? (path === '' ? [] : path.split('.')) : [...path];
-  return parts.map(String);
-}
-
-const kb = (bytes: number) => Math.ceil(bytes / 1024);
-
-function byteLength(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value)).length;
-}
-
-function depthOf(value: unknown): number {
-  if (value === null || typeof value !== 'object') return 0;
-  let deepest = 0;
-  for (const v of Object.values(value)) deepest = Math.max(deepest, depthOf(v));
-  return 1 + deepest;
-}
-
-/** Why `value` is not JSON, or null when it is. */
-function notJson(value: unknown, where: string): string | null {
-  const why = (what: string) =>
-    `State holds JSON only: ${what} at "${where}" is not a string, number, boolean, null, array or plain object.`;
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return null;
-  if (typeof value === 'number') return Number.isFinite(value) ? null : why(String(value));
-  if (Array.isArray(value)) {
-    for (const [i, v] of value.entries()) {
-      const bad = notJson(v, `${where}.${i}`);
-      if (bad) return bad;
-    }
-    return null;
-  }
-  if (typeof value === 'object') {
-    const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) return why(`a ${proto?.constructor?.name}`);
-    for (const [k, v] of Object.entries(value)) {
-      if (k === '__proto__') return `State has no key "__proto__" (at "${where}").`;
-      const bad = notJson(v, `${where}.${k}`);
-      if (bad) return bad;
-    }
-    return null;
-  }
-  return why(value === undefined ? 'undefined' : `a ${typeof value}`);
-}
-
-type Container = Record<string, unknown> | unknown[];
-
-const isContainer = (v: unknown): v is Container => v !== null && typeof v === 'object';
-
-function indexIn(arr: { length: number }, seg: string, path: string, extend: boolean): number {
-  const i = /^\d+$/.test(seg) ? Number(seg) : -1;
-  if (i < 0 || i > arr.length || (i === arr.length && !extend)) {
-    throw new Error(`"${path}" names no item of its list.`);
-  }
-  return i;
-}
-
-/** The state `op` would leave, worked on a plain copy so a refusal changes
- *  nothing. Throws a message for a path that cannot be followed. */
-function applyPlain(state: Record<string, unknown>, segs: string[], op: Op): unknown {
-  if (segs.length === 0) {
-    if (op.kind === 'set' && isContainer(op.value) && !Array.isArray(op.value)) return op.value;
-    throw new Error('The whole state can only be set to a plain object.');
-  }
-  let at: Container = state;
-  for (let i = 0; i < segs.length - 1; i++) {
-    const seg = segs[i] as string;
-    const path = segs.slice(0, i + 1).join('.');
-    const next: unknown = Array.isArray(at)
-      ? at[indexIn(at, seg, path, false)]
-      : Object.hasOwn(at, seg)
-        ? (at as Record<string, unknown>)[seg]
-        : undefined;
-    if (next === undefined && op.kind === 'delete') return state;
-    if (next === undefined && !Array.isArray(at)) {
-      const made: Record<string, unknown> = {};
-      (at as Record<string, unknown>)[seg] = made;
-      at = made;
-      continue;
-    }
-    if (!isContainer(next))
-      throw new Error(`"${path}" holds no keys, so "${segs.join('.')}" cannot be reached.`);
-    at = next;
-  }
-  const last = segs[segs.length - 1] as string;
-  const path = segs.join('.');
-  if (op.kind === 'push') {
-    const cur = Array.isArray(at)
-      ? at[indexIn(at, last, path, false)]
-      : Object.hasOwn(at, last)
-        ? at[last]
-        : undefined;
-    if (cur === undefined && !Array.isArray(at)) at[last] = [op.value];
-    else if (Array.isArray(cur)) cur.push(op.value);
-    else throw new Error(`"${path}" is not a list, so nothing can be pushed onto it.`);
-  } else if (Array.isArray(at)) {
-    const i = indexIn(at, last, path, op.kind === 'set');
-    if (op.kind === 'set') at[i] = op.value;
-    else at.splice(i, 1);
-  } else if (op.kind === 'set') at[last] = op.value;
-  else delete at[last];
-  return state;
-}
 
 function toY(value: unknown): unknown {
   if (Array.isArray(value)) {

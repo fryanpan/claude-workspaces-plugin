@@ -1,0 +1,14 @@
+{
+  "name": "astro-chart-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@claude-workspaces/core": "workspace:*",
+    "@observablehq/plot": "0.6.17",
+    "astro": "7.4.12"
+  },
+  "scripts": {
+    "build": "astro build"
+  }
+}
