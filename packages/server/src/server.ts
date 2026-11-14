@@ -2340,7 +2340,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     redirectTo,
     withReviewUrl,
     landingReview: async () => {
-      await crossReview.prepare();
       const q = await crossReview.queue();
       // Fire and forget: the page shows what is stored, and a sentence that
       // arrives now is on the next load. Each refresh declines unless due.
