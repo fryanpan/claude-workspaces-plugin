@@ -129,10 +129,19 @@ export function mdxFlowNodeView(
       drawComponent();
       view.dataset.kind = 'component';
       wrapper.dataset.kind = 'component';
+      wrapper.classList.remove('has-chart');
+      error.hidden = true;
+      error.textContent = '';
       return;
     }
     if (component?.host.parentNode === view) view.replaceChildren();
-    const kept = drewChart(summary) ? [...view.childNodes] : null;
+    // A broken chart keeps the last one that drew only while it is still a
+    // chart: the reader is typing in it, or the tag still names a chart.
+    // ProseMirror hands one view a different block when a rewrite moves the
+    // doc's blocks, and an import or a component that lands there is not a
+    // chart that broke.
+    const keep = drewChart(summary) && (editing() || isChartTag(next));
+    const kept = keep ? [...view.childNodes] : null;
     drawnAt = view.clientWidth;
     const failed = drawInto(view, next, drawnAt);
     if (failed && kept) {
