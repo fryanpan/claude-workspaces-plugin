@@ -102,13 +102,13 @@ describe('the at3 agent grant over the real server', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('mints only for an agent whose person is on the board, at or below their role', async () => {
+  it('mints only for an agent whose person is on the board, and never the owner role', async () => {
     const noPerson = await mint({ agentId: B1 });
     expect(noPerson.status).toBe(400);
     expect(await noPerson.json()).toMatchObject({ error: 'agent_has_no_person' });
     const above = await mint({ agentId: A1, role: 'owner' });
     expect(above.status).toBe(400);
-    expect(await above.json()).toMatchObject({ error: 'role_above_person' });
+    expect(await above.json()).toMatchObject({ error: 'owner_not_grantable' });
     const offBoard = await mint({ agentId: A1, boardId: other });
     expect(offBoard.status).toBe(400);
     expect(await offBoard.json()).toMatchObject({ error: 'person_not_on_board' });

@@ -31,7 +31,7 @@ import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
 import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
-import { localOnlyPlacesFrom, offBoxAskView } from './ask-feed.ts';
+import { localOnlyPlacesFrom, offBoxAddressedView, offBoxAskView } from './ask-feed.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
@@ -2436,13 +2436,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     presenceRoster,
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
-    offBoxView: (payload) =>
-      offBoxAskView(
-        payload,
-        (ask) =>
-          localOnlyPlaces.board(ask.workspaceId) ||
-          (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
-      ),
+    offBoxView: (payload) => {
+      const addressed = offBoxAddressedView(payload, localOnlyPlaces);
+      return addressed
+        ? offBoxAskView(
+            addressed,
+            (ask) =>
+              localOnlyPlaces.board(ask.workspaceId) ||
+              (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
+          )
+        : undefined;
+    },
   });
   /**
    * What the operator routes read instead of this closure's scope. Built

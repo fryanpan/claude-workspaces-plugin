@@ -99,9 +99,21 @@ describe('minting an at3', () => {
     expect(w.tokens.mint(A1, 'w-salt', '')).toEqual({ ok: false, error: 'person_not_on_board' });
     expect(w.tokens.mint(A1, BOARD, '', 'owner')).toEqual({
       ok: false,
-      error: 'role_above_person',
+      error: 'owner_not_grantable',
     });
     expect(w.tokens.list()).toEqual([]);
+  });
+
+  it("refuses the owner role even to an owner's own agent", () => {
+    const w = world();
+    w.roles.set(`${BOARD}:${ALICE}`, 'owner');
+    expect(w.tokens.mint(A1, BOARD, '', 'owner')).toEqual({
+      ok: false,
+      error: 'owner_not_grantable',
+    });
+    expect(w.tokens.list()).toEqual([]);
+    // Positive control: the same agent gets a member grant.
+    expect(minted(w).record.role).toBe('member');
   });
 });
 

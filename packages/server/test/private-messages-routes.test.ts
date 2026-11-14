@@ -7,10 +7,12 @@
  * with the session cookie the server's own sign-in sets.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { commentQueuePath } from '../src/agent-comment-queue.ts';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
+import { mintBoardWidgetToken, widgetTokenKey } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import { type Frame, listenFrames } from './doc-activity-stall-harness.ts';
@@ -141,6 +143,8 @@ describe('private messages between a person and their own agent', () => {
       .listQueuedComments(ws)
       .filter((r) => r.event === 'private.message' && r.text === 'A1, private one');
     expect(rows.map((r) => r.agentId)).toEqual([A1]);
+    // The row holds the message's words, so its file is the owner's alone.
+    expect(statSync(commentQueuePath(dataDir, ws)).mode & 0o777).toBe(0o600);
   });
 
   it("Bob's read never returns Alice's log, whatever the query names", async () => {
@@ -187,6 +191,41 @@ describe('private messages between a person and their own agent', () => {
       expect([401, 403]).toContain(res.status);
     }
     expect((await read(alice)).messages.map((m) => m.text)).not.toContain('as the agent');
+  });
+
+  it("opens a person's own stream on their cookie alone: never a widget or agent token", async () => {
+    const stream = (headers: Record<string, string>) =>
+      fetch(`${base}/workspaces/${ws}/me/events:stream`, { headers: { ...SSE, ...headers } });
+    // Alice's widget token for this board, from this server's own page: a
+    // script on any page running the widget holds one like it.
+    const wt2 = mintBoardWidgetToken(
+      // Session-bound, as the widget's own mint issues it.
+      { identityId: alice.user.id, workspaceId: ws, origin: base, sessionId: 'sess-harborlight' },
+      widgetTokenKey(loadCookieKey(dataDir)),
+    );
+    const widget = { origin: base, authorization: `Bearer ${wt2}` };
+    // The token stands on its own: it opens the board's stream.
+    const board = await fetch(`${base}/workspaces/${ws}/events:stream`, {
+      headers: { ...SSE, ...widget },
+    });
+    expect(board.status).toBe(200);
+    await board.body?.cancel();
+    const { token: at2 } = handle.boardTokens.mintHeld(A1, ws);
+    const refused = [
+      await stream(widget),
+      // The cookie beside a token does not rescue it: the request carries a
+      // credential a host page can hold.
+      await stream({ ...alice.headers, authorization: `Bearer ${wt2}` }),
+      await stream({ authorization: `Bearer ${at2}` }),
+    ];
+    for (const res of refused) {
+      expect([401, 403]).toContain(res.status);
+      await res.body?.cancel();
+    }
+    // Positive control: the same person's cookie opens it.
+    const mine = await stream(alice.headers);
+    expect(mine.status).toBe(200);
+    await mine.body?.cancel();
   });
 
   it('lets A1 reply with the board token the server holds for it', async () => {

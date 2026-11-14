@@ -57,6 +57,7 @@ import { authorizeAgentCaller } from '../auth/agent-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { SocketEditor } from '../edit-sessions.ts';
 import { currentEventOrigin } from '../event-origin.ts';
+import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { crossOriginCredentials, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
@@ -218,6 +219,12 @@ export interface UpgradeStreamRequest {
    *  person. A token is bound to the page origin it was minted for, so it is
    *  the credential a widget on another origin brings, where a cookie is not. */
   widgetTokenProved: boolean;
+  /** The person this request's cookie or Access assertion proved, or null.
+   *  Never a widget token, an agent token or a body: the person-level stream
+   *  opens on this alone. Absent: nobody. */
+  personProof?: () => IdentityRecord | null;
+  /** Whether an agent's board token (`at2`/`at3`) admitted this request. */
+  boardAgent?: boolean;
   /** The Access address of a visitor admitted as a board member, or null:
    *  the same value an app's write is judged by (`appWriteRefusal`). */
   appMember?: string | null;
@@ -345,6 +352,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     widgetDoorGrant,
     widgetTokenProved,
     appMember,
+    personProof,
+    boardAgent,
   }: UpgradeStreamRequest): StreamOutcome => {
     // A page on another origin sends the reader's cookie with every socket it
     // opens: a dev server on another port is same-site, and a handshake has
@@ -814,15 +823,29 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         if (taskStore.getWorkspace(meEventsMatch.workspaceId) === undefined) {
           return j(404, { error: 'workspace not found' });
         }
-        const me = socketAuthor();
-        if (!me || roster.isAgent(me.id)) {
+        // The person's own proof and nothing else: this channel spans every
+        // board, so a widget token (one board, readable by any script on its
+        // host page) or an agent's token must never open it. A request that
+        // carries one is refused outright, and so is a cookie sent from
+        // another origin.
+        if (
+          boardAgent ||
+          widgetTokenProved ||
+          widgetDoorGrant !== null ||
+          req.headers.has('authorization') ||
+          crossOriginCredentials(req.headers, policyFor(req))
+        ) {
+          return j(403, { error: 'person_proof_required' });
+        }
+        const me = personProof?.() ?? null;
+        if (!me || me.kind !== 'person') {
           return j(401, { error: 'person_proof_required' });
         }
         return openSseStream(
           sse,
           `person~${me.id}`,
           visitorShareId ?? undefined,
-          undefined,
+          offBox(req) ? offBoxView : undefined,
           undefined,
           sseLastEventId(req, url),
           visitorMemberKey ?? undefined,

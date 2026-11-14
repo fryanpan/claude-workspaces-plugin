@@ -138,7 +138,14 @@ export interface AgentGrantDeps {
 
 export type AgentGrantMint =
   | { ok: true; record: AgentGrantRecord; token: string; expiresAt: number }
-  | { ok: false; error: 'agent_has_no_person' | 'person_not_on_board' | 'role_above_person' };
+  | {
+      ok: false;
+      error:
+        | 'owner_not_grantable'
+        | 'agent_has_no_person'
+        | 'person_not_on_board'
+        | 'role_above_person';
+    };
 
 export class AgentGrantTokens {
   private records: AgentGrantRecord[] | null = null;
@@ -165,6 +172,9 @@ export class AgentGrantTokens {
   ): AgentGrantMint {
     if (!AGENT_ID.test(agentId)) throw new Error('bad agentId');
     if (!BOARD_ID.test(boardId)) throw new Error('bad boardId');
+    // An agent never holds a board's owner role, even its owner's agent:
+    // owner verbs (sharing, roles, deleting the board) stay with a person.
+    if (role === 'owner') return { ok: false, error: 'owner_not_grantable' };
     const personId = this.deps.personOfAgent(agentId);
     if (personId === null || !this.deps.personActive(personId)) {
       return { ok: false, error: 'agent_has_no_person' };
@@ -269,7 +279,7 @@ export class AgentGrantTokens {
     if (!this.deps.personActive(r.personId)) return false;
     if (this.deps.personOfAgent(r.agentId) !== r.personId) return false;
     const held = this.deps.roleOf(r.boardId, r.personId);
-    return held !== null && RANK[r.role] <= RANK[held];
+    return held !== null && r.role !== 'owner' && RANK[r.role] <= RANK[held];
   }
 
   private sign(r: AgentGrantRecord): { token: string; expiresAt: number } {
