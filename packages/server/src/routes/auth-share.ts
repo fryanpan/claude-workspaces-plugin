@@ -17,6 +17,7 @@ import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import type { PersonAgentLinks } from '../person-agent-link.ts';
 /**
  * The sign-in, session and share-link REST block, in the order it is matched.
  *
@@ -55,6 +56,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
 import { BOARD_LOCK_PATH, handleBoardLock } from './board-lock.ts';
+import { handleProfile } from './person-profile.ts';
 import { handleShareSwitch, provedOwner } from './share-switch.ts';
 
 /**
@@ -228,6 +230,10 @@ export interface AuthShareRoutesContext {
   policyFor: (req: Request) => OriginPolicy;
   /** The identity a request's session cookie attests to, or null. */
   sessionIdentityFor: (req: Request) => IdentityRecord | null;
+  /** Each person's lead agent (`person-agent-link.ts`). */
+  personAgentLinks: PersonAgentLinks;
+  /** Tells every open page a person's new name (`yjs-protocol.ts`). */
+  onPersonRenamed: (personId: string, name: string) => void;
 }
 
 /** What only this request knows. */
@@ -593,18 +599,7 @@ export async function handleAuthShareRoutes(
   }
 
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
-    // The one write the sign-in flow makes about a person: their chosen
-    // display name. Session-gated, and ONLY the session decides whose —
-    // the body names no identity, so nobody can rename somebody else by
-    // claiming to be them.
-    const rec = sessionIdentityFor(req);
-    if (!rec) return j(401, { error: 'not_signed_in' });
-    const body = await safeJson(req);
-    const displayName = typeof body?.displayName === 'string' ? body.displayName.trim() : '';
-    if (!displayName) return j(400, { error: 'invalid_display_name' });
-    const updated = identities.setDisplayName(rec.id, displayName);
-    if (!updated) return j(401, { error: 'not_signed_in' });
-    return j(200, { ok: true, user: userForIdentity(updated) });
+    return handleProfile(ctx, req, provenIdentityFor);
   }
 
   // --- REST: shares ---

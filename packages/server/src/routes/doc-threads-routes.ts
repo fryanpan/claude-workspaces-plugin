@@ -16,6 +16,7 @@
  * is used by all three route groups and nowhere else.
  */
 import {
+  type Addressee,
   type Anchor,
   type PageEdit,
   type ReviewPayload,
@@ -209,6 +210,7 @@ export async function handleDocThreadRoutes(
     j,
     safeJson,
     resolveWorkspaceForDoc,
+    addresseesFor,
     threadUrl,
     judgeThreadReview,
     announceThreadReview,
@@ -227,6 +229,14 @@ export async function handleDocThreadRoutes(
    *  measurement rows leave `taskId` off rather than empty. */
   const rowOfDoc = taskIdOfBodyDoc(docId);
   const viaOpt = via ? { via } : {};
+  /** The body's `to`, resolved; a refusal is the 400 to answer with. */
+  const addressedOpt = (
+    to: unknown,
+  ): { opt: { addressedTo?: Addressee[] } } | { refusal: Response } => {
+    const got = addresseesFor(docId, to);
+    if (!got.ok) return { refusal: j(400, { error: got.error, message: got.message }) };
+    return { opt: got.addressedTo ? { addressedTo: got.addressedTo } : {} };
+  };
   /** Record a thread this request's board token opened, for the org relay.
    *  Only a real `at2`: an agent a board socket named holds no token. */
   const recordOpener = (thread: Thread | null | undefined): void => {
@@ -311,6 +321,8 @@ export async function handleDocThreadRoutes(
       if (isCategoryAuthor(user)) return refuseCategoryAuthor();
       const declared = withGoal(reviewFromBody(body?.review, text));
       if (!declared.ok) return j(400, { error: declared.error });
+      const addressed = addressedOpt(body?.to);
+      if ('refusal' in addressed) return addressed.refusal;
       // A person's plain reply IS the answer to the ask it lands on.
       //
       // Three surfaces render an Answer composer and post at
@@ -418,6 +430,7 @@ export async function handleDocThreadRoutes(
           // A share visitor must not be able to spend the API key.
           generate: !visitor,
           ...viaOpt,
+          ...addressed.opt,
           ...(declared.review ? { review: declared.review } : {}),
         });
       }
@@ -920,6 +933,8 @@ export async function handleDocThreadRoutes(
     if (voice === false) return j(400, { error: 'voice must be { clip, raw } for this doc' });
     const declared = withGoal(reviewFromBody(body?.review, text));
     if (!declared.ok) return j(400, { error: declared.error });
+    const addressed = addressedOpt(body?.to);
+    if ('refusal' in addressed) return addressed.refusal;
     // Identity for the dedup below — computed from the RAW anchor
     // (so a duplicate call matches regardless of how the
     // review-item branch below rewrites `anchor` for the eventual
@@ -934,6 +949,7 @@ export async function handleDocThreadRoutes(
       anchor,
       review: declared.review ?? null,
       authorId: user.id,
+      to: addressed.opt.addressedTo?.map((a) => a.id) ?? null,
     });
     // A retry of an already-handled request has to be caught HERE,
     // before the review-item validation below: that block refuses a
@@ -1055,6 +1071,7 @@ export async function handleDocThreadRoutes(
           ...(voice ? { voice } : {}),
           ...(pageEdits ? { pageEdits } : {}),
           ...viaOpt,
+          ...addressed.opt,
         });
         recordOpener(created);
         if (created && itemAsk?.range) {
@@ -1103,10 +1120,13 @@ export async function handleDocThreadRoutes(
     }
     const declared = withGoal(reviewFromBody(body?.review, text));
     if (!declared.ok) return j(400, { error: declared.error });
+    const addressed = addressedOpt(body?.to);
+    if ('refusal' in addressed) return addressed.refusal;
     // Visitor-authored text becomes the entire prompt on this route.
     const writeOpts = {
       generate: !visitor,
       ...(declared.review ? { review: declared.review } : {}),
+      ...addressed.opt,
     };
     // An app or a mock holds no text of its own to find: the words are the
     // page's, and the anchor is the widget's (`page-thread.ts`).

@@ -9,9 +9,6 @@ import {
   type DocTitleSource,
   type DocType,
   type ElementAnchor,
-  type LinkedReviewItem,
-  type PageEdit,
-  type PageSuggestion,
   type ReviewItemJudgement,
   type ReviewPayload,
   type Thread,
@@ -43,7 +40,12 @@ import { DiskDocStateStore } from './doc-state/disk.ts';
 import type { DocStateStore } from './doc-state/store.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
 import { DocSuggestOps, type DocSuggestPersistence } from './doc-suggest-ops.ts';
-import { type DocThreadPersistence, DocThreads } from './doc-threads.ts';
+import {
+  type DocThreadPersistence,
+  DocThreads,
+  type FindWriteOpts,
+  type PostCommentOpts,
+} from './doc-threads.ts';
 import {
   type AttachOpts,
   type FileBindingHost,
@@ -130,6 +132,7 @@ import {
 import { type BufferCounters, MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
+import type { PresenceStamp } from './presence-identity.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -222,6 +225,9 @@ export type WsCtx = {
    * decides which tabs are the owner's. Set on the board room's socket only.
    */
   personProof?: 'owner' | 'other';
+  /** Who every peer sees this socket's presence as, set by the server at
+   *  the upgrade (`presence-identity.ts`). Absent: a guest (`yjs-protocol.ts`). */
+  presenceUser?: PresenceStamp;
   /**
    * The board widget token and page origin a tailnet widget door socket was
    * admitted with. Like `shareId`: the token is checked once at the upgrade,
@@ -2661,33 +2667,7 @@ export class DocStore {
      * summary is not worth granting an outsider an outbound call. Defaults to
      * true so local editors and agents keep working unchanged.
      */
-    opts?: {
-      generate?: boolean;
-      /**
-       * The Review Item this comment DECLARES, if it declares one.
-       *
-       * Rides on the ordinary comment path rather than a store of its own,
-       * which is what makes every existing mechanism apply to it for free:
-       * threads already sync, anchor, resolve, watch and emit the events
-       * agents listen to, and a person's reply already ends the unanswered
-       * run — which is exactly how a review item leaves the queue.
-       *
-       * `postComment` is the one choke point all three reply paths funnel
-       * through (browser REST, MCP `post_reply`, widget), so this is the
-       * layer where the payload has to be accepted, not the routes above it.
-       */
-      review?: ReviewPayload;
-      /** A spoken comment's note — see `VoiceNote`. */
-      voice?: VoiceNote;
-      /** Text a reviewer changed on the page — see `PageEdit`. */
-      pageEdits?: PageEdit[];
-      /** New words an agent proposes for the page — see `PageSuggestion`. */
-      pageSuggestion?: PageSuggestion;
-      /** A review item this reply points at — see `LinkedReviewItem`. */
-      linkedItem?: LinkedReviewItem;
-      /** Sent from inside a mock page — see `WriteVia`. */
-      via?: WriteVia;
-    },
+    opts?: PostCommentOpts,
   ): Promise<Thread | null> {
     const thread = await this.docThreads.postComment(docId, threadId, author, text, anchor, opts);
     const posted = thread?.comments
@@ -2876,7 +2856,7 @@ export class DocStore {
      * — the worst of the gate's holes, because it needs no pre-existing
      * thread. Defaults to generating, like every other local caller.
      */
-    writeOpts?: { generate?: boolean; review?: ReviewPayload },
+    writeOpts?: FindWriteOpts,
   ): Promise<
     | { ok: true; thread: Thread }
     | {

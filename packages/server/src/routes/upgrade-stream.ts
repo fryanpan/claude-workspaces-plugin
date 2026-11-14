@@ -43,6 +43,7 @@
  */
 import type { DocType, User } from '@claude-workspaces/core';
 import { APP_VOICE_TOKEN_PARAM, APP_VOICE_VERB } from '@claude-workspaces/core/app-voice';
+import { ownerDisplayNames, ownerIdentityIds } from '../actor-identity.ts';
 import {
   type AgentWatches,
   SHARED_AGENT_IDS,
@@ -56,12 +57,14 @@ import { authorizeAgentCaller } from '../auth/agent-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { SocketEditor } from '../edit-sessions.ts';
 import { currentEventOrigin } from '../event-origin.ts';
+import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { crossOriginCredentials, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
+import { type PresenceRoster, type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
@@ -167,7 +170,19 @@ export interface UpgradeStreamContext {
   offBoxView: (
     payload: { event: string } & Record<string, unknown>,
   ) => { event: string } | undefined;
+  /** Who an unproven writable loopback presence socket is (the owner), which
+   *  proven ids are agents, and which names a guest may not show. Absent in
+   *  a test's fake context: the owner registry, no agents, no members. */
+  presenceRoster?: PresenceRoster;
 }
+
+const REGISTRY_ROSTER: PresenceRoster = {
+  owner: () => ({
+    id: ownerIdentityIds().at(-1) ?? 'owner',
+    name: ownerDisplayNames()[0] ?? 'Owner',
+  }),
+  isAgent: () => false,
+};
 
 /** The address this request is asking about, and what admission proved. */
 export interface UpgradeStreamRequest {
@@ -204,6 +219,12 @@ export interface UpgradeStreamRequest {
    *  person. A token is bound to the page origin it was minted for, so it is
    *  the credential a widget on another origin brings, where a cookie is not. */
   widgetTokenProved: boolean;
+  /** The person this request's cookie or Access assertion proved, or null.
+   *  Never a widget token, an agent token or a body: the person-level stream
+   *  opens on this alone. Absent: nobody. */
+  personProof?: () => IdentityRecord | null;
+  /** Whether an agent's board token (`at2`/`at3`) admitted this request. */
+  boardAgent?: boolean;
   /** The Access address of a visitor admitted as a board member, or null:
    *  the same value an app's write is judged by (`appWriteRefusal`). */
   appMember?: string | null;
@@ -267,6 +288,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     frameOrigin,
     offBoxView,
   } = ctx;
+  const roster = ctx.presenceRoster ?? REGISTRY_ROSTER;
 
   /** Whether this stream leaves the machine: through the tunnel, or to a
    *  socket peer that is not loopback. */
@@ -330,6 +352,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     widgetDoorGrant,
     widgetTokenProved,
     appMember,
+    personProof,
+    boardAgent,
   }: UpgradeStreamRequest): StreamOutcome => {
     // A page on another origin sends the reader's cookie with every socket it
     // opens: a dev server on another port is same-site, and a handshake has
@@ -354,6 +378,20 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     // passed the origin rule, and the cookie beside it did not.
     const socketOwnerProven = (): boolean =>
       !crossOriginCredentials(req.headers, policyFor(req)) && ownerProven();
+    // Who every peer sees this socket's presence as: never what the page
+    // announces (`presence-identity.ts`).
+    // The share key is the one a visitor's comments are named under
+    // (`request-attribution.ts`), so presence and comments agree.
+    const presenceUser = (readOnly: boolean): PresenceStamp =>
+      presenceUserFor({
+        proven: socketAuthor(),
+        isAgent: roster.isAgent,
+        shareKey: visitor ? (visitorShareId ?? visitor.workspaceId ?? '') : null,
+        readOnly,
+        offBox: offBox(req),
+        owner: roster.owner,
+        ...(roster.reservedName ? { reservedName: roster.reservedName } : {}),
+      });
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
@@ -603,6 +641,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
             ...(presenceOnly ? { presenceOnly: true } : {}),
+            presenceUser: presenceUser(roomReadOnly),
             ...(socketOwnerProven()
               ? { personProof: 'owner' as const }
               : socketAuthor()
@@ -699,6 +738,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(readOnly ? { readOnly: true } : {}),
             ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
             ...(editor ? { editor } : {}),
+            presenceUser: presenceUser(readOnly),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });
@@ -770,6 +810,47 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
       // the activity feed's name on the board's own REST surface. The colon
       // is the design guide's custom-verb spelling, and it is what keeps this
       // apart from the five board panes at `/workspaces/<id>/<tab>`.
+      // --- SSE (person-level): the comments addressed to the person this
+      // request PROVED (`stall-wiring.ts tellAddressedPeople`). The channel
+      // is the proven identity, never a path segment, so there is nothing to
+      // name somebody else's with. An agent proof is refused: an agent hears
+      // its addressed comments on the board channel. Under the board's
+      // address only so a share visitor's admission can judge it; the channel
+      // itself spans every board the person is addressed on, each of which
+      // they are a member of (`addressees.ts`).
+      const meEventsMatch = matchWorkspaceRoute(pathname, 'me/events:stream');
+      if (meEventsMatch) {
+        if (taskStore.getWorkspace(meEventsMatch.workspaceId) === undefined) {
+          return j(404, { error: 'workspace not found' });
+        }
+        // The person's own proof and nothing else: this channel spans every
+        // board, so a widget token (one board, readable by any script on its
+        // host page) or an agent's token must never open it. A request that
+        // carries one is refused outright, and so is a cookie sent from
+        // another origin.
+        if (
+          boardAgent ||
+          widgetTokenProved ||
+          widgetDoorGrant !== null ||
+          req.headers.has('authorization') ||
+          crossOriginCredentials(req.headers, policyFor(req))
+        ) {
+          return j(403, { error: 'person_proof_required' });
+        }
+        const me = personProof?.() ?? null;
+        if (!me || me.kind !== 'person') {
+          return j(401, { error: 'person_proof_required' });
+        }
+        return openSseStream(
+          sse,
+          `person~${me.id}`,
+          visitorShareId ?? undefined,
+          offBox(req) ? offBoxView : undefined,
+          undefined,
+          sseLastEventId(req, url),
+          visitorMemberKey ?? undefined,
+        );
+      }
       const wsEventsMatch = matchWorkspaceRoute(pathname, 'events:stream');
       if (wsEventsMatch) {
         const workspaceId = wsEventsMatch.workspaceId;

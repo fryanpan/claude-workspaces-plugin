@@ -52,11 +52,11 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · supervisor-stop.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · spend-alarm.ts · page-loads.ts"]
   end
@@ -706,7 +706,15 @@ the board doc's own awareness, `ws:<id>`. The board page holds it with its full
 socket; a doc page and a whiteboard page join it with `?presence=1`, a socket
 that `yjs-protocol.ts` syncs against an empty doc, so awareness flows both ways
 and none of the board's megabyte does. Each page announces `user` and its
-person's `spot` (core's `workspace-presence.ts`). The server announces no
+person's `spot` (core's `workspace-presence.ts`), but the server sets the
+name: `presence-identity.ts` decides at the upgrade who the socket is (the
+proven person; the owner for a writable loopback socket that proved nobody;
+otherwise a guest whose `guest-` id is hashed from the page's own browser id,
+so it matches the guest's comments), and `yjs-protocol.ts` writes that over
+`user` in every state the socket sends. It strips the fields only the server
+writes, and drops any entry for the server's own client id or for one another
+socket holds, unless that state is gone or the new socket is the same person
+(a reconnect). The server announces no
 `user`; its own state carries `agentSpots`, one entry per agent, written by
 `agent-spots.ts` when an agent calls `point_at` (`routes/workspace-point.ts`:
 a board page, a panel, a thread, the review queue, the workspaces list, or a
@@ -1424,6 +1432,28 @@ an agent's own comment, review item or task move costs it no turn. Every other
 reader still gets the frame, and one whose actor the child cannot identify is
 always delivered, because an agent cannot detect silence. Rules in
 `packages/mcp/src/self-authored.ts`.
+
+*A comment addressed to somebody else.* A comment can name who it is for
+(`to` on thread create and reply). The server resolves each entry against the
+roster of the doc's boards (`addressees.ts`: the owner, a member, or an
+attached agent) and writes the result as `addressedTo` on the comment; core's
+`addressed-to.ts` reads it back defensively, like every comment field. Only
+those agents get a comment-queue row and the board-channel frame
+(`stall-wiring.ts`, through `SseBus.broadcast`'s `agentAudience`), and each
+person named hears it on their own `person~<id>` channel, which only that
+person's proof opens (`GET /workspaces/<id>/me/events:stream`). Pages still
+show the comment. A doc channel cannot tell an agent's stream from a page's,
+so the MCP child drops a comment addressed to others there
+(`packages/mcp/src/addressed-elsewhere.ts`). An open thread whose latest
+comment names people carries `waitingOn`.
+
+*A private message.* A person writes to their own linked lead agent at
+`/api/me/messages`, and the agent answers at
+`/api/agents/<id>/messages/<personId>` (`routes/private-messages.ts`). The
+log is one append-only file per pair (`private-messages.ts`, mode 600, no
+delete verb). The person's message becomes one comment-queue row and one
+`sendToAgent` frame for that agent alone; the agent's reply goes out on the
+person's `person~<id>` channel. Nothing is broadcast on a board channel.
 
 *An analytics event.* `review_item.viewed` records that a person opened a card
 and changes nothing, so the server keeps it off the fan-out while the audit log

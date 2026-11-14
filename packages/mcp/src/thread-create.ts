@@ -25,6 +25,9 @@ export interface ThreadCreateInput {
    *  server validates it and refuses a malformed one, so a shape check here
    *  would be a second copy of one rule, free to drift from the first. */
   review?: unknown;
+  /** Who the comment is for: ids, emails or names. Passed through; the
+   *  server resolves each against the board's roster and refuses the rest. */
+  to?: unknown;
 }
 
 export interface ThreadCreateRequest {
@@ -52,6 +55,7 @@ export function threadCreateRequest(
         text: input.text,
         anchor: { kind: 'subject' },
         ...(input.review !== undefined ? { review: input.review } : {}),
+        ...(input.to !== undefined ? { to: input.to } : {}),
       },
     };
   }
@@ -67,6 +71,7 @@ export function threadCreateRequest(
       ...(input.path !== undefined ? { path: input.path } : {}),
       ...(input.suggest !== undefined ? { suggest: input.suggest } : {}),
       ...(input.review !== undefined ? { review: input.review } : {}),
+      ...(input.to !== undefined ? { to: input.to } : {}),
     },
   };
 }

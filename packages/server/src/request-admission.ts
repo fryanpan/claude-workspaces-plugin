@@ -279,7 +279,7 @@ export interface RequestAdmissionContext {
   /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
   frameHost: FrameHost | null;
   /** What a board agent token still grants (`auth/board-agent-token.ts`). */
-  boardAgentGrantFor: (bearer: string) => BoardAgentClaims | null;
+  boardAgentGrantFor: (bearer: string, via?: 'loopback' | 'edge') => BoardAgentClaims | null;
   /** Whether a board token id is one the server holds for a board socket
    *  session (`BoardAgentTokens.isHeld`). */
   boardAgentHeld: (tokenId: string) => boolean;

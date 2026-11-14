@@ -191,6 +191,28 @@ export function offBoxAskView<P extends { event: string }>(
   return { ...payload, items };
 }
 
+/**
+ * An addressed comment (`comment.addressed`, on a person's own channel) as a
+ * stream off this machine sees it: dropped when its board or doc keeps its
+ * files here, the same rule `offBoxAskView` applies to an ask, since the frame
+ * carries the comment's words and the doc's title. A failed check counts as
+ * local-only. Every other frame passes unchanged.
+ */
+export function offBoxAddressedView<P extends { event: string }>(
+  payload: P,
+  places: LocalOnlyPlaces,
+): P | undefined {
+  if (payload.event !== 'comment.addressed') return payload;
+  const { workspaceId, docId } = payload as unknown as { workspaceId?: unknown; docId?: unknown };
+  try {
+    if (typeof workspaceId === 'string' && places.board(workspaceId)) return undefined;
+    if (typeof docId === 'string' && places.doc(docId)) return undefined;
+  } catch {
+    return undefined;
+  }
+  return payload;
+}
+
 /** Which boards and docs keep their files on this machine, for `offBoxAskView`. */
 export interface LocalOnlyPlaces {
   /** The board, or a doc on it, keeps its files on this machine. */

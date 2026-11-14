@@ -611,11 +611,25 @@ export interface LinkedReviewItem {
   ref: { taskId: string; reviewItemId: string } | { docId: string; threadId: string };
 }
 
+/** Somebody a comment is for: a person or an agent on the doc's board. */
+export interface Addressee {
+  id: string;
+  kind: 'person' | 'agent';
+  name: string;
+}
+
 export interface Comment {
   id: string;
   author: User;
   text: string;
   ts: number;
+  /**
+   * Who this comment is for. Written by the server alone, from ids it
+   * resolved against the board's roster, never from a body's names. It
+   * decides who is notified and who must answer; it does not hide the
+   * comment from anybody who can read the doc.
+   */
+  addressedTo?: Addressee[];
   /** Set when the comment was sent from inside a mock page — see `WriteVia`. */
   via?: WriteVia;
   /**
@@ -681,6 +695,9 @@ export interface ThreadSummary {
   commentCount: number;
   lastActivity: number;
   createdBy: User;
+  /** Ids an open thread waits on: the addressees of its latest comment.
+   *  Absent when the thread is resolved or its latest comment named nobody. */
+  waitingOn?: string[];
 }
 
 export interface Thread extends ThreadSummary {
