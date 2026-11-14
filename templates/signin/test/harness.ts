@@ -75,6 +75,8 @@ export interface CallOptions {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  /** A body sent as-is, for non-JSON content types. */
+  rawBody?: string;
   /** Send the Turnstile token header (default true). */
   turnstile?: boolean;
 }
@@ -96,7 +98,7 @@ export class Client {
     if (this.cookies.size > 0) {
       headers.set('cookie', [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; '));
     }
-    let body: string | undefined;
+    let body: string | undefined = opts.rawBody;
     if (opts.body !== undefined) {
       headers.set('content-type', 'application/json');
       body = JSON.stringify(opts.body);

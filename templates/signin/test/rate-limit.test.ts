@@ -46,6 +46,25 @@ describe('per-email limit: 3 per 15 minutes, kept in D1', () => {
     );
   });
 
+  it('counts a form-encoded attempt the same as a JSON one', async () => {
+    h.clock.advance(15 * MINUTE);
+    const c = h.client();
+    const form = { 'content-type': 'application/x-www-form-urlencoded' };
+    const asForm = () =>
+      c.call('/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: form,
+        rawBody: `email=alice%40example.com&password=${PASSWORD}`,
+      });
+    expect((await asForm()).status).toBe(200);
+    expect((await asForm()).status).toBe(200);
+    expect(
+      (await c.post('/api/auth/sign-in/email', { email: 'alice@example.com', password: PASSWORD }))
+        .status,
+    ).toBe(200);
+    expect((await asForm()).status).toBe(429);
+  });
+
   it('does not let a refused attempt extend the lockout', async () => {
     const at = h.clock.now;
     for (let i = 0; i < 3; i++)

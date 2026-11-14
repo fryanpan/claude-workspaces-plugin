@@ -50,11 +50,7 @@ export function createApp(options: AppOptions) {
     if (!byIp.allowed) return tooMany(byIp.retryAfterSeconds);
     const path = c.req.path.slice(AUTH_BASE.length);
     if (EMAIL_LIMITED_PATHS.has(path)) {
-      const body = await c.req.raw
-        .clone()
-        .json()
-        .catch(() => null);
-      const email = normaliseEmail((body as { email?: unknown } | null)?.email);
+      const email = normaliseEmail(await emailInBody(c.req.raw));
       if (email) {
         const byEmail = await takeRateSlot(c.env.DB, EMAIL_RULE, email, now());
         if (!byEmail.allowed) return tooMany(byEmail.retryAfterSeconds);
@@ -67,6 +63,21 @@ export function createApp(options: AppOptions) {
 
   mountAdminRoutes(app);
   return app;
+}
+
+/**
+ * Better Auth accepts form posts as well as JSON, so the limiter reads both.
+ * Reading only JSON would let a form-encoded attempt skip the email limit.
+ */
+async function emailInBody(req: Request): Promise<unknown> {
+  const type = req.headers.get('content-type') ?? '';
+  const copy = req.clone();
+  if (type.includes('application/x-www-form-urlencoded') || type.includes('multipart/form-data')) {
+    const form = await copy.formData().catch(() => null);
+    return form?.get('email');
+  }
+  const body = (await copy.json().catch(() => null)) as { email?: unknown } | null;
+  return body?.email;
 }
 
 function tooMany(retryAfterSeconds: number): Response {
