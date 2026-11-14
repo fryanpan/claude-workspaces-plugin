@@ -13,7 +13,7 @@
  * Nothing it imports reaches for Yjs, so a page that bundles it gets none.
  */
 import {
-  type StateOp,
+  type PlainOp,
   checkWrite,
   rateRefusal,
   recentWrites,
@@ -42,7 +42,7 @@ export function snapshotState(snapshot: unknown, opts: SnapshotOptions = {}): St
   let times: number[] = [];
   const listeners = new Set<(s: unknown) => void>();
 
-  const write = (path: StatePath, op: StateOp): StateWrite => {
+  const write = (path: StatePath, op: PlainOp): StateWrite => {
     const checked = checkWrite(state, path, op, id);
     if ('error' in checked) return { ok: false, error: checked.error };
     const t = now();

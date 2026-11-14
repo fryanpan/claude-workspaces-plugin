@@ -82,7 +82,7 @@ export function indexIn(
 
 /** The state `op` would leave, worked on a plain copy so a refusal changes
  *  nothing. Throws a message for a path that cannot be followed. */
-export function applyPlain(state: Record<string, unknown>, segs: string[], op: StateOp): unknown {
+export function applyPlain(state: Record<string, unknown>, segs: string[], op: PlainOp): unknown {
   if (segs.length === 0) {
     if (op.kind === 'set' && isContainer(op.value) && !Array.isArray(op.value)) return op.value;
     throw new Error('The whole state can only be set to a plain object.');
@@ -127,47 +127,54 @@ export function applyPlain(state: Record<string, unknown>, segs: string[], op: S
   return state;
 }
 
-export type StateOp =
+export type PlainOp =
   | { kind: 'set'; value: unknown }
   | { kind: 'push'; value: unknown }
   | { kind: 'delete' };
 
+/** Why `op` at `segs` is refused before it is tried, or null. */
+export function opRefusal(segs: string[], op: PlainOp): string | null {
+  const where = segs.join('.') || '(the whole state)';
+  if (segs.includes('__proto__')) return `State has no key "__proto__" (at "${where}").`;
+  return op.kind === 'delete' ? null : notJson(op.value, where);
+}
+
+/** Why `next` as component `id`'s state is past the depth or the
+ *  one-component size limit, or null. */
+export function componentSizeRefusal(id: string, next: unknown): string | null {
+  const depth = depthOf(next);
+  if (depth > STATE_LIMITS.depth) {
+    return `Component "${id}" state would be nested ${depth} levels deep, over the limit of ${STATE_LIMITS.depth}.`;
+  }
+  const bytes = byteLength(next);
+  if (bytes > STATE_LIMITS.instanceBytes) {
+    return `Component "${id}" state would be ${kb(bytes)} KB, over the 256 KB limit for one component. Keep large data in a file the component imports.`;
+  }
+  return null;
+}
+
 /**
  * Check one write against `state` (plain JSON, which is not changed) and
- * work out the state it would leave. A refusal says why.
+ * work out the state it would leave. A refusal says why. The snapshot hook's
+ * whole check; the live hook adds the doc-wide limit.
  */
 export function checkWrite(
   state: Record<string, unknown>,
   path: StatePath,
-  op: StateOp,
+  op: PlainOp,
   id: string,
-): { next: unknown; segs: string[]; bytes: number } | { error: string } {
+): { next: unknown } | { error: string } {
   const segs = segments(path);
-  const where = segs.join('.') || '(the whole state)';
-  if (segs.includes('__proto__')) return { error: `State has no key "__proto__" (at "${where}").` };
-  if (op.kind !== 'delete') {
-    const bad = notJson(op.value, where);
-    if (bad) return { error: bad };
-  }
+  const bad = opRefusal(segs, op);
+  if (bad) return { error: bad };
   let next: unknown;
   try {
     next = applyPlain(structuredClone(state), segs, op);
   } catch (err) {
     return { error: (err as Error).message };
   }
-  const depth = depthOf(next);
-  if (depth > STATE_LIMITS.depth) {
-    return {
-      error: `Component "${id}" state would be nested ${depth} levels deep, over the limit of ${STATE_LIMITS.depth}.`,
-    };
-  }
-  const bytes = byteLength(next);
-  if (bytes > STATE_LIMITS.instanceBytes) {
-    return {
-      error: `Component "${id}" state would be ${kb(bytes)} KB, over the 256 KB limit for one component. Keep large data in a file the component imports.`,
-    };
-  }
-  return { next, segs, bytes };
+  const over = componentSizeRefusal(id, next);
+  return over ? { error: over } : { next };
 }
 
 /** The accepted write times still inside the last second at `t`. */

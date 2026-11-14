@@ -253,7 +253,10 @@ export function mdxFlowNodeView(
     // block for the re-render loop it prevents.
     ignoreMutation(mutation) {
       const target = mutation.target as Node;
-      if (mutation.type === 'selection') return false;
+      // A selection of a component's words is the reader's, for a comment
+      // (selection-range.ts): ProseMirror has no position there, and reading
+      // one would collapse it in view mode.
+      if (mutation.type === 'selection') return component?.host.contains(target) ?? false;
       return !(code === target || code.contains(target));
     },
     stopEvent(event) {

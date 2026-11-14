@@ -35,6 +35,7 @@ import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
+import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -143,6 +144,9 @@ export interface DocRoutesContext {
   summarizer: ThreadSummarizer | null;
   /** The data directory — read for the mockup capture's output path. */
   dataDir: string;
+  /** File an access card for the owner's approval (`share/access-proposals.ts`):
+   *  the component folder grant's only path. Absent, nothing is filed. */
+  proposeAccess?: AccessProposals['propose'];
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
