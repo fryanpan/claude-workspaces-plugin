@@ -9,37 +9,28 @@ import { landingSections, renderLandingNav } from '../src/landing-nav.ts';
 import { readLandingNav } from './landing-nav-read.ts';
 
 describe('landingSections', () => {
-  it('names all four in page order when the page carries Inbox and Coach', () => {
-    expect(landingSections({ inbox: true, coach: true }).map((s) => [s.id, s.label])).toEqual([
+  it('names all three in page order when the page carries Inbox, and no Coach', () => {
+    expect(landingSections({ inbox: true }).map((s) => [s.id, s.label])).toEqual([
       ['landing-review', 'Review'],
       ['inbox', 'Inbox'],
       ['landing-boards', 'Projects'],
-      ['coach', 'Coach'],
     ]);
   });
 
-  it('leaves out Inbox and Coach when the page does not carry them', () => {
-    expect(landingSections({ inbox: false, coach: false }).map((s) => s.label)).toEqual([
-      'Review',
-      'Projects',
-    ]);
-    expect(landingSections({ inbox: true, coach: false }).map((s) => s.label)).toEqual([
-      'Review',
-      'Inbox',
-      'Projects',
-    ]);
+  it('leaves out Inbox when the page does not carry it', () => {
+    expect(landingSections({ inbox: false }).map((s) => s.label)).toEqual(['Review', 'Projects']);
   });
 
   it('gives every section its own icon', () => {
-    const icons = landingSections({ inbox: true, coach: true }).map((s) => s.icon);
-    expect(new Set(icons).size).toBe(4);
+    const icons = landingSections({ inbox: true }).map((s) => s.icon);
+    expect(new Set(icons).size).toBe(3);
     for (const icon of icons) expect(icon).toStartWith('<svg ');
   });
 });
 
 describe('renderLandingNav', () => {
   it('draws each entry as a workspace nav item: an icon, then a label', async () => {
-    const html = renderLandingNav(landingSections({ inbox: false, coach: false }));
+    const html = renderLandingNav(landingSections({ inbox: false }));
     const { navClasses, entries } = await readLandingNav(html);
     expect(navClasses).toEqual(['board-nav home-nav']);
     expect(entries).toEqual([
@@ -65,7 +56,7 @@ describe('the lead chat dock on Home', () => {
   }
 
   it('names the board whose lead the chat talks to, inside the bar', async () => {
-    const html = renderLandingNav(landingSections({ inbox: false, coach: false }), 'w-harbor');
+    const html = renderLandingNav(landingSections({ inbox: false }), 'w-harbor');
     expect(await docks(html)).toEqual(['w-harbor']);
     // The bar's entries are unchanged by it.
     expect((await readLandingNav(html)).entries.map((e) => e.id)).toEqual([
@@ -75,9 +66,7 @@ describe('the lead chat dock on Home', () => {
   });
 
   it('draws no dock with no board, and escapes the id it is given', async () => {
-    expect(await docks(renderLandingNav(landingSections({ inbox: false, coach: false })))).toEqual(
-      [],
-    );
+    expect(await docks(renderLandingNav(landingSections({ inbox: false })))).toEqual([]);
     // An id that tries to close the attribute stays inside it: one dock, and
     // no element the id would have opened. (The rewriter hands back the
     // attribute undecoded, so the count is the check.)

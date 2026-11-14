@@ -26,8 +26,8 @@
  *
  * SHARDING vs JOBS. `--jobs` splits across processes on THIS machine and is
  * how the wall clock comes down. `--shard i/n` takes a slice of the files and
- * is for splitting across machines — CI uses neither today; it runs the whole
- * suite with the default job count in one runner. Both compose.
+ * is for splitting across machines. CI uses both: two runners, each taking
+ * `--shard i/2` and running it across `--jobs 8`.
  *
  * COVERAGE. Each CHUNK writes its own lcov — not each worker: bun rewrites
  * `<coverage-dir>/lcov.info` on every run, so a worker pointed at one

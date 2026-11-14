@@ -256,6 +256,7 @@ export function createRequestChain(
         visitor,
         visitorShareId,
         visitorMemberKey,
+        accessEmail: gate.accessEmail,
         browserProvedNobody,
         provenAuthor,
         ownerProven,
@@ -263,6 +264,8 @@ export function createRequestChain(
         widgetDoorGrant,
         widgetTokenProved: widgetIdentity !== null,
         appMember: visitor && !gate.boardAgent ? (gate.visitorHome?.signedInAs ?? null) : null,
+        personProof: provenIdentityFor,
+        boardAgent: gate.boardAgent !== null && gate.boardAgent !== undefined,
       });
       if (streamed) {
         const settled = streamed.kind === 'dialing' ? await streamed.outcome : streamed;

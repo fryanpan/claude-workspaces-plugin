@@ -19,6 +19,7 @@ import {
   parseAgentPointers,
   putSceneElements,
 } from '@claude-workspaces/core/whiteboard-scene';
+import { ownerDisplayNames } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type FrameListener, listenFrames, waitForFrames } from './sse-frames.ts';
 import { insideWhiteboardSettle, pastWhiteboardSettle, waitFor } from './wait-for.ts';
@@ -107,9 +108,11 @@ describe('a whiteboard', () => {
     await new Promise((r) => setTimeout(r, insideWhiteboardSettle()));
     putSceneElements(a.ydoc, [stroke('s2')], null);
 
-    // One event for both strokes, after the pen rests, naming the person.
+    // One event for both strokes, after the pen rests, naming the person:
+    // the server's name for an unproven page where writes need no sign-in
+    // (the owner), never the one the page announced.
     const [first] = await waitForFrames(frames.frames, 'whiteboard.changed', 1);
-    expect(first?.data?.actor).toMatchObject({ name: 'Riverbend', kind: 'person' });
+    expect(first?.data?.actor).toMatchObject({ name: ownerDisplayNames()[0], kind: 'person' });
     expect(first?.data?.changed).toEqual(['s1', 's2']);
     expect(first?.data?.count).toBe(2);
 

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Review queue</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="/kit.css" />
+    <script type="module" src="/kit.js"></script>
+  </head>
+  <body>
+    <main class="trial-page wa-stack">
+      <div class="trial-row">
+        <h1>Review queue</h1>
+        <wa-button id="new-review" variant="brand">New review</wa-button>
+      </div>
+      <wa-input id="filter" label="Filter" placeholder="Search reviews"></wa-input>
+
+      <wa-card id="card-1">
+        <div class="wa-stack wa-gap-s">
+          <div class="trial-row">
+            <h2>Harborlight sign-in copy</h2>
+            <wa-tag variant="warning">Waiting</wa-tag>
+          </div>
+          <p class="trial-meta">Alice asked for a decision on the button label.</p>
+          <div class="trial-row">
+            <wa-button id="details-1" appearance="outlined">Details</wa-button>
+            <wa-badge variant="brand">2 comments</wa-badge>
+          </div>
+          <wa-popover id="popover-1" for="details-1" placement="bottom">
+            <div class="wa-stack wa-gap-xs">
+              <strong>Asked by Alice</strong>
+              <span>Keep "Continue" or change it to "Sign in"?</span>
+              <wa-button id="answer-1" size="small" variant="brand">Answer</wa-button>
+            </div>
+          </wa-popover>
+        </div>
+      </wa-card>
+
+      <wa-card id="card-2">
+        <div class="wa-stack wa-gap-s">
+          <div class="trial-row">
+            <h2>Riverbend board layout</h2>
+            <wa-tag variant="success">Answered</wa-tag>
+          </div>
+          <p class="trial-meta">Bob approved the two-column layout.</p>
+        </div>
+      </wa-card>
+    </main>
+  </body>
+</html>

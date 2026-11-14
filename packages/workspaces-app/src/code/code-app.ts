@@ -5,6 +5,7 @@ import { api } from '../doc-path.ts';
 import { el } from '../doc/chrome-dom.ts';
 import { openThreadId } from '../doc/open-thread.ts';
 import type { MountContext } from '../mount-context.ts';
+import { announceUser } from '../presence/announce-user.ts';
 import { wireFlatDocSpot } from '../presence/flat-doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { mountReviewChrome } from '../review-chrome.ts';
@@ -129,7 +130,7 @@ export async function mountCode(
     canWrite: ctx.canWrite,
   });
   if (editable) {
-    awareness.setLocalStateField('user', { name: user.name, color: user.color });
+    announceUser(awareness, user);
     document.body.classList.add('code-editable');
     scope.onCleanup(() => document.body.classList.remove('code-editable'));
   }

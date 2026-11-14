@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,34 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Ref } from '../src/tasks.ts';
 
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+
+/**
+ * The goal's id, fixed. Ids are random base64url and so may hold `_`; this
+ * one sits where CommonMark opens emphasis (after `g-`). The markdown round
+ * trip used to turn it into `g-*abcdEFGHij*` in doc A's prose, the backfill
+ * then found no goal link, and this file failed whenever a random id came out
+ * this shape. A fixed id makes that case run every time.
+ */
+const GOAL_ID = 'g-_abcdEFGHij_';
+
+/** Run `fn` with the next 9-byte `randomBytes` call (the one `cryptoId` makes
+ *  for a new goal) returning `id`'s bytes; every other call stays random. */
+async function withNextCryptoId<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const real = crypto.randomBytes;
+  let used = false;
+  const spy = spyOn(crypto, 'randomBytes').mockImplementation(((size: number) => {
+    if (!used && size === 9) {
+      used = true;
+      return Buffer.from(id.slice(2), 'base64url');
+    }
+    return real(size);
+  }) as typeof crypto.randomBytes);
+  try {
+    return await fn();
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 interface Stats {
   dryRun: boolean;
@@ -95,13 +124,17 @@ describe('refs backfill (route + settle scan)', () => {
     const ws = await post('/workspaces', { name: 'refs-backfill-ws', goal: 'Mine the links.' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     WS = wsId;
-    const goals = await local(`/workspaces/${wsId}/goals`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ goals: [{ title: 'Ship the linked flow' }], author: PERSON }),
-    });
+    const goals = await withNextCryptoId(GOAL_ID, () =>
+      local(`/workspaces/${wsId}/goals`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ goals: [{ title: 'Ship the linked flow' }], author: PERSON }),
+      }),
+    );
     expect(goals.status).toBe(200);
     goalId = ((await goals.json()) as { created: Array<{ id: string }> }).created[0]?.id ?? '';
+    // The control that the seam still reaches the minted id.
+    expect(goalId).toBe(GOAL_ID);
 
     plainTaskId = await makeTask('Linked from the plan prose');
     bodyTaskId = await makeTask('Body links doc B');

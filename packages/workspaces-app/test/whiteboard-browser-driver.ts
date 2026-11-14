@@ -25,7 +25,14 @@ import {
   chromeLaunchArgs,
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
+import {
+  SESSION_COOKIE,
+  mintSession,
+  sessionKey,
+  signSession,
+} from '../../server/src/auth/session.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
+import { loadCookieKey } from '../../server/src/share/link-session.ts';
 import type { WhiteboardRun, WhiteboardTab } from './whiteboard-browser-reading.ts';
 
 const step = (what: string): void => {
@@ -97,7 +104,6 @@ async function main(): Promise<void> {
     const created = (await post(`/workspaces/${ws}/whiteboards`, { title: 'Ferry flow' })) as {
       url: string;
     };
-    const url = `${base}${created.url}`;
 
     const b = await launchChrome(
       resolveChromeBin(undefined),
@@ -114,10 +120,21 @@ async function main(): Promise<void> {
     ).json()) as { webSocketDebuggerUrl: string };
     const second = await Cdp.connect(opened.webSocketDebuggerUrl);
 
-    const tabs: Array<{ cdp: Cdp; name: string; width: number; height: number }> = [
-      { cdp: first, name: 'Riverbend', width: 1180, height: 820 },
-      { cdp: second, name: 'Saltmarsh', width: 430, height: 932 },
+    // Two people, each signed in: the server sets every presence name, and
+    // two unproven loopback tabs are one person, the owner. The tabs share a
+    // browser, so each reaches the server under its own loopback name to
+    // hold its own cookie.
+    const tabs: Array<{ cdp: Cdp; name: string; width: number; height: number; origin: string }> = [
+      { cdp: first, name: 'Riverbend', width: 1180, height: 820, origin: base },
+      {
+        cdp: second,
+        name: 'Saltmarsh',
+        width: 430,
+        height: 932,
+        origin: `http://localhost:${handle.port}`,
+      },
     ];
+    const cookieKey = sessionKey(loadCookieKey(join(dir, 'data')));
     for (const t of tabs) {
       await t.cdp.send('Page.enable');
       await t.cdp.send('Runtime.enable');
@@ -131,9 +148,19 @@ async function main(): Promise<void> {
       await t.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
         source: `try { localStorage.setItem('feedback-user-name', ${JSON.stringify(t.name)}); } catch {}`,
       });
+      const person = handle.identities.upsertByEmail(
+        `${t.name.toLowerCase()}@harborlight.example`,
+        { displayName: t.name },
+      );
+      await t.cdp.send('Network.enable');
+      await t.cdp.send('Network.setCookie', {
+        name: SESSION_COOKIE,
+        value: signSession(mintSession(person.id), cookieKey),
+        url: t.origin,
+      });
       step(`open the whiteboard at ${t.width}x${t.height}`);
       const loaded = t.cdp.once('Page.loadEventFired');
-      await t.cdp.send('Page.navigate', { url });
+      await t.cdp.send('Page.navigate', { url: `${t.origin}${created.url}` });
       await loaded;
       await until(`the canvas at ${t.width}`, async () =>
         (await t.cdp.evaluate(`document.body.dataset.whiteboardReady === '1'`)) ? true : null,

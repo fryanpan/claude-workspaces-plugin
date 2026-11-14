@@ -1,10 +1,11 @@
 /**
- * Home's bottom bar on a phone: Review items, Inbox, Projects and Coach, each
+ * Home's bottom bar on a phone: Review items, Inbox and Projects, each
  * an icon and a label drawn with a workspace navbar's markup and classes, so
  * the two bars read as one product. Tapping an entry brings its section into
  * view above the bar, and at 1180x820 the bar is not there and moves nothing
  * (Bryan, 31 Oct: "From home can you give me on mobile a navbar to go between
- * review items, inbox, projects, coach").
+ * review items, inbox, projects, coach"). Coach left the bar with Home's
+ * coach section ("Coach should not be on home page").
  *
  * And a workspace's own navbar sits at the bottom at every width up to 1100,
  * not only at 900 and under (Bryan: "Just put it at the bottom").
@@ -38,9 +39,9 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
     r = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? '') as HomeNavReading;
   }, SUITE_MS);
 
-  it('at 430 wide shows Review items, Inbox, Projects and Coach, each with an icon', () => {
-    expect(r.phone.labels).toEqual(['Review', 'Inbox', 'Projects', 'Coach']);
-    expect(r.phone.icons).toEqual([true, true, true, true]);
+  it('at 430 wide shows Review items, Inbox and Projects, each with an icon, and no Coach', () => {
+    expect(r.phone.labels).toEqual(['Review', 'Inbox', 'Projects']);
+    expect(r.phone.icons).toEqual([true, true, true]);
   }, 60_000);
 
   it('sits on the bottom edge of the screen, wherever the page is scrolled', () => {
@@ -60,7 +61,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
   }, 60_000);
 
   it('tapping each entry brings its section into view, above the bar', () => {
-    expect(r.phone.taps.map((t) => t.label)).toEqual(['Projects', 'Coach', 'Inbox', 'Review']);
+    expect(r.phone.taps.map((t) => t.label)).toEqual(['Projects', 'Inbox', 'Review']);
     for (const t of r.phone.taps) {
       // CONTROL: the section started out of view, so a landing is the tap's.
       expect(t.before < 0 || t.before >= t.innerHeight / 2, t.label).toBe(true);
@@ -70,11 +71,12 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
     }
   }, 60_000);
 
-  it('a tap on every entry reaches it, with the widget and a coach card on the page', () => {
-    expect(r.phone.hits.map((h) => h.label)).toEqual(['Review', 'Inbox', 'Projects', 'Coach']);
+  it('a tap on every entry reaches it, with the widget on the page and no coach card', () => {
+    expect(r.phone.hits.map((h) => h.label)).toEqual(['Review', 'Inbox', 'Projects']);
     for (const h of r.phone.hits) expect(h.reached, h.label).toBe(true);
-    // The coach card sits above the bar, not over it.
-    expect(r.phone.coach.bottom).toBeLessThanOrEqual(r.phone.placeTop.top);
+    // The same offered moment draws on a board (the 1000-wide case below);
+    // Home draws no coach card.
+    expect(r.phone.coachCards).toBe(0);
   }, 60_000);
 
   it('no widget control is drawn over a tab', () => {
@@ -91,7 +93,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
   }, 60_000);
 
   it('no entry moves or resizes as the page scrolls under it', () => {
-    expect(r.phone.boxesBefore).toHaveLength(4);
+    expect(r.phone.boxesBefore).toHaveLength(3);
     expect(r.phone.boxesAfter).toEqual(r.phone.boxesBefore);
   }, 60_000);
 

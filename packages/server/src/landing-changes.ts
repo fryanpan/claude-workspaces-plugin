@@ -9,8 +9,7 @@
  * boards than that.
  * So the server listens to every broadcast, keeps the ones that can change
  * what `/` shows, and sends `landing.changed` on one channel. The page
- * refetches `/` and swaps the parts it drew (`landing-live.ts`), the house
- * pattern `landing-coach.ts` already uses after an answer.
+ * refetches `/` and swaps the parts it drew (`landing-live.ts`).
  *
  * What counts is decided by event name, never by payload, so the filter
  * reads no board content. A board channel (`ws~<id>`) carries task, goal,
@@ -24,8 +23,8 @@
  *
  * The frame names the PARTS of `/` the burst touched, so the page re-reads
  * only those. `boards` is everything a board broadcast reaches (the review
- * bar and the board list); the coach, Incoming Messages and the meeting
- * banner have stores of their own that broadcast nothing, and their writers
+ * bar and the board list); Incoming Messages and the meeting banner have
+ * stores of their own that broadcast nothing, and their writers
  * call `notify` with their part. `/review` listens on the same channel and
  * re-reads its queue on `boards`.
  */
@@ -39,7 +38,7 @@ export const LANDING_CHANGED_EVENT = 'landing.changed';
 export const LANDING_COALESCE_MS = 250;
 
 /** The parts of `/` a frame can name. */
-export type LandingPart = 'boards' | 'coach' | 'inbox' | 'meeting';
+export type LandingPart = 'boards' | 'inbox' | 'meeting';
 
 const BOARD_EVENT_PREFIXES = ['task.', 'workspace.', 'review_item.', 'decision.', 'thread.'];
 
@@ -54,7 +53,7 @@ export interface LandingChanges {
   /** Feed one broadcast through the filter. */
   observe: (channel: string, event: string) => void;
   /** Mark a part of `/` stale for a change that no broadcast carries: a
-   *  lead's rank or a new board (`boards`), or the coach, inbox or calendar
+   *  lead's rank or a new board (`boards`), or the inbox or calendar
    *  stores. */
   notify: (part?: LandingPart) => void;
   dispose: () => void;

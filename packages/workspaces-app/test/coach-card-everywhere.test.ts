@@ -190,8 +190,9 @@ describe('a board the coach does not hear from', () => {
     hub.publish({ type: 'moment', moment: MOMENT, off: true });
     const card = cards()[0] as ShadowRoot;
     expect(card.querySelector('.cw-coach-line')?.textContent).toBe(MOMENT.line);
-    expect(card.querySelector('button.cw-coach-off')).toBeNull();
-    expect(card.querySelector('.cw-coach-off')?.textContent).toBe('Coach is off for this board');
+    expect(card.querySelector('.cw-coach-off')?.textContent).toBe(
+      'Coach is off for this board · Turn back on',
+    );
     // Turned back on: the same card, now with the switch.
     const host = document.querySelector('.coach-card-host');
     hub.publish({ type: 'moment', moment: MOMENT });

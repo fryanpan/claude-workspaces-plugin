@@ -51,12 +51,12 @@ flowchart TB
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
-    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · socket-write-gate · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
+    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · supervisor-stop.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · spend-alarm.ts · page-loads.ts"]
   end
@@ -116,6 +116,46 @@ instead. Which parts of `~/.claude` the lead may write is
 profile (`scripts/lead-sandbox-lib.ts`) is built from its lists, and the
 guard refuses exactly those parts and the lead's own scratch folders, while
 the owner's part of `~/.claude` still reads through the guard's checked open.
+
+**The collaboration core is a folder another app can take.**
+`core/src/collab/` (a new top-level core directory, exported as
+`@claude-workspaces/core/collab`) holds rooms that sync a Yjs doc between
+pages over the app's storage (`room-host.ts`, speaking the same
+`[0, syncMessage]` frames as `yjs-protocol.ts`), and a private-message store
+kept apart from every room (`private-messages.ts`, one log per pair). It
+imports nothing but `yjs`, `y-protocols` and `lib0`
+(`core/test/collab/collab-imports.test.ts`). Two rules hold for every app: no
+room opens without a role function, and an action whose body names a room,
+board or doc is refused, because the room comes from the connection. A view
+or comment connection gets the doc and its edits are dropped unread, and an
+action is an edit, refused for those roles, unless the app marks it
+read-only, when it runs on a copy of the doc. The
+server's `DocStateStore` fits its storage interface as it is, and
+`server/src/private-messages.ts` is the file-backed store behind its
+private-message interface. Workspaces does not run its rooms on it yet; that
+is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
+runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
+that imports only the core. `server/src/collab-rooms.ts` is the registry of
+room hosts the server runs; every revoke calls its `recheck` beside the
+sweep that closes the server's own sockets, so a core connection loses a
+revoked role on the same call.
+
+Presence and follow sit in the same folder. `presence.ts` is the server
+half: one entry per tab, a person shown once at their most recently active
+tab among the tabs the viewer may see (the rule
+`core/src/workspace-presence.ts` already states), identity and board taken
+from the connection, the role function asked again on every update and view,
+a change announced only to connections that may see it, and updates past a
+per-person rate limit dropped and counted. Each app passes which pages have presence and whether
+app-wide presence is on; with it on, a page also shows people elsewhere, but
+only on boards the app's role function gives the viewer a role on. The spot
+shape and its page key are the app's, so Workspaces can pass `parseSpot` and
+`samePage` unchanged in step 5. `follow.ts` is the page half, DOM-free: a
+follow armed in one tab's storage, carried across the navigation it caused
+(to another board too, the one the server named), and ended by the reader's
+own move, as `workspaces-app/src/presence/follower.ts`
+does today. `server/test/collab-presence-app.test.ts` drives both over
+sockets in an app that imports only the core.
 
 **Two callers wanting the same thing share one read.** The board shell mounts
 `<meeting-banner>` in each pane, so the calendar read is
@@ -285,6 +325,9 @@ signed-in member sees at `/`, and the one refusal page for a board they were
 not given, are answered BY the gate from the membership it just checked, so a
 board the list names always opens and one it leaves out never does. It sees a
 `Request` only to ask whether it is a navigation, and names no path of its own.
+`socket-write-gate.ts` joins them: it judges each doc and board socket's
+write against the person's role and the board's roles mode, for whatever path
+opened the socket.
 
 Share audiences (only the machine's owner changes who is in) add no box
 either. `share/board-audience.ts` is each board's list of addresses and
@@ -706,7 +749,15 @@ the board doc's own awareness, `ws:<id>`. The board page holds it with its full
 socket; a doc page and a whiteboard page join it with `?presence=1`, a socket
 that `yjs-protocol.ts` syncs against an empty doc, so awareness flows both ways
 and none of the board's megabyte does. Each page announces `user` and its
-person's `spot` (core's `workspace-presence.ts`). The server announces no
+person's `spot` (core's `workspace-presence.ts`), but the server sets the
+name: `presence-identity.ts` decides at the upgrade who the socket is (the
+proven person; the owner for a writable loopback socket that proved nobody;
+otherwise a guest whose `guest-` id is hashed from the page's own browser id,
+so it matches the guest's comments), and `yjs-protocol.ts` writes that over
+`user` in every state the socket sends. It strips the fields only the server
+writes, and drops any entry for the server's own client id or for one another
+socket holds, unless that state is gone or the new socket is the same person
+(a reconnect). The server announces no
 `user`; its own state carries `agentSpots`, one entry per agent, written by
 `agent-spots.ts` when an agent calls `point_at` (`routes/workspace-point.ts`:
 a board page, a panel, a thread, the review queue, the workspaces list, or a
@@ -1425,6 +1476,28 @@ reader still gets the frame, and one whose actor the child cannot identify is
 always delivered, because an agent cannot detect silence. Rules in
 `packages/mcp/src/self-authored.ts`.
 
+*A comment addressed to somebody else.* A comment can name who it is for
+(`to` on thread create and reply). The server resolves each entry against the
+roster of the doc's boards (`addressees.ts`: the owner, a member, or an
+attached agent) and writes the result as `addressedTo` on the comment; core's
+`addressed-to.ts` reads it back defensively, like every comment field. Only
+those agents get a comment-queue row and the board-channel frame
+(`stall-wiring.ts`, through `SseBus.broadcast`'s `agentAudience`), and each
+person named hears it on their own `person~<id>` channel, which only that
+person's proof opens (`GET /workspaces/<id>/me/events:stream`). Pages still
+show the comment. A doc channel cannot tell an agent's stream from a page's,
+so the MCP child drops a comment addressed to others there
+(`packages/mcp/src/addressed-elsewhere.ts`). An open thread whose latest
+comment names people carries `waitingOn`.
+
+*A private message.* A person writes to their own linked lead agent at
+`/api/me/messages`, and the agent answers at
+`/api/agents/<id>/messages/<personId>` (`routes/private-messages.ts`). The
+log is one append-only file per pair (`private-messages.ts`, mode 600, no
+delete verb). The person's message becomes one comment-queue row and one
+`sendToAgent` frame for that agent alone; the agent's reply goes out on the
+person's `person~<id>` channel. Nothing is broadcast on a board channel.
+
 *An analytics event.* `review_item.viewed` records that a person opened a card
 and changes nothing, so the server keeps it off the fan-out while the audit log
 still gets the row. `review_item.answered` is kept off too: a ticket answer
@@ -1586,6 +1659,16 @@ under "The board's own live doc is different". Task BODIES are the deliberate
 exception: each is an ordinary live `task:<taskId>` doc so every edit tool,
 thread and anchor applies unchanged, and the store's `body` string is a
 debounced snapshot of it.
+
+### Outside the packages: `templates/`
+
+`templates/` holds starters that a new app copies into its own repository.
+Nothing in `packages/` imports them, and they import nothing from it.
+`templates/signin/` is a Cloudflare Worker that provides sign-in with Hono,
+Better Auth and D1; its [README](../../templates/signin/README.md) covers how
+to copy it. The repo's gates still cover these folders: the root workspace
+installs their dependencies, the root `tsconfig.json` typechecks them, and
+vitest's `node` project runs their tests.
 
 ## Layers inside `server`
 
@@ -2124,6 +2207,19 @@ reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
 
+`doc-state/` joins the doc-store group and moves no boundary. It is where each
+doc's shared state — the Yjs update behind a markdown doc, a board, a
+whiteboard or a component's state — is kept, behind one interface keyed by doc
+id (`doc-state/store.ts`). `doc-state/disk.ts` is the `.ydoc` files in the
+data dir, written exactly as before, and is the default;
+`doc-state/memory.ts` keeps the same state in maps, for tests and small apps,
+chosen by passing `docState` to `DocStore`. `DocStore`, `doc-catalog.ts`,
+`file-binding.ts` and the archive moves in `doc-store-workspaces.ts` read and
+write state only through it. The sidecar, the index row and the `.md`
+write-back are not behind it and stay files in the data dir. The offline
+tools (`doc-identity-*`, `note-list-gap-corpus.ts`, `activity-backfill.ts`)
+still read `.ydoc` files directly and run on the disk backend only.
+
 `doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
 `doc-*.ts` glob draws it. It decides whether a create naming an existing doc
 would repoint that doc to another file or type, which `POST
@@ -2601,6 +2697,18 @@ time a doc shows a map; markers and rings are SVG paths, points one canvas.
 The files route serves a `src` file only when a `<StreetMap>` in the doc's
 live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
 
+An agent reaches a doc's components through `doc-components-agent.ts`, in the
+doc-store group's `doc-*.ts` glob, and so does not move the picture. It lists
+each tag with its build and state id, and lists a state whose tag is gone as
+unplaced. It writes a component's state through the same core module the page
+uses, so the write reaches every open page over the doc socket. It places a tag
+with the block-edit path every agent edit takes. `routes/doc-component-agent.ts`
+answers the MCP tools `list_components`, `get_component_state`,
+`set_component_state`, `place_component` and `request_component_grant`.
+`component-grants.ts` sits beside `component-build.ts` and holds the folders
+whose git-ignored files the owner let a build read. Only the owner's Approve on
+an access card writes it.
+
 A component tag in an `.mdx` doc runs, not just previews, and the modules
 that do it are described in [mdx-components](mdx-components.md). Core's
 `mdx-components.ts` joins the document-model tier: it decides which tags
@@ -2615,7 +2723,23 @@ on what a build may read, `component-cdn.ts` fetches and stores esm.sh
 modules, `doc-component-builds.ts` is the sweep that builds what changed in
 each open doc (a `doc-*.ts` the diagram draws), and `routes/doc-components.ts`
 serves a bundle. On the client, `mdx-component.ts` mounts the bundle in the
-`mdx-flow` node view. None of them changes the picture.
+`mdx-flow` node view, and `selection-range.ts` maps a reader's selection of
+words a component drew to the tag's source, quoting those words, so a comment
+can anchor where the doc has no text. None of them changes the picture.
+
+Two more core modules serve the components a site shares with a doc, and
+neither changes the picture. `plot-chart.ts` is the library chart: one
+component file over `plot-spec.mjs` that a doc builds from the pair copied
+side by side, and an Astro page imports as it is. It imports Plot from
+esm.sh at an exact version, which a doc build accepts; `esm-sh-plot.d.ts`
+types that address, and vitest and a site's bundler map it to the installed
+copy. `component-snapshot.ts` is the host wrapper for a page that is not a
+doc: a state hook over a JSON snapshot, whose writes stay on the page.
+`component-state-rules.ts` holds what both hooks refuse (paths, JSON-only
+values, `__proto__`, the depth, size and rate limits), taken out of
+`mdx-component-state.ts` so a site and a doc refuse the same writes.
+`templates/astro-chart` is the Astro page that proves the chart runs there
+unchanged.
 
 `prose-math.ts` joins the same tier and does not move the picture. It is the
 grammar of a remark-math equation — `$x$` inline, `$$` … `$$` on lines of
@@ -2917,19 +3041,21 @@ iOS is reported to leave it at keyboard height.
 
 **The coach** helps the owner with habits he names, in three parts. It is not a
 board feature; the one agent it reaches is its own session.
-(A) *Goals*: "Set up my coach" on the front page makes one learning-goals doc
+(A) *Goals*: `POST /coach/setup` makes one learning-goals doc
 and the session's Coach memory doc on a board of their own (`coach/setup.ts`,
-`coach/goals-doc.ts`); the planning interview fills the goals when he taps
+`coach/goals-doc.ts`). The docs are filed on the Coach board and name no
+attachment set, so its Library lists them; `library.ts` also treats a set
+field holding the board's own id as no set, for docs made before that; the planning interview fills the goals when he taps
 Talk. The doc has the coach's name and one section, "What I want to do
 better": each top-level bullet or paragraph there is one goal and names its
 own trigger. A doc in the older layout, one section of four parts per goal,
-still reads, its "Act differently when" joined to each goal. The front
-page's section (`coach/section.ts`, `coach/landing.ts`) lists the goals, offers a review when they have not changed in a week, holds the
-how-readily setting, and says how many events the session read today.
+still reads, its "Act differently when" joined to each goal. Home carries no coach (the owner: "Coach should not be on home page"); the
+card and the goals doc live on the Coach board.
 (B) *Observe*: board and doc pages send what he is looking at, and each
 paragraph he writes when he pauses, to `/coach/here`
-(`workspaces-app/src/coach-card.ts`); the front page and the review walk,
-which name no board, send which page they are (`PAGE_PLACES`); `coach/stream.ts` turns that and his
+(`workspaces-app/src/coach-card.ts`); the review walk,
+which names no board, sends which page it is (`PAGE_PLACES`, which still
+accepts `home` from a Home page loaded before the coach left it); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
 into one event per thing he does, dropping repeats. The coach's visibility
 is the owner's own: every board he can see, local-only, sharing-locked and
@@ -2966,21 +3092,20 @@ and answers and the setting go at once. With no session holding a stream
 the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
 windows and 48 hours, across a restart) and go as one digest when its stream
 comes back. Past 400 turns in a day it sends
-nothing and the front page says the coach is paused for today. The session raises a moment on `POST /coach/moments`, and
+nothing until the next day. The session raises a moment on `POST /coach/moments`, and
 `coach/judge.ts` refuses one that does not copy three words in order from the
 goal it names, or arrives while another is open. A moment goes to his pages over
 `/coach/stream` (`coach/hub.ts`) and follows him: every page he has open
 shows it until he answers in any one, which clears it on the rest. That is
 the board (task pages included), every doc surface (`doc/doc-coach.ts`,
-mounted for markdown, folder files, diffs and code alike), the front page,
+mounted for markdown, folder files, diffs and code alike), the review walk,
 and the host page around a mock or dev server (`coach-page.ts`, its own
 `/app/coach.js`, since the sandboxed frame cannot draw it). A page on a
 board that is off for the coach shows it too, marked so, and tells the
 session nothing. He answers with a thumbs up, or a thumbs down with a few
 words of why that reach the session in `coach.answer`. In the session, `mcp/src/coach-line.ts` renders each frame and
 `coach_moment` raises a moment; the persona is the plugin's `coaching` skill.
-With no session holding a stream the front page says it is offline, and
-only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
+With no session holding a stream only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
 `coach/wiring.ts` composes it for `server.ts`. `scripts/coach-eval.ts` plays
 the fixture days to a real coach session and scores it.
 

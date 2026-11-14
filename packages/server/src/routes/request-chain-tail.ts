@@ -22,6 +22,7 @@ import { handleBoardLinkRoutes } from './board-links.ts';
 import { handleCoachRoutes } from './coach.ts';
 import { handleLandingStreamRoute } from './landing-stream.ts';
 import { handleWebhookLogRoute } from './ops.ts';
+import { handlePrivateMessageRoutes } from './private-messages.ts';
 import { handlePromptRoutes } from './prompts.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
 import { handleReviewQueueRoutes } from './review-queue.ts';
@@ -47,13 +48,14 @@ export async function serveTopLevelRoutes(
     requireSignInToWrite,
     policyFor,
     featureRoutes,
+    privateMessageRoutesCtx,
     coachRoutesCtx,
     opsRoutesCtx,
     serveShellRoutes,
     boardLinkRoutesCtx,
   } = ctx;
   const { req, url, pathname, gate, attribution, ownerProven } = rq;
-  const { visitor, visitorHome } = gate;
+  const { visitor, visitorHome, boardAgent } = gate;
   const { authorFor, provenIdentityFor, browserProvedNobody } = attribution;
 
   // --- REST: the prompt settings --- see ./routes/prompts.ts.
@@ -146,6 +148,22 @@ export async function serveTopLevelRoutes(
       visitor,
       ownerProven: () => ownerProven(),
       requestOrigin: () => policyFor(req).requestOrigin,
+    });
+    if (handled) return handled;
+  }
+
+  // --- REST: private messages --- see ./routes/private-messages.ts. Here
+  // rather than in the board chain because `/api/me/messages` names no board,
+  // and beside the features for the inbox's reason: a person's own, not a
+  // board's. `/api/me/` and `/api/agents/<id>/messages/` are claimed by
+  // nothing above.
+  {
+    const handled = await handlePrivateMessageRoutes(privateMessageRoutesCtx, {
+      req,
+      pathname,
+      visitor,
+      boardAgent,
+      provenIdentityFor,
     });
     if (handled) return handled;
   }

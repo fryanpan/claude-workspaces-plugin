@@ -80,6 +80,13 @@ export interface RequestAttributionContext {
   ) => { identity: IdentityRecord; workspaceId: string } | null;
   /** The JSON responder, so a refusal here is spelled as a route's. */
   j: (status: number, body: unknown) => Response;
+  /**
+   * The author for a browser write that proved nobody: the owner on a
+   * loopback socket, else a guest named from the page's own browser id —
+   * the same rule presence uses (`presence-identity.ts`). Absent: the
+   * claimed body, as for a non-browser caller.
+   */
+  unprovenBrowserAuthor?: (req: Request, claimed: unknown) => User;
 }
 
 /**
@@ -212,10 +219,11 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
      *     Since every share host sits behind Cloudflare Access, a visitor
      *     reaching this rung is a deployment with no verifier wired, not a
      *     normal anonymous reviewer.
-     *  3. Otherwise the claimed body, exactly as today. This is the rung
-     *     every agent, every MCP call and every un-authenticated browser
-     *     lands on, so a request with no session behaves identically
-     *     whichever way the flag is set.
+     *  3. A browser that proved nobody: the name the server sets, by the
+     *     rule presence uses — the owner on a loopback socket, otherwise a
+     *     guest named from the page's browser id (`unprovenBrowserAuthor`).
+     *  4. Otherwise the claimed body. This is the rung every agent and every
+     *     MCP call lands on.
      *
      * With no session presented, this function is byte-for-byte what it
      * was whichever way the flag is set.
@@ -269,6 +277,12 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
           // than only at compile time.
           shareKey: visitorShareId ?? visitor.workspaceId ?? '',
         });
+      }
+      // A browser that proved nobody does not name itself either: the
+      // server sets the name, as it does for presence. Non-browser callers
+      // (the MCP children) keep the claimed body.
+      if (ctx.unprovenBrowserAuthor && isBrowserRequest(req.headers)) {
+        return ctx.unprovenBrowserAuthor(req, claimed);
       }
       return stampRosterAgent(claimed as User | undefined);
     };

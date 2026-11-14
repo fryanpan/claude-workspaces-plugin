@@ -662,6 +662,8 @@ function plantSourceProbes(): void {
 }
 
 describe('the audit sees a source read one module away', () => {
+  // Two audit runs in a child process, like the 30s cases above. On CI it
+  // shares a 4-vCPU runner with Chrome-launching files, and took 5.9s there.
   it('counts the eight ways a test reaches source text, and none of the four that do not', () => {
     // CONTROL: nothing from the probe directory is named before it exists, so
     // every "named" assertion below is this test's doing.
@@ -731,7 +733,7 @@ describe('the audit sees a source read one module away', () => {
     // source literal is on the line straight after the read's closing paren,
     // so every window that is not the parentheses themselves matches it.
     expect(run.stdout).not.toContain(join(PROBE_DIR_REL, 'split-statement.test.ts'));
-  });
+  }, 30_000);
 
   it('holds on the real harnesses, not only on planted ones', () => {
     // `board-island.test.tsx` imports `css-harness.ts` and asserts computed

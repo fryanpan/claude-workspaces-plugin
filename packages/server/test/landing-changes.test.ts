@@ -46,11 +46,11 @@ describe('createLandingChanges', () => {
     const sent: string[][] = [];
     const changes = createLandingChanges({ emit: (parts) => sent.push(parts), coalesceMs: 5 });
     changes.observe('ws~w-1', 'task.created');
-    changes.notify('coach');
     changes.notify('inbox');
-    changes.notify('coach');
+    changes.notify('meeting');
+    changes.notify('inbox');
     await waitFor(() => sent.length === 1, { describe: 'one frame for the burst' });
-    expect(sent[0]).toEqual(['boards', 'coach', 'inbox']);
+    expect(sent[0]).toEqual(['boards', 'inbox', 'meeting']);
     changes.notify('meeting');
     await waitFor(() => sent.length === 2, { describe: 'the next burst' });
     expect(sent[1]).toEqual(['meeting']);

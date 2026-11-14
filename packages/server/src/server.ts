@@ -19,6 +19,7 @@ import {
   ownerDisplayNames,
   ownerIdentityIds,
 } from './actor-identity.ts';
+import { type AddresseeRoster, resolveAddressees } from './addressees.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -30,11 +31,17 @@ import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
 import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
-import { localOnlyPlacesFrom, offBoxAskView } from './ask-feed.ts';
+import { localOnlyPlacesFrom, offBoxAddressedView, offBoxAskView } from './ask-feed.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
 import { identifyCallerAgent } from './auth/agent-caller.ts';
+import {
+  AgentGrantTokens,
+  agentGrantTokenKey,
+  agentGrantTokensPath,
+  appIdFrom,
+} from './auth/agent-grant-token.ts';
 import {
   authorizeAgentCaller,
   createLegacyAgentWarner,
@@ -56,6 +63,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
@@ -64,6 +72,7 @@ import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapsh
 import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
+import { confirmGrantFolder } from './doc-components-agent.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
@@ -120,7 +129,10 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { realTickScheduler } from './pause-ticker.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
+import { PersonAgentLinks } from './person-agent-link.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
+import { type PresenceRoster, presenceUserFor, resolveStamp } from './presence-identity.ts';
+import { FilePrivateMessageStore } from './private-messages.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
@@ -164,6 +176,7 @@ import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
 import { type OpsRoutesContext } from './routes/ops.ts';
+import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
@@ -237,6 +250,7 @@ import { meetingContext } from './voice-meeting-context.ts';
 import { VoiceRouter, parseVoiceContext } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 import { isRetired } from './workspace-store.ts';
+import { restampPerson } from './yjs-protocol.ts';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 8787);
 
@@ -364,6 +378,8 @@ export interface ServerHandle {
    *  Exposed so a test can name who a board admits without a person's
    *  browser, which is the only other door that may (`board-audience.ts`). */
   shareLinks: ShareLinks;
+  /** The core room hosts every revoke rechecks (`collab-rooms.ts`). */
+  collabRooms: CollabRooms;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -1112,6 +1128,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
+    personAccessOn,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -1289,26 +1307,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.coachSummarizer ? { summarizer: opts.coachSummarizer } : {}),
     ...(opts.coachDigestWindowMs === undefined ? {} : { digestWindowMs: opts.coachDigestWindowMs }),
   });
-  // "Your coach" on `/` reads the coach store, the goals doc and whether the
-  // coach session is connected. None of the three broadcasts, so each tells
-  // the workspaces list's feed itself.
-  coachWiring.store.onChange = () => landingChanges.notify('coach');
   {
-    const onRevision = docStore.onContentRevision;
-    docStore.onContentRevision = (docIds, revision) => {
-      onRevision?.(docIds, revision);
-      const goals = coachWiring.store.goalsDoc?.docId;
-      if (goals && docIds.includes(goals)) landingChanges.notify('coach');
-    };
     const onAgentStreams = sse.onAgentStreams;
     sse.onAgentStreams = (channel, agentId) => {
       onAgentStreams?.(channel, agentId);
       const board = coachWiring.store.goalsDoc?.workspaceId;
-      if (board && channel === `ws~${board}`) {
-        landingChanges.notify('coach');
-        // The coach session is back: what waited while it was away goes now.
-        coachWiring.agentStreamsChanged(board, agentId);
-      }
+      // The coach session is back: what waited while it was away goes now.
+      if (board && channel === `ws~${board}`) coachWiring.agentStreamsChanged(board, agentId);
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks
@@ -2102,6 +2107,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     memberOf: audienceMemberOf,
   });
   trustBoardsFor = boardsForDoc;
+  /** Each person's one lead agent, linked when both sides agree. */
+  const personAgentLinks = new PersonAgentLinks(dataDir, identities);
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -2115,8 +2122,30 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
   const removeLeadBindGuard = boundFiles.guards.add(boardSocketRoots);
   /** Board agent tokens (`at2`) and their revocation record. */
+  /** The core room hosts every revoke rechecks (collab-rooms.ts). */
+  const collabRooms = new CollabRooms();
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
+  );
+  /** Agent grants (`at3`): one agent, one app, one board, capped by the
+   *  agent's person, read per verify through `personAccessOn`. */
+  const agentGrantTokens = new AgentGrantTokens(
+    agentGrantTokensPath(dataDir),
+    () => agentGrantTokenKey(cookieKey()),
+    {
+      appId: appIdFrom(process.env.CW_APP_ID),
+      personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
+      roleOf: (boardId, personId) => {
+        const person = identities.get(personId);
+        if (!person) return null;
+        // A grant is edit-level at most, so a person whose access is comment
+        // or view holds nothing grantable: the mint refuses and the sweep
+        // hangs up a grant minted before the person was narrowed.
+        const access = personAccessOn(boardId, person);
+        return access === 'owner' ? 'owner' : access === 'edit' ? 'member' : null;
+      },
+      personActive: (personId) => identities.get(personId)?.status === 'active',
+    },
   );
   /** The threads those tokens opened, which the org relay checks a sender by. */
   const threadOpenerProofs = new ThreadOpenerProofs(threadOpenerProofsPath(dataDir));
@@ -2161,7 +2190,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
-    boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    boardAgentGrantFor: (bearer, via) =>
+      bearer.startsWith('at3.')
+        ? agentGrantTokens.verify(bearer, via)
+        : boardAgentTokens.verify(bearer),
     boardAgentHeld: (tokenId) => boardAgentTokens.isHeld(tokenId),
     // Forward references, as above: the board sockets are opened below, and
     // the agent-token key is derived further down.
@@ -2216,6 +2248,60 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * chains rather than composes — its per-request input is the admission
    * result, so it cannot be called until the gate has answered.
    */
+  // Every name a roster row or the owner goes by, lowercased: a guest may not
+  // show one in presence. Rebuilt only when a row changes.
+  let memberNameCache: { rev: number; names: Set<string> } | null = null;
+  const memberNames = (): Set<string> => {
+    const rev = identities.revision();
+    if (memberNameCache?.rev !== rev) {
+      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
+      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
+      memberNameCache = { rev, names };
+    }
+    return memberNameCache.names;
+  };
+  // Who an unproven writable loopback socket is (the owner), which proven ids
+  // are agents, and which names a guest may not show (presence-identity.ts).
+  // Presence and the unproven-browser rung of attribution read the same one.
+  const presenceRoster: PresenceRoster = {
+    owner: () => {
+      const id = ownerIdentityIds().at(-1) ?? 'owner';
+      return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
+    },
+    isAgent: (id) => identities.get(id)?.kind === 'agent',
+    reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
+  };
+  // Who a comment's `to` may name (`addressees.ts`): the owner, a member of a
+  // board the doc is on, or an agent attached to one.
+  const addresseeRoster: AddresseeRoster = {
+    identities,
+    owner: presenceRoster.owner,
+    isMember: (board, person) => personAccessOn(board, person) !== null,
+    attachedAgents: (board) => taskStore.listAttachments(board).map((a) => a.agentId),
+  };
+  const addresseesFor = (docId: string, to: unknown) => {
+    const row = taskIdOfBodyDoc(docId);
+    const rowBoard = row
+      ? (taskStore.getTask(row)?.workspaceId ?? taskStore.getGoalRow(row)?.workspaceId)
+      : undefined;
+    const boards = row ? (rowBoard ? [rowBoard] : []) : [...boardsForDoc(docId)];
+    return resolveAddressees(to, boards, addresseeRoster);
+  };
+  const unprovenBrowserAuthor = (req: Request, claimed: unknown): User => {
+    const u = resolveStamp(
+      presenceUserFor({
+        proven: null,
+        isAgent: presenceRoster.isAgent,
+        shareKey: null,
+        readOnly: false,
+        offBox: req.headers.has('cf-ray') || !isLoopbackAddress(server.requestIP(req)?.address),
+        owner: presenceRoster.owner,
+        ...(presenceRoster.reservedName ? { reservedName: presenceRoster.reservedName } : {}),
+      }),
+      claimed,
+    );
+    return { id: u.id, name: u.name, color: u.color, kind: u.kind === 'guest' ? 'anon' : 'known' };
+  };
   const { attributeRequest } = createRequestAttribution({
     identities,
     taskStore,
@@ -2223,6 +2309,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetBearerOf,
     widgetTokenGrantFor,
     j,
+    unprovenBrowserAuthor,
   });
 
   /**
@@ -2245,10 +2332,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    // The retired boards' task docs too: the page's own activity reading
-    // walks every board, and it runs after this in the same stretch.
     landingReview: async () => {
-      await crossReview.prepare({ includeRetired: true });
       const q = await crossReview.queue();
       // Fire and forget: the page shows what is stored, and a sentence that
       // arrives now is on the next load. Each refresh declines unless due.
@@ -2265,7 +2349,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // Started further down, with the other registered features; the page
     // reads it at request time.
     landingInbox: (rankOf) => features.inbox.landingSection(rankOf),
-    landingCoach: () => coachWiring.landing(),
     landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
     appVoiceSeed,
   });
@@ -2344,6 +2427,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     canonicalDocId,
     fileUnderBoardWorkspace,
+    boardAccessOf,
+    rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2353,15 +2438,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
+    presenceRoster,
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
-    offBoxView: (payload) =>
-      offBoxAskView(
-        payload,
-        (ask) =>
-          localOnlyPlaces.board(ask.workspaceId) ||
-          (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
-      ),
+    offBoxView: (payload) => {
+      const addressed = offBoxAddressedView(payload, localOnlyPlaces);
+      return addressed
+        ? offBoxAskView(
+            addressed,
+            (ask) =>
+              localOnlyPlaces.board(ask.workspaceId) ||
+              (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
+          )
+        : undefined;
+    },
   });
   /**
    * What the operator routes read instead of this closure's scope. Built
@@ -2529,12 +2619,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    personRoleOn: (workspaceId, person) => {
-      if (ownerIdentityIds().includes(person.id)) return 'owner';
-      if (!person.email) return null;
-      if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
-      return shareLinks.roleOf(workspaceId, person.email);
-    },
+    personAccessOn,
     agentTokenKey: agentTokenKeyFor,
     ownerNoticeBoards: () => {
       const first = defaultBoardWorkspaceId();
@@ -2782,6 +2867,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** What the two agent-id-keyed routes read instead of this closure's
    *  scope — the watch set, the roster and the store a merge moves. */
   const agentIdentityRoutesCtx: AgentIdentityRoutesContext = {
+    personAgentLinks,
     agentWatches,
     identities,
     taskStore,
@@ -2799,17 +2885,48 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     warnRefusedMint,
   };
 
+  /** A person's private conversation with their own lead agent
+   *  (routes/private-messages.ts). The agent's messages ride one board's
+   *  stream and queue: the board it leads, else one it is live on, else
+   *  any it is attached to. */
+  const privateMessageRoutesCtx: PrivateMessageRoutesContext = {
+    store: new FilePrivateMessageStore(dataDir),
+    personAgentLinks,
+    identities,
+    taskStore,
+    sse,
+    boardForAgent: (agentId) => {
+      const attached = taskStore
+        .listWorkspaces()
+        .filter((w) => taskStore.listAttachments(w.id).some((a) => a.agentId === agentId));
+      const pick =
+        attached.find((w) => w.leadAgentId === agentId) ??
+        attached.find((w) => taskStore.hasLiveAttachmentFor(w.id, agentId)) ??
+        attached[0];
+      return pick?.id ?? null;
+    },
+    requestAddress: (req) => server.requestIP(req)?.address,
+    agentTokenKey: agentTokenKeyFor,
+    j,
+    safeJson,
+  };
+
   /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
   const boardTokenRoutesCtx: BoardTokenRoutesContext = {
     tokens: boardAgentTokens,
+    grants: agentGrantTokens,
     boardExists: (boardId) => taskStore.getWorkspace(boardId) !== undefined,
     ensureAgent: (agentId) => {
       const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
       return rec !== null && rec.kind === 'agent';
     },
-    closeConnections: (memberKey) =>
-      docStore.closeSocketsForShareMembers((k) => k === memberKey) +
-      sse.closeForShareMembers((k) => k === memberKey),
+    closeConnections: (memberKey) => {
+      collabRooms.recheck();
+      return (
+        docStore.closeSocketsForShareMembers((k) => k === memberKey) +
+        sse.closeForShareMembers((k) => k === memberKey)
+      );
+    },
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2895,6 +3012,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     canonicalDocId,
     backTargetFor,
     resolveWorkspaceForDoc,
+    addresseesFor,
     pageOpened,
     withReviewUrl,
     boardIndexForListing,
@@ -2912,6 +3030,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     rewriteTaskBody,
     parseRevisedRange,
     workspacesOfDoc: shareWorkspacesOf,
+    // Declared below; called only per request, after it exists.
+    proposeAccess: (input) => accessProposals.propose(input),
   };
 
   // The owner's notice when the master sharing switch goes off: one decision
@@ -3010,6 +3130,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);
     },
+    grantComponentFolder: (folder, by) => {
+      const ok = confirmGrantFolder(folder, boundFiles.guards);
+      if (!ok.ok) return ok;
+      try {
+        docStore.componentGrants.grant(folder, by);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
     onChanged: pageNudges.accessChanged,
   });
   /** The owner's page of who can reach every board (routes/access.ts). */
@@ -3051,6 +3181,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const authShareRoutesCtx: AuthShareRoutesContext = {
+    personAgentLinks,
+    // A rename reaches pages already open within a frame (yjs-protocol.ts).
+    onPersonRenamed: (personId, name) => void restampPerson(personId, name),
     docStore,
     sse,
     taskStore,
@@ -3183,6 +3316,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    collabRooms,
     agentSpots,
     personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
@@ -3374,6 +3508,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
+    privateMessageRoutesCtx,
     coachRoutesCtx,
     serveShellRoutes,
   });
@@ -3609,12 +3744,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    collabRooms.recheck();
     // A tailnet widget door socket is authorized once at its upgrade too, by
     // a board token that expires and that the roster can revoke — and no
     // share is needed for the door, so this half runs without one.
     docStore.closeSocketsForDeadWidgetGrants(
       (token, origin) => boardWidgetGrantFor(token, origin) !== null,
     );
+    // An agent grant whose person left the board or was archived: HTTP
+    // already refuses it (`AgentGrantTokens.verify`); this hangs up what it
+    // opened while it still held.
+    const lapsed = new Set(agentGrantTokens.lapsedMemberKeys());
+    if (lapsed.size > 0) {
+      docStore.closeSocketsForShareMembers((k) => lapsed.has(k));
+      sse.closeForShareMembers((k) => lapsed.has(k));
+    }
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);
@@ -3740,6 +3884,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     folderWatches,
     shares,
     shareLinks,
+    collabRooms,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },

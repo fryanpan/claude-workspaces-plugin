@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AddresseeResult } from '../addressees.ts';
 import type { AgentSpots } from '../agent-spots.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
@@ -34,6 +35,7 @@ import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
+import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -142,6 +144,9 @@ export interface DocRoutesContext {
   summarizer: ThreadSummarizer | null;
   /** The data directory — read for the mockup capture's output path. */
   dataDir: string;
+  /** File an access card for the owner's approval (`share/access-proposals.ts`):
+   *  the component folder grant's only path. Absent, nothing is filed. */
+  proposeAccess?: AccessProposals['propose'];
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -163,6 +168,9 @@ export interface DocRoutesContext {
   ) => { id: string; name: string } | null;
   /** The board a doc belongs to, or null. */
   resolveWorkspaceForDoc: (docId: string) => string | null;
+  /** A comment's `to`, resolved against the roster of the boards this doc is
+   *  on (`addressees.ts`). Absent `to` answers ok with no addressees. */
+  addresseesFor: (docId: string, to: unknown) => AddresseeResult;
   /** Anyone besides the owner can reach the board: a share link, a member
    *  who redeemed one, or a share. */
   boardIsShared: (workspaceId: string) => boolean;

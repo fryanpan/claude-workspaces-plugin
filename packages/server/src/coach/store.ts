@@ -34,7 +34,7 @@ const empty = (): CoachState => ({
   offBoards: [],
 });
 
-/** One week's answers, for the front page's line and the wrong-call rate. */
+/** One week's answers, for the wrong-call rate. */
 export interface CoachWeek {
   moments: number;
   /** Thumbs up, with the old cards' Thanks. */
@@ -53,9 +53,6 @@ export class CoachStore {
    *  are unknown: until it is fixed, every board counts as off. */
   readonly readFailed: boolean;
   private countWrittenAt = 0;
-  /** Told after every change to what the store holds, written or not yet:
-   *  "Your coach" on an open `/` redraws from it. */
-  onChange: (() => void) | null = null;
 
   constructor(dataDir: string, now: number = Date.now()) {
     this.path = join(dataDir, COACH_DIRNAME, 'state.json');
@@ -203,10 +200,7 @@ export class CoachStore {
     counts[day] = (counts[day] ?? 0) + 1;
     const days = Object.keys(counts).sort();
     for (const d of days.slice(0, Math.max(0, days.length - KEEP_EVENT_DAYS))) delete counts[d];
-    if (now - this.countWrittenAt < COUNT_WRITE_MS) {
-      this.onChange?.();
-      return;
-    }
+    if (now - this.countWrittenAt < COUNT_WRITE_MS) return;
     this.countWrittenAt = now;
     this.write();
   }
@@ -232,6 +226,5 @@ export class CoachStore {
 
   private write(): void {
     writeJsonFile(this.path, this.state);
-    this.onChange?.();
   }
 }

@@ -61,6 +61,15 @@ function replyFor(path: string): { status: number; body: unknown } {
   if (path === '/workspaces/w-live/person/show') {
     return { status: 200, body: { ok: true, spot: { surface: 'doc', docId: 'd-quay' } } };
   }
+  if (/^\/api\/agents\/[^/]+\/messages\/user-bob$/.test(path)) {
+    return { status: 403, body: { error: 'not_your_person' } };
+  }
+  if (/^\/api\/agents\/[^/]+\/messages\/[^/]+$/.test(path)) {
+    return { status: 200, body: { ok: true, message: { id: 'pm-2' } } };
+  }
+  if (/^\/api\/agents\/[^/]+\/person$/.test(path)) {
+    return { status: 200, body: { ok: true, state: 'pending' } };
+  }
   if (path === '/workspaces/w-live/person/watch') {
     return { status: 200, body: { ok: true, watching: true, landing: LANDING } };
   }
@@ -96,7 +105,11 @@ function payload(reply: Reply): Record<string, unknown> {
  * top of it.
  */
 function personPosts(): Recorded[] {
-  return seen.filter((r) => r.method === 'POST' && /\/person\/(watch|show)$/.test(r.path));
+  return seen.filter(
+    (r) =>
+      r.method === 'POST' &&
+      /(\/person\/(watch|show)|\/agents\/[^/]+\/(person|messages\/[^/]+))$/.test(r.path),
+  );
 }
 
 function last(): Recorded {
@@ -209,5 +222,65 @@ describe('watch_person and show_person', () => {
   it('says nobody is looking, rather than failing, when no tab is attended', async () => {
     const out = payload(await call('show_person', { workspaceId: 'w-empty', path: 'home' }));
     expect(out).toMatchObject({ shown: false, error: 'not-here' });
+  });
+});
+
+describe('confirm_person', () => {
+  it("posts this agent's side of the link with its token, and says the link is pending", async () => {
+    const out = payload(await call('confirm_person', { email: 'alice@example.com' }));
+    expect(last().path).toMatch(/^\/api\/agents\/agent-[^/]+\/person$/);
+    expect(last().body).toEqual({ email: 'alice@example.com' });
+    expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+    expect(out).toMatchObject({ ok: true, state: 'pending' });
+  });
+
+  it('clears its side with email null', async () => {
+    payload(await call('confirm_person', { email: null }));
+    expect(last().body).toEqual({ personId: null });
+  });
+});
+
+describe('reply_private', () => {
+  it("posts the reply to this agent's own person route with its token", async () => {
+    const out = payload(await call('reply_private', { personId: 'user-alice', text: 'Done.' }));
+    expect(last().path).toMatch(/^\/api\/agents\/agent-[^/]+\/messages\/user-alice$/);
+    expect(last().body).toEqual({ text: 'Done.' });
+    expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+    expect(out).toMatchObject({ ok: true, messageId: 'pm-2' });
+  });
+
+  it('says why when the server refuses, rather than failing', async () => {
+    const out = payload(await call('reply_private', { personId: 'user-bob', text: 'Hi' }));
+    expect(out).toMatchObject({ ok: false, error: 'not_your_person' });
+  });
+});
+
+describe('addressing a comment with `to`', () => {
+  const threadPosts = () =>
+    seen.filter(
+      (r) => r.method === 'POST' && /\/docs\/d-quay\/threads(\/[^/]+\/comments)?$/.test(r.path),
+    );
+
+  it('post_reply sends `to` as given, for the server to resolve', async () => {
+    await call('post_reply', {
+      workspaceId: 'w-live',
+      docId: 'd-quay',
+      threadId: 'th1',
+      text: 'Alice?',
+      to: ['Alice'],
+    });
+    expect(threadPosts().at(-1)?.body).toMatchObject({ text: 'Alice?', to: ['Alice'] });
+  });
+
+  it('create_thread sends `to`, and leaves it out when not given', async () => {
+    await call('create_thread', {
+      workspaceId: 'w-live',
+      docId: 'd-quay',
+      text: 'Bob?',
+      to: ['bob@example.com'],
+    });
+    expect(threadPosts().at(-1)?.body).toMatchObject({ text: 'Bob?', to: ['bob@example.com'] });
+    await call('create_thread', { workspaceId: 'w-live', docId: 'd-quay', text: 'Anyone?' });
+    expect('to' in (threadPosts().at(-1)?.body ?? {})).toBe(false);
   });
 });

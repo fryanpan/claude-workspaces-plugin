@@ -49,6 +49,14 @@ import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 
 import {
+  type AccessRole,
+  DEFAULT_ROLES_MODE,
+  type MemberAccess,
+  type RolesMode,
+  accessRoleOf,
+  normalizeMemberAccess,
+} from './board-access.ts';
+import {
   type BoardAudience,
   addAudienceEntries,
   boardAudienceAdmits,
@@ -128,6 +136,9 @@ export interface ShareLinkMember {
    * exactly as a row that says `member`.
    */
   role?: BoardRole;
+  /** What a member may do to doc content (`board-access.ts`). Absent = edit;
+   *  never written on an owner's row. */
+  access?: MemberAccess;
 }
 
 /**
@@ -169,6 +180,8 @@ interface Persisted {
   /** Absent on a registry written before audiences existed: `load` seeds
    *  them from the members (`board-audience.ts`). */
   audiences?: BoardAudience[];
+  /** Boards whose narrow roles are enforced. Absent = every board report-only. */
+  rolesEnforced?: string[];
 }
 
 /** What a write answers while the registry on disk could not be read. */
@@ -182,6 +195,7 @@ export class ShareLinks {
   private migratedThisBoot = false;
   private members: ShareLinkMember[] = [];
   private audiences: BoardAudience[] = [];
+  private rolesEnforced = new Set<string>();
   /**
    * Set when the registry file exists and could not be read. Everything then
    * stays empty, which admits nobody, and nothing is written: a save would
@@ -497,13 +511,19 @@ export class ShareLinks {
    * no membership to write a role onto, and inventing one here would make this
    * a second, quieter way to admit somebody.
    */
-  setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
+  setMemberRole(
+    workspaceId: string,
+    email: string,
+    role: BoardRole,
+    access: MemberAccess | undefined = undefined,
+  ): boolean {
     this.refuseWhileUnreadable();
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
     const row = this.admittedRow(workspaceId, who);
     if (!row) return false;
-    if ((row.role ?? DEFAULT_BOARD_ROLE) === role) return true;
+    const nextAccess = role === 'owner' ? undefined : access;
+    if ((row.role ?? DEFAULT_BOARD_ROLE) === role && row.access === nextAccess) return true;
     // Rebuilt rather than mutated, so a demotion REMOVES the key instead of
     // writing `undefined` into it: `member` is the absent state (see
     // `BoardRole`), and a row carrying `"role": undefined` serializes as a
@@ -514,10 +534,34 @@ export class ShareLinks {
       addedAt: row.addedAt,
       viaLinkId: row.viaLinkId,
       ...(role === 'owner' ? { role: 'owner' as const } : {}),
+      ...(nextAccess ? { access: nextAccess } : {}),
     };
     this.members = this.members.map((m) => (m === row ? next : m));
     this.save();
     return true;
+  }
+
+  /** The four-word role (`board-access.ts`), or null when not a member. */
+  accessRoleOf(workspaceId: string, email: string | null | undefined): AccessRole | null {
+    const who = email ? normalizeEmail(email) : '';
+    if (who === '' || !workspaceId) return null;
+    const row = this.memberRow(workspaceId, who);
+    if (!row) return null;
+    return accessRoleOf(row.role ?? DEFAULT_BOARD_ROLE, row.access);
+  }
+
+  /** Whether this board's narrow roles are enforced or only logged. */
+  rolesModeOf(workspaceId: string): RolesMode {
+    return this.rolesEnforced.has(workspaceId) ? 'enforce' : DEFAULT_ROLES_MODE;
+  }
+
+  /** Turn a board's role enforcement on or off. */
+  setRolesMode(workspaceId: string, mode: RolesMode): void {
+    this.refuseWhileUnreadable();
+    if (this.rolesModeOf(workspaceId) === mode) return;
+    if (mode === 'enforce') this.rolesEnforced.add(workspaceId);
+    else this.rolesEnforced.delete(workspaceId);
+    this.save();
   }
 
   /**
@@ -678,18 +722,25 @@ export class ShareLinks {
           // hand-edited `"Owner"` is dropped to the default rather than
           // becoming a role nothing else recognises. Dropping can only narrow.
           const role = normalizeBoardRole(m.role);
+          const access = role === 'owner' ? undefined : normalizeMemberAccess(m.access);
           // Spread MINUS the role, then add it back only when it survived the
           // normalizer: `{...m}` would otherwise carry a hand-edited `"Owner"`
           // straight through the very check that exists to drop it.
-          const { role: _raw, ...rest } = m;
+          const { role: _raw, access: _rawAccess, ...rest } = m;
           const row: ShareLinkMember = {
             ...rest,
             email: normalizeEmail(m.email),
             ...(role === 'owner' ? { role } : {}),
+            ...(access ? { access } : {}),
           };
           return row;
         })
         .filter((m) => m.email !== '');
+      this.rolesEnforced = new Set(
+        Array.isArray(parsed.rolesEnforced)
+          ? parsed.rolesEnforced.filter((w): w is string => typeof w === 'string' && w !== '')
+          : [],
+      );
       if (Array.isArray(parsed?.audiences)) {
         this.audiences = storedAudiences(parsed.audiences);
       } else {
@@ -705,6 +756,7 @@ export class ShareLinks {
     this.links = [];
     this.members = [];
     this.audiences = [];
+    this.rolesEnforced = new Set();
     this.loadFailed = true;
     console.error(
       `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
@@ -764,6 +816,7 @@ export class ShareLinks {
       links: this.links,
       members: this.members,
       audiences: this.audiences,
+      ...(this.rolesEnforced.size > 0 ? { rolesEnforced: [...this.rolesEnforced] } : {}),
     };
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE });

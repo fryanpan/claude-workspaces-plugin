@@ -46,11 +46,14 @@ const handlers = (): DetailHandlers => ({
 
 let live: (() => void) | null = null;
 let scrolled: Element[] = [];
+/** For each scroll, whether its target sat under a `.hidden` box at the time. */
+let scrolledWhileHidden: boolean[] = [];
 
-function open(search: string, t: BoardTask): HTMLElement {
+/** `closed`: the host starts as the board shell builds it, `hidden`. */
+function open(search: string, t: BoardTask, closed = false): HTMLElement {
   window.history.replaceState(null, '', `/workspaces/w-harbor${search}`);
   const host = document.createElement('div');
-  host.className = 'board-detail';
+  host.className = closed ? 'board-detail hidden' : 'board-detail';
   document.body.replaceChildren(host);
   // Written before the mount: the signal is module-level, and the last
   // test's task would otherwise paint first.
@@ -61,8 +64,10 @@ function open(search: string, t: BoardTask): HTMLElement {
 
 beforeEach(() => {
   scrolled = [];
+  scrolledWhileHidden = [];
   Element.prototype.scrollIntoView = function (this: Element) {
     scrolled.push(this);
+    scrolledWhileHidden.push(this.closest('.hidden') !== null);
   };
 });
 afterEach(() => {
@@ -87,6 +92,18 @@ describe('opening a task from a needs-review link', () => {
     expect(scrolled).toEqual([]);
     taskDetailData.value = { task: task(true), discussion: EMPTY, handlers: handlers() };
     expect(scrolled).toEqual([host.querySelector('.board-decide')]);
+  });
+
+  // The board shell builds the host `hidden`, and the parent's layout effect
+  // shows it AFTER the panel's own effects have run. An item already on the
+  // task at the first paint was scrolled to inside a `display: none` box, which
+  // moves nothing, and the landing counted as done: CI runs 43566634971 and
+  // 43568706285 read the queue at 1522px, the plain open's value.
+  it('scrolls once the panel is shown, when the item is there at the first paint', () => {
+    const host = open('?task=t-ferry&focus=review', task(true), true);
+    expect(host.classList.contains('hidden')).toBe(false);
+    expect(scrolled).toEqual([host.querySelector('.board-decide')]);
+    expect(scrolledWhileHidden).toEqual([false]);
   });
 
   it('scrolls nowhere on an ordinary open (control)', () => {

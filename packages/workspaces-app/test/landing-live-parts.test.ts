@@ -1,6 +1,6 @@
 /**
- * The parts of an open workspaces list that keep their own stores: "Your
- * coach", Incoming Messages and the meeting banner. A `landing.changed`
+ * The parts of an open workspaces list that keep their own stores: Incoming
+ * Messages and the meeting banner. A `landing.changed`
  * frame names the parts that changed, and the page redraws those and only
  * those, without a reload. The markup is the shape the server draws.
  */
@@ -29,12 +29,10 @@ const LINE = (id: string, purpose: string) =>
   `<div class="inbox-row" data-row="${id}" data-channel="Email"><div class="inbox-line"><button type="button" class="board-review-row" aria-expanded="false"><span class="board-review-row-title">${purpose}</span></button></div></div>`;
 const inbox = (lines: Array<[string, string]>) =>
   `<section id="inbox" class="inbox-front" tabindex="-1"><div class="inbox-rows">${lines.map(([id, p]) => LINE(id, p)).join('')}</div></section>`;
-const coach = (readiness: string) =>
-  `<section id="coach"><button data-readiness="${readiness}" aria-pressed="true">${readiness}</button></section>`;
 const boards = (name: string) =>
   `<div id="landing-boards"><span class="grp-name">${name}</span></div>`;
-const page = (c: string, i: string, b: string) =>
-  `<meeting-banner></meeting-banner>${c}<div id="landing-review"></div>${i}${b}`;
+const page = (i: string, b: string) =>
+  `<meeting-banner></meeting-banner><div id="landing-review"></div>${i}${b}`;
 
 const A: [string, string] = ['ib-aaaaaaaaaaaa', 'Wants a yes on the Saltmarsh dates'];
 const B: [string, string] = ['ib-bbbbbbbbbbbb', 'Asks about the Riverbend rota'];
@@ -93,20 +91,11 @@ afterEach(() => {
 });
 
 describe('the parts of the list with their own stores stay live', () => {
-  it('redraws the coach when it changed on another device, and leaves the rest', async () => {
-    open(page(coach('normal'), inbox([A]), boards('Harborlight')));
-    served = page(coach('less'), inbox([A, B]), boards('Riverbend'));
-    stream.changed('coach');
-    await until(() => document.querySelector('#coach [data-readiness="less"]') !== null);
-    expect(titles()).toEqual([A[1]]);
-    expect(document.querySelector('.grp-name')?.textContent).toBe('Harborlight');
-  });
-
   it('adds a message posted elsewhere, keeping the open line and its text', async () => {
-    open(page(coach('normal'), inbox([A]), boards('Harborlight')));
+    open(page(inbox([A]), boards('Harborlight')));
     document.querySelector<HTMLButtonElement>('.inbox-line > .board-review-row')?.click();
     await until(() => document.querySelector('.inbox-msg')?.textContent === 'Hold the 14th?');
-    served = page(coach('normal'), inbox([B, A]), boards('Harborlight'));
+    served = page(inbox([B, A]), boards('Harborlight'));
     stream.changed('inbox');
     await until(() => titles().length === 2);
     expect(titles()).toEqual([B[1], A[1]]);
@@ -117,11 +106,11 @@ describe('the parts of the list with their own stores stay live', () => {
   });
 
   it('holds the inbox while the reader types, and redraws once they stop', async () => {
-    open(page(coach('normal'), inbox([A]), boards('Harborlight')));
+    open(page(inbox([A]), boards('Harborlight')));
     const box = document.createElement('textarea');
     document.querySelector('#inbox .inbox-row')?.append(box);
     box.focus();
-    served = page(coach('normal'), inbox([B, A]), boards('Harborlight'));
+    served = page(inbox([B, A]), boards('Harborlight'));
     stream.changed('inbox');
     for (let i = 0; i < 10; i += 1) await flush();
     expect(titles()).toEqual([A[1]]);
@@ -130,7 +119,7 @@ describe('the parts of the list with their own stores stay live', () => {
   });
 
   it('asks the meeting banner to re-read when a meeting starts or ends', async () => {
-    open(page(coach('normal'), inbox([A]), boards('Harborlight')));
+    open(page(inbox([A]), boards('Harborlight')));
     stream.changed('meeting');
     await until(() => bannerReads === 1);
   });

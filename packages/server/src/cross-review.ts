@@ -82,11 +82,9 @@ export interface CrossReview {
   projects(): { planWorkspaceId?: string; projects: RankedProject[] };
   /**
    * Load the cold docs a queue read will take threads from, handing the loop
-   * back between loads. `includeRetired` adds the retired boards' task docs,
-   * which the landing page's activity reading walks too. Resolves to how many
-   * docs it loaded.
+   * back between loads. Resolves to how many docs it loaded.
    */
-  prepare(opts?: { includeRetired?: boolean }): Promise<number>;
+  prepare(): Promise<number>;
   /** Every open item on every live board, top project first. */
   queue(): Promise<CrossReviewQueue & { planWorkspaceId?: string }>;
   /** One open item by any name it goes by (`review-key.ts`), with the plan
@@ -133,26 +131,33 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     taskStore.listWorkspaces().filter((w) => !isRetired(w));
 
   /**
-   * Every doc a queue read on `boards` takes threads from, all of them
-   * unfiltered: the roster (`knownPeople`) reads resolved threads too, and
-   * the activity reading (`lastActivityOf`) reads archived tasks' threads.
+   * Every doc a queue read on the live boards takes threads from, and no
+   * other: the rows `reviewThreadItems` reads — tasks and goals that are not
+   * done, and the board's docs. All of them unfiltered, because the roster
+   * (`knownPeople`) reads their resolved threads too.
+   *
+   * Archived and done rows are not here. The activity reading
+   * (`lastActivityOf`) used to read their threads, which is why they were;
+   * it reads index rows now, and loading a board's whole history to warm a
+   * read that never touches it is what made the first Home after an idle
+   * sweep load ~4,900 docs on a 20-board corpus where the queue reads ~2,000.
    */
   const readTargets = (boards: BoardWorkspace[]): Map<string, undefined> => {
     const targets = new Map<string, undefined>();
     for (const w of boards) {
-      for (const t of taskStore.listTasks(w.id, { includeArchived: true })) {
-        targets.set(taskBodyDocId(t.id), undefined);
+      for (const t of taskStore.listTasks(w.id)) {
+        if (t.status !== 'done') targets.set(taskBodyDocId(t.id), undefined);
       }
-      for (const g of taskStore.listGoalRows(w.id)) targets.set(taskBodyDocId(g.id), undefined);
+      for (const g of taskStore.listGoalRows(w.id)) {
+        if (g.status !== 'done') targets.set(taskBodyDocId(g.id), undefined);
+      }
       for (const docId of w.docIds) targets.set(docId, undefined);
     }
     return targets;
   };
 
-  const prepare: CrossReview['prepare'] = (opts) =>
-    docStore.warmForThreadReads(
-      readTargets(opts?.includeRetired ? taskStore.listWorkspaces() : liveBoards()),
-    );
+  const prepare: CrossReview['prepare'] = () =>
+    docStore.warmForThreadReads(readTargets(liveBoards()));
 
   const projectsOf = (boards: BoardWorkspace[]) => {
     const inputs = boards.map((w) => ({

@@ -1,0 +1,110 @@
+# Project machines' images, deployed to Fly from main
+# (infra/project-machine/README.md, docs/process/project-machine.md).
+#
+#   push to main  when the image's inputs change: infra/project-machine/**,
+#                 the root package.json or bun.lock (a machine refuses a
+#                 signed release built against another bun.lock, so a lock
+#                 change needs a new image), or this file.
+#   dispatch      the same, on main only. Any other branch deploys nothing.
+#
+# Each machine in infra/project-machine/machines.json is updated with
+# `machine:deploy` (machines.ts), taking every credential from the
+# environment (CW_SECRETS_FROM_ENV=1, mac-ops.ts). A run here only updates a
+# machine: an app, volume, bucket or backup key the Mac has not made is
+# refused before Fly is touched, so a project's first deploy, and its lead's
+# browser sign-in, still run on the Mac. Server code is not deployed here:
+# machines install the signed releases server-release.yml publishes.
+#
+# Secrets, in the `cloudflare-prod` environment (deployments from main only),
+# both written by `bun run cf:ci-secrets apply` (infra/cloudflare/ci-secrets/):
+#   FLY_API_TOKEN          an org deploy token for the Fly org the apps are in
+#   CLOUDFLARE_API_TOKEN   the deploy token; ci-credentials.ts derives the
+#                          state bucket's key and the account id from it, for
+#                          `terraform output`, unless R2_ACCESS_KEY_ID and
+#                          R2_SECRET_ACCESS_KEY are set
+# Variables (optional): CLOUDFLARE_ACCOUNT_ID, when the token reaches more
+# than one account; CF_TFSTATE_BUCKET, default claude-workspaces-tfstate.
+# The Fly org's slug is not needed: only the Mac-only steps that make an app
+# or a bucket name it.
+#
+# Until both secrets are set, a merge skips the deploy rather than failing.
+
+name: fly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/project-machine/**
+      - package.json
+      - bun.lock
+      - .github/workflows/fly.yml
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: cloudflare-prod
+    concurrency:
+      group: fly-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    # The tokens are on the one step that needs them, not the job: `bun
+    # install` and the setup actions never see them.
+    steps:
+      - name: Deploy secrets are present
+        id: secrets
+        env:
+          HAS_FLY: ${{ secrets.FLY_API_TOKEN != '' }}
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          if [ "$HAS_FLY" = true ] && [ "$HAS_TOKEN" = true ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No deploy: FLY_API_TOKEN and CLOUDFLARE_API_TOKEN are not both set in cloudflare-prod yet."
+          fi
+      # The full history: the image records its serial, the commit's position
+      # on main (release-publish.ts serialOf).
+      - if: steps.secrets.outputs.present == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - if: steps.secrets.outputs.present == 'true'
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - if: steps.secrets.outputs.present == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.secrets.outputs.present == 'true'
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - if: steps.secrets.outputs.present == 'true'
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      # mac-ops.ts runs `fly`; the action puts `flyctl` on the PATH.
+      - name: fly on the PATH
+        if: steps.secrets.outputs.present == 'true'
+        run: |
+          if ! command -v fly >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/flybin"
+            ln -s "$(command -v flyctl)" "$RUNNER_TEMP/flybin/fly"
+            echo "$RUNNER_TEMP/flybin" >> "$GITHUB_PATH"
+          fi
+      - name: Deploy each project machine
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          CW_SECRETS_FROM_ENV: '1'
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+        run: bun infra/cloudflare/ci-credentials.ts --account-id -- bun infra/project-machine/machines.ts deploy --ref "$GITHUB_SHA"

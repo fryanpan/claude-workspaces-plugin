@@ -58,4 +58,35 @@ export const PERSON_TOOLS: ListToolsResult['tools'] = [
       required: ['workspaceId'],
     },
   },
+  {
+    name: 'confirm_person',
+    description:
+      'Confirm which person you work for, by their sign-in email. You become their lead agent only once they have also named you in their profile; until then the reply says pending. Their private messages reach only their linked lead agent. email: null clears your side of the link.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        email: {
+          type: ['string', 'null'],
+          description: "The person's sign-in email, or null to clear the link.",
+        },
+      },
+      required: ['email'],
+    },
+  },
+  {
+    name: 'reply_private',
+    description:
+      'Answer a private message from your person (a [private] channel line). Only that person sees it, on their own stream; it never reaches the board, its threads or lead chat. Refused unless personId is the person linked to you (confirm_person).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        personId: {
+          type: 'string',
+          description: 'The personId the [private] line named.',
+        },
+        text: { type: 'string', description: 'Your reply.' },
+      },
+      required: ['personId', 'text'],
+    },
+  },
 ];

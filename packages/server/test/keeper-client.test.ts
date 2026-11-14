@@ -55,12 +55,16 @@ const done = {
 
 describe('waiting on a held call', () => {
   it('a command that is running is waited for past the tap wait', async () => {
-    // Approved on the second poll, then running for far longer than the tap wait.
-    const polls = [pending, ...Array.from({ length: 40 }, () => running), done];
+    // Approved on the second poll, then running for longer than the tap wait.
+    // 300 polls of at least 2ms each is at least 600ms, past the 500ms wait
+    // however fast the machine; the wait still leaves 500ms for the first poll
+    // to see `pending` on a loaded runner. At 30ms it lost that race on CI
+    // (PR 1625's run, server shard 1) and the call was withdrawn.
+    const polls = [pending, ...Array.from({ length: 300 }, () => running), done];
     const k = scripted(polls);
     const r = await keeperFly(ORIGIN, ['deploy'], undefined, {
       fetchImpl: k.fetchImpl,
-      waitMs: 30,
+      waitMs: 500,
       pollMs: 2,
     });
     expect(r).toEqual({ status: 0, stdout: 'deployed\n', stderr: '' });

@@ -46,6 +46,7 @@ import {
   chromeLaunchArgs,
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
+import { registerOwnerIdentity } from '../../server/src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import {
   Q,
@@ -199,6 +200,12 @@ async function main(): Promise<void> {
       frameBoardHosts: [BOARD_HOST],
     });
     const h = handle;
+    // The reader is this machine's owner: the server names a loopback page
+    // that proved nobody as the owner, never by the name the page typed.
+    const reader = h.identities.upsertByEmail('reader@harborlight.example', {
+      displayName: READER,
+    });
+    registerOwnerIdentity(reader.id);
     const api = `http://127.0.0.1:${port}`;
     const base = `http://${BOARD_HOST}:${port}`;
     const post = async (path: string, body: unknown) => {

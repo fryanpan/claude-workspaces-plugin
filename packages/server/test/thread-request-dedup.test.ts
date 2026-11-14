@@ -179,7 +179,8 @@ describe('ThreadRequestDedup', () => {
   });
 
   it('a completed entry is remembered for the full TTL measured from completion, not from reservation', async () => {
-    const d = new ThreadRequestDedup<string | null>(15);
+    let clock = 1_000;
+    const d = new ThreadRequestDedup<string | null>(15, () => clock);
     let resolveFirst: ((v: string) => void) | undefined;
     const first = d.dedupe(
       'doc1',
@@ -188,13 +189,12 @@ describe('ThreadRequestDedup', () => {
       'anchor-a',
       () => new Promise<string>((resolve) => (resolveFirst = resolve)),
     );
-    const start = Date.now();
-    while (Date.now() - start < 20) {
-      // The reservation is already older than the 15ms TTL — if the clock
-      // ran from reservation, the entry below would already be gone.
-    }
+    // The reservation is now older than the 15ms TTL: if the clock ran from
+    // reservation, the entry below would already be gone.
+    clock += 20;
     resolveFirst?.('t1');
     await first;
+    clock += 14;
     const { value, deduped } = await d.dedupe('doc1', 'r1', 'hello', 'anchor-a', async () => 't2');
     expect(value).toBe('t1');
     expect(deduped).toBe(true);

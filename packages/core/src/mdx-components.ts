@@ -134,6 +134,26 @@ export function componentInputs(blocks: readonly string[]): ComponentInput[] {
   return out;
 }
 
+const TAG_ID_RE =
+  /<([A-Z][\w$.]*)\b[^>]*?\bid\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)'|\{\s*(?:"([^"\n]*)"|'([^'\n]*)'|`([^`$\n]*)`)\s*\})/g;
+
+/**
+ * The state ids a component tag's source names: every function tag (a
+ * capitalised name) with an `id` written as a string literal, in source
+ * order, once each. The runtime hands a function tag with a string `id` that
+ * id's state, so these are the states the tag shows. A scan, so an `id`
+ * computed by an expression is not seen, and an attribute after a `>` inside
+ * an earlier expression can be missed.
+ */
+export function componentTagIds(tag: string): string[] {
+  const out: string[] = [];
+  for (const m of tag.matchAll(TAG_ID_RE)) {
+    const id = m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6];
+    if (id !== undefined && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 /** The key a tag's build is filed under: a hash of what goes into it. */
 export function componentBuildKey(imports: readonly string[], tag: string): string {
   const text = `${imports.join('\n')}\n\u0000\n${tag}`;

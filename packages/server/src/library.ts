@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { basename, posix } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
-import { attachmentIdOf } from '@claude-workspaces/core';
+import { attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
 import { type FolderState, type FolderView, folderOfDoc, liveFolders } from './library-folders.ts';
@@ -260,12 +260,24 @@ export function displayNames(relPaths: readonly string[]): Map<string, string> {
  *  when it came from one. */
 type LooseFile = ProjectFile & { fileId?: string };
 
+/**
+ * Whether a doc belongs to an attachment set, whose own page lists it. Coach
+ * setup used to write the Coach board's id in the set field of docs that
+ * have no file path in a set; those are filed on the board, so they are not
+ * set members. A doc with a set file path is a member whatever the id.
+ */
+function inAttachmentSet(meta: DocMeta, workspaceId: string): boolean {
+  const id = attachmentIdOf(meta);
+  if (id === undefined) return false;
+  return id !== workspaceId || isAttachmentMember(meta);
+}
+
 /** The doc keys this board's docs already hold — the files the repo listing
  *  must not offer a second time, and a second bind for. */
 function coveredKeys(src: LibrarySources): Set<string> {
   const covered = new Set<string>();
   for (const meta of src.docs) {
-    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    if (inAttachmentSet(meta, src.workspaceId) || isReservedDocId(meta.docId)) continue;
     const key = src.docKeyOf(meta.docId);
     if (key) covered.add(key);
   }
@@ -354,7 +366,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
     // A review's member (a diff file, a folder bind's opened file) belongs to
     // that review's own page, and a task's description is the task. Neither
     // is a document somebody files on a board.
-    if (attachmentIdOf(meta) || isReservedDocId(meta.docId)) continue;
+    if (inAttachmentSet(meta, src.workspaceId) || isReservedDocId(meta.docId)) continue;
     const href = docHref(src.workspaceId, meta);
     if (!href) continue;
     const key = src.docKeyOf(meta.docId);

@@ -61,7 +61,7 @@ export class Awareness {
   readonly doc: AwarenessDoc;
   readonly clientID: number;
   /** Empty and staying empty. `ws-client` pushes local state on connect only
-   *  when `getStates()` is non-empty, so this is what stops the announcement. */
+   *  when `getLocalState()` is non-null, which the null below stops. */
   readonly states = new Map<number, Record<string, unknown>>();
   readonly meta = new Map<number, { clock: number; lastUpdated: number }>();
 

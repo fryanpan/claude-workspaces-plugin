@@ -94,8 +94,10 @@ export interface HomeNavReading {
     boxesBefore: string[];
     boxesAfter: string[];
     taps: Tap[];
-    /** The coach card's box with a moment showing. */
-    coach: { top: number; bottom: number };
+    /** Coach cards on Home after a moment was offered: none, since the coach
+     *  is not on Home. `workspace1000Coach` is the same moment drawn on a
+     *  board, so a zero here is a reading. */
+    coachCards: number;
     /** Each tab, and whether a tap at its centre reaches it. */
     hits: Array<{ label: string; reached: boolean }>;
     /** Widget controls drawn over a tab, as `control on tab`. */
@@ -351,19 +353,17 @@ async function main(): Promise<void> {
     const home = await look();
     const boxesBefore = await boxes();
     const taps: Tap[] = [];
-    // Each section starts out of view: scrolled past for the ones above,
-    // at the top for the one below.
-    for (const [label, from] of [
-      ['Projects', 'top'],
-      ['Coach', 'bottom'],
-      ['Inbox', 'bottom'],
-      ['Review', 'bottom'],
-    ] as const) {
+    // Each section starts out of view, scrolled past from the page's end.
+    // Projects used to start below the fold from the top, with the coach
+    // section above it; without that section it sits in the first half
+    // screen, so it too starts from the end, where thirty boards put its top
+    // above the viewport.
+    for (const label of ['Projects', 'Inbox', 'Review'] as const) {
       const sel = await ev<string>(
         `[...document.querySelectorAll('.home-nav .board-nav-item')].find((a) => a.textContent.trim() === ${JSON.stringify(label)})?.getAttribute('href') ?? ''`,
       );
       if (!sel) throw new Error(`no ${label} entry`);
-      await ev(`window.scrollTo(0, ${from === 'top' ? 0 : 'document.body.scrollHeight'})`);
+      await ev('window.scrollTo(0, document.body.scrollHeight)');
       const topOf = () =>
         ev<number>(
           `Math.round(document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().top)`,
@@ -397,7 +397,7 @@ async function main(): Promise<void> {
       });
     }
     const boxesAfter = await boxes();
-    const homeCoach = await coachCard();
+    const homeCoachCards = await ev<number>(`document.querySelectorAll('.coach-card-host').length`);
     const homeHits = await hits();
 
     step('phone: the widget beside the bar');
@@ -442,7 +442,7 @@ async function main(): Promise<void> {
     const desktop = await ev<HomeNavReading['desktop']>(`(() => {
       const nav = document.querySelector('.home-nav');
       const marks = () =>
-        ['h1', 'meeting-banner', '#landing-review', '#inbox', '#landing-boards', '#coach'].map((sel) => {
+        ['h1', 'meeting-banner', '#landing-review', '#inbox', '#landing-boards'].map((sel) => {
           const r = document.querySelector(sel)?.getBoundingClientRect();
           return r ? sel + ' ' + [r.left, r.top, r.width, r.height].map(Math.round).join(',') : sel + ' missing';
         });
@@ -465,7 +465,7 @@ async function main(): Promise<void> {
         boxesBefore,
         boxesAfter,
         taps,
-        coach: homeCoach,
+        coachCards: homeCoachCards,
         overTabs: seated.over,
         controls: seated.controls,
         blur,

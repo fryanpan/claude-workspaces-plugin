@@ -11,6 +11,7 @@ import {
   ciRunTokens,
   overallExit,
   parityProblems,
+  requiredCheckProblems,
   runMembers,
 } from './verify.ts';
 
@@ -177,6 +178,37 @@ describe('ciJobIds and ciGateTokens', () => {
   it('excuses only jobs the real workflow actually has', () => {
     const ids = ciJobIds(readFileSync(CI_WORKFLOW, 'utf8'));
     for (const job of Object.keys(NON_GATE_JOBS)) expect(ids).toContain(job);
+  });
+});
+
+describe('requiredCheckProblems', () => {
+  const wf = (needs: string) =>
+    [
+      'jobs:',
+      '  a:',
+      '    runs-on: x',
+      '  b:',
+      '    runs-on: x',
+      '  ci:',
+      `    needs: ${needs}`,
+      '    if: always()',
+      '',
+    ].join('\n');
+
+  it('is quiet when the required check needs every other job', () => {
+    expect(requiredCheckProblems(wf('[a, b]'))).toEqual([]);
+  });
+
+  it('names a job the required check does not wait for', () => {
+    const problems = requiredCheckProblems(wf('[a]'));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('`b`');
+  });
+
+  it('says so when the required job is missing', () => {
+    const problems = requiredCheckProblems('jobs:\n  a:\n    runs-on: x\n');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('no `ci` job');
   });
 });
 

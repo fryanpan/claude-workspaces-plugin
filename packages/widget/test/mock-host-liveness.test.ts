@@ -2,7 +2,7 @@
  * The host page's watch on the doc socket it relays for a frame: a socket that
  * stops carrying bytes is closed to the frame, and one that answers is left
  * alone. The two ends are joined as in `mock-bridge-host.test.ts`; the browser
- * case that a real page recovers is `app-resolve.test.ts`.
+ * case that a real page recovers is `app-resolve-cases.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROBE_ANSWER_MS, PROBE_EVERY_MS } from '../src/mock-host-liveness.ts';

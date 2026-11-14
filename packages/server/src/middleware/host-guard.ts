@@ -684,6 +684,11 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // Task events on it are redacted for visitors (actor display names only)
   // before they reach the stream.
   'events:stream': ['GET'],
+  // The comments addressed to the person this request proved, and nobody
+  // else's: the channel is the proof's identity, not a path segment
+  // (`routes/upgrade-stream.ts`). Every comment on it is on a board that
+  // person is a member of (`addressees.ts`).
+  'me/events:stream': ['GET'],
 };
 
 /** The per-task verbs, under `/workspaces/<id>/tasks/<taskId>/`. See BOARD_MEMBER_ROUTES. */

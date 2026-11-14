@@ -1,13 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
 import {
   type Anchor,
   type AnchorRefresh,
@@ -18,9 +9,6 @@ import {
   type DocTitleSource,
   type DocType,
   type ElementAnchor,
-  type LinkedReviewItem,
-  type PageEdit,
-  type PageSuggestion,
   type ReviewItemJudgement,
   type ReviewPayload,
   type Thread,
@@ -42,15 +30,23 @@ import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { ComponentGrants } from './component-grants.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import { DocImageVersions } from './doc-image-versions.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type ResidencyEntry, pastWindow } from './doc-residency.ts';
+import { DiskDocStateStore } from './doc-state/disk.ts';
+import type { DocStateStore } from './doc-state/store.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
 import { DocSuggestOps, type DocSuggestPersistence } from './doc-suggest-ops.ts';
-import { type DocThreadPersistence, DocThreads } from './doc-threads.ts';
+import {
+  type DocThreadPersistence,
+  DocThreads,
+  type FindWriteOpts,
+  type PostCommentOpts,
+} from './doc-threads.ts';
 import {
   type AttachOpts,
   type FileBindingHost,
@@ -137,7 +133,7 @@ import {
 import { type BufferCounters, MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
-import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
+import type { PresenceStamp } from './presence-identity.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -151,6 +147,7 @@ import {
   type ScopedEditGuard,
   type ScopedEditRefusal,
 } from './scoped-edit-guard.ts';
+import type { SocketAccess } from './share/board-access.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
 import type { ScheduleArgs, ThreadSummarizer } from './summarize.ts';
@@ -230,6 +227,9 @@ export type WsCtx = {
    * decides which tabs are the owner's. Set on the board room's socket only.
    */
   personProof?: 'owner' | 'other';
+  /** Who every peer sees this socket's presence as, set by the server at
+   *  the upgrade (`presence-identity.ts`). Absent: a guest (`yjs-protocol.ts`). */
+  presenceUser?: PresenceStamp;
   /**
    * The board widget token and page origin a tailnet widget door socket was
    * admitted with. Like `shareId`: the token is checked once at the upgrade,
@@ -244,6 +244,13 @@ export type WsCtx = {
    * doc editing socket only; absent elsewhere.
    */
   editor?: SocketEditor;
+  /**
+   * The person's access on the board this socket is addressed under, and
+   * the board's roles mode (`share/board-access.ts`). Sent at connect and
+   * judged on every write by `socket-write-gate.ts`. Set on doc and board
+   * room sockets.
+   */
+  access?: SocketAccess;
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
@@ -402,6 +409,12 @@ export interface WorkspaceTree {
 
 export interface DocStoreConfig {
   dataDir: string;
+  /**
+   * Where each doc's shared state (the Yjs update) is kept
+   * (`doc-state/store.ts`). Defaults to `.ydoc` files in `dataDir`. Sidecars,
+   * index rows and the `.md` write-back stay in `dataDir` either way.
+   */
+  docState?: DocStateStore;
   /** How a component build reaches esm.sh; see `ServerOptions.componentFetch`. */
   componentFetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   /** Called on new thread / reply / status change to dispatch webhooks + SSE. */
@@ -512,7 +525,7 @@ export class DocStore {
       dataDir: () => this.cfg.dataDir,
       doc: (docId) => this.resolveDoc(docId),
       residentDoc: (docId) => this.docs.get(docId),
-      ydocPath: (docId) => this.pathFor(docId),
+      stateSavedAt: (docId) => this.state.savedAt(docId),
       schedulePersist: (doc) => this.saveToDisk(doc),
       persistNow: (doc) => this.persistDocNow(doc),
       clearPendingFileWrite: (docId) => this.clearPendingFileWrite(docId),
@@ -602,7 +615,7 @@ export class DocStore {
   private catalogHost(): DocCatalogHost {
     return {
       dataDir: () => this.cfg.dataDir,
-      ydocPath: (docId) => this.pathFor(docId),
+      docState: () => this.state,
       residentDoc: (docId) => this.docs.get(docId),
       residentDocs: () => this.docs.values(),
       hasPendingSave: (docId) => this.saveTimers.has(docId),
@@ -653,6 +666,8 @@ export class DocStore {
   });
   /** The component builds of each open `.mdx` doc (doc-component-builds.ts). */
   private readonly componentBuilds: DocComponentBuilds;
+  /** The owner's component folder grants; the access door writes them. */
+  readonly componentGrants: ComponentGrants;
   /** An idle sweep is part-way through, handing the loop back between docs. */
   private sweeping = false;
   /**
@@ -746,7 +761,7 @@ export class DocStore {
       persistDocNow: (doc) => this.persistDocNow(doc),
       teardownDoc: (doc, closeReason) => this.teardownDoc(doc, closeReason),
       releaseAliases: (docId) => this.catalog.releaseAliases(docId),
-      pathFor: (docId) => this.pathFor(docId),
+      docState: () => this.state,
       forgetActivityMtime: (docId) => this.catalog.forgetActivity(docId),
       setIndexEntry: (docId, entry) => this.catalog.setIndex(docId, entry),
       deleteIndexEntry: (docId) => this.catalog.setIndex(docId, undefined),
@@ -972,6 +987,11 @@ export class DocStore {
     this.componentBuilds.noteOpened(doc);
   }
 
+  /** Build `doc`'s component tags now, as a page opening it would. */
+  refreshComponents(doc: LiveDoc): Promise<void> {
+    return this.componentBuilds.refresh(doc);
+  }
+
   /** The file of a component build `doc`'s map names, or null. */
   componentBundlePath(doc: LiveDoc, hash: string): string | null {
     return this.componentBuilds.bundlePathFor(doc, hash);
@@ -1088,12 +1108,17 @@ export class DocStore {
   constructor(private cfg: DocStoreConfig) {
     if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
     this.repos = new RepoRegistry(cfg.dataDir);
+    this.componentGrants = new ComponentGrants(cfg.dataDir);
     this.componentBuilds = new DocComponentBuilds(
       {
         openDocs: () => [...this.docs.values()].filter((d) => d.conns.size > 0),
         boundPathOf: (docId) => this.boundPathOf(docId),
       },
-      { dataDir: cfg.dataDir, ...(cfg.componentFetch ? { fetch: cfg.componentFetch } : {}) },
+      {
+        dataDir: cfg.dataDir,
+        grants: this.componentGrants,
+        ...(cfg.componentFetch ? { fetch: cfg.componentFetch } : {}),
+      },
     );
     this.editSessions = new EditSessionTracker({
       ...(cfg.editSessionIdleMs !== undefined ? { idleMs: cfg.editSessionIdleMs } : {}),
@@ -1281,6 +1306,21 @@ export class DocStore {
     return this.catalog.lastThreadActivity(docId);
   }
 
+  /**
+   * The newest comment on a doc, loading it only when no index row can say.
+   *
+   * `lastThreadActivity` answers 0 for a cold doc with no row, which is right
+   * for a badge and wrong for "when was this board last active". Home asks
+   * this of every task on every board, archived ones included; reading the
+   * row instead of the thread map is what keeps that read from loading them.
+   */
+  newestThreadActivity(docId: string): number {
+    if (this.docs.has(docId) || this.catalog.entry(docId)) {
+      return this.catalog.lastThreadActivity(docId);
+    }
+    return this.listThreads(docId).reduce((last, t) => Math.max(last, t.lastActivity), 0);
+  }
+
   activityAt(docId: string): number | undefined {
     return this.catalog.activityAt(docId);
   }
@@ -1394,15 +1434,7 @@ export class DocStore {
     // that is no longer there.
     stageDocIndex(this.cfg.dataDir, docId);
     this.catalog.setIndex(docId, undefined);
-    const path = this.pathFor(docId);
-    if (!existsSync(path)) return true;
-    try {
-      renameSync(path, `${path}.deleting`);
-      return true;
-    } catch (err) {
-      console.error(`[doc-store] failed to stage ${docId} for deletion:`, err);
-      return false;
-    }
+    return this.state.stageDelete(docId);
   }
 
   /** Put a staged `.ydoc` back — the delete didn't commit. */
@@ -1411,24 +1443,14 @@ export class DocStore {
     unstageDocIndex(this.cfg.dataDir, docId);
     const restored = readDocIndex(this.cfg.dataDir, docId);
     if (restored) this.catalog.setIndex(docId, restored);
-    const staged = `${this.pathFor(docId)}.deleting`;
-    if (!existsSync(staged)) return;
-    try {
-      renameSync(staged, this.pathFor(docId));
-    } catch (err) {
-      console.error(`[doc-store] failed to restore staged ${docId}:`, err);
-    }
+    this.state.unstageDelete(docId);
   }
 
   /** Remove a staged `.ydoc` — the delete committed. A failure here leaves
    *  a file nothing loads, so it is litter, not an orphan doc. */
   dropStaged(docId: string): void {
     dropStagedDocIndex(this.cfg.dataDir, docId);
-    try {
-      rmSync(`${this.pathFor(docId)}.deleting`, { force: true });
-    } catch (err) {
-      console.error(`[doc-store] failed to remove staged ${docId}:`, err);
-    }
+    this.state.dropStaged(docId);
   }
 
   purgePersisted(docId: string): boolean {
@@ -1442,8 +1464,7 @@ export class DocStore {
     // back where every link already points.
     for (const key of this.repos.keysFor(docId)) this.repos.releaseKey(key);
     try {
-      const p = this.pathFor(docId);
-      if (existsSync(p)) rmSync(p);
+      const gone = this.state.remove(docId);
       deletePrivateMeta(this.cfg.dataDir, docId);
       deleteDocIndex(this.cfg.dataDir, docId);
       // A mockup's captured HTML is the reviewer's copy of somebody's page.
@@ -1457,7 +1478,7 @@ export class DocStore {
       // …and what was said about it by voice, which is ABOUT this doc and has
       // no reader once the doc is gone.
       deleteVoiceFeedback(this.cfg.dataDir, docId);
-      return !existsSync(p);
+      return gone;
     } catch (err) {
       console.error(`[doc-store] failed to remove persisted ${docId}:`, err);
       return false;
@@ -2298,7 +2319,7 @@ export class DocStore {
       return resident;
     }
     const target = this.catalog.aliasTarget(docId) ?? docId;
-    if (!existsSync(this.pathFor(target))) return undefined;
+    if (!this.state.has(target)) return undefined;
     this.hydrateDoc(target);
     return this.docs.get(target);
   }
@@ -2345,7 +2366,7 @@ export class DocStore {
     const resident = this.peek(docId);
     if (resident) return resident;
     const target = this.catalog.aliasTarget(docId) ?? docId;
-    if (!existsSync(this.pathFor(target))) return undefined;
+    if (!this.state.has(target)) return undefined;
     this.hydrateDoc(target, { bind: false });
     const doc = this.docs.get(target);
     if (doc) this.unboundReads.add(target);
@@ -2556,7 +2577,7 @@ export class DocStore {
   /** Whether a doc exists at all — resident, indexed, or a file on disk. */
   docExists(docId: string): boolean {
     const target = this.resolveDocId(docId);
-    return this.docs.has(target) || this.catalog.has(target) || existsSync(this.pathFor(target));
+    return this.docs.has(target) || this.catalog.has(target) || this.state.has(target);
   }
 
   /**
@@ -2682,33 +2703,7 @@ export class DocStore {
      * summary is not worth granting an outsider an outbound call. Defaults to
      * true so local editors and agents keep working unchanged.
      */
-    opts?: {
-      generate?: boolean;
-      /**
-       * The Review Item this comment DECLARES, if it declares one.
-       *
-       * Rides on the ordinary comment path rather than a store of its own,
-       * which is what makes every existing mechanism apply to it for free:
-       * threads already sync, anchor, resolve, watch and emit the events
-       * agents listen to, and a person's reply already ends the unanswered
-       * run — which is exactly how a review item leaves the queue.
-       *
-       * `postComment` is the one choke point all three reply paths funnel
-       * through (browser REST, MCP `post_reply`, widget), so this is the
-       * layer where the payload has to be accepted, not the routes above it.
-       */
-      review?: ReviewPayload;
-      /** A spoken comment's note — see `VoiceNote`. */
-      voice?: VoiceNote;
-      /** Text a reviewer changed on the page — see `PageEdit`. */
-      pageEdits?: PageEdit[];
-      /** New words an agent proposes for the page — see `PageSuggestion`. */
-      pageSuggestion?: PageSuggestion;
-      /** A review item this reply points at — see `LinkedReviewItem`. */
-      linkedItem?: LinkedReviewItem;
-      /** Sent from inside a mock page — see `WriteVia`. */
-      via?: WriteVia;
-    },
+    opts?: PostCommentOpts,
   ): Promise<Thread | null> {
     const thread = await this.docThreads.postComment(docId, threadId, author, text, anchor, opts);
     const posted = thread?.comments
@@ -2897,7 +2892,7 @@ export class DocStore {
      * — the worst of the gate's holes, because it needs no pre-existing
      * thread. Defaults to generating, like every other local caller.
      */
-    writeOpts?: { generate?: boolean; review?: ReviewPayload },
+    writeOpts?: FindWriteOpts,
   ): Promise<
     | { ok: true; thread: Thread }
     | {
@@ -4407,9 +4402,16 @@ export class DocStore {
     return t;
   }
 
-  private pathFor(docId: string): string {
-    // keep docId simple; validate in API layer
-    return join(this.cfg.dataDir, `${docId}.ydoc`);
+  private stateStore: DocStateStore | undefined;
+
+  /**
+   * The backend holding each doc's Yjs state. Lazy, because the host objects
+   * built in field initialisers reach it before the constructor body runs.
+   * Doc ids are validated in the API layer before they get here.
+   */
+  private get state(): DocStateStore {
+    this.stateStore ??= this.cfg.docState ?? new DiskDocStateStore(this.cfg.dataDir);
+    return this.stateStore;
   }
 
   /**
@@ -4425,21 +4427,17 @@ export class DocStore {
    * is thrown away and redone, once per boot, forever.
    */
   private loadFromDisk(docId: string, ydoc: Y.Doc): boolean {
-    // The `.ydoc` in the server's own data dir, never a bound path — the
-    // synchronous read below is safe for the same reason every other data-dir
-    // read is: this process owns the directory, and no cloud-sync provider
-    // stands between it and the disk. Bound paths go through `slow-fs.ts`.
-    const path = this.pathFor(docId);
-    if (!existsSync(path)) return false;
+    // The state store, never a bound path (`doc-state/disk.ts` says why its
+    // synchronous read is safe). Bound paths go through `slow-fs.ts`.
     try {
-      const buf = readFileSync(path);
+      const original = this.state.read(docId);
+      if (!original) return false;
       // A BOARD doc sheds its history on the way in. It is a projection —
       // the task sidecar is the source of truth and `TaskProjection.init`
       // reasserts every row after load — so its past is cost with no reader,
       // and it is paid by every browser on every page load in one sync frame.
       // See board-doc-compaction.ts for why this is safe here and nowhere
       // else, and for the three guards that keep it that way.
-      const original = new Uint8Array(buf);
       const state = isWorkspaceProjectionDoc(docId) ? compactBoardState(original) : null;
       // The compacted state is what the next debounced save writes over the
       // `.ydoc`, so the bytes it replaces are kept first — written and fsynced
@@ -4447,13 +4445,13 @@ export class DocStore {
       // save can run. A backup that cannot be written is a reason to keep the
       // original bytes, not a reason to fail the load: the doc is fine either
       // way, it just stays big until someone looks at the log line.
-      const backup = state?.compacted ? writePreCompactBackup(path, original) : 'exists';
+      const backup = state?.compacted ? this.state.keepBeforeCompaction(docId, original) : 'exists';
       const useCompacted = state?.compacted === true && backup !== 'failed';
       Y.applyUpdate(ydoc, useCompacted && state ? state.update : original);
       if (useCompacted && state) {
         console.log(
           `[doc-store] compacted ${docId}: ${state.beforeBytes} → ${state.afterBytes} bytes` +
-            (backup === 'written' ? ` (kept ${preCompactPath(path)})` : ''),
+            (backup === 'written' ? ` (kept ${this.state.keptCopyLabel(docId)})` : ''),
         );
       } else if (state?.compacted && backup === 'failed') {
         console.error(
@@ -4483,13 +4481,13 @@ export class DocStore {
 
   private persistDocNow(doc: LiveDoc): void {
     try {
-      const update = Y.encodeStateAsUpdate(doc.ydoc);
-      const path = this.pathFor(doc.docId);
-      writeFileSync(path, update);
-      // We are the only writer of this file, so recording the mtime here is
-      // what lets `withActivity` stop stat-ing every doc on every list.
+      this.state.write(doc.docId, Y.encodeStateAsUpdate(doc.ydoc));
+      // We are the only writer of this state, so recording its save time here
+      // is what lets `withActivity` stop asking the store on every list.
       try {
-        this.catalog.noteActivityMtime(doc.docId, Math.round(statSync(path).mtimeMs));
+        const savedAt = this.state.savedAt(doc.docId);
+        if (savedAt === undefined) this.catalog.forgetActivity(doc.docId);
+        else this.catalog.noteActivityMtime(doc.docId, Math.round(savedAt));
       } catch {
         this.catalog.forgetActivity(doc.docId);
       }

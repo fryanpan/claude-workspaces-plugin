@@ -21,7 +21,7 @@
  * bound-doc sync behaviour rests on, and this file moved them without
  * touching them.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type DocMeta,
@@ -586,8 +586,9 @@ export interface FileBindingHost {
   doc(docId: string): LiveDoc | undefined;
   /** Only what is already in memory — no hydrate, no access stamp. */
   residentDoc(docId: string): LiveDoc | undefined;
-  /** The doc's persisted `.ydoc` path, whose mtime the at-rest arbitration reads. */
-  ydocPath(docId: string): string;
+  /** When the doc's Yjs state was last saved (epoch ms, unrounded), or
+   *  undefined when it never was. The at-rest arbitration reads it. */
+  stateSavedAt(docId: string): number | undefined;
   /** Arm the debounced `.ydoc` persist (and the sidecar and index row with it). */
   schedulePersist(doc: LiveDoc): void;
   /** Persist the `.ydoc` now, synchronously. */
@@ -2801,9 +2802,8 @@ export class FileBindings {
    */
   private fileOutlivedClaim(docId: string, filePath: string, knownMtimeMs?: number): boolean {
     try {
-      const ydocPath = this.p.ydocPath(docId);
-      if (!existsSync(ydocPath)) return false;
-      const stateMtime = statSync(ydocPath).mtimeMs;
+      const stateMtime = this.p.stateSavedAt(docId);
+      if (stateMtime === undefined) return false;
       const fileMtime =
         knownMtimeMs ??
         (boundFiles.quarantined(filePath) ? undefined : statStampSync(filePath).mtimeMs);
@@ -2826,9 +2826,8 @@ export class FileBindings {
 
   private diskNewerThanState(docId: string, filePath: string, knownMtimeMs?: number): boolean {
     try {
-      const ydocPath = this.p.ydocPath(docId);
-      if (!existsSync(ydocPath)) return true;
-      const stateMtime = statSync(ydocPath).mtimeMs;
+      const stateMtime = this.p.stateSavedAt(docId);
+      if (stateMtime === undefined) return true;
       if (knownMtimeMs !== undefined) return knownMtimeMs >= stateMtime;
       if (boundFiles.quarantined(filePath)) return true;
       return statStampSync(filePath).mtimeMs >= stateMtime;

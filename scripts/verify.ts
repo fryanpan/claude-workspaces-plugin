@@ -36,8 +36,8 @@
  * coverage step — which was half of this command's wall clock and all of
  * CI's; each now runs once and answers both questions.
  *
- * PARITY ACROSS JOBS. ci.yml is four jobs now (`gates`, `client`, `server`,
- * `coverage`) plus the note-taking slice. `--parity` reads all of them except
+ * PARITY ACROSS JOBS. ci.yml is several jobs now (`gates`, `gates-build`,
+ * `client`, `server`, `coverage`, `ci`). `--parity` reads all of them except
  * the ones named in NON_GATE_JOBS, so a gate added to a NEW job is covered by
  * the same check that covers a gate added to an old one — a parity check
  * pinned to one job name would have gone quietly vacuous the moment CI was
@@ -332,6 +332,41 @@ export function ciGateTokens(
   return { tokens, problems };
 }
 
+/** The job branch protection requires: it only reports the others' results. */
+export const REQUIRED_CHECK_JOB = 'ci';
+
+/**
+ * Jobs the required check does not wait for. Branch protection on main asks
+ * for one check, `ci`, so a job missing from its `needs` can fail and the pull
+ * request still merges. Every other job must be listed there.
+ */
+export function requiredCheckProblems(yaml: string, jobId: string = REQUIRED_CHECK_JOB): string[] {
+  const ids = ciJobIds(yaml);
+  if (!ids.includes(jobId)) {
+    return [`ci.yml has no \`${jobId}\` job, and branch protection requires a check of that name.`];
+  }
+  const lines = yaml.split('\n');
+  const start = lines.indexOf(`  ${jobId}:`);
+  let needs: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (/^ {2}\S/.test(line)) break;
+    const m = line.match(/^ {4}needs:\s*\[([^\]]*)\]\s*$/);
+    if (m)
+      needs = (m[1] ?? '')
+        .split(',')
+        .map((n) => n.trim())
+        .filter(Boolean);
+  }
+  return ids
+    .filter((id) => id !== jobId && !needs.includes(id))
+    .map(
+      (id) =>
+        `ci.yml's \`${jobId}\` job does not need \`${id}\`, so \`${id}\` can fail and a PR still merges.\n` +
+        `    Add \`${id}\` to the \`needs:\` list of the \`${jobId}\` job.`,
+    );
+}
+
 /** Everything that makes MEMBERS and ci.yml disagree, as printable lines. */
 export function parityProblems(members: Member[], ciTokens: string[]): string[] {
   const claimed = new Set(members.map((m) => m.ci).filter((c): c is string => c !== null));
@@ -356,7 +391,12 @@ export function parityProblems(members: Member[], ciTokens: string[]): string[] 
 /** The parity member, as a member: 0 when the two agree. */
 export function runParity(): number {
   const { tokens, problems: jobProblems } = ciGateTokens(readFileSync(CI_WORKFLOW, 'utf8'));
-  const problems = [...jobProblems, ...parityProblems(MEMBERS, tokens)];
+  const yaml = readFileSync(CI_WORKFLOW, 'utf8');
+  const problems = [
+    ...jobProblems,
+    ...parityProblems(MEMBERS, tokens),
+    ...requiredCheckProblems(yaml),
+  ];
   if (problems.length === 0) {
     console.log(
       `✓ every gate in ci.yml (${ciJobIds(readFileSync(CI_WORKFLOW, 'utf8')).length} job(s)) is a member of \`bun run verify\`.`,

@@ -12,7 +12,8 @@
  *    tree, in a folder that holds `component.json` or under one (not the work
  *    tree's root itself: a `component.json` there would declare the whole
  *    repository), with a component extension, and not ignored by git
- *    (a gitignored source needs the owner's grant, decision 5, not built yet);
+ *    unless the owner granted a folder holding it (decision 5,
+ *    `component-grants.ts`);
  *  - an `https://` import names esm.sh at an exact version (`component-cdn.ts`),
  *    and what that module imports stays on esm.sh;
  *  - a bare import (`from 'leaflet'`) is refused with the esm.sh form;
@@ -119,6 +120,9 @@ export interface BuildRequest {
   /** The doc's git work tree, when the caller already knows it. Not used
    *  for a doc under a lead root, where no git runs. */
   workTree?: string | null;
+  /** Whether the owner granted a folder holding this real path, asked only
+   *  for a file git ignores. Absent: nothing is granted. */
+  granted?: (realPath: string) => boolean;
 }
 
 export type BuildOutcome =
@@ -340,11 +344,11 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
     if (!(COMPONENT_EXTENSIONS as readonly string[]).includes(ext)) return notComponent(spec, ext);
     const manifest = declaringManifest(real, workTree, watch);
     if (!manifest) return undeclared(spec, workTree, real);
-    if (await gitIgnores(workTree, relative(workTree, real))) {
+    if ((await gitIgnores(workTree, relative(workTree, real))) && !req.granted?.(real)) {
       return {
         errors: [
           {
-            text: `'${spec}' is ignored by git, and a source git does not list needs the owner's grant, which is not built yet: un-ignore it to import it`,
+            text: `'${spec}' is ignored by git, and a source git does not list builds only once the owner grants its folder: ask with request_component_grant, or un-ignore it`,
           },
         ],
       };
@@ -467,7 +471,11 @@ export async function buildComponent(req: BuildRequest): Promise<BuildOutcome> {
  * The `component.json` that declares `file`'s folder, or null. Every place
  * one could be is watched, so adding one rebuilds.
  */
-function declaringManifest(file: string, workTree: string, watch: Set<string>): string | null {
+export function declaringManifest(
+  file: string,
+  workTree: string,
+  watch: Set<string>,
+): string | null {
   for (let dir = dirname(file); dir.startsWith(workTree + sep); dir = dirname(dir)) {
     const m = join(dir, COMPONENT_MANIFEST);
     watch.add(m);

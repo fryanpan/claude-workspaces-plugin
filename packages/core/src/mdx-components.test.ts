@@ -4,6 +4,7 @@ import {
   componentBuildKey,
   componentBuildOf,
   componentInputs,
+  componentTagIds,
   importKind,
   mdxFlowSources,
   parseImports,
@@ -71,5 +72,14 @@ describe('the blocks the server reads', () => {
     expect(componentBuildOf(map, 'k')).toEqual({ hash: 'f'.repeat(32), at: 1 });
     expect(componentBuildOf(map, 'bad')).toEqual({ at: 1 });
     expect(componentBuildOf(map, 'junk')).toBeUndefined();
+  });
+});
+
+describe('the state ids a tag names', () => {
+  it("reads each function tag's literal id once, in order, and nothing else", () => {
+    const tag =
+      '<Map id="map" zoom={12}>\n  <Pin id=\'harbor\' />\n  <Pin id={"saltmarsh"} />\n  <Pin id={`riverbend`} />\n  <div id="plain" />\n  <Pin id={name} />\n  <Pin id="map" />\n</Map>';
+    expect(componentTagIds(tag)).toEqual(['map', 'harbor', 'saltmarsh', 'riverbend']);
+    expect(componentTagIds('<Map zoom={12} />')).toEqual([]);
   });
 });

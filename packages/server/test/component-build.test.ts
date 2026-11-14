@@ -202,9 +202,27 @@ describe('what a build refuses, each with the fix', () => {
     });
   }
 
-  it('a file git ignores', async () => {
+  it('a file git ignores, until the owner grants its folder', async () => {
     const error = await refusal("import S from './components/secret.tsx'\n\n<S />");
     expect(error).toContain('ignored by git');
+    expect(error).toContain('request_component_grant');
+    const blocks = ["import S from './components/secret.tsx'", '<S />'];
+    const input = componentInputs(blocks)[0];
+    if (!input) throw new Error('no tag');
+    const asked: string[] = [];
+    const granted = await buildComponent({
+      docPath: join(repo, 'post.mdx'),
+      input,
+      cdn,
+      guards: OPEN,
+      granted: (p) => {
+        asked.push(p);
+        return p === join(repo, 'components', 'secret.tsx');
+      },
+    });
+    expect(granted.ok ? '' : granted.error).toBe('');
+    // Asked only about the ignored file, as its real path.
+    expect(asked).toEqual([join(repo, 'components', 'secret.tsx')]);
   });
 
   it('a link out of the work tree', async () => {

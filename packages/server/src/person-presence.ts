@@ -22,7 +22,8 @@
  * person (`personProof`) counts only if that proof named the owner, a share
  * visitor's socket never counts, and a socket that proved nobody counts by
  * its announced id only where the deployment let it write (a read-only
- * socket is one the sign-in gate refused).
+ * socket is one the sign-in gate refused). That id is the one the server
+ * stamped on the socket (`presence-identity.ts`), never the page's own.
  *
  * The wall between boards is the room itself: a board's room holds only the
  * pages open on that board, so an agent on one board can neither hear nor
@@ -57,7 +58,13 @@ export interface Landing {
 
 /** The slice of a socket's stamp this reads: the `origin` of a remote update. */
 interface SocketStamp {
-  data?: { shareId?: unknown; shareMember?: unknown; readOnly?: unknown; personProof?: unknown };
+  data?: {
+    shareId?: unknown;
+    shareMember?: unknown;
+    readOnly?: unknown;
+    personProof?: unknown;
+    presenceUser?: { id?: unknown; kind?: unknown; verified?: unknown };
+  };
 }
 
 export interface PersonPresenceDeps {
@@ -100,13 +107,23 @@ interface Room {
   directed: { by: { id: string; name: string }; page: string } | null;
 }
 
-/** The trust a socket's stamp gives the states it carried, or null for none. */
-function trustOf(origin: unknown): 'proven' | 'announced' | 'none' | null {
+/** The trust a socket's stamp gives the states it carried, or null for none.
+ *  `presenceUser` is the name the server put on the socket's presence: a
+ *  guest never counts, and a proof naming somebody else never does. */
+function trustOf(
+  origin: unknown,
+  isOwner: (id: string) => boolean,
+): 'proven' | 'announced' | 'none' | null {
   const data = (origin as SocketStamp | null)?.data;
   if (!data || typeof data !== 'object') return null;
   if (data.shareId || data.shareMember) return 'none';
   if (data.personProof === 'owner') return 'proven';
   if (data.personProof === 'other' || data.readOnly) return 'none';
+  const stamped = data.presenceUser;
+  if (stamped?.kind === 'guest') return 'none';
+  if (stamped?.verified === true && !(typeof stamped.id === 'string' && isOwner(stamped.id))) {
+    return 'none';
+  }
   return 'announced';
 }
 
@@ -210,7 +227,7 @@ export function createPersonPresence(deps: PersonPresenceDeps): PersonPresence {
           origin: unknown,
         ) => {
           if (rooms.get(workspaceId) !== room) return;
-          const trust = trustOf(origin);
+          const trust = trustOf(origin, deps.isOwner);
           for (const id of [...added, ...updated]) {
             if (id === awareness.clientID) continue;
             // A socket's stamp is fixed at its upgrade; the first one wins.

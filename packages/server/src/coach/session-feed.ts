@@ -34,7 +34,7 @@
  *
  * A day has a budget of turns (`DAILY_EVENT_LIMIT`): a digest and the
  * morning wake-up each spend one. Past it nothing is sent until his next
- * local day, and the front page says the coach is paused.
+ * local day.
  *
  * With no lead, or a lead holding no stream, what he does is still held:
  * a window that closes then waits on disk (`coach/backlog.ts`), and when

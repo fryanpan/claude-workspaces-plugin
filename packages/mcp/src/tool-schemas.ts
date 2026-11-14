@@ -19,6 +19,7 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { COMPONENT_TOOLS } from './component-schemas.ts';
 import { FOLDER_TOOLS } from './folder-schemas.ts';
 import { PERSON_TOOLS } from './person-schemas.ts';
 import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
@@ -178,6 +179,15 @@ const CONFIRM_SCOPED_OVERWRITE = {
     'Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance.',
 };
 
+/** `to` on a comment: who it is for. The server resolves and refuses. */
+const ADDRESSEES_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  maxItems: 10,
+  description:
+    'Who this comment is for: person ids, emails or display names, or agent ids or names, on this board. Only they are notified, and the thread waits on them. Everyone who can read the doc still sees it. Omit to notify the board as usual.',
+};
+
 const TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -294,6 +304,7 @@ export const TOOL_LIST: ListToolsResult = {
           threadId: { type: 'string' },
           text: { type: 'string' },
           review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA,
         },
         required: ['workspaceId', 'docId', 'threadId', 'text'],
       },
@@ -612,6 +623,7 @@ export const TOOL_LIST: ListToolsResult = {
           },
           text: { type: 'string' },
           review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA,
         },
         required: ['workspaceId', 'docId', 'text'],
       },
@@ -3546,5 +3558,6 @@ export const TOOL_LIST: ListToolsResult = {
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
     ...FOLDER_TOOLS,
+    ...COMPONENT_TOOLS,
   ],
 };

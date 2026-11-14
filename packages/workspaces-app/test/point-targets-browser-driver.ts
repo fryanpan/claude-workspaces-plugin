@@ -25,6 +25,7 @@ import {
   docView,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   until,
 } from './follow-browser-kit.ts';
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
       const firstPerson = await openPerson(width, height, {
         anonId: `first-person-targets${width}`,
         name: 'Alice',
+        signIn: true,
         ws,
         follow: 'a-agent-house-lead',
       });
@@ -256,12 +258,13 @@ async function main(): Promise<void> {
       const secondPerson = await openPerson(width, height, {
         anonId: `second-person-targets${width}`,
         name: 'Bob',
+        signIn: true,
         ws,
       });
       const secondPersonSessions = await frameSessions(secondPerson);
       await navigate(secondPerson, `${base}${onDoc}`);
       await firstPerson.evaluate(
-        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-anon-second-person-targets${width}' }))`,
+        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-${personIdOf(`second-person-targets${width}`)}' }))`,
       );
       await navigate(firstPerson, `${base}${B}`);
       await until('the doc under secondPerson', async () =>

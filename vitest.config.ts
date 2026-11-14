@@ -1,5 +1,6 @@
+import { createRequire } from 'node:module';
 import { defineConfig } from 'vitest/config';
-import { BrowserFirstSequencer } from './scripts/vitest-sequencer.ts';
+import { DurationSequencer } from './scripts/vitest-sequencer.ts';
 
 // A DOM is not free: creating a happy-dom window costs ~170ms of CPU per test
 // FILE, and vitest builds one per file. Measured 2026-09-10 over packages/core
@@ -19,9 +20,35 @@ const testFilesIn = (pkg: string) => [
   `packages/${pkg}/src/**/*.test.{ts,tsx}`,
 ];
 
+// `core/plot-chart.ts` imports Plot from the esm.sh address a doc build
+// accepts. Here it is the copy workspaces-app installs, the same version, as
+// a site's bundler maps it (templates/astro-chart/astro.config.mjs).
+const PLOT_FROM_ESM_SH = 'https://esm.sh/@observablehq/plot@0.6.17';
+const installedPlot = createRequire(
+  new URL('./packages/workspaces-app/package.json', import.meta.url),
+).resolve('@observablehq/plot');
+
 const EXCLUDE = ['packages/server/test/**', 'node_modules/**', 'dist/**'];
 
 export default defineConfig({
+  // The address is rewritten in the importing source, not resolved: vitest's
+  // module runner hands an `https://` import to Node as an external URL
+  // before `resolve.alias` or a plugin's `resolveId` sees it.
+  plugins: [
+    {
+      name: 'plot-from-esm-sh',
+      enforce: 'pre',
+      // Only the chart's own file: a test that names the address (a fake
+      // esm.sh answering it) keeps it as written.
+      transform: (code: string, id: string) =>
+        id.endsWith('/packages/core/src/plot-chart.ts')
+          ? {
+              code: code.replaceAll(`'${PLOT_FROM_ESM_SH}'`, JSON.stringify(installedPlot)),
+              map: null,
+            }
+          : null,
+    },
+  ],
   // Preact JSX for .tsx files (mirrors jsx/jsxImportSource in tsconfig.base.json).
   esbuild: { jsx: 'automatic', jsxImportSource: 'preact' },
   test: {
@@ -43,10 +70,9 @@ export default defineConfig({
       happyDOM: { settings: { navigation: { disableMainFrameNavigation: true } } },
     },
     setupFiles: ['./vitest.setup.ts'],
-    // Files that may launch a browser start first, across both projects; the
-    // default runs every `dom` file before any `node` one. Why, measured:
-    // scripts/vitest-sequencer.ts.
-    sequence: { sequencer: BrowserFirstSequencer },
+    // `--shard` splits by measured duration and each shard starts its longest
+    // files first, across both projects. Why, measured: scripts/vitest-shard.ts.
+    sequence: { sequencer: DurationSequencer },
     // Two projects rather than the `environmentMatchGlobs` that vitest 4
     // removed. Each inherits everything above through `extends: true`; only
     // the file set and the environment differ.
@@ -71,8 +97,18 @@ export default defineConfig({
             // Repo-level scripts are gates (release, leak, bundle size); they
             // need covering too, and they are not under packages/.
             'scripts/**/*.test.ts',
+            // Starter apps copied into new repos (templates/signin). Each runs
+            // its own Worker code in node against a local workerd D1.
+            'templates/*/test/**/*.test.ts',
           ],
-          exclude: [...EXCLUDE, ...DOM_PACKAGES.map((pkg) => `packages/${pkg}/**`)],
+          exclude: [
+            ...EXCLUDE,
+            ...DOM_PACKAGES.map((pkg) => `packages/${pkg}/**`),
+            // The design-kit trial's tests are `bun test` files: they import
+            // bun:test and drive Bun.build and Bun.serve, which node has not
+            // got. The kit runs them itself (`bun run test` in its folder).
+            'templates/design-kit/**',
+          ],
         },
       },
     ],

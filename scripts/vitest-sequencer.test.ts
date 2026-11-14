@@ -1,31 +1,44 @@
 /**
- * The start order: browser-gated files first, and nothing else moved.
+ * The browser-gate signal and the table key the duration sequencer uses.
+ * The split and the order themselves are `vitest-shard.test.ts`.
  *
  * audit: no-text — the reader is injected; nothing here reads a source file.
  */
 import { describe, expect, it } from 'vitest';
-import { browserFirst, callsBrowserGate } from './vitest-sequencer.ts';
+import { callsBrowserGate, kindFromEnv, kindOf, specKey } from './vitest-sequencer.ts';
 
-describe('browserFirst', () => {
-  it('moves the gated files to the front and keeps both halves in order', () => {
-    const gated = new Set(['b', 'd']);
-    expect(browserFirst(['a', 'b', 'c', 'd', 'e'], (f) => gated.has(f))).toEqual([
-      'b',
-      'd',
-      'a',
-      'c',
-      'e',
-    ]);
+describe('specKey', () => {
+  it('is the project and the repo-relative path', () => {
+    expect(specKey('dom', '/repo', '/repo/packages/widget/test/a.test.ts')).toBe(
+      'dom:packages/widget/test/a.test.ts',
+    );
+  });
+});
+
+describe('kindOf', () => {
+  it('puts a file that calls the gate in the browser shards', () => {
+    expect(kindOf('packages/x/test/a-browser.test.ts', true)).toBe('browser');
   });
 
-  it('changes nothing when no file is gated — the control', () => {
-    expect(browserFirst(['a', 'b', 'c'], () => false)).toEqual(['a', 'b', 'c']);
+  it('puts a file listed as launching Chrome ungated in the browser shards', () => {
+    expect(kindOf('scripts/chrome-orphans.test.ts', false)).toBe('browser');
   });
 
-  it('drops and duplicates nothing', () => {
-    const files = Array.from({ length: 50 }, (_, i) => `f${i}`);
-    const out = browserFirst(files, (f) => Number(f.slice(1)) % 3 === 0);
-    expect([...out].sort()).toEqual([...files].sort());
+  it('puts every other file in the unit shards — the control', () => {
+    expect(kindOf('packages/x/test/a.test.ts', false)).toBe('unit');
+  });
+});
+
+describe('kindFromEnv', () => {
+  it('is null when unset, so a local run keeps every file', () => {
+    expect(kindFromEnv(undefined)).toBeNull();
+    expect(kindFromEnv('')).toBeNull();
+  });
+
+  it('accepts the two kinds and refuses a typo rather than running nothing', () => {
+    expect(kindFromEnv('browser')).toBe('browser');
+    expect(kindFromEnv('unit')).toBe('unit');
+    expect(() => kindFromEnv('browsers')).toThrow();
   });
 });
 
