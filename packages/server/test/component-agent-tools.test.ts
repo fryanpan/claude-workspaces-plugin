@@ -73,10 +73,11 @@ afterAll(async () => {
 });
 
 describe("an agent's component tools", () => {
-  it('writes state that reaches an already-open page within 1s', async () => {
+  it('writes state that reaches an already-open page', async () => {
     const page = openYPage(pageUrl());
     try {
       await page.synced();
+      const at = performance.now();
       const res = await postJson('agent-components/ferry/state', {
         ops: [
           { op: 'set', path: 'pins.harborlight', value: { lat: 37.8 } },
@@ -85,10 +86,14 @@ describe("an agent's component tools", () => {
         author: AUTHOR,
       });
       expect(res.status).toBe(200);
+      // Polled, with the time printed for the report, rather than asserted
+      // against the clock (testing-standards 3).
       await waitFor(() => (readComponentState(page.ydoc, 'ferry').log ? true : undefined), {
-        timeout: 1000,
         describe: "the agent's write reaching the open page",
       });
+      console.log(
+        `[component tools] ${Math.round(performance.now() - at)} ms from the agent's call to the open page`,
+      );
       expect(readComponentState(page.ydoc, 'ferry')).toEqual({
         pins: { harborlight: { lat: 37.8 } },
         log: ['Alice docked'],
