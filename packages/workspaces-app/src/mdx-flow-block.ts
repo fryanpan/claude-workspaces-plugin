@@ -39,11 +39,13 @@ export function isMdxFlowNode(node: PMNode): boolean {
 export const REDRAW_MS = 300;
 
 /** Whether a block's view drew a chart, so a broken edit has one to keep. */
-const drewChart = (s: MdxSummary) => !s.error && (s.chart !== undefined || s.plot !== undefined);
+const drewChart = (s: MdxSummary) =>
+  !s.error && (s.chart !== undefined || s.plot !== undefined || s.map !== undefined);
 
 /** Whether a block is a chart's tag, drawn or not: a tag left broken must
  *  still offer Edit when the doc is next opened. */
-const isChartTag = (s: MdxSummary) => drewChart(s) || (s.kind === 'jsx' && /Chart$/.test(s.label));
+const isChartTag = (s: MdxSummary) =>
+  drewChart(s) || (s.kind === 'jsx' && (/Chart$/.test(s.label) || s.label === 'StreetMap'));
 
 /** Draw `next` into `view`, and say why it failed when it did: the tag did not
  *  parse, it no longer reads as a chart, Plot refused its spec, or a drawing

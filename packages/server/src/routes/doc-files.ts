@@ -3,7 +3,7 @@ import { DOC_FILES_SEGMENT, docFileFolderBase } from '@claude-workspaces/core/bo
 import { DOC_PAGE_CSP, type DocFileRead, frameHtml, readDocFile } from '../doc-file-frame.ts';
 import { listingGeneration } from '../doc-file-listing.ts';
 import { cachedPage } from '../doc-file-page-cache.ts';
-import { framedPages, servingFolder } from '../doc-file-scope.ts';
+import { framedPages, mapDataFolder, servingFolder } from '../doc-file-scope.ts';
 import { decodeSegments } from '../doc-image-store.ts';
 import { fileSandboxHeaders } from '../mockup-frame.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
@@ -16,10 +16,11 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  *
  * Which folder a doc may serve is `doc-file-scope.ts` (only the subfolder of
  * a present, git-listed page a `::html` line in the doc's current content
- * names); which files git lists there is `doc-file-listing.ts`; what may be
- * read, and why the page's scripts are written into it, is
- * `doc-file-frame.ts`; built pages are kept by `doc-file-page-cache.ts`. This module decodes the path, refuses a doc with no
- * bound file, and sets the headers:
+ * names, or the one `.json` file a `<StreetMap src>` tag in it names);
+ * which files git lists there is `doc-file-listing.ts`; what may be read,
+ * and why the page's scripts are written into it, is `doc-file-frame.ts`;
+ * built pages are kept by `doc-file-page-cache.ts`. This module decodes the
+ * path, refuses a doc with no bound file, and sets the headers:
  *
  *  - every segment decoded on its own and refused if it is empty, `.`, `..`
  *    or carries a separator or a NUL (`decodeSegments`), so `%2e%2e`, `%2f`
@@ -76,7 +77,9 @@ export async function handleDocFilesRoute(
   const md = ctx.docStore.boundPathOf(docId);
   if (!md) return refusal(404, 'this doc is not bound to a file');
   const dir = dirname(md);
-  const folder = await servingFolder(dir, framedPages(doc.ydoc), segments);
+  const folder =
+    (await servingFolder(dir, framedPages(doc.ydoc), segments)) ??
+    mapDataFolder(doc.ydoc, segments);
   if (!folder) return refusal(404, READ_ERRORS[404] ?? '');
   const html = /\.html$/i.test(segments[segments.length - 1] ?? '');
   if (html && req.headers.get('sec-fetch-dest') !== 'iframe') {

@@ -40,6 +40,7 @@ import type * as Y from 'yjs';
 import { api, docIdFromPathOrNull } from './doc-path.ts';
 import { UNREADABLE } from './mdx-chart-props.ts';
 import { plotChartOf, renderPlotChart } from './mdx-plot-chart.ts';
+import { renderStreetMap, streetMapOf } from './mdx-street-map.ts';
 
 export interface ComponentLive {
   ydoc: Y.Doc;
@@ -89,25 +90,32 @@ export function componentKeyOf(doc: PMNode, text: string): string | null {
   return componentInputs(blocks).find((i) => i.tag === text)?.key ?? null;
 }
 
+/** A built-in's title, drawn as the block's own card draws it
+ *  (`renderMdxSummary`), since a built-in inside a component has no card. */
+function titleInto(el: HTMLElement, title: unknown): void {
+  if (typeof title !== 'string' || !title) return;
+  const head = document.createElement('div');
+  head.className = 'mdx-head';
+  const words = document.createElement('span');
+  words.className = 'mdx-title';
+  words.textContent = title;
+  head.appendChild(words);
+  el.appendChild(head);
+}
+
 const BUILTINS: ComponentHostApi = {
   builtins: {
-    // Props reach a built-in as values, so none is unreadable. The title is
-    // drawn as the block's own card draws it (`renderMdxSummary`), since a
-    // chart inside a component has no card around it.
+    // Props reach a built-in as values, so none is unreadable.
     PlotChart: (el, props) => {
-      if (typeof props.title === 'string' && props.title) {
-        const head = document.createElement('div');
-        head.className = 'mdx-head';
-        const title = document.createElement('span');
-        title.className = 'mdx-title';
-        title.textContent = props.title;
-        head.appendChild(title);
-        el.appendChild(head);
-      }
+      titleInto(el, props.title);
       renderPlotChart(
         el,
         plotChartOf(new Map(Object.entries(props).filter(([, v]) => v !== UNREADABLE))),
       );
+    },
+    StreetMap: (el, props) => {
+      titleInto(el, props.title);
+      renderStreetMap(el, streetMapOf(new Map(Object.entries(props))));
     },
   },
 };
