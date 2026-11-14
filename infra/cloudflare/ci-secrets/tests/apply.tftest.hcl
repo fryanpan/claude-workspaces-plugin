@@ -22,7 +22,7 @@ override_data {
 }
 
 override_resource {
-  target = cloudflare_api_token.ci_deploy
+  target = cloudflare_account_token.ci_deploy
   values = {
     id    = "0123456789abcdef0123456789abcdef"
     value = "fixture-token-riverbend"
@@ -55,7 +55,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
   command = apply
 
   assert {
-    condition = jsonencode([for p in cloudflare_api_token.ci_deploy.policies : sort([for g in p.permission_groups : g.id])]) == jsonencode([
+    condition = jsonencode([for p in cloudflare_account_token.ci_deploy.policies : sort([for g in p.permission_groups : g.id])]) == jsonencode([
       sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk"]),
       sort(["g-zone", "g-dns", "g-ssl", "g-rts"]),
       ["g-r2"],
@@ -64,7 +64,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
   }
 
   assert {
-    condition = jsonencode([for p in cloudflare_api_token.ci_deploy.policies : jsondecode(p.resources)]) == jsonencode([
+    condition = jsonencode([for p in cloudflare_account_token.ci_deploy.policies : jsondecode(p.resources)]) == jsonencode([
       { "com.cloudflare.api.account.fedcba9876543210fedcba9876543210" = "*" },
       { "com.cloudflare.api.account.fedcba9876543210fedcba9876543210" = { "com.cloudflare.api.account.zone.*" = "*" } },
       { "com.cloudflare.edge.r2.bucket.fedcba9876543210fedcba9876543210_default_claude-workspaces-tfstate" = "*" },
@@ -73,7 +73,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
   }
 
   assert {
-    condition     = alltrue([for p in cloudflare_api_token.ci_deploy.policies : p.effect == "allow"])
+    condition     = alltrue([for p in cloudflare_account_token.ci_deploy.policies : p.effect == "allow"])
     error_message = "every policy allows"
   }
 }
@@ -147,7 +147,7 @@ run "a_permission_cloudflare_does_not_list_stops_the_token" {
     ]
   }
 
-  expect_failures = [cloudflare_api_token.ci_deploy]
+  expect_failures = [cloudflare_account_token.ci_deploy]
 }
 
 run "an_environment_other_branches_can_deploy_to_gets_no_secret" {
@@ -160,7 +160,7 @@ run "an_environment_other_branches_can_deploy_to_gets_no_secret" {
     }
   }
 
-  expect_failures = [cloudflare_api_token.ci_deploy]
+  expect_failures = [cloudflare_account_token.ci_deploy]
 }
 
 run "main_beside_a_tag_rule_is_not_main_alone" {
@@ -173,7 +173,7 @@ run "main_beside_a_tag_rule_is_not_main_alone" {
     }
   }
 
-  expect_failures = [cloudflare_api_token.ci_deploy]
+  expect_failures = [cloudflare_account_token.ci_deploy]
 }
 
 run "protected_branches_mode_is_not_main_alone" {
@@ -186,7 +186,7 @@ run "protected_branches_mode_is_not_main_alone" {
     }
   }
 
-  expect_failures = [cloudflare_api_token.ci_deploy]
+  expect_failures = [cloudflare_account_token.ci_deploy]
 }
 
 run "a_token_with_no_value_writes_nothing" {
@@ -195,12 +195,12 @@ run "a_token_with_no_value_writes_nothing" {
   state_key = "no-value"
 
   override_resource {
-    target = cloudflare_api_token.ci_deploy
+    target = cloudflare_account_token.ci_deploy
     values = {
       id    = "0123456789abcdef0123456789abcdef"
       value = ""
     }
   }
 
-  expect_failures = [cloudflare_api_token.ci_deploy]
+  expect_failures = [cloudflare_account_token.ci_deploy]
 }
