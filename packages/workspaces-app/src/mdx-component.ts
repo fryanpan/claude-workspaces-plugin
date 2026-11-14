@@ -75,12 +75,24 @@ export function componentKeyOf(doc: PMNode, text: string): string | null {
 
 const BUILTINS: ComponentHostApi = {
   builtins: {
-    // Props reach a built-in as values, so none is unreadable.
-    PlotChart: (el, props) =>
+    // Props reach a built-in as values, so none is unreadable. The title is
+    // drawn as the block's own card draws it (`renderMdxSummary`), since a
+    // chart inside a component has no card around it.
+    PlotChart: (el, props) => {
+      if (typeof props.title === 'string' && props.title) {
+        const head = document.createElement('div');
+        head.className = 'mdx-head';
+        const title = document.createElement('span');
+        title.className = 'mdx-title';
+        title.textContent = props.title;
+        head.appendChild(title);
+        el.appendChild(head);
+      }
       renderPlotChart(
         el,
         plotChartOf(new Map(Object.entries(props).filter(([, v]) => v !== UNREADABLE))),
-      ),
+      );
+    },
   },
 };
 
