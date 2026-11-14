@@ -137,6 +137,20 @@ is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
 runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
 that imports only the core.
 
+Presence and follow sit in the same folder. `presence.ts` is the server
+half: one entry per tab, a person shown once at their most recently active
+tab (the rule `core/src/workspace-presence.ts` already states), identity and
+board taken from the connection, updates past a per-connection rate limit
+dropped and counted. Each app passes which pages have presence and whether
+app-wide presence is on; with it on, a page also shows people elsewhere, but
+only on boards the app's role function gives the viewer a role on. The spot
+shape and its page key are the app's, so Workspaces can pass `parseSpot` and
+`samePage` unchanged in step 5. `follow.ts` is the page half, DOM-free: a
+follow armed in one tab's storage, carried across the navigation it caused,
+and ended by the reader's own move, as `workspaces-app/src/presence/follower.ts`
+does today. `server/test/collab-presence-app.test.ts` drives both over
+sockets in an app that imports only the core.
+
 **Two callers wanting the same thing share one read.** The board shell mounts
 `<meeting-banner>` in each pane, so the calendar read is
 `workspaces-app/src/calendar-events-source.ts` rather than the element: it
