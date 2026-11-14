@@ -38,8 +38,7 @@ interface Data {
   conn?: PresenceConnection<AppSpot>;
 }
 
-export function startPresenceApp(opts: { appWide: boolean; burst?: number }) {
-  const sockets = new Set<{ data: Data; send: (s: string) => unknown }>();
+export function startPresenceApp(opts: { appWide: boolean; burst?: number; now?: () => number }) {
   const hub = createPresenceHub<AppSpot>({
     role: PRESENCE_ROLES,
     parseSpot: (raw) => parseAppSpot((raw as { spot?: unknown } | null)?.spot),
@@ -47,6 +46,7 @@ export function startPresenceApp(opts: { appWide: boolean; burst?: number }) {
     hasPresence: (page) => page !== 'private',
     appWide: opts.appWide,
     rate: { burst: opts.burst ?? 50, perSecond: 1 },
+    ...(opts.now ? { now: opts.now } : {}),
   });
   const push = (ws: { data: Data; send: (s: string) => unknown }) => {
     if (ws.data.conn) ws.send(JSON.stringify({ view: ws.data.conn.view() }));
@@ -71,16 +71,14 @@ export function startPresenceApp(opts: { appWide: boolean; burst?: number }) {
         const res = hub.join({
           roomId: ws.data.roomId,
           principal: { id: ws.data.personId, name: ws.data.personId },
-          onChange: () => {
-            for (const s of sockets) push(s);
-          },
+          // Called only when this socket may see the change: push to it alone.
+          onChange: () => push(ws),
         });
         if (!res.ok) {
           ws.close(1008, res.error);
           return;
         }
         ws.data.conn = res.connection;
-        sockets.add(ws);
         push(ws);
       },
       message(ws, msg) {
@@ -94,13 +92,12 @@ export function startPresenceApp(opts: { appWide: boolean; burst?: number }) {
         }
         if ('follow' in body) {
           conn.follow(typeof body.follow === 'string' ? body.follow : null);
-        } else {
-          conn.update(body);
+          push(ws);
+        } else if (conn.update(body) === 'applied') {
+          push(ws);
         }
-        push(ws);
       },
       close(ws) {
-        sockets.delete(ws);
         ws.data.conn?.close();
       },
     },

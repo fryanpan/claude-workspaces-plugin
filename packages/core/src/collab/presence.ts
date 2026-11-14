@@ -22,8 +22,14 @@
  *     people on a board the viewer has a role on: the app's role function
  *     decides, and it is asked about the subject's board, which the core took
  *     from the subject's connection.
- *   - **Updates past the rate limit are dropped**, per connection, and
- *     counted.
+ *   - **The role function is asked again on every update and every view.**
+ *     A viewer whose role on their board is gone sees nobody and can no
+ *     longer publish; a subject whose role is gone is shown to nobody.
+ *   - **A change is announced only to connections that may see it**, so the
+ *     timing of `onChange` says nothing about a board the viewer cannot see.
+ *   - **Updates past the rate limit are dropped** and counted. The budget is
+ *     per person, shared by all their tabs, so opening more tabs does not
+ *     raise it.
  *
  * What a spot is, and which page it is on, is the app's: Workspaces passes
  * its own `parseSpot` and a page key built like `samePage`.
@@ -74,14 +80,15 @@ export interface PresenceView<S> {
   leader: PresencePerson<S> | null;
 }
 
-export type PresenceUpdateResult = 'applied' | 'rate-limited' | 'bad-spot' | 'closed';
+export type PresenceUpdateResult = 'applied' | 'rate-limited' | 'bad-spot' | 'revoked' | 'closed';
 
 export interface PresenceConnection<S> {
   readonly roomId: string;
   readonly principal: Principal;
   /** Feed what the page announced: its spot, as the app's `parseSpot` reads. */
   update(raw: unknown): PresenceUpdateResult;
-  /** Follow a person by id, from this connection (one tab) only; null stops. */
+  /** Follow a person by id, from this connection (one tab) only; null, or
+   *  the viewer's own id, stops. */
   follow(personId: string | null): void;
   /** What this connection's page should show now. */
   view(): PresenceView<S>;
@@ -108,10 +115,13 @@ interface Entry<S> {
   principal: Principal;
   spot: S | null;
   lastActive: number;
-  tokens: number;
-  refilledAt: number;
   following: string | null;
   onChange?: () => void;
+}
+
+interface Bucket {
+  tokens: number;
+  refilledAt: number;
 }
 
 export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
@@ -122,31 +132,28 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
   const burst = opts.rate?.burst ?? 10;
   const perSecond = opts.rate?.perSecond ?? 5;
   const entries = new Set<Entry<S>>();
+  /** One rate budget per person, shared by their tabs. */
+  const buckets = new Map<string, Bucket>();
   let dropped = 0;
 
+  const hasRole = (e: Entry<S>): boolean => opts.role(e.principal, e.roomId) !== null;
+
+  /** Whether `viewer` may see somebody on `roomId`: the role function's call. */
+  const maySee = (viewer: Entry<S>, roomId: string): boolean =>
+    roomId === viewer.roomId
+      ? hasRole(viewer)
+      : opts.appWide && opts.role(viewer.principal, roomId) !== null;
+
+  /** Tell the connections that may see a change on `from`'s board. */
   const notifyOthers = (from: Entry<S>): void => {
     for (const e of entries) {
-      if (e === from) continue;
+      if (e === from || !maySee(e, from.roomId)) continue;
       try {
         e.onChange?.();
       } catch {
         // One app callback failing does not stop the rest hearing.
       }
     }
-  };
-
-  /** Each person's most recently active tab with a spot on a presence page. */
-  const latestByPerson = (): Map<string, Entry<S>> => {
-    const out = new Map<string, Entry<S>>();
-    for (const e of entries) {
-      if (e.spot === null) continue;
-      const prev = out.get(e.principal.id);
-      if (!prev || e.lastActive >= prev.lastActive) out.set(e.principal.id, e);
-    }
-    for (const [id, e] of out) {
-      if (e.spot === null || !opts.hasPresence(opts.pageOf(e.spot))) out.delete(id);
-    }
-    return out;
   };
 
   const asPerson = (e: Entry<S>): PresencePerson<S> => {
@@ -161,37 +168,52 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
     };
   };
 
-  /** Whether `viewer` may see somebody on `roomId`: the role function's call. */
-  const maySee = (viewer: Entry<S>, roomId: string): boolean =>
-    roomId === viewer.roomId || opts.role(viewer.principal, roomId) !== null;
-
   const viewFor = (viewer: Entry<S>): PresenceView<S> => {
+    const empty: PresenceView<S> = { here: [], elsewhere: [], leader: null };
+    if (!hasRole(viewer)) return empty;
+    // Fold each person to their most recently active tab among the tabs this
+    // viewer may see, so a tab on a hidden board neither shows nor hides them.
+    const latest = new Map<string, Entry<S>>();
+    for (const e of entries) {
+      if (e.spot === null || !maySee(viewer, e.roomId) || !hasRole(e)) continue;
+      const prev = latest.get(e.principal.id);
+      if (!prev || e.lastActive >= prev.lastActive) latest.set(e.principal.id, e);
+    }
     const myPage = viewer.spot === null ? null : opts.pageOf(viewer.spot);
     const pageShown = myPage !== null && opts.hasPresence(myPage);
     const here: PresencePerson<S>[] = [];
     const elsewhere: PresencePerson<S>[] = [];
     let leader: PresencePerson<S> | null = null;
-    for (const [id, e] of latestByPerson()) {
-      const sameRoom = e.roomId === viewer.roomId;
-      const visible = sameRoom || (opts.appWide && maySee(viewer, e.roomId));
-      if (id === viewer.following && visible) leader = asPerson(e);
-      if (id === viewer.principal.id) continue;
+    for (const [id, e] of latest) {
       const person = asPerson(e);
-      if (sameRoom && pageShown && person.page === myPage) here.push(person);
-      else if (opts.appWide && pageShown && visible) elsewhere.push(person);
+      if (!opts.hasPresence(person.page)) continue;
+      if (id === viewer.following) leader = person;
+      if (id === viewer.principal.id) continue;
+      if (e.roomId === viewer.roomId && pageShown && person.page === myPage) here.push(person);
+      else if (opts.appWide && pageShown) elsewhere.push(person);
     }
     const byName = (a: PresencePerson<S>, b: PresencePerson<S>) =>
       a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
     return { here: here.sort(byName), elsewhere: elsewhere.sort(byName), leader };
   };
 
-  const takeToken = (e: Entry<S>): boolean => {
+  const takeToken = (personId: string): boolean => {
     const t = now();
-    e.tokens = Math.min(burst, e.tokens + ((t - e.refilledAt) / 1000) * perSecond);
-    e.refilledAt = t;
-    if (e.tokens < 1) return false;
-    e.tokens -= 1;
+    const b = buckets.get(personId) ?? { tokens: burst, refilledAt: t };
+    b.tokens = Math.min(burst, b.tokens + ((t - b.refilledAt) / 1000) * perSecond);
+    b.refilledAt = t;
+    buckets.set(personId, b);
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
     return true;
+  };
+
+  /** Forget a person's budget once they have no tab left and it is full. */
+  const forgetBucket = (personId: string): void => {
+    for (const e of entries) if (e.principal.id === personId) return;
+    const b = buckets.get(personId);
+    if (b && b.tokens + ((now() - b.refilledAt) / 1000) * perSecond >= burst)
+      buckets.delete(personId);
   };
 
   return {
@@ -206,8 +228,6 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
         principal: req.principal,
         spot: null,
         lastActive: t,
-        tokens: burst,
-        refilledAt: t,
         following: null,
         ...(req.onChange ? { onChange: req.onChange } : {}),
       };
@@ -218,7 +238,8 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
         principal: req.principal,
         update(raw) {
           if (closed) return 'closed';
-          if (!takeToken(entry)) {
+          if (!hasRole(entry)) return 'revoked';
+          if (!takeToken(entry.principal.id)) {
             dropped++;
             return 'rate-limited';
           }
@@ -231,7 +252,10 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
         },
         follow(personId) {
           if (closed) return;
-          entry.following = typeof personId === 'string' && personId ? personId : null;
+          entry.following =
+            typeof personId === 'string' && personId && personId !== entry.principal.id
+              ? personId
+              : null;
         },
         view() {
           return viewFor(entry);
@@ -240,7 +264,8 @@ export function createPresenceHub<S>(opts: PresenceOptions<S>): PresenceHub<S> {
           if (closed) return;
           closed = true;
           entries.delete(entry);
-          notifyOthers(entry);
+          forgetBucket(entry.principal.id);
+          if (entry.spot !== null) notifyOthers(entry);
         },
       };
       return { ok: true, connection };

@@ -16,7 +16,7 @@ afterEach(() => {
   for (const fn of cleanup.splice(0)) fn();
 });
 
-function app(opts: { appWide: boolean; burst?: number }) {
+function app(opts: { appWide: boolean; burst?: number; now?: () => number }) {
   const a = startPresenceApp(opts);
   cleanup.push(a.stop);
   return a;
@@ -94,7 +94,8 @@ describe('presence through the core, over sockets', () => {
   });
 
   it('drops updates past the rate limit', async () => {
-    const a = app({ appWide: true, burst: 3 });
+    // A frozen clock: no token is earned back mid-test, however slow the run.
+    const a = app({ appWide: true, burst: 3, now: () => 0 });
     const alice = await page(a.url('harborlight'), 'alice');
     const bob = await page(a.url('harborlight'), 'bob');
     alice.at({ page: 'p3', scroll: 0 });
@@ -125,14 +126,15 @@ describe('one-tab follow through the core, over sockets', () => {
     const alice = await page(a.url('harborlight'), 'alice');
     const tabs = [await page(a.url('harborlight'), 'bob'), await page(a.url('harborlight'), 'bob')];
     const where = tabs.map(() => ({ page: 'notes', scroll: 0 }) as AppSpot);
+    const placeOf = (i: number) => ({ roomId: 'harborlight', spot: where[i] as AppSpot });
     tabs.forEach((t, i) => {
       const f = createFollowTab<AppSpot>({
         slot: 'follow',
         storage: new MemoryStorage(),
         address: () => `/${where[i]?.page}`,
-        here: () => where[i] as AppSpot,
+        here: () => placeOf(i),
         pageOf: (s) => s.page,
-        hrefOf: (s) => `/${s.page}`,
+        hrefOf: (p) => `/${p.spot.page}`,
         samePlace: (x, y) => x.page === y.page && x.scroll === y.scroll,
         go: (href) => {
           where[i] = { page: href.slice(1), scroll: 0 };
@@ -144,7 +146,7 @@ describe('one-tab follow through the core, over sockets', () => {
         },
         send: (id) => t.follow(id),
       });
-      t.onView(() => f.leaderAt(t.state.view?.leader?.spot ?? null));
+      t.onView(() => f.leaderAt(t.state.view?.leader ?? null));
       t.at(where[i] as AppSpot);
       if (i === 0) f.follow('alice');
     });

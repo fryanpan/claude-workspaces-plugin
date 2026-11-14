@@ -9,10 +9,27 @@
  * connection, so the reader's other tabs stay where they are. It outlives a
  * navigation the follow caused: before going, the tab writes the address it
  * is going to, and the page that loads there finds its own address in the
- * record and carries on. A page that loads anywhere else was reached by the
- * reader, so the follow ends. Workspaces' follower
- * (`workspaces-app/src/presence/follower.ts`) works the same way.
+ * record and carries on. A page that loads anywhere else while a follow's
+ * navigation is in flight was reached by the reader, so the follow ends.
+ *
+ * The app's part of the contract: call `readerMoved` on any move the reader
+ * makes themselves (a scroll, a key, a tap, a link), before it navigates.
+ * A navigation the app cancels is a move of the reader's too. Once a tab has
+ * arrived, its record names only the leader, so a reload
+ * keeps following; a navigation the app did not report would too.
+ * Workspaces' follower (`workspaces-app/src/presence/follower.ts`) works the
+ * same way and ends a follow on any tap or key.
+ *
+ * Places carry their board, so a follow can cross boards: the leader's board
+ * is the one the server took from the leader's connection
+ * (`PresencePerson.roomId`), never one a page wrote.
  */
+
+/** A spot on one board. */
+export interface FollowPlace<S> {
+  roomId: string;
+  spot: S;
+}
 
 export interface FollowStorage {
   getItem(key: string): string | null;
@@ -27,11 +44,12 @@ export interface FollowTabDeps<S> {
   /** This tab's address now. */
   address: () => string;
   /** Where this tab's view is now. */
-  here: () => S;
+  here: () => FollowPlace<S>;
+  /** The page a spot is on, within its board. */
   pageOf: (spot: S) => string;
-  /** The address a spot's page opens at. */
-  hrefOf: (spot: S) => string;
-  /** Two spots are the same place on a page (same scroll, same block). */
+  /** The address a place's page opens at. */
+  hrefOf: (place: FollowPlace<S>) => string;
+  /** Two spots on one page are the same place on it (scroll, block). */
   samePlace: (a: S, b: S) => boolean;
   /** Open another page. */
   go: (href: string) => void;
@@ -46,9 +64,13 @@ export interface FollowTab<S> {
   leader(): string | null;
   /** Follow somebody, or stop with null. */
   follow(personId: string | null): void;
-  /** The leader is here now: the server's `view().leader.spot`, or null
-   *  when the viewer may no longer see them. */
-  leaderAt(spot: S | null): void;
+  /** The leader is here now: the server's `view().leader` (its `roomId` and
+   *  `spot`), or null when the viewer may not see them. A follow stays armed
+   *  while the leader is out of sight, and resumes when they come back. */
+  leaderAt(place: FollowPlace<S> | null): void;
+  /** A page that swaps in place has finished navigating: apply the newest
+   *  place the leader reached while it was on the way. */
+  arrived(): void;
   /** The reader moved on their own: the follow ends. */
   readerMoved(): void;
 }
@@ -73,6 +95,7 @@ export function createFollowTab<S>(deps: FollowTabDeps<S>): FollowTab<S> {
     else deps.storage.removeItem(deps.slot);
   };
 
+  let pending: FollowPlace<S> | null = null;
   // A follow survives only the navigation it caused.
   let current = read();
   if (current?.arriving !== undefined && current.arriving !== deps.address()) current = null;
@@ -84,36 +107,47 @@ export function createFollowTab<S>(deps: FollowTabDeps<S>): FollowTab<S> {
     write(null);
   }
 
-  return {
+  const tab: FollowTab<S> = {
     leader: () => current?.leader ?? null,
     follow(personId) {
       current = personId ? { leader: personId } : null;
       write(current);
       deps.send(current?.leader ?? null);
     },
-    leaderAt(spot) {
-      if (!current || spot === null) return;
+    leaderAt(place) {
+      if (!current || place === null) return;
       if (current.arriving !== undefined) {
         // A page that swaps in place (no reload) arrives here, not at boot.
-        if (deps.address() !== current.arriving) return;
+        // Until it does, keep only the newest place and apply it on arrival.
+        if (deps.address() !== current.arriving) {
+          pending = place;
+          return;
+        }
         current = { leader: current.leader };
         write(current);
       }
+      pending = null;
       const here = deps.here();
-      if (deps.pageOf(spot) !== deps.pageOf(here)) {
-        const href = deps.hrefOf(spot);
+      if (place.roomId !== here.roomId || deps.pageOf(place.spot) !== deps.pageOf(here.spot)) {
+        const href = deps.hrefOf(place);
         current = { leader: current.leader, arriving: href };
         write(current);
         deps.go(href);
         return;
       }
-      if (!deps.samePlace(spot, here)) deps.show(spot);
+      if (!deps.samePlace(place.spot, here.spot)) deps.show(place.spot);
+    },
+    arrived() {
+      const held = pending;
+      if (held) tab.leaderAt(held);
     },
     readerMoved() {
+      pending = null;
       if (!current) return;
       current = null;
       write(null);
       deps.send(null);
     },
   };
+  return tab;
 }

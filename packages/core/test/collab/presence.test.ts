@@ -113,7 +113,77 @@ describe('who a page shows', () => {
   });
 });
 
+describe('boards the viewer cannot see', () => {
+  it('neither hides nor shows a person through their tab on a hidden board', () => {
+    const { join, tick } = hub({ appWide: false });
+    const bob = join('bob', 'harborlight');
+    const alice = join('alice', 'harborlight');
+    const aliceAway = join('alice', 'riverbend');
+    bob.update({ page: 'doc' });
+    alice.update({ page: 'doc' });
+    expect(ids(bob.view().here)).toEqual(['alice']);
+    tick(10);
+    aliceAway.update({ page: 'plan' });
+    expect(ids(bob.view().here)).toEqual(['alice']);
+  });
+
+  it('does not wake a connection for a change on a board it cannot see', () => {
+    let t = 0;
+    const woke: string[] = [];
+    const h = createPresenceHub<Spot>({
+      role: ROLES,
+      parseSpot,
+      pageOf,
+      hasPresence: () => true,
+      appWide: true,
+      now: () => ++t,
+    });
+    const join = (id: string, roomId: string) => {
+      const r = h.join({ roomId, principal: { id }, onChange: () => woke.push(id) });
+      if (!r.ok) throw new Error(r.error);
+      return r.connection;
+    };
+    join('bob', 'harborlight');
+    join('alice', 'harborlight');
+    const salt = join('saltmarsh', 'riverbend');
+    salt.update({ page: 'plan' });
+    expect(woke).toEqual(['alice']);
+  });
+});
+
+describe('a role taken away', () => {
+  it('stops a viewer seeing or publishing, and hides a subject, from the next call', () => {
+    let bobAllowed = true;
+    const { join } = hub({
+      role: (p, room) => (p.id === 'bob' && !bobAllowed ? null : ROLES(p, room)),
+    });
+    const alice = join('alice', 'harborlight');
+    const bob = join('bob', 'harborlight');
+    alice.update({ page: 'notes' });
+    bob.update({ page: 'notes' });
+    expect(ids(alice.view().here)).toEqual(['bob']);
+    bobAllowed = false;
+    expect(bob.update({ page: 'tasks' })).toBe('revoked');
+    expect(bob.view()).toEqual({ here: [], elsewhere: [], leader: null });
+    expect(alice.view().here).toEqual([]);
+  });
+});
+
 describe('rate limit', () => {
+  it('shares one budget across a person’s tabs, so more tabs do not raise it', () => {
+    const { h, join } = hub({ rate: { burst: 3, perSecond: 1 } });
+    const tabs = [
+      join('bob', 'harborlight'),
+      join('bob', 'harborlight'),
+      join('bob', 'harborlight'),
+    ];
+    const results = tabs.flatMap((c) => [c.update({ page: 'a' }), c.update({ page: 'b' })]);
+    expect(results.filter((r) => r === 'applied')).toHaveLength(3);
+    expect(h.droppedCount()).toBe(3);
+    tabs[0]?.close();
+    expect(join('bob', 'harborlight').update({ page: 'c' })).toBe('rate-limited');
+  });
+
   it('drops updates past the limit, counts them, and lets one through once earned back', () => {
     const { h, join, tick } = hub({ rate: { burst: 3, perSecond: 1 } });
     const alice = join('alice', 'harborlight');
@@ -131,6 +201,15 @@ describe('rate limit', () => {
 });
 
 describe('leader', () => {
+  it('refuses a follow of the viewer’s own id', () => {
+    const { join } = hub();
+    const bob1 = join('bob', 'harborlight');
+    const bob2 = join('bob', 'harborlight');
+    bob2.update({ page: 'notes' });
+    bob1.follow('bob');
+    expect(bob1.view().leader).toBeNull();
+  });
+
   it('names where the followed person is, only while the viewer may see them', () => {
     const { join } = hub();
     const bob = join('bob', 'harborlight');
