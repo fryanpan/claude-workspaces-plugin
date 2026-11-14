@@ -140,6 +140,7 @@ describe('the deploy’s make-push-keys step', () => {
       'Riverbend/notes: write deploy key 11',
       'Riverbend/app: write deploy key 12',
       'Riverbend/notes#3: older key removed',
+      'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
     ]);
     await expect(
       makePushKeysThroughKeeper(
@@ -152,30 +153,37 @@ describe('the deploy’s make-push-keys step', () => {
   });
 
   it('prints which secrets a workflow pushed with each key could read', async () => {
+    const ask = (exposure: unknown) => async () => ({
+      status: 200,
+      body: JSON.stringify({ keys: [{ repo: 'Riverbend/app', id: 12 }], exposure }),
+    });
+    const env = { CW_KEEPER_URL: 'http://localhost:9' };
     const lines = await makePushKeysThroughKeeper(
       'cw-riverbend-test',
       REPOS,
-      async () => ({
-        status: 200,
-        body: JSON.stringify({
-          keys: [{ repo: 'Riverbend/app', id: 12 }],
-          exposure: [
-            {
-              repo: 'Riverbend/app',
-              defaultBranch: 'main',
-              defaultBranchProtected: false,
-              repoSecrets: ['FLY_API_TOKEN'],
-              sideBranchReadable: ['FLY_API_TOKEN'],
-            },
-          ],
-        }),
-      }),
-      { CW_KEEPER_URL: 'http://localhost:9' },
+      ask([
+        {
+          repo: 'Riverbend/app',
+          defaultBranch: 'main',
+          defaultBranchProtected: false,
+          repoSecrets: { items: ['FLY_API_TOKEN'], complete: true },
+          orgSecrets: { items: [], complete: true },
+          openEnvironments: { items: [], complete: true },
+        },
+      ]),
+      env,
     );
     expect(lines).toEqual([
       'Riverbend/app: write deploy key 12',
       'Riverbend/app: a workflow on any branch can read FLY_API_TOKEN (repository secrets)',
-      'Riverbend/app: default branch main is not protected, so the deploy key can push a workflow there and reach every secret, environment ones too',
+      'Riverbend/app: default branch main does not refuse the deploy key, so it can push a workflow there and reach every secret, environment ones too',
+    ]);
+    // A keeper that sends no report says so, rather than printing nothing.
+    expect(
+      await makePushKeysThroughKeeper('cw-riverbend-test', REPOS, ask(undefined), env),
+    ).toEqual([
+      'Riverbend/app: write deploy key 12',
+      'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
     ]);
   });
 });

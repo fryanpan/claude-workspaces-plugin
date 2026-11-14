@@ -16,10 +16,7 @@ import {
   boardUrlFromEnv,
 } from '../../packages/server/src/keeper/keeper-announce.ts';
 import { KEEPER_URL_ENV, keeperPushKeys } from '../../packages/server/src/keeper/keeper-client.ts';
-import {
-  type RepoExposure,
-  exposureLines,
-} from '../../packages/server/src/keeper/keeper-push-exposure.ts';
+import { exposureLines } from '../../packages/server/src/keeper/keeper-push-exposure.ts';
 
 export async function makePushKeysThroughKeeper(
   app: string,
@@ -43,7 +40,7 @@ export async function makePushKeysThroughKeeper(
     error?: string;
     keys?: { repo: string; id: number }[];
     retired?: string[];
-    exposure?: RepoExposure[];
+    exposure?: unknown;
   } = {};
   try {
     body = JSON.parse(r.body);
@@ -54,6 +51,10 @@ export async function makePushKeysThroughKeeper(
   return [
     ...(body.keys ?? []).map((k) => `${k.repo}: write deploy key ${k.id}`),
     ...(body.retired ?? []).map((k) => `${k}: older key removed`),
-    ...exposureLines(Array.isArray(body.exposure) ? body.exposure : []),
+    ...(Array.isArray(body.exposure)
+      ? exposureLines(body.exposure)
+      : [
+          'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
+        ]),
   ];
 }
