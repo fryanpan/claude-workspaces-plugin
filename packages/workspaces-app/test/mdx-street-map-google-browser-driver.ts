@@ -34,7 +34,13 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import { tinyPng } from '../../server/test/tiny-png.ts';
-import { FAKE_GOOGLE_MAPS_JS, FAKE_KEY, GOOGLE_CREDIT } from './fake-google-maps.ts';
+import {
+  FAKE_GOOGLE_MAPS_JS,
+  FAKE_KEY,
+  GOOGLE_CREDIT,
+  REFUSED_KEY,
+  UNLOADED_KEY,
+} from './fake-google-maps.ts';
 
 /** What one open page did. */
 export interface PageReading {
@@ -72,6 +78,10 @@ export interface GoogleMapReading {
   plain: PageReading;
   /** The server with no key, the Google doc. */
   keyless: PageReading;
+  /** A server whose key Google refuses, and one whose Google script never
+   *  arrives: the Google doc on each. */
+  refused: PageReading;
+  unloaded: PageReading;
 }
 
 const step = (what: string): void => {
@@ -105,6 +115,8 @@ const READ_PAGE = `(() => {
   const googleTiles = loaded.filter((t) => src(t).startsWith('https://maps.googleapis.com/maps/vt')).length;
   const osmTiles = loaded.filter((t) => src(t).startsWith('https://tile.openstreetmap.org/')).length;
   if (googleTiles + osmTiles === 0) return null;
+  // Not yet settled: the map still says Google but shows OpenStreetMap.
+  if (slot.dataset.basemap === 'google' && googleTiles === 0) return null;
   const corners = slot.querySelector('.leaflet-control-container')?.textContent ?? '';
   // Google's corners move into the map a moment after its tiles: wait for them.
   if (googleTiles > 0 && !corners.includes(${JSON.stringify(GOOGLE_CREDIT)})) return null;
@@ -187,6 +199,9 @@ async function main(): Promise<void> {
     };
     const keyed = await serve('keyed', FAKE_KEY);
     const keyless = await serve('keyless');
+    const refused = await serve('refused', REFUSED_KEY);
+    const unloaded = await serve('unloaded', UNLOADED_KEY);
+    const ourBases = [keyed.base, keyless.base, refused.base, unloaded.base];
 
     const b = await launchChrome(
       resolveChromeBin(undefined),
@@ -207,7 +222,7 @@ async function main(): Promise<void> {
     const google = BASEMAPS.google;
     const osm = BASEMAPS.osm;
     if (!google || !osm) throw new Error('missing basemap');
-    const ours = new Set([keyed.base, keyless.base]);
+    const ours = new Set(ourBases);
     const png = Buffer.from(tinyPng(232, 256, 256)).toString('base64');
     const js = Buffer.from(FAKE_GOOGLE_MAPS_JS).toString('base64');
     /** The requests of the page now open. */
@@ -231,8 +246,13 @@ async function main(): Promise<void> {
       } else if (basemapAllows(google, url.href)) {
         seen.google++;
         if (url.href.startsWith(`${google.script}?`)) {
-          seen.scriptKeys.push(url.searchParams.get('key') ?? '');
-          void fulfil(requestId, 'text/javascript', js);
+          const key = url.searchParams.get('key') ?? '';
+          seen.scriptKeys.push(key);
+          if (key === UNLOADED_KEY) {
+            void cdp.send('Fetch.failRequest', { requestId, errorReason: 'ConnectionFailed' });
+          } else {
+            void fulfil(requestId, 'text/javascript', js);
+          }
         } else if (url.hostname === 'maps.googleapis.com' && url.pathname === '/maps/vt') {
           void fulfil(requestId, 'image/png', png);
         } else {
@@ -276,6 +296,8 @@ async function main(): Promise<void> {
       narrow: await open(keyed.google, 430, 932),
       plain: await open(keyed.plain, 1180, 820),
       keyless: await open(keyless.google, 1180, 820),
+      refused: await open(refused.google, 1180, 820),
+      unloaded: await open(unloaded.google, 1180, 820),
     };
     cdp.close();
     process.stdout.write(`\n${JSON.stringify(reading)}\n`);

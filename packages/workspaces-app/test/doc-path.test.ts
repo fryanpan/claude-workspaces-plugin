@@ -25,6 +25,14 @@ describe('docIdFromPath', () => {
     expect(docIdFromPath('/workspaces/w-1/docs/rev-1%3Asrc~app.ts')).toBe('rev-1:src~app.ts');
   });
 
+  it('reads a doc on a share visitor’s host, which serves the same board path', () => {
+    // A StreetMap asks for its Maps key with this id; a share visitor who got
+    // null here would be told the server holds no key.
+    expect(
+      docIdFromPathOrNull('https://share.harborlight.test/workspaces/w-1/docs/d-streets'),
+    ).toBe('d-streets');
+  });
+
   it('ignores query and hash', () => {
     expect(docIdFromPath('/workspaces/w-1/docs/d?mobile=iphone#c1')).toBe('d');
   });

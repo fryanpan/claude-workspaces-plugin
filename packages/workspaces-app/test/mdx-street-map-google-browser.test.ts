@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
-import { FAKE_KEY, GOOGLE_CREDIT } from './fake-google-maps.ts';
+import { FAKE_KEY, GOOGLE_CREDIT, REFUSED_KEY, UNLOADED_KEY } from './fake-google-maps.ts';
 import type { GoogleMapReading, PageReading } from './mdx-street-map-google-browser-driver.ts';
 
 /** The browser these cases may launch, or null to skip them.
@@ -59,7 +59,7 @@ describe.skipIf(CHROME === null)('a StreetMap on the google basemap', () => {
   it(
     'asks Google only for what its basemap lists, and nowhere else',
     () => {
-      for (const page of [r.wide, r.narrow, r.plain, r.keyless]) {
+      for (const page of [r.wide, r.narrow, r.plain, r.keyless, r.refused, r.unloaded]) {
         expect(page.strayRequests).toEqual([]);
       }
       expect(r.wide.googleRequests).toBeGreaterThan(1);
@@ -91,6 +91,36 @@ describe.skipIf(CHROME === null)('a StreetMap on the google basemap', () => {
         'Google Maps is not set up on this server, so this map is drawn on OpenStreetMap.',
       );
       expect(r.keyless.corners).toContain('OpenStreetMap');
+    },
+    CASE_MS,
+  );
+
+  it(
+    'falls back to OpenStreetMap and says so when Google refuses the key',
+    () => {
+      expect(r.refused.scriptKeys).toEqual([REFUSED_KEY]);
+      expect(r.refused.basemap).toBe('osm');
+      expect(r.refused.osmTiles).toBeGreaterThan(0);
+      expect(r.refused.googleTiles).toBe(0);
+      expect(r.refused.notice).toBe(
+        "Google Maps refused this server's key, so this map is drawn on OpenStreetMap.",
+      );
+      expect(r.refused.markerPaths).toBe(12);
+    },
+    CASE_MS,
+  );
+
+  it(
+    'falls back to OpenStreetMap and says so when Google’s script does not load',
+    () => {
+      expect(r.unloaded.scriptKeys).toEqual([UNLOADED_KEY]);
+      expect(r.unloaded.basemap).toBe('osm');
+      expect(r.unloaded.osmTiles).toBeGreaterThan(0);
+      expect(r.unloaded.googleScriptTag).toBe(false);
+      expect(r.unloaded.notice).toBe(
+        'Google Maps did not load, so this map is drawn on OpenStreetMap.',
+      );
+      expect(r.unloaded.markerPaths).toBe(12);
     },
     CASE_MS,
   );

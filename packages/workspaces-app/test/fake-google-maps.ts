@@ -7,13 +7,23 @@
  * is centred, adds roadmap tile images to its container under the address
  * shape Google's own tiles use (`/maps/vt?pb=!1m5!1m4!1i<z>!2i<x>!3i<y>…`),
  * an `idle` event, and the two corner nodes Google puts its logo and terms
- * link in. It then calls the page's `callback`, as Google's loader does.
+ * link in. It then calls the page's `callback`, as Google's loader does, and
+ * for `REFUSED_KEY` then calls `gm_authFailure`, as Google does for a key it
+ * refuses.
  * The tile images are answered by the driver with a plain PNG.
  *
  * audit: no-text — a script for the page, not a read of any source.
  */
 /** The key the keyed server holds: not a real one. */
 export const FAKE_KEY = 'fake-maps-key-riverbend-0000';
+
+/** A key the stand-in refuses, as Google does a key it will not serve:
+ *  it calls the page's `gm_authFailure` once the API is up. */
+export const REFUSED_KEY = 'fake-maps-key-refused-0000';
+
+/** A key whose script request the driver fails, as if Google's script never
+ *  arrived. */
+export const UNLOADED_KEY = 'fake-maps-key-unloaded-0000';
 
 export const GOOGLE_CREDIT = 'Map data stand-in for Google';
 
@@ -85,4 +95,5 @@ export const FAKE_GOOGLE_MAPS_JS: string = `(() => {
     },
   };
   window[params.get('callback')]();
+  if (params.get('key') === ${JSON.stringify(REFUSED_KEY)}) setTimeout(() => window.gm_authFailure?.(), 0);
 })();`;

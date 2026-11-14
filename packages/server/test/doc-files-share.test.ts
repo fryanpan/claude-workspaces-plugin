@@ -27,6 +27,7 @@ const SHARE_HOST = 'share.harborlight.test';
 const CF_RAY = { 'cf-ray': '8a1b2c3d4e5f-SJC' };
 const MEMBER = 'bob@riverbend.example';
 const OUTSIDER = 'alice@saltmarsh.example';
+const FAKE_KEY = 'fake-maps-key-saltmarsh-0000';
 
 let jwks: JSONWebKeySet;
 let signJwt: (aud: string, email: string) => Promise<string>;
@@ -89,12 +90,24 @@ describe('a doc folder file through a share link', () => {
     mkdirSync(join(dir, 'map'));
     writeFileSync(join(dir, 'doc.md'), `# ${name}\n\n::html{src="map/index.html"}\n`);
     writeFileSync(join(dir, 'map', 'index.html'), `<!doctype html><h1>${name} map</h1>`);
+    writeFileSync(
+      join(dir, 'streets.mdx'),
+      `# ${name} streets\n\n<StreetMap basemap="google" markers={[{ lat: 37.77, lng: -122.42 }]} />\n`,
+    );
     await postLocal(`/workspaces/${board}/docs`, {
       docId: name.toLowerCase(),
       type: 'markdown',
       sourceUrl: join(dir, 'doc.md'),
     });
+    await postLocal(`/workspaces/${board}/docs`, {
+      docId: `${name.toLowerCase()}-streets`,
+      type: 'markdown',
+      sourceUrl: join(dir, 'streets.mdx'),
+    });
   };
+  const keyPath = (board: string, doc: string) =>
+    `/workspaces/${encodeURIComponent(board)}/docs/${doc}-streets/map-key/google`;
+  let landing = '';
 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'doc-files-share-'));
@@ -105,6 +118,7 @@ describe('a doc folder file through a share link', () => {
       shareLinkHosts: [SHARE_HOST],
       shareLinkAudience: SHARE_AUD,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
+      googleMapsKey: FAKE_KEY,
     });
     base = `http://127.0.0.1:${handle.port}`;
     const boardOf = async (name: string) =>
@@ -117,7 +131,9 @@ describe('a doc folder file through a share link', () => {
     handle.shareLinks.addToAudience(shared, [MEMBER], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: shared });
     const linkId = ((await minted.json()) as { link: { linkId: string } }).link.linkId;
-    expect((await asVisitor(MEMBER, `/s/${linkId}`)).status).toBe(302);
+    const redeemed = await asVisitor(MEMBER, `/s/${linkId}`);
+    expect(redeemed.status).toBe(302);
+    landing = redeemed.headers.get('location') ?? '';
   });
 
   afterAll(async () => {
@@ -142,6 +158,28 @@ describe('a doc folder file through a share link', () => {
     expect(r.status).not.toBe(200);
     expect(await r.text()).not.toContain('Riverbend map');
   });
+
+  it('hands a visitor in the audience the Maps key for a shared doc’s Google map', async () => {
+    // The visitor lands on the board's own path, which is where the page
+    // reads the doc id it asks for the key with (`docIdFromPathOrNull`).
+    expect(new URL(landing, 'https://x.test').pathname.startsWith(`/workspaces/${shared}`)).toBe(
+      true,
+    );
+    const r = await asVisitor(MEMBER, keyPath(shared, 'harborlight'));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ key: FAKE_KEY });
+  });
+
+  it('gives the key to no visitor outside the audience or on a board that was not shared', async () => {
+    for (const [email, path] of [
+      [OUTSIDER, keyPath(shared, 'harborlight')],
+      [MEMBER, keyPath(unshared, 'riverbend')],
+    ] as const) {
+      const r = await asVisitor(email, path);
+      expect(r.status).not.toBe(200);
+      expect(await r.text()).not.toContain(FAKE_KEY);
+    }
+  });
 });
 
 describe('share scope for a doc’s folder files', () => {
@@ -158,6 +196,15 @@ describe('share scope for a doc’s folder files', () => {
     ).toBe(false);
     expect(
       shareScopeAllows('/workspaces/ws-2/docs/harborlight/files/map.html', 'GET', BOARD, owners),
+    ).toBe(false);
+  });
+
+  it('admits a read of a shared doc’s map key, and no write', () => {
+    const p = '/workspaces/ws-1/docs/harborlight/map-key/google';
+    expect(shareScopeAllows(p, 'GET', BOARD, owners)).toBe(true);
+    expect(shareScopeAllows(p, 'POST', BOARD, owners)).toBe(false);
+    expect(
+      shareScopeAllows('/workspaces/ws-1/docs/riverbend/map-key/google', 'GET', BOARD, owners),
     ).toBe(false);
   });
 });

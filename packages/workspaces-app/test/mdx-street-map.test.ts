@@ -211,6 +211,19 @@ describe('a StreetMap block on the doc page', () => {
       );
     });
 
+    it('asks once more when the server has not yet seen the tag just typed', async () => {
+      const answers = [
+        new Response(JSON.stringify({ reason: 'not-named' }), { status: 404 }),
+        new Response(JSON.stringify({ key: 'fake-maps-key' })),
+      ];
+      vi.stubGlobal('fetch', async () => answers.shift() ?? new Response('{}', { status: 500 }));
+      mount(GOOGLE);
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1), { timeout: 4_000 });
+      expect(answers).toHaveLength(0);
+      expect(drawnOn[0]?.keyed?.key).toBe('fake-maps-key');
+      expect(notice()?.hidden).toBe(true);
+    });
+
     it('says so when Google refuses the key after the map started', async () => {
       serve(200, { key: 'fake-maps-key' });
       mount(GOOGLE);

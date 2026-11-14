@@ -33,6 +33,11 @@ interface GoogleWindow {
   [READY_CALLBACK]?: () => void;
 }
 
+/** How long Google's script has to call back before the map falls back. */
+const LOAD_MS = 15_000;
+
+// One load per page, under the first key it was asked with. A server holds
+// one key, so a rotated key reaches a page on its next load.
 let loading: Promise<void> | null = null;
 const refused = new Set<() => void>();
 let wasRefused = false;
@@ -47,12 +52,24 @@ function loadGoogle(script: string, key: string): Promise<void> {
     refused.clear();
   };
   loading = new Promise<void>((resolve, reject) => {
+    const tag = document.createElement('script');
+    // A failed load is forgotten, so the next map on the page tries again.
+    const failed = () => {
+      clearTimeout(late);
+      tag.remove();
+      loading = null;
+      reject(new Error('did not load'));
+    };
+    const late = setTimeout(failed, LOAD_MS);
     w[READY_CALLBACK] = () => {
       const lib = w.google?.maps?.importLibrary;
-      if (lib) lib('maps').then(() => resolve(), reject);
-      else resolve();
+      const ready = () => {
+        clearTimeout(late);
+        resolve();
+      };
+      if (lib) lib('maps').then(ready, failed);
+      else ready();
     };
-    const tag = document.createElement('script');
     const url = new URL(script);
     url.searchParams.set('key', key);
     url.searchParams.set('v', 'weekly');
@@ -61,11 +78,7 @@ function loadGoogle(script: string, key: string): Promise<void> {
     tag.src = url.href;
     tag.async = true;
     tag.dataset.cwGoogleMaps = '';
-    tag.onerror = () => {
-      tag.remove();
-      loading = null;
-      reject(new Error('did not load'));
-    };
+    tag.onerror = failed;
     document.head.appendChild(tag);
   });
   return loading;
@@ -104,7 +117,13 @@ export function addGoogleLayer(
   });
   loadGoogle(script, key).then(
     () => {
-      if (done) return;
+      // Redrawn away while the script loaded: a Google map built now would
+      // be a billed load nobody sees.
+      if (done || !map.getContainer().isConnected) {
+        done = true;
+        refused.delete(onRefused);
+        return;
+      }
       layer = (L.gridLayer as unknown as MutantFactory).googleMutant({ type: 'roadmap', maxZoom });
       layer.addTo(map);
     },

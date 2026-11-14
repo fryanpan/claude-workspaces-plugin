@@ -127,22 +127,31 @@ const FELL_BACK: Record<string, (label: string, instead: string) => string> = {
   unloaded: (label, instead) => `${label} did not load, so this map is drawn on ${instead}.`,
 };
 
+/** How long to wait before asking once more after a `not-named` answer: a
+ *  tag just typed redraws here before the server has the edit. */
+const NOT_NAMED_RETRY_MS = 1_000;
+
 /** The key the server holds for `basemap`, if it hands it to this doc, or
  *  why not. Asked again on every draw: a doc that starts naming the basemap
  *  gets the key on its next draw. */
 async function keyFor(basemap: string): Promise<{ key: string } | { reason: string }> {
   const docId = typeof location === 'undefined' ? null : docIdFromPathOrNull(location.pathname);
   if (!docId) return { reason: 'no-key' };
-  try {
-    const res = await fetch(
-      api(`docs/${encodeURIComponent(docId)}/map-key/${encodeURIComponent(basemap)}`),
-      { credentials: 'same-origin' },
-    );
-    const body = (await res.json()) as { key?: unknown; reason?: unknown };
-    if (res.ok && typeof body.key === 'string' && body.key) return { key: body.key };
-    return { reason: typeof body.reason === 'string' ? body.reason : 'no-key' };
-  } catch {
-    return { reason: 'no-key' };
+  const url = api(`docs/${encodeURIComponent(docId)}/map-key/${encodeURIComponent(basemap)}`);
+  for (let tries = 0; ; tries++) {
+    let got: { key: string } | { reason: string };
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      const body = (await res.json()) as { key?: unknown; reason?: unknown };
+      got =
+        res.ok && typeof body.key === 'string' && body.key
+          ? { key: body.key }
+          : { reason: typeof body.reason === 'string' ? body.reason : 'no-key' };
+    } catch {
+      got = { reason: 'no-key' };
+    }
+    if (!('reason' in got) || got.reason !== 'not-named' || tries > 0) return got;
+    await new Promise((r) => setTimeout(r, NOT_NAMED_RETRY_MS));
   }
 }
 
