@@ -4,10 +4,10 @@
  * folders mock, `library-tree.ts`), and — folded shut at the end — where each
  * kind of doc really lives (mock v2).
  *
- * Four states, one at a time: the front page (the newest files, "See all",
- * the folders, then the fold), the full list with a way back, the docs in
- * one location with a way back, and search results while the box holds a
- * term. A row is its title and one time — the page exists so that finding a
+ * Four states, one at a time: the front page (Starred, the Recently Viewed /
+ * Recently Created tabs, the folders, then the fold), the full list with a
+ * way back, the docs in one location with a way back, and search results
+ * while the box holds a term. A row is its title and one time — the page exists so that finding a
  * doc never needs a repo path, so no row carries one.
  *
  * Opening reuses the review-doc page and builds nothing new there: a row the
@@ -23,26 +23,29 @@ import type { BootHistory } from '../boot-env.ts';
 import { recentRows } from './library-folders-model.ts';
 import {
   LIBRARY_KIND_NAMES,
-  LIBRARY_NO_FOLDER,
-  LIBRARY_RECENT,
   type LibraryFileEntry,
   type LibraryHit,
   type LibraryList,
   type LibraryPayload,
-  type LibraryPlace,
   type LibraryRow,
   type LibrarySort,
-  type LibraryWhere,
   burstLabel,
-  fileEntries,
   libraryWhenColumn,
   placeRows,
   searchLibrary,
   sortRows,
 } from './library-model.ts';
-import { fixedTable, viewedRows, viewedSectionHtml } from './library-recent.ts';
+import {
+  type RecentTab,
+  type RecentTabStorage,
+  readRecentTab,
+  recentTabsHtml,
+  wireRecentTabs,
+  writeRecentTab,
+} from './library-recent.ts';
 import { type StarViewer, createLibraryStars, starredSectionHtml } from './library-starred.ts';
 import { createLibraryTree } from './library-tree.ts';
+import { whereHtml } from './library-where.ts';
 
 export interface LibraryPageDeps {
   /** `#board-library`. */
@@ -74,6 +77,8 @@ export interface LibraryPageDeps {
   viewer?: () => StarViewer | null;
   /** The board's one-line report, with an optional Undo (`showToast`). */
   toast?: (msg: string, action?: { label: string; run: () => void; ms?: number }) => void;
+  /** This device's stored choices: which recent-files tab was last picked. */
+  storage?: RecentTabStorage;
 }
 
 export interface LibraryPage {
@@ -108,6 +113,8 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   const expanded = new Set<string>();
   /** Whether Recently Viewed is showing its longer list. */
   let viewedOpen = false;
+  /** The recent-files tab showing, as this device last left it. */
+  let tab: RecentTab = readRecentTab(deps.storage);
 
   root.innerHTML = `<div class="library-page">
     <header class="library-top">
@@ -190,36 +197,6 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   function tableOf(which: 'meetings' | 'files', inner: string): string {
     const list = inner || `<div class="library-empty">No ${which} yet.</div>`;
     return `<div class="library-tbl"><div class="library-cols"><span aria-hidden="true">${FIRST_COLUMN[which]}</span>${sortHeader(which)}</div><div class="library-list">${list}</div></div>`;
-  }
-
-  /** One location's line: where, and what is wrong or unset about it. */
-  function placeHtml(where: LibraryWhere, p: LibraryPlace | null, first: boolean): string {
-    const noteText = p?.note ?? (first && where.unset ? LIBRARY_NO_FOLDER : undefined);
-    const note = noteText
-      ? `<span class="library-place-note${p?.stray ? ' is-stray' : ''}">${escapeHtml(noteText)}</span>`
-      : '';
-    if (!p) {
-      return `<div class="library-row library-place is-empty"><span class="library-main"><span class="library-name">None yet</span></span>${note}</div>`;
-    }
-    const cls = p.folder ? 'library-name library-path' : 'library-name';
-    return `<button type="button" class="library-row library-place" data-place="${escapeHtml(p.key)}"><span class="library-main"><span class="${cls}">${escapeHtml(p.label)}</span></span>${note}</button>`;
-  }
-
-  /**
-   * "Where files live", closed by default and last on the page: the Library
-   * opens on meetings and files as it always has, and location is there for
-   * whoever asks (Bryan, mock v2).
-   */
-  function whereHtml(where: readonly LibraryWhere[]): string {
-    const kinds = where
-      .map((w) => {
-        const places = w.places.length
-          ? w.places.map((p, i) => placeHtml(w, p, i === 0)).join('')
-          : placeHtml(w, null, true);
-        return `<div class="library-where-type"><span class="library-where-name">${LIBRARY_KIND_NAMES[w.kind]}</span><div class="library-where-places">${places}</div></div>`;
-      })
-      .join('');
-    return `<details class="library-where-fold"${whereOpen ? ' open' : ''}><summary><h2>Where files live</h2></summary><div class="library-where"><div class="library-cols" aria-hidden="true"><span>Type</span><span>Location</span></div><div class="library-list">${kinds}</div></div></details>`;
   }
 
   /** The docs living in one location, as a full list with a way back. */
@@ -305,23 +282,16 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       tree.afterRender();
       return;
     }
-    // Recently Created, counted in ENTRIES: a burst is one line of the ten,
-    // so a generator's run cannot push everything else off the front page.
-    const meetings = new Set(payload.meetings);
-    const created = recentRows(payload, 'created');
-    const entries = fileEntries(created, 'created', (r) => meetings.has(r));
-    const more =
-      entries.length > LIBRARY_RECENT.files
-        ? '<button type="button" class="library-more" data-list="files">See all files</button>'
-        : '';
-    const shown = entries.slice(0, LIBRARY_RECENT.files).map((e) => entryHtml(e, 'created'));
-    const table = fixedTable('Created', shown.join(''), 'No files yet.');
-    const viewed = viewedSectionHtml(viewedRows(payload), viewedOpen, tree.rowHtml);
+    const recent = recentTabsHtml(tab, payload, {
+      viewedOpen,
+      rowHtml: tree.rowHtml,
+      entryHtml: (e) => entryHtml(e, 'created'),
+    });
     const rows = [...payload.meetings, ...payload.files];
     const starred = starredSectionHtml(stars.list(), rows, tree.rowHtml, tree.folderLinkHtml);
-    // Starred first (it is short, and the reader chose it), then what they
-    // opened, then what is new; the tree below.
-    body.innerHTML = `${starred}${viewed}<div class="lf-section-head lf-created-head"><h2>Recently Created</h2></div>${table}${more}${tree.html()}${payload.where ? whereHtml(payload.where) : ''}`;
+    // Starred first (it is short, and the reader chose it), then the recent
+    // tabs; the tree below.
+    body.innerHTML = `${starred}${recent}${tree.html()}${payload.where ? whereHtml(payload.where, whereOpen) : ''}`;
     tree.afterRender();
   }
 
@@ -432,6 +402,11 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       e.preventDefault();
       void openFile(row.dataset.open ?? '');
     }
+  });
+  wireRecentTabs(root, (next) => {
+    tab = next;
+    writeRecentTab(deps.storage, tab);
+    render();
   });
   root.addEventListener('change', (e) => {
     const select = (e.target as Element).closest<HTMLSelectElement>('.library-sort');

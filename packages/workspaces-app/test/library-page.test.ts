@@ -38,14 +38,19 @@ const PAYLOAD: LibraryPayload = {
   ],
 };
 
-const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
+/** Most cases read Recently Created, so this device last picked that tab. */
+const drive = (opts: DriveOptions = {}) =>
+  driveLibrary(WS, PAYLOAD, NOW, { recentTab: 'created', ...opts });
 
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
+/** The recent-files tabs' labels, in order. */
+const tabs = (root: ParentNode) =>
+  [...root.querySelectorAll('.lf-recent-tabs [role=tab]')].map((t) => t.textContent);
 /** The front page's Recent files table — the first table; the tree follows. */
 const recentTable = (root: ParentNode) =>
   root.querySelector(
-    '.lf-created-head + .library-tbl, .library-all > h2 + .library-tbl',
+    '[data-lf-panel=created] > .library-tbl, .library-all > h2 + .library-tbl',
   ) as Element;
 
 describe('the Library front page', () => {
@@ -71,13 +76,10 @@ describe('the Library front page', () => {
       'Harborlight sync 6',
     ]);
     // The separate recent-meetings list is gone: one "See all", under
-    // Recently Created.
+    // Recently Created, which is a tab beside Recently Viewed, not a section.
     const body = root.querySelector('.library-body') as HTMLElement;
-    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
-      'Recently Viewed',
-      'Recently Created',
-      'Folders',
-    ]);
+    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual(['Folders']);
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
       'See all files',
     ]);
@@ -429,8 +431,11 @@ describe('the Library on the board', () => {
     expect(board.history.url()).toBe(`/workspaces/${WS}/library`);
   });
 
+  /** This device last picked Recently Created. */
+  const createdTab = { storage: { 'cw-library-recent-tab': 'created' } };
+
   it('the nav item goes to the Library and back to Tasks, each with an address', async () => {
-    const board = await bootTestBoard();
+    const board = await bootTestBoard(createdTab);
     expect(showing('board-library')).toBe(false);
     await click(document.querySelector('[data-nav=library]') as HTMLElement);
     await settle();
@@ -452,7 +457,7 @@ describe('the Library on the board', () => {
   };
 
   it('an open Library redraws a meeting filed elsewhere, on the list it shows', async () => {
-    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library` });
+    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library`, ...createdTab });
     await settle();
     await click(el('board-library').querySelector('.library-more[data-list=files]') as HTMLElement);
     expect(el('board-library').querySelector('h2')?.textContent).toBe('All files');

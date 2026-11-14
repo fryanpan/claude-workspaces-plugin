@@ -5263,9 +5263,26 @@ html:has(.board-walk-cred-form) {
 .lf-newfolder:hover {
   text-decoration: underline;
 }
-/* Recently Viewed's "Show more" holds the right of its heading at the width of
-   its longer label, so neither label moves it or the heading. */
-.lf-viewed-head .lf-viewmore {
+/* Recently Viewed and Recently Created: two tabs in one row (Bryan,
+   2026-11-13), styled as the task panel's tabs (`.board-detail-tab`). Both
+   labels keep one weight and the underline is always 2px, only coloured when
+   chosen, so picking a tab moves neither tab nor anything below. The row's
+   own rule is the baseline the underline sits on. */
+.lf-recent-tabs {
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+.lf-tablist {
+  display: flex;
+  gap: 4px;
+}
+.lf-recent-tab {
+  min-height: var(--lf-hit);
+  margin-bottom: -1px;
+}
+/* Recently Viewed's "Show more" holds the right of the tab row at the width
+   of its longer label, so neither label moves it or the tabs. */
+.lf-recent-tabs .lf-viewmore {
   justify-content: flex-end;
   min-width: 6.5em;
   margin-left: auto;
