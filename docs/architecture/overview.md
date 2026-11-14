@@ -2669,7 +2669,9 @@ on what a build may read, `component-cdn.ts` fetches and stores esm.sh
 modules, `doc-component-builds.ts` is the sweep that builds what changed in
 each open doc (a `doc-*.ts` the diagram draws), and `routes/doc-components.ts`
 serves a bundle. On the client, `mdx-component.ts` mounts the bundle in the
-`mdx-flow` node view. None of them changes the picture.
+`mdx-flow` node view, and `selection-range.ts` maps a reader's selection of
+words a component drew to the tag's source, quoting those words, so a comment
+can anchor where the doc has no text. None of them changes the picture.
 
 `prose-math.ts` joins the same tier and does not move the picture. It is the
 grammar of a remark-math equation — `$x$` inline, `$$` … `$$` on lines of

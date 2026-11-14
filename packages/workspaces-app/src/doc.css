@@ -1265,10 +1265,13 @@ body.is-archived #editor .ProseMirror {
 }
 /* A component tag drawn live (mdx-component.ts). The component lays itself
    out; the host only gives it the column and a normal cursor, since a tap
-   inside works the component rather than opening the source. */
+   inside works the component rather than opening the source. Its words are
+   selectable, unlike the rest of the block's view, so a reader can comment on
+   them (selection-range.ts). */
 #editor > .ProseMirror .mdx-live {
   cursor: auto;
   min-width: 0;
+  user-select: text;
 }
 /* A built-in drawn inside a component (a <PlotChart> slide) takes the width
    of whatever holds it: a chart is drawn at its box's width, so a box that
