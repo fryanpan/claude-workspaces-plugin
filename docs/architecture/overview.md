@@ -2594,7 +2594,11 @@ A component tag in an `.mdx` doc runs, not just previews, and the modules
 that do it are described in [mdx-components](mdx-components.md). Core's
 `mdx-components.ts` joins the document-model tier: it decides which tags
 are component tags and the key each build is filed under, and
-`mdx-component-runtime.ts` is the JSX runtime each bundle carries. On the
+`mdx-component-runtime.ts` is the JSX runtime each bundle carries.
+`mdx-component-state.ts` is a tag's live state: one root Y.Map per component
+id in the doc's Y.Doc (not one shared map, so two pages' first writes both
+survive), with the size, depth and rate limits checked on the writing page
+and a read-only page's writes refused there and dropped by the socket. On the
 server, `component-build.ts` builds one tag with esbuild and holds the rules
 on what a build may read, `component-cdn.ts` fetches and stores esm.sh
 modules, `doc-component-builds.ts` is the sweep that builds what changed in
