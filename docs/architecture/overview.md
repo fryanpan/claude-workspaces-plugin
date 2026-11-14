@@ -342,8 +342,12 @@ an address no Hono family claims falls through to the rest of the chain
 unchanged, and a websocket upgrade never enters Hono. The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
 names one of them. `test/route-answers.test.ts` drives one request per
-route-table row and holds every answer to `test/fixtures/route-answers.json`,
-so a family that moves and answers anything differently fails CI.
+route-table row, plus a HEAD beside every GET, and holds every answer to
+`test/fixtures/route-answers.json`: the status, the body's shape, the headers
+that matter, and the module and function that answered, which
+`test/route-handler-spy.ts` reads without any hook in production code. A
+family that moves and answers anything differently, or from anywhere else,
+fails CI.
 
 **How a family wires itself in.** `feature-module.ts` is the shape: a family's
 `start` takes the long-lived values it reads and returns its routes, its
