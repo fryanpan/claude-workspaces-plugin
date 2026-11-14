@@ -33,6 +33,7 @@ const CF_RAY = { 'cf-ray': '8a1b2c3d4e5f-SJC' };
 const OWNER_EMAIL = 'owner@example.test';
 
 const MSG_SYNC = 0;
+const MSG_RESET = 2;
 const MSG_PROBE = 3;
 const MSG_ACCESS = 4;
 
@@ -245,6 +246,7 @@ describe('board roles over the real server', () => {
       expect(live().getText('report-only-probe').toString()).toBe('from a commenter');
       const lines = warn.mock.calls.map((args) => String(args[0]));
       expect(lines.some((l) => /report-only, would refuse a role write/.test(l))).toBe(true);
+      expect(c.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
       c.ws.close();
     } finally {
       warn.mockRestore();
@@ -267,6 +269,8 @@ describe('board roles over the real server', () => {
         updateFrame((d) => d.getText('enforce-probe').insert(0, 'viewer')),
       );
       expect(live().getText('enforce-probe').toString()).toBe('');
+      // Told to drop the state it now holds, so it does not diverge silently.
+      expect(v.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
       // The positive control: the same frame from an edit socket lands.
       const e = await asMember(editor);
       await sendAndSettle(
@@ -274,6 +278,7 @@ describe('board roles over the real server', () => {
         updateFrame((d) => d.getText('enforce-probe').insert(0, 'editor')),
       );
       expect(live().getText('enforce-probe').toString()).toBe('editor');
+      expect(e.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
       v.ws.close();
       e.ws.close();
     } finally {

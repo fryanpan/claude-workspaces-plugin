@@ -332,17 +332,22 @@ function refuseDeadState(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): boolea
     ) {
       state(ws).deadState = true;
       console.log(`[ws] ${doc.docId}: a client's state shares nothing with this doc; reset`);
-      const enc = encoding.createEncoder();
-      encoding.writeVarUint(enc, MSG_RESET);
-      try {
-        ws.sendBinary(encoding.toUint8Array(enc), true);
-      } catch (e) {
-        console.error('[ws] reset send failed', e);
-      }
+      sendReset(ws);
     }
     return false;
   }
   return state(ws).deadState === true;
+}
+
+/** Tell the client to drop what it holds (`MSG_RESET`). */
+function sendReset(ws: FeedbackWs): void {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_RESET);
+  try {
+    ws.sendBinary(encoding.toUint8Array(enc), true);
+  } catch (e) {
+    console.error('[ws] reset send failed', e);
+  }
 }
 
 export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void {
@@ -382,7 +387,14 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
           // The role and threads gate (`socket-write-gate.ts`): a comment or
           // view socket's edit, or any socket's write to `threads`, is dropped
           // under enforce and logged under report-only.
-          if (refuseSocketWrite(ws, doc.docId, doc.ydoc, ws.data.access, data)) return;
+          // A dropped frame leaves the client holding items the doc never
+          // took, so it is told to drop its state rather than diverge in
+          // silence. The board reloads on it; a page that does not handle
+          // the kind ignores it, as for a rebuilt doc.
+          if (refuseSocketWrite(ws, doc.docId, doc.ydoc, ws.data.access, data)) {
+            sendReset(ws);
+            return;
+          }
           syncProtocol.readSyncMessage(dec, enc, doc.ydoc, ws);
         }
         if (encoding.length(enc) > 1) {
