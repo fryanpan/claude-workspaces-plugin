@@ -224,6 +224,7 @@ keeper run in the owner's own checkouts.
 | a write-back's temp file | beside the target in the lead tree | `tree-fs` `writeTree`: random name, `O_CREAT\|O_EXCL\|O_NOFOLLOW_ANY`, judged, renamed by folder descriptor |
 | clobber backups, live copies (`file-binding.ts` 2600–2712) | `<dataDir>/clobber-backups` | the content comes from a guarded read; the file is written in the data dir |
 | pre-compact backups (`pre-compact-backup.ts`) | beside the `.ydoc` in the data dir | not a lead tree |
+| a doc's `.ydoc`, its archived and staged copies (`doc-state/disk.ts`) | data dir and `<dataDir>/_archive` | not a lead tree |
 | `mockup-capture.ts` and `mockup-versions.ts` temps | data dir | not a lead tree |
 
 PR 1440 follow-up 10 stays open: a temp is created by path and renamed by
