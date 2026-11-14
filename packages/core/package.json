@@ -35,6 +35,7 @@
     "./page-edits": "./src/page-edits.ts",
     "./page-speech": "./src/page-speech.ts",
     "./linked-item": "./src/linked-item.ts",
+    "./thread-progress": "./src/thread-progress.ts",
     "./page-edits-text": "./src/page-edits-text.ts",
     "./page-thread-link": "./src/page-thread-link.ts",
     "./review-access": "./src/review-access.ts",

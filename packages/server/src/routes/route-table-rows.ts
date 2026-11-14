@@ -652,6 +652,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/resolve', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/reopen', 'POST'],
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/docs/:docId/threads/:threadId/progress',
+      'POST',
+      'the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself',
+    ],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/reanchor', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/rewrite_region', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/insert_after', 'POST'],

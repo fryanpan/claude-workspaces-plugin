@@ -709,6 +709,18 @@ export interface Thread extends ThreadSummary {
    * deterministic fallback during the regeneration window.
    */
   summaryPending?: boolean;
+  /** What an agent is doing with this thread, when it said: `thread-progress.ts`.
+   *  Server payloads only; the widget reads the raw field. */
+  progress?: ThreadProgress;
+}
+
+/** An agent's mark on a thread: working on it, or done. See `thread-progress.ts`. */
+export interface ThreadProgress {
+  state: 'working' | 'done';
+  /** Who set the mark. */
+  by: User;
+  /** When, in ms since the epoch. */
+  at: number;
 }
 
 /** A generated summary as stored on a thread. Mirrors `summary-prompt.ts`. */

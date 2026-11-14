@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.365";
+var version2 = "0.1.366";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -17049,7 +17049,7 @@ var TOOL_LIST = {
     },
     {
       name: "resolve_thread",
-      description: "Mark a thread resolved. It retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable.",
+      description: "Mark a thread resolved. It retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable. On a comment a person left, use set_thread_progress with 'done' instead and let them resolve it: a resolve takes the comment off their open page at once.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17061,6 +17061,23 @@ var TOOL_LIST = {
           threadId: { type: "string" }
         },
         required: ["workspaceId", "docId", "threadId"]
+      }
+    },
+    {
+      name: "set_thread_progress",
+      description: "Show a person what you are doing with their comment. Send 'working' when you start on it and 'done' when the change is made. The thread stays open and on their page, so they check the work and resolve it themselves. 'open' clears the mark. Their reply on a done thread clears it too, because that reply sends the work back. Refused on a resolved thread.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
+          },
+          docId: { type: "string" },
+          threadId: { type: "string" },
+          state: { type: "string", enum: ["working", "done", "open"] }
+        },
+        required: ["workspaceId", "docId", "threadId", "state"]
       }
     },
     {
@@ -19797,6 +19814,14 @@ async function handleDocsTool(name, a, ctx) {
     case "resolve_thread": {
       const { docId, threadId } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/resolve`);
+      return ok2(res);
+    }
+    case "set_thread_progress": {
+      const { docId, threadId, state } = a;
+      if (state !== "working" && state !== "done" && state !== "open") {
+        return err2("state must be 'working', 'done' or 'open'");
+      }
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/progress`, { state, author: AUTHOR });
       return ok2(res);
     }
     case "summarize_thread": {
