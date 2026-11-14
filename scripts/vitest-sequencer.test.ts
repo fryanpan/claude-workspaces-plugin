@@ -1,31 +1,17 @@
 /**
- * The start order: browser-gated files first, and nothing else moved.
+ * The browser-gate signal and the table key the duration sequencer uses.
+ * The split and the order themselves are `vitest-shard.test.ts`.
  *
  * audit: no-text — the reader is injected; nothing here reads a source file.
  */
 import { describe, expect, it } from 'vitest';
-import { browserFirst, callsBrowserGate } from './vitest-sequencer.ts';
+import { callsBrowserGate, specKey } from './vitest-sequencer.ts';
 
-describe('browserFirst', () => {
-  it('moves the gated files to the front and keeps both halves in order', () => {
-    const gated = new Set(['b', 'd']);
-    expect(browserFirst(['a', 'b', 'c', 'd', 'e'], (f) => gated.has(f))).toEqual([
-      'b',
-      'd',
-      'a',
-      'c',
-      'e',
-    ]);
-  });
-
-  it('changes nothing when no file is gated — the control', () => {
-    expect(browserFirst(['a', 'b', 'c'], () => false)).toEqual(['a', 'b', 'c']);
-  });
-
-  it('drops and duplicates nothing', () => {
-    const files = Array.from({ length: 50 }, (_, i) => `f${i}`);
-    const out = browserFirst(files, (f) => Number(f.slice(1)) % 3 === 0);
-    expect([...out].sort()).toEqual([...files].sort());
+describe('specKey', () => {
+  it('is the project and the repo-relative path', () => {
+    expect(specKey('dom', '/repo', '/repo/packages/widget/test/a.test.ts')).toBe(
+      'dom:packages/widget/test/a.test.ts',
+    );
   });
 });
 
