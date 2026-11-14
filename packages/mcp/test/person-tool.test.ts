@@ -61,6 +61,9 @@ function replyFor(path: string): { status: number; body: unknown } {
   if (path === '/workspaces/w-live/person/show') {
     return { status: 200, body: { ok: true, spot: { surface: 'doc', docId: 'd-quay' } } };
   }
+  if (/^\/api\/agents\/[^/]+\/person$/.test(path)) {
+    return { status: 200, body: { ok: true, state: 'pending' } };
+  }
   if (path === '/workspaces/w-live/person/watch') {
     return { status: 200, body: { ok: true, watching: true, landing: LANDING } };
   }
@@ -96,7 +99,9 @@ function payload(reply: Reply): Record<string, unknown> {
  * top of it.
  */
 function personPosts(): Recorded[] {
-  return seen.filter((r) => r.method === 'POST' && /\/person\/(watch|show)$/.test(r.path));
+  return seen.filter(
+    (r) => r.method === 'POST' && /(\/person\/(watch|show)|\/agents\/[^/]+\/person)$/.test(r.path),
+  );
 }
 
 function last(): Recorded {
@@ -209,5 +214,20 @@ describe('watch_person and show_person', () => {
   it('says nobody is looking, rather than failing, when no tab is attended', async () => {
     const out = payload(await call('show_person', { workspaceId: 'w-empty', path: 'home' }));
     expect(out).toMatchObject({ shown: false, error: 'not-here' });
+  });
+});
+
+describe('confirm_person', () => {
+  it("posts this agent's side of the link with its token, and says the link is pending", async () => {
+    const out = payload(await call('confirm_person', { email: 'alice@example.com' }));
+    expect(last().path).toMatch(/^\/api\/agents\/agent-[^/]+\/person$/);
+    expect(last().body).toEqual({ email: 'alice@example.com' });
+    expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+    expect(out).toMatchObject({ ok: true, state: 'pending' });
+  });
+
+  it('clears its side with email null', async () => {
+    payload(await call('confirm_person', { email: null }));
+    expect(last().body).toEqual({ personId: null });
   });
 });

@@ -89,6 +89,14 @@ export interface PresenceProof {
   reservedName?: (name: string) => boolean;
 }
 
+/** The roster reads `presenceUserFor` needs, as the server wires them. */
+export interface PresenceRoster {
+  owner: () => { id: string; name: string };
+  isAgent: (id: string) => boolean;
+  /** A display name a guest may not show: a roster member's. */
+  reservedName?: (name: string) => boolean;
+}
+
 /**
  * The stamp for a socket, in this order:
  *  1. the identity the request proved (an agent token, Access, a session or
@@ -165,6 +173,10 @@ export interface StampOptions {
    * slot and for a client id another socket holds (`yjs-protocol.ts`).
    */
   mayCarry: (clientId: number, user: PresenceUser | null) => boolean;
+  /** The clock a kept entry is applied at. The server may have bumped a
+   *  socket's state itself (a rename), so a page's next clock can be one it
+   *  has already passed. Absent: the page's own clock. */
+  clockFor?: (clientId: number, clock: number) => number;
 }
 
 /**
@@ -177,7 +189,7 @@ export interface StampOptions {
  * then for each entry its client id, its clock and its state as JSON.
  */
 export function stampAwarenessUpdate(update: Uint8Array, opts: StampOptions): Uint8Array | null {
-  const kept: Array<{ clientId: number; clock: number; json: string }> = [];
+  const kept: AwarenessEntry[] = [];
   try {
     const dec = decoding.createDecoder(update);
     const count = decoding.readVarUint(dec);
@@ -187,7 +199,9 @@ export function stampAwarenessUpdate(update: Uint8Array, opts: StampOptions): Ui
       const raw = decoding.readVarString(dec);
       const state: unknown = JSON.parse(raw);
       if (state === null) {
-        if (opts.mayCarry(clientId, null)) kept.push({ clientId, clock, json: raw });
+        if (opts.mayCarry(clientId, null)) {
+          kept.push({ clientId, clock: opts.clockFor?.(clientId, clock) ?? clock, json: raw });
+        }
         continue;
       }
       if (typeof state !== 'object' || Array.isArray(state)) continue;
@@ -197,7 +211,7 @@ export function stampAwarenessUpdate(update: Uint8Array, opts: StampOptions): Ui
       if (!opts.mayCarry(clientId, user)) continue;
       kept.push({
         clientId,
-        clock,
+        clock: opts.clockFor?.(clientId, clock) ?? clock,
         json: JSON.stringify({ ...own, user: stampedUserField(user) }),
       });
     }
@@ -205,9 +219,21 @@ export function stampAwarenessUpdate(update: Uint8Array, opts: StampOptions): Ui
     return null;
   }
   if (kept.length === 0) return null;
+  return encodeAwarenessEntries(kept);
+}
+
+/** One entry of a y-protocols awareness update. */
+export interface AwarenessEntry {
+  clientId: number;
+  clock: number;
+  json: string;
+}
+
+/** Encode entries in the y-protocols awareness wire format. */
+export function encodeAwarenessEntries(entries: AwarenessEntry[]): Uint8Array {
   const enc = encoding.createEncoder();
-  encoding.writeVarUint(enc, kept.length);
-  for (const e of kept) {
+  encoding.writeVarUint(enc, entries.length);
+  for (const e of entries) {
     encoding.writeVarUint(enc, e.clientId);
     encoding.writeVarUint(enc, e.clock);
     encoding.writeVarString(enc, e.json);

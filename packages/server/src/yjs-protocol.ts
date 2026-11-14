@@ -7,9 +7,12 @@ import * as Y from 'yjs';
 import { clientStateIsDead, peekSyncFrame } from './board-sync-gate.ts';
 import type { FeedbackWs, LiveDoc } from './doc-store.ts';
 import {
+  type AwarenessEntry,
   LOCAL_GUEST_SCOPE,
   type PresenceStamp,
   type PresenceUser,
+  encodeAwarenessEntries,
+  isGuestStamp,
   stampAwarenessUpdate,
 } from './presence-identity.ts';
 import { captureServerError } from './sentry.ts';
@@ -66,6 +69,45 @@ type WsState = {
    *  client ids, when another socket asks to take one over. */
   presence?: PresenceUser;
 };
+
+/** Every open socket and its doc, so a rename can reach the pages already
+ *  showing the old name (`restampPerson`). */
+const openSockets = new Map<FeedbackWs, LiveDoc>();
+
+/**
+ * Put a person's new name on every open socket they proved, and on the
+ * states those sockets already announced, so every other page shows it now
+ * rather than at the page's next renewal. Each state is re-applied one clock
+ * ahead with the socket as its origin, so the socket's own page is not sent
+ * its state back; the page's next frame is raised past that clock
+ * (`clockFor` below). Returns how many sockets it changed.
+ */
+export function restampPerson(personId: string, name: string): number {
+  let changed = 0;
+  for (const [ws, doc] of openSockets) {
+    const stamp = ws.data.presenceUser;
+    if (!stamp || isGuestStamp(stamp) || stamp.id !== personId) continue;
+    ws.data.presenceUser = { ...stamp, name };
+    const st = state(ws);
+    if (st.presence) st.presence = { ...st.presence, name };
+    const states = doc.awareness.getStates();
+    const entries: AwarenessEntry[] = [];
+    for (const id of st.knownClientIds) {
+      const cur = states.get(id) as { user?: Record<string, unknown> } | undefined;
+      if (!cur) continue;
+      entries.push({
+        clientId: id,
+        clock: (doc.awareness.meta.get(id)?.clock ?? 0) + 1,
+        json: JSON.stringify({ ...cur, user: { ...cur.user, name } }),
+      });
+    }
+    if (entries.length > 0) {
+      awarenessProtocol.applyAwarenessUpdate(doc.awareness, encodeAwarenessEntries(entries), ws);
+    }
+    changed++;
+  }
+  return changed;
+}
 
 function state(ws: FeedbackWs): WsState {
   const typed = ws as FeedbackWs & { _state?: WsState };
@@ -193,6 +235,7 @@ function ensureBroadcaster(doc: LiveDoc): void {
 export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
   ensureBroadcaster(doc);
   doc.conns.add(ws);
+  openSockets.set(ws, doc);
 
   // sync step 1 — ask the client for updates it has that we don't. A
   // presence-only socket is asked about an empty doc, so it never offers us
@@ -222,6 +265,7 @@ export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
       awarenessProtocol.removeAwarenessStates(doc.awareness, Array.from(knownClientIds), ws);
     }
     doc.conns.delete(ws);
+    openSockets.delete(ws);
   };
 }
 
@@ -326,6 +370,7 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
         const payload = stampAwarenessUpdate(decoding.readVarUint8Array(dec), {
           stamp: stampOf(ws),
           mayCarry: carryRule(doc, ws, accepted),
+          clockFor: (id, clock) => Math.max(clock, (doc.awareness.meta.get(id)?.clock ?? -1) + 1),
         });
         if (payload === null) return;
         awarenessProtocol.applyAwarenessUpdate(doc.awareness, payload, ws);

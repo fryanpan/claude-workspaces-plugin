@@ -58,4 +58,19 @@ export const PERSON_TOOLS: ListToolsResult['tools'] = [
       required: ['workspaceId'],
     },
   },
+  {
+    name: 'confirm_person',
+    description:
+      'Confirm which person you work for, by their sign-in email. You become their lead agent only once they have also named you in their profile; until then the reply says pending. Their private messages reach only their linked lead agent. email: null clears your side of the link.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        email: {
+          type: ['string', 'null'],
+          description: "The person's sign-in email, or null to clear the link.",
+        },
+      },
+      required: ['email'],
+    },
+  },
 ];

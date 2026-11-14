@@ -63,7 +63,7 @@ import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
-import { type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
+import { type PresenceRoster, type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
@@ -173,14 +173,6 @@ export interface UpgradeStreamContext {
    *  proven ids are agents, and which names a guest may not show. Absent in
    *  a test's fake context: the owner registry, no agents, no members. */
   presenceRoster?: PresenceRoster;
-}
-
-/** The roster reads `presenceUserFor` needs (`presence-identity.ts`). */
-export interface PresenceRoster {
-  owner: () => { id: string; name: string };
-  isAgent: (id: string) => boolean;
-  /** A display name a guest may not show: a roster member's. */
-  reservedName?: (name: string) => boolean;
 }
 
 const REGISTRY_ROSTER: PresenceRoster = {

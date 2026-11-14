@@ -120,7 +120,9 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { realTickScheduler } from './pause-ticker.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
+import { PersonAgentLinks } from './person-agent-link.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
+import { type PresenceRoster, presenceUserFor, resolveStamp } from './presence-identity.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
@@ -237,6 +239,7 @@ import { meetingContext } from './voice-meeting-context.ts';
 import { VoiceRouter, parseVoiceContext } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 import { isRetired } from './workspace-store.ts';
+import { restampPerson } from './yjs-protocol.ts';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 8787);
 
@@ -2102,6 +2105,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     memberOf: audienceMemberOf,
   });
   trustBoardsFor = boardsForDoc;
+  /** Each person's one lead agent, linked when both sides agree. */
+  const personAgentLinks = new PersonAgentLinks(dataDir, identities);
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -2216,6 +2221,44 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * chains rather than composes — its per-request input is the admission
    * result, so it cannot be called until the gate has answered.
    */
+  // Every name a roster row or the owner goes by, lowercased: a guest may not
+  // show one in presence. Rebuilt only when a row changes.
+  let memberNameCache: { rev: number; names: Set<string> } | null = null;
+  const memberNames = (): Set<string> => {
+    const rev = identities.revision();
+    if (memberNameCache?.rev !== rev) {
+      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
+      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
+      memberNameCache = { rev, names };
+    }
+    return memberNameCache.names;
+  };
+  // Who an unproven writable loopback socket is (the owner), which proven ids
+  // are agents, and which names a guest may not show (presence-identity.ts).
+  // Presence and the unproven-browser rung of attribution read the same one.
+  const presenceRoster: PresenceRoster = {
+    owner: () => {
+      const id = ownerIdentityIds().at(-1) ?? 'owner';
+      return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
+    },
+    isAgent: (id) => identities.get(id)?.kind === 'agent',
+    reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
+  };
+  const unprovenBrowserAuthor = (req: Request, claimed: unknown): User => {
+    const u = resolveStamp(
+      presenceUserFor({
+        proven: null,
+        isAgent: presenceRoster.isAgent,
+        shareKey: null,
+        readOnly: false,
+        offBox: req.headers.has('cf-ray') || !isLoopbackAddress(server.requestIP(req)?.address),
+        owner: presenceRoster.owner,
+        ...(presenceRoster.reservedName ? { reservedName: presenceRoster.reservedName } : {}),
+      }),
+      claimed,
+    );
+    return { id: u.id, name: u.name, color: u.color, kind: u.kind === 'guest' ? 'anon' : 'known' };
+  };
   const { attributeRequest } = createRequestAttribution({
     identities,
     taskStore,
@@ -2223,6 +2266,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetBearerOf,
     widgetTokenGrantFor,
     j,
+    unprovenBrowserAuthor,
   });
 
   /**
@@ -2331,18 +2375,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return (opts.identifyAgentCaller ?? identifyCallerAgent)(peer, server.port ?? 0);
   };
 
-  // Every name a roster row or the owner goes by, lowercased: a guest may not
-  // show one in presence. Rebuilt only when a row changes.
-  let memberNameCache: { rev: number; names: Set<string> } | null = null;
-  const memberNames = (): Set<string> => {
-    const rev = identities.revision();
-    if (memberNameCache?.rev !== rev) {
-      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
-      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
-      memberNameCache = { rev, names };
-    }
-    return memberNameCache.names;
-  };
   const { serveUpgradeAndStreamRoutes } = createUpgradeStream({
     server: { upgrade: (req, options) => server.upgrade(req, options) },
     docStore,
@@ -2365,17 +2397,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
-    // Who an unproven writable loopback presence socket is (the owner), which
-    // proven ids are agents, and which names a guest may not show
-    // (presence-identity.ts).
-    presenceRoster: {
-      owner: () => {
-        const id = ownerIdentityIds().at(-1) ?? 'owner';
-        return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
-      },
-      isAgent: (id) => identities.get(id)?.kind === 'agent',
-      reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
-    },
+    presenceRoster,
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
     offBoxView: (payload) =>
@@ -2805,6 +2827,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** What the two agent-id-keyed routes read instead of this closure's
    *  scope — the watch set, the roster and the store a merge moves. */
   const agentIdentityRoutesCtx: AgentIdentityRoutesContext = {
+    personAgentLinks,
     agentWatches,
     identities,
     taskStore,
@@ -3074,6 +3097,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const authShareRoutesCtx: AuthShareRoutesContext = {
+    personAgentLinks,
+    // A rename reaches pages already open within a frame (yjs-protocol.ts).
+    onPersonRenamed: (personId, name) => void restampPerson(personId, name),
     docStore,
     sse,
     taskStore,

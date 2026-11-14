@@ -94,6 +94,7 @@ export function agentTokenPath(agentId: string): string {
 export function pathNeedsAgentToken(path: string): boolean {
   return (
     /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) ||
+    /^\/api\/agents\/[^/?]+\/person$/.test(path) ||
     /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) ||
     /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) ||
     /^\/workspaces\/[^/?]+\/point$/.test(path) ||

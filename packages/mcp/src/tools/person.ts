@@ -1,5 +1,5 @@
 /**
- * The person verbs: `watch_person` and `show_person`.
+ * The person verbs: `watch_person`, `show_person` and `confirm_person`.
  *
  * `watch_person` asks the server to tell this session where the board
  * owner's attended tab lands (`person.landed` lines, `person-line.ts`) and
@@ -50,6 +50,7 @@ export async function handlePersonTool(
   a: Record<string, unknown>,
   ctx: PersonToolContext,
 ): Promise<CallToolResult | undefined> {
+  if (name === 'confirm_person') return confirmPerson(a, ctx);
   if (name !== 'watch_person' && name !== 'show_person') return undefined;
   const workspaceId = typeof a.workspaceId === 'string' ? a.workspaceId : '';
   if (!workspaceId) return ctx.err('workspaceId is required');
@@ -83,5 +84,31 @@ export async function handlePersonTool(
         ? { note: 'Nobody is looking at this board now. Post the link on the task instead.' }
         : {}),
     });
+  }
+}
+
+/**
+ * `confirm_person`: this agent's half of its person link
+ * (`POST /api/agents/<id>/person`, `person-agent-link.ts` on the server).
+ */
+async function confirmPerson(
+  a: Record<string, unknown>,
+  ctx: PersonToolContext,
+): Promise<CallToolResult> {
+  if (a.email !== null && (typeof a.email !== 'string' || !a.email.trim())) {
+    return ctx.err('email is required (or null to clear)');
+  }
+  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
+  try {
+    const res = (await ctx.http(
+      'POST',
+      `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`,
+      body,
+    )) as { state?: unknown };
+    return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused) throw e;
+    return ctx.ok({ ok: false, ...refused });
   }
 }

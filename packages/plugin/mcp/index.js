@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.366";
+var version2 = "0.1.368";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/api\/agents\/[^/?]+\/person$/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -16480,6 +16480,20 @@ var PERSON_TOOLS = [
         y: { type: "number", description: "Whiteboard canvas y." }
       },
       required: ["workspaceId"]
+    }
+  },
+  {
+    name: "confirm_person",
+    description: "Confirm which person you work for, by their sign-in email. You become their lead agent only once they have also named you in their profile; until then the reply says pending. Their private messages reach only their linked lead agent. email: null clears your side of the link.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        email: {
+          type: ["string", "null"],
+          description: "The person's sign-in email, or null to clear the link."
+        }
+      },
+      required: ["email"]
     }
   }
 ];
@@ -20432,6 +20446,8 @@ function refusalOf(e, codes) {
   return { error: `refused (${m[1]})` };
 }
 async function handlePersonTool(name, a, ctx) {
+  if (name === "confirm_person")
+    return confirmPerson(a, ctx);
   if (name !== "watch_person" && name !== "show_person")
     return;
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
@@ -20463,6 +20479,21 @@ async function handlePersonTool(name, a, ctx) {
       ...refused,
       ...refused.error === "not-here" ? { note: "Nobody is looking at this board now. Post the link on the task instead." } : {}
     });
+  }
+}
+async function confirmPerson(a, ctx) {
+  if (a.email !== null && (typeof a.email !== "string" || !a.email.trim())) {
+    return ctx.err("email is required (or null to clear)");
+  }
+  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
+    return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
   }
 }
 
