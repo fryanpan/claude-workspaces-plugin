@@ -2613,6 +2613,18 @@ the doc does not move when it does. It fetches Plot and `buildPlot`
 from `/app/plot/plot.js` the first time a doc shows one, for KaTeX's reason
 below; `plot-entry.ts` is what the build compiles to that path.
 
+An agent reaches a doc's components through `doc-components-agent.ts`, in the
+doc-store group's `doc-*.ts` glob, and so does not move the picture. It lists
+each tag with its build and state id, and lists a state whose tag is gone as
+unplaced. It writes a component's state through the same core module the page
+uses, so the write reaches every open page over the doc socket. It places a tag
+with the block-edit path every agent edit takes. `routes/doc-component-agent.ts`
+answers the MCP tools `list_components`, `get_component_state`,
+`set_component_state`, `place_component` and `request_component_grant`.
+`component-grants.ts` sits beside `component-build.ts` and holds the folders
+whose git-ignored files the owner let a build read. Only the owner's Approve on
+an access card writes it.
+
 A component tag in an `.mdx` doc runs, not just previews, and the modules
 that do it are described in [mdx-components](mdx-components.md). Core's
 `mdx-components.ts` joins the document-model tier: it decides which tags

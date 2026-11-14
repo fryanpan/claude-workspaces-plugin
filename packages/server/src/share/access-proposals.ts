@@ -52,6 +52,13 @@ export interface AccessProposalDeps {
   /** Turn the master switch back on, logged with the approver as the actor:
    *  the sharing notice's card. Absent where there is no sharing gate. */
   setSharingOn?: (by: string) => { ok: boolean; error?: string };
+  /** Let docs build components from the files git ignores in `folder`
+   *  (`component-grants.ts`), when the owner approves a `component-folder`
+   *  card. It re-checks the folder; absent, the change is refused. */
+  grantComponentFolder?: (
+    folder: string,
+    by: string,
+  ) => { ok: true } | { ok: false; error: string };
   /** Re-project the task and tell the queue, as the review-item route does. */
   announce: (task: Task, item: TaskReviewItem, author: User) => void;
   /** Told after a proposal is filed or answered, for the access page. */
@@ -176,6 +183,15 @@ export class AccessProposals {
             'sharing is fixed in the environment (CW_SHARING_DISABLED), so it cannot be turned back on here',
         };
       }
+      return { ok: true, text: `Approved. ${accessChangeLine(change)}` };
+    }
+    if (change.op === 'component-folder') {
+      // Not a sharing change, so a board's lock does not hold it.
+      const res = this.deps.grantComponentFolder?.(change.folder, by) ?? {
+        ok: false,
+        error: 'this server cannot grant component folders',
+      };
+      if (!res.ok) return { ok: false, error: 'grant-refused', message: res.error };
       return { ok: true, text: `Approved. ${accessChangeLine(change)}` };
     }
     if (change.op === 'unlock-board' || change.op === 'open-board') {

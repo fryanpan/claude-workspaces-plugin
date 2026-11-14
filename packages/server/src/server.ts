@@ -64,6 +64,7 @@ import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapsh
 import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
+import { confirmGrantFolder } from './doc-components-agent.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
@@ -2898,6 +2899,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     rewriteTaskBody,
     parseRevisedRange,
     workspacesOfDoc: shareWorkspacesOf,
+    // Declared below; called only per request, after it exists.
+    proposeAccess: (input) => accessProposals.propose(input),
   };
 
   // The owner's notice when the master sharing switch goes off: one decision
@@ -2995,6 +2998,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     announce: (task, item, author) => {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);
+    },
+    grantComponentFolder: (folder, by) => {
+      const ok = confirmGrantFolder(folder);
+      if (!ok.ok) return ok;
+      try {
+        docStore.componentGrants.grant(folder, by);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     onChanged: pageNudges.accessChanged,
   });
