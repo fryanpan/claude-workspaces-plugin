@@ -213,6 +213,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/assets` | POST | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/assets/*` | GET, HEAD | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/audio` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/components/*` | GET, HEAD | `routes/doc-components.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | GET | `routes/doc-edit-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/delete_block_at_anchor` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
@@ -256,6 +257,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_blocks_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/linked-items` | POST | `routes/doc-thread-linked-item.ts` | owner-in-handler | the guard admits `threads/*`; the handler refuses a visitor, since the item may be on a board they were not given |
+| `/workspaces/:ws/docs/:docId/threads/:threadId/progress` | POST | `routes/doc-threads-routes.ts` | owner-in-handler | the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/promote` | POST | `routes/docs.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reanchor` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reopen` | POST | `routes/doc-threads-routes.ts` | share-scope |  |

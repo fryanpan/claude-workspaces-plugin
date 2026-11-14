@@ -923,6 +923,20 @@ the frame answers with `{cw:'comments-state'}` after each render. All of it
 ships in `mockup-live.js` and `mic.js`, outside the budgeted bundle. No new
 route and no new fetch.
 
+**An agent marks a person's comment in progress or done, and the comment
+stays until the person resolves it.** `set_thread_progress` posts to
+`…/threads/:id/progress` (closed to share visitors), which writes a
+`progress` field — state, who, when — on the thread's Yjs map, so an open
+page sees it as the doc syncs. No thread frame is fired: an agent has
+nothing to act on in another agent's mark. Core's `thread-progress.ts` reads
+and writes the field; `listThreadsWithLinks` adds it to every server thread
+read, and `readThread` leaves it out for the budget reason above. Any status
+change clears it, and so does a person's reply on a done thread. In the
+widget, `comment-extras.ts` reads it off the doc with the linked items, puts
+the state word in each card, the "working on this" line in the opened card,
+and the state on each pin. It ships in `mic.js` and `mockup-live.js`. The
+board's own doc and task pages do not draw the mark yet.
+
 **A comment's markdown is drawn rendered in its popover.**
 `widget-comment-markdown.ts` rewrites each popover comment the budgeted bundle
 drew as escaped words: links (`http:`, `https:` and `mailto:` only), bold,
@@ -2575,6 +2589,18 @@ which it sets to the chart's height (`plotHeight`) before Plot arrives, so
 the doc does not move when it does. It fetches Plot and `buildPlot`
 from `/app/plot/plot.js` the first time a doc shows one, for KaTeX's reason
 below; `plot-entry.ts` is what the build compiles to that path.
+
+A component tag in an `.mdx` doc runs, not just previews, and the modules
+that do it are described in [mdx-components](mdx-components.md). Core's
+`mdx-components.ts` joins the document-model tier: it decides which tags
+are component tags and the key each build is filed under, and
+`mdx-component-runtime.ts` is the JSX runtime each bundle carries. On the
+server, `component-build.ts` builds one tag with esbuild and holds the rules
+on what a build may read, `component-cdn.ts` fetches and stores esm.sh
+modules, `doc-component-builds.ts` is the sweep that builds what changed in
+each open doc (a `doc-*.ts` the diagram draws), and `routes/doc-components.ts`
+serves a bundle. On the client, `mdx-component.ts` mounts the bundle in the
+`mdx-flow` node view. None of them changes the picture.
 
 `prose-math.ts` joins the same tier and does not move the picture. It is the
 grammar of a remark-math equation — `$x$` inline, `$$` … `$$` on lines of

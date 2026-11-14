@@ -594,6 +594,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     commentTrustBoards: (docId) => [...(trustBoardsFor?.(docId) ?? [])],
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
+    ...(opts.componentFetch ? { componentFetch: opts.componentFetch } : {}),
   });
   // A planning meeting's minutes, under the plan section each is about.
   const boardDocIds = (ws: string) => taskStore.getWorkspace(ws)?.docIds;

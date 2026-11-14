@@ -1393,6 +1393,12 @@ function docSubrouteAllowed(sub: string, method: string): boolean {
    */
   if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
   /**
+   * A built component of an `.mdx` doc (`routes/doc-components.ts`), served
+   * only while the doc's own build map names it. Reads only, on a doc already
+   * inside the shared board: the component is part of what the doc displays.
+   */
+  if (sub.startsWith('components/')) return method === 'GET' || method === 'HEAD';
+  /**
    * Thread verbs, INCLUDING the three region-edit ones this used to exclude.
    *
    * The exclusion protected nothing it was written for: a member already has

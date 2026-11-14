@@ -460,6 +460,7 @@ export function setStatus(
     // not relayed from a mock takes it away rather than inheriting it.
     if (via) threadMap.set('statusVia', via);
     else if (threadMap.has('statusVia')) threadMap.delete('statusVia');
+    threadMap.delete('progress'); // an agent's mark ends with the status it was on
   });
   return readThread(threadMap, threadId);
 }

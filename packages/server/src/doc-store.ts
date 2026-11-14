@@ -43,6 +43,7 @@ import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
+import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import { DocImageVersions } from './doc-image-versions.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
@@ -401,6 +402,8 @@ export interface WorkspaceTree {
 
 export interface DocStoreConfig {
   dataDir: string;
+  /** How a component build reaches esm.sh; see `ServerOptions.componentFetch`. */
+  componentFetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   /** Called on new thread / reply / status change to dispatch webhooks + SSE. */
   sse: SseBus;
   webhooks: WebhookDispatcher;
@@ -648,6 +651,8 @@ export class DocStore {
     openDocs: () => [...this.docs.values()].filter((d) => d.conns.size > 0),
     boundPathOf: (docId) => this.boundPathOf(docId),
   });
+  /** The component builds of each open `.mdx` doc (doc-component-builds.ts). */
+  private readonly componentBuilds: DocComponentBuilds;
   /** An idle sweep is part-way through, handing the loop back between docs. */
   private sweeping = false;
   /**
@@ -964,6 +969,12 @@ export class DocStore {
   /** A page's websocket joined `doc` (socket-handlers.ts). */
   notePageOpened(doc: LiveDoc): void {
     this.imageVersions.noteOpened(doc);
+    this.componentBuilds.noteOpened(doc);
+  }
+
+  /** The file of a component build `doc`'s map names, or null. */
+  componentBundlePath(doc: LiveDoc, hash: string): string | null {
+    return this.componentBuilds.bundlePathFor(doc, hash);
   }
 
   private startEvictionSweep(): void {
@@ -1002,6 +1013,7 @@ export class DocStore {
     if (this.evictTicker) clearInterval(this.evictTicker);
     this.evictTicker = null;
     this.imageVersions.stop();
+    this.componentBuilds.stop();
     this.disarmParkRetry();
     this.bindings.stopPolling();
     this.fanout.stop();
@@ -1076,6 +1088,13 @@ export class DocStore {
   constructor(private cfg: DocStoreConfig) {
     if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
     this.repos = new RepoRegistry(cfg.dataDir);
+    this.componentBuilds = new DocComponentBuilds(
+      {
+        openDocs: () => [...this.docs.values()].filter((d) => d.conns.size > 0),
+        boundPathOf: (docId) => this.boundPathOf(docId),
+      },
+      { dataDir: cfg.dataDir, ...(cfg.componentFetch ? { fetch: cfg.componentFetch } : {}) },
+    );
     this.editSessions = new EditSessionTracker({
       ...(cfg.editSessionIdleMs !== undefined ? { idleMs: cfg.editSessionIdleMs } : {}),
       emit: (session) => this.recordEditSession(session),
@@ -1187,7 +1206,8 @@ export class DocStore {
         files.tickers +
         (this.memoryLog.running ? 1 : 0) +
         (this.evictTicker ? 1 : 0) +
-        (this.imageVersions.running ? 1 : 0),
+        (this.imageVersions.running ? 1 : 0) +
+        (this.componentBuilds.running ? 1 : 0),
       activations: files.activations,
       activationsTotal: files.activationsTotal,
     };
@@ -2905,6 +2925,15 @@ export class DocStore {
     opts?: { generate?: boolean; via?: WriteVia },
   ): Thread | null {
     return this.docThreads.reopen(docId, threadId, author, opts);
+  }
+
+  setProgress(
+    docId: string,
+    threadId: string,
+    state: 'working' | 'done' | 'open',
+    author: User,
+  ): Thread | 'not-found' | 'resolved' {
+    return this.docThreads.setProgress(docId, threadId, state, author);
   }
 
   reanchor(docId: string, threadId: string, anchor: Anchor): Thread | null {
