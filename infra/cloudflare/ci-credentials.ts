@@ -157,9 +157,15 @@ export interface MainIo extends CiCredentialIo {
 
 /** Exit code: the command's, 1 when the credentials could not be made, 2 on bad usage. */
 export async function main(argv: string[], io: MainIo): Promise<number> {
-  const sep = argv.indexOf('--');
-  const flags = sep < 0 ? argv : argv.slice(0, sep);
-  const cmd = sep < 0 ? [] : argv.slice(sep + 1);
+  // `bun file.ts -- cmd` hands the script argv WITHOUT the `--`: bun takes
+  // the first one as its own end-of-options marker. So the separator is
+  // optional here, and flags are the leading `--`-words before the command.
+  // Read as required, it sent every CI run in cloudflare.yml to usage
+  // (exit 2) before Terraform started (run 43620529801, 14 Nov).
+  let i = 0;
+  while (i < argv.length && argv[i] !== '--' && argv[i]?.startsWith('--')) i++;
+  const flags = argv.slice(0, i);
+  const cmd = argv[i] === '--' ? argv.slice(i + 1) : argv.slice(i);
   if (cmd.length === 0 || flags.some((f) => f !== '--account-id')) {
     io.err(USAGE);
     return 2;
