@@ -16,7 +16,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const WORKFLOW = join(import.meta.dir, '..', '..', '..', '.github', 'workflows', 'cloudflare.yml');
+const WORKFLOWS = join(import.meta.dir, '..', '..', '..', '.github', 'workflows');
 
 interface Job {
   if?: string;
@@ -36,7 +36,10 @@ interface Workflow {
   jobs: Record<string, Job>;
 }
 
-const wf = Bun.YAML.parse(readFileSync(WORKFLOW, 'utf8')) as Workflow;
+const load = (name: string) =>
+  Bun.YAML.parse(readFileSync(join(WORKFLOWS, name), 'utf8')) as Workflow;
+const wf = load('cloudflare.yml');
+const fly = load('fly.yml');
 
 type Ctx = Record<string, string>;
 
@@ -96,11 +99,11 @@ function evaluate(expr: string, ctx: Ctx): boolean | string {
 }
 
 /** Whether a job runs for this event: its `if` holds, and so does every job it needs. */
-function runs(job: string, ctx: Ctx): boolean {
-  const j = wf.jobs[job];
+function runs(job: string, ctx: Ctx, w: Workflow = wf): boolean {
+  const j = w.jobs[job];
   if (!j) throw new Error(`no job ${job}`);
   const needs = j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs];
-  if (!needs.every((n) => runs(n, ctx))) return false;
+  if (!needs.every((n) => runs(n, ctx, w))) return false;
   if (j.if === undefined) return true;
   const v = evaluate(j.if.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), ctx);
   return v !== false && v !== '';
@@ -180,7 +183,36 @@ describe('cloudflare.yml', () => {
 
   it('applies with run.ts apply --ci and has no step that waits on a person', () => {
     const steps = wf.jobs.apply?.steps ?? [];
-    expect(steps.some((s) => s.run === 'bun infra/cloudflare/run.ts apply prod --ci')).toBe(true);
+    expect(
+      steps.some(
+        (s) =>
+          s.run ===
+          'bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts apply prod --ci',
+      ),
+    ).toBe(true);
     expect(JSON.stringify(wf.jobs)).not.toMatch(/manual-approval|wait-for-approval|trstringer/i);
+  });
+});
+
+describe('fly.yml', () => {
+  it('deploys on a push to main and a dispatch on main, in cloudflare-prod, and nowhere else', () => {
+    expect(runs('deploy', event('push', MAIN), fly)).toBe(true);
+    expect(runs('deploy', event('workflow_dispatch', MAIN), fly)).toBe(true);
+    expect(runs('deploy', event('workflow_dispatch', 'refs/heads/riverbend'), fly)).toBe(false);
+    expect(Object.keys(fly.on)).not.toContain('pull_request');
+    expect(fly.jobs.deploy?.environment).toBe('cloudflare-prod');
+  });
+
+  it('hands the Fly and Cloudflare tokens to the deploy step alone', () => {
+    const steps = fly.jobs.deploy?.steps ?? [];
+    const values = (env?: Record<string, string>) => Object.values(env ?? {}).join(' ');
+    expect(values(fly.jobs.deploy?.env)).not.toMatch(/secrets\./);
+    const holders = steps.filter(
+      (st) =>
+        /secrets\.(FLY_API_TOKEN|CLOUDFLARE_API_TOKEN|R2_SECRET)/.test(values(st.env)) &&
+        !/!= ''/.test(values(st.env)),
+    );
+    expect(holders.map((st) => st.name)).toEqual(['Deploy each project machine']);
+    expect(steps.find((st) => st.run?.includes('bun install'))?.env).toBeUndefined();
   });
 });

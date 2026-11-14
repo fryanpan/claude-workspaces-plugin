@@ -15,9 +15,10 @@
 # browser sign-in, still run on the Mac. Server code is not deployed here:
 # machines install the signed releases server-release.yml publishes.
 #
-# Secrets, in the `cloudflare-prod` environment (deployments from main only):
+# Secrets, in the `cloudflare-prod` environment (deployments from main only),
+# both written by `bun run cf:ci-secrets apply` (infra/cloudflare/ci-secrets/):
 #   FLY_API_TOKEN          an org deploy token for the Fly org the apps are in
-#   CLOUDFLARE_API_TOKEN   the apply token; ci-credentials.ts derives the
+#   CLOUDFLARE_API_TOKEN   the deploy token; ci-credentials.ts derives the
 #                          state bucket's key and the account id from it, for
 #                          `terraform output`, unless R2_ACCESS_KEY_ID and
 #                          R2_SECRET_ACCESS_KEY are set

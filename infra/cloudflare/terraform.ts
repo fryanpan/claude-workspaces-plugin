@@ -20,6 +20,8 @@ export type TfEnv = (typeof ENVS)[number];
 export const isEnv = (s: string | undefined): s is TfEnv => ENVS.includes(s as TfEnv);
 export const envDir = (env: TfEnv): string => join(TF_DIR, 'deploys', env);
 export const stateDir = (env: TfEnv): string => join(TF_DIR, 'state', env);
+/** CI's credentials: a root of its own, with local state (`ci-secrets.ts`). */
+export const CI_SECRETS_DIR = join(TF_DIR, 'ci-secrets');
 
 export interface TfResult {
   status: number;

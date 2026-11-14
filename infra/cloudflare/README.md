@@ -11,6 +11,8 @@ bun run cf:plan              # prod: reads the account, prints what would change
 bun run cf:plan staging      # the same for staging
 bun run cf:sync-config       # sends the gitignored configs to CI and starts an apply; one passkey tap
 bun run cf:rotate-token NAME # a new secret for one service token; one passkey tap
+bun run cf:ci-secrets plan    # CI's deploy token and GitHub secrets: what would change
+bun run cf:ci-secrets apply   # make the token and write the secrets ("CI's credentials" below)
 ```
 
 `bun run cf:apply` only prints where applies run now, and changes nothing.
@@ -26,6 +28,7 @@ bun run cf:rotate-token NAME # a new secret for one service token; one passkey t
 | `modules/stack` | The four wired together, plus the Access team domain (read back) |
 | `deploys/prod` | Prod's root, and `imports.tf`, which adopts what already exists |
 | `deploys/staging` | Staging's root: the same modules, no imports. Validated on every run, never applied yet |
+| `ci-secrets` | CI's deploy token, and the GitHub Actions secrets that carry it. Local state, applied by hand ("CI's credentials") |
 
 The layout is HashiCorp's standard module structure. Each module has
 `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf` and a `README.md`. Each
@@ -63,12 +66,14 @@ Staging reads the same three configs from `deploys/staging/*.local.*`
   put` (`../share-link-worker/README.md`); `keep_bindings` keeps it across an
   apply, so the key never enters the state.
 - **Fly.** The Fly Terraform provider is archived, and a `local-exec` keeps no
-  state, so Fly stays on `machine:deploy`, run from the keeper (below).
-- **CI's own credentials.** `keeper-setup`'s `CI credentials` step makes the
-  apply token, the plan token and the two state keys, and writes them to
-  GitHub through the keeper (`packages/server/src/keeper/keeper-setup-ci.ts`).
-  Terraform cannot hold them for the same reason it cannot hold the keeper's
-  token.
+  state, so Fly stays on `machine:deploy`. `.github/workflows/fly.yml` runs it
+  on main for each machine's image; a project's first deploy still runs on the
+  Mac (`docs/process/project-machine.md`).
+- **CI's plan credentials.** The repository's read-only `CLOUDFLARE_API_TOKEN`
+  and R2 pair, for pull request plans, are made by `keeper-setup`'s `CI
+  credentials` step and written through the keeper
+  (`packages/server/src/keeper/keeper-setup-ci.ts`). The write credentials are
+  `ci-secrets/`'s (below).
 
 ## How a run goes
 
@@ -185,8 +190,10 @@ read-only one and fails.
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Object Read on the state bucket | Object Read and Write on the state bucket |
 | `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | the three configs' contents (they hold the Access email lists) | |
 
-`keeper-setup` writes the three credentials in both places (its `CI
-credentials` step); `cf:sync-config` writes the three configs. Each R2 key is
+`bun run cf:ci-secrets apply` writes the environment's three credentials and
+the three configs ("CI's credentials" below); `keeper-setup`'s `CI
+credentials` step writes the repository's read-only three; `cf:sync-config`
+also writes the configs. Each R2 key is
 an API token on the state bucket: its access key id is the token's id and its
 secret the SHA-256 of the token's value.
 
@@ -199,6 +206,42 @@ including one that edits this workflow. The keeper refuses to write the
 environment's secrets unless that rule is in place. The apply job hands the
 write token and the read-write key to the "Apply prod" step only, so `bun
 install` never sees them.
+
+## CI's credentials
+
+`ci-secrets/` is a root of its own. One apply makes the CI deploy token
+(`cloudflare_api_token.ci_deploy`) and writes, through the GitHub provider:
+
+| Secret | Where | Value |
+| --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | `cloudflare-prod` | the deploy token |
+| `R2_ACCESS_KEY_ID` | `cloudflare-prod` | the token's id |
+| `R2_SECRET_ACCESS_KEY` | `cloudflare-prod` | the SHA-256 of the token's value |
+| `FLY_API_TOKEN` | `cloudflare-prod` | `FLY_API_TOKEN` from the runner's environment, when set |
+| `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | repository | the three gitignored configs, each when present |
+
+The token gets the apply permissions below plus Workers R2 Storage Bucket
+Item Write on the state bucket alone, and no API Tokens permission, so it
+cannot make a wider token. CI never runs this root, so the token never
+manages itself.
+
+```bash
+CLOUDFLARE_API_TOKEN=… GITHUB_TOKEN=… bun run cf:ci-secrets apply
+```
+
+`CLOUDFLARE_API_TOKEN` here must hold User > API Tokens > Edit, the one
+permission the keeper's token lacks on purpose
+(`packages/server/src/keeper/keeper-setup-cloudflare.ts`). `GITHUB_TOKEN` is a
+classic token with `repo` scope. Each reaches terraform in its environment
+only; the run prints resource addresses and verbs, never a value. Every
+output that carries a value is `sensitive`.
+
+**The state is local, and holds the token's value.** It sits in
+`state/ci-secrets/` (mode 700, files 600), or under `$CW_TF_WORK_DIR` when the
+keeper runs it, never in the R2 bucket: the repository's read-only state key,
+which every same-repo pull request's plan holds, reads the whole bucket. Whoever
+can read that folder can read the token; that is the cost of Terraform owning
+it. The saved plan holds the values too and is removed when the run ends.
 
 ## State
 
@@ -227,14 +270,12 @@ tunnel token read needs it, when it runs on the Mac with this token), Workers Sc
 Certificates Read, Workers Routes Edit. The plan token has the Read form of
 each.
 
-## Fly is not touched here
+## Fly
 
-No job holds a Fly token. Project machines install the signed releases
-`.github/workflows/server-release.yml` publishes, and `machine:deploy` runs
-from the keeper (`docs/process/project-machine.md`, "Releases"). The
-`cloudflare-prod` environment's `FLY_API_TOKEN`, `CW_BOARD_OWNER_EMAIL` and
-`CLOUDFLARE_ACCOUNT_ID` were read only by the job that ran it, and nothing
-reads them now.
+`.github/workflows/fly.yml` deploys each project machine's image from main
+with `machine:deploy`, using the `cloudflare-prod` environment's
+`FLY_API_TOKEN` and the deploy token. Server code still reaches machines as
+the signed releases `.github/workflows/server-release.yml` publishes.
 
 ## Tests
 
@@ -242,8 +283,12 @@ reads them now.
 `gates` job and the first job of `cloudflare.yml`: `terraform fmt -check`,
 `terraform validate` on each root, and `deploys/prod/tests/plan.tftest.hcl`,
 which plans the root and each module from a fixture against a mock provider
-(no token, no state, no network call beyond the provider download).
-In `packages/server/test`: `cloudflare-tf-discover.test.ts` runs the adoption
+(no token, no state, no network call beyond the provider download), and
+`ci-secrets/tests/apply.tftest.hcl`, which applies the CI credentials root
+against mock Cloudflare and GitHub providers.
+In `packages/server/test`: `cloudflare-ci-secrets.test.ts` checks what
+`cf:ci-secrets` hands terraform and prints; `cloudflare-ci-credentials.test.ts`
+the R2 key and account id CI's steps take from the token; `cloudflare-tf-discover.test.ts` runs the adoption
 and the refusals against a fake account; `cloudflare-tf-service-tokens.test.ts`
 a missing token through plan and CI apply; `cloudflare-tf-wrapper.test.ts` the
 variable assembly, where each credential goes, what CI prints, the file

@@ -28,6 +28,8 @@
 #   CLOUDFLARE_API_TOKEN                                       both; required
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY                     both; optional
 #   CF_ROUTER_CONFIG, CF_ACCESS_CONFIG, CF_SHARE_LINK_CONFIG   repository
+# `bun run cf:ci-secrets apply` (infra/cloudflare/ci-secrets/) writes the
+# environment's three and the configs; keeper-setup the repository's three.
 # Without the R2 pair, ci-credentials.ts derives the state bucket's key from
 # CLOUDFLARE_API_TOKEN (its id, and the SHA-256 of its value), masks it, and
 # hands it to terraform's environment alone. The token then needs R2 write.
