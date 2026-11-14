@@ -18,8 +18,8 @@
  * A `view` or `comment` connection receives the doc and can never change it:
  * its sync step 2 and update messages are dropped before they are read. An
  * action is an edit unless the app marks it read-only, and an edit action is
- * refused for those roles. A role is asked once, when the socket connects; an
- * app that revokes one closes the socket.
+ * refused for those roles. A socket's role is asked when it connects and again
+ * whenever the app calls `recheckRoles`, which drops a revoked connection.
  */
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
@@ -40,8 +40,7 @@ export interface ActionContext {
   doc: Y.Doc;
 }
 
-/** Runs synchronously: the room is released when it returns, so a handler
- *  that awaits must not touch `ctx.doc` afterwards. */
+/** May be async: the room stays open until a returned promise settles. */
 export type ActionHandler = (ctx: ActionContext, body: Record<string, unknown>) => unknown;
 
 /** An action is an edit unless the app marks it read-only. A read-only
@@ -69,6 +68,10 @@ export interface ConnectRequest {
   /** From the app's sign-in check. */
   principal: Principal;
   send: (bytes: Uint8Array) => void;
+  /** Called when `recheckRoles` finds this principal no longer has a role
+   *  in the room; the app closes the socket. The core has already stopped
+   *  serving it. */
+  onRevoked?: () => void;
 }
 
 export interface CollabConnection {
@@ -98,6 +101,11 @@ export interface RoomHost {
   /** Run a server action in `roomId` as `principal`, both from the caller's
    *  connection or address. */
   action(roomId: string, principal: Principal, name: string, body: unknown): ActionResult;
+  /** Ask the role function again for every open connection (in one room,
+   *  or all). A connection whose role is now null is dropped and its
+   *  `onRevoked` called; one whose role changed reads and writes under the
+   *  new role. The hook for the identity step's revocation. */
+  recheckRoles(roomId?: string): void;
   /** Save every room with unsaved changes now. */
   flush(): void;
   /** Ids of the rooms open now. */
@@ -110,10 +118,13 @@ interface Room {
   conns: Set<Conn>;
   timer: ReturnType<typeof setTimeout> | null;
   dirty: boolean;
+  /** Actions still running in the room (an async handler's promise). */
+  pending: number;
 }
 
 interface Conn {
   send: (bytes: Uint8Array) => void;
+  recheck: () => void;
 }
 
 const syncFrame = (write: (enc: encoding.Encoder) => void): Uint8Array => {
@@ -122,6 +133,9 @@ const syncFrame = (write: (enc: encoding.Encoder) => void): Uint8Array => {
   write(enc);
   return encoding.toUint8Array(enc);
 };
+
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  typeof (v as { then?: unknown } | null)?.then === 'function';
 
 export function createRoomHost(opts: RoomHostOptions): RoomHost {
   if (typeof opts?.role !== 'function') {
@@ -152,7 +166,7 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
     const doc = new Y.Doc();
     const saved = storage.read(id);
     if (saved) Y.applyUpdate(doc, saved);
-    const room: Room = { id, doc, conns: new Set(), timer: null, dirty: false };
+    const room: Room = { id, doc, conns: new Set(), timer: null, dirty: false, pending: 0 };
     doc.on('update', (update: Uint8Array, origin: unknown) => {
       room.dirty = true;
       if (room.timer) clearTimeout(room.timer);
@@ -172,7 +186,7 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
   };
 
   const release = (room: Room): void => {
-    if (room.conns.size > 0) return;
+    if (room.conns.size > 0 || room.pending > 0) return;
     save(room);
     if (room.dirty) return; // a failed save keeps the room, and its changes
     room.doc.destroy();
@@ -187,15 +201,31 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
       const granted = role(req.principal, req.roomId);
       if (granted === null) return { ok: false, error: 'no-role' };
       const room = open(req.roomId);
-      const conn: Conn = { send: req.send };
-      room.conns.add(conn);
-      const writable = canEdit(granted);
+      let current: CollabRole = granted;
+      let writable = canEdit(granted);
       let closed = false;
+      const conn: Conn = {
+        send: req.send,
+        recheck: () => {
+          if (closed) return;
+          const now = role(req.principal, req.roomId);
+          if (now === null) {
+            connection.close();
+            req.onRevoked?.();
+            return;
+          }
+          current = now;
+          writable = canEdit(now);
+        },
+      };
+      room.conns.add(conn);
       req.send(syncFrame((enc) => syncProtocol.writeSyncStep1(enc, room.doc)));
       const connection: CollabConnection = {
         roomId: req.roomId,
         principal: req.principal,
-        role: granted,
+        get role() {
+          return current;
+        },
         receive(bytes) {
           if (closed) return;
           try {
@@ -263,14 +293,29 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
       // reach the room.
       const doc = canEdit(granted) ? room.doc : new Y.Doc();
       if (doc !== room.doc) Y.applyUpdate(doc, Y.encodeStateAsUpdate(room.doc));
-      try {
-        return {
-          ok: true,
-          value: run({ roomId, principal, role: granted, doc }, body as Record<string, unknown>),
-        };
-      } finally {
+      room.pending++;
+      const finish = (): void => {
+        room.pending--;
         if (doc !== room.doc) doc.destroy();
         release(room);
+      };
+      let value: unknown;
+      try {
+        value = run({ roomId, principal, role: granted, doc }, body as Record<string, unknown>);
+      } catch (err) {
+        finish();
+        throw err;
+      }
+      if (isThenable(value)) value.then(finish, finish);
+      else finish();
+      return { ok: true, value };
+    },
+
+    recheckRoles(roomId) {
+      for (const room of [...rooms.values()]) {
+        if (roomId === undefined || room.id === roomId) {
+          for (const c of [...room.conns]) c.recheck();
+        }
       }
     },
 

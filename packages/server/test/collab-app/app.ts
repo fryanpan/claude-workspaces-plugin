@@ -78,6 +78,7 @@ export function startCollabApp(storage: CollabStorage) {
           roomId: ws.data.roomId,
           principal: { id: ws.data.personId },
           send: (bytes) => ws.sendBinary(bytes),
+          onRevoked: () => ws.close(1008, 'revoked'),
         });
         if (!res.ok) {
           ws.close(1008, res.error);

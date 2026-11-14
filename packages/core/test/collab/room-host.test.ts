@@ -181,6 +181,55 @@ describe('a connection that misbehaves', () => {
   });
 });
 
+describe('recheckRoles', () => {
+  it('drops a connection whose role was revoked, and tells the app', async () => {
+    let bobRole: 'edit' | null = 'edit';
+    const host = createRoomHost({
+      storage: new MemoryCollabStorage(),
+      role: (p) => (p.id === 'alice' ? 'edit' : p.id === 'bob' ? bobRole : null),
+    });
+    const a = page(host, 'harborlight', 'alice');
+    const revoked = vi.fn();
+    const bob = host.connect({
+      roomId: 'harborlight',
+      principal: { id: 'bob' },
+      send: () => {},
+      onRevoked: revoked,
+    });
+    bobRole = null;
+    host.recheckRoles('harborlight');
+    expect(revoked).toHaveBeenCalledTimes(1);
+    const before = a.ydoc.getText('t').toString();
+    if (bob.ok) {
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MSG_SYNC);
+      const other = new Y.Doc();
+      other.getText('t').insert(0, 'after revoke');
+      syncProtocol.writeUpdate(enc, Y.encodeStateAsUpdate(other));
+      bob.connection.receive(encoding.toUint8Array(enc));
+    }
+    await settle();
+    expect(a.ydoc.getText('t').toString()).toBe(before);
+  });
+
+  it('downgrades a connection whose role became view', async () => {
+    let bobRole: 'edit' | 'view' = 'edit';
+    const host = createRoomHost({
+      storage: new MemoryCollabStorage(),
+      role: (p) => (p.id === 'alice' ? 'edit' : p.id === 'bob' ? bobRole : null),
+    });
+    const a = page(host, 'harborlight', 'alice');
+    const bob = page(host, 'harborlight', 'bob');
+    await settle();
+    bobRole = 'view';
+    host.recheckRoles();
+    expect(bob.conn?.role).toBe('view');
+    bob.ydoc.getText('t').insert(0, 'defaced');
+    await settle();
+    expect(a.ydoc.getText('t').toString()).toBe('');
+  });
+});
+
 describe('actions', () => {
   const setup = () => {
     const handler = vi.fn((ctx: { doc: Y.Doc }, body: Record<string, unknown>) => {
@@ -263,6 +312,32 @@ describe('actions', () => {
       value: 'scribble kept',
     });
     expect(text()).toBe('kept');
+  });
+
+  it('keeps the room open until an async action settles, and saves what it wrote', async () => {
+    const storage = new MemoryCollabStorage();
+    let resume: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      resume = r;
+    });
+    const host = createRoomHost({
+      storage,
+      role: roles,
+      actions: {
+        slow: async (ctx) => {
+          await gate;
+          ctx.doc.getText('t').insert(0, 'after await');
+        },
+      },
+    });
+    const res = host.action('harborlight', { id: 'alice' }, 'slow', {});
+    expect(host.openRooms()).toEqual(['harborlight']);
+    resume();
+    if (res.ok) await res.value;
+    expect(host.openRooms()).toEqual([]);
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, storage.read('harborlight') ?? new Uint8Array());
+    expect(doc.getText('t').toString()).toBe('after await');
   });
 
   it('runs an offered action in the room the caller named, with the role the app gave', () => {
