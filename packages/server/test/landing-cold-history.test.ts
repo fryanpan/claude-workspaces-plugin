@@ -92,7 +92,8 @@ beforeAll(async () => {
   // After the archive, so the comment rather than the row's own update is the
   // board's newest activity: only a thread read can find it.
   const archivedAt = first.tasks.getTask(archivedTask)?.updatedAt ?? 0;
-  while (Date.now() <= archivedAt) await Bun.sleep(1);
+  // A spin, not a sleep: it waits at most until the next millisecond.
+  while (Date.now() <= archivedAt) {}
   await comment(board, archivedTask, 'Old feed is gone.');
   archivedCommentAt = Math.max(
     ...first.docStore.listThreads(`task:${archivedTask}`).map((t) => t.lastActivity),
