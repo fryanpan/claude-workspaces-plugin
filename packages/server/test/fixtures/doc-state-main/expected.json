@@ -1,0 +1,241 @@
+{
+  "writtenBy": "origin/main ad8c9f521, via its own DocStore; read back by a second DocStore from the same checkout",
+  "docs": [
+    {
+      "docId": "harborlight-notes",
+      "file": "markdown.ydoc",
+      "bytes": 278,
+      "stateVector": "AqmSxewPL8vzpB0b",
+      "text": {
+        "content": "# Harborlight\n\nRiverbend opens at ten.\n\nSaltmarsh closes at six.\n"
+      },
+      "maps": {
+        "meta": {
+          "docId": "harborlight-notes",
+          "type": "markdown",
+          "createdAt": 1794636520961,
+          "title": "Harborlight notes"
+        },
+        "extra": {
+          "reviewer": "Alice"
+        },
+        "threads": {}
+      }
+    },
+    {
+      "docId": "ws:harborlight",
+      "file": "board.ydoc",
+      "bytes": 245,
+      "stateVector": "Ac/G3fUCCA==",
+      "text": {},
+      "maps": {
+        "meta": {
+          "docId": "ws:harborlight",
+          "type": "workspace",
+          "createdAt": 1794636520964,
+          "title": "Harborlight"
+        },
+        "tasks": {
+          "t-1": {
+            "id": "t-1",
+            "title": "Paint the Riverbend sign",
+            "status": "done"
+          }
+        },
+        "workspace": {
+          "name": "Harborlight"
+        }
+      }
+    },
+    {
+      "docId": "harborlight-sketch",
+      "file": "whiteboard.ydoc",
+      "bytes": 1936,
+      "stateVector": "AePZqkkN",
+      "text": {},
+      "maps": {
+        "meta": {
+          "docId": "harborlight-sketch",
+          "type": "whiteboard",
+          "createdAt": 1794636520965,
+          "title": "Harborlight sketch",
+          "contentRevision": 1
+        },
+        "elements": {
+          "dock": {
+            "angle": 0,
+            "strokeColor": "#1e1e1e",
+            "backgroundColor": "transparent",
+            "fillStyle": "solid",
+            "strokeWidth": 2,
+            "strokeStyle": "solid",
+            "roughness": 1,
+            "opacity": 100,
+            "groupIds": [],
+            "frameId": null,
+            "roundness": {
+              "type": 3
+            },
+            "seed": 641709300,
+            "isDeleted": false,
+            "boundElements": [
+              {
+                "id": "dock-label",
+                "type": "text"
+              }
+            ],
+            "updated": 1700000001000,
+            "link": null,
+            "locked": false,
+            "index": "a0",
+            "id": "dock",
+            "type": "rectangle",
+            "x": 15,
+            "y": 25,
+            "width": 140,
+            "height": 60,
+            "version": 1000002,
+            "versionNonce": 2120567548
+          },
+          "dock-label": {
+            "angle": 0,
+            "strokeColor": "#1e1e1e",
+            "backgroundColor": "transparent",
+            "fillStyle": "solid",
+            "strokeWidth": 2,
+            "strokeStyle": "solid",
+            "roughness": 1,
+            "opacity": 100,
+            "groupIds": [],
+            "frameId": null,
+            "roundness": null,
+            "seed": 605660923,
+            "isDeleted": false,
+            "boundElements": null,
+            "updated": 1700000001000,
+            "link": null,
+            "locked": false,
+            "index": "a1",
+            "id": "dock-label",
+            "type": "text",
+            "x": 50.5,
+            "y": 42.5,
+            "width": 69,
+            "height": 25,
+            "text": "Dock A",
+            "originalText": "Dock A",
+            "fontSize": 20,
+            "fontFamily": 5,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "containerId": "dock",
+            "autoResize": true,
+            "lineHeight": 1.25,
+            "version": 1000002,
+            "versionNonce": 1225871850
+          },
+          "pier": {
+            "angle": 0,
+            "strokeColor": "#1e1e1e",
+            "backgroundColor": "transparent",
+            "fillStyle": "solid",
+            "strokeWidth": 2,
+            "strokeStyle": "solid",
+            "roughness": 1,
+            "opacity": 100,
+            "groupIds": [],
+            "frameId": null,
+            "roundness": {
+              "type": 2
+            },
+            "seed": 397358660,
+            "isDeleted": true,
+            "boundElements": [
+              {
+                "id": "pier-label",
+                "type": "text"
+              }
+            ],
+            "updated": 1700000001000,
+            "link": null,
+            "locked": false,
+            "index": "a2",
+            "id": "pier",
+            "type": "ellipse",
+            "x": 200,
+            "y": 40,
+            "width": 80,
+            "height": 80,
+            "version": 1000002,
+            "versionNonce": 1816137870
+          },
+          "pier-label": {
+            "angle": 0,
+            "strokeColor": "#1e1e1e",
+            "backgroundColor": "transparent",
+            "fillStyle": "solid",
+            "strokeWidth": 2,
+            "strokeStyle": "solid",
+            "roughness": 1,
+            "opacity": 100,
+            "groupIds": [],
+            "frameId": null,
+            "roundness": null,
+            "seed": 516970959,
+            "isDeleted": true,
+            "boundElements": null,
+            "updated": 1700000001000,
+            "link": null,
+            "locked": false,
+            "index": "a3",
+            "id": "pier-label",
+            "type": "text",
+            "x": 216.5,
+            "y": 67.5,
+            "width": 47,
+            "height": 25,
+            "text": "Pier",
+            "originalText": "Pier",
+            "fontSize": 20,
+            "fontFamily": 5,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "containerId": "pier",
+            "autoResize": true,
+            "lineHeight": 1.25,
+            "version": 1000002,
+            "versionNonce": 402482507
+          }
+        }
+      }
+    },
+    {
+      "docId": "riverbend-poll",
+      "file": "component-state.ydoc",
+      "bytes": 364,
+      "stateVector": "Aa6L1+UHMQ==",
+      "text": {
+        "content": "# Riverbend poll\n\n<Poll id=\"poll\" />\n"
+      },
+      "maps": {
+        "meta": {
+          "docId": "riverbend-poll",
+          "type": "markdown",
+          "createdAt": 1794636520966,
+          "title": "Riverbend poll"
+        },
+        "component-state:poll": {
+          "question": "Saltmarsh or Riverbend?",
+          "votes": [
+            "Alice",
+            "Bob"
+          ],
+          "tally": {
+            "Saltmarsh": 1,
+            "Riverbend": 2
+          }
+        }
+      }
+    }
+  ]
+}
