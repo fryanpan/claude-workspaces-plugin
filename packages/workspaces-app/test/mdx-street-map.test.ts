@@ -1,10 +1,11 @@
 import { prose } from '@claude-workspaces/core';
+import type { Basemap } from '@claude-workspaces/core/map-basemaps';
 import type { MapSpec } from '@claude-workspaces/core/map-spec';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { createEditor } from '../src/editor.ts';
-import { renderMapInto } from '../src/map-entry.ts';
+import { type KeyedBase, renderMapInto } from '../src/map-entry.ts';
 import { type MapChunk, mapDataUrl, setMapForTest } from '../src/mdx-street-map.ts';
 
 /**
@@ -20,9 +21,15 @@ import { type MapChunk, mapDataUrl, setMapForTest } from '../src/mdx-street-map.
  */
 
 const drawnSpecs: MapSpec[] = [];
+/** Each draw's basemap and, for a keyed one, what the page handed the chunk. */
+const drawnOn: Array<{ base: Basemap; keyed?: KeyedBase }> = [];
 const CHUNK: MapChunk = {
-  renderMapInto: (slot, spec, base) => {
+  renderMapInto: (slot, spec, base, keyed) => {
     drawnSpecs.push(spec);
+    drawnOn.push({ base, ...(keyed ? { keyed } : {}) });
+    // Google's script is never loaded here: its path runs in a real browser,
+    // against a stub, in `mdx-street-map-google-browser.test.ts`.
+    if (base.script) return { drawn: { markers: 0, rings: 0, points: 0 }, remove: () => {} };
     return renderMapInto(slot, spec, base);
   },
 };
@@ -32,6 +39,7 @@ afterEach(() => {
   for (const f of open.splice(0).reverse()) f();
   document.body.innerHTML = '';
   drawnSpecs.length = 0;
+  drawnOn.length = 0;
   setMapForTest(null);
   vi.unstubAllGlobals();
   history.replaceState(null, '', '/');
@@ -163,5 +171,63 @@ describe('a StreetMap block on the doc page', () => {
     expect(mapDataUrl('/etc/x.json')).toBeNull();
     expect(mapDataUrl('notes.txt')).toBeNull();
     expect(mapDataUrl('./a b.json')).toBe('/workspaces/w-harbor/docs/d-reports/files/a%20b.json');
+  });
+
+  describe('on the google basemap', () => {
+    const GOOGLE = '<StreetMap basemap="google" markers={[{ lat: 37.77, lng: -122.42 }]} />';
+    const notice = () => view()?.querySelector<HTMLElement>('.mdx-map-fallback');
+    const serve = (status: number, body: unknown) => {
+      const asked: string[] = [];
+      vi.stubGlobal('fetch', async (url: string) => {
+        asked.push(url);
+        return new Response(JSON.stringify(body), { status });
+      });
+      return asked;
+    };
+    beforeEach(() => history.replaceState(null, '', '/workspaces/w-harbor/docs/d-reports'));
+
+    it('draws on Google with the key the server handed this doc, and says nothing', async () => {
+      const asked = serve(200, { key: 'fake-maps-key' });
+      mount(GOOGLE);
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1));
+      expect(asked).toEqual(['/workspaces/w-harbor/docs/d-reports/map-key/google']);
+      expect(drawnOn[0]?.base.label).toBe('Google Maps');
+      expect(drawnOn[0]?.keyed?.key).toBe('fake-maps-key');
+      expect(drawnOn[0]?.keyed?.fallback.label).toBe('OpenStreetMap');
+      expect(view()?.querySelector<HTMLElement>('.mdx-map')?.dataset.basemap).toBe('google');
+      expect(notice()?.hidden).toBe(true);
+    });
+
+    it('falls back to OpenStreetMap, and says so, when the server holds no key', async () => {
+      serve(404, { error: 'none', reason: 'no-key' });
+      mount(GOOGLE);
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1));
+      expect(drawnOn[0]?.base.label).toBe('OpenStreetMap');
+      expect(drawnOn[0]?.keyed).toBeUndefined();
+      expect(view()?.querySelector<HTMLElement>('.mdx-map')?.dataset.basemap).toBe('osm');
+      expect(notice()?.hidden).toBe(false);
+      expect(notice()?.textContent).toBe(
+        'Google Maps is not set up on this server, so this map is drawn on OpenStreetMap.',
+      );
+    });
+
+    it('says so when Google refuses the key after the map started', async () => {
+      serve(200, { key: 'fake-maps-key' });
+      mount(GOOGLE);
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1));
+      drawnOn[0]?.keyed?.fellBack('refused');
+      expect(view()?.querySelector<HTMLElement>('.mdx-map')?.dataset.basemap).toBe('osm');
+      expect(notice()?.textContent).toBe(
+        "Google Maps refused this server's key, so this map is drawn on OpenStreetMap.",
+      );
+    });
+
+    it('asks for no key for a map on a keyless basemap', async () => {
+      const asked = serve(500, {});
+      mount('<StreetMap basemap="carto-light" markers={[{ lat: 37.77, lng: -122.42 }]} />');
+      await drawn();
+      expect(asked).toEqual([]);
+      expect(drawnOn[0]?.base.label).toBe('CARTO Positron');
+    });
   });
 });

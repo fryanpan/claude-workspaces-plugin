@@ -13,7 +13,7 @@
  * A spec that does not read draws an error box in the map's place, in the
  * class `mdx-flow-block.ts` reads a chart's failure from.
  */
-import { basemapOf } from '@claude-workspaces/core/map-basemaps';
+import { type Basemap, DEFAULT_BASEMAP, basemapOf } from '@claude-workspaces/core/map-basemaps';
 import {
   type MapSpec,
   mapDataSegments,
@@ -21,7 +21,7 @@ import {
   readMapSpec,
 } from '@claude-workspaces/core/map-spec';
 import { api, docIdFromPathOrNull } from './doc-path.ts';
-import type { renderMapInto } from './map-entry.ts';
+import type { KeyedBase, renderMapInto } from './map-entry.ts';
 import { UNREADABLE } from './mdx-chart-props.ts';
 
 /** What `/app/map/map.js` exports. */
@@ -116,6 +116,36 @@ async function fetchData(src: string): Promise<unknown> {
   return res.json();
 }
 
+/** Why a keyed map is drawn on its fallback instead, as the reader is told. */
+const FELL_BACK: Record<string, (label: string, instead: string) => string> = {
+  'no-key': (label, instead) =>
+    `${label} is not set up on this server, so this map is drawn on ${instead}.`,
+  'not-named': (label, instead) =>
+    `${label} draws only for a basemap="…" written as a quoted string, so this map is drawn on ${instead}.`,
+  refused: (label, instead) =>
+    `${label} refused this server's key, so this map is drawn on ${instead}.`,
+  unloaded: (label, instead) => `${label} did not load, so this map is drawn on ${instead}.`,
+};
+
+/** The key the server holds for `basemap`, if it hands it to this doc, or
+ *  why not. Asked again on every draw: a doc that starts naming the basemap
+ *  gets the key on its next draw. */
+async function keyFor(basemap: string): Promise<{ key: string } | { reason: string }> {
+  const docId = typeof location === 'undefined' ? null : docIdFromPathOrNull(location.pathname);
+  if (!docId) return { reason: 'no-key' };
+  try {
+    const res = await fetch(
+      api(`docs/${encodeURIComponent(docId)}/map-key/${encodeURIComponent(basemap)}`),
+      { credentials: 'same-origin' },
+    );
+    const body = (await res.json()) as { key?: unknown; reason?: unknown };
+    if (res.ok && typeof body.key === 'string' && body.key) return { key: body.key };
+    return { reason: typeof body.reason === 'string' ? body.reason : 'no-key' };
+  } catch {
+    return { reason: 'no-key' };
+  }
+}
+
 function errorBox(slot: HTMLElement, message: string): void {
   const box = document.createElement('div');
   box.className = 'plot-spec-error';
@@ -192,21 +222,49 @@ const PLACE_FRAMES = 3;
 /** Frames after which a slot never connected (redrawn away) is let go. */
 const GIVE_UP_FRAMES = 600;
 
-function draw(chunk: MapChunk, slot: HTMLElement, legendAt: HTMLElement, spec: MapSpec): void {
+function draw(
+  chunk: MapChunk,
+  slot: HTMLElement,
+  legendAt: HTMLElement,
+  notice: HTMLElement,
+  spec: MapSpec,
+): void {
   const base = basemapOf(spec.basemap);
   if (!base) throw new Error(`no basemap "${spec.basemap}"`);
   slot.style.height = `${spec.height}px`;
   const legend = legendOf(spec);
   if (legend) legendAt.replaceChildren(legend);
-  whenPlaced(slot, () => {
-    slot.classList.remove('is-pending');
-    try {
-      const { drawn } = chunk.renderMapInto(slot, spec, base);
-      slot.dataset.markers = String(drawn.markers);
-      slot.dataset.rings = String(drawn.rings);
-      slot.dataset.points = String(drawn.points);
-    } catch (err) {
-      errorBox(slot, err instanceof Error ? err.message : String(err));
+  const start = (on: Basemap, name: string, keyed?: KeyedBase) =>
+    whenPlaced(slot, () => {
+      slot.classList.remove('is-pending');
+      slot.dataset.basemap = name;
+      try {
+        const { drawn } = chunk.renderMapInto(slot, spec, on, keyed);
+        slot.dataset.markers = String(drawn.markers);
+        slot.dataset.rings = String(drawn.rings);
+        slot.dataset.points = String(drawn.points);
+      } catch (err) {
+        errorBox(slot, err instanceof Error ? err.message : String(err));
+      }
+    });
+  if (!base.key) {
+    start(base, spec.basemap);
+    return;
+  }
+  const insteadName = base.fallback ?? DEFAULT_BASEMAP;
+  const instead = basemapOf(insteadName);
+  if (!instead) throw new Error(`no basemap "${insteadName}"`);
+  const fellBack = (why: string) => {
+    slot.dataset.basemap = insteadName;
+    notice.textContent = (FELL_BACK[why] ?? FELL_BACK['no-key'])?.(base.label, instead.label) ?? '';
+    notice.hidden = false;
+  };
+  void keyFor(spec.basemap).then((got) => {
+    if ('key' in got) {
+      start(base, spec.basemap, { key: got.key, fallback: instead, fellBack });
+    } else {
+      start(instead, insteadName);
+      fellBack(got.reason);
     }
   });
 }
@@ -232,6 +290,12 @@ export function renderStreetMap(host: HTMLElement, summary: StreetMapSummary): v
     });
   }
   host.appendChild(slot);
+  // Says so when a keyed basemap (Google) is drawn on its fallback instead.
+  const notice = document.createElement('div');
+  notice.className = 'mdx-chart-note mdx-map-fallback';
+  notice.setAttribute('role', 'status');
+  notice.hidden = true;
+  host.appendChild(notice);
   const legendAt = document.createElement('div');
   host.appendChild(legendAt);
   if (summary.note) {
@@ -250,7 +314,7 @@ export function renderStreetMap(host: HTMLElement, summary: StreetMapSummary): v
         throw new Error(`Not a literal, so not drawn: ${summary.unreadable.join(', ')}`);
       }
       if (!read.ok) throw new Error(read.error);
-      draw(ready, slot, legendAt, read.spec);
+      draw(ready, slot, legendAt, notice, read.spec);
     } catch (err) {
       fail(err);
     }
@@ -262,7 +326,7 @@ export function renderStreetMap(host: HTMLElement, summary: StreetMapSummary): v
       if (!slot.isConnected) return;
       if (!chunk) return fail(new Error('The map could not be loaded'));
       try {
-        draw(chunk, slot, legendAt, spec);
+        draw(chunk, slot, legendAt, notice, spec);
       } catch (err) {
         fail(err);
       }

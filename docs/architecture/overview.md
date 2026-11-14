@@ -2696,6 +2696,14 @@ doc's files route, draws the legend, and fetches Leaflet from
 time a doc shows a map; markers and rings are SVG paths, points one canvas.
 The files route serves a `src` file only when a `<StreetMap>` in the doc's
 live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
+`basemap="google"` is the one keyed basemap: `mdx-street-map.ts` asks
+`routes/doc-map-key.ts` for the key, which the server (`CW_GOOGLE_MAPS_KEY`)
+answers only while the doc's live content names that basemap
+(`doc-file-scope.ts` `mapBasemapsNamed`), and draws on OpenStreetMap with a
+line saying why when it gets none. `map-google.ts`, in the same chunk, loads
+Google's Maps JavaScript API with that key and puts its tiles under the
+Leaflet layers through GoogleMutant, which reads the global `L` that
+`leaflet-global.ts` sets.
 
 An agent reaches a doc's components through `doc-components-agent.ts`, in the
 doc-store group's `doc-*.ts` glob, and so does not move the picture. It lists

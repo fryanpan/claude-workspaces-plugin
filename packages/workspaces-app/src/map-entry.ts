@@ -7,10 +7,13 @@
  * `core/map-basemaps.ts` names. Markers and rings are SVG paths, so each is
  * an element a test can count and a reader can tap; the points, which run to
  * thousands, share one canvas. Popups are built when opened, as text nodes.
+ * A basemap drawn by its provider's own script (Google's) goes under the same
+ * layers through `map-google.ts`.
  */
 import type { Basemap } from '@claude-workspaces/core/map-basemaps';
 import type { MapSpec } from '@claude-workspaces/core/map-spec';
 import L from 'leaflet';
+import { addGoogleLayer } from './map-google.ts';
 
 /** What the slot carries once drawn: how many of each layer went on. */
 export interface MapDrawn {
@@ -26,11 +29,28 @@ const popupOf = (words: string) => () => {
   return p;
 };
 
+/** For a basemap its provider's script draws: the key the server handed this
+ *  doc, the basemap to draw instead if the provider cannot, and who to tell. */
+export interface KeyedBase {
+  key: string;
+  fallback: Basemap;
+  fellBack: (why: 'refused' | 'unloaded') => void;
+}
+
+function tilesOf(base: Basemap): L.TileLayer {
+  return L.tileLayer(base.tiles, {
+    attribution: base.attribution,
+    maxZoom: base.maxZoom,
+    ...(base.subdomains ? { subdomains: base.subdomains } : {}),
+  });
+}
+
 /** Draw `spec` into `slot`; returns the cleanup that removes the map. */
 export function renderMapInto(
   slot: HTMLElement,
   spec: MapSpec,
   base: Basemap,
+  keyed?: KeyedBase,
 ): { drawn: MapDrawn; remove: () => void } {
   const map = L.map(slot, {
     // A doc scrolls; a wheel over the map scrolls the doc, not the map.
@@ -41,11 +61,15 @@ export function renderMapInto(
     zoomSnap: 0.25,
   });
   map.attributionControl.setPrefix(false);
-  L.tileLayer(base.tiles, {
-    attribution: base.attribution,
-    maxZoom: base.maxZoom,
-    ...(base.subdomains ? { subdomains: base.subdomains } : {}),
-  }).addTo(map);
+  if (base.script) {
+    if (!keyed) throw new Error(`${base.label} needs a key`);
+    addGoogleLayer(map, base.script, keyed.key, base.maxZoom, (why) => {
+      tilesOf(keyed.fallback).addTo(map);
+      keyed.fellBack(why);
+    });
+  } else {
+    tilesOf(base).addTo(map);
+  }
 
   // The points get a pane of their own under the overlay pane, so the
   // markers' paths are always above the points and take a reader's tap. A
