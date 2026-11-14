@@ -63,8 +63,10 @@ describe.skipIf(CHROME === null)('the library chart on an Astro page', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'astro-chart-'));
     const out = join(dir, 'dist');
+    // Built with bun, which every CI job installs, not the runner's node:
+    // Astro 7 asks for node >=22.23.4 and no job pins a node.
     const built = spawnSync(
-      process.execPath,
+      'bun',
       [join(FIXTURE, 'node_modules', 'astro', 'bin', 'astro.mjs'), 'build', '--outDir', out],
       {
         cwd: FIXTURE,

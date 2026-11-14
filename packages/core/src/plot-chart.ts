@@ -9,7 +9,8 @@
  *
  * Its props are a `<PlotChart>` spec (`data`, `marks` or `preset`,
  * `options`) plus a `title`, `subtitle` and `note`. Its state may hold
- * `title` and `data`; each key of the state's `data` replaces that key of the
+ * `title`, `subtitle`, `note` (a string there wins over the prop's, so an
+ * empty one clears it) and `data`; each key of the state's `data` replaces that key of the
  * props' data, so an agent or a reader can change what is charted without
  * touching the tag. The chart redraws whenever the state changes.
  *
@@ -38,8 +39,6 @@ interface ChartState {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const text = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
-
 export default function mount(
   el: HTMLElement,
   props: Record<string, unknown>,
@@ -62,10 +61,12 @@ export default function mount(
   const draw = (): void => {
     const live = state?.get();
     const s = isRecord(live) ? live : {};
+    // A string in the state wins, even an empty one, so the state can clear
+    // a line the props wrote.
     const words = (key: string, node: HTMLElement): void => {
-      const v = text(s[key]) ?? text(props[key]);
-      node.textContent = v ?? '';
-      node.hidden = v === null;
+      const v = typeof s[key] === 'string' ? s[key] : props[key];
+      node.textContent = typeof v === 'string' ? v : '';
+      node.hidden = node.textContent === '';
     };
     words('title', title);
     words('subtitle', subtitle);

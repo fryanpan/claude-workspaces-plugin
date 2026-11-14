@@ -51,6 +51,11 @@ describe('a state hook over a JSON snapshot', () => {
     expect(refused.ok).toBe(false);
     expect(hook.set('__proto__.polluted', true).ok).toBe(false);
     expect(hook.push('filter', 'x').ok).toBe(false);
+    expect(hook.set('toString.x', 1).ok).toBe(true);
+    hook.delete('toString');
+    expect(hook.set('when', new Date(0)).ok).toBe(false);
+    expect(hook.set('nothing', undefined).ok).toBe(false);
+    expect(hook.push('pins', () => 1).ok).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(hook.get()).toEqual(SNAPSHOT);
   });

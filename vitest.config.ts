@@ -38,9 +38,14 @@ export default defineConfig({
     {
       name: 'plot-from-esm-sh',
       enforce: 'pre',
-      transform: (code: string) =>
-        code.includes(PLOT_FROM_ESM_SH)
-          ? code.replaceAll(`'${PLOT_FROM_ESM_SH}'`, JSON.stringify(installedPlot))
+      // Only the chart's own file: a test that names the address (a fake
+      // esm.sh answering it) keeps it as written.
+      transform: (code: string, id: string) =>
+        id.endsWith('/packages/core/src/plot-chart.ts')
+          ? {
+              code: code.replaceAll(`'${PLOT_FROM_ESM_SH}'`, JSON.stringify(installedPlot)),
+              map: null,
+            }
           : null,
     },
   ],

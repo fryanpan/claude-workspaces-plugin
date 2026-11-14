@@ -99,6 +99,8 @@ describe('the library chart', () => {
     expect(bars(el)).toBe(3);
     expect(onA.set('title', 'Ferry trips, live')).toEqual({ ok: true });
     expect(title(el)).toBe('Ferry trips, live');
+    expect(onA.set('title', '')).toEqual({ ok: true });
+    expect(title(el)).toBe('');
   });
 
   it('stops redrawing once its cleanup runs', () => {

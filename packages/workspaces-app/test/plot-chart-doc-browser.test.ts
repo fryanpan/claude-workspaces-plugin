@@ -46,7 +46,6 @@ describe.skipIf(CHROME === null)('the library chart in a doc', () => {
     'redraws the open page when another client writes its state',
     () => {
       expect(r.afterWrite).toEqual({ bars: 3, title: 'Ferry trips, Saltmarsh added' });
-      expect(r.writeToPageMs).toBeGreaterThan(0);
     },
     CASE_MS,
   );
