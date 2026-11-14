@@ -7,6 +7,10 @@
  * than the file class, so a later store can replace this one without touching
  * them.
  *
+ * The interface and its paging live in the collab core
+ * (`@claude-workspaces/core/collab`), beside the core's in-memory store;
+ * this file is the Workspaces backend, and its on-disk format is unchanged.
+ *
  * Who may read or write a pair is decided by the routes
  * (`routes/private-messages.ts`), never here. This module only keeps a pair's
  * file inside its folder: each id is percent-encoded, `.` and `~` included, so
@@ -14,41 +18,22 @@
  */
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  type NewPrivateMessage,
+  type PrivateMessage,
+  type PrivateMessagePage,
+  type PrivateMessageStore,
+  pageOf,
+} from '@claude-workspaces/core/collab';
 import { cryptoId } from './task-fields.ts';
 
-export interface PrivateMessage {
-  id: string;
-  personId: string;
-  agentId: string;
-  /** Which side wrote it. */
-  from: 'person' | 'agent';
-  author: { id: string; name: string };
-  text: string;
-  ts: number;
-}
+export type {
+  NewPrivateMessage,
+  PrivateMessage,
+  PrivateMessagePage,
+  PrivateMessageStore,
+} from '@claude-workspaces/core/collab';
 
-export type NewPrivateMessage = Omit<PrivateMessage, 'id' | 'ts'>;
-
-export interface PrivateMessagePage {
-  /** Oldest first. */
-  messages: PrivateMessage[];
-  /** Whether older messages exist before the first one returned. */
-  more: boolean;
-}
-
-export interface PrivateMessageStore {
-  append(message: NewPrivateMessage): PrivateMessage;
-  /** The newest `limit` messages of a pair (default 50, at most 200), or the
-   *  newest before the message `before` names. */
-  page(
-    personId: string,
-    agentId: string,
-    opts?: { limit?: number; before?: string },
-  ): PrivateMessagePage;
-}
-
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
 const MAX_ID = 200;
 
 /** An id as one safe file-name part: no `/`, no `.`, no `~`. */
@@ -95,15 +80,7 @@ export class FilePrivateMessageStore implements PrivateMessageStore {
     agentId: string,
     opts: { limit?: number; before?: string } = {},
   ): PrivateMessagePage {
-    const all = this.read(this.pathOf(personId, agentId));
-    const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? DEFAULT_LIMIT)), MAX_LIMIT);
-    let end = all.length;
-    if (opts.before !== undefined) {
-      const at = all.findIndex((m) => m.id === opts.before);
-      end = at === -1 ? 0 : at;
-    }
-    const start = Math.max(0, end - limit);
-    return { messages: all.slice(start, end), more: start > 0 };
+    return pageOf(this.read(this.pathOf(personId, agentId)), opts);
   }
 
   private pathOf(personId: string, agentId: string): string {
