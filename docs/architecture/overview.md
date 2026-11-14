@@ -2667,6 +2667,9 @@ esm.sh at an exact version, which a doc build accepts; `esm-sh-plot.d.ts`
 types that address, and vitest and a site's bundler map it to the installed
 copy. `component-snapshot.ts` is the host wrapper for a page that is not a
 doc: a state hook over a JSON snapshot, whose writes stay on the page.
+`component-state-rules.ts` holds what both hooks refuse (paths, JSON-only
+values, `__proto__`, the depth, size and rate limits), taken out of
+`mdx-component-state.ts` so a site and a doc refuse the same writes.
 `templates/astro-chart` is the Astro page that proves the chart runs there
 unchanged.
 

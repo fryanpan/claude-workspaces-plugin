@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mountFromSnapshot, snapshotState } from './component-snapshot.ts';
+import { STATE_LIMITS } from './component-state-rules.ts';
 import type { MountFn, StateHook } from './mdx-component-runtime.ts';
 
 /**
@@ -58,6 +59,27 @@ describe('a state hook over a JSON snapshot', () => {
     expect(hook.push('pins', () => 1).ok).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(hook.get()).toEqual(SNAPSHOT);
+  });
+
+  it("refuses past the live hook's depth, size and rate limits, as a doc would", () => {
+    let t = 1_000;
+    const hook = snapshotState({}, { id: 'ferry', now: () => t });
+    const deep = hook.set('a.b.c.d.e.f.g.h.i', 1);
+    expect(deep).toEqual({
+      ok: false,
+      error: `Component "ferry" state would be nested 9 levels deep, over the limit of ${STATE_LIMITS.depth}.`,
+    });
+    const big = hook.set('notes', 'x'.repeat(STATE_LIMITS.instanceBytes));
+    expect(big.ok).toBe(false);
+    expect(big.ok ? '' : big.error).toContain('over the 256 KB limit');
+    for (let i = 0; i < STATE_LIMITS.writesPerSecond; i++) {
+      expect(hook.set('n', i)).toEqual({ ok: true });
+    }
+    const fast = hook.set('n', 'one too many');
+    expect(fast.ok).toBe(false);
+    expect(hook.get('n')).toBe(STATE_LIMITS.writesPerSecond - 1);
+    t += 1_000;
+    expect(hook.set('n', 'a second later')).toEqual({ ok: true });
   });
 
   it('stops calling a listener once it unsubscribes', () => {
