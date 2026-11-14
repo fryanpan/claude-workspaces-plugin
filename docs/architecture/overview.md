@@ -117,6 +117,24 @@ profile (`scripts/lead-sandbox-lib.ts`) is built from its lists, and the
 guard refuses exactly those parts and the lead's own scratch folders, while
 the owner's part of `~/.claude` still reads through the guard's checked open.
 
+**The collaboration core is a folder another app can take.**
+`core/src/collab/` (a new top-level core directory, exported as
+`@claude-workspaces/core/collab`) holds rooms that sync a Yjs doc between
+pages over the app's storage (`room-host.ts`, speaking the same
+`[0, syncMessage]` frames as `yjs-protocol.ts`), and a private-message store
+kept apart from every room (`private-messages.ts`, one log per pair). It
+imports nothing but `yjs`, `y-protocols` and `lib0`
+(`core/test/collab/collab-imports.test.ts`). Two rules hold for every app: no
+room opens without a role function, and an action whose body names a room,
+board or doc is refused, because the room comes from the connection. A view
+or comment connection gets the doc and its edits are dropped unread. The
+server's `DocStateStore` fits its storage interface as it is, and
+`server/src/private-messages.ts` is the file-backed store behind its
+private-message interface. Workspaces does not run its rooms on it yet; that
+is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
+runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
+that imports only the core.
+
 **Two callers wanting the same thing share one read.** The board shell mounts
 `<meeting-banner>` in each pane, so the calendar read is
 `workspaces-app/src/calendar-events-source.ts` rather than the element: it

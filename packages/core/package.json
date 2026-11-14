@@ -13,6 +13,7 @@
     "./anchor/element": "./src/anchor/element.ts",
     "./anchor/context": "./src/anchor/context.ts",
     "./prose": "./src/prose.ts",
+    "./collab": "./src/collab/index.ts",
     "./prose-math": "./src/prose-math.ts",
     "./doc-metadata": "./src/doc-metadata.ts",
     "./spoken-reply": "./src/spoken-reply.ts",
