@@ -9,7 +9,6 @@
     "astro": "7.4.12"
   },
   "scripts": {
-    "build": "astro build",
-    "test": "CW_BROWSER_TESTS=1 bunx vitest run --project node templates/astro-chart"
+    "build": "astro build"
   }
 }
