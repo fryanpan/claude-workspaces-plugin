@@ -346,6 +346,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/review-items/viewed` | POST | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/review/:id` | GET | `routes/board-links.ts` | trusted-local |  |
 | `/workspaces/:ws/reviews/:id` | GET | `routes/board-links.ts` | trusted-local |  |
+| `/workspaces/:ws/roles-mode` | POST | `routes/workspace-members.ts` | trusted-local |  |
 | `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | owner-in-handler | the guard admits both verbs; the GET is a member’s and `workspace-settings.ts` refuses a Regular User’s PUT itself — every field it writes is board-wide |
 | `/workspaces/:ws/tasks` | GET, POST | `routes/tasks-list-create.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId` | GET | `routes/task-page.ts` | trusted-local |  |

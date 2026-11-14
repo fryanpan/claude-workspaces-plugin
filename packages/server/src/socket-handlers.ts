@@ -43,6 +43,7 @@ import type { SocketEditor } from './edit-sessions.ts';
 import type { MeetingRelay } from './meeting-protocol.ts';
 import type { PresenceStamp } from './presence-identity.ts';
 import type { RecallMeetingRelay } from './recall-meeting.ts';
+import type { SocketAccess } from './share/board-access.ts';
 import type { SpokenReplyRelay } from './spoken-reply/relay.ts';
 import type { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { onClose, onMessage, onOpen } from './yjs-protocol.ts';
@@ -99,6 +100,8 @@ export type UpgradeData = {
   presenceOnly?: boolean;
   widgetDoorGrant?: { token: string; origin: string };
   editor?: SocketEditor;
+  /** The person's access on the board (`share/board-access.ts`). */
+  access?: SocketAccess;
   /** Who peers see this socket's presence as (`presence-identity.ts`). */
   presenceUser?: PresenceStamp;
   /** A voice socket's proven speaker, and its mark when a mock relayed it —

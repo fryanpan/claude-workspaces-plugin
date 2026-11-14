@@ -256,6 +256,7 @@ export function createRequestChain(
         visitor,
         visitorShareId,
         visitorMemberKey,
+        accessEmail: gate.accessEmail,
         browserProvedNobody,
         provenAuthor,
         ownerProven,

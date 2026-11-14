@@ -1125,6 +1125,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -2130,7 +2131,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
       roleOf: (boardId, personId) => {
         const person = identities.get(personId);
-        return person ? personRoleOn(boardId, person) : null;
+        if (!person) return null;
+        // A grant is edit-level at most, so a person whose access is comment
+        // or view holds nothing grantable: the mint refuses and the sweep
+        // hangs up a grant minted before the person was narrowed.
+        const access = person.email ? shareLinks.accessRoleOf(boardId, person.email) : null;
+        if (access === 'comment' || access === 'view') return null;
+        return personRoleOn(boardId, person);
       },
       personActive: (personId) => identities.get(personId)?.status === 'active',
     },
@@ -2425,6 +2432,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     canonicalDocId,
     fileUnderBoardWorkspace,
+    boardAccessOf,
+    rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,

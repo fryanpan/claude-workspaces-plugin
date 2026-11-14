@@ -16,6 +16,7 @@ import {
   stampAwarenessUpdate,
 } from './presence-identity.ts';
 import { captureServerError } from './sentry.ts';
+import { refuseSocketWrite } from './socket-write-gate.ts';
 
 /**
  * Minimal y-websocket protocol implementation for Bun's native WebSocket.
@@ -24,6 +25,7 @@ import { captureServerError } from './sentry.ts';
  *   1 = awareness (see y-protocols/awareness)
  *   2 = reset (server → client; this file, below)
  *   3 = probe (either way; `core/src/ws-probe.ts`)
+ *   4 = access (server → client; this file, below)
  */
 
 export const MSG_SYNC = 0;
@@ -44,6 +46,13 @@ export const MSG_AWARENESS = 1;
  * the deploy that shipped this.
  */
 export const MSG_RESET = 2;
+
+/**
+ * "This is your role here." Sent once at connect to a socket stamped with
+ * access (`share/board-access.ts`): a JSON body `{ role, mode, readOnly }`.
+ * A client that does not know the kind ignores it (`ws-client.ts`).
+ */
+export const MSG_ACCESS = 4;
 
 /**
  * Per-connection state attached to the WebSocket. We track the set of
@@ -247,6 +256,21 @@ export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
     ws.sendBinary(encoding.toUint8Array(enc), true);
   }
 
+  // The person's role on this board, before anything else they could act on.
+  if (ws.data.access) {
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, MSG_ACCESS);
+    encoding.writeVarString(
+      enc,
+      JSON.stringify({
+        role: ws.data.access.role,
+        mode: ws.data.access.mode(),
+        readOnly: ws.data.readOnly === true,
+      }),
+    );
+    ws.sendBinary(encoding.toUint8Array(enc), true);
+  }
+
   // send current awareness state
   const states = doc.awareness.getStates();
   if (states.size > 0) {
@@ -355,6 +379,10 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
             syncProtocol.readSyncStep1(dec, enc, doc.ydoc);
           }
         } else {
+          // The role and threads gate (`socket-write-gate.ts`): a comment or
+          // view socket's edit, or any socket's write to `threads`, is dropped
+          // under enforce and logged under report-only.
+          if (refuseSocketWrite(ws, doc.docId, doc.ydoc, ws.data.access, data)) return;
           syncProtocol.readSyncMessage(dec, enc, doc.ydoc, ws);
         }
         if (encoding.length(enc) > 1) {

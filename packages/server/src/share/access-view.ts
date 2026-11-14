@@ -8,6 +8,7 @@
  * row its audience no longer admits.
  */
 import { type AccessProposalRow } from './access-proposals.ts';
+import { type AccessRole, accessRoleOf } from './board-access.ts';
 import { type AudienceEntry, admittingEntry } from './board-audience.ts';
 import type { BoardRole } from './board-role.ts';
 import type { ShareLinks } from './share-links.ts';
@@ -15,6 +16,8 @@ import type { ShareLinks } from './share-links.ts';
 export interface AccessPerson {
   email: string;
   role: BoardRole;
+  /** The four-word role (`board-access.ts`): owner, edit, comment or view. */
+  accessRole: AccessRole;
   /** When they first signed in through a link. */
   addedAt: number;
   /** The audience entry that admits them: their address, or an `@domain`. */
@@ -44,6 +47,7 @@ export function accessPeople(shareLinks: ShareLinks, workspaceId: string): Acces
     return {
       email: m.email,
       role: m.role ?? 'member',
+      accessRole: accessRoleOf(m.role ?? 'member', m.access),
       addedAt: m.addedAt,
       ...(entry ? { entry } : {}),
       ...(link ? { link } : {}),
