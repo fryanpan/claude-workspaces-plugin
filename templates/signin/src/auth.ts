@@ -82,6 +82,9 @@ export function createAuth(env: Env, deps: AuthDeps) {
             ...(deps.googleEndpoints ?? GOOGLE_ENDPOINTS),
             scopes: ['openid', 'email', 'profile'],
             pkce: true,
+            // Google's stable account id is the userinfo `sub`. Never the
+            // email: an address can change hands, a subject cannot.
+            accountSubject: ({ profile }) => String(profile.sub ?? ''),
           },
         ],
       }),

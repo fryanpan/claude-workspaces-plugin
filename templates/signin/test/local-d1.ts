@@ -6,6 +6,9 @@ import { getPlatformProxy } from 'wrangler';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+// Tests make no call to Cloudflare, including wrangler's usage metrics.
+process.env.WRANGLER_SEND_METRICS = 'false';
+
 export interface LocalDatabase {
   binding: D1Database;
   dispose: () => Promise<void>;

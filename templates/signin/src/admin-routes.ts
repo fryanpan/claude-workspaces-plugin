@@ -1,3 +1,4 @@
+import { APIError } from 'better-auth/api';
 import type { Context, Hono } from 'hono';
 import type { AppEnv } from './app.ts';
 import { REGISTER_USERS } from './auth.ts';
@@ -33,8 +34,15 @@ export function mountAdminRoutes(app: Hono<AppEnv>): void {
     if (!input) return c.json({ code: 'INVALID_BODY' }, 400);
     // Called without request headers, Better Auth trusts the caller; the
     // checks above are the gate. No role is ever passed: plain users only.
-    const { user } = await c.var.auth.api.createUser({ body: input });
-    return c.json({ user: { id: user.id, email: user.email, name: user.name } }, 201);
+    try {
+      const { user } = await c.var.auth.api.createUser({ body: input });
+      return c.json({ user: { id: user.id, email: user.email, name: user.name } }, 201);
+    } catch (error) {
+      // e.g. the address is taken: answer Better Auth's own status and code.
+      if (error instanceof APIError)
+        return Response.json(error.body ?? {}, { status: error.statusCode });
+      throw error;
+    }
   });
 }
 
@@ -53,7 +61,12 @@ async function agentOfAdmin(c: Ctx): Promise<{ id: string } | null> {
     body: { key, permissions: REGISTER_USERS },
   });
   if (!verdict.valid || !verdict.key) return null;
-  const owner = await c.var.auth.api.getUser({ query: { id: verdict.key.referenceId } });
+  // Read the owner's role now, not when the key was minted.
+  const { internalAdapter } = await c.var.auth.$context;
+  const owner = (await internalAdapter.findUserById(verdict.key.referenceId)) as {
+    id: string;
+    role?: string | null;
+  } | null;
   return owner?.role === 'admin' ? { id: owner.id } : null;
 }
 
