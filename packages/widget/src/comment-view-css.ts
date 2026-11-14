@@ -17,6 +17,9 @@ import { STATUS_COLORS } from '@claude-workspaces/core/ui-shared';
 /** The one comment colour, which the pins take from the same constant. */
 export const MARK = STATUS_COLORS.open;
 
+/** An agent's done mark: teal, so it never reads as resolved green. */
+export const DONE = '#0a7b83';
+
 export const VIEW_CSS = [
   '.panel{top:0;right:0;bottom:0;width:420px;max-height:none;border-radius:0;border-width:0 0 0 1px;margin-right:0;box-shadow:-8px 0 28px rgba(0,0,0,.10)}',
   '@media (max-width:1100px){.panel{top:auto;left:0;width:auto;height:82%;border-width:1px 0 0;border-radius:12px 12px 0 0;box-shadow:0 -8px 28px rgba(0,0,0,.16)}.panel.cw-detail{height:50%}}',
@@ -59,6 +62,21 @@ export const VIEW_CSS = [
   '.cw-back{display:none}',
   '.panel.cw-detail .cw-back{display:flex;align-items:center;border-bottom:1px solid #eaeef2;margin:0 -8px 4px;padding:0 4px}',
   '.cw-back button{min-height:44px;min-width:44px;padding:0 12px;border:0;background:none;color:#2e7dd7;font-size:14px;font-weight:600;cursor:pointer}',
+  // An agent's mark (`comment-extras.ts`): one steady word on the card, in
+  // its own colour; done is teal, never the green of a resolved comment.
+  '.thread .meta .time{margin-left:auto}',
+  '.cw-state{flex:none;font-size:11px;font-weight:600;white-space:nowrap;margin-left:8px}',
+  '.cw-state[data-state=open]{display:none}',
+  `.cw-state[data-state=working]{color:${MARK}}`,
+  `.cw-state[data-state=done]{color:${DONE}}`,
+  // The opened card keeps room for a two-line note, so Reply and Resolve
+  // stay where they were as the mark comes and goes, and both keep one width
+  // whichever of them leads.
+  '.cw-progress{box-sizing:border-box;min-height:46px;margin:6px 0 2px;padding:6px 8px;border-radius:6px;font-size:12px;line-height:17px;color:#57606a}',
+  '.cw-progress[data-state=working]{background:#f6f8fa}',
+  `.cw-progress[data-state=done]{background:#e6f4f5;color:${DONE}}`,
+  '.thread-popover .actions .submit,.thread-popover .actions .resolve{min-width:84px;justify-content:center}',
+  '.thread-popover .actions .submit:not(.primary){background:#fff;color:#1b1f23;border:1px solid #d1d5da;border-radius:6px;padding:6px 12px;font-size:12px;min-height:44px;display:inline-flex;align-items:center;cursor:pointer}',
   // A linked review item: a steady marked row in the thread (calm rule).
   '.cw-linked{margin:8px 0 4px;border:1px solid #c8dcf3;border-left:3px solid #2e7dd7;background:#f4f8fd;border-radius:6px;padding:8px 10px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center}',
   '.cw-linked .from{grid-column:1/-1;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#2e7dd7}',
@@ -71,6 +89,10 @@ export const PAGE_CSS = [
   // The steady ring on the pin being shown, until the next tap on the page.
   '.cfw-pin[data-hl]:after{content:"";position:absolute;left:5px;top:2px;width:34px;height:34px;box-sizing:border-box;border-radius:50%;border:3px solid #2e7dd7}',
   '.cfw-pin[data-hl]{opacity:1}',
+  // An agent's mark on the pin: half filled while it works, filled teal when
+  // done. White-and-green outline stays the resolved pin's.
+  `.cfw-pin[data-state=working]:before{background:linear-gradient(45deg,#fff 50%,${MARK} 50%)}`,
+  `.cfw-pin[data-state=done]:before{background:${DONE}}`,
   `.cw-link-badge{position:fixed;width:20px;height:20px;border-radius:50%;background:${MARK};color:#fff;border:2px solid #fff;box-sizing:border-box;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;z-index:2147483646}`,
   // Wide, a mock in the board narrows beside the open view rather than
   // running under it.

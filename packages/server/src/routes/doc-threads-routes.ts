@@ -783,6 +783,23 @@ export async function handleDocThreadRoutes(
       const t = docStore.resolve(docId, threadId, author, { generate: !visitor, ...viaOpt });
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
+    if (threadRest === '/progress' && req.method === 'POST') {
+      // An agent's mark on a person's comment (`thread-progress.ts`). Not a
+      // share visitor's to set: the mark speaks for whoever is doing the work.
+      if (visitor) return j(403, { error: 'not available to share visitors' });
+      const body = await safeJson(req);
+      const state = body?.state;
+      if (state !== 'working' && state !== 'done' && state !== 'open') {
+        return j(400, { error: "state must be 'working', 'done' or 'open'" });
+      }
+      const author = authorFor(body?.author);
+      if (!author) return j(400, { error: 'author required' });
+      if (isCategoryAuthor(author)) return refuseCategoryAuthor();
+      const t = docStore.setProgress(docId, threadId, state, author);
+      if (t === 'not-found') return j(404, { error: 'thread not found' });
+      if (t === 'resolved') return j(409, { error: 'thread is resolved; reopen it first' });
+      return j(200, { thread: t });
+    }
     if (threadRest === '/reopen' && req.method === 'POST') {
       const body = await safeJson(req);
       const author = authorFor(body?.author);

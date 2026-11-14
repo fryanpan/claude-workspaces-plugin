@@ -919,6 +919,20 @@ the frame answers with `{cw:'comments-state'}` after each render. All of it
 ships in `mockup-live.js` and `mic.js`, outside the budgeted bundle. No new
 route and no new fetch.
 
+**An agent marks a person's comment in progress or done, and the comment
+stays until the person resolves it.** `set_thread_progress` posts to
+`…/threads/:id/progress` (closed to share visitors), which writes a
+`progress` field — state, who, when — on the thread's Yjs map, so an open
+page sees it as the doc syncs. No thread frame is fired: an agent has
+nothing to act on in another agent's mark. Core's `thread-progress.ts` reads
+and writes the field; `listThreadsWithLinks` adds it to every server thread
+read, and `readThread` leaves it out for the budget reason above. Any status
+change clears it, and so does a person's reply on a done thread. In the
+widget, `comment-extras.ts` reads it off the doc with the linked items, puts
+the state word in each card, the "working on this" line in the opened card,
+and the state on each pin. It ships in `mic.js` and `mockup-live.js`. The
+board's own doc and task pages do not draw the mark yet.
+
 **A comment's markdown is drawn rendered in its popover.**
 `widget-comment-markdown.ts` rewrites each popover comment the budgeted bundle
 drew as escaped words: links (`http:`, `https:` and `mailto:` only), bold,

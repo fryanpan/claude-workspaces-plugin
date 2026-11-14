@@ -293,6 +293,18 @@ export async function handleDocsTool(
       );
       return ok(res);
     }
+    case 'set_thread_progress': {
+      const { docId, threadId, state } = a as { docId: string; threadId: string; state: unknown };
+      if (state !== 'working' && state !== 'done' && state !== 'open') {
+        return err("state must be 'working', 'done' or 'open'");
+      }
+      const res = await http(
+        'POST',
+        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/progress`,
+        { state, author: AUTHOR },
+      );
+      return ok(res);
+    }
     case 'summarize_thread': {
       const { docId, threadId, force } = a as {
         docId: string;

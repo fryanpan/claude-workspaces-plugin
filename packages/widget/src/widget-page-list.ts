@@ -1,8 +1,7 @@
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
-import { readLinkedItem } from '@claude-workspaces/core/linked-item';
-import type { LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
+import type { Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc } from '@claude-workspaces/core/ui-shared';
-import type * as Y from 'yjs';
+import { markPins, withExtras } from './comment-extras.ts';
 import { seenStore } from './comment-seen-store.ts';
 import { decorateLinked, foldedHtml, openHeadHtml } from './comment-view-card.ts';
 import { PAGE_CSS, VIEW_CSS } from './comment-view-css.ts';
@@ -60,30 +59,6 @@ import type { FeedbackWidgetEl } from './widget.ts';
 /** The bridge's line to the board's bar around a mock (`mock-bridge.ts`). */
 interface HostBar {
   tell(state: { open: boolean; fresh: boolean }): void;
-}
-
-/**
- * `t` with each comment's linked review item, read off the doc here rather
- * than by the budgeted bundle's thread reader, which has no bytes left for
- * it. Read through core's checker, so a malformed one is no item at all.
- */
-function withLinked(el: FeedbackWidgetEl, t: Thread): Thread {
-  const raw = el.client?.ydoc.getMap('threads').get(t.id) as Y.Map<unknown> | undefined;
-  const cs = raw?.get?.('comments') as Y.Array<Y.Map<unknown>> | undefined;
-  if (!cs?.toArray) return t;
-  const items = new Map<string, LinkedReviewItem>();
-  for (const c of cs.toArray()) {
-    const item = readLinkedItem(c.get?.('linkedItem'));
-    if (item) items.set(String(c.get('id')), item);
-  }
-  if (!items.size) return t;
-  return {
-    ...t,
-    comments: t.comments.map((c) => {
-      const linkedItem = items.get(c.id);
-      return linkedItem ? { ...c, linkedItem } : c;
-    }),
-  };
 }
 
 const narrow = (): boolean => matchMedia('(max-width: 1100px)').matches;
@@ -301,7 +276,13 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     const detail = narrow() && !!active && isOpen();
     panel?.classList.toggle('cw-detail', detail);
     const sig = JSON.stringify([
-      lastRows.map((r) => [r.thread.id, r.status, r.thread.comments.length, latest(r.thread)]),
+      lastRows.map((r) => [
+        r.thread.id,
+        r.status,
+        r.thread.comments.length,
+        latest(r.thread),
+        r.thread.progress?.state,
+      ]),
       rows.map((r) => r.isNew),
       here,
       el.activeThread,
@@ -472,7 +453,8 @@ export function mountPageList(el: FeedbackWidgetEl): void {
   });
 
   el.listHook = (rows, open) => {
-    lastRows = rows.map((r) => ({ ...r, thread: withLinked(el, r.thread) }));
+    lastRows = rows.map((r) => ({ ...r, thread: withExtras(el, r.thread) }));
+    markPins(el, lastRows);
     threads = new Map(lastRows.map((r) => [r.thread.id, r.thread]));
     openPop = open;
     take();

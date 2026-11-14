@@ -29,6 +29,7 @@ import {
   setCommentDelivered,
   setCommentReview,
   setCommentText,
+  setThreadProgress,
   storedJudgement,
   withRevision,
   withdrawReview,
@@ -221,6 +222,14 @@ export class DocThreads {
     // ("done, removed it in <sha>") after a human resolves, and resurrecting
     // a thread the human just closed is its own bug. Same actor split the
     // activity log uses.
+    // A person's reply on a thread an agent marked done sends the work back,
+    // so the mark clears (`thread-progress.ts`). An agent's reply does not.
+    if (
+      classifyActor(author) === 'person' &&
+      this.getThread(docId, threadId)?.progress?.state === 'done'
+    ) {
+      setThreadProgress(doc.ydoc, threadId, 'open', author);
+    }
     const replied = this.getThread(docId, threadId);
     const reopened =
       replied?.status === 'resolved' && classifyActor(author) === 'person'
@@ -913,6 +922,27 @@ export class DocThreads {
       });
     }
     return t;
+  }
+
+  /**
+   * An agent's mark on an open thread: working on it, done, or `open` to
+   * clear it (`thread-progress.ts`). The thread stays open: the person it
+   * came from resolves it. No frame is fired — the mark reaches every open
+   * page through the doc's Yjs sync, and an agent has nothing to act on in
+   * another agent's mark.
+   */
+  setProgress(
+    docId: string,
+    threadId: string,
+    state: 'working' | 'done' | 'open',
+    author: User,
+  ): Thread | 'not-found' | 'resolved' {
+    const doc = this.p.doc(docId);
+    const t = doc ? this.getThread(docId, threadId) : null;
+    if (!doc || !t) return 'not-found';
+    if (t.status === 'resolved') return 'resolved';
+    setThreadProgress(doc.ydoc, threadId, state, author);
+    return this.getThread(docId, threadId) ?? 'not-found';
   }
 
   reanchor(docId: string, threadId: string, anchor: Anchor): Thread | null {
