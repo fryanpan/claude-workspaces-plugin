@@ -4,12 +4,12 @@ A test area for one question: can [Web Awesome](https://webawesome.com/docs/)
 3.14.0 be the kit every site shares, with one theme file per site? Nothing
 here is part of the product. No live surface imports it.
 
-It is its own package (not a root workspace), with its own `package.json` and
-`bun.lock`, so the root install does not pull the kit in.
+It is a root workspace (`templates/*`), so the root `bun install` installs its
+pinned dependencies and the root `bun.lock` records them.
 
 ```bash
+bun install        # at the repo root
 cd templates/design-kit
-bun install
 bun run test       # 12 cases; 8 in a headless Chrome (sets CW_BROWSER_TESTS=1)
 bun run measure    # gzip-9 sizes and time to interactive
 bun run serve      # http://127.0.0.1:<port>/t/workspaces/review-list.html
