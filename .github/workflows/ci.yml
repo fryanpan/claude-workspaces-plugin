@@ -223,7 +223,7 @@ jobs:
           CW_BROWSER_TESTS: '1'
         run: bun run check:meeting-smoke
 
-  # The client + unit suite, in twelve shards.
+  # The client + unit suite, in sixteen shards of three workers each.
   #
   # It is CPU-bound — 134 seconds of CPU inside 42 of wall clock locally, with
   # vitest's fork pool already saturating the runner — so more processes on one
@@ -255,8 +255,18 @@ jobs:
   # Replayed against that run's per-file times, ten balanced shards put the
   # slowest at ~73s. On CI they ran 63-94s of vitest (PR 1625, run
   # 43608751757): four browser files at once on one runner each run slower
-  # than the replay assumed. Twelve brings the average shard down to the
+  # than the replay assumed. Twelve brought the average shard down to the
   # floor the slowest single files set, about 65-77s.
+  #
+  # THREE WORKERS, NOT FOUR. Longest-first starts each shard's four heaviest
+  # files together, and those are browser drivers that launch one or more
+  # Chromes each. That is four of them on a 4-vCPU runner from the first
+  # second. Main's order started four browser files at once too, but they
+  # were a random mix of heavy and light. Browser timing windows then lost:
+  # 3 of this PR's first 4 runs failed a browser file, against 14 of 95 runs
+  # on other branches in the same 24h. So each shard runs three files at a
+  # time, which leaves a core free, and sixteen shards keep the per-shard
+  # time where twelve had it.
   client:
     runs-on: ubuntu-latest
     permissions:
@@ -267,7 +277,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add a shard here and the coverage job's expected count below too.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -284,7 +294,7 @@ jobs:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
           CW_BROWSER_TESTS: '1'
         run: |
-          bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} \
+          bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=3 \
             --coverage.enabled --coverage.reporter=lcovonly \
             --coverage.reportsDirectory=.coverage/vitest
       - uses: actions/upload-artifact@v4
@@ -377,8 +387,8 @@ jobs:
           cat .lcov/lcov-server-*/lcov.info > .coverage/server/lcov.info
           client=$(ls -d .lcov/lcov-client-* | wc -l)
           server=$(ls -d .lcov/lcov-server-* | wc -l)
-          if [ "$client" -ne 12 ] || [ "$server" -ne 2 ]; then
-            echo "::error::merged $client client and $server server lcov file(s), expected 12 and 2 — the coverage number would be measured from part of the suite."
+          if [ "$client" -ne 16 ] || [ "$server" -ne 2 ]; then
+            echo "::error::merged $client client and $server server lcov file(s), expected 16 and 2 — the coverage number would be measured from part of the suite."
             exit 1
           fi
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
