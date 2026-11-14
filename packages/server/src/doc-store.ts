@@ -1,13 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
 import {
   type Anchor,
   type AnchorRefresh,
@@ -48,6 +39,8 @@ import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import { DocImageVersions } from './doc-image-versions.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type ResidencyEntry, pastWindow } from './doc-residency.ts';
+import { DiskDocStateStore } from './doc-state/disk.ts';
+import type { DocStateStore } from './doc-state/store.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
 import { DocSuggestOps, type DocSuggestPersistence } from './doc-suggest-ops.ts';
 import { type DocThreadPersistence, DocThreads } from './doc-threads.ts';
@@ -137,7 +130,6 @@ import {
 import { type BufferCounters, MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
-import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -402,6 +394,12 @@ export interface WorkspaceTree {
 
 export interface DocStoreConfig {
   dataDir: string;
+  /**
+   * Where each doc's shared state (the Yjs update) is kept
+   * (`doc-state/store.ts`). Defaults to `.ydoc` files in `dataDir`. Sidecars,
+   * index rows and the `.md` write-back stay in `dataDir` either way.
+   */
+  docState?: DocStateStore;
   /** How a component build reaches esm.sh; see `ServerOptions.componentFetch`. */
   componentFetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   /** Called on new thread / reply / status change to dispatch webhooks + SSE. */
@@ -512,7 +510,7 @@ export class DocStore {
       dataDir: () => this.cfg.dataDir,
       doc: (docId) => this.resolveDoc(docId),
       residentDoc: (docId) => this.docs.get(docId),
-      ydocPath: (docId) => this.pathFor(docId),
+      stateSavedAt: (docId) => this.state.savedAt(docId),
       schedulePersist: (doc) => this.saveToDisk(doc),
       persistNow: (doc) => this.persistDocNow(doc),
       clearPendingFileWrite: (docId) => this.clearPendingFileWrite(docId),
@@ -602,7 +600,7 @@ export class DocStore {
   private catalogHost(): DocCatalogHost {
     return {
       dataDir: () => this.cfg.dataDir,
-      ydocPath: (docId) => this.pathFor(docId),
+      docState: () => this.state,
       residentDoc: (docId) => this.docs.get(docId),
       residentDocs: () => this.docs.values(),
       hasPendingSave: (docId) => this.saveTimers.has(docId),
@@ -746,7 +744,7 @@ export class DocStore {
       persistDocNow: (doc) => this.persistDocNow(doc),
       teardownDoc: (doc, closeReason) => this.teardownDoc(doc, closeReason),
       releaseAliases: (docId) => this.catalog.releaseAliases(docId),
-      pathFor: (docId) => this.pathFor(docId),
+      docState: () => this.state,
       forgetActivityMtime: (docId) => this.catalog.forgetActivity(docId),
       setIndexEntry: (docId, entry) => this.catalog.setIndex(docId, entry),
       deleteIndexEntry: (docId) => this.catalog.setIndex(docId, undefined),
@@ -1394,15 +1392,7 @@ export class DocStore {
     // that is no longer there.
     stageDocIndex(this.cfg.dataDir, docId);
     this.catalog.setIndex(docId, undefined);
-    const path = this.pathFor(docId);
-    if (!existsSync(path)) return true;
-    try {
-      renameSync(path, `${path}.deleting`);
-      return true;
-    } catch (err) {
-      console.error(`[doc-store] failed to stage ${docId} for deletion:`, err);
-      return false;
-    }
+    return this.state.stageDelete(docId);
   }
 
   /** Put a staged `.ydoc` back — the delete didn't commit. */
@@ -1411,24 +1401,14 @@ export class DocStore {
     unstageDocIndex(this.cfg.dataDir, docId);
     const restored = readDocIndex(this.cfg.dataDir, docId);
     if (restored) this.catalog.setIndex(docId, restored);
-    const staged = `${this.pathFor(docId)}.deleting`;
-    if (!existsSync(staged)) return;
-    try {
-      renameSync(staged, this.pathFor(docId));
-    } catch (err) {
-      console.error(`[doc-store] failed to restore staged ${docId}:`, err);
-    }
+    this.state.unstageDelete(docId);
   }
 
   /** Remove a staged `.ydoc` — the delete committed. A failure here leaves
    *  a file nothing loads, so it is litter, not an orphan doc. */
   dropStaged(docId: string): void {
     dropStagedDocIndex(this.cfg.dataDir, docId);
-    try {
-      rmSync(`${this.pathFor(docId)}.deleting`, { force: true });
-    } catch (err) {
-      console.error(`[doc-store] failed to remove staged ${docId}:`, err);
-    }
+    this.state.dropStaged(docId);
   }
 
   purgePersisted(docId: string): boolean {
@@ -1442,8 +1422,7 @@ export class DocStore {
     // back where every link already points.
     for (const key of this.repos.keysFor(docId)) this.repos.releaseKey(key);
     try {
-      const p = this.pathFor(docId);
-      if (existsSync(p)) rmSync(p);
+      const gone = this.state.remove(docId);
       deletePrivateMeta(this.cfg.dataDir, docId);
       deleteDocIndex(this.cfg.dataDir, docId);
       // A mockup's captured HTML is the reviewer's copy of somebody's page.
@@ -1457,7 +1436,7 @@ export class DocStore {
       // …and what was said about it by voice, which is ABOUT this doc and has
       // no reader once the doc is gone.
       deleteVoiceFeedback(this.cfg.dataDir, docId);
-      return !existsSync(p);
+      return gone;
     } catch (err) {
       console.error(`[doc-store] failed to remove persisted ${docId}:`, err);
       return false;
@@ -2298,7 +2277,7 @@ export class DocStore {
       return resident;
     }
     const target = this.catalog.aliasTarget(docId) ?? docId;
-    if (!existsSync(this.pathFor(target))) return undefined;
+    if (!this.state.has(target)) return undefined;
     this.hydrateDoc(target);
     return this.docs.get(target);
   }
@@ -2345,7 +2324,7 @@ export class DocStore {
     const resident = this.peek(docId);
     if (resident) return resident;
     const target = this.catalog.aliasTarget(docId) ?? docId;
-    if (!existsSync(this.pathFor(target))) return undefined;
+    if (!this.state.has(target)) return undefined;
     this.hydrateDoc(target, { bind: false });
     const doc = this.docs.get(target);
     if (doc) this.unboundReads.add(target);
@@ -2556,7 +2535,7 @@ export class DocStore {
   /** Whether a doc exists at all — resident, indexed, or a file on disk. */
   docExists(docId: string): boolean {
     const target = this.resolveDocId(docId);
-    return this.docs.has(target) || this.catalog.has(target) || existsSync(this.pathFor(target));
+    return this.docs.has(target) || this.catalog.has(target) || this.state.has(target);
   }
 
   /**
@@ -4407,9 +4386,16 @@ export class DocStore {
     return t;
   }
 
-  private pathFor(docId: string): string {
-    // keep docId simple; validate in API layer
-    return join(this.cfg.dataDir, `${docId}.ydoc`);
+  private stateStore: DocStateStore | undefined;
+
+  /**
+   * The backend holding each doc's Yjs state. Lazy, because the host objects
+   * built in field initialisers reach it before the constructor body runs.
+   * Doc ids are validated in the API layer before they get here.
+   */
+  private get state(): DocStateStore {
+    this.stateStore ??= this.cfg.docState ?? new DiskDocStateStore(this.cfg.dataDir);
+    return this.stateStore;
   }
 
   /**
@@ -4425,21 +4411,17 @@ export class DocStore {
    * is thrown away and redone, once per boot, forever.
    */
   private loadFromDisk(docId: string, ydoc: Y.Doc): boolean {
-    // The `.ydoc` in the server's own data dir, never a bound path — the
-    // synchronous read below is safe for the same reason every other data-dir
-    // read is: this process owns the directory, and no cloud-sync provider
-    // stands between it and the disk. Bound paths go through `slow-fs.ts`.
-    const path = this.pathFor(docId);
-    if (!existsSync(path)) return false;
+    // The state store, never a bound path (`doc-state/disk.ts` says why its
+    // synchronous read is safe). Bound paths go through `slow-fs.ts`.
     try {
-      const buf = readFileSync(path);
+      const original = this.state.read(docId);
+      if (!original) return false;
       // A BOARD doc sheds its history on the way in. It is a projection —
       // the task sidecar is the source of truth and `TaskProjection.init`
       // reasserts every row after load — so its past is cost with no reader,
       // and it is paid by every browser on every page load in one sync frame.
       // See board-doc-compaction.ts for why this is safe here and nowhere
       // else, and for the three guards that keep it that way.
-      const original = new Uint8Array(buf);
       const state = isWorkspaceProjectionDoc(docId) ? compactBoardState(original) : null;
       // The compacted state is what the next debounced save writes over the
       // `.ydoc`, so the bytes it replaces are kept first — written and fsynced
@@ -4447,13 +4429,13 @@ export class DocStore {
       // save can run. A backup that cannot be written is a reason to keep the
       // original bytes, not a reason to fail the load: the doc is fine either
       // way, it just stays big until someone looks at the log line.
-      const backup = state?.compacted ? writePreCompactBackup(path, original) : 'exists';
+      const backup = state?.compacted ? this.state.keepBeforeCompaction(docId, original) : 'exists';
       const useCompacted = state?.compacted === true && backup !== 'failed';
       Y.applyUpdate(ydoc, useCompacted && state ? state.update : original);
       if (useCompacted && state) {
         console.log(
           `[doc-store] compacted ${docId}: ${state.beforeBytes} → ${state.afterBytes} bytes` +
-            (backup === 'written' ? ` (kept ${preCompactPath(path)})` : ''),
+            (backup === 'written' ? ` (kept ${this.state.keptCopyLabel(docId)})` : ''),
         );
       } else if (state?.compacted && backup === 'failed') {
         console.error(
@@ -4483,13 +4465,13 @@ export class DocStore {
 
   private persistDocNow(doc: LiveDoc): void {
     try {
-      const update = Y.encodeStateAsUpdate(doc.ydoc);
-      const path = this.pathFor(doc.docId);
-      writeFileSync(path, update);
-      // We are the only writer of this file, so recording the mtime here is
-      // what lets `withActivity` stop stat-ing every doc on every list.
+      this.state.write(doc.docId, Y.encodeStateAsUpdate(doc.ydoc));
+      // We are the only writer of this state, so recording its save time here
+      // is what lets `withActivity` stop asking the store on every list.
       try {
-        this.catalog.noteActivityMtime(doc.docId, Math.round(statSync(path).mtimeMs));
+        const savedAt = this.state.savedAt(doc.docId);
+        if (savedAt === undefined) this.catalog.forgetActivity(doc.docId);
+        else this.catalog.noteActivityMtime(doc.docId, Math.round(savedAt));
       } catch {
         this.catalog.forgetActivity(doc.docId);
       }
