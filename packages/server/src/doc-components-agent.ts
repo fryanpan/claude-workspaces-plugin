@@ -333,11 +333,16 @@ export async function grantFolderFor(
     return fail(400, 'folder must be a path: relative to the doc, or absolute.');
   }
   const docDir = dirname(boundPath);
-  const real = realDir(isAbsolute(folder) ? folder : resolve(docDir, folder));
-  if (!real) return fail(400, `${folder} is not a folder.`);
-  if (!guards.allows(real) || guards.covers(real)) {
+  const named = isAbsolute(folder) ? folder : resolve(docDir, folder);
+  // The guards answer for both the doc and the folder as named before
+  // anything is touched, and again for the real path a link may lead to.
+  const walled = (p: string) => !guards.allows(p) || guards.covers(p);
+  if (walled(boundPath) || walled(named)) {
     return fail(403, "Components are not built from a walled lead's folder.");
   }
+  const real = realDir(named);
+  if (!real) return fail(400, `${folder} is not a folder.`);
+  if (walled(real)) return fail(403, "Components are not built from a walled lead's folder.");
   const workTree = await gitWorkTree(docDir);
   if (!workTree || !real.startsWith(workTree + sep)) {
     return fail(400, `${folder} is not inside the doc's git work tree.`);
@@ -356,11 +361,12 @@ export function confirmGrantFolder(
   folder: string,
   guards: Pick<BuildGuards, 'allows' | 'covers'>,
 ): { ok: true } | { ok: false; error: string } {
+  // Asked before the folder is touched; the real path is then the folder.
+  if (!guards.allows(folder) || guards.covers(folder)) {
+    return { ok: false, error: `${folder} is now inside a walled lead's folder.` };
+  }
   const real = realDir(folder);
   if (real === null) return { ok: false, error: `${folder} is no longer a folder.` };
   if (real !== folder) return { ok: false, error: `${folder} now leads somewhere else (${real}).` };
-  if (!guards.allows(real) || guards.covers(real)) {
-    return { ok: false, error: `${folder} is now inside a walled lead's folder.` };
-  }
   return { ok: true };
 }
