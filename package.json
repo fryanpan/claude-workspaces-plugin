@@ -2,7 +2,7 @@
   "name": "claude-workspaces-plugin",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["packages/*", "demos/*"],
+  "workspaces": ["packages/*", "demos/*", "templates/*"],
   "scripts": {
     "postinstall": "bash scripts/check-hooks.sh || true",
     "bootstrap": "bun run scripts/bootstrap.ts",
