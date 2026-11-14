@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BASEMAPS, DEFAULT_BASEMAP, basemapOf } from './map-basemaps.ts';
+import { BASEMAPS, DEFAULT_BASEMAP, basemapAllows, basemapOf } from './map-basemaps.ts';
 import {
   CATEGORY_COLORS,
   FEET_TO_METERS,
+  mapBasemapNames,
   mapDataPaths,
   mergeMapData,
   readMapSpec,
@@ -75,9 +76,9 @@ describe('a StreetMap tag read into a spec', () => {
     });
     expect(bad).toEqual({ ok: false, error: 'markers[1] needs a numeric lat and lng' });
     expect(readMapSpec({ points: [{ lat: 95, lng: 0 }] }).ok).toBe(false);
-    expect(readMapSpec({ basemap: 'google' })).toEqual({
+    expect(readMapSpec({ basemap: 'bing' })).toEqual({
       ok: false,
-      error: `basemap "google" is not one of: ${Object.keys(BASEMAPS).join(', ')}`,
+      error: `basemap "bing" is not one of: ${Object.keys(BASEMAPS).join(', ')}`,
     });
     expect(readMapSpec({})).toEqual({
       ok: false,
@@ -132,6 +133,21 @@ describe('the files a doc’s StreetMap tags name', () => {
       ]),
     ).toEqual([['data', '311.json'], ['saltmarsh.json'], ['later.json']]);
   });
+
+  it('lists each literal basemap once, so the server knows which keys a doc may have', () => {
+    expect(
+      mapBasemapNames([
+        '<StreetMap basemap="google" src="a.json" />',
+        '<StreetMap title="Riverbend" basemap=\'carto-light\' />',
+        '<StreetMap basemap="google" />',
+        '<StreetMap basemap={"osm"} />',
+        '<StreetMap title="basemap=\\"google\\"" />',
+        '<PlotChart basemap="osm" />',
+        '<StreetMap markers={[{ lat: 1, lng: 2, popup: "a > b" }]} basemap="osm" />',
+      ]),
+    ).toEqual(['google', 'carto-light', 'osm']);
+    expect(mapBasemapNames(['<StreetMap src="a.json" />'])).toEqual([]);
+  });
 });
 
 describe('the basemap seam', () => {
@@ -139,11 +155,37 @@ describe('the basemap seam', () => {
     const base = basemapOf(DEFAULT_BASEMAP);
     expect(base?.key).toBeUndefined();
     for (const b of Object.values(BASEMAPS)) {
-      expect(b.attribution.length).toBeGreaterThan(0);
       expect(b.origins.length).toBeGreaterThan(0);
-      const host = new URL(b.tiles.replace(/\{[a-z]\}/g, 'a')).origin;
-      expect(b.origins).toContain(host);
+      const first = b.script ?? b.tiles.replace(/\{[a-z]\}/g, 'a');
+      expect(basemapAllows(b, first)).toBe(true);
+      // A keyed provider names a keyless one to draw on without its key.
+      if (b.key) expect(basemapOf(b.fallback ?? '')?.key).toBeUndefined();
+      else expect(b.attribution.length).toBeGreaterThan(0);
     }
     expect(basemapOf('nope')).toBeUndefined();
+  });
+
+  it('keeps Google behind a server-held key, with OpenStreetMap as its fallback', () => {
+    const google = basemapOf('google');
+    expect(google?.key).toBe('CW_GOOGLE_MAPS_KEY');
+    expect(google?.fallback).toBe('osm');
+    expect(google?.script).toBe('https://maps.googleapis.com/maps/api/js');
+  });
+
+  it('matches a listed origin and its wildcard subdomains, and nothing else', () => {
+    const google = BASEMAPS.google;
+    const osm = BASEMAPS.osm;
+    if (!google || !osm) throw new Error('missing basemap');
+    expect(basemapAllows(google, 'https://maps.googleapis.com/maps/api/js?key=k')).toBe(true);
+    expect(basemapAllows(google, 'https://khms0.googleapis.com/kh?v=1')).toBe(true);
+    expect(basemapAllows(google, 'https://maps.gstatic.com/x.png')).toBe(true);
+    expect(basemapAllows(google, 'http://maps.googleapis.com/x')).toBe(false);
+    expect(basemapAllows(google, 'https://maps.googleapis.com:8443/x')).toBe(false);
+    expect(basemapAllows(google, 'https://googleapis.com.evil.test/x')).toBe(false);
+    expect(basemapAllows(google, 'https://evilgoogleapis.com/x')).toBe(false);
+    expect(basemapAllows(google, 'https://tile.openstreetmap.org/1/1/1.png')).toBe(false);
+    expect(basemapAllows(osm, 'https://tile.openstreetmap.org/1/1/1.png')).toBe(true);
+    expect(basemapAllows(osm, 'https://a.tile.openstreetmap.org/1/1/1.png')).toBe(false);
+    expect(basemapAllows(osm, 'not a url')).toBe(false);
   });
 });

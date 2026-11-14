@@ -276,10 +276,12 @@ export function mapDataSegments(src: string): string[] | null {
   return segs;
 }
 
-/** The literal `src` of the tag whose attributes start at `from`, read by a
- *  scan that skips quoted strings and `{…}` values, so a `>` inside a popup
- *  does not end the tag early. */
-function srcOf(s: string, from: number): string | undefined {
+/** The literal string prop `name` of the tag whose attributes start at
+ *  `from`, written as a quoted string (`name="x"`; `name={"x"}` is an
+ *  expression and is not read), by a scan that skips quoted strings and
+ *  `{…}` values, so a `>` inside a popup does not end the tag early. */
+function literalPropOf(s: string, from: number, name: string): string | undefined {
+  const prop = new RegExp(`^\\s+${name}\\s*=\\s*(["'])([^"'\\n]*)\\1`);
   let depth = 0;
   for (let i = from; i < s.length; i++) {
     const ch = s[i];
@@ -291,11 +293,24 @@ function srcOf(s: string, from: number): string | undefined {
     else if (ch === '}') depth--;
     else if (depth === 0 && ch === '>') return undefined;
     else if (depth === 0 && /\s/.test(ch ?? '')) {
-      const m = /^\s+src\s*=\s*(["'])([^"'\n]*)\1/.exec(s.slice(i));
+      const m = prop.exec(s.slice(i));
       if (m) return m[2];
     }
   }
   return undefined;
+}
+
+/** The value of literal prop `name` on every `<StreetMap>` tag in `blocks`
+ *  that has one, in doc order. */
+function streetMapProps(blocks: readonly string[], name: string): string[] {
+  const out: string[] = [];
+  for (const block of blocks) {
+    for (const m of block.matchAll(/<StreetMap(?![\w$.-])/g)) {
+      const v = literalPropOf(block, (m.index ?? 0) + m[0].length, name);
+      if (v !== undefined) out.push(v);
+    }
+  }
+  return out;
 }
 
 /**
@@ -304,13 +319,16 @@ function srcOf(s: string, from: number): string | undefined {
  * files and no others beside the doc for a map (`doc-file-scope.ts`).
  */
 export function mapDataPaths(blocks: readonly string[]): string[][] {
-  const out: string[][] = [];
-  for (const block of blocks) {
-    for (const m of block.matchAll(/<StreetMap(?![\w$.-])/g)) {
-      const src = srcOf(block, (m.index ?? 0) + m[0].length);
-      const segs = src === undefined ? null : mapDataSegments(src);
-      if (segs) out.push(segs);
-    }
-  }
-  return out;
+  return streetMapProps(blocks, 'src')
+    .map(mapDataSegments)
+    .filter((segs): segs is string[] => segs !== null);
+}
+
+/**
+ * The basemaps a doc's `<StreetMap>` tags name in a literal `basemap`, once
+ * each, given the text of its `mdx-flow` blocks. The server hands a basemap's
+ * key only to a doc this names it for (`routes/doc-map-key.ts`).
+ */
+export function mapBasemapNames(blocks: readonly string[]): string[] {
+  return [...new Set(streetMapProps(blocks, 'basemap'))];
 }
