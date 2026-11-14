@@ -2332,10 +2332,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    // The retired boards' task docs too: the page's own activity reading
-    // walks every board, and it runs after this in the same stretch.
     landingReview: async () => {
-      await crossReview.prepare({ includeRetired: true });
       const q = await crossReview.queue();
       // Fire and forget: the page shows what is stored, and a sentence that
       // arrives now is on the next load. Each refresh declines unless due.

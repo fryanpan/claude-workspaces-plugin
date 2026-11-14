@@ -1306,6 +1306,21 @@ export class DocStore {
     return this.catalog.lastThreadActivity(docId);
   }
 
+  /**
+   * The newest comment on a doc, loading it only when no index row can say.
+   *
+   * `lastThreadActivity` answers 0 for a cold doc with no row, which is right
+   * for a badge and wrong for "when was this board last active". Home asks
+   * this of every task on every board, archived ones included; reading the
+   * row instead of the thread map is what keeps that read from loading them.
+   */
+  newestThreadActivity(docId: string): number {
+    if (this.docs.has(docId) || this.catalog.entry(docId)) {
+      return this.catalog.lastThreadActivity(docId);
+    }
+    return this.listThreads(docId).reduce((last, t) => Math.max(last, t.lastActivity), 0);
+  }
+
   activityAt(docId: string): number | undefined {
     return this.catalog.activityAt(docId);
   }
