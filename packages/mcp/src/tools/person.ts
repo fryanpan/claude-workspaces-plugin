@@ -1,5 +1,6 @@
 /**
- * The person verbs: `watch_person`, `show_person` and `confirm_person`.
+ * The person verbs: `watch_person`, `show_person`, `confirm_person` and
+ * `reply_private`.
  *
  * `watch_person` asks the server to tell this session where the board
  * owner's attended tab lands (`person.landed` lines, `person-line.ts`) and
@@ -51,6 +52,7 @@ export async function handlePersonTool(
   ctx: PersonToolContext,
 ): Promise<CallToolResult | undefined> {
   if (name === 'confirm_person') return confirmPerson(a, ctx);
+  if (name === 'reply_private') return replyPrivate(a, ctx);
   if (name !== 'watch_person' && name !== 'show_person') return undefined;
   const workspaceId = typeof a.workspaceId === 'string' ? a.workspaceId : '';
   if (!workspaceId) return ctx.err('workspaceId is required');
@@ -106,6 +108,31 @@ async function confirmPerson(
       body,
     )) as { state?: unknown };
     return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused) throw e;
+    return ctx.ok({ ok: false, ...refused });
+  }
+}
+
+/**
+ * `reply_private`: answer this agent's person privately
+ * (`POST /api/agents/<id>/messages/<personId>`, `routes/private-messages.ts`).
+ */
+async function replyPrivate(
+  a: Record<string, unknown>,
+  ctx: PersonToolContext,
+): Promise<CallToolResult> {
+  const personId = typeof a.personId === 'string' ? a.personId.trim() : '';
+  const text = typeof a.text === 'string' ? a.text.trim() : '';
+  if (!personId || !text) return ctx.err('personId and text are required');
+  try {
+    const res = (await ctx.http(
+      'POST',
+      `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`,
+      { text },
+    )) as { message?: { id?: unknown } };
+    return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
     if (!refused) throw e;

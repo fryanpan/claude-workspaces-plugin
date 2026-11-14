@@ -124,6 +124,7 @@ import { PermissionGrants, wirePermissionGrantRelease } from './permission-grant
 import { PersonAgentLinks } from './person-agent-link.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
 import { type PresenceRoster, presenceUserFor, resolveStamp } from './presence-identity.ts';
+import { FilePrivateMessageStore } from './private-messages.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
@@ -167,6 +168,7 @@ import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
 import { type OpsRoutesContext } from './routes/ops.ts';
+import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
@@ -2864,6 +2866,32 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     warnRefusedMint,
   };
 
+  /** A person's private conversation with their own lead agent
+   *  (routes/private-messages.ts). The agent's messages ride one board's
+   *  stream and queue: the board it leads, else one it is live on, else
+   *  any it is attached to. */
+  const privateMessageRoutesCtx: PrivateMessageRoutesContext = {
+    store: new FilePrivateMessageStore(dataDir),
+    personAgentLinks,
+    identities,
+    taskStore,
+    sse,
+    boardForAgent: (agentId) => {
+      const attached = taskStore
+        .listWorkspaces()
+        .filter((w) => taskStore.listAttachments(w.id).some((a) => a.agentId === agentId));
+      const pick =
+        attached.find((w) => w.leadAgentId === agentId) ??
+        attached.find((w) => taskStore.hasLiveAttachmentFor(w.id, agentId)) ??
+        attached[0];
+      return pick?.id ?? null;
+    },
+    requestAddress: (req) => server.requestIP(req)?.address,
+    agentTokenKey: agentTokenKeyFor,
+    j,
+    safeJson,
+  };
+
   /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
   const boardTokenRoutesCtx: BoardTokenRoutesContext = {
     tokens: boardAgentTokens,
@@ -3443,6 +3471,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
+    privateMessageRoutesCtx,
     coachRoutesCtx,
     serveShellRoutes,
   });

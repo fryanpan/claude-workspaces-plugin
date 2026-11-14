@@ -40,6 +40,7 @@ import {
   stalledLine,
 } from './nudge-line.ts';
 import { type PersonLandedLike, personLandedIds, personLandedLine } from './person-line.ts';
+import { type PrivateMessageLike, privateMessageLine } from './private-message-line.ts';
 import {
   type ReviewItemEventPayload,
   isTaskReviewItemEvent,
@@ -169,10 +170,12 @@ export interface ChannelPayload {
 /** Board/workspace event families formatted by emitBoardChannelMessage. Thread
  *  and suggestion events on the same workspace stream keep the doc-shaped
  *  path below. */
-const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
+const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person|private)\./;
 
 export interface BoardEventPayload {
   workspaceId?: string;
+  /** On `private.message`: the person who wrote it. */
+  personId?: string;
   /** On `voice.request`: the durable queue row this frame came from. Sending
    *  it back is what takes the row off the queue. Absent from a server older
    *  than the durable queue, in which case the frame is all there is and
@@ -503,6 +506,14 @@ async function emitBoardChannelMessage(
       body = personLandedLine(rawPayload as PersonLandedLike);
       Object.assign(p, personLandedIds(rawPayload as PersonLandedLike));
       break;
+    // Addressed to a person's own lead agent alone: private-message-line.ts.
+    case 'private.message': {
+      const line = privateMessageLine(rawPayload as PrivateMessageLike, deps.authorId);
+      if (line === null) return;
+      body = line;
+      p.actor = (rawPayload as PrivateMessageLike).author as BoardEventPayload['actor'];
+      break;
+    }
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ''}`;
   }
@@ -524,6 +535,7 @@ async function emitBoardChannelMessage(
         // wants it delivered for the same reason.
         ...(p.docId ? { doc_id: p.docId } : {}),
         ...(p.reviewItemId ? { review_item_id: p.reviewItemId } : {}),
+        ...(p.personId ? { person_id: p.personId } : {}),
         event,
         ...(p.actor?.name ? { author: p.actor.name } : {}),
       },

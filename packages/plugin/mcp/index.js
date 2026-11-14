@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/api\/agents\/[^/?]+\/person$/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/api\/agents\/[^/?]+\/(person|messages\/[^/?]+)$/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -15126,6 +15126,15 @@ function personLandedIds(p) {
   return {};
 }
 
+// packages/mcp/src/private-message-line.ts
+var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+function privateMessageLine(p, selfId) {
+  if (p.from !== "person" || p.author?.id === selfId || !p.personId)
+    return null;
+  const who = p.author?.name || p.personId;
+  return `[private] ${who} (your person): ${clip2(p.text ?? "", 2000)} Answer with reply_private(personId="${p.personId}").`;
+}
+
 // packages/mcp/src/review-item-line.ts
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
@@ -15360,7 +15369,7 @@ function nowMs(deps) {
 function nowIso(deps) {
   return new Date(nowMs(deps)).toISOString();
 }
-var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
+var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person|private)\./;
 function dispatchReportedLine(p) {
   const who = p.agentName ?? p.actor?.name ?? "a builder";
   const commit = (p.headCommit ?? "").slice(0, 7);
@@ -15497,6 +15506,14 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = personLandedLine(rawPayload);
       Object.assign(p, personLandedIds(rawPayload));
       break;
+    case "private.message": {
+      const line = privateMessageLine(rawPayload, deps.authorId);
+      if (line === null)
+        return;
+      body = line;
+      p.actor = rawPayload.author;
+      break;
+    }
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ""}`;
   }
@@ -15511,6 +15528,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
         ...p.taskId ? { task_id: p.taskId } : {},
         ...p.docId ? { doc_id: p.docId } : {},
         ...p.reviewItemId ? { review_item_id: p.reviewItemId } : {},
+        ...p.personId ? { person_id: p.personId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -16526,6 +16544,21 @@ var PERSON_TOOLS = [
         }
       },
       required: ["email"]
+    }
+  },
+  {
+    name: "reply_private",
+    description: "Answer a private message from your person (a [private] channel line). Only that person sees it, on their own stream; it never reaches the board, its threads or lead chat. Refused unless personId is the person linked to you (confirm_person).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        personId: {
+          type: "string",
+          description: "The personId the [private] line named."
+        },
+        text: { type: "string", description: "Your reply." }
+      },
+      required: ["personId", "text"]
     }
   }
 ];
@@ -20495,6 +20528,8 @@ function refusalOf(e, codes) {
 async function handlePersonTool(name, a, ctx) {
   if (name === "confirm_person")
     return confirmPerson(a, ctx);
+  if (name === "reply_private")
+    return replyPrivate(a, ctx);
   if (name !== "watch_person" && name !== "show_person")
     return;
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
@@ -20536,6 +20571,21 @@ async function confirmPerson(a, ctx) {
   try {
     const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
     return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
+  }
+}
+async function replyPrivate(a, ctx) {
+  const personId = typeof a.personId === "string" ? a.personId.trim() : "";
+  const text = typeof a.text === "string" ? a.text.trim() : "";
+  if (!personId || !text)
+    return ctx.err("personId and text are required");
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`, { text });
+    return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
     if (!refused)

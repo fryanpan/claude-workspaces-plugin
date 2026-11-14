@@ -77,6 +77,10 @@ export type BoardAgentDoorVerdict =
     };
 
 const WATCHES_PATH = /^\/api\/agents\/([^/]+)\/watches$/;
+/** The agent's own side of its person link, and its private replies to that
+ *  person. The routes check the link itself (`routes/agent-identity.ts`,
+ *  `routes/private-messages.ts`). */
+const OWN_PERSON_PATH = /^\/api\/agents\/([^/]+)\/(?:person|messages\/[^/]+)$/;
 
 /**
  * May this token reach this path? Its own watch set, its own renewal, or what
@@ -98,6 +102,8 @@ export function boardAgentScopeAllows(
     const m = method.toUpperCase();
     return decoded(watches[1] ?? '') === grant.agentId && (m === 'GET' || m === 'POST');
   }
+  const own = pathname.match(OWN_PERSON_PATH);
+  if (own) return decoded(own[1] ?? '') === grant.agentId && method.toUpperCase() === 'POST';
   if (lead && leadScopeAllows(pathname, method, grant.boardId, workspacesOf)) return true;
   if (boardDocEditAllows(pathname, method, grant.boardId, workspacesOf)) return true;
   if (boardTaskWriteAllows(pathname, method, grant.boardId, workspacesOf)) return true;

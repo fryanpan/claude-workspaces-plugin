@@ -61,6 +61,12 @@ function replyFor(path: string): { status: number; body: unknown } {
   if (path === '/workspaces/w-live/person/show') {
     return { status: 200, body: { ok: true, spot: { surface: 'doc', docId: 'd-quay' } } };
   }
+  if (/^\/api\/agents\/[^/]+\/messages\/user-bob$/.test(path)) {
+    return { status: 403, body: { error: 'not_your_person' } };
+  }
+  if (/^\/api\/agents\/[^/]+\/messages\/[^/]+$/.test(path)) {
+    return { status: 200, body: { ok: true, message: { id: 'pm-2' } } };
+  }
   if (/^\/api\/agents\/[^/]+\/person$/.test(path)) {
     return { status: 200, body: { ok: true, state: 'pending' } };
   }
@@ -100,7 +106,9 @@ function payload(reply: Reply): Record<string, unknown> {
  */
 function personPosts(): Recorded[] {
   return seen.filter(
-    (r) => r.method === 'POST' && /(\/person\/(watch|show)|\/agents\/[^/]+\/person)$/.test(r.path),
+    (r) =>
+      r.method === 'POST' &&
+      /(\/person\/(watch|show)|\/agents\/[^/]+\/(person|messages\/[^/]+))$/.test(r.path),
   );
 }
 
@@ -229,6 +237,21 @@ describe('confirm_person', () => {
   it('clears its side with email null', async () => {
     payload(await call('confirm_person', { email: null }));
     expect(last().body).toEqual({ personId: null });
+  });
+});
+
+describe('reply_private', () => {
+  it("posts the reply to this agent's own person route with its token", async () => {
+    const out = payload(await call('reply_private', { personId: 'user-alice', text: 'Done.' }));
+    expect(last().path).toMatch(/^\/api\/agents\/agent-[^/]+\/messages\/user-alice$/);
+    expect(last().body).toEqual({ text: 'Done.' });
+    expect(last().authorization).toBe(`Bearer ${TOKEN}`);
+    expect(out).toMatchObject({ ok: true, messageId: 'pm-2' });
+  });
+
+  it('says why when the server refuses, rather than failing', async () => {
+    const out = payload(await call('reply_private', { personId: 'user-bob', text: 'Hi' }));
+    expect(out).toMatchObject({ ok: false, error: 'not_your_person' });
   });
 });
 

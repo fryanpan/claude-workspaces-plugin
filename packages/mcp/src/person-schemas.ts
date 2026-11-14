@@ -73,4 +73,20 @@ export const PERSON_TOOLS: ListToolsResult['tools'] = [
       required: ['email'],
     },
   },
+  {
+    name: 'reply_private',
+    description:
+      'Answer a private message from your person (a [private] channel line). Only that person sees it, on their own stream; it never reaches the board, its threads or lead chat. Refused unless personId is the person linked to you (confirm_person).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        personId: {
+          type: 'string',
+          description: 'The personId the [private] line named.',
+        },
+        text: { type: 'string', description: 'Your reply.' },
+      },
+      required: ['personId', 'text'],
+    },
+  },
 ];
