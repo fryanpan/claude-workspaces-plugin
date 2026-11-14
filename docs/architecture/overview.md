@@ -1587,6 +1587,16 @@ exception: each is an ordinary live `task:<taskId>` doc so every edit tool,
 thread and anchor applies unchanged, and the store's `body` string is a
 debounced snapshot of it.
 
+### Outside the packages: `templates/`
+
+`templates/` holds starters that a new app copies into its own repository.
+Nothing in `packages/` imports them, and they import nothing from it.
+`templates/signin/` is a Cloudflare Worker that provides sign-in with Hono,
+Better Auth and D1; its [README](../../templates/signin/README.md) covers how
+to copy it. The repo's gates still cover these folders: the root workspace
+installs their dependencies, the root `tsconfig.json` typechecks them, and
+vitest's `node` project runs their tests.
+
 ## Layers inside `server`
 
 **Imports point downward only** — a file may import its own layer and every layer below it, never one above.
