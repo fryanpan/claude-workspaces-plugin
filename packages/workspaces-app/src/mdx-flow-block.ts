@@ -22,7 +22,11 @@ import { type MdxSummary, renderMdxSummary, summarizeMdx } from './mdx-preview.t
  * the last chart that did, with the reason under the source.
  *
  * A component tag — one whose import the server builds — draws the built
- * component itself, live, in place of the preview (`mdx-component.ts`).
+ * component itself, live, in place of the preview (`mdx-component.ts`), and
+ * offers Edit as a chart does: a props edit is a text edit, and the drawing
+ * stays until the rebuilt bundle lands. Its mount lives in a `ComponentMount`
+ * that only its own build hash moves, so an edit anywhere else in the doc,
+ * here or on another page, never remounts it.
  */
 
 export { MDX_FLOW_LANGUAGE };
@@ -73,8 +77,8 @@ export function mdxFlowNodeView(
   view.setAttribute('aria-expanded', 'false');
   wrapper.appendChild(view);
 
-  // Shown on a chart to a reader who can write; CSS hides it when the editor
-  // is read-only. Its label swaps between two words of one width.
+  // Shown on a chart or a component to a reader who can write; CSS hides it
+  // when the editor is read-only. Its label swaps between two words of one width.
   const edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'mdx-edit';
@@ -130,11 +134,13 @@ export function mdxFlowNodeView(
       view.dataset.kind = 'component';
       wrapper.dataset.kind = 'component';
       wrapper.classList.remove('has-chart');
+      wrapper.classList.add('has-component');
       error.hidden = true;
       error.textContent = '';
       return;
     }
     if (component?.host.parentNode === view) view.replaceChildren();
+    wrapper.classList.remove('has-component');
     // A broken chart keeps the last one that drew only while it is still a
     // chart: the reader is typing in it, or the tag still names a chart.
     // ProseMirror hands one view a different block when a rewrite moves the
