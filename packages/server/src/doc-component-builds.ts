@@ -121,7 +121,8 @@ export class DocComponentBuilds {
     let open = 0;
     for (const doc of this.host.openDocs()) {
       open++;
-      void this.refresh(doc);
+      // A doc mid-pass is left to it; only an agent's place waits for a follow-up.
+      if (!this.inFlight.has(doc.docId)) void this.refresh(doc);
     }
     if (open === 0) this.stop();
   }

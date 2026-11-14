@@ -36,6 +36,8 @@ import {
  * applies it.
  */
 
+// The id is not decoded: a component id is only a-z, 0-9 and -, so an
+// encoded one is refused as it stands.
 const STATE = /^agent-components\/([^/]+)\/state$/;
 
 const reply = <T>(j: DocRoutesContext['j'], res: AgentResult<T>): Response =>
@@ -60,7 +62,7 @@ export async function handleDocComponentAgentRoute(
     if (rest === 'agent-components') return j(200, { docId, components: listComponents(doc) });
     if (state) {
       const path = url.searchParams.get('path') ?? undefined;
-      return reply(j, getComponentState(doc, decodeURIComponent(state[1] ?? ''), path));
+      return reply(j, getComponentState(doc, state[1] ?? '', path));
     }
     return j(405, { error: 'method not allowed' });
   }
@@ -74,10 +76,7 @@ export async function handleDocComponentAgentRoute(
     return j(400, { error: 'author {id,name} is required: component writes are attributed' });
 
   if (state) {
-    return reply(
-      j,
-      setComponentState(doc, decodeURIComponent(state[1] ?? ''), body?.ops, author.id),
-    );
+    return reply(j, setComponentState(doc, state[1] ?? '', body?.ops, author.id));
   }
   if (rest === 'agent-components/place') {
     const res = await placeComponent(

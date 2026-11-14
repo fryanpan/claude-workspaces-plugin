@@ -189,6 +189,9 @@ export interface PlaceDeps {
 const NAME = /^[A-Z][A-Za-z0-9_$]{0,63}$/;
 const PROP = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
 const PROPS_MAX = 20_000;
+/** A string prop written in quotes; any other string is written as `{JSON}`,
+ *  so no character can end the attribute, the tag or the block. */
+const SAFE_TEXT = /^[\w .,:/@#()+-]*$/;
 
 /** A component name from a file: `./map/index.ts` → `Map`, `./pin-list.tsx` → `PinList`. */
 export function nameFromPath(importPath: string): string {
@@ -207,7 +210,7 @@ export function nameFromPath(importPath: string): string {
 function attributes(props: Record<string, unknown>): string {
   return Object.entries(props)
     .map(([k, v]) =>
-      typeof v === 'string' && !/["{}\n<>]/.test(v) ? `${k}="${v}"` : `${k}={${JSON.stringify(v)}}`,
+      typeof v === 'string' && SAFE_TEXT.test(v) ? `${k}="${v}"` : `${k}={${JSON.stringify(v)}}`,
     )
     .join(' ');
 }
@@ -268,7 +271,12 @@ export async function placeComponent(
       'name must start with a capital letter and hold only letters, digits, _ and $.',
     );
   }
-  const name = existing?.names[0] ?? (typeof req.name === 'string' ? req.name : nameFromPath(spec));
+  const asked = typeof req.name === 'string' ? req.name : undefined;
+  const name = existing
+    ? asked && existing.names.includes(asked)
+      ? asked
+      : (existing.names[0] as string)
+    : (asked ?? nameFromPath(spec));
   const tag = `<${name} ${attributes(p)} />`;
   const markdown = existing ? tag : `import ${name} from '${spec}'\n\n${tag}`;
   const edit: prose.BlockEdit =
@@ -344,9 +352,15 @@ export async function grantFolderFor(
 }
 
 /** Whether `folder`, from an approved card, is still a real directory as named. */
-export function confirmGrantFolder(folder: string): { ok: true } | { ok: false; error: string } {
+export function confirmGrantFolder(
+  folder: string,
+  guards: Pick<BuildGuards, 'allows' | 'covers'>,
+): { ok: true } | { ok: false; error: string } {
   const real = realDir(folder);
   if (real === null) return { ok: false, error: `${folder} is no longer a folder.` };
   if (real !== folder) return { ok: false, error: `${folder} now leads somewhere else (${real}).` };
+  if (!guards.allows(real) || guards.covers(real)) {
+    return { ok: false, error: `${folder} is now inside a walled lead's folder.` };
+  }
   return { ok: true };
 }

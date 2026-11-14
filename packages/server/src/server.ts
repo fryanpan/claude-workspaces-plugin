@@ -3123,7 +3123,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       announceTaskReview(task, item, author);
     },
     grantComponentFolder: (folder, by) => {
-      const ok = confirmGrantFolder(folder);
+      const ok = confirmGrantFolder(folder, boundFiles.guards);
       if (!ok.ok) return ok;
       try {
         docStore.componentGrants.grant(folder, by);

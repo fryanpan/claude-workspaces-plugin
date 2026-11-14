@@ -174,8 +174,14 @@ export function applyStateOps(
     if (typeof parsed === 'string') return refuse(parsed);
     const bad = checkOp(parsed.segs, parsed.op);
     if (bad) return refuse(`ops[${i}]: ${bad}`);
+    // The plain copy gets a copy of the value: a later op in the batch
+    // changes the copy in place, and must not change what this op writes.
+    const own: Op =
+      parsed.op.kind === 'delete'
+        ? parsed.op
+        : { kind: parsed.op.kind, value: structuredClone(parsed.op.value) };
     try {
-      next = applyPlain(next as Record<string, unknown>, parsed.segs, parsed.op);
+      next = applyPlain(next as Record<string, unknown>, parsed.segs, own);
     } catch (err) {
       return refuse(`ops[${i}]: ${(err as Error).message}`);
     }

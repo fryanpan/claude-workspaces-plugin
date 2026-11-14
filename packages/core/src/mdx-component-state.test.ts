@@ -249,6 +249,20 @@ describe('a batch of writes from an agent', () => {
     });
   });
 
+  it('applies a later op once to a value an earlier op in the batch set', () => {
+    const ydoc = new Y.Doc();
+    const pins: string[] = [];
+    const res = applyStateOps(ydoc, 'map', [
+      { op: 'set', path: 'pins', value: pins },
+      { op: 'push', path: 'pins', value: 'harbor' },
+      { op: 'set', path: 'list', value: [1, 2] },
+      { op: 'delete', path: 'list.0' },
+    ]);
+    expect(res).toEqual({ ok: true });
+    expect(readComponentState(ydoc, 'map')).toEqual({ pins: ['harbor'], list: [2] });
+    expect(pins).toEqual([]);
+  });
+
   it('changes nothing when any op is refused, and names which one', () => {
     const ydoc = new Y.Doc();
     createStateHook(ydoc, 'map', { canWrite: true }).set('filter', 'open');
