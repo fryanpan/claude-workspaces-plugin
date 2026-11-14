@@ -68,6 +68,36 @@ describe('rootsTouched', () => {
     expect(rootsTouched(server, u).has('threads')).toBe(true);
   });
 
+  it('cannot place a delete that runs past what the doc holds', () => {
+    // Yjs keeps the uncovered part pending and applies it to whatever lands
+    // at those clocks later, a comment the server writes included.
+    const server = new Y.Doc();
+    server.getText('content').insert(0, 'hello');
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, 0); // no structs
+    encoding.writeVarUint(enc, 1); // one client in the delete set
+    encoding.writeVarUint(enc, server.clientID);
+    encoding.writeVarUint(enc, 1); // one range
+    encoding.writeVarUint(enc, 4);
+    encoding.writeVarUint(enc, 1000);
+    expect(rootsTouched(server, encoding.toUint8Array(enc)).has(null)).toBe(true);
+  });
+
+  it('places every item of a long unmerged history, however it is chained', () => {
+    // A low client id types at the front thousands of times (no item merges,
+    // each names the previous as its right neighbour); a higher id then types
+    // after the last. Yjs encodes the higher id first, so placing its item
+    // walks the whole chain.
+    const low = new Y.Doc();
+    low.clientID = 1;
+    for (let i = 0; i < 8000; i++) low.getText('content').insert(0, 'x');
+    const high = new Y.Doc();
+    high.clientID = 2;
+    Y.applyUpdate(high, Y.encodeStateAsUpdate(low));
+    high.getText('content').insert(1, 'y');
+    expect([...rootsTouched(new Y.Doc(), Y.encodeStateAsUpdate(high))]).toEqual(['content']);
+  });
+
   it('cannot place an item whose neighbour this doc never had', () => {
     const { client } = pair();
     const u = diff(client, (d) => d.getText('content').insert(3, 'x'));

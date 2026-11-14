@@ -66,7 +66,12 @@ function rootOfType(type: AnyType): string | null {
 
 /**
  * Every root an update writes or deletes under. `null` in the set means an
- * item could not be placed.
+ * item or a deleted range could not be placed.
+ *
+ * Linear in the update's size: each client's items are sorted once and found
+ * by binary search, and roots are resolved without recursion, so neither a
+ * long chain of unmerged items nor a crafted frame can make the walk give up
+ * on a real edit or hold the event loop.
  */
 export function rootsTouched(ydoc: Y.Doc, update: Uint8Array): Set<string | null> {
   const { structs, ds } = Y.decodeUpdate(update);
@@ -78,54 +83,109 @@ export function rootsTouched(ydoc: Y.Doc, update: Uint8Array): Set<string | null
     list.push(s);
     byClient.set(s.id.client, list);
   }
-  const inUpdate = (client: number, clock: number): Y.Item | undefined =>
-    byClient.get(client)?.find((i) => i.id.clock <= clock && clock < i.id.clock + i.length);
-  const memo = new Map<Y.Item, string | null>();
+  for (const list of byClient.values()) list.sort((a, b) => a.id.clock - b.id.clock);
+  /** Index of the first item of `client` that ends after `clock`. */
+  const firstEndingAfter = (list: Y.Item[], clock: number): number => {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const it = list[mid] as Y.Item;
+      if (it.id.clock + it.length <= clock) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const inUpdate = (client: number, clock: number): Y.Item | undefined => {
+    const list = byClient.get(client);
+    if (!list) return undefined;
+    const it = list[firstEndingAfter(list, clock)];
+    return it && it.id.clock <= clock ? it : undefined;
+  };
 
-  // The root of whatever item an id names: an item in this update, or one
-  // already in the doc. A sibling (origin) and a nested type's holder (a
-  // parent id) both sit under the same root as the item that names them.
-  const rootOfId = (id: Y.ID, depth: number): string | null | 'gc' => {
-    const local = inUpdate(id.client, id.clock);
-    if (local) return rootOfDecoded(local, depth + 1);
+  // `''` marks an item that Yjs collects on apply (it sits next to garbage),
+  // so it writes nothing; it is removed from the answer at the end.
+  const memo = new Map<Y.Item, string | null>();
+  /** The id an item is placed by: its parent's holder, else a neighbour. */
+  const refOf = (item: Y.Item): Y.ID | null => {
+    const parent = item.parent as unknown;
+    if (typeof parent === 'string') return null;
+    return (parent as Y.ID | null) ?? item.origin ?? item.rightOrigin;
+  };
+  /** The root of an item already in the doc, or of garbage (`''`). */
+  const rootOfStored = (id: Y.ID): string | null => {
     if (Y.getState(ydoc.store, id.client) <= id.clock) return null;
     const struct = Y.getItem(ydoc.store, id);
-    if (!(struct instanceof Y.Item)) return 'gc';
+    if (!(struct instanceof Y.Item)) return '';
     return struct.parent instanceof Y.AbstractType ? rootOfType(struct.parent as AnyType) : null;
   };
-  const rootOfDecoded = (item: Y.Item, depth: number): string | null => {
-    if (memo.has(item)) return memo.get(item) ?? null;
-    if (depth > 5_000) return null;
+  // Iterative: follow refs through this update's items until one is placed
+  // (a string parent, a stored item, or a memoized item), then write that
+  // root back along the chain. A ref back into the chain is a cycle: null.
+  const rootOfDecoded = (first: Y.Item): string | null => {
+    const chain: Y.Item[] = [];
+    const onChain = new Set<Y.Item>();
+    let at: Y.Item | undefined = first;
     let root: string | null = null;
-    const parent = item.parent as unknown;
-    if (typeof parent === 'string') {
-      root = parent;
-    } else {
-      const ref = (parent as Y.ID | null) ?? item.origin ?? item.rightOrigin;
-      const found = ref ? rootOfId(ref, depth) : null;
-      // An item next to collected garbage is collected too when Yjs applies
-      // it, so it writes nothing.
-      root = found === 'gc' ? '' : found;
+    while (at) {
+      const known = memo.get(at);
+      if (known !== undefined || memo.has(at)) {
+        root = known ?? null;
+        break;
+      }
+      if (onChain.has(at)) {
+        root = null;
+        break;
+      }
+      chain.push(at);
+      onChain.add(at);
+      const parent = at.parent as unknown;
+      if (typeof parent === 'string') {
+        root = parent;
+        break;
+      }
+      const ref = refOf(at);
+      if (!ref) {
+        root = null;
+        break;
+      }
+      const local = inUpdate(ref.client, ref.clock);
+      if (!local) {
+        root = rootOfStored(ref);
+        break;
+      }
+      at = local;
     }
-    memo.set(item, root);
+    for (const item of chain) memo.set(item, root);
     return root;
   };
 
   for (const list of byClient.values()) {
-    for (const item of list) roots.add(rootOfDecoded(item, 0));
+    for (const item of list) roots.add(rootOfDecoded(item));
   }
   for (const [client, ranges] of ds.clients) {
+    const list = byClient.get(client) ?? [];
+    const state = Y.getState(ydoc.store, client);
     for (const { clock, len } of ranges) {
       const end = clock + len;
-      for (const item of byClient.get(client) ?? []) {
-        if (item.id.clock < end && clock < item.id.clock + item.length) {
-          roots.add(rootOfDecoded(item, 0));
-        }
+      // This update's own items in the range.
+      for (let i = firstEndingAfter(list, clock); i < list.length; i++) {
+        const item = list[i] as Y.Item;
+        if (item.id.clock >= end) break;
+        roots.add(rootOfDecoded(item));
       }
-      if (Y.getState(ydoc.store, client) <= clock) {
-        if (!inUpdate(client, clock)) roots.add(null);
-        continue;
+      // Past what the doc holds, every clock must be an item this update
+      // carries. Yjs keeps an uncovered remainder pending and applies it to
+      // whatever arrives at those clocks later — a comment the server writes
+      // included — so an uncovered range is never judged by its known part.
+      let covered = Math.max(clock, state);
+      for (let i = firstEndingAfter(list, covered); i < list.length && covered < end; i++) {
+        const item = list[i] as Y.Item;
+        if (item.id.clock > covered) break;
+        covered = item.id.clock + item.length;
       }
+      if (covered < end) roots.add(null);
+      if (clock >= state) continue;
       const held = ydoc.store.clients.get(client) ?? [];
       for (let i = Y.findIndexSS(held, clock); i < held.length; i++) {
         const struct = held[i];
