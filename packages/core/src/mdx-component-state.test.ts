@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
   STATE_LIMITS,
+  applyStateOps,
   componentStateIds,
   createStateHook,
   readComponentState,
@@ -211,5 +212,65 @@ describe('the limits on a write', () => {
     if (!out.ok) expect(out.error).toMatch(/filter/);
     const push = s.push('filter', 'x');
     expect(push.ok).toBe(false);
+  });
+});
+
+describe('a batch of writes from an agent', () => {
+  it('applies every op in one transaction, tagged with its origin', () => {
+    const { a, b, sync } = twoPages();
+    createStateHook(a, 'map', { canWrite: true }).set('pins', ['harbor']);
+    sync();
+    const origins: unknown[] = [];
+    let changes = 0;
+    a.on('afterTransaction', (tr: Y.Transaction) => {
+      if (tr.changed.size > 0) {
+        origins.push(tr.origin);
+        changes++;
+      }
+    });
+    const res = applyStateOps(
+      a,
+      'map',
+      [
+        { op: 'set', path: 'filter', value: 'open' },
+        { op: 'push', path: 'pins', value: 'saltmarsh' },
+        { op: 'set', path: 'view.zoom', value: 12 },
+      ],
+      { origin: 'agent:Alice' },
+    );
+    expect(res).toEqual({ ok: true });
+    expect(changes).toBe(1);
+    expect(origins).toEqual(['agent:Alice']);
+    sync();
+    expect(readComponentState(b, 'map')).toEqual({
+      pins: ['harbor', 'saltmarsh'],
+      filter: 'open',
+      view: { zoom: 12 },
+    });
+  });
+
+  it('changes nothing when any op is refused, and names which one', () => {
+    const ydoc = new Y.Doc();
+    createStateHook(ydoc, 'map', { canWrite: true }).set('filter', 'open');
+    const res = applyStateOps(ydoc, 'map', [
+      { op: 'set', path: 'filter', value: 'closed' },
+      { op: 'push', path: 'filter', value: 'x' },
+    ]);
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error).toMatch(/^ops\[1\]: "filter" is not a list/);
+    expect(readComponentState(ydoc, 'map')).toEqual({ filter: 'open' });
+  });
+
+  it('holds the batch to the size limit and refuses a bad op shape', () => {
+    const ydoc = new Y.Doc();
+    const big = 'x'.repeat(STATE_LIMITS.instanceBytes);
+    const res = applyStateOps(ydoc, 'map', [{ op: 'set', path: 'blob', value: big }]);
+    expect(!res.ok && res.error).toMatch(/over the 256 KB limit/);
+    expect(applyStateOps(ydoc, 'map', [{ op: 'move', path: 'a' } as never])).toEqual({
+      ok: false,
+      error: 'ops[0].op must be "set", "push" or "delete".',
+    });
+    expect(applyStateOps(ydoc, 'map', []).ok).toBe(false);
+    expect(readComponentState(ydoc, 'map')).toEqual({});
   });
 });
