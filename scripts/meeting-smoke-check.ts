@@ -174,6 +174,9 @@ const SCRIPT: readonly MockScriptTurn[] = [
 /** The first thing said — the sentence the 2026-09-11 meeting lost. */
 const FIRST_TURN = SCRIPT[0]?.settled ?? '';
 
+/** A sentence's words, lower case, as the live line is compared. */
+const words = (text: string): string[] => text.toLowerCase().match(/[a-z0-9']+/g) ?? [];
+
 /**
  * Ticks on the CADENCE clock rather than on pauses, because the fake
  * microphone never stops talking: a capture device producing a continuous
@@ -566,14 +569,21 @@ async function run(o: Options): Promise<number> {
     }
 
     // 2. WHAT IS SAID SHOWS LIVE, in the lead chat's meeting view, with the
-    //    count beside it, before the meeting ends.
+    //    count beside it, before the meeting ends. The view is one line, the
+    //    newest thing said (or, on this recording tab, the words still being
+    //    heard), so it must carry words of the script rather than its first
+    //    sentence, which later lines have replaced.
+    const vocabulary = [...new Set(SCRIPT.flatMap((t) => words(t.settled ?? '')))];
     await until(
       cdp,
-      `(() => { const t = ${LAYER}.querySelector('.lc-notes-list')?.textContent ?? '';
+      `(() => { const row = ${LAYER}.querySelector('.lc-notes .lc-line');
+         const t = (row?.textContent ?? '').replace(/^[^:]*:\s*/, '');
          const n = Number.parseInt(${LAYER}.querySelector('.lc-notes-n')?.textContent ?? '', 10);
-         return t.includes(${js(FIRST_TURN)}) && n >= 1; })()`,
+         const said = t.toLowerCase().match(/[a-z0-9']+/g) ?? [];
+         const known = new Set(${js(vocabulary)});
+         return n >= 1 && said.length >= 3 && said.every((w) => known.has(w)); })()`,
       SETTLE_MS,
-      `the first thing said (${JSON.stringify(FIRST_TURN)}) in the lead chat's live lines`,
+      "three or more of the script's words in the lead chat's live line, with a count of one or more",
     );
 
     // 3. THE MEETING REPORTS ITSELF, through the lead chat's End meeting

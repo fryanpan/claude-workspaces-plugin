@@ -156,9 +156,12 @@ describe('the lead chat meeting on a page', () => {
         lines: [{ turn: 0, who: 'Bob', text: 'Lead, file the ferry timetable.', ts: 2 }],
       }),
     );
-    expect(t.view.meeting.notes.textContent).toContain('Saltmarsh notes');
+    // One line: the doc it lands in is the row's tooltip.
+    expect(t.view.meeting.notes.querySelector('.lc-notes-row')?.getAttribute('title')).toBe(
+      'Notes: Saltmarsh notes',
+    );
     expect(t.view.meeting.notes.textContent).toContain('1 line');
-    expect(t.view.meeting.notes.textContent).toContain('BobLead, file the ferry timetable.');
+    expect(t.view.meeting.notes.textContent).toContain('Bob: Lead, file the ferry timetable.');
     // Another tab records it: this page opens no microphone.
     expect(t.mic.opened).toBe(0);
   });

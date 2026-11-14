@@ -7,6 +7,7 @@
  * when the chat changes width between words.
  */
 import { HEARD, barLines, statusIsHeard, statusLine } from './lead-chat-lines.ts';
+import type { NoteLine } from './lead-chat-meeting-view.ts';
 import type { LeadChatViewModel } from './lead-chat-view.ts';
 
 /** The left-edge fade goes on only when words are really cut. */
@@ -54,6 +55,23 @@ export function drawBarLines(box: HTMLElement, m: LeadChatViewModel): void {
     if (line.live) showTail(row, label, line.text);
     else row.append(label, line.text);
   }
+}
+
+/** The meeting's one line of notes, above the typing box. */
+export function drawNoteLine(row: HTMLElement, line: NoteLine | null): void {
+  watchWidth(row);
+  row.replaceChildren();
+  row.classList.remove('lc-tail');
+  row.classList.toggle('lc-dim', !!line?.dim);
+  delete row.dataset.lead;
+  delete row.dataset.said;
+  if (!line) return;
+  if (line.lead) row.dataset.lead = '1';
+  if (line.said) row.dataset.said = line.said;
+  const label = row.ownerDocument.createElement('b');
+  label.textContent = `${line.who}: `;
+  if (line.live) showTail(row, label, line.text);
+  else row.append(label, line.text);
 }
 
 export function drawStatus(status: HTMLElement, m: LeadChatViewModel): void {
