@@ -356,6 +356,10 @@ describe('agent notes routes', () => {
     expect(notes.at(-1)?.text).toBe('turn 6');
   });
 
+  // 203 notes, one HTTP round trip each, before a single assertion. On CI it
+  // has taken 565ms to 1.7s and once 5.02s, past bun's 5s default, on a
+  // runner whose file poll was logging 55ms stats. The bound is the number
+  // of requests, not a slow path, so it gets a budget sized for them.
   it('projects the newest notes only, and bounds what the sidecar keeps', async () => {
     const wsId = await boardWithLead();
     const taskId = await inProgressRow(wsId, 'Long-running row');
@@ -373,7 +377,7 @@ describe('agent notes routes', () => {
     expect(row.notes).toHaveLength(TASK_NOTES_READ_CAP);
     expect(row.notes?.[0]?.text).toBe(`turn ${total}`);
     expect(row.notes?.at(-1)?.text).toBe(`turn ${total - TASK_NOTES_READ_CAP + 1}`);
-  });
+  }, 30_000);
 
   it('stores the text verbatim — a secret-looking value is the hook’s job to keep out', async () => {
     const wsId = await boardWithLead();

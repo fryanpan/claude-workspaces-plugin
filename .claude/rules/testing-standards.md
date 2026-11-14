@@ -171,7 +171,8 @@ binary with `chromeForSuite()` from `scripts/browser-tests.ts` and gate the
 suite on it — `describe.skipIf(CHROME === null)`. It answers `null` unless
 `CW_BROWSER_TESTS` is set, so `bun run verify` on a developer's machine
 launches no browser at all; ci.yml sets the variable on the three steps that
-need one, so coverage there is unchanged.
+need one (client-boot, the meeting smoke, and the `client-browser` shards of
+test:vitest), so coverage there is unchanged.
 
 The old guard asked `resolveChromeBin(undefined)` whether Chrome existed,
 which on a Mac is always yes. That is how one `bun run verify` came to open

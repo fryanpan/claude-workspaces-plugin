@@ -150,13 +150,15 @@ and `bun run verify:parity` — a member of the run AND a step of CI's `gates`
 job — fails if ci.yml gains a gate that is not a member, in ANY of its jobs.
 That is what keeps this paragraph true.
 
-CI is four jobs (`gates`, `client`, `server`, `coverage`) so that a verdict
-takes about ninety seconds rather than eleven minutes; `bun run verify` is
+CI is seven jobs (`gates`, `gates-build`, `client` in five shards,
+`client-browser` in fourteen, `server` in two, `coverage`, and `ci`, the one
+required check) so that a verdict takes
+about two minutes rather than eleven; `bun run verify` is
 still one sequential run, because this machine hosts several agents at once.
 Its last three members are a chain — both suites run under coverage
 instrumentation and `coverage` ratchets what they left in `.coverage/`, so
 neither suite runs twice. `bun run test:server` splits the server suite across
-four processes for the same reason CI splits it across eight: it is two-thirds
+four processes for the same reason CI splits each half across eight: it is two-thirds
 idle. Pass `--jobs 1` for the old one-process behaviour.
 
 Every member's output goes straight to your terminal in full; the summary at

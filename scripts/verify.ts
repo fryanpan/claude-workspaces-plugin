@@ -36,8 +36,8 @@
  * coverage step — which was half of this command's wall clock and all of
  * CI's; each now runs once and answers both questions.
  *
- * PARITY ACROSS JOBS. ci.yml is four jobs now (`gates`, `client`, `server`,
- * `coverage`) plus the note-taking slice. `--parity` reads all of them except
+ * PARITY ACROSS JOBS. ci.yml is several jobs now (`gates`, `gates-build`,
+ * `client`, `server`, `coverage`, `ci`). `--parity` reads all of them except
  * the ones named in NON_GATE_JOBS, so a gate added to a NEW job is covered by
  * the same check that covers a gate added to an old one — a parity check
  * pinned to one job name would have gone quietly vacuous the moment CI was
