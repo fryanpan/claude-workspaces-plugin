@@ -122,7 +122,7 @@ that way and add new subsystem docs to the list here.
   a new mock doc, a new link or a new review item per round (the owner,
   2026-09-14: "there should be one collaboration surface").
 
-## The gates — `bun run verify` before you push
+## The gates — CI is the gate
 
 ```bash
 bun run verify                        # every gate CI runs. ~2 min, cheapest first.
@@ -130,6 +130,16 @@ bun run verify --list                 # the members, and the one hole
 bun run verify --only lint,typecheck  # re-run what failed
 bun run verify --bail                 # stop at the first failure
 ```
+
+**CI is the gate** (the owner, 2026-11-14). Before you push, run the fast
+gates and the tests you touched: `bun run verify --only
+typecheck,lint,loc:audit,test:audit`, plus `check:widget-size` if the diff
+touches the widget, plus `bun test <file>` / `bunx vitest run <file>` for each
+test file you changed. Then push and open the PR. CI runs every member on
+GitHub's runners; when it goes red, read it with one `gh pr checks` call, fix
+and push. A full local `bun run verify` is still the whole set and still
+works, but it is no longer required before a push: several agents share this
+machine, and two full runs at once have run it out of memory.
 
 **One command, not a list you pick from.** This section used to name four
 gates. CI runs every gate `bun run verify --list` names, and a builder who
