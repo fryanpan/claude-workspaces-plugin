@@ -14,6 +14,7 @@ import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
 import { setComponentDoc } from '../mdx-component.ts';
 import type { MountContext } from '../mount-context.ts';
+import { announceUser } from '../presence/announce-user.ts';
 import { wireDocSpot } from '../presence/doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type ReviewChrome, mountReviewChrome } from '../review-chrome.ts';
@@ -60,7 +61,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   // editable File view of a .md diff member (see MountContext.navDocId).
   const navDocId = ctx.navDocId ?? docId;
   const { ydoc, awareness } = client;
-  awareness.setLocalStateField('user', { name: user.name, color: user.color });
+  announceUser(awareness, user);
 
   // The thread panel / composer / thread-view / drawer elements are owned
   // by the shared review chrome; only the markdown-specific elements are here.

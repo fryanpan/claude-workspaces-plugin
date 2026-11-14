@@ -26,7 +26,15 @@ import {
   chromeLaunchArgs,
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
+import { registerOwnerIdentity } from '../../server/src/actor-identity.ts';
+import {
+  SESSION_COOKIE,
+  mintSession,
+  sessionKey,
+  signSession,
+} from '../../server/src/auth/session.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
+import { loadCookieKey } from '../../server/src/share/link-session.ts';
 import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import { workspaceDocId } from '../../server/src/task-projection.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/src/transcribe.ts';
@@ -98,6 +106,21 @@ const browserOf = new WeakMap<Cdp, { proc: ChildProcess; profile: string; port: 
 export const debugPortOf = (cdp: Cdp): number | undefined => browserOf.get(cdp)?.port;
 let handle: ServerHandle | undefined;
 let dir = '';
+let serverBase = '';
+/** Each signed-in person's identity id, by the `anonId` a driver gave them. */
+const personIds = new Map<string, string>();
+
+/**
+ * The id the server puts on a signed-in person's presence and follow chip.
+ * The server sets every presence name, so two people on one loopback board
+ * are two people only when each proves who they are; an unproven loopback
+ * page is the owner. Throws for a person opened without `signIn`.
+ */
+export function personIdOf(anonId: string): string {
+  const id = personIds.get(anonId);
+  if (!id) throw new Error(`no signed-in person ${anonId}: open them with signIn: true`);
+  return id;
+}
 
 /** `extra` adds server options a driver needs, such as `identifyAgentCaller`
  *  so an agent can hold its token. */
@@ -135,6 +158,7 @@ export async function bootBoard(
   });
   const server = handle;
   const base = `http://127.0.0.1:${server.port}`;
+  serverBase = base;
   const post = async (path: string, payload: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
@@ -225,7 +249,18 @@ export async function bootBoard(
 export async function openPerson(
   width: number,
   height: number,
-  who: { anonId: string; name: string; ws: string; follow?: string; voice?: boolean },
+  who: {
+    anonId: string;
+    name: string;
+    ws: string;
+    follow?: string;
+    voice?: boolean;
+    /** Sign this person in, in their own browser, so the server names them
+     *  `name` rather than as the loopback owner (see `personIdOf`).
+     *  `'owner'` also makes the identity one of the owner's, for a driver
+     *  whose person talks to the lead, which only the owner may. */
+    signIn?: boolean | 'owner';
+  },
 ): Promise<Cdp> {
   const b = await launchChrome(
     resolveChromeBin(undefined),
@@ -257,6 +292,17 @@ export async function openPerson(
   const follow = who.follow
     ? `if (!sessionStorage.getItem('cw-follow:${who.ws}')) sessionStorage.setItem('cw-follow:${who.ws}', ${JSON.stringify(JSON.stringify({ key: who.follow }))});`
     : '';
+  if (who.signIn) {
+    if (!handle) throw new Error('openPerson signIn: bootBoard first');
+    const rec = handle.identities.upsertByEmail(`${who.anonId}@harborlight.example`, {
+      displayName: who.name,
+    });
+    personIds.set(who.anonId, rec.id);
+    if (who.signIn === 'owner') registerOwnerIdentity(rec.id);
+    const value = signSession(mintSession(rec.id), sessionKey(loadCookieKey(join(dir, 'data'))));
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setCookie', { name: SESSION_COOKIE, value, url: serverBase });
+  }
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
     source: `try { ${set('feedback-anon-id', who.anonId)} ${set('feedback-user-name', who.name)} ${who.voice ? set('cw.lead-chat.mode', 'voice') : ''} ${follow} } catch {}`,
   });

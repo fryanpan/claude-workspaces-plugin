@@ -70,7 +70,9 @@ export interface Follower {
 /**
  * The newest instruction the server addressed to THIS page (`show_person`),
  * or null. The server writes one at a time and addresses it to the tab its
- * person is attending to, so every other page reads past it.
+ * person is attending to, so every other page reads past it. Only a state
+ * with no `user` can carry one: the server's own state has none, and the
+ * server stamps a `user` on every state a page sends.
  */
 export function directiveFor(
   states: RoomStates,
@@ -79,7 +81,9 @@ export function directiveFor(
   let best: { seq: number; spot: PresenceSpot } | null = null;
   states.forEach((raw, id) => {
     if (id === clientID) return;
-    const d = parseDirective((raw as Record<string, unknown> | undefined)?.[DIRECTIVE_FIELD]);
+    const state = raw as Record<string, unknown> | undefined;
+    if (state?.user !== undefined) return;
+    const d = parseDirective(state?.[DIRECTIVE_FIELD]);
     if (d && d.to === clientID && (!best || d.seq > best.seq)) best = { seq: d.seq, spot: d.spot };
   });
   return best;

@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AddresseeResult } from '../addressees.ts';
 import type { AgentSpots } from '../agent-spots.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
@@ -167,6 +168,9 @@ export interface DocRoutesContext {
   ) => { id: string; name: string } | null;
   /** The board a doc belongs to, or null. */
   resolveWorkspaceForDoc: (docId: string) => string | null;
+  /** A comment's `to`, resolved against the roster of the boards this doc is
+   *  on (`addressees.ts`). Absent `to` answers ok with no addressees. */
+  addresseesFor: (docId: string, to: unknown) => AddresseeResult;
   /** Anyone besides the owner can reach the board: a share link, a member
    *  who redeemed one, or a share. */
   boardIsShared: (workspaceId: string) => boolean;

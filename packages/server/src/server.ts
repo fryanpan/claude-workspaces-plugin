@@ -19,6 +19,7 @@ import {
   ownerDisplayNames,
   ownerIdentityIds,
 } from './actor-identity.ts';
+import { type AddresseeRoster, resolveAddressees } from './addressees.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -30,11 +31,17 @@ import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
 import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
-import { localOnlyPlacesFrom, offBoxAskView } from './ask-feed.ts';
+import { localOnlyPlacesFrom, offBoxAddressedView, offBoxAskView } from './ask-feed.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
 import { identifyCallerAgent } from './auth/agent-caller.ts';
+import {
+  AgentGrantTokens,
+  agentGrantTokenKey,
+  agentGrantTokensPath,
+  appIdFrom,
+} from './auth/agent-grant-token.ts';
 import {
   authorizeAgentCaller,
   createLegacyAgentWarner,
@@ -121,7 +128,10 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { realTickScheduler } from './pause-ticker.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
+import { PersonAgentLinks } from './person-agent-link.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
+import { type PresenceRoster, presenceUserFor, resolveStamp } from './presence-identity.ts';
+import { FilePrivateMessageStore } from './private-messages.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
@@ -165,6 +175,7 @@ import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
 import { type OpsRoutesContext } from './routes/ops.ts';
+import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
@@ -238,6 +249,7 @@ import { meetingContext } from './voice-meeting-context.ts';
 import { VoiceRouter, parseVoiceContext } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 import { isRetired } from './workspace-store.ts';
+import { restampPerson } from './yjs-protocol.ts';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 8787);
 
@@ -2090,6 +2102,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     memberOf: audienceMemberOf,
   });
   trustBoardsFor = boardsForDoc;
+  /** Each person's one lead agent, linked when both sides agree. */
+  const personAgentLinks = new PersonAgentLinks(dataDir, identities);
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -2105,6 +2119,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Board agent tokens (`at2`) and their revocation record. */
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
+  );
+  /** Agent grants (`at3`): one agent, one app, one board, capped by the
+   *  agent's person. `personRoleOn` is declared below and read per verify. */
+  const agentGrantTokens = new AgentGrantTokens(
+    agentGrantTokensPath(dataDir),
+    () => agentGrantTokenKey(cookieKey()),
+    {
+      appId: appIdFrom(process.env.CW_APP_ID),
+      personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
+      roleOf: (boardId, personId) => {
+        const person = identities.get(personId);
+        return person ? personRoleOn(boardId, person) : null;
+      },
+      personActive: (personId) => identities.get(personId)?.status === 'active',
+    },
   );
   /** The threads those tokens opened, which the org relay checks a sender by. */
   const threadOpenerProofs = new ThreadOpenerProofs(threadOpenerProofsPath(dataDir));
@@ -2149,7 +2178,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
-    boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    boardAgentGrantFor: (bearer, via) =>
+      bearer.startsWith('at3.')
+        ? agentGrantTokens.verify(bearer, via)
+        : boardAgentTokens.verify(bearer),
     boardAgentHeld: (tokenId) => boardAgentTokens.isHeld(tokenId),
     // Forward references, as above: the board sockets are opened below, and
     // the agent-token key is derived further down.
@@ -2204,6 +2236,67 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * chains rather than composes — its per-request input is the admission
    * result, so it cannot be called until the gate has answered.
    */
+  // Every name a roster row or the owner goes by, lowercased: a guest may not
+  // show one in presence. Rebuilt only when a row changes.
+  let memberNameCache: { rev: number; names: Set<string> } | null = null;
+  const memberNames = (): Set<string> => {
+    const rev = identities.revision();
+    if (memberNameCache?.rev !== rev) {
+      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
+      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
+      memberNameCache = { rev, names };
+    }
+    return memberNameCache.names;
+  };
+  // Who an unproven writable loopback socket is (the owner), which proven ids
+  // are agents, and which names a guest may not show (presence-identity.ts).
+  // Presence and the unproven-browser rung of attribution read the same one.
+  const presenceRoster: PresenceRoster = {
+    owner: () => {
+      const id = ownerIdentityIds().at(-1) ?? 'owner';
+      return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
+    },
+    isAgent: (id) => identities.get(id)?.kind === 'agent',
+    reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
+  };
+  /** A person's role on a board: owner, a member's role, or null. */
+  const personRoleOn = (workspaceId: string, person: { id: string; email?: string }) => {
+    if (ownerIdentityIds().includes(person.id)) return 'owner' as const;
+    if (!person.email) return null;
+    if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner' as const;
+    return shareLinks.roleOf(workspaceId, person.email);
+  };
+  // Who a comment's `to` may name (`addressees.ts`): the owner, a member of a
+  // board the doc is on, or an agent attached to one.
+  const addresseeRoster: AddresseeRoster = {
+    identities,
+    owner: presenceRoster.owner,
+    isMember: (board, person) => personRoleOn(board, person) !== null,
+    attachedAgents: (board) => taskStore.listAttachments(board).map((a) => a.agentId),
+  };
+  const addresseesFor = (docId: string, to: unknown) => {
+    const row = taskIdOfBodyDoc(docId);
+    const rowBoard = row
+      ? (taskStore.getTask(row)?.workspaceId ?? taskStore.getGoalRow(row)?.workspaceId)
+      : undefined;
+    const boards = row ? (rowBoard ? [rowBoard] : []) : [...boardsForDoc(docId)];
+    return resolveAddressees(to, boards, addresseeRoster);
+  };
+  const unprovenBrowserAuthor = (req: Request, claimed: unknown): User => {
+    const u = resolveStamp(
+      presenceUserFor({
+        proven: null,
+        isAgent: presenceRoster.isAgent,
+        shareKey: null,
+        readOnly: false,
+        offBox: req.headers.has('cf-ray') || !isLoopbackAddress(server.requestIP(req)?.address),
+        owner: presenceRoster.owner,
+        ...(presenceRoster.reservedName ? { reservedName: presenceRoster.reservedName } : {}),
+      }),
+      claimed,
+    );
+    return { id: u.id, name: u.name, color: u.color, kind: u.kind === 'guest' ? 'anon' : 'known' };
+  };
   const { attributeRequest } = createRequestAttribution({
     identities,
     taskStore,
@@ -2211,6 +2304,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetBearerOf,
     widgetTokenGrantFor,
     j,
+    unprovenBrowserAuthor,
   });
 
   /**
@@ -2340,15 +2434,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
+    presenceRoster,
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
-    offBoxView: (payload) =>
-      offBoxAskView(
-        payload,
-        (ask) =>
-          localOnlyPlaces.board(ask.workspaceId) ||
-          (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
-      ),
+    offBoxView: (payload) => {
+      const addressed = offBoxAddressedView(payload, localOnlyPlaces);
+      return addressed
+        ? offBoxAskView(
+            addressed,
+            (ask) =>
+              localOnlyPlaces.board(ask.workspaceId) ||
+              (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
+          )
+        : undefined;
+    },
   });
   /**
    * What the operator routes read instead of this closure's scope. Built
@@ -2516,12 +2615,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    personRoleOn: (workspaceId, person) => {
-      if (ownerIdentityIds().includes(person.id)) return 'owner';
-      if (!person.email) return null;
-      if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
-      return shareLinks.roleOf(workspaceId, person.email);
-    },
+    personRoleOn,
     agentTokenKey: agentTokenKeyFor,
     ownerNoticeBoards: () => {
       const first = defaultBoardWorkspaceId();
@@ -2769,6 +2863,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** What the two agent-id-keyed routes read instead of this closure's
    *  scope — the watch set, the roster and the store a merge moves. */
   const agentIdentityRoutesCtx: AgentIdentityRoutesContext = {
+    personAgentLinks,
     agentWatches,
     identities,
     taskStore,
@@ -2786,9 +2881,36 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     warnRefusedMint,
   };
 
+  /** A person's private conversation with their own lead agent
+   *  (routes/private-messages.ts). The agent's messages ride one board's
+   *  stream and queue: the board it leads, else one it is live on, else
+   *  any it is attached to. */
+  const privateMessageRoutesCtx: PrivateMessageRoutesContext = {
+    store: new FilePrivateMessageStore(dataDir),
+    personAgentLinks,
+    identities,
+    taskStore,
+    sse,
+    boardForAgent: (agentId) => {
+      const attached = taskStore
+        .listWorkspaces()
+        .filter((w) => taskStore.listAttachments(w.id).some((a) => a.agentId === agentId));
+      const pick =
+        attached.find((w) => w.leadAgentId === agentId) ??
+        attached.find((w) => taskStore.hasLiveAttachmentFor(w.id, agentId)) ??
+        attached[0];
+      return pick?.id ?? null;
+    },
+    requestAddress: (req) => server.requestIP(req)?.address,
+    agentTokenKey: agentTokenKeyFor,
+    j,
+    safeJson,
+  };
+
   /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
   const boardTokenRoutesCtx: BoardTokenRoutesContext = {
     tokens: boardAgentTokens,
+    grants: agentGrantTokens,
     boardExists: (boardId) => taskStore.getWorkspace(boardId) !== undefined,
     ensureAgent: (agentId) => {
       const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
@@ -2882,6 +3004,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     canonicalDocId,
     backTargetFor,
     resolveWorkspaceForDoc,
+    addresseesFor,
     pageOpened,
     withReviewUrl,
     boardIndexForListing,
@@ -3050,6 +3173,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const authShareRoutesCtx: AuthShareRoutesContext = {
+    personAgentLinks,
+    // A rename reaches pages already open within a frame (yjs-protocol.ts).
+    onPersonRenamed: (personId, name) => void restampPerson(personId, name),
     docStore,
     sse,
     taskStore,
@@ -3373,6 +3499,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
+    privateMessageRoutesCtx,
     coachRoutesCtx,
     serveShellRoutes,
   });
@@ -3614,6 +3741,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForDeadWidgetGrants(
       (token, origin) => boardWidgetGrantFor(token, origin) !== null,
     );
+    // An agent grant whose person left the board or was archived: HTTP
+    // already refuses it (`AgentGrantTokens.verify`); this hangs up what it
+    // opened while it still held.
+    const lapsed = new Set(agentGrantTokens.lapsedMemberKeys());
+    if (lapsed.size > 0) {
+      docStore.closeSocketsForShareMembers((k) => lapsed.has(k));
+      sse.closeForShareMembers((k) => lapsed.has(k));
+    }
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);

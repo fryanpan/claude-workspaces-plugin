@@ -30,6 +30,7 @@ import {
   deadline,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   tap,
   until,
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
       const firstPerson = await openPerson(width, height, {
         anonId: `first-person-voice${width}`,
         name: 'Alice',
+        signIn: 'owner',
         ws,
         voice: true,
       });
@@ -207,7 +209,7 @@ async function main(): Promise<void> {
           // so centre the heading again until the spot shows it held.
           let last = 0;
           await until('the scroll read', async () => {
-            const spot = board.spotOf(`anon-first-person-voice${width}`);
+            const spot = board.spotOf(personIdOf(`first-person-voice${width}`));
             if (spot?.docId === board.docId && (spot.scroll ?? 0) > 0.1) return true;
             if (Date.now() - last > 500) {
               last = Date.now();
@@ -220,7 +222,7 @@ async function main(): Promise<void> {
           const frame = frameSurface(firstPerson, sessions, `!!document.getElementById('ferry')`);
           await until('the frame said where', async () => {
             await frame.eval(`document.getElementById('ferry').scrollIntoView({ block: 'start' })`);
-            const spot = board.spotOf(`anon-first-person-voice${width}`);
+            const spot = board.spotOf(personIdOf(`first-person-voice${width}`));
             return spot?.docId === board.mockId && (spot.scroll ?? 0) > 0.1 ? true : null;
           });
         }
@@ -243,6 +245,7 @@ async function main(): Promise<void> {
       const secondPerson = await openPerson(width, height, {
         anonId: `second-person-voice${width}`,
         name: 'Bob',
+        signIn: 'owner',
         ws,
         voice: true,
         follow: 'a-agent-house-lead',

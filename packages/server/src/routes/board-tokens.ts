@@ -3,7 +3,11 @@
  *
  *   GET  /api/board-tokens              every record, without token values
  *   POST /api/board-tokens              mint one: `{ agentId, boardId, label? }`;
- *                                       the value is returned once
+ *                                       the value is returned once. With
+ *                                       `version: "at3"` (and `role?`) it is an
+ *                                       agent grant (`auth/agent-grant-token.ts`),
+ *                                       refused for an agent with no person on
+ *                                       the board or a role above theirs
  *   POST /api/board-tokens/<id>/revoke  revoke one, and hang up what it opened
  *   POST /api/board-tokens/refresh      a fresh value for the live `at2` presented
  *
@@ -20,6 +24,7 @@
  * same record and nothing wider. A revoked or expired token never reaches it.
  */
 import { SHARED_AGENT_IDS } from '../agent-watches.ts';
+import type { AgentGrantClaims, AgentGrantTokens } from '../auth/agent-grant-token.ts';
 import { refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
 import {
   type BoardAgentTokens,
@@ -29,9 +34,12 @@ import {
 } from '../auth/board-agent-token.ts';
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
+import { normalizeBoardRole } from '../share/board-role.ts';
 
 export interface BoardTokenRoutesContext {
   tokens: BoardAgentTokens;
+  /** The `at3` agent grants, listed, revoked and refreshed beside them. */
+  grants: AgentGrantTokens;
   /** Whether a board of this id exists here. */
   boardExists: (boardId: string) => boolean;
   /** The roster row a mint makes sure of, so writes carry the agent's name.
@@ -66,7 +74,9 @@ export async function handleBoardTokenRoutes(
   if (pathname === BOARD_TOKEN_REFRESH_PATH) {
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
     if (!rq.boardAgent) return j(401, { error: 'board_token_required' });
-    const fresh = ctx.tokens.refresh(rq.boardAgent);
+    const fresh = isGrant(rq.boardAgent)
+      ? ctx.grants.refresh(rq.boardAgent)
+      : ctx.tokens.refresh(rq.boardAgent);
     if (!fresh) return j(401, { error: 'board_token_invalid' });
     return j(200, { ok: true, ...fresh });
   }
@@ -87,7 +97,7 @@ export async function handleBoardTokenRoutes(
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
     const id = revoke[1] ?? '';
     if (!isValidBoardTokenId(id)) return j(400, { error: 'bad token id' });
-    const record = ctx.tokens.revoke(id);
+    const record = ctx.tokens.revoke(id) ?? ctx.grants.revoke(id);
     if (!record) return j(404, { error: 'not_found' });
     // The token stops verifying on its next request; this ends the
     // connections it already holds open, which were authorized once.
@@ -95,7 +105,10 @@ export async function handleBoardTokenRoutes(
     return j(200, { ok: true, record, ...(closed ? { closed } : {}) });
   }
 
-  if (req.method === 'GET') return j(200, { tokens: ctx.tokens.list() });
+  if (req.method === 'GET') {
+    const grants = ctx.grants.list().map((r) => ({ ...r, version: 'at3' as const }));
+    return j(200, { tokens: [...ctx.tokens.list(), ...grants] });
+  }
   if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
   const body = await ctx.safeJson(req);
   const agentId = body?.agentId;
@@ -107,6 +120,24 @@ export async function handleBoardTokenRoutes(
   if (!ctx.boardExists(boardId)) return j(404, { error: 'unknown_workspace', boardId });
   if (!ctx.ensureAgent(agentId)) return j(400, { error: 'not an agent id', agentId });
   const label = typeof body?.label === 'string' ? body.label : '';
+  if (body?.version === 'at3') {
+    const role = body.role === undefined ? 'member' : normalizeBoardRole(body.role);
+    if (!role) return j(400, { error: 'bad role' });
+    const grant = ctx.grants.mint(agentId, boardId, label, role);
+    if (!grant.ok) return j(400, { error: grant.error });
+    return j(201, {
+      ...grant.record,
+      version: 'at3',
+      token: grant.token,
+      expiresAt: grant.expiresAt,
+    });
+  }
+  if (body?.version !== undefined && body.version !== 'at2')
+    return j(400, { error: 'bad version' });
   const { record, token, expiresAt } = ctx.tokens.mint(agentId, boardId, label);
   return j(201, { ...record, token, expiresAt });
+}
+
+function isGrant(claims: BoardAgentClaims): claims is AgentGrantClaims {
+  return (claims as Partial<AgentGrantClaims>).version === 'at3';
 }

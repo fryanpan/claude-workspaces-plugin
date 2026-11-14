@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.366";
+var version2 = "0.1.368";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/api\/agents\/[^/?]+\/(person|messages\/[^/?]+)$/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -14272,6 +14272,34 @@ function createCallToolHandler(deps) {
       endToolCall();
     }
   };
+}
+
+// packages/mcp/src/addressed-elsewhere.ts
+var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+function commentOf(event, payload) {
+  if (!payload || typeof payload !== "object")
+    return;
+  const p = payload;
+  if (p.comment && typeof p.comment === "object")
+    return p.comment;
+  if (event !== "thread.created")
+    return;
+  const comments = p.thread?.comments;
+  if (!Array.isArray(comments) || comments.length === 0)
+    return;
+  const lastComment = comments[comments.length - 1];
+  return lastComment && typeof lastComment === "object" ? lastComment : undefined;
+}
+function isAddressedElsewhere(event, payload, selfId) {
+  if (!COMMENT_EVENTS.has(event))
+    return false;
+  const self = selfId.trim().toLowerCase();
+  if (self === "" || self.startsWith("known-"))
+    return false;
+  const to = commentOf(event, payload)?.addressedTo;
+  if (!Array.isArray(to) || to.length === 0)
+    return false;
+  return !to.some((a) => a !== null && typeof a === "object" && typeof a.id === "string" && a.id.trim().toLowerCase() === self);
 }
 
 // packages/mcp/src/app-unreachable-line.ts
@@ -15098,6 +15126,15 @@ function personLandedIds(p) {
   return {};
 }
 
+// packages/mcp/src/private-message-line.ts
+var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+function privateMessageLine(p, selfId) {
+  if (p.from !== "person" || p.author?.id === selfId || !p.personId)
+    return null;
+  const who = p.author?.name || p.personId;
+  return `[private] ${who} (your person): ${clip2(p.text ?? "", 2000)} Answer with reply_private(personId="${p.personId}").`;
+}
+
 // packages/mcp/src/review-item-line.ts
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
@@ -15170,7 +15207,7 @@ function spawnRequestedLine(p) {
 }
 
 // packages/mcp/src/self-authored.ts
-var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+var COMMENT_EVENTS2 = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
 var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
 var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard|person)\./;
@@ -15202,7 +15239,7 @@ function frameActorId(event, payload) {
     return stringOf(p.agentId);
   if (ACTOR_FAMILY_RE.test(event))
     return idOf(p.actor);
-  if (!COMMENT_EVENTS.has(event))
+  if (!COMMENT_EVENTS2.has(event))
     return;
   const direct = idOf(p.comment?.author);
   if (direct)
@@ -15332,7 +15369,7 @@ function nowMs(deps) {
 function nowIso(deps) {
   return new Date(nowMs(deps)).toISOString();
 }
-var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
+var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person|private)\./;
 function dispatchReportedLine(p) {
   const who = p.agentName ?? p.actor?.name ?? "a builder";
   const commit = (p.headCommit ?? "").slice(0, 7);
@@ -15352,6 +15389,8 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   if (event === "dispatch.requested")
     return;
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
     return;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   let body;
@@ -15467,6 +15506,14 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = personLandedLine(rawPayload);
       Object.assign(p, personLandedIds(rawPayload));
       break;
+    case "private.message": {
+      const line = privateMessageLine(rawPayload, deps.authorId);
+      if (line === null)
+        return;
+      body = line;
+      p.actor = rawPayload.author;
+      break;
+    }
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ""}`;
   }
@@ -15481,6 +15528,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
         ...p.taskId ? { task_id: p.taskId } : {},
         ...p.docId ? { doc_id: p.docId } : {},
         ...p.reviewItemId ? { review_item_id: p.reviewItemId } : {},
+        ...p.personId ? { person_id: p.personId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -15500,6 +15548,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
     return;
   if (event === "review_item.answered")
     return;
@@ -16481,6 +16531,35 @@ var PERSON_TOOLS = [
       },
       required: ["workspaceId"]
     }
+  },
+  {
+    name: "confirm_person",
+    description: "Confirm which person you work for, by their sign-in email. You become their lead agent only once they have also named you in their profile; until then the reply says pending. Their private messages reach only their linked lead agent. email: null clears your side of the link.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        email: {
+          type: ["string", "null"],
+          description: "The person's sign-in email, or null to clear the link."
+        }
+      },
+      required: ["email"]
+    }
+  },
+  {
+    name: "reply_private",
+    description: "Answer a private message from your person (a [private] channel line). Only that person sees it, on their own stream; it never reaches the board, its threads or lead chat. Refused unless personId is the person linked to you (confirm_person).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        personId: {
+          type: "string",
+          description: "The personId the [private] line named."
+        },
+        text: { type: "string", description: "Your reply." }
+      },
+      required: ["personId", "text"]
+    }
   }
 ];
 
@@ -16661,6 +16740,12 @@ var CONFIRM_SCOPED_OVERWRITE = {
   type: "boolean",
   description: "Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance."
 };
+var ADDRESSEES_SCHEMA = {
+  type: "array",
+  items: { type: "string" },
+  maxItems: 10,
+  description: "Who this comment is for: person ids, emails or display names, or agent ids or names, on this board. Only they are notified, and the thread waits on them. Everyone who can read the doc still sees it. Omit to notify the board as usual."
+};
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -16757,7 +16842,8 @@ var TOOL_LIST = {
           docId: { type: "string" },
           threadId: { type: "string" },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "threadId", "text"]
       }
@@ -17042,7 +17128,8 @@ var TOOL_LIST = {
             required: ["replacement"]
           },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "text"]
       }
@@ -19668,7 +19755,8 @@ function threadCreateRequest(input, author, board) {
         author,
         text: input.text,
         anchor: { kind: "subject" },
-        ...input.review !== undefined ? { review: input.review } : {}
+        ...input.review !== undefined ? { review: input.review } : {},
+        ...input.to !== undefined ? { to: input.to } : {}
       }
     };
   }
@@ -19683,7 +19771,8 @@ function threadCreateRequest(input, author, board) {
       ...input.occurrence !== undefined ? { occurrence: input.occurrence } : {},
       ...input.path !== undefined ? { path: input.path } : {},
       ...input.suggest !== undefined ? { suggest: input.suggest } : {},
-      ...input.review !== undefined ? { review: input.review } : {}
+      ...input.review !== undefined ? { review: input.review } : {},
+      ...input.to !== undefined ? { to: input.to } : {}
     }
   };
 }
@@ -19758,8 +19847,13 @@ async function handleDocsTool(name, a, ctx) {
       return ok2(res);
     }
     case "post_reply": {
-      const { docId, threadId, text, review } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, { author: AUTHOR, text, ...review !== undefined ? { review } : {} });
+      const { docId, threadId, text, review, to } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, {
+        author: AUTHOR,
+        text,
+        ...review !== undefined ? { review } : {},
+        ...to !== undefined ? { to } : {}
+      });
       return ok2(res);
     }
     case "link_review_item": {
@@ -20432,6 +20526,10 @@ function refusalOf(e, codes) {
   return { error: `refused (${m[1]})` };
 }
 async function handlePersonTool(name, a, ctx) {
+  if (name === "confirm_person")
+    return confirmPerson(a, ctx);
+  if (name === "reply_private")
+    return replyPrivate(a, ctx);
   if (name !== "watch_person" && name !== "show_person")
     return;
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
@@ -20463,6 +20561,36 @@ async function handlePersonTool(name, a, ctx) {
       ...refused,
       ...refused.error === "not-here" ? { note: "Nobody is looking at this board now. Post the link on the task instead." } : {}
     });
+  }
+}
+async function confirmPerson(a, ctx) {
+  if (a.email !== null && (typeof a.email !== "string" || !a.email.trim())) {
+    return ctx.err("email is required (or null to clear)");
+  }
+  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
+    return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
+  }
+}
+async function replyPrivate(a, ctx) {
+  const personId = typeof a.personId === "string" ? a.personId.trim() : "";
+  const text = typeof a.text === "string" ? a.text.trim() : "";
+  if (!personId || !text)
+    return ctx.err("personId and text are required");
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`, { text });
+    return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
   }
 }
 
