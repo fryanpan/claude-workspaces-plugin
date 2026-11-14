@@ -1289,26 +1289,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.coachSummarizer ? { summarizer: opts.coachSummarizer } : {}),
     ...(opts.coachDigestWindowMs === undefined ? {} : { digestWindowMs: opts.coachDigestWindowMs }),
   });
-  // "Your coach" on `/` reads the coach store, the goals doc and whether the
-  // coach session is connected. None of the three broadcasts, so each tells
-  // the workspaces list's feed itself.
-  coachWiring.store.onChange = () => landingChanges.notify('coach');
   {
-    const onRevision = docStore.onContentRevision;
-    docStore.onContentRevision = (docIds, revision) => {
-      onRevision?.(docIds, revision);
-      const goals = coachWiring.store.goalsDoc?.docId;
-      if (goals && docIds.includes(goals)) landingChanges.notify('coach');
-    };
     const onAgentStreams = sse.onAgentStreams;
     sse.onAgentStreams = (channel, agentId) => {
       onAgentStreams?.(channel, agentId);
       const board = coachWiring.store.goalsDoc?.workspaceId;
-      if (board && channel === `ws~${board}`) {
-        landingChanges.notify('coach');
-        // The coach session is back: what waited while it was away goes now.
-        coachWiring.agentStreamsChanged(board, agentId);
-      }
+      // The coach session is back: what waited while it was away goes now.
+      if (board && channel === `ws~${board}`) coachWiring.agentStreamsChanged(board, agentId);
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks
@@ -2265,7 +2252,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // Started further down, with the other registered features; the page
     // reads it at request time.
     landingInbox: (rankOf) => features.inbox.landingSection(rankOf),
-    landingCoach: () => coachWiring.landing(),
     landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
     appVoiceSeed,
   });
