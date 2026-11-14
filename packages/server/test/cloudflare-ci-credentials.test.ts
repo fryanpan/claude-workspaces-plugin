@@ -6,7 +6,9 @@
  * fake token; nothing calls Cloudflare.
  */
 import { describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import {
   type MainIo,
   USAGE,
@@ -221,11 +223,35 @@ describe('main', () => {
     expect(Object.keys(runs[0]?.env ?? {})).not.toContain('R2_SECRET_ACCESS_KEY');
   });
 
+  it('takes the command without the separator, which is how bun hands it over', async () => {
+    const plain = io({ CLOUDFLARE_API_TOKEN: TOKEN });
+    expect(await main(['bun', 'infra/cloudflare/run.ts', 'apply', 'prod', '--ci'], plain.m)).toBe(
+      7,
+    );
+    expect(plain.runs[0]?.cmd).toEqual(['bun', 'infra/cloudflare/run.ts', 'apply', 'prod', '--ci']);
+    const flagged = io({ CLOUDFLARE_API_TOKEN: TOKEN });
+    expect(await main(['--account-id', 'true'], flagged.m)).toBe(7);
+    expect(flagged.runs[0]?.cmd).toEqual(['true']);
+  });
+
+  it('as the workflows call it, `bun ci-credentials.ts -- <cmd>` reaches the credentials step, not usage', () => {
+    // bun eats the first `--`, so this is the shape CI's script sees. With no
+    // token the run stops at the credentials (1), never at usage (2).
+    const env: Record<string, string> = { PATH: process.env.PATH ?? '' };
+    const r = spawnSync(
+      process.execPath,
+      [join(import.meta.dir, '../../../infra/cloudflare/ci-credentials.ts'), '--', 'true'],
+      { env, encoding: 'utf8' },
+    );
+    expect(r.stderr).not.toContain('usage:');
+    expect(r.status).toBe(1);
+  });
+
   it('runs nothing when the credentials cannot be made, or the usage is wrong', async () => {
     const missing = io({});
     expect(await main(['--', 'true'], missing.m)).toBe(1);
     expect(missing.runs).toEqual([]);
-    for (const argv of [['true'], ['--'], ['--account', '--', 'true']]) {
+    for (const argv of [[], ['--'], ['--account', '--', 'true'], ['--account', 'true']]) {
       const bad = io({ CLOUDFLARE_API_TOKEN: TOKEN });
       expect(await main(argv, bad.m)).toBe(2);
       expect(bad.events).toEqual([`err ${USAGE.trim()}`]);
