@@ -65,6 +65,10 @@ export interface ComponentBuildOptions {
   guards?: BuildGuards;
   /** Called with each finished build, for a test to time. */
   onBuilt?: (docId: string, key: string, outcome: BuildOutcome) => void;
+  /** The owner's folder grants (`component-grants.ts`). A new grant makes
+   *  every tag build again on the next sweep, so a refused one that it
+   *  covers builds without a save. */
+  grants?: { covers(realPath: string): boolean; readonly version: number };
 }
 
 interface TagState {
@@ -74,12 +78,13 @@ interface TagState {
 
 export class DocComponentBuilds {
   private ticker: ReturnType<typeof setInterval> | null = null;
-  private readonly inFlight = new Set<string>();
+  private readonly inFlight = new Map<string, Promise<void>>();
   private readonly tags = new Map<string, Map<string, TagState>>();
   private readonly workTrees = new Map<string, Promise<string | null>>();
   private readonly cdn: CdnStore;
   readonly bundleDir: string;
   private readonly guards: BuildGuards;
+  private grantsSeen = 0;
 
   constructor(
     private readonly host: ComponentBuildHost,
@@ -141,53 +146,71 @@ export class DocComponentBuilds {
     return null;
   }
 
-  /** Build what changed in `doc`, and drop builds whose tag is gone. */
+  /** Build what changed in `doc`, and drop builds whose tag is gone. A call
+   *  made while a pass runs waits for it and then runs its own, so an agent
+   *  that just placed a tag gets back a pass that saw it. */
   async refresh(doc: LiveDoc): Promise<void> {
-    if (this.inFlight.has(doc.docId)) return;
+    const running = this.inFlight.get(doc.docId);
+    if (running) {
+      await running;
+      const next = this.inFlight.get(doc.docId);
+      if (next) return next;
+    }
+    const pass = this.pass(doc);
+    this.inFlight.set(doc.docId, pass);
+    try {
+      await pass;
+    } finally {
+      if (this.inFlight.get(doc.docId) === pass) this.inFlight.delete(doc.docId);
+    }
+  }
+
+  private async pass(doc: LiveDoc): Promise<void> {
     const md = this.host.boundPathOf(doc.docId);
     if (!md || !isMdxPath(md)) return;
-    this.inFlight.add(doc.docId);
-    try {
-      const inputs = componentInputs(mdxFlowSources(prose.getProseFragment(doc.ydoc))).slice(
-        0,
-        MAX_COMPONENTS_PER_DOC,
-      );
-      const state = this.tags.get(doc.docId) ?? new Map<string, TagState>();
-      this.tags.set(doc.docId, state);
-      const map = componentBuildsMap(doc.ydoc);
-      const live = new Set(inputs.map((i) => i.key));
-      const gone = [...map.keys()].filter((k) => !live.has(k));
-      for (const k of [...state.keys()]) if (!live.has(k)) state.delete(k);
-      if (gone.length > 0) {
-        doc.ydoc.transact(() => {
-          for (const k of gone) map.delete(k);
-        }, COMPONENT_BUILD_ORIGIN);
-      }
-      for (const input of inputs) {
-        const prev = state.get(input.key);
-        const recorded = componentBuildOf(map, input.key);
-        if (prev && recorded && !(await this.changed(prev.seen))) continue;
-        const seen = prev ? await this.stamp([...prev.seen.keys()]) : new Map<string, number>();
-        const outcome = await buildComponent({
-          docPath: md,
-          input,
-          cdn: this.cdn,
-          guards: this.guards,
-          // No git is started in a walled lead's folder: the build uses the
-          // lead root as its boundary and reads through tree-fs.
-          workTree: this.walled(md) ? null : await this.workTreeOf(md),
-        });
-        // Stamped before the build where the paths were known, so a save
-        // landing mid-build still differs on the next sweep.
-        const fresh = await this.stamp(outcome.watch.filter((p) => !seen.has(p)));
-        for (const [p, v] of fresh) seen.set(p, v);
-        for (const p of [...seen.keys()]) if (!outcome.watch.includes(p)) seen.delete(p);
-        state.set(input.key, { seen });
-        this.record(doc, input.key, outcome);
-        this.opts.onBuilt?.(doc.docId, input.key, outcome);
-      }
-    } finally {
-      this.inFlight.delete(doc.docId);
+    const grants = this.opts.grants;
+    if (grants && grants.version !== this.grantsSeen) {
+      this.grantsSeen = grants.version;
+      this.tags.clear();
+    }
+    const inputs = componentInputs(mdxFlowSources(prose.getProseFragment(doc.ydoc))).slice(
+      0,
+      MAX_COMPONENTS_PER_DOC,
+    );
+    const state = this.tags.get(doc.docId) ?? new Map<string, TagState>();
+    this.tags.set(doc.docId, state);
+    const map = componentBuildsMap(doc.ydoc);
+    const live = new Set(inputs.map((i) => i.key));
+    const gone = [...map.keys()].filter((k) => !live.has(k));
+    for (const k of [...state.keys()]) if (!live.has(k)) state.delete(k);
+    if (gone.length > 0) {
+      doc.ydoc.transact(() => {
+        for (const k of gone) map.delete(k);
+      }, COMPONENT_BUILD_ORIGIN);
+    }
+    for (const input of inputs) {
+      const prev = state.get(input.key);
+      const recorded = componentBuildOf(map, input.key);
+      if (prev && recorded && !(await this.changed(prev.seen))) continue;
+      const seen = prev ? await this.stamp([...prev.seen.keys()]) : new Map<string, number>();
+      const outcome = await buildComponent({
+        docPath: md,
+        input,
+        cdn: this.cdn,
+        guards: this.guards,
+        // No git is started in a walled lead's folder: the build uses the
+        // lead root as its boundary and reads through tree-fs.
+        workTree: this.walled(md) ? null : await this.workTreeOf(md),
+        ...(grants ? { granted: (p: string) => grants.covers(p) } : {}),
+      });
+      // Stamped before the build where the paths were known, so a save
+      // landing mid-build still differs on the next sweep.
+      const fresh = await this.stamp(outcome.watch.filter((p) => !seen.has(p)));
+      for (const [p, v] of fresh) seen.set(p, v);
+      for (const p of [...seen.keys()]) if (!outcome.watch.includes(p)) seen.delete(p);
+      state.set(input.key, { seen });
+      this.record(doc, input.key, outcome);
+      this.opts.onBuilt?.(doc.docId, input.key, outcome);
     }
   }
 

@@ -33,6 +33,7 @@ import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { ComponentGrants } from './component-grants.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
@@ -651,6 +652,8 @@ export class DocStore {
   });
   /** The component builds of each open `.mdx` doc (doc-component-builds.ts). */
   private readonly componentBuilds: DocComponentBuilds;
+  /** The owner's component folder grants; the access door writes them. */
+  readonly componentGrants: ComponentGrants;
   /** An idle sweep is part-way through, handing the loop back between docs. */
   private sweeping = false;
   /**
@@ -970,6 +973,11 @@ export class DocStore {
     this.componentBuilds.noteOpened(doc);
   }
 
+  /** Build `doc`'s component tags now, as a page opening it would. */
+  refreshComponents(doc: LiveDoc): Promise<void> {
+    return this.componentBuilds.refresh(doc);
+  }
+
   /** The file of a component build `doc`'s map names, or null. */
   componentBundlePath(doc: LiveDoc, hash: string): string | null {
     return this.componentBuilds.bundlePathFor(doc, hash);
@@ -1086,12 +1094,17 @@ export class DocStore {
   constructor(private cfg: DocStoreConfig) {
     if (!existsSync(cfg.dataDir)) mkdirSync(cfg.dataDir, { recursive: true });
     this.repos = new RepoRegistry(cfg.dataDir);
+    this.componentGrants = new ComponentGrants(cfg.dataDir);
     this.componentBuilds = new DocComponentBuilds(
       {
         openDocs: () => [...this.docs.values()].filter((d) => d.conns.size > 0),
         boundPathOf: (docId) => this.boundPathOf(docId),
       },
-      { dataDir: cfg.dataDir, ...(cfg.componentFetch ? { fetch: cfg.componentFetch } : {}) },
+      {
+        dataDir: cfg.dataDir,
+        grants: this.componentGrants,
+        ...(cfg.componentFetch ? { fetch: cfg.componentFetch } : {}),
+      },
     );
     this.editSessions = new EditSessionTracker({
       ...(cfg.editSessionIdleMs !== undefined ? { idleMs: cfg.editSessionIdleMs } : {}),
