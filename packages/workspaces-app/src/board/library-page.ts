@@ -5,9 +5,9 @@
  * kind of doc really lives (mock v2).
  *
  * Four states, one at a time: the front page (Starred, the Recently Viewed /
- * Recently Created tabs, the folders, then the fold), the full list with a way back, the docs in
- * one location with a way back, and search results while the box holds a
- * term. A row is its title and one time — the page exists so that finding a
+ * Recently Created tabs, the folders, then the fold), the full list with a
+ * way back, the docs in one location with a way back, and search results
+ * while the box holds a term. A row is its title and one time — the page exists so that finding a
  * doc never needs a repo path, so no row carries one.
  *
  * Opening reuses the review-doc page and builds nothing new there: a row the
