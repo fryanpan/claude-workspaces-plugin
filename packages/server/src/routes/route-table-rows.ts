@@ -422,6 +422,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // An agent's add files an access card instead of applying; a removal
     // applies at once. Off the member allowlist: no share visitor reaches it.
     ['trusted-local', '/workspaces/:ws/audience', 'POST'],
+    // Whether comment and view are enforced on this board (D1 step 8). Off
+    // the member allowlist, like the audience: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/roles-mode', 'POST'],
   ]),
 
   ...family('routes/workspace-content.ts', [

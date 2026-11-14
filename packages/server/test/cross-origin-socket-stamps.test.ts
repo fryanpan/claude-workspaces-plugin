@@ -59,6 +59,8 @@ function stampFor(path: string, c: Case): UpgradeData {
     taskStore: { getWorkspace: (id: string) => (id === WS ? { id } : undefined) },
     isValidDocId: () => true,
     workspacesOfMember: () => [WS],
+    boardAccessOf: () => 'edit',
+    rolesModeOf: () => 'report-only',
     policyFor: () => ({
       requestOrigin: OWN,
       localHostnames: ['localhost', '127.0.0.1'],

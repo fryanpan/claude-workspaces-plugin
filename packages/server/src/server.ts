@@ -63,6 +63,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
@@ -377,6 +378,8 @@ export interface ServerHandle {
    *  Exposed so a test can name who a board admits without a person's
    *  browser, which is the only other door that may (`board-audience.ts`). */
   shareLinks: ShareLinks;
+  /** The core room hosts every revoke rechecks (`collab-rooms.ts`). */
+  collabRooms: CollabRooms;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -1125,6 +1128,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -2117,6 +2121,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
   const removeLeadBindGuard = boundFiles.guards.add(boardSocketRoots);
   /** Board agent tokens (`at2`) and their revocation record. */
+  /** The core room hosts every revoke rechecks (collab-rooms.ts). */
+  const collabRooms = new CollabRooms();
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -2130,7 +2136,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
       roleOf: (boardId, personId) => {
         const person = identities.get(personId);
-        return person ? personRoleOn(boardId, person) : null;
+        if (!person) return null;
+        // A grant is edit-level at most, so a person whose access is comment
+        // or view holds nothing grantable: the mint refuses and the sweep
+        // hangs up a grant minted before the person was narrowed.
+        const access = person.email ? shareLinks.accessRoleOf(boardId, person.email) : null;
+        if (access === 'comment' || access === 'view') return null;
+        return personRoleOn(boardId, person);
       },
       personActive: (personId) => identities.get(personId)?.status === 'active',
     },
@@ -2425,6 +2437,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     canonicalDocId,
     fileUnderBoardWorkspace,
+    boardAccessOf,
+    rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2916,9 +2930,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
       return rec !== null && rec.kind === 'agent';
     },
-    closeConnections: (memberKey) =>
-      docStore.closeSocketsForShareMembers((k) => k === memberKey) +
-      sse.closeForShareMembers((k) => k === memberKey),
+    closeConnections: (memberKey) => {
+      collabRooms.recheck();
+      return (
+        docStore.closeSocketsForShareMembers((k) => k === memberKey) +
+        sse.closeForShareMembers((k) => k === memberKey)
+      );
+    },
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -3308,6 +3326,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    collabRooms,
     agentSpots,
     personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
@@ -3735,6 +3754,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    collabRooms.recheck();
     // A tailnet widget door socket is authorized once at its upgrade too, by
     // a board token that expires and that the roster can revoke — and no
     // share is needed for the door, so this half runs without one.
@@ -3874,6 +3894,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     folderWatches,
     shares,
     shareLinks,
+    collabRooms,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },

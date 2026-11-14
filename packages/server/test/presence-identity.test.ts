@@ -260,6 +260,8 @@ describe('the name each upgrade stamps', () => {
       taskStore: { getWorkspace: (id: string) => (id === WS ? { id } : undefined) },
       isValidDocId: () => true,
       workspacesOfMember: () => [WS],
+      boardAccessOf: () => 'edit',
+      rolesModeOf: () => 'report-only',
       policyFor: () => ({
         requestOrigin: 'http://localhost:8787',
         localHostnames: ['localhost', '127.0.0.1'],

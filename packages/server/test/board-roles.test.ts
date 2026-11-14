@@ -225,10 +225,10 @@ describe('the level is enforced by the API', () => {
     // Everything in a workspace is available to everyone in it: a person who
     // cannot see who else is here cannot know who reads what they write.
     const body = await jj<{
-      you: { email: string; role: string };
+      you: { email: string; role: string; accessRole: string };
       members: Array<{ email: string; role: string }>;
     }>(await asVisitor(REGULAR, `/workspaces/${encodeURIComponent(board)}/members`));
-    expect(body.you).toEqual({ email: REGULAR, role: 'member' });
+    expect(body.you).toEqual({ email: REGULAR, role: 'member', accessRole: 'edit' });
     expect(Object.fromEntries(body.members.map((m) => [m.email, m.role]))).toEqual({
       [REGULAR]: 'member',
       [PROMOTED]: 'owner',
