@@ -184,16 +184,22 @@ export async function handleDocsTool(
       return ok(res);
     }
     case 'post_reply': {
-      const { docId, threadId, text, review } = a as {
+      const { docId, threadId, text, review, to } = a as {
         docId: string;
         threadId: string;
         text: string;
         review?: unknown;
+        to?: unknown;
       };
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`,
-        { author: AUTHOR, text, ...(review !== undefined ? { review } : {}) },
+        {
+          author: AUTHOR,
+          text,
+          ...(review !== undefined ? { review } : {}),
+          ...(to !== undefined ? { to } : {}),
+        },
       );
       return ok(res);
     }

@@ -47,6 +47,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'agent-token'],
   ['api', 'auth', 'logout'],
   ['api', 'auth', 'profile'],
+  ['api', 'me', 'messages'],
   ['api', 'auth', 'reauth'],
   ['api', 'auth', 'session'],
   ['api', 'auth', 'start'],
@@ -137,6 +138,8 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // /api/agents/:id/...
   ['api', 'agents', ':id', 'watches'],
   ['api', 'agents', ':id', 'merge'],
+  ['api', 'agents', ':id', 'person'],
+  ['api', 'agents', ':id', 'messages', ':id'],
   // /workspaces/:id/docs/:id and its ~30 subroutes (canonicalized once in
   // server.ts, then dispatched on the literal 'rest' of the path)
   ['workspaces', ':id', 'docs', ':id'],
@@ -252,6 +255,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // Board collections addressed the canonical way — the live event stream
   // and the agent roster, both moved off names the glossary spends elsewhere.
   ['workspaces', ':id', 'events:stream'],
+  ['workspaces', ':id', 'me', 'events:stream'],
   ['workspaces', ':id', 'agents'],
   ['workspaces', ':id', 'agents', ':id'],
   ['workspaces', ':id', 'agents', ':id', 'heartbeat'],

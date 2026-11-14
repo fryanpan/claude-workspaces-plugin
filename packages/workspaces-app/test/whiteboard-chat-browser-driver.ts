@@ -9,6 +9,7 @@ import {
   deadline,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   tap,
   until,
@@ -116,17 +117,22 @@ async function presence(
 ): Promise<PresenceCase> {
   const B = `/workspaces/${board.ws}`;
   const anonId = `mover${width}`;
-  const tab = await openPerson(width, height, { anonId, name: 'Alice', ws: board.ws });
+  const tab = await openPerson(width, height, {
+    anonId,
+    name: 'Alice',
+    ws: board.ws,
+    signIn: true,
+  });
   const lead = `${LEAD.agentName} · pointing in ${whiteboard}`;
   await board.point({ docId: board.docId });
   await navigate(tab, `${board.base}${B}/docs/${board.docId}`);
   await until('the person on the doc', () =>
-    board.spotOf(`anon-${anonId}`)?.docId === board.docId ? true : null,
+    board.spotOf(personIdOf(anonId))?.docId === board.docId ? true : null,
   );
   await board.point({ docId: whiteboard, x: 400, y: 300 });
   const moved = navigate(tab, `${board.base}${B}/whiteboards/${whiteboard}`);
   await until('the person on the whiteboard', () =>
-    board.spotOf(`anon-${anonId}`)?.docId === whiteboard ? true : null,
+    board.spotOf(personIdOf(anonId))?.docId === whiteboard ? true : null,
   );
   const arrived = Date.now();
   await until(

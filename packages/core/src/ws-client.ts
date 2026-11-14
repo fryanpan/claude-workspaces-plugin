@@ -196,24 +196,22 @@ export function connect(
       encoding.writeVarUint(enc, MSG_SYNC);
       syncProtocol.writeSyncStep1(enc, ydoc);
       ws.send(encoding.toUint8Array(enc));
-      // Push our local awareness so peers see us after a (re)connect.
+      // Push our own awareness so peers see us after a (re)connect: only our
+      // own client id. The server holds every peer's state already, and it
+      // drops an entry for a client id another socket holds, so re-sending
+      // the peers we heard about was always wasted and now never lands.
       //
-      // Skipped only when `getStates()` is genuinely empty. This used to say
-      // it was a no-op "for clients (like the widget) that never set local
-      // awareness state", which was wrong in the one case it named: the real
-      // `Awareness` constructor ends with `this.setLocalState({})`, so a
-      // client that never touches presence still holds one entry and still
-      // sends this frame. It is true of the widget now because its build
-      // stands a stand-in in for the module — see
-      // `packages/widget/scripts/shims/y-protocols-awareness.ts` — and false
-      // of anything else that has not.
-      const states = awareness.getStates();
-      if (states.size > 0) {
+      // Skipped only when our local state is null. The real `Awareness`
+      // constructor ends with `this.setLocalState({})`, so a client that
+      // never touches presence still sends this frame; the widget does not
+      // because its build stands a stand-in in for the module — see
+      // `packages/widget/scripts/shims/y-protocols-awareness.ts`.
+      if (awareness.getLocalState() !== null) {
         const enc2 = encoding.createEncoder();
         encoding.writeVarUint(enc2, MSG_AWARENESS);
         encoding.writeVarUint8Array(
           enc2,
-          awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(states.keys())),
+          awarenessProtocol.encodeAwarenessUpdate(awareness, [ydoc.clientID]),
         );
         ws.send(encoding.toUint8Array(enc2));
       }

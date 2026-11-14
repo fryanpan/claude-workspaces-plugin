@@ -36,6 +36,7 @@ import type { Identities } from '../identities.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import type { PersonAgentLinks } from '../person-agent-link.ts';
 import type { TaskStore } from '../tasks.ts';
 
 /** The long-lived collaborators these two routes need. */
@@ -84,6 +85,8 @@ export interface AgentIdentityRoutesContext {
   identifyAgentCaller: (req: Request) => Promise<CallerAgent>;
   /** Logs a refused mint, at most once per agent id and reason. */
   warnRefusedMint: (agentId: string, reason: string) => void;
+  /** Each person's lead agent; this family writes the agent's side. */
+  personAgentLinks: PersonAgentLinks;
 }
 
 /** What only this request knows. */
@@ -181,6 +184,45 @@ export async function handleAgentIdentityRoutes(
       return j(400, { error: SHARED_IDENTITY_ERROR, message: SHARED_IDENTITY_MESSAGE });
     }
     return mintForCaller(ctx, req, resolved.identity.author.id);
+  }
+
+  // --- REST: the agent's half of its person link ---
+  //
+  // `POST /api/agents/<id>/person { personId | email | null }`. The agent
+  // confirms which person it works for; the link holds only once that person
+  // has named it too (person-agent-link.ts). Behind a token, with no legacy
+  // path: an `at1` for this agent (loopback, not a browser, no cf-ray), or an
+  // `at2` whose agent is this one.
+  const agentPersonMatch = pathname.match(/^\/api\/agents\/([^/]+)\/person$/);
+  if (agentPersonMatch && req.method === 'POST') {
+    if (visitor && !boardAgent) return j(403, { error: 'not available to share visitors' });
+    const agentId = decodeURIComponent(agentPersonMatch[1] ?? '');
+    if (!isValidAgentId(agentId)) return j(400, { error: 'bad agentId' });
+    if (boardAgent) {
+      if (agentId !== boardAgent.agentId) return j(403, { error: 'out_of_board_token_scope' });
+    } else {
+      const allowed = authorizeAgentCaller({
+        agentId,
+        req,
+        address: requestAddress(req),
+        key: agentTokenKey(),
+        requireToken: true,
+      });
+      if (!allowed.ok) return j(allowed.status, allowed.body);
+    }
+    const body = await safeJson(req);
+    let personId: string | null = null;
+    if (typeof body?.email === 'string') {
+      personId = identities.byEmail(body.email)?.id ?? null;
+      if (personId === null) return j(400, { error: 'not_a_person' });
+    } else if (typeof body?.personId === 'string') {
+      personId = body.personId.trim();
+    } else if (body?.personId !== null) {
+      return j(400, { error: 'person_required' });
+    }
+    const result = ctx.personAgentLinks.confirmPerson(agentId, personId);
+    if (!result.ok) return j(400, { error: result.error });
+    return j(200, { ok: true, state: result.state });
   }
 
   // --- REST: durable agent watches ---

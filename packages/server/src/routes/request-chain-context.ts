@@ -42,6 +42,7 @@ import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
 import type { MountRoutesContext } from './mounts.ts';
 import type { OpsRoutesContext } from './ops.ts';
+import type { PrivateMessageRoutesContext } from './private-messages.ts';
 import type { PromptRoutesContext } from './prompts.ts';
 import type { RecallWebhookRoutesContext } from './recall-webhook.ts';
 import type { RepoRoutesContext } from './repos.ts';
@@ -129,6 +130,8 @@ export interface RequestChainContext {
   /** Every registered feature's routes (`features.ts`), tried at the
    *  position the inbox routes held. */
   featureRoutes: FeatureRoutes;
+  /** A person's private conversation with their own lead agent. */
+  privateMessageRoutesCtx: PrivateMessageRoutesContext;
   coachRoutesCtx: CoachRoutesContext;
   serveShellRoutes: ShellStatic['serveShellRoutes'];
   /** The wrong-form board links and the relative-link open route

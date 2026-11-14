@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { readAddressedTo, waitingOnOf } from './addressed-to.ts';
 import { readPageEdits, readSuggestionField } from './page-edits.ts';
 import { type ReviewPayload, readReviewPayload } from './review-item.ts';
 import { readStoredSummary } from './thread-summary.ts';
@@ -215,6 +216,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
         // which is the state a renderer can always draw.
         const deliveredRaw = c.get('deliveredAt');
         const deliveredAt = typeof deliveredRaw === 'number' ? deliveredRaw : undefined;
+        const addressedTo = readAddressedTo(c.get('addressedTo'));
         comments.push({
           id,
           author,
@@ -222,6 +224,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
           ts,
           ...(via ? { via } : {}),
           ...(deliveredAt !== undefined ? { deliveredAt } : {}),
+          ...(addressedTo ? { addressedTo } : {}),
           ...(voice ? { voice } : {}),
           ...(pageEdits ? { pageEdits } : {}),
           ...readSuggestionField(c.get('pageSuggestion')),
@@ -233,6 +236,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
   }
 
   const statusVia = readWriteVia(threadMap.get('statusVia'));
+  const waitingOn = waitingOnOf(status, comments);
   const lastActivity =
     comments.length > 0 ? (comments[comments.length - 1]?.ts ?? createdAt) : createdAt;
 
@@ -250,6 +254,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
     // must not be able to reach `threadLines`.
     ...(summary ? { summary } : {}),
     ...(statusVia ? { statusVia } : {}),
+    ...(waitingOn ? { waitingOn } : {}),
   };
 }
 
@@ -270,9 +275,11 @@ export interface CreateThreadArgs {
   /** `pageEdits` and `pageSuggestion` are the page's words — see `page-edits.ts`. */
   firstComment: Pick<
     Comment,
-    'id' | 'text' | 'review' | 'voice' | 'pageEdits' | 'pageSuggestion' | 'via'
+    'id' | 'text' | 'review' | 'voice' | 'pageEdits' | 'pageSuggestion' | 'via' | 'addressedTo'
   >;
 }
+
+const EXTRAS = ['review', 'voice', 'pageEdits', 'pageSuggestion', 'via', 'addressedTo'] as const;
 
 export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
   const threads = getThreads(doc);
@@ -286,7 +293,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
     firstCommentMap.set('author', args.createdBy);
     firstCommentMap.set('text', args.firstComment.text);
     firstCommentMap.set('ts', now);
-    for (const k of ['review', 'voice', 'pageEdits', 'pageSuggestion', 'via'] as const) {
+    for (const k of EXTRAS) {
       if (args.firstComment[k]) firstCommentMap.set(k, args.firstComment[k]);
     }
     comments.push([firstCommentMap]);
@@ -308,7 +315,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
 export function postReply(
   doc: Y.Doc,
   threadId: string,
-  reply: { id: string; author: User; text: string; review?: ReviewPayload; via?: WriteVia },
+  reply: Pick<Comment, 'id' | 'author' | 'text' | 'review' | 'via' | 'addressedTo'>,
 ): Comment | null {
   const threads = getThreads(doc);
   const threadMap = threads.get(threadId);
@@ -322,18 +329,10 @@ export function postReply(
     cm.set('author', reply.author);
     cm.set('text', reply.text);
     cm.set('ts', now);
-    if (reply.review) cm.set('review', reply.review);
-    if (reply.via) cm.set('via', reply.via);
+    for (const k of ['review', 'via', 'addressedTo'] as const) if (reply[k]) cm.set(k, reply[k]);
     comments.push([cm]);
   });
-  return {
-    id: reply.id,
-    author: reply.author,
-    text: reply.text,
-    ts: now,
-    ...(reply.review ? { review: reply.review } : {}),
-    ...(reply.via ? { via: reply.via } : {}),
-  };
+  return { ...reply, ts: now };
 }
 
 /**
