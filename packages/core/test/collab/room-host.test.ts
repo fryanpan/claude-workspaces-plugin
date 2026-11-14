@@ -142,18 +142,68 @@ describe('sync between pages', () => {
   });
 });
 
+describe('a connection that misbehaves', () => {
+  it('drops a garbled frame and keeps serving the room', async () => {
+    const host = createRoomHost({ storage: new MemoryCollabStorage(), role: roles });
+    const a = page(host, 'harborlight', 'alice');
+    const b = page(host, 'harborlight', 'saltmarsh');
+    // A sync step 1 whose state vector runs past the end of the frame.
+    for (const garbled of [[0], [0, 0, 5, 1]]) {
+      expect(() => a.conn?.receive(new Uint8Array(garbled))).not.toThrow();
+    }
+    a.ydoc.getText('t').insert(0, 'still here');
+    await settle();
+    expect(b.ydoc.getText('t').toString()).toBe('still here');
+  });
+
+  it('saves a change even when another socket throws on send', async () => {
+    const storage = new MemoryCollabStorage();
+    const host = createRoomHost({
+      storage,
+      role: roles,
+      saveDelayMs: 10_000,
+      actions: { write: (ctx) => ctx.doc.getText('t').insert(0, 'kept') },
+    });
+    let sends = 0;
+    const dead = host.connect({
+      roomId: 'harborlight',
+      principal: { id: 'saltmarsh' },
+      send: () => {
+        if (++sends > 1) throw new Error('socket gone');
+      },
+    });
+    expect(dead.ok).toBe(true);
+    expect(host.action('harborlight', { id: 'alice' }, 'write', {})).toMatchObject({ ok: true });
+    host.flush();
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, storage.read('harborlight') ?? new Uint8Array());
+    expect(doc.getText('t').toString()).toBe('kept');
+  });
+});
+
 describe('actions', () => {
   const setup = () => {
     const handler = vi.fn((ctx: { doc: Y.Doc }, body: Record<string, unknown>) => {
       ctx.doc.getText('t').insert(0, String(body.text));
       return 'done';
     });
-    const host = createRoomHost({
-      storage: new MemoryCollabStorage(),
-      role: roles,
-      actions: { write: handler },
+    const peek = vi.fn((ctx: { doc: Y.Doc }) => {
+      ctx.doc.getText('t').insert(0, 'scribble ');
+      return ctx.doc.getText('t').toString();
     });
-    return { host, handler };
+    const storage = new MemoryCollabStorage();
+    const host = createRoomHost({
+      storage,
+      role: roles,
+      actions: { write: handler, peek: { run: peek, readOnly: true } },
+    });
+    const text = () => {
+      const doc = new Y.Doc();
+      const saved = storage.read('harborlight');
+      if (saved) Y.applyUpdate(doc, saved);
+      return doc.getText('t').toString();
+    };
+    return { host, handler, peek, text };
   };
 
   for (const key of ['board', 'boardId', 'workspaceId', 'docId', 'room', 'roomId']) {
@@ -192,6 +242,27 @@ describe('actions', () => {
         error: 'unknown-action',
       });
     }
+  });
+
+  it('refuses an edit action for a view principal and leaves the doc alone', () => {
+    const { host, handler, text } = setup();
+    host.action('harborlight', { id: 'alice' }, 'write', { text: 'kept' });
+    expect(host.action('harborlight', { id: 'bob' }, 'write', { text: 'defaced ' })).toMatchObject({
+      ok: false,
+      error: 'read-only',
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(text()).toBe('kept');
+  });
+
+  it('runs a read-only action for a view principal on a copy of the doc', () => {
+    const { host, text } = setup();
+    host.action('harborlight', { id: 'alice' }, 'write', { text: 'kept' });
+    expect(host.action('harborlight', { id: 'bob' }, 'peek', {})).toEqual({
+      ok: true,
+      value: 'scribble kept',
+    });
+    expect(text()).toBe('kept');
   });
 
   it('runs an offered action in the room the caller named, with the role the app gave', () => {

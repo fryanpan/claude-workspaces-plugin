@@ -16,7 +16,10 @@
  *     that names a room, board or doc is refused (`request-guard.ts`).
  *
  * A `view` or `comment` connection receives the doc and can never change it:
- * its sync step 2 and update messages are dropped before they are read.
+ * its sync step 2 and update messages are dropped before they are read. An
+ * action is an edit unless the app marks it read-only, and an edit action is
+ * refused for those roles. A role is asked once, when the socket connects; an
+ * app that revokes one closes the socket.
  */
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
@@ -37,7 +40,14 @@ export interface ActionContext {
   doc: Y.Doc;
 }
 
+/** Runs synchronously: the room is released when it returns, so a handler
+ *  that awaits must not touch `ctx.doc` afterwards. */
 export type ActionHandler = (ctx: ActionContext, body: Record<string, unknown>) => unknown;
+
+/** An action is an edit unless the app marks it read-only. A read-only
+ *  action may run for a `view` or `comment` principal, and is then given a
+ *  copy of the doc, so nothing it does reaches the room. */
+export type ActionSpec = ActionHandler | { run: ActionHandler; readOnly: true };
 
 export interface RoomHostOptions {
   storage: CollabStorage;
@@ -46,7 +56,7 @@ export interface RoomHostOptions {
   /** How long after the last change a room is saved. Default 500 ms. */
   saveDelayMs?: number;
   /** Server actions the app offers, by name. */
-  actions?: Record<string, ActionHandler>;
+  actions?: Record<string, ActionSpec>;
   /** Told when a save fails; the change stays in memory and is retried on
    *  the next change or `flush`. */
   onSaveError?: (roomId: string, err: unknown) => void;
@@ -79,7 +89,7 @@ export type ActionResult =
   | { ok: true; value: unknown }
   | {
       ok: false;
-      error: 'bad-room' | 'no-role' | 'room-in-body' | 'unknown-action' | 'bad-body';
+      error: 'bad-room' | 'no-role' | 'read-only' | 'room-in-body' | 'unknown-action' | 'bad-body';
       message: string;
     };
 
@@ -144,11 +154,18 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
     if (saved) Y.applyUpdate(doc, saved);
     const room: Room = { id, doc, conns: new Set(), timer: null, dirty: false };
     doc.on('update', (update: Uint8Array, origin: unknown) => {
-      const frame = syncFrame((enc) => syncProtocol.writeUpdate(enc, update));
-      for (const c of room.conns) if (c !== origin) c.send(frame);
       room.dirty = true;
       if (room.timer) clearTimeout(room.timer);
       room.timer = setTimeout(() => save(room), saveDelayMs);
+      const frame = syncFrame((enc) => syncProtocol.writeUpdate(enc, update));
+      for (const c of room.conns) {
+        if (c === origin) continue;
+        try {
+          c.send(frame);
+        } catch {
+          // A socket that died mid-send: its close() is on its way.
+        }
+      }
     });
     rooms.set(id, room);
     return room;
@@ -181,18 +198,22 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
         role: granted,
         receive(bytes) {
           if (closed) return;
-          const dec = decoding.createDecoder(bytes);
-          if (decoding.readVarUint(dec) !== MSG_SYNC) return;
-          if (!writable) {
-            // Peek the sync message's kind: only a step 1 (a request for the
-            // doc) is answered; a step 2 or update would change it.
-            const kind = decoding.readVarUint(decoding.createDecoder(bytes.subarray(dec.pos)));
-            if (kind !== syncProtocol.messageYjsSyncStep1) return;
+          try {
+            const dec = decoding.createDecoder(bytes);
+            if (decoding.readVarUint(dec) !== MSG_SYNC) return;
+            if (!writable) {
+              // Peek the sync message's kind: only a step 1 (a request for the
+              // doc) is answered; a step 2 or update would change it.
+              const kind = decoding.readVarUint(decoding.createDecoder(bytes.subarray(dec.pos)));
+              if (kind !== syncProtocol.messageYjsSyncStep1) return;
+            }
+            const enc = encoding.createEncoder();
+            encoding.writeVarUint(enc, MSG_SYNC);
+            syncProtocol.readSyncMessage(dec, enc, room.doc, conn);
+            if (encoding.length(enc) > 1) req.send(encoding.toUint8Array(enc));
+          } catch {
+            // A truncated or garbled frame changes nothing; drop it.
           }
-          const enc = encoding.createEncoder();
-          encoding.writeVarUint(enc, MSG_SYNC);
-          syncProtocol.readSyncMessage(dec, enc, room.doc, conn);
-          if (encoding.length(enc) > 1) req.send(encoding.toUint8Array(enc));
         },
         close() {
           if (closed) return;
@@ -223,21 +244,32 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
       if (granted === null) {
         return { ok: false, error: 'no-role', message: 'You have no role in this room.' };
       }
-      const handler =
+      const spec =
         opts.actions && Object.hasOwn(opts.actions, name) ? opts.actions[name] : undefined;
-      if (!handler) {
+      if (!spec) {
         return { ok: false, error: 'unknown-action', message: `No action "${name}".` };
       }
+      const readOnly = typeof spec !== 'function';
+      const run = typeof spec === 'function' ? spec : spec.run;
+      if (!readOnly && !canEdit(granted)) {
+        return {
+          ok: false,
+          error: 'read-only',
+          message: `A ${granted} role cannot run "${name}".`,
+        };
+      }
       const room = open(roomId);
+      // A read-only action run by a reader gets a copy: nothing it does can
+      // reach the room.
+      const doc = canEdit(granted) ? room.doc : new Y.Doc();
+      if (doc !== room.doc) Y.applyUpdate(doc, Y.encodeStateAsUpdate(room.doc));
       try {
         return {
           ok: true,
-          value: handler(
-            { roomId, principal, role: granted, doc: room.doc },
-            body as Record<string, unknown>,
-          ),
+          value: run({ roomId, principal, role: granted, doc }, body as Record<string, unknown>),
         };
       } finally {
+        if (doc !== room.doc) doc.destroy();
         release(room);
       }
     },

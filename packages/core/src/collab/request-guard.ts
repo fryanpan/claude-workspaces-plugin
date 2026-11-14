@@ -7,6 +7,10 @@
  * room: a handler that never sees such a field cannot be talked into using
  * it, and a caller that sends one has misunderstood where the room comes
  * from.
+ *
+ * A tripwire, not the boundary: it checks these exact top-level names only.
+ * What keeps a request in its room is that the core takes the room from the
+ * caller's address and never reads it from the body at all.
  */
 
 /** Body keys that would name where a request acts. */

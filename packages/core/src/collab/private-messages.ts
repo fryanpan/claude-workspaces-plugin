@@ -95,7 +95,11 @@ export class MemoryPrivateMessageStore implements PrivateMessageStore {
     agentId: string,
     opts?: { limit?: number; before?: string },
   ): PrivateMessagePage {
-    return pageOf(this.logs.get(pairKey(personId, agentId)) ?? [], opts);
+    const page = pageOf(this.logs.get(pairKey(personId, agentId)) ?? [], opts);
+    return {
+      messages: page.messages.map((m) => ({ ...m, author: { ...m.author } })),
+      more: page.more,
+    };
   }
 
   /** How many pairs have a log. */

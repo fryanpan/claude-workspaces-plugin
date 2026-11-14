@@ -127,7 +127,9 @@ imports nothing but `yjs`, `y-protocols` and `lib0`
 (`core/test/collab/collab-imports.test.ts`). Two rules hold for every app: no
 room opens without a role function, and an action whose body names a room,
 board or doc is refused, because the room comes from the connection. A view
-or comment connection gets the doc and its edits are dropped unread. The
+or comment connection gets the doc and its edits are dropped unread, and an
+action is an edit, refused for those roles, unless the app marks it
+read-only, when it runs on a copy of the doc. The
 server's `DocStateStore` fits its storage interface as it is, and
 `server/src/private-messages.ts` is the file-backed store behind its
 private-message interface. Workspaces does not run its rooms on it yet; that

@@ -34,6 +34,7 @@ export function startCollabApp(storage: CollabStorage) {
         ctx.doc.getText('t').insert(ctx.doc.getText('t').length, String(body.text ?? ''));
         return ctx.doc.getText('t').toString();
       },
+      read: { readOnly: true, run: (ctx) => ctx.doc.getText('t').toString() },
     },
   });
   const server = Bun.serve<SocketData>({
@@ -61,7 +62,12 @@ export function startCollabApp(storage: CollabStorage) {
         }
         const res = host.action(decodeURIComponent(act[1]), { id: personId }, act[2], body);
         if (res.ok) return Response.json({ value: res.value });
-        const status = res.error === 'no-role' ? 403 : res.error === 'unknown-action' ? 404 : 400;
+        const status =
+          res.error === 'no-role' || res.error === 'read-only'
+            ? 403
+            : res.error === 'unknown-action'
+              ? 404
+              : 400;
         return Response.json({ error: res.error, message: res.message }, { status });
       }
       return new Response('not found', { status: 404 });

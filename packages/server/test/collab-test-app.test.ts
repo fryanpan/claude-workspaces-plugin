@@ -120,6 +120,24 @@ describe('collab test app', () => {
   });
 });
 
+describe('collab test app, a view principal', () => {
+  it('cannot change the doc through an action, and can read it', async () => {
+    const a = app();
+    const post = (person: string, name: string, body: unknown) =>
+      fetch(`${a.base}/rooms/harborlight/actions/${name}`, {
+        method: 'POST',
+        headers: { 'x-person': person, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect((await post('alice', 'append', { text: 'kept' })).status).toBe(200);
+    const refused = await post('bob', 'append', { text: ' defaced' });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe('read-only');
+    const read = await post('bob', 'read', {});
+    expect(((await read.json()) as { value: string }).value).toBe('kept');
+  });
+});
+
 describe('private messages beside rooms', () => {
   it('are never read by a doc path sharing the data folder', async () => {
     const dataDir = tmp();
