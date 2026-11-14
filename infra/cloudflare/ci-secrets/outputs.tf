@@ -3,7 +3,7 @@
 
 output "token_id" {
   description = "The CI deploy token's id, which is also the state bucket's access key id."
-  value       = cloudflare_api_token.ci_deploy.id
+  value       = cloudflare_account_token.ci_deploy.id
   sensitive   = true
 }
 

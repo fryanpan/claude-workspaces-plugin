@@ -210,7 +210,7 @@ install` never sees them.
 ## CI's credentials
 
 `ci-secrets/` is a root of its own. One apply makes the CI deploy token
-(`cloudflare_api_token.ci_deploy`) and writes, through the GitHub provider:
+(`cloudflare_account_token.ci_deploy`) and writes, through the GitHub provider:
 
 | Secret | Where | Value |
 | --- | --- | --- |
@@ -229,7 +229,8 @@ manages itself.
 CLOUDFLARE_API_TOKEN=… GITHUB_TOKEN=… bun run cf:ci-secrets apply
 ```
 
-`CLOUDFLARE_API_TOKEN` here must hold User > API Tokens > Edit, the one
+`CLOUDFLARE_API_TOKEN` here must hold Account API Tokens Edit (an
+account-owned token, made under Manage Account > Account API Tokens), the one
 permission the keeper's token lacks on purpose
 (`packages/server/src/keeper/keeper-setup-cloudflare.ts`). `GITHUB_TOKEN` is a
 classic token with `repo` scope. Each reaches terraform in its environment
