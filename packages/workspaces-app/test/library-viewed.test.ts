@@ -41,7 +41,7 @@ const PAYLOAD: LibraryPayload = {
 
 /** The Recently Viewed table: the one after its heading. */
 const viewedTable = (root: ParentNode) =>
-  root.querySelector('.lf-viewed-head + .library-tbl') as Element;
+  root.querySelector('[data-lf-panel=viewed] > .library-tbl') as Element;
 const viewedCells = (root: ParentNode) =>
   [...viewedTable(root).querySelectorAll('.library-list .library-row')].map((r) => [
     r.querySelector('.library-name')?.textContent,
@@ -69,7 +69,7 @@ describe('Recently Viewed', () => {
   it('"Show more" reveals the older views, and its heading row stays put', async () => {
     const { page, root } = driveLibrary(WS, PAYLOAD, NOW);
     await page.open();
-    const head = () => root.querySelector('.lf-viewed-head') as HTMLElement;
+    const head = () => root.querySelector('.lf-recent-tabs') as HTMLElement;
     const toggle = () => head().querySelector('[data-lf-viewmore]') as HTMLButtonElement;
     expect(toggle().textContent).toBe('Show more');
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
@@ -86,7 +86,7 @@ describe('Recently Viewed', () => {
     // Same row, same place in it, label swapped; focus stays on it.
     expect(toggle().textContent).toBe('Show less');
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
-    expect(head().firstElementChild?.textContent).toBe('Recently Viewed');
+    expect(head().querySelector('[aria-selected=true]')?.textContent).toBe('Recently Viewed');
     expect(document.activeElement).toBe(toggle());
     await click(toggle());
     expect(viewedCells(root)).toHaveLength(5);

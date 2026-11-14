@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { libraryHref } from '../src/board/board-url.ts';
 import type { LibraryFolder, LibraryPayload, LibraryRow } from '../src/board/library-model.ts';
 import { createLibraryPage } from '../src/board/library-page.ts';
-import { FakeEventSource, fakeHistory, settle } from './boot-harness.ts';
+import { FakeEventSource, fakeHistory, fakeStorage, settle } from './boot-harness.ts';
 import { WS, bootTestBoard, click, el, resetBoardServer, server } from './support/board-drive.ts';
 
 const NOW = 1_700_000_000_000;
@@ -119,6 +119,8 @@ function drive() {
     here: (list, place) => libraryHref(`https://board.test/workspaces/${WS}/library`, list, place),
     now: () => NOW,
     toast: (msg, action) => toasts.push({ msg, run: action?.run }),
+    // Recently Created showing, the tab these cases file docs from.
+    storage: fakeStorage({ 'cw-library-recent-tab': 'created' }),
   });
   return { page, root, board, toasts };
 }
@@ -146,7 +148,7 @@ const typeName = async (root: ParentNode, value: string) => {
 const recentRow = (root: ParentNode, name: string) =>
   [
     ...(
-      root.querySelector('.lf-created-head + .library-tbl') as Element
+      root.querySelector('[data-lf-panel=created] > .library-tbl') as Element
     ).querySelectorAll<HTMLElement>('.lf-doc'),
   ].find((r) => r.querySelector('.library-name')?.textContent === name) as HTMLElement;
 

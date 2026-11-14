@@ -38,14 +38,21 @@ const PAYLOAD: LibraryPayload = {
   ],
 };
 
-const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
+/** Most cases read Recently Created, so this device last picked that tab. */
+const drive = (opts: DriveOptions = {}) =>
+  driveLibrary(WS, PAYLOAD, NOW, { recentTab: 'created', ...opts });
 
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
+/** The recent-files tabs' labels, in order. */
+const tabs = (root: ParentNode) =>
+  [...root.querySelectorAll('.lf-recent-tabs [role=tab]')].map((t) => t.textContent);
+const chosenTab = (root: ParentNode) =>
+  root.querySelector('.lf-recent-tabs [aria-selected=true]')?.textContent;
 /** The front page's Recent files table — the first table; the tree follows. */
 const recentTable = (root: ParentNode) =>
   root.querySelector(
-    '.lf-created-head + .library-tbl, .library-all > h2 + .library-tbl',
+    '[data-lf-panel=created] > .library-tbl, .library-all > h2 + .library-tbl',
   ) as Element;
 
 describe('the Library front page', () => {
@@ -71,13 +78,10 @@ describe('the Library front page', () => {
       'Harborlight sync 6',
     ]);
     // The separate recent-meetings list is gone: one "See all", under
-    // Recently Created.
+    // Recently Created, which is a tab beside Recently Viewed, not a section.
     const body = root.querySelector('.library-body') as HTMLElement;
-    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
-      'Recently Viewed',
-      'Recently Created',
-      'Folders',
-    ]);
+    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+    expect([...body.querySelectorAll('h2')].map((h) => h.textContent)).toEqual(['Folders']);
     expect([...root.querySelectorAll('.library-more')].map((b) => b.textContent)).toEqual([
       'See all files',
     ]);
@@ -391,6 +395,61 @@ describe('the Library front page', () => {
   });
 });
 
+describe('the Recently Viewed / Recently Created tabs', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('opens on Recently Viewed on a device that never picked, with Created one tap away', async () => {
+    const { page, root } = drive({ recentTab: undefined });
+    await page.open();
+    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+    expect(chosenTab(root)).toBe('Recently Viewed');
+    expect(root.querySelector('[data-lf-panel=viewed]')).not.toBeNull();
+    expect(root.querySelector('[data-lf-panel=created]')).toBeNull();
+    await click(root.querySelector('[data-lf-tab=created]') as HTMLElement);
+    expect(chosenTab(root)).toBe('Recently Created');
+    expect(names(recentTable(root))[0]).toBe('Tide gauge notes');
+    expect(root.querySelector('[data-lf-panel=viewed]')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-lf-tab=created]'));
+  });
+
+  it('keeps the tab row where it was, same labels in the same order, when the tab changes', async () => {
+    const { page, root } = drive({ recentTab: undefined });
+    await page.open();
+    const body = root.querySelector('.library-body') as HTMLElement;
+    const at = () => [...body.children].indexOf(root.querySelector('.lf-recent-tabs') as Element);
+    const before = at();
+    await click(root.querySelector('[data-lf-tab=created]') as HTMLElement);
+    expect(at()).toBe(before);
+    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+  });
+
+  it('remembers the tab last picked on this device, and a reload opens on it', async () => {
+    const first = drive({ recentTab: undefined });
+    await first.page.open();
+    await click(first.root.querySelector('[data-lf-tab=created]') as HTMLElement);
+    expect(first.storage.values.get('cw-library-recent-tab')).toBe('created');
+    // A reload: a fresh page over the same device storage.
+    const again = drive({ recentTab: undefined, storage: first.storage });
+    await again.page.open();
+    expect(chosenTab(again.root)).toBe('Recently Created');
+    await click(again.root.querySelector('[data-lf-tab=viewed]') as HTMLElement);
+    expect(again.storage.values.get('cw-library-recent-tab')).toBe('viewed');
+  });
+
+  it('moves between the tabs with the arrow keys, the chosen tab the only Tab stop', async () => {
+    const { page, root } = drive({ recentTab: undefined });
+    await page.open();
+    const tab = (t: string) => root.querySelector(`[data-lf-tab=${t}]`) as HTMLElement;
+    expect([tab('viewed').tabIndex, tab('created').tabIndex]).toEqual([0, -1]);
+    tab('viewed').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(chosenTab(root)).toBe('Recently Created');
+    expect(document.activeElement).toBe(tab('created'));
+    expect([tab('viewed').tabIndex, tab('created').tabIndex]).toEqual([-1, 0]);
+  });
+});
+
 describe('the Library on the board', () => {
   beforeEach(() => {
     resetBoardServer();
@@ -429,8 +488,11 @@ describe('the Library on the board', () => {
     expect(board.history.url()).toBe(`/workspaces/${WS}/library`);
   });
 
+  /** This device last picked Recently Created. */
+  const createdTab = { storage: { 'cw-library-recent-tab': 'created' } };
+
   it('the nav item goes to the Library and back to Tasks, each with an address', async () => {
-    const board = await bootTestBoard();
+    const board = await bootTestBoard(createdTab);
     expect(showing('board-library')).toBe(false);
     await click(document.querySelector('[data-nav=library]') as HTMLElement);
     await settle();
@@ -451,8 +513,32 @@ describe('the Library on the board', () => {
     return feed;
   };
 
+  it('a doc created elsewhere reaches an open Recently Created tab, with no reload', async () => {
+    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library`, ...createdTab });
+    await settle();
+    const lib = el('board-library');
+    expect(chosenTab(lib)).toBe('Recently Created');
+    expect(names(recentTable(lib))).not.toContain('Riverbend brief');
+    server.on(`/workspaces/${WS}/library/items`, {
+      ...PAYLOAD,
+      files: [
+        {
+          name: 'Riverbend brief',
+          at: NOW + HOUR,
+          created: NOW + HOUR,
+          href: `/workspaces/${WS}/docs/rb`,
+        },
+        ...PAYLOAD.files,
+      ],
+    });
+    boardFeed().dispatchEvent(new Event('library.changed'));
+    await settle();
+    expect(names(recentTable(lib))[0]).toBe('Riverbend brief');
+    expect(chosenTab(lib)).toBe('Recently Created');
+  });
+
   it('an open Library redraws a meeting filed elsewhere, on the list it shows', async () => {
-    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library` });
+    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library`, ...createdTab });
     await settle();
     await click(el('board-library').querySelector('.library-more[data-list=files]') as HTMLElement);
     expect(el('board-library').querySelector('h2')?.textContent).toBe('All files');
