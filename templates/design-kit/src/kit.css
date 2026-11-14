@@ -1,0 +1,40 @@
+/*
+ * Shared kit styles, the same on every site: the kit's styling of native
+ * elements, its layout utilities, and the trial pages' own layout. Every
+ * value here is a --wa-* token, so the theme file decides how it looks.
+ */
+@import "@awesome.me/webawesome/dist/styles/native.css";
+@import "@awesome.me/webawesome/dist/styles/utilities.css";
+
+body {
+  margin: 0;
+  background: var(--wa-color-surface-lowered);
+}
+
+.trial-page {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--wa-space-l);
+}
+
+.trial-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wa-space-s);
+  flex-wrap: wrap;
+}
+
+.trial-row h1,
+.trial-row h2 {
+  margin: 0;
+}
+
+.trial-row h2 {
+  font-size: var(--wa-font-size-l);
+}
+
+.trial-meta {
+  color: var(--wa-color-text-quiet);
+  font-size: var(--wa-font-size-s);
+}

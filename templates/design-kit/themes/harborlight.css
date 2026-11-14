@@ -1,0 +1,33 @@
+/*
+ * Theme file: Harborlight, a stand-in for a second site. Same four parts as
+ * workspaces.css; it leaves out the compact block, so the setting does
+ * nothing on this site.
+ */
+/*
+ * Base is default.css, not awesome.css: the kit's other base themes are
+ * scoped to a class on <html> (.wa-theme-awesome), which is page markup, and
+ * awesome.css also pulls web fonts from an outside host. Only default.css
+ * applies with no class.
+ */
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+
+:root {
+  /* 2. Brand hue: green. */
+  --wa-color-brand-95: var(--wa-color-green-95);
+  --wa-color-brand-90: var(--wa-color-green-90);
+  --wa-color-brand-80: var(--wa-color-green-80);
+  --wa-color-brand-70: var(--wa-color-green-70);
+  --wa-color-brand-60: var(--wa-color-green-60);
+  --wa-color-brand-50: var(--wa-color-green-50);
+  --wa-color-brand-40: var(--wa-color-green-40);
+  --wa-color-brand-30: var(--wa-color-green-30);
+  --wa-color-brand-20: var(--wa-color-green-20);
+  --wa-color-brand-10: var(--wa-color-green-10);
+  --wa-color-brand-05: var(--wa-color-green-05);
+
+  /* 3. Site tokens: a serif reading face, round corners, roomier spacing. */
+  --wa-font-family-body: Georgia, "Times New Roman", serif;
+  --wa-font-family-heading: var(--wa-font-family-body);
+  --wa-border-radius-scale: 2;
+  --wa-space-scale: 1.25;
+}

@@ -1,0 +1,10 @@
+{
+  "name": "design-kit-trial",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@awesome.me/webawesome": "3.14.0",
+    "preact": "10.29.8"
+  }
+}
