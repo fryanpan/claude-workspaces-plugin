@@ -853,11 +853,14 @@ export function boardLastActivity(
   // Archived rows included: archiving IS activity on this board, and a
   // reading that dropped the row afterwards would step the timestamp
   // backwards the moment somebody tidied up.
+  // The comment half comes off each body's index row, never its thread map:
+  // this runs for every row on every board each time Home renders, and a
+  // thread read here loaded the whole history back into memory after every
+  // idle sweep.
   for (const task of taskStore.listTasks(ws.id, { includeArchived: true })) {
     if (task.updatedAt > last) last = task.updatedAt;
-    for (const thread of docStore.listThreads(`task:${task.id}`)) {
-      if (thread.lastActivity > last) last = thread.lastActivity;
-    }
+    const commented = docStore.newestThreadActivity(`task:${task.id}`);
+    if (commented > last) last = commented;
   }
   return last;
 }
