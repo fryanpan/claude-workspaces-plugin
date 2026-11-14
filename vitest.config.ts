@@ -71,6 +71,9 @@ export default defineConfig({
             // Repo-level scripts are gates (release, leak, bundle size); they
             // need covering too, and they are not under packages/.
             'scripts/**/*.test.ts',
+            // Starter apps copied into new repos (templates/signin). Each runs
+            // its own Worker code in node against a local workerd D1.
+            'templates/*/test/**/*.test.ts',
           ],
           exclude: [...EXCLUDE, ...DOM_PACKAGES.map((pkg) => `packages/${pkg}/**`)],
         },
