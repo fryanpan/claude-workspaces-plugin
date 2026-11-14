@@ -87,6 +87,7 @@ import { handleDocComponentsRoute } from './doc-components.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocFileMoveRoute } from './doc-file-move.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
+import { handleDocMapKeyRoute } from './doc-map-key.ts';
 import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
@@ -737,6 +738,7 @@ export async function handleDocResourceRoutes(
     (await handleDocComponentsRoute(ctx, docRq)) ??
     (await handleDocComponentAgentRoute(ctx, docRq)) ??
     (await handleDocFilesRoute(ctx, docRq)) ??
+    (await handleDocMapKeyRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
     (await handleDocFileMoveRoute(ctx, docRq)) ??
     (await handleDocMetadataRoute(ctx, docRq)) ??

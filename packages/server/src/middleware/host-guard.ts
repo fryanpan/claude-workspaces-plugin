@@ -1398,6 +1398,14 @@ function docSubrouteAllowed(sub: string, method: string): boolean {
    */
   if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
   /**
+   * The key a `<StreetMap basemap="google">` in the doc draws with
+   * (`routes/doc-map-key.ts`), answered only while the doc's live content
+   * names that basemap. A read, on a doc already inside the shared board:
+   * the map is part of what the doc displays, and the key is a browser key
+   * Google restricts to the board's site.
+   */
+  if (sub.startsWith('map-key/')) return method === 'GET';
+  /**
    * A built component of an `.mdx` doc (`routes/doc-components.ts`), served
    * only while the doc's own build map names it. Reads only, on a doc already
    * inside the shared board: the component is part of what the doc displays.

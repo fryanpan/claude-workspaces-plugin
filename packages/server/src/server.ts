@@ -3032,6 +3032,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
     // Declared below; called only per request, after it exists.
     proposeAccess: (input) => accessProposals.propose(input),
+    ...(opts.googleMapsKey ? { googleMapsKey: opts.googleMapsKey } : {}),
   };
 
   // The owner's notice when the master sharing switch goes off: one decision

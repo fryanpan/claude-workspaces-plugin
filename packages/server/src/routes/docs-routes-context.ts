@@ -147,6 +147,9 @@ export interface DocRoutesContext {
   /** File an access card for the owner's approval (`share/access-proposals.ts`):
    *  the component folder grant's only path. Absent, nothing is filed. */
   proposeAccess?: AccessProposals['propose'];
+  /** The Google Maps browser key, for `routes/doc-map-key.ts`. Absent, a
+   *  Google map draws on its fallback. */
+  googleMapsKey?: string;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */

@@ -63,6 +63,9 @@ const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
 // routes/home-feed.ts). Either unset turns that half off.
 const homeRemotesConfig = homeRemotesFromEnv(process.env);
 const homeFeedClientId = process.env.CW_HOME_FEED_CLIENT_ID?.trim() || undefined;
+// A browser key, restricted by Google to the board's site; sent only to a doc
+// that draws a Google map (routes/doc-map-key.ts).
+const googleMapsKey = process.env.CW_GOOGLE_MAPS_KEY?.trim() || undefined;
 const {
   requestedPort,
   hostname,
@@ -272,6 +275,7 @@ while (!handle) {
       proxiedTrustedEmails,
       ...(homeRemotesConfig ? { homeRemotes: { config: homeRemotesConfig } } : {}),
       ...(homeFeedClientId ? { homeFeedClientId } : {}),
+      ...(googleMapsKey ? { googleMapsKey } : {}),
       ...(frameOrigin ? { frameOrigin } : {}),
       ...(frameBoardHosts ? { frameBoardHosts } : {}),
       allowedOrigins,

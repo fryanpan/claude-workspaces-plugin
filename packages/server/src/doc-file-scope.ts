@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import { parseFileEmbedDirective } from '@claude-workspaces/core/board-embeds';
-import { mapDataPaths } from '@claude-workspaces/core/map-spec';
+import { mapBasemapNames, mapDataPaths } from '@claude-workspaces/core/map-spec';
 import { mdxFlowSources } from '@claude-workspaces/core/mdx-components';
 import * as Y from 'yjs';
 import { isGitListed } from './doc-file-listing.ts';
@@ -119,4 +119,9 @@ export function mapDataFolder(ydoc: Y.Doc, segments: string[]): string[] | null 
   const asked = segments.join('/');
   const named = mapDataPaths(mdxFlowSources(prose.getProseFragment(ydoc)));
   return named.some((p) => p.join('/') === asked) ? segments.slice(0, -1) : null;
+}
+
+/** The basemaps the `<StreetMap>` tags in the doc's CURRENT content name. */
+export function mapBasemapsNamed(ydoc: Y.Doc): string[] {
+  return mapBasemapNames(mdxFlowSources(prose.getProseFragment(ydoc)));
 }

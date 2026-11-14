@@ -676,6 +676,13 @@ export interface ServerOptions {
    */
   homeFeedClientId?: string;
   /**
+   * The Google Maps JavaScript API browser key (`CW_GOOGLE_MAPS_KEY`), handed
+   * only to a doc page whose content draws a `<StreetMap basemap="google">`
+   * (`routes/doc-map-key.ts`). Absent, such a map draws on OpenStreetMap and
+   * says so. Never logged.
+   */
+  googleMapsKey?: string;
+  /**
    * WHO may come through `proxiedTrustedHosts`, by the email Cloudflare
    * Access verified — folded the way the roster folds addresses.
    *
