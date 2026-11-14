@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type DocMeta, type WebhookPayload, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { DiskDocStateStore } from '../src/doc-state/disk.ts';
 import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
 import type { LiveDoc } from '../src/doc-store.ts';
 import { type FileBindingHost, FileBindings } from '../src/file-binding.ts';
@@ -82,7 +83,7 @@ function recorder(dataDir: string, doc: LiveDoc): Recorder {
       return docId === doc.docId ? doc : undefined;
     },
     residentDoc: (docId) => (docId === doc.docId ? doc : undefined),
-    ydocPath: (docId) => join(dataDir, `${docId}.ydoc`),
+    stateSavedAt: (docId) => new DiskDocStateStore(dataDir).savedAt(docId),
     schedulePersist: () => calls.push('schedulePersist'),
     persistNow: () => calls.push('persistNow'),
     clearPendingFileWrite: (docId) => calls.push(`clearPendingFileWrite(${docId})`),

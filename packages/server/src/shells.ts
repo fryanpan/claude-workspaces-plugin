@@ -1205,11 +1205,9 @@ export function renderLanding(
   notesWorkspaceName: string,
   assets: AssetManifest = {},
   review: LandingReview = { items: [], rankOf: new Map(), summaryOf: () => undefined },
-  /** Incoming Messages with its styles, below the coach (inbox/landing.ts). */
+  /** Incoming Messages with its styles, below the review items
+   *  (inbox/landing.ts). */
   inbox = '',
-  /** The week's goals and the coach's nudge, below the review items: his
-   *  review items lead Home (coach/landing.ts). */
-  coach = '',
   /** A board to reach the Workspaces feedback doc at, or '' for no widget.
    *  The board shell's widget, for the same reasons; '' for a visitor. */
   feedbackWorkspaceId = '',
@@ -1264,12 +1262,9 @@ export function renderLanding(
       : `<details class="fold"><summary>Attachments by project <span class="count">${model.projects.length}</span></summary>
 <ul>${model.projects.map(renderLandingProjectLink).join('')}</ul></details>`;
   // The bottom bar at the mobile tier (`landing-nav.ts`).
-  const nav = renderLandingNav(
-    landingSections({ inbox: owner && !!inbox, coach: owner && !!coach }),
-    leadWorkspaceId,
-  );
+  const nav = renderLandingNav(landingSections({ inbox: owner && !!inbox }), leadWorkspaceId);
   // `landing-live.ts` swaps `#landing-review` and `#landing-boards` when a
-  // board changes, `#coach` and `#inbox` when theirs do, and tells the
+  // board changes, `#inbox` when its store does, and tells the
   // `pushed` banner when a meeting is joined or left, so it never polls.
   return landingShell(
     'Workspaces',
@@ -1284,7 +1279,6 @@ export function renderLanding(
         : ''
     }
 <div id="landing-review">${renderReviewBar(review)}${remote}</div>
-${coach}
 ${inbox}
 <div id="landing-boards">${active}
 ${inactive}

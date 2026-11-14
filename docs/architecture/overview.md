@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -1617,6 +1617,16 @@ exception: each is an ordinary live `task:<taskId>` doc so every edit tool,
 thread and anchor applies unchanged, and the store's `body` string is a
 debounced snapshot of it.
 
+### Outside the packages: `templates/`
+
+`templates/` holds starters that a new app copies into its own repository.
+Nothing in `packages/` imports them, and they import nothing from it.
+`templates/signin/` is a Cloudflare Worker that provides sign-in with Hono,
+Better Auth and D1; its [README](../../templates/signin/README.md) covers how
+to copy it. The repo's gates still cover these folders: the root workspace
+installs their dependencies, the root `tsconfig.json` typechecks them, and
+vitest's `node` project runs their tests.
+
 ## Layers inside `server`
 
 **Imports point downward only** — a file may import its own layer and every layer below it, never one above.
@@ -2153,6 +2163,19 @@ opening it — the listing rows, the alias table and the `.ydoc` mtimes a listin
 reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
+
+`doc-state/` joins the doc-store group and moves no boundary. It is where each
+doc's shared state — the Yjs update behind a markdown doc, a board, a
+whiteboard or a component's state — is kept, behind one interface keyed by doc
+id (`doc-state/store.ts`). `doc-state/disk.ts` is the `.ydoc` files in the
+data dir, written exactly as before, and is the default;
+`doc-state/memory.ts` keeps the same state in maps, for tests and small apps,
+chosen by passing `docState` to `DocStore`. `DocStore`, `doc-catalog.ts`,
+`file-binding.ts` and the archive moves in `doc-store-workspaces.ts` read and
+write state only through it. The sidecar, the index row and the `.md`
+write-back are not behind it and stay files in the data dir. The offline
+tools (`doc-identity-*`, `note-list-gap-corpus.ts`, `activity-backfill.ts`)
+still read `.ydoc` files directly and run on the disk backend only.
 
 `doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
 `doc-*.ts` glob draws it. It decides whether a create naming an existing doc
@@ -2936,19 +2959,21 @@ iOS is reported to leave it at keyboard height.
 
 **The coach** helps the owner with habits he names, in three parts. It is not a
 board feature; the one agent it reaches is its own session.
-(A) *Goals*: "Set up my coach" on the front page makes one learning-goals doc
+(A) *Goals*: `POST /coach/setup` makes one learning-goals doc
 and the session's Coach memory doc on a board of their own (`coach/setup.ts`,
-`coach/goals-doc.ts`); the planning interview fills the goals when he taps
+`coach/goals-doc.ts`). The docs are filed on the Coach board and name no
+attachment set, so its Library lists them; `library.ts` also treats a set
+field holding the board's own id as no set, for docs made before that; the planning interview fills the goals when he taps
 Talk. The doc has the coach's name and one section, "What I want to do
 better": each top-level bullet or paragraph there is one goal and names its
 own trigger. A doc in the older layout, one section of four parts per goal,
-still reads, its "Act differently when" joined to each goal. The front
-page's section (`coach/section.ts`, `coach/landing.ts`) lists the goals, offers a review when they have not changed in a week, holds the
-how-readily setting, and says how many events the session read today.
+still reads, its "Act differently when" joined to each goal. Home carries no coach (the owner: "Coach should not be on home page"); the
+card and the goals doc live on the Coach board.
 (B) *Observe*: board and doc pages send what he is looking at, and each
 paragraph he writes when he pauses, to `/coach/here`
-(`workspaces-app/src/coach-card.ts`); the front page and the review walk,
-which name no board, send which page they are (`PAGE_PLACES`); `coach/stream.ts` turns that and his
+(`workspaces-app/src/coach-card.ts`); the review walk,
+which names no board, sends which page it is (`PAGE_PLACES`, which still
+accepts `home` from a Home page loaded before the coach left it); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
 into one event per thing he does, dropping repeats. The coach's visibility
 is the owner's own: every board he can see, local-only, sharing-locked and
@@ -2985,21 +3010,20 @@ and answers and the setting go at once. With no session holding a stream
 the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
 windows and 48 hours, across a restart) and go as one digest when its stream
 comes back. Past 400 turns in a day it sends
-nothing and the front page says the coach is paused for today. The session raises a moment on `POST /coach/moments`, and
+nothing until the next day. The session raises a moment on `POST /coach/moments`, and
 `coach/judge.ts` refuses one that does not copy three words in order from the
 goal it names, or arrives while another is open. A moment goes to his pages over
 `/coach/stream` (`coach/hub.ts`) and follows him: every page he has open
 shows it until he answers in any one, which clears it on the rest. That is
 the board (task pages included), every doc surface (`doc/doc-coach.ts`,
-mounted for markdown, folder files, diffs and code alike), the front page,
+mounted for markdown, folder files, diffs and code alike), the review walk,
 and the host page around a mock or dev server (`coach-page.ts`, its own
 `/app/coach.js`, since the sandboxed frame cannot draw it). A page on a
 board that is off for the coach shows it too, marked so, and tells the
 session nothing. He answers with a thumbs up, or a thumbs down with a few
 words of why that reach the session in `coach.answer`. In the session, `mcp/src/coach-line.ts` renders each frame and
 `coach_moment` raises a moment; the persona is the plugin's `coaching` skill.
-With no session holding a stream the front page says it is offline, and
-only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
+With no session holding a stream only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
 `coach/wiring.ts` composes it for `server.ts`. `scripts/coach-eval.ts` plays
 the fixture days to a real coach session and scores it.
 

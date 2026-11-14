@@ -71,8 +71,18 @@ export default defineConfig({
             // Repo-level scripts are gates (release, leak, bundle size); they
             // need covering too, and they are not under packages/.
             'scripts/**/*.test.ts',
+            // Starter apps copied into new repos (templates/signin). Each runs
+            // its own Worker code in node against a local workerd D1.
+            'templates/*/test/**/*.test.ts',
           ],
-          exclude: [...EXCLUDE, ...DOM_PACKAGES.map((pkg) => `packages/${pkg}/**`)],
+          exclude: [
+            ...EXCLUDE,
+            ...DOM_PACKAGES.map((pkg) => `packages/${pkg}/**`),
+            // The design-kit trial's tests are `bun test` files: they import
+            // bun:test and drive Bun.build and Bun.serve, which node has not
+            // got. The kit runs them itself (`bun run test` in its folder).
+            'templates/design-kit/**',
+          ],
         },
       },
     ],

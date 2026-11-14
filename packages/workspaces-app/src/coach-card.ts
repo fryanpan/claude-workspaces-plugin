@@ -1,5 +1,5 @@
 /**
- * The coach on a board, a doc or the front page: what the owner is looking at
+ * The coach on a board, a doc or the review walk: what the owner is looking at
  * and writing, sent to the server, and the coach's "Hi, I'm noticing…" card
  * when it has something to say.
  *
@@ -15,12 +15,11 @@
  *
  * Only the owner has a coach. Anyone else's first POST gets an empty 204,
  * and the page then stops: no more beacons, and the stream is never opened.
- * The front page and the review walk name no board, so each says which page
- * it is (`page`) and nothing more: no heading, no passage. They are where he
- * answers review items, most of all from his phone, and a page that said
- * nothing left those stays out of every digest. The server draws the front
- * page's coach section only for the owner, and the front page mounts the
- * card only when the section is there.
+ * The review walk names no board, so it says which page it is (`page`) and
+ * nothing more: no heading, no passage. It is where he answers review items,
+ * most of all from his phone, and a page that said nothing left those stays
+ * out of every digest. Home carries no coach at all (Bryan: "Coach should
+ * not be on home page").
  *
  * The card: calm by default. It sits in the bottom-left corner of every
  * page he has open (above the lead chat's button where that floats there,
@@ -61,14 +60,14 @@ const THUMB_UP =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v11"/><path d="M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.5l-2.3 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.8a2 2 0 0 0 1.8-1.1L12 2a3.1 3.1 0 0 1 3 3.9Z"/></svg>';
 const THUMB_DOWN =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V3"/><path d="M9 18.1 10 14H4.2a2 2 0 0 1-1.9-2.5l2.3-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.8a2 2 0 0 0-1.8 1.1L12 22a3.1 3.1 0 0 1-3-3.9Z"/></svg>';
-const OFF_HERE = 'Coach is off for this board';
+const OFF_HERE = 'Coach is off for this board · Turn back on';
 const TURN_OFF = 'Coach off for this board';
 
 export interface CoachCardOptions {
-  /** The board, or none on the front page and the review walk. */
+  /** The board, or none on the review walk. */
   workspaceId?: string;
-  /** A page that names no board: the front page or the review walk. */
-  page?: 'home' | 'review';
+  /** A page that names no board: the review walk. */
+  page?: 'review';
   docId?: string;
   /** The doc's editor, whose headings say which part he is reading. */
   root?: HTMLElement;
@@ -94,7 +93,6 @@ const STYLES = `
 .cw-coach-acts button:disabled { opacity: .55; cursor: default; }
 .cw-coach-off { display: block; margin: 8px 0 0; padding: 6px 0; min-height: 32px; border: none; background: none; color: #6e7781; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .cw-coach-off:disabled { opacity: .55; cursor: default; }
-span.cw-coach-off { text-decoration: none; cursor: default; }
 `;
 
 async function defaultPost(url: string, body: unknown): Promise<number> {
@@ -328,23 +326,23 @@ export function mountCoachCard(opts: CoachCardOptions): CoachCard {
       line('cw-coach-goal', `Your goal: ${m.goal}`),
       acts,
     );
-    // The front page is on no board, so it has nothing to turn off.
+    // The review walk is on no board, so it has nothing to turn off.
     const workspaceId = opts.workspaceId;
     if (workspaceId) {
       let slot: HTMLElement | null = null;
+      // One switch in one place, both ways: Home listed the boards turned
+      // off and turned them back on, and Home no longer carries the coach.
       setOff = (isOff) => {
-        const next = isOff ? document.createElement('span') : document.createElement('button');
+        const next = document.createElement('button');
+        next.type = 'button';
         next.className = 'cw-coach-off';
         next.textContent = isOff ? OFF_HERE : TURN_OFF;
-        if (next instanceof HTMLButtonElement) {
-          next.type = 'button';
-          next.addEventListener('click', async () => {
-            next.disabled = true;
-            const status = await post(BOARDS_URL, { workspaceId, off: true });
-            if (status === 200) setOff(true);
-            else next.disabled = false;
-          });
-        }
+        next.addEventListener('click', async () => {
+          next.disabled = true;
+          const status = await post(BOARDS_URL, { workspaceId, off: !isOff });
+          if (status === 200) setOff(!isOff);
+          else next.disabled = false;
+        });
         if (slot) slot.replaceWith(next);
         else card.append(next);
         slot = next;

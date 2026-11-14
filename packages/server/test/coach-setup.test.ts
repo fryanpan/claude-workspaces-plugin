@@ -1,5 +1,5 @@
 /**
- * Workflow A's first step and the coach's composition: "Set up my coach"
+ * Workflow A's first step and the coach's composition: `POST /coach/setup`
  * makes the goals doc and the memory doc on a board of its own and never
  * overwrites a file, a board set up before the memory doc gets one at boot,
  * and the live activity feed reaches
@@ -183,18 +183,6 @@ describe('wireCoach', () => {
     ]);
     expect(w.store.week(at(9)).eventsToday).toBe(1);
     w.stop();
-  });
-
-  it('draws Set up before there is a doc, and the named coach and goals after', () => {
-    const before = wire(dir, null);
-    expect(before.landing()).toContain('data-act="setup"');
-    before.stop();
-    const after = wire(dir, GOALS_DOC);
-    after.store.setGoalsDoc({ workspaceId: 'w-coach', docId: 'd-goals', createdAt: at(9) });
-    const page = after.landing();
-    expect(page).toContain('<h2 id="coach-h">Saltmarsh</h2>');
-    expect(page).toContain('<li>Answer people who are waiting on me the same day.</li>');
-    after.stop();
   });
 
   it('hears an activity row written in its own data dir, and not in another', () => {

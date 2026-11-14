@@ -149,7 +149,7 @@ export function readGoalsDoc(markdown: string): GoalsDocReading {
   return reading;
 }
 
-/** A goal's one-line title for the front page and the card. */
+/** A goal's one-line title, for the card. */
 export function goalTitle(goal: LearningGoal): string {
   const t = (goal.text.split('\n')[0] ?? '').trim();
   return t.length > 120 ? `${t.slice(0, 119)}…` : t;

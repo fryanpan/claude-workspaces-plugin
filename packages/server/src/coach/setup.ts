@@ -1,5 +1,5 @@
 /**
- * Workflow A's first step: "Set up my coach" makes the learning-goals doc
+ * Workflow A's first step: `POST /coach/setup` makes the learning-goals doc
  * and the coach's memory doc, once each, on a board of the coach's own.
  *
  * The doc is an ordinary markdown doc bound to `<dataDir>/coach/
@@ -64,7 +64,7 @@ const writeOnce = (dataDir: string, path: string, text: string) => {
 };
 
 /**
- * One making of each doc at a time, per store: a second "Set up my coach",
+ * One making of each doc at a time, per store: a second setup call,
  * or setup racing the boot's memory-doc check, waits for the first and gets
  * its answer instead of making a second board or doc.
  */

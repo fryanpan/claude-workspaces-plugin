@@ -1370,6 +1370,10 @@ function TaskDetailPanel(props: {
   // A needs-review link opened this task (`?focus=review`, from link-titles'
   // `reviewLandingHref`): land on its open items, once per open, as soon as
   // the queue is drawn — an item on a thread arrives with the discussion.
+  // The host is shown first: on the first paint it is still `hidden`, because
+  // `TaskDetail` shows it in its own layout effect, which runs after this
+  // one. A scroll inside a `display: none` box moves nothing, so an item that
+  // was already on the task at the first paint was never landed on.
   const reviewLanding = useRef<boolean | null>(null);
   reviewLanding.current ??= takeReviewFocus(task.id);
   useLayoutEffect(() => {
@@ -1379,6 +1383,7 @@ function TaskDetailPanel(props: {
     );
     if (!queue) return;
     reviewLanding.current = false;
+    showDetailHost(host);
     if (typeof queue.scrollIntoView === 'function') queue.scrollIntoView({ block: 'start' });
   });
 
@@ -1635,6 +1640,12 @@ function TaskDetailPanel(props: {
   );
 }
 
+/** Shows the panel's host and marks the body. Idempotent. */
+function showDetailHost(host: HTMLElement): void {
+  host.classList.remove('hidden');
+  host.ownerDocument.body.classList.add('board-detail-open');
+}
+
 /**
  * The panel, or nothing at all.
  *
@@ -1650,11 +1661,11 @@ function TaskDetail(props: { host: HTMLElement }) {
     taskDetailData.value;
   const { host } = props;
   useLayoutEffect(() => {
-    host.classList.toggle('hidden', task === null);
     if (task !== null) {
-      document.body.classList.add('board-detail-open');
+      showDetailHost(host);
       return;
     }
+    host.classList.add('hidden');
     // The marker says "an overlay is open", and the GOAL panel is the other
     // one — it lives in a container of its own now, and it paints
     // synchronously while this effect lands a microtask later. Dropping the
