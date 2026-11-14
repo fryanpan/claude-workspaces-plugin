@@ -89,6 +89,10 @@ describe("an agent's component tools", () => {
       // Polled, with the time printed for the report, rather than asserted
       // against the clock (testing-standards 3).
       await waitFor(() => (readComponentState(page.ydoc, 'ferry').log ? true : undefined), {
+        // The page synced before the write and is never reopened, so the
+        // write can only arrive as a push. The ceiling is generous because
+        // the claim rests on that push, not on how fast the runner is.
+        timeout: 10_000,
         describe: "the agent's write reaching the open page",
       });
       console.log(
@@ -105,7 +109,7 @@ describe("an agent's component tools", () => {
     } finally {
       page.close();
     }
-  });
+  }, 15_000);
 
   it('refuses a bad write whole, an unattributed write, and a bad id', async () => {
     const bad = await postJson('agent-components/ferry/state', {
