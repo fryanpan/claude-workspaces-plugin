@@ -83,6 +83,11 @@ const READ = `(() => {
     end: box(q('.lc-end')),
     tap: box(q('.lc-tap')),
     notes: q('.lc-notes') && !q('.lc-notes').hidden ? q('.lc-notes').textContent : '',
+    notesBox: box(q('.lc-notes')),
+    composeBox: box(q('.lc-compose')),
+    close: box(q('.lc-close')),
+    bar: box(q('.lc-bar')),
+    barText: q('.lc-bar') && !q('.lc-bar').hidden ? q('.lc-bar').textContent : '',
     nav: box(nav),
     navLinks: nav ? [...nav.querySelectorAll('a')].map((a) => a.textContent) : [],
     frame: box(frame),
@@ -103,6 +108,11 @@ interface Read {
   end: Rect | null;
   tap: Rect | null;
   notes: string;
+  notesBox: Rect | null;
+  composeBox: Rect | null;
+  close: Rect | null;
+  bar: Rect | null;
+  barText: string;
   nav: Rect | null;
   navLinks: string[];
   frame: Rect | null;
@@ -353,6 +363,10 @@ async function main(): Promise<void> {
         (await read(watcher)).notes.includes(line) ? true : null,
       );
       const watcherMs = Date.now() - said;
+      const watching = await until('the watching tab’s panel grown full size', async () => {
+        const r = await read(watcher);
+        return (r.composeBox?.width ?? 0) > 200 && (r.notesBox?.height ?? 0) > 10 ? r : null;
+      });
 
       const moves: MeetingSizeRun['moves'] = [];
       for (const [surface, url] of route) {
@@ -417,8 +431,20 @@ async function main(): Promise<void> {
         });
       }
 
-      step(`End meeting from the watching tab at ${width}`);
-      const w = await read(watcher);
+      step(`the watching tab closes its chat, then ends the meeting, at ${width}`);
+      await tap(watcher, (await read(watcher)).close as Rect);
+      const later = `The ferry leaves at ten, said at ${width}.`;
+      ear.say?.(later);
+      const closed = await until('the line in the closed chat’s bar', async () => {
+        const r = await read(watcher);
+        return r.pane === null && r.barText.includes(later) ? r : null;
+      });
+      await shot(watcher, shots, `meeting-closed-bar-${width}`);
+      await tap(watcher, closed.bar as Rect);
+      const w = await until('the watching tab’s chat open again', async () => {
+        const r = await read(watcher);
+        return r.end ? r : null;
+      });
       await tap(watcher, w.end as Rect);
       await until('the meeting gone on the recording page', async () => {
         const r = await read(page);
@@ -440,6 +466,9 @@ async function main(): Promise<void> {
         viewport: started.viewport,
         recorderMs,
         watcherMs,
+        notesBox: watching.notesBox,
+        composeBox: watching.composeBox,
+        closedBar: closed.bar,
         moves,
         framesAfterEnd,
         endedOnServer: snap.meeting === null,

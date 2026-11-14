@@ -3,6 +3,7 @@
  * lines, the status under the list, and the line above the first message.
  * `lead-chat-view.ts` puts them on the page.
  */
+import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
 import type { LeadChatViewModel } from './lead-chat-view.ts';
 
 /** Said while listening is on here and another tab hears the reader. */
@@ -20,8 +21,25 @@ export interface BarLine {
   live?: boolean;
 }
 
-/** The person's lines and the lead's, newest last, as the bar shows them. */
+/** A meeting's last two lines, newest last: the bar while the chat is
+ *  closed in a meeting, so the room's words stay on screen as the doc
+ *  page's strip keeps them. */
+function meetingBarLines(mm: MeetingViewModel): BarLine[] {
+  const lines: BarLine[] = (mm.meeting?.lines ?? []).slice(-2).map((l) => ({
+    who: l.who,
+    text: l.text.replace(/\s+/g, ' '),
+  }));
+  if (mm.recording && mm.run.partial) {
+    lines.push({ who: 'Heard', text: mm.run.partial, dim: true, live: true });
+  }
+  if (lines.length === 0) lines.push({ who: 'Meeting', text: 'Nothing said yet', dim: true });
+  return lines.slice(-2);
+}
+
+/** The person's lines and the lead's, newest last, as the bar shows them. In
+ *  a meeting, the meeting's lines. */
 export function barLines(m: LeadChatViewModel): BarLine[] {
+  if (m.meeting?.meeting) return meetingBarLines(m.meeting);
   const lines: BarLine[] = m.messages.slice(-2).map((x) => ({
     who: x.role === 'agent' ? x.author.name : 'You',
     text: x.text.replace(/\s+/g, ' '),

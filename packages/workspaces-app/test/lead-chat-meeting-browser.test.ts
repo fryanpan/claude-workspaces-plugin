@@ -70,6 +70,32 @@ describe.skipIf(CHROME === null)('the lead chat meeting in a browser', () => {
     }
   });
 
+  it('shows the notes as one line just above the typing box, at both sizes', () => {
+    for (const s of result().sizes) {
+      const at = String(s.width);
+      expect(s.notesBox, at).not.toBeNull();
+      expect(s.composeBox, at).not.toBeNull();
+      if (!s.notesBox || !s.composeBox) continue;
+      // One 28px row and its border: a second line would be 20px more. The
+      // floor is the positive control: a panel still growing reads ~2px.
+      expect(s.notesBox.height, at).toBeGreaterThan(20);
+      expect(s.notesBox.height, at).toBeLessThanOrEqual(30);
+      expect(s.notesBox.top + s.notesBox.height, at).toBeLessThanOrEqual(s.composeBox.top + 1);
+      // Only the status line (22px) may sit between them.
+      expect(s.composeBox.top - (s.notesBox.top + s.notesBox.height), at).toBeLessThanOrEqual(24);
+    }
+  });
+
+  it('keeps the bar on screen with the newest line while the chat is closed', () => {
+    for (const s of result().sizes) {
+      const at = String(s.width);
+      expect(s.closedBar, at).not.toBeNull();
+      if (!s.closedBar) continue;
+      expect(s.closedBar.left, at).toBeGreaterThanOrEqual(0);
+      expect(s.closedBar.left + s.closedBar.width, at).toBeLessThanOrEqual(s.width);
+    }
+  });
+
   it('resumes the same recording on every page the recording tab moves to, with the notes kept', () => {
     for (const s of result().sizes) {
       expect(s.moves.map((m) => m.surface)).toEqual(['tasks', 'home', 'library', 'mock', 'doc']);

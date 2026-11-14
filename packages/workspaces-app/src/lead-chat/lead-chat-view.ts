@@ -36,13 +36,14 @@ import {
   type MeetingView,
   type MeetingViewModel,
   createMeetingView,
+  newestLine,
 } from './lead-chat-meeting-view.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
 import { type DrawnRow, patchRows } from './lead-chat-patch.ts';
 import { createPlacer } from './lead-chat-place.ts';
 import { drawMessage, isWorkingRow, liveWorkingRow } from './lead-chat-rows.ts';
 import { BUTTON_STYLES, LAYER_STYLES, STATUS_MARK_STYLES } from './lead-chat-styles.ts';
-import { drawBarLines, drawStatus } from './lead-chat-tail.ts';
+import { drawBarLines, drawNoteLine, drawStatus } from './lead-chat-tail.ts';
 
 /** Fired on the pane when a full-screen chat must make way for a page. */
 export const LEAVE_EVENT = 'lc-leave';
@@ -206,7 +207,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const compose = createComposer(doc);
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
-  pane.append(grip, head, meeting.notes, list, status, compose.root, readonly, ...compose.overlays);
+  // The meeting's notes are one line just above the typing box.
+  pane.append(grip, head, list, meeting.notes, status, compose.root, readonly, ...compose.overlays);
   root.append(style, bar, pane);
   doc.body.append(layer);
 
@@ -388,16 +390,18 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
           : 'Ask Workspaces';
       if (m.open && !meetingOn) button.setAttribute('aria-pressed', String(m.listening));
       else button.removeAttribute('aria-pressed');
-      bar.hidden = !m.barOut || m.open;
+      // In a meeting the bar stays out while the chat is closed: the room's
+      // words stay on screen, as the doc page's strip keeps them.
+      bar.hidden = m.open || !(m.barOut || meetingOn);
       pane.hidden = !m.open;
       drawBarLines(barText, m);
       who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
       drawStatus(status, m);
       title.hidden = meetingOn;
       start.hidden = meetingOn || !m.canTalk || !m.loaded;
-      meeting.render(
-        m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false },
-      );
+      const mm = m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false };
+      meeting.render(mm);
+      drawNoteLine(meeting.line, newestLine(mm));
       compose.root.hidden = !m.canTalk;
       readonly.hidden = m.canTalk || !m.loaded;
       compose.render(m.compose ?? bareComposer(compose.field, m.listening));

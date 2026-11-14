@@ -371,9 +371,13 @@ async function main(): Promise<void> {
         const row = r.lead.find((l) => l.text.includes(line));
         return row?.said === 'said' ? r : null;
       });
-      const watch = await until('the lead’s line on the watching tab', async () => {
+      // Read once the watching tab's panel has grown out of its button: a
+      // tab behind another runs that animation slowly, and a reading taken
+      // part-way finds the one-line row scaled to a few pixels.
+      const watch = await until('the lead’s line on the watching tab, full size', async () => {
         const r = await read(watcher);
-        return r.lead.some((l) => l.text.includes(line)) ? r : null;
+        const row = r.lead.find((l) => l.text.includes(line));
+        return row?.box && row.box.height > 10 ? r : null;
       });
       sizes.push({
         width,
