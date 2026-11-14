@@ -1129,6 +1129,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     redeemShareLink,
     boardRoleOf,
     boardAccessOf,
+    personAccessOn,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -2127,7 +2128,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardAgentTokenKey(cookieKey()),
   );
   /** Agent grants (`at3`): one agent, one app, one board, capped by the
-   *  agent's person. `personRoleOn` is declared below and read per verify. */
+   *  agent's person, read per verify through `personAccessOn`. */
   const agentGrantTokens = new AgentGrantTokens(
     agentGrantTokensPath(dataDir),
     () => agentGrantTokenKey(cookieKey()),
@@ -2140,9 +2141,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         // A grant is edit-level at most, so a person whose access is comment
         // or view holds nothing grantable: the mint refuses and the sweep
         // hangs up a grant minted before the person was narrowed.
-        const access = person.email ? shareLinks.accessRoleOf(boardId, person.email) : null;
-        if (access === 'comment' || access === 'view') return null;
-        return personRoleOn(boardId, person);
+        const access = personAccessOn(boardId, person);
+        return access === 'owner' ? 'owner' : access === 'edit' ? 'member' : null;
       },
       personActive: (personId) => identities.get(personId)?.status === 'active',
     },
@@ -2271,19 +2271,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isAgent: (id) => identities.get(id)?.kind === 'agent',
     reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
   };
-  /** A person's role on a board: owner, a member's role, or null. */
-  const personRoleOn = (workspaceId: string, person: { id: string; email?: string }) => {
-    if (ownerIdentityIds().includes(person.id)) return 'owner' as const;
-    if (!person.email) return null;
-    if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner' as const;
-    return shareLinks.roleOf(workspaceId, person.email);
-  };
   // Who a comment's `to` may name (`addressees.ts`): the owner, a member of a
   // board the doc is on, or an agent attached to one.
   const addresseeRoster: AddresseeRoster = {
     identities,
     owner: presenceRoster.owner,
-    isMember: (board, person) => personRoleOn(board, person) !== null,
+    isMember: (board, person) => personAccessOn(board, person) !== null,
     attachedAgents: (board) => taskStore.listAttachments(board).map((a) => a.agentId),
   };
   const addresseesFor = (docId: string, to: unknown) => {
@@ -2629,7 +2622,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    personRoleOn,
+    personAccessOn,
     agentTokenKey: agentTokenKeyFor,
     ownerNoticeBoards: () => {
       const first = defaultBoardWorkspaceId();
