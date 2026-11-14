@@ -26,6 +26,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/agent-notes/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agent-token` | GET | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/merge` | POST | `routes/agent-identity.ts` | loopback-only |  |
+| `/api/agents/:agentId/messages/:personId` | POST | `routes/private-messages.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`). |
+| `/api/agents/:agentId/person` | POST | `routes/agent-identity.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`). |
 | `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`). |
 | `/api/attachments` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
@@ -63,6 +65,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/keeper/holds` | POST | `routes/keeper-holds.ts` | loopback-only |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
 | `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
+| `/api/me/messages` | GET, POST | `routes/private-messages.ts` | trusted-local |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
@@ -208,11 +211,15 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId` | DELETE | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components` | GET | `routes/doc-component-agent.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components/:id/state` | GET, POST | `routes/doc-component-agent.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components/place` | POST | `routes/doc-component-agent.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/app-voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/archive` | POST | `routes/archive.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/assets` | POST | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/assets/*` | GET, HEAD | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/audio` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/component-grants` | POST | `routes/doc-component-agent.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/components/*` | GET, HEAD | `routes/doc-components.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | GET | `routes/doc-edit-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
@@ -318,6 +325,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |
+| `/workspaces/:ws/me/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/members` | GET | `routes/workspace-members.ts` | share-scope |  |
 | `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
 | `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |

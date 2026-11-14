@@ -19,6 +19,7 @@ import {
   askFromReviewItemAdded,
   asksFromThreadEvent,
   localOnlyPlacesFrom,
+  offBoxAddressedView,
   offBoxAskView,
 } from '../src/ask-feed.ts';
 import { makeDocKey } from '../src/doc-key.ts';
@@ -276,5 +277,37 @@ describe('localOnlyPlacesFrom', () => {
     expect(places.board('w-records')).toBe(true);
     // The control: a board holding a bind that is not local-only.
     expect(places.board('w-launch')).toBe(false);
+  });
+});
+
+describe('an addressed comment on a stream off this machine', () => {
+  const frame = {
+    event: 'comment.addressed',
+    workspaceId: 'w-harbor',
+    docId: 'riverbend-plan',
+    docTitle: 'Riverbend plan',
+    text: 'Alice, is the berth right?',
+  };
+  const places = (board: string[], docs: string[]) => ({
+    board: (id: string) => board.includes(id),
+    doc: (id: string) => docs.includes(id),
+  });
+
+  it('is dropped when its board or its doc keeps its files here, and kept otherwise', () => {
+    expect(offBoxAddressedView(frame, places(['w-harbor'], []))).toBeUndefined();
+    expect(offBoxAddressedView(frame, places([], ['riverbend-plan']))).toBeUndefined();
+    expect(offBoxAddressedView(frame, places(['w-salt'], ['other']))).toBe(frame);
+  });
+
+  it('counts a failed check as local-only, and passes every other frame', () => {
+    const throws = {
+      board: () => {
+        throw new Error('privacy store unreadable');
+      },
+      doc: () => false,
+    };
+    expect(offBoxAddressedView(frame, throws)).toBeUndefined();
+    const other = { event: 'private.message', workspaceId: 'w-harbor' };
+    expect(offBoxAddressedView(other, places(['w-harbor'], []))).toBe(other);
   });
 });

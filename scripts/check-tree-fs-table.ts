@@ -47,6 +47,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/allow-rules.ts': 'not-in-inventory',
   'packages/server/src/attachment-privacy.ts': 'not-in-inventory',
   'packages/server/src/auth/agent-caller.ts': 'not-in-inventory',
+  // `<dataDir>/agent-grant-tokens.json`, a path built from the data dir alone.
+  'packages/server/src/auth/agent-grant-token.ts': 'data-dir',
   'packages/server/src/auth/board-agent-token.ts': 'not-in-inventory',
   'packages/server/src/auth/session-revocations.ts': 'not-in-inventory',
   'packages/server/src/board-socket-roots.ts': 'not-in-inventory',
@@ -62,6 +64,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/client-release.ts': 'not-in-inventory',
   'packages/server/src/coach/setup.ts': 'not-in-inventory',
   'packages/server/src/component-build.ts': 'tree-fs',
+  // `<dataDir>/component-grants.json`, a path built from the data dir alone.
+  'packages/server/src/component-grants.ts': 'data-dir',
   'packages/server/src/component-cdn.ts': 'data-dir',
   'packages/server/src/connector/snapshot.ts': 'not-in-inventory',
   'packages/server/src/dependency-install.ts': 'owner-checkout',
@@ -71,6 +75,9 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/dispatch-registry.ts': 'watch-only',
   'packages/server/src/dispatch-reports.ts': 'not-in-inventory',
   'packages/server/src/doc-component-builds.ts': 'tree-fs',
+  // A grant folder: `allows`/`covers` on the doc and the folder as named
+  // before any realpath or stat, and again on the real path (section A).
+  'packages/server/src/doc-components-agent.ts': 'refused-when-covered',
   'packages/server/src/doc-copies.ts': 'tree-fs',
   'packages/server/src/doc-create-conflict.ts': 'spelling-only',
   'packages/server/src/doc-edit-ops.ts': 'not-in-inventory',
@@ -164,9 +171,14 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/org-relay/relay-log.ts': 'not-in-inventory',
   'packages/server/src/page-loads.ts': 'not-in-inventory',
   'packages/server/src/permission-grants.ts': 'not-in-inventory',
+  // `<dataDir>/person-agent-links.json`, a path built from the data dir alone.
+  'packages/server/src/person-agent-link.ts': 'data-dir',
   'packages/server/src/plugin-refresh.ts': 'owner-checkout',
   'packages/server/src/plugin-release.ts': 'not-in-inventory',
   'packages/server/src/pre-compact-backup.ts': 'data-dir',
+  // `<dataDir>/private-messages/<pair>.jsonl`; ids are percent-encoded into one
+  // file name, so no id names a path outside that folder.
+  'packages/server/src/private-messages.ts': 'data-dir',
   'packages/server/src/private-meta.ts': 'not-in-inventory',
   'packages/server/src/prompt-store.ts': 'not-in-inventory',
   'packages/server/src/public-host.ts': 'not-in-inventory',

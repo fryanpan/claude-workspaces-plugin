@@ -88,51 +88,16 @@ export function createStateHook(ydoc: Y.Doc, id: string, opts: StateHookOptions)
       );
     }
     const segs = segments(path);
-    const where = segs.join('.') || '(the whole state)';
-    if (segs.includes('__proto__')) return refuse(`State has no key "__proto__" (at "${where}").`);
-    if (op.kind !== 'delete') {
-      const bad = notJson(op.value, where);
-      if (bad) return refuse(bad);
-    }
+    const bad = checkOp(segs, op);
+    if (bad) return refuse(bad);
     let next: unknown;
     try {
       next = applyPlain(root.toJSON(), segs, op);
     } catch (err) {
       return refuse((err as Error).message);
     }
-    const depth = depthOf(next);
-    if (depth > STATE_LIMITS.depth) {
-      return refuse(
-        `Component "${id}" state would be nested ${depth} levels deep, over the limit of ${STATE_LIMITS.depth}.`,
-      );
-    }
-    const bytes = byteLength(next);
-    if (bytes > STATE_LIMITS.instanceBytes) {
-      return refuse(
-        `Component "${id}" state would be ${kb(bytes)} KB, over the 256 KB limit for one component. Keep large data in a file the component imports.`,
-      );
-    }
-    let total = bytes;
-    for (const other of componentStateIds(ydoc)) {
-      if (other !== id) total += byteLength(readComponentState(ydoc, other));
-    }
-    if (total > STATE_LIMITS.docBytes) {
-      return refuse(
-        `This doc's component state would be ${kb(total)} KB, over the 2 MB limit for one doc.`,
-      );
-    }
-    const t = now();
-    const perDoc = writeTimes.get(ydoc) ?? new Map<string, number[]>();
-    writeTimes.set(ydoc, perDoc);
-    const recent = (perDoc.get(id) ?? []).filter((at) => t - at < 1000);
-    if (recent.length >= STATE_LIMITS.writesPerSecond) {
-      perDoc.set(id, recent);
-      return refuse(
-        `Component "${id}" wrote more than ${STATE_LIMITS.writesPerSecond} times a second, so this write was refused. Write a drag's position when it ends, or at most every 50 ms.`,
-      );
-    }
-    recent.push(t);
-    perDoc.set(id, recent);
+    const over = overLimit(ydoc, id, next) ?? spendWrite(ydoc, id, now());
+    if (over) return refuse(over);
     ydoc.transact(() => applyY(root, segs, op));
     return { ok: true };
   };
@@ -166,6 +131,126 @@ export function createStateHook(ydoc: Y.Doc, id: string, opts: StateHookOptions)
       listeners.clear();
     },
   };
+}
+
+/** One op of a batch: `set` and `push` carry a value, `delete` none. */
+export type StateOp =
+  | { op: 'set'; path: StatePath; value: unknown }
+  | { op: 'push'; path: StatePath; value: unknown }
+  | { op: 'delete'; path: StatePath };
+
+export interface StateOpsOptions {
+  /** The transaction origin, so a listener can tell who wrote. */
+  origin?: unknown;
+  now?: () => number;
+}
+
+/** Most ops one batch may carry. */
+export const MAX_STATE_OPS = 100;
+
+/**
+ * Apply `ops` to component `id` in one transaction: every op is worked on a
+ * plain copy first and the limits are checked on the result, so a refused op
+ * anywhere in the batch changes nothing, and the refusal names its index.
+ * The batch spends one write of the rate limit. The agent route's write
+ * (`server/src/doc-components-agent.ts`); a page writes through the hook.
+ */
+export function applyStateOps(
+  ydoc: Y.Doc,
+  id: string,
+  ops: readonly StateOp[],
+  opts: StateOpsOptions = {},
+): StateWrite {
+  if (!COMPONENT_STATE_ID.test(id)) {
+    return refuse(`"${id}" is not a component id: use 1 to 64 of a-z, 0-9 and -.`);
+  }
+  if (!Array.isArray(ops) || ops.length === 0) return refuse('ops must be a non-empty list.');
+  if (ops.length > MAX_STATE_OPS) return refuse(`ops must hold at most ${MAX_STATE_OPS} entries.`);
+  const root = componentStateMap(ydoc, id);
+  const steps: Array<{ segs: string[]; op: Op }> = [];
+  let next: unknown = root.toJSON();
+  for (const [i, raw] of ops.entries()) {
+    const parsed = parseOp(raw, i);
+    if (typeof parsed === 'string') return refuse(parsed);
+    const bad = checkOp(parsed.segs, parsed.op);
+    if (bad) return refuse(`ops[${i}]: ${bad}`);
+    // The plain copy gets a copy of the value: a later op in the batch
+    // changes the copy in place, and must not change what this op writes.
+    const own: Op =
+      parsed.op.kind === 'delete'
+        ? parsed.op
+        : { kind: parsed.op.kind, value: structuredClone(parsed.op.value) };
+    try {
+      next = applyPlain(next as Record<string, unknown>, parsed.segs, own);
+    } catch (err) {
+      return refuse(`ops[${i}]: ${(err as Error).message}`);
+    }
+    steps.push(parsed);
+  }
+  const over = overLimit(ydoc, id, next) ?? spendWrite(ydoc, id, (opts.now ?? Date.now)());
+  if (over) return refuse(over);
+  ydoc.transact(() => {
+    for (const { segs, op } of steps) applyY(root, segs, op);
+  }, opts.origin);
+  return { ok: true };
+}
+
+function parseOp(raw: unknown, i: number): { segs: string[]; op: Op } | string {
+  const r = raw as { op?: unknown; path?: unknown; value?: unknown } | null;
+  if (r === null || typeof r !== 'object') return `ops[${i}] must be an object.`;
+  const path = r.path;
+  const okPath =
+    typeof path === 'string' ||
+    (Array.isArray(path) && path.every((p) => typeof p === 'string' || typeof p === 'number'));
+  if (!okPath) return `ops[${i}].path must be a string like "pins.a" or a list of keys.`;
+  const segs = segments(path as StatePath);
+  if (r.op === 'delete') return { segs, op: { kind: 'delete' } };
+  if (r.op === 'set' || r.op === 'push') {
+    if (!('value' in r)) return `ops[${i}].value is required for "${r.op}".`;
+    return { segs, op: { kind: r.op, value: r.value } };
+  }
+  return `ops[${i}].op must be "set", "push" or "delete".`;
+}
+
+/** Why `op` at `segs` is refused before it is tried, or null. */
+function checkOp(segs: string[], op: Op): string | null {
+  const where = segs.join('.') || '(the whole state)';
+  if (segs.includes('__proto__')) return `State has no key "__proto__" (at "${where}").`;
+  return op.kind === 'delete' ? null : notJson(op.value, where);
+}
+
+/** Why `next` as component `id`'s state is past a size limit, or null. */
+function overLimit(ydoc: Y.Doc, id: string, next: unknown): string | null {
+  const depth = depthOf(next);
+  if (depth > STATE_LIMITS.depth) {
+    return `Component "${id}" state would be nested ${depth} levels deep, over the limit of ${STATE_LIMITS.depth}.`;
+  }
+  const bytes = byteLength(next);
+  if (bytes > STATE_LIMITS.instanceBytes) {
+    return `Component "${id}" state would be ${kb(bytes)} KB, over the 256 KB limit for one component. Keep large data in a file the component imports.`;
+  }
+  let total = bytes;
+  for (const other of componentStateIds(ydoc)) {
+    if (other !== id) total += byteLength(readComponentState(ydoc, other));
+  }
+  if (total > STATE_LIMITS.docBytes) {
+    return `This doc's component state would be ${kb(total)} KB, over the 2 MB limit for one doc.`;
+  }
+  return null;
+}
+
+/** Spend one write of component `id`'s rate budget at `t`, or say why not. */
+function spendWrite(ydoc: Y.Doc, id: string, t: number): string | null {
+  const perDoc = writeTimes.get(ydoc) ?? new Map<string, number[]>();
+  writeTimes.set(ydoc, perDoc);
+  const recent = (perDoc.get(id) ?? []).filter((at) => t - at < 1000);
+  if (recent.length >= STATE_LIMITS.writesPerSecond) {
+    perDoc.set(id, recent);
+    return `Component "${id}" wrote more than ${STATE_LIMITS.writesPerSecond} times a second, so this write was refused. Write a drag's position when it ends, or at most every 50 ms.`;
+  }
+  recent.push(t);
+  perDoc.set(id, recent);
+  return null;
 }
 
 const refuse = (error: string): StateWrite => ({ ok: false, error });

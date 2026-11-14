@@ -176,3 +176,24 @@ describe('the change shown against the change stored', () => {
     expect(sameAccessChange(undefined, ADD)).toBe(false);
   });
 });
+
+describe('a component folder grant', () => {
+  const GRANT: ReviewAccessChange = {
+    op: 'component-folder',
+    workspaceId: 'w-riverbend',
+    folder: '/Users/alice/dev/harborlight/site/map',
+  };
+
+  it('says which folder, by its last three names, and that its code runs for every reader', () => {
+    expect(accessChangeLine(GRANT)).toBe(
+      'Lets docs on any board build components from the files git does not list in …/harborlight/site/map/. Their code runs in the page for every reader of a doc that imports them.',
+    );
+  });
+
+  it('reads back only an absolute folder with no dot segments', () => {
+    expect(readAccessChange(GRANT)).toEqual(GRANT);
+    expect(readAccessChange({ ...GRANT, folder: 'site/map' })).toBeUndefined();
+    expect(readAccessChange({ ...GRANT, folder: '/Users/alice/../bob' })).toBeUndefined();
+    expect(readAccessChange({ ...GRANT, folder: 7 })).toBeUndefined();
+  });
+});

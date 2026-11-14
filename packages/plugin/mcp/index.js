@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.366";
+var version2 = "0.1.369";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14044,7 +14044,7 @@ function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
 }
 function pathNeedsAgentToken(path) {
-  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
+  return /^\/api\/agents\/[^/?]+\/watches(\?|$)/.test(path) || /^\/api\/agents\/[^/?]+\/(person|messages\/[^/?]+)$/.test(path) || /^\/workspaces\/[^/?]+\/voice-queue\/[^/?]+\/answer$/.test(path) || /^\/workspaces\/[^/?]+\/lead-chat\/meeting\/say$/.test(path) || /^\/workspaces\/[^/?]+\/point$/.test(path) || /^\/workspaces\/[^/?]+\/person\/(watch|show)$/.test(path) || path === "/inbox/rows" || path === "/api/review-queue/rank";
 }
 function createAgentTokenStore(deps) {
   let token = null;
@@ -14272,6 +14272,34 @@ function createCallToolHandler(deps) {
       endToolCall();
     }
   };
+}
+
+// packages/mcp/src/addressed-elsewhere.ts
+var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+function commentOf(event, payload) {
+  if (!payload || typeof payload !== "object")
+    return;
+  const p = payload;
+  if (p.comment && typeof p.comment === "object")
+    return p.comment;
+  if (event !== "thread.created")
+    return;
+  const comments = p.thread?.comments;
+  if (!Array.isArray(comments) || comments.length === 0)
+    return;
+  const lastComment = comments[comments.length - 1];
+  return lastComment && typeof lastComment === "object" ? lastComment : undefined;
+}
+function isAddressedElsewhere(event, payload, selfId) {
+  if (!COMMENT_EVENTS.has(event))
+    return false;
+  const self = selfId.trim().toLowerCase();
+  if (self === "" || self.startsWith("known-"))
+    return false;
+  const to = commentOf(event, payload)?.addressedTo;
+  if (!Array.isArray(to) || to.length === 0)
+    return false;
+  return !to.some((a) => a !== null && typeof a === "object" && typeof a.id === "string" && a.id.trim().toLowerCase() === self);
 }
 
 // packages/mcp/src/app-unreachable-line.ts
@@ -15098,6 +15126,15 @@ function personLandedIds(p) {
   return {};
 }
 
+// packages/mcp/src/private-message-line.ts
+var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+function privateMessageLine(p, selfId) {
+  if (p.from !== "person" || p.author?.id === selfId || !p.personId)
+    return null;
+  const who = p.author?.name || p.personId;
+  return `[private] ${who} (your person): ${clip2(p.text ?? "", 2000)} Answer with reply_private(personId="${p.personId}").`;
+}
+
 // packages/mcp/src/review-item-line.ts
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
@@ -15170,7 +15207,7 @@ function spawnRequestedLine(p) {
 }
 
 // packages/mcp/src/self-authored.ts
-var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+var COMMENT_EVENTS2 = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
 var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
 var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard|person)\./;
@@ -15202,7 +15239,7 @@ function frameActorId(event, payload) {
     return stringOf(p.agentId);
   if (ACTOR_FAMILY_RE.test(event))
     return idOf(p.actor);
-  if (!COMMENT_EVENTS.has(event))
+  if (!COMMENT_EVENTS2.has(event))
     return;
   const direct = idOf(p.comment?.author);
   if (direct)
@@ -15332,7 +15369,7 @@ function nowMs(deps) {
 function nowIso(deps) {
   return new Date(nowMs(deps)).toISOString();
 }
-var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person)\./;
+var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach|person|private)\./;
 function dispatchReportedLine(p) {
   const who = p.agentName ?? p.actor?.name ?? "a builder";
   const commit = (p.headCommit ?? "").slice(0, 7);
@@ -15352,6 +15389,8 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   if (event === "dispatch.requested")
     return;
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
     return;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   let body;
@@ -15467,6 +15506,14 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = personLandedLine(rawPayload);
       Object.assign(p, personLandedIds(rawPayload));
       break;
+    case "private.message": {
+      const line = privateMessageLine(rawPayload, deps.authorId);
+      if (line === null)
+        return;
+      body = line;
+      p.actor = rawPayload.author;
+      break;
+    }
     default:
       body = `[${event}]${p.taskId ? ` task ${p.taskId}` : ""}`;
   }
@@ -15481,6 +15528,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
         ...p.taskId ? { task_id: p.taskId } : {},
         ...p.docId ? { doc_id: p.docId } : {},
         ...p.reviewItemId ? { review_item_id: p.reviewItemId } : {},
+        ...p.personId ? { person_id: p.personId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -15500,6 +15548,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
     return;
   if (event === "review_item.answered")
     return;
@@ -16344,8 +16394,120 @@ function secretReadCommand(service) {
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 
+// packages/mcp/src/component-schemas.ts
+var WORKSPACE_ID = { type: "string", description: "The board the doc is on." };
+var DOC_ID = {
+  type: "string",
+  description: "The doc, bound to an .mdx file, whose components these are."
+};
+var COMPONENT_ID = {
+  type: "string",
+  description: "The state id: the string `id` prop on the tag. 1 to 64 of a-z, 0-9 and -. list_components names them."
+};
+var PATH = {
+  type: "string",
+  description: 'A dot path into the state, like "pins.harborlight" or "log.0".'
+};
+var RUNS = "Every component runs in the doc page for every reader, with the reader’s session; none is framed.";
+var COMPONENT_TOOLS = [
+  {
+    name: "list_components",
+    description: `List an .mdx doc's components: one row per tag, with its state ids, its build status (built, failed with the error, or pending) and whether it has state; then one row per state no tag names, marked placed:false (deleting a tag keeps its state). ${RUNS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, docId: DOC_ID },
+      required: ["workspaceId", "docId"]
+    }
+  },
+  {
+    name: "get_component_state",
+    description: "Read a component's state: the whole state, or the value at `path`. Says whether a tag in the doc still names the id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        componentId: COMPONENT_ID,
+        path: PATH
+      },
+      required: ["workspaceId", "docId", "componentId"]
+    }
+  },
+  {
+    name: "set_component_state",
+    description: "Change a component's state in one step. Every open page shows the change within a second. `ops` is a list of at most 100 of {op:'set', path, value}, {op:'push', path, value} (append to a list) and {op:'delete', path}. The list is checked whole against the page's limits (256 KB per component, 2 MB per doc, depth 8, 20 writes a second) and applied in full or not at all. Returns the state after.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        componentId: COMPONENT_ID,
+        ops: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              op: { type: "string", enum: ["set", "push", "delete"] },
+              path: PATH,
+              value: { description: "Any JSON value. Not used by delete." }
+            },
+            required: ["op", "path"]
+          }
+        }
+      },
+      required: ["workspaceId", "docId", "componentId", "ops"]
+    }
+  },
+  {
+    name: "place_component",
+    description: `Insert a component tag into an .mdx doc, under a heading or at the end, with its import line when the doc has none for that file, and build it. Returns the tag as written and the build status; a failed build says why. A local file must be in the doc's git repository under a folder holding component.json; a file git ignores builds only after request_component_grant is approved. ${RUNS}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        importPath: {
+          type: "string",
+          description: "A path relative to the doc, ending .ts, .tsx, .js, .jsx or .mjs (like './map/index.ts'), or an esm.sh URL at an exact version."
+        },
+        name: {
+          type: "string",
+          description: "The tag name. Default: from the file name, like Map for ./map/index.ts."
+        },
+        props: {
+          type: "object",
+          description: 'The tag’s props, which must include a string `id`: the state id. Strings are written as "…"; anything else as {JSON}.'
+        },
+        headingId: {
+          type: "string",
+          description: "Insert under this heading (an id read_doc_outline returned). Default: the end."
+        }
+      },
+      required: ["workspaceId", "docId", "importPath", "props"]
+    }
+  },
+  {
+    name: "request_component_grant",
+    description: "Ask the owner to let docs build components from a folder's files that git ignores. Files an access card on the task you name and changes nothing; you are told when the owner answers. The folder must be inside the doc's git repository and declared by a component.json. A grant covers that folder for docs on every board.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        folder: { type: "string", description: "Relative to the doc, or absolute." },
+        taskId: { type: "string", description: "The task that needs it; the card is filed there." },
+        why: {
+          type: "string",
+          description: "What the component is for, in at most 600 characters."
+        }
+      },
+      required: ["workspaceId", "docId", "folder", "taskId", "why"]
+    }
+  }
+];
+
 // packages/mcp/src/folder-schemas.ts
-var WORKSPACE_ID = {
+var WORKSPACE_ID2 = {
   type: "string",
   description: "The board whose Library holds the folders."
 };
@@ -16364,7 +16526,7 @@ var FOLDER_TOOLS = [
     description: `List a board's Library folders. Meetings is built in: new meetings land in it, and it cannot be moved or archived. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID },
+      properties: { workspaceId: WORKSPACE_ID2 },
       required: ["workspaceId"]
     }
   },
@@ -16374,7 +16536,7 @@ var FOLDER_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID,
+        workspaceId: WORKSPACE_ID2,
         name: { type: "string", description: "At most 80 characters, no slash." },
         parentId: PARENT_ID
       },
@@ -16386,7 +16548,7 @@ var FOLDER_TOOLS = [
     description: `Rename a Library folder. A name already used beside it is refused. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, name: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID, name: { type: "string" } },
       required: ["workspaceId", "folderId", "name"]
     }
   },
@@ -16395,7 +16557,7 @@ var FOLDER_TOOLS = [
     description: `Move a Library folder, with everything in it, into another folder or to the top level. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, parentId: PARENT_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID, parentId: PARENT_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16404,7 +16566,7 @@ var FOLDER_TOOLS = [
     description: `Archive a Library folder. Reversible with unarchive_folder: its docs and subfolders show as in no folder until then, and nothing is deleted. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16413,7 +16575,7 @@ var FOLDER_TOOLS = [
     description: `Bring back an archived Library folder with its docs and subfolders where they were. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16423,7 +16585,7 @@ var FOLDER_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID,
+        workspaceId: WORKSPACE_ID2,
         docId: { type: "string" },
         folderId: { ...FOLDER_ID, type: ["string", "null"] }
       },
@@ -16481,11 +16643,40 @@ var PERSON_TOOLS = [
       },
       required: ["workspaceId"]
     }
+  },
+  {
+    name: "confirm_person",
+    description: "Confirm which person you work for, by their sign-in email. You become their lead agent only once they have also named you in their profile; until then the reply says pending. Their private messages reach only their linked lead agent. email: null clears your side of the link.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        email: {
+          type: ["string", "null"],
+          description: "The person's sign-in email, or null to clear the link."
+        }
+      },
+      required: ["email"]
+    }
+  },
+  {
+    name: "reply_private",
+    description: "Answer a private message from your person (a [private] channel line). Only that person sees it, on their own stream; it never reaches the board, its threads or lead chat. Refused unless personId is the person linked to you (confirm_person).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        personId: {
+          type: "string",
+          description: "The personId the [private] line named."
+        },
+        text: { type: "string", description: "Your reply." }
+      },
+      required: ["personId", "text"]
+    }
   }
 ];
 
 // packages/mcp/src/whiteboard-schemas.ts
-var WORKSPACE_ID2 = {
+var WORKSPACE_ID3 = {
   type: "string",
   description: "The board this whiteboard is on. get_workspace lists the boards you are attached to."
 };
@@ -16519,7 +16710,7 @@ var WHITEBOARD_TOOLS = [
     description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you. Returns `url`, the absolute link to the whiteboard. Give that link to a person.",
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID2, title: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID3, title: { type: "string" } },
       required: ["workspaceId"]
     }
   },
@@ -16529,7 +16720,7 @@ var WHITEBOARD_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID2,
+        workspaceId: WORKSPACE_ID3,
         docId: { type: "string" },
         shapes: { type: "array", items: SHAPE },
         mode: { type: "string", enum: ["add", "replace"] },
@@ -16547,7 +16738,7 @@ var WHITEBOARD_TOOLS = [
     description: `Read a whiteboard as shapes: {shapes: [{id, kind, x, y, w, h, text, from, to}], count}. A box's words are its text. A person's pen stroke reads kind "freedraw" with its bounding box.`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID2, docId: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID3, docId: { type: "string" } },
       required: ["workspaceId", "docId"]
     }
   }
@@ -16661,6 +16852,12 @@ var CONFIRM_SCOPED_OVERWRITE = {
   type: "boolean",
   description: "Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance."
 };
+var ADDRESSEES_SCHEMA = {
+  type: "array",
+  items: { type: "string" },
+  maxItems: 10,
+  description: "Who this comment is for: person ids, emails or display names, or agent ids or names, on this board. Only they are notified, and the thread waits on them. Everyone who can read the doc still sees it. Omit to notify the board as usual."
+};
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -16757,7 +16954,8 @@ var TOOL_LIST = {
           docId: { type: "string" },
           threadId: { type: "string" },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "threadId", "text"]
       }
@@ -17042,7 +17240,8 @@ var TOOL_LIST = {
             required: ["replacement"]
           },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "text"]
       }
@@ -19641,7 +19840,8 @@ var TOOL_LIST = {
     },
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
-    ...FOLDER_TOOLS
+    ...FOLDER_TOOLS,
+    ...COMPONENT_TOOLS
   ]
 };
 
@@ -19658,6 +19858,51 @@ function boardPathOf(toolName, args) {
   return `/workspaces/${encodeURIComponent(boardIdOf(toolName, args))}`;
 }
 
+// packages/mcp/src/tools/components.ts
+var str = (v) => typeof v === "string" ? v : "";
+async function handleComponentTool(name, a, ctx) {
+  const doc2 = () => {
+    const docId = str(a.docId);
+    if (docId === "")
+      throw new Error(`${name} needs a docId`);
+    return `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}`;
+  };
+  const state = () => {
+    const id = str(a.componentId);
+    if (id === "")
+      throw new Error(`${name} needs a componentId: the tag's id prop`);
+    return `${doc2()}/agent-components/${encodeURIComponent(id)}/state`;
+  };
+  switch (name) {
+    case "list_components":
+      return ctx.ok(await ctx.http("GET", `${doc2()}/agent-components`));
+    case "get_component_state": {
+      const path = str(a.path);
+      const q = path ? `?path=${encodeURIComponent(path)}` : "";
+      return ctx.ok(await ctx.http("GET", `${state()}${q}`));
+    }
+    case "set_component_state":
+      return ctx.ok(await ctx.http("POST", state(), { ops: a.ops, author: ctx.suggestionAuthor() }));
+    case "place_component":
+      return ctx.ok(await ctx.http("POST", `${doc2()}/agent-components/place`, {
+        importPath: a.importPath,
+        ...a.name !== undefined ? { name: a.name } : {},
+        props: a.props,
+        ...a.headingId !== undefined ? { headingId: a.headingId } : {},
+        author: ctx.suggestionAuthor()
+      }));
+    case "request_component_grant":
+      return ctx.ok(await ctx.http("POST", `${doc2()}/component-grants`, {
+        folder: a.folder,
+        taskId: a.taskId,
+        why: a.why,
+        author: ctx.suggestionAuthor()
+      }));
+    default:
+      return;
+  }
+}
+
 // packages/mcp/src/thread-create.ts
 function threadCreateRequest(input, author, board) {
   const doc2 = encodeURIComponent(input.docId);
@@ -19668,7 +19913,8 @@ function threadCreateRequest(input, author, board) {
         author,
         text: input.text,
         anchor: { kind: "subject" },
-        ...input.review !== undefined ? { review: input.review } : {}
+        ...input.review !== undefined ? { review: input.review } : {},
+        ...input.to !== undefined ? { to: input.to } : {}
       }
     };
   }
@@ -19683,7 +19929,8 @@ function threadCreateRequest(input, author, board) {
       ...input.occurrence !== undefined ? { occurrence: input.occurrence } : {},
       ...input.path !== undefined ? { path: input.path } : {},
       ...input.suggest !== undefined ? { suggest: input.suggest } : {},
-      ...input.review !== undefined ? { review: input.review } : {}
+      ...input.review !== undefined ? { review: input.review } : {},
+      ...input.to !== undefined ? { to: input.to } : {}
     }
   };
 }
@@ -19758,8 +20005,13 @@ async function handleDocsTool(name, a, ctx) {
       return ok2(res);
     }
     case "post_reply": {
-      const { docId, threadId, text, review } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, { author: AUTHOR, text, ...review !== undefined ? { review } : {} });
+      const { docId, threadId, text, review, to } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, {
+        author: AUTHOR,
+        text,
+        ...review !== undefined ? { review } : {},
+        ...to !== undefined ? { to } : {}
+      });
       return ok2(res);
     }
     case "link_review_item": {
@@ -20432,6 +20684,10 @@ function refusalOf(e, codes) {
   return { error: `refused (${m[1]})` };
 }
 async function handlePersonTool(name, a, ctx) {
+  if (name === "confirm_person")
+    return confirmPerson(a, ctx);
+  if (name === "reply_private")
+    return replyPrivate(a, ctx);
   if (name !== "watch_person" && name !== "show_person")
     return;
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
@@ -20463,6 +20719,36 @@ async function handlePersonTool(name, a, ctx) {
       ...refused,
       ...refused.error === "not-here" ? { note: "Nobody is looking at this board now. Post the link on the task instead." } : {}
     });
+  }
+}
+async function confirmPerson(a, ctx) {
+  if (a.email !== null && (typeof a.email !== "string" || !a.email.trim())) {
+    return ctx.err("email is required (or null to clear)");
+  }
+  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
+    return ctx.ok({ ok: true, state: res.state ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
+  }
+}
+async function replyPrivate(a, ctx) {
+  const personId = typeof a.personId === "string" ? a.personId.trim() : "";
+  const text = typeof a.text === "string" ? a.text.trim() : "";
+  if (!personId || !text)
+    return ctx.err("personId and text are required");
+  try {
+    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`, { text });
+    return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
+  } catch (e) {
+    const refused = refusalOf(e, [400, 401, 403]);
+    if (!refused)
+      throw e;
+    return ctx.ok({ ok: false, ...refused });
   }
 }
 
@@ -21624,9 +21910,9 @@ function parseLeadChatAttachment(raw) {
   if (typeof raw !== "object" || raw === null)
     return null;
   const { id, name, type, size, image } = raw;
-  const ok2 = str(id, 100);
-  const label = str(name, FILE_NAME_MAX);
-  const kind = str(type, FILE_TYPE_MAX);
+  const ok2 = str2(id, 100);
+  const label = str2(name, FILE_NAME_MAX);
+  const kind = str2(type, FILE_TYPE_MAX);
   if (!ok2 || !LEAD_CHAT_FILE_ID.test(ok2) || !label || !kind)
     return null;
   if (typeof size !== "number" || !Number.isFinite(size) || size < 0)
@@ -21639,7 +21925,7 @@ function parseLeadChatAttachment(raw) {
     ...image === true ? { image: true } : {}
   };
 }
-function str(v, max) {
+function str2(v, max) {
   return typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
 }
 
@@ -22637,7 +22923,8 @@ function createConnectorSession(deps) {
       handleInboxTool,
       handlePersonTool,
       handleWhiteboardTool,
-      handleFolderTool
+      handleFolderTool,
+      handleComponentTool
     ],
     err
   });

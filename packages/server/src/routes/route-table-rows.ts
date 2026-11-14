@@ -93,6 +93,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['loopback-only', '/events/agent/:agentId', 'GET'],
     ['share-scope', '/workspaces/:ws/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/events:stream', 'GET'],
+    ['share-scope', '/workspaces/:ws/me/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/audio', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/app-voice', 'GET'],
@@ -256,6 +257,24 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
       'Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`).',
     ],
     ['loopback-only', '/api/agents/:agentId/merge', 'POST'],
+    [
+      'loopback-only',
+      '/api/agents/:agentId/person',
+      'POST',
+      'Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`).',
+    ],
+  ]),
+  // A person's private conversation with their own lead agent. The person's
+  // side needs a person proof and refuses every token; the agent's reply is
+  // its own `at1` or `at2`, and only to the person linked to it.
+  ...family('routes/private-messages.ts', [
+    ['trusted-local', '/api/me/messages', 'GET POST'],
+    [
+      'loopback-only',
+      '/api/agents/:agentId/messages/:personId',
+      'POST',
+      'Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`).',
+    ],
   ]),
   // Mint, list and revoke `at2`: refused through the edge, from off this
   // machine, from a page, and to every visitor, `at2` holders included.
@@ -597,6 +616,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
   ...family('routes/doc-components.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/components/*', 'GET HEAD'],
+  ]),
+  // An agent's component tools; deliberately outside `components/*`.
+  ...family('routes/doc-component-agent.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/:id/state', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/place', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/component-grants', 'POST'],
   ]),
   ...family('routes/doc-metadata.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],

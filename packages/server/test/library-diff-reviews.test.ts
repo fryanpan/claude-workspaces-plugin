@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LibraryPayload } from '../src/library.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -37,7 +38,9 @@ describe('diff reviews in the Library', () => {
   let base: string;
   let WS = '';
   const host = { host: 'localhost' };
-  const browser = () => ({ ...host, origin: base, 'sec-fetch-site': 'same-origin' });
+  let alice: SignedInPerson;
+  /** Alice's own signed-in tab: a browser's body claim names nobody. */
+  const asAlice = () => ({ ...alice.headers });
   const post = async (path: string, body: unknown, headers: Record<string, string> = host) => {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
@@ -72,6 +75,10 @@ describe('diff reviews in the Library', () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base, { name: 'Harborlight' });
+    alice = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
   });
 
   afterEach(async () => {
@@ -114,10 +121,10 @@ describe('diff reviews in the Library', () => {
     const v = await post(
       `/workspaces/${WS}/library/views`,
       { docId: reviewId, author: ALICE },
-      browser(),
+      asAlice(),
     );
     expect(v.body.recorded).toBe(true);
-    expect(((await items('known-alice')).viewed ?? []).map((x) => x.docId)).toEqual([reviewId]);
+    expect(((await items(alice.user.id)).viewed ?? []).map((x) => x.docId)).toEqual([reviewId]);
   });
 
   it('stars a diff review for the person who starred it only', async () => {
@@ -125,16 +132,16 @@ describe('diff reviews in the Library', () => {
     const s = await post(
       `/workspaces/${WS}/library/stars`,
       { kind: 'doc', id: reviewId, starred: true, author: ALICE },
-      browser(),
+      asAlice(),
     );
     expect(s.body.recorded).toBe(true);
-    const mine = await fetch(`${base}/workspaces/${WS}/library/stars?viewer=known-alice`, {
+    const mine = await fetch(`${base}/workspaces/${WS}/library/stars?viewer=${alice.user.id}`, {
       headers: host,
     });
     const starred = ((await mine.json()) as { starred: Array<{ kind: string; id: string }> })
       .starred;
     expect(starred.map((x) => `${x.kind}:${x.id}`)).toEqual([`doc:${reviewId}`]);
-    expect((await items('known-alice')).starred?.map((x) => x.id)).toEqual([reviewId]);
+    expect((await items(alice.user.id)).starred?.map((x) => x.id)).toEqual([reviewId]);
     expect((await items('known-bob')).starred).toBeUndefined();
   });
 });

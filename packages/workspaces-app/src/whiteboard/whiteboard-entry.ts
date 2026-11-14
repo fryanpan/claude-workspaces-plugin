@@ -20,6 +20,7 @@ import { docSocketUrl } from '../doc-path.ts';
 import { mountDocStar } from '../doc-star.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
 import { recordLibraryView } from '../library-view.ts';
+import { announceUser } from '../presence/announce-user.ts';
 import type { CanvasHandle } from './canvas-island.ts';
 import {
   commitLocal,
@@ -81,7 +82,7 @@ async function boot(): Promise<void> {
   }
   const client = connect(docSocketUrl(location, docId, 'whiteboard', workspaceId));
   const { ydoc, awareness } = client;
-  awareness.setLocalStateField('user', { name: user.name, color: user.color });
+  announceUser(awareness, user);
 
   const showPresence = () => {
     if (presence) {
