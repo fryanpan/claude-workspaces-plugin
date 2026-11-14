@@ -37,6 +37,12 @@ import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
 import { identifyCallerAgent } from './auth/agent-caller.ts';
 import {
+  AgentGrantTokens,
+  agentGrantTokenKey,
+  agentGrantTokensPath,
+  appIdFrom,
+} from './auth/agent-grant-token.ts';
+import {
   authorizeAgentCaller,
   createLegacyAgentWarner,
   createRefusedMintWarner,
@@ -2126,6 +2132,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
+  /** Agent grants (`at3`): one agent, one app, one board, capped by the
+   *  agent's person. `personRoleOn` is declared below and read per verify. */
+  const agentGrantTokens = new AgentGrantTokens(
+    agentGrantTokensPath(dataDir),
+    () => agentGrantTokenKey(cookieKey()),
+    {
+      appId: appIdFrom(process.env.CW_APP_ID),
+      personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
+      roleOf: (boardId, personId) => {
+        const person = identities.get(personId);
+        return person ? personRoleOn(boardId, person) : null;
+      },
+      personActive: (personId) => identities.get(personId)?.status === 'active',
+    },
+  );
   /** The threads those tokens opened, which the org relay checks a sender by. */
   const threadOpenerProofs = new ThreadOpenerProofs(threadOpenerProofsPath(dataDir));
 
@@ -2169,7 +2190,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
-    boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    boardAgentGrantFor: (bearer, via) =>
+      bearer.startsWith('at3.')
+        ? agentGrantTokens.verify(bearer, via)
+        : boardAgentTokens.verify(bearer),
     boardAgentHeld: (tokenId) => boardAgentTokens.isHeld(tokenId),
     // Forward references, as above: the board sockets are opened below, and
     // the agent-token key is derived further down.
@@ -2895,6 +2919,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
   const boardTokenRoutesCtx: BoardTokenRoutesContext = {
     tokens: boardAgentTokens,
+    grants: agentGrantTokens,
     boardExists: (boardId) => taskStore.getWorkspace(boardId) !== undefined,
     ensureAgent: (agentId) => {
       const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
@@ -3713,6 +3738,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForDeadWidgetGrants(
       (token, origin) => boardWidgetGrantFor(token, origin) !== null,
     );
+    // An agent grant whose person left the board or was archived: HTTP
+    // already refuses it (`AgentGrantTokens.verify`); this hangs up what it
+    // opened while it still held.
+    const lapsed = new Set(agentGrantTokens.lapsedMemberKeys());
+    if (lapsed.size > 0) {
+      docStore.closeSocketsForShareMembers((k) => lapsed.has(k));
+      sse.closeForShareMembers((k) => lapsed.has(k));
+    }
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);

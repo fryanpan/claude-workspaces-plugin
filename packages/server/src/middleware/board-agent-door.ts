@@ -57,7 +57,9 @@ export interface BoardAgentDoorInput {
   /** The Access verifier for the operator's proxied hostname, or null. */
   proxiedVerifier: ((req: Request) => Promise<CfAccessResult>) | null;
   /** The claims a bearer still attests to (MAC, record, not revoked), or null. */
-  grantFor: (bearer: string) => BoardAgentClaims | null;
+  /** `via` is where the request came from, which an `at3` records as its
+   *  last use (`auth/agent-grant-token.ts`). */
+  grantFor: (bearer: string, via?: 'loopback' | 'edge') => BoardAgentClaims | null;
   /** Every workspace an id belongs to, as `collabScope` asks it. */
   workspacesOf: (id: string) => string[];
   /** Whether a token id is one the server holds for a board socket session. */
@@ -134,7 +136,7 @@ export async function admitBoardAgent(input: BoardAgentDoorInput): Promise<Board
   if (isBrowserRequest(req.headers)) return refuse(403, 'board_token_browser');
   // Forged, tampered, never issued, revoked, or disagreeing with its record:
   // one answer, so a caller learns nothing about which check refused.
-  const grant = input.grantFor(input.bearer);
+  const grant = input.grantFor(input.bearer, hostKind === 'proxied-local' ? 'edge' : 'loopback');
   if (!grant) return refuse(401, 'board_token_invalid');
   // Only off the tunnel, from loopback: where the server's own connector is.
   const lead = hostKind === 'local' && input.held(grant.tokenId);
