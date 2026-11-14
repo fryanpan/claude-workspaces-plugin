@@ -54,6 +54,8 @@ import { type RouteHandlerSpy, spyOnRouteHandlers } from './route-handler-spy.ts
 const FIXTURE = join(import.meta.dir, 'fixtures', 'route-answers.json');
 const UPDATE = process.env.CW_UPDATE_ROUTE_ANSWERS === '1';
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** Seeds built at once; small enough not to flood a loaded runner. */
+const SEED_BATCH = 16;
 
 interface Seed {
   ws: string;
@@ -186,10 +188,22 @@ describe('every route-table row is answered as recorded', () => {
       ...rows.filter((r) => READS.has(r.method)),
       ...rows.filter((r) => !READS.has(r.method)),
     ];
+    // Every write's seed is built before any recorded request, in bounded
+    // parallel batches: seeding is about half the work, and the spy only
+    // attributes one request at a time, so the recorded requests themselves
+    // stay sequential.
+    const writes = ordered.filter((r) => !READS.has(r.method)).length;
+    const own: Seed[] = [];
+    for (let i = 0; i < writes; i += SEED_BATCH) {
+      const batch = Math.min(SEED_BATCH, writes - i);
+      own.push(...(await Promise.all(Array.from({ length: batch }, () => seed()))));
+    }
+    let nextOwn = 0;
     for (const { e, method } of ordered) {
       const key = `${method} ${e.pattern}`;
       if (answers.has(key)) continue;
-      const at = READS.has(method) ? shared : await seed();
+      const at = READS.has(method) ? shared : own[nextOwn++];
+      if (!at) throw new Error(`no seed left for ${key}`);
       const hasBody = !READS.has(method);
       spy.begin();
       const res = await fetch(`${base}${addressFor(e.pattern, at)}`, {
@@ -211,7 +225,10 @@ describe('every route-table row is answered as recorded', () => {
       const sorted = Object.fromEntries([...answers].sort(([a], [b]) => a.localeCompare(b)));
       writeFileSync(FIXTURE, `${JSON.stringify(sorted, null, 2)}\n`);
     }
-  });
+    // About 670 requests and 300 seeds. Locally this hook takes 0.4-0.5s; on
+    // a loaded CI shard it overran bun's 5s hook default (main at ebbc4422b).
+    // The bound is a ceiling for a starved runner, not a measurement.
+  }, 60_000);
 
   afterAll(async () => {
     await handle.stop();
