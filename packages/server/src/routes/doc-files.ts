@@ -16,10 +16,11 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  *
  * Which folder a doc may serve is `doc-file-scope.ts` (only the subfolder of
  * a present, git-listed page a `::html` line in the doc's current content
- * names, or the one `.json` file a `<StreetMap src>` tag in it names); which files git lists there is `doc-file-listing.ts`; what may be
- * read, and why the page's scripts are written into it, is
- * `doc-file-frame.ts`; built pages are kept by `doc-file-page-cache.ts`. This module decodes the path, refuses a doc with no
- * bound file, and sets the headers:
+ * names, or the one `.json` file a `<StreetMap src>` tag in it names);
+ * which files git lists there is `doc-file-listing.ts`; what may be read,
+ * and why the page's scripts are written into it, is `doc-file-frame.ts`;
+ * built pages are kept by `doc-file-page-cache.ts`. This module decodes the
+ * path, refuses a doc with no bound file, and sets the headers:
  *
  *  - every segment decoded on its own and refused if it is empty, `.`, `..`
  *    or carries a separator or a NUL (`decodeSegments`), so `%2e%2e`, `%2f`

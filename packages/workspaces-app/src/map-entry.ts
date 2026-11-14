@@ -109,8 +109,24 @@ export function renderMapInto(
 
   // The column can change width after the first draw (a sidebar opens, the
   // phone turns), and Leaflet sizes itself only when told.
+  // A redrawn block drops its slot: the map is removed with it, so nothing
+  // keeps the old one alive.
   const resized =
-    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => map.invalidateSize());
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          if (slot.isConnected) {
+            map.invalidateSize();
+            return;
+          }
+          // Checked again a frame later: the editor may move a block's DOM
+          // and put it straight back.
+          requestAnimationFrame(() => {
+            if (slot.isConnected) return;
+            resized?.disconnect();
+            map.remove();
+          });
+        });
   resized?.observe(slot);
 
   return {
