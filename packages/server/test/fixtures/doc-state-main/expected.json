@@ -226,10 +226,7 @@
         },
         "component-state:poll": {
           "question": "Saltmarsh or Riverbend?",
-          "votes": [
-            "Alice",
-            "Bob"
-          ],
+          "votes": ["Alice", "Bob"],
           "tally": {
             "Saltmarsh": 1,
             "Riverbend": 2

@@ -132,7 +132,7 @@ describe('DiskDocStateStore keeps the file format every earlier server wrote', (
     store.write('harborlight', bytes);
     const path = join(dataDir, 'harborlight.ydoc');
     expect(store.pathOf('harborlight')).toBe(path);
-    expect(new Uint8Array(readFileSync(path))).toEqual(bytes);
+    expect(Buffer.from(readFileSync(path)).equals(Buffer.from(bytes))).toBe(true);
   });
 
   it('reads a `.ydoc` some other writer put in the data dir', () => {
