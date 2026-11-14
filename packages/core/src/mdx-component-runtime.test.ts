@@ -12,6 +12,7 @@ import {
   type ComponentHostApi,
   Fragment,
   type MountFn,
+  type StateHook,
   builtin,
   jsx,
   jsxs,
@@ -128,5 +129,26 @@ describe('the component JSX runtime', () => {
     expect(ran).toEqual(['good']);
     expect(error).toHaveBeenCalledTimes(1);
     error.mockRestore();
+  });
+
+  it('hands a tag with an id the state the page has for that id, and no state without one', () => {
+    const asked: string[] = [];
+    const hook = { canWrite: true } as unknown as StateHook;
+    const api: ComponentHostApi = {
+      builtins: {},
+      state: (id) => {
+        asked.push(id);
+        return hook;
+      },
+    };
+    const got: unknown[] = [];
+    const Map: MountFn = (_el, _props, state) => {
+      got.push(state);
+    };
+    render(document.createElement('div'), api, () =>
+      jsxs(Fragment, { children: [jsx(Map, { id: 'harborlight' }), jsx(Map, {})] }),
+    );
+    expect(asked).toEqual(['harborlight']);
+    expect(got).toEqual([hook, undefined]);
   });
 });

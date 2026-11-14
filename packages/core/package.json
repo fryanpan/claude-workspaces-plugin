@@ -57,6 +57,7 @@
     "./image-versions": "./src/image-versions.ts",
     "./mdx-components": "./src/mdx-components.ts",
     "./mdx-component-runtime": "./src/mdx-component-runtime.ts",
+    "./mdx-component-state": "./src/mdx-component-state.ts",
     "./board-embeds": "./src/board-embeds.ts",
     "./note-suggestion": "./src/note-suggestion.ts",
     "./related-work": "./src/related-work.ts",

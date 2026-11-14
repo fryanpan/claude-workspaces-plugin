@@ -15,6 +15,11 @@
  * nodes in `props.children`, so a carousel can put each child in a slide. A
  * built-in (`<PlotChart>`) is drawn by the page through `api.builtins`.
  *
+ * A function tag with an `id` prop gets that id's live state as its third
+ * argument, from `api.state` (`core/mdx-component-state.ts`); two tags with
+ * one id share one state. A tag without an id, or a host with no state (an
+ * Astro page), gets `undefined`, so a component works without state.
+ *
  * Text only ever reaches the DOM as a text node. Nothing here sets
  * `innerHTML` or evaluates a string.
  */
@@ -26,18 +31,42 @@ export interface CwBuiltin {
   readonly $$builtin: string;
 }
 
+/** A path into a component's state: `"pins.a.x"` or `["pins", "a", "x"]`.
+ *  A list item is named by its index. */
+export type StatePath = string | readonly (string | number)[];
+
+/** What a write returns. A refused write changed nothing and says why. */
+export type StateWrite = { ok: true } | { ok: false; error: string };
+
+/** A component's live state, shared by every page holding the doc. */
+export interface StateHook {
+  /** The value at `path`, or the whole state; plain JSON, a copy. */
+  get(path?: StatePath): unknown;
+  set(path: StatePath, value: unknown): StateWrite;
+  /** Append to the list at `path`, making the list if there is none. */
+  push(path: StatePath, value: unknown): StateWrite;
+  delete(path: StatePath): StateWrite;
+  /** Called with the whole state after any change, from this page or
+   *  another. Returns the unsubscribe. */
+  on(fn: (state: unknown) => void): () => void;
+  /** False on a page that may read and may not write. */
+  readonly canWrite: boolean;
+}
+
 /** A component's default export. It may return a cleanup; one that returns
  *  nothing is typed `void`, which is why the union names it. */
 export type MountFn = (
   el: HTMLElement,
   props: Record<string, unknown>,
-  state?: unknown,
+  state?: StateHook,
   // biome-ignore lint/suspicious/noConfusingVoidType: an author's mount that returns nothing is a () => void, and must be assignable
 ) => (() => void) | void;
 
 /** What the page hands a bundle's entry. */
 export interface ComponentHostApi {
   builtins: Record<string, (el: HTMLElement, props: Record<string, unknown>) => void>;
+  /** The live state for a tag's `id`, or undefined for an id that holds none. */
+  state?: (id: string) => StateHook | undefined;
 }
 
 /** The render in progress: where a component's cleanup goes, and the page's
@@ -71,7 +100,8 @@ export function jsx(type: unknown, props: Record<string, unknown> | null): Node 
   if (typeof type === 'function') {
     const el = document.createElement('div');
     el.className = 'mdx-component';
-    const out = (type as MountFn)(el, { ...p, children });
+    const state = typeof p.id === 'string' ? current?.api.state?.(p.id) : undefined;
+    const out = (type as MountFn)(el, { ...p, children }, state);
     if (typeof out === 'function') current?.cleanups.push(out);
     return el;
   }

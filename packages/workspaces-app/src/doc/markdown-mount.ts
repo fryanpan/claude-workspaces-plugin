@@ -109,7 +109,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   const docLink = ctx.workspaceId
     ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
     : undefined;
-  setComponentDoc(ydoc, isMdxPath(ctx.relPath) || isMdxPath(ctx.sourceUrl));
+  setComponentDoc(ydoc, isMdxPath(ctx.relPath) || isMdxPath(ctx.sourceUrl), canWrite);
   const editor: EditorHandle = createEditor({
     parent: editorMount,
     ydoc,

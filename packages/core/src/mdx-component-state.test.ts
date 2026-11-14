@@ -1,0 +1,215 @@
+/**
+ * A component's state lives in the doc's Y.Doc, so every page holding the doc
+ * shares it: writes to different paths both survive, two writes to one path
+ * settle on one value everywhere, and push keeps both appends. A page that
+ * may not write is refused with a message, and so is a write past the size,
+ * depth or rate limit — and a refused write changes nothing.
+ *
+ * Two Y.Docs stand in for two pages, wired to each other the way the server
+ * relays updates, so "concurrent" means each wrote before seeing the other.
+ */
+import { describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
+import {
+  STATE_LIMITS,
+  componentStateIds,
+  createStateHook,
+  readComponentState,
+} from './mdx-component-state.ts';
+
+/** Two pages. `sync()` exchanges what each has that the other lacks. */
+function twoPages() {
+  const a = new Y.Doc();
+  const b = new Y.Doc();
+  const sync = () => {
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a, Y.encodeStateVector(b)));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b, Y.encodeStateVector(a)));
+  };
+  return { a, b, sync };
+}
+
+const writer = (ydoc: Y.Doc, id = 'map', now?: () => number) =>
+  createStateHook(ydoc, id, { canWrite: true, ...(now ? { now } : {}) });
+
+describe('component state in the doc', () => {
+  it('reads back what was written, by path', () => {
+    const doc = new Y.Doc();
+    const s = writer(doc);
+    expect(s.get()).toEqual({});
+    expect(s.set('pins.harborlight', { lat: 37.8, label: 'Harborlight' })).toEqual({ ok: true });
+    expect(s.set('filter', 'open')).toEqual({ ok: true });
+    expect(s.get('pins.harborlight.label')).toBe('Harborlight');
+    expect(s.get(['pins', 'harborlight', 'lat'])).toBe(37.8);
+    expect(s.get('missing.deeper')).toBeUndefined();
+    expect(s.push('visits', 'Riverbend')).toEqual({ ok: true });
+    expect(s.push('visits', 'Saltmarsh')).toEqual({ ok: true });
+    expect(s.set('visits.0', 'Bob')).toEqual({ ok: true });
+    expect(s.delete('filter')).toEqual({ ok: true });
+    expect(s.get()).toEqual({
+      pins: { harborlight: { lat: 37.8, label: 'Harborlight' } },
+      visits: ['Bob', 'Saltmarsh'],
+    });
+    expect(readComponentState(doc, 'map')).toEqual(s.get());
+    expect(componentStateIds(doc)).toEqual(['map']);
+  });
+
+  it('keeps writes to different paths made at once on two pages', () => {
+    const { a, b, sync } = twoPages();
+    writer(a).set('pins', { a: { x: 1 }, b: { name: 'Harborlight' } });
+    sync();
+    // Alice moves pin a while Bob renames pin b, neither seeing the other.
+    writer(a).set('pins.a.x', 5);
+    writer(b).set('pins.b.name', 'Riverbend');
+    sync();
+    const want = { pins: { a: { x: 5 }, b: { name: 'Riverbend' } } };
+    expect(readComponentState(a, 'map')).toEqual(want);
+    expect(readComponentState(b, 'map')).toEqual(want);
+  });
+
+  it('keeps two first writes to one component, made before either page saw the other', () => {
+    const { a, b, sync } = twoPages();
+    writer(a).set('filter', 'open');
+    writer(b).set('selected', 'saltmarsh');
+    sync();
+    const want = { filter: 'open', selected: 'saltmarsh' };
+    expect(readComponentState(a, 'map')).toEqual(want);
+    expect(readComponentState(b, 'map')).toEqual(want);
+  });
+
+  it('settles two writes to one path on one value, and keeps both pushes', () => {
+    const { a, b, sync } = twoPages();
+    writer(a).set('visits', []);
+    sync();
+    writer(a).set('filter', 'open');
+    writer(b).set('filter', 'closed');
+    writer(a).push('visits', 'Alice');
+    writer(b).push('visits', 'Bob');
+    sync();
+    const onA = readComponentState(a, 'map');
+    expect(onA).toEqual(readComponentState(b, 'map'));
+    expect(['open', 'closed']).toContain(onA.filter);
+    expect([...(onA.visits as string[])].sort()).toEqual(['Alice', 'Bob']);
+  });
+
+  it('tells a listener about a write from the other page', () => {
+    const { a, b, sync } = twoPages();
+    const seen: unknown[] = [];
+    const off = writer(b).on((state) => seen.push(state));
+    writer(a).set('filter', 'open');
+    sync();
+    expect(seen).toEqual([{ filter: 'open' }]);
+    off();
+    writer(a).set('filter', 'closed');
+    sync();
+    expect(seen).toHaveLength(1);
+  });
+
+  it('lets a read-only page read state and refuses its writes with a message', () => {
+    const { a, b, sync } = twoPages();
+    writer(a).set('filter', 'open');
+    sync();
+    const reader = createStateHook(b, 'map', { canWrite: false });
+    expect(reader.canWrite).toBe(false);
+    expect(reader.get('filter')).toBe('open');
+    for (const out of [
+      reader.set('filter', 'closed'),
+      reader.push('visits', 'Bob'),
+      reader.delete('filter'),
+    ]) {
+      expect(out.ok).toBe(false);
+      if (!out.ok) expect(out.error).toMatch(/can only read/);
+    }
+    sync();
+    expect(readComponentState(a, 'map')).toEqual({ filter: 'open' });
+  });
+});
+
+describe('the limits on a write', () => {
+  it('refuses a write that would take one component past its size, and keeps the state', () => {
+    const doc = new Y.Doc();
+    const s = writer(doc);
+    s.set('note', 'Harborlight');
+    const out = s.set('blob', 'x'.repeat(STATE_LIMITS.instanceBytes));
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/256 KB/);
+    expect(s.get()).toEqual({ note: 'Harborlight' });
+  });
+
+  it('refuses a write that would take the doc past its size, across components', () => {
+    const doc = new Y.Doc();
+    const chunk = 'x'.repeat(200 * 1024);
+    let t = 0;
+    const now = () => (t += 1000);
+    for (let i = 0; i < 10; i++) {
+      expect(writer(doc, `pin-${i}`, now).set('data', chunk)).toEqual({ ok: true });
+    }
+    const out = writer(doc, 'pin-10', now).set('data', chunk);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/2 MB/);
+    expect(componentStateIds(doc)).not.toContain('pin-10');
+  });
+
+  it('refuses state nested deeper than the limit', () => {
+    const s = writer(new Y.Doc());
+    let deep: unknown = 'Saltmarsh';
+    for (let i = 0; i < STATE_LIMITS.depth; i++) deep = { d: deep };
+    const out = s.set('top', deep);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/levels deep/);
+    expect(s.get()).toEqual({});
+  });
+
+  it('refuses a value that is not JSON', () => {
+    const s = writer(new Y.Doc());
+    for (const bad of [() => 1, undefined, Number.NaN, new Date(0), { a: Symbol('x') }]) {
+      const out = s.set('bad', bad);
+      expect(out.ok).toBe(false);
+      if (!out.ok) expect(out.error).toMatch(/JSON only/);
+    }
+    expect(s.get()).toEqual({});
+  });
+
+  it('refuses the write past the rate limit, and accepts again a second later', () => {
+    let t = 0;
+    const s = writer(new Y.Doc(), 'map', () => t);
+    for (let i = 0; i < STATE_LIMITS.writesPerSecond; i++) {
+      expect(s.set('x', i)).toEqual({ ok: true });
+    }
+    const out = s.set('x', 999);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/20 times a second/);
+    expect(s.get('x')).toBe(STATE_LIMITS.writesPerSecond - 1);
+    t = 1001;
+    expect(s.set('x', 1000)).toEqual({ ok: true });
+  });
+
+  it('counts the rate per component, shared by two tags with one id', () => {
+    const doc = new Y.Doc();
+    const t = 0;
+    const first = writer(doc, 'map', () => t);
+    const second = writer(doc, 'map', () => t);
+    for (let i = 0; i < STATE_LIMITS.writesPerSecond; i++) first.set('x', i);
+    expect(second.set('y', 1).ok).toBe(false);
+    expect(writer(doc, 'other', () => t).set('y', 1)).toEqual({ ok: true });
+  });
+
+  it('refuses a __proto__ key in a path or a value, and reads no inherited key', () => {
+    const s = writer(new Y.Doc());
+    expect(s.set('__proto__.polluted', 'Bob').ok).toBe(false);
+    expect(s.set('pins', JSON.parse('{"__proto__": {"polluted": "Bob"}}')).ok).toBe(false);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(s.get('constructor')).toBeUndefined();
+    expect(s.set('constructor.name', 'Alice')).toEqual({ ok: true });
+    expect(s.get('constructor.name')).toBe('Alice');
+  });
+
+  it('refuses a path through a value that holds no keys', () => {
+    const s = writer(new Y.Doc());
+    s.set('filter', 'open');
+    const out = s.set('filter.kind', 'Harborlight');
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/filter/);
+    const push = s.push('filter', 'x');
+    expect(push.ok).toBe(false);
+  });
+});

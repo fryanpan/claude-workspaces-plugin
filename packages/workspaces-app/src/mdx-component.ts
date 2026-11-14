@@ -1,4 +1,9 @@
-import type { ComponentHostApi } from '@claude-workspaces/core/mdx-component-runtime';
+import type { ComponentHostApi, StateHook } from '@claude-workspaces/core/mdx-component-runtime';
+import {
+  COMPONENT_STATE_ID,
+  type OwnedStateHook,
+  createStateHook,
+} from '@claude-workspaces/core/mdx-component-state';
 import {
   type ComponentBuild,
   componentBuildOf,
@@ -22,6 +27,10 @@ import {
  * rebuilds. `customElements.define` throws on a name already defined, so it
  * is wrapped once to skip a name the page already has; the element defined
  * first stays.
+ *
+ * A tag with an `id` gets that id's live state (`core/mdx-component-state.ts`),
+ * kept in the doc's Y.Doc so every open page follows a write. A refused write
+ * (a read-only page, or one past a limit) shows its reason in the status line.
  */
 import { MDX_FLOW_LANGUAGE } from '@claude-workspaces/core/prose';
 import type { Editor } from '@tiptap/core';
@@ -34,19 +43,21 @@ import { plotChartOf, renderPlotChart } from './mdx-plot-chart.ts';
 
 export interface ComponentLive {
   ydoc: Y.Doc;
+  /** False on a page that may read and may not write. */
+  canWrite: boolean;
   /** `…/docs/<id>/components`, no trailing slash. */
   base: string;
 }
 
-/** The synced docs whose page said they are bound to an `.mdx` file. Only
- *  those run components: in a `.md` doc an `mdx-flow` block is something an
- *  editor typed, not a tag the server builds. */
-const componentDocs = new WeakSet<Y.Doc>();
+/** The synced docs whose page said they are bound to an `.mdx` file, and
+ *  whether that page may write. Only those run components: in a `.md` doc an
+ *  `mdx-flow` block is something an editor typed, not a tag the server builds. */
+const componentDocs = new WeakMap<Y.Doc, { canWrite: boolean }>();
 
-/** Say whether `ydoc`'s page is an `.mdx` doc. Called before the editor is
- *  made, since node views read it while it is made. */
-export function setComponentDoc(ydoc: Y.Doc, isMdx: boolean): void {
-  if (isMdx) componentDocs.add(ydoc);
+/** Say whether `ydoc`'s page is an `.mdx` doc, and whether it may write.
+ *  Called before the editor is made, since node views read it while it is made. */
+export function setComponentDoc(ydoc: Y.Doc, isMdx: boolean, canWrite = true): void {
+  if (isMdx) componentDocs.set(ydoc, { canWrite });
   else componentDocs.delete(ydoc);
 }
 
@@ -55,8 +66,13 @@ export function setComponentDoc(ydoc: Y.Doc, isMdx: boolean): void {
 export function componentLiveOf(editor: Editor): ComponentLive | null {
   const state = ySyncPluginKey.getState(editor.state) as { doc?: Y.Doc } | undefined;
   const docId = typeof location === 'undefined' ? null : docIdFromPathOrNull(location.pathname);
-  if (!state?.doc || !docId || !componentDocs.has(state.doc)) return null;
-  return { ydoc: state.doc, base: api(`docs/${encodeURIComponent(docId)}/components`) };
+  const page = state?.doc ? componentDocs.get(state.doc) : undefined;
+  if (!state?.doc || !docId || !page) return null;
+  return {
+    ydoc: state.doc,
+    canWrite: page.canWrite,
+    base: api(`docs/${encodeURIComponent(docId)}/components`),
+  };
 }
 
 /** The build key of the tag `text`, read against the editor's blocks, or
@@ -130,6 +146,8 @@ export class ComponentMount {
   private token = 0;
   private stopObserve: (() => void) | null = null;
   private keyOf: () => string | null = () => null;
+  /** The state hooks the mounted bundle was handed, torn down with it. */
+  private hooks: OwnedStateHook[] = [];
 
   constructor(private readonly live: ComponentLive) {
     this.host.className = 'mdx-live';
@@ -180,16 +198,52 @@ export class ComponentMount {
       return;
     }
     if (mine !== this.token) return;
-    this.cleanup?.();
-    this.cleanup = null;
+    this.release();
     try {
-      const out = mod.default(this.host, BUILTINS);
+      const out = mod.default(this.host, { ...BUILTINS, state: (id) => this.stateFor(id) });
       if (typeof out === 'function') this.cleanup = out as () => void;
       this.mounted = hash;
       this.say(componentBuildOf(componentBuildsMap(this.live.ydoc), this.keyOf() ?? ''));
     } catch (err) {
       this.fail(err);
     }
+  }
+
+  /** A live state hook for `id`, whose refused writes say why in the status
+   *  line and whose next accepted write clears that. */
+  private stateFor(id: string): StateHook | undefined {
+    if (!COMPONENT_STATE_ID.test(id)) return undefined;
+    const hook = createStateHook(this.live.ydoc, id, { canWrite: this.live.canWrite });
+    this.hooks.push(hook);
+    const report = (out: ReturnType<StateHook['set']>) => {
+      if (out.ok) {
+        if (this.status.classList.contains('is-refused')) {
+          this.status.classList.remove('is-refused', 'is-error');
+          this.status.textContent = '';
+          this.status.hidden = true;
+        }
+      } else {
+        this.status.textContent = out.error;
+        this.status.hidden = false;
+        this.status.classList.add('is-error', 'is-refused');
+      }
+      return out;
+    };
+    return {
+      canWrite: hook.canWrite,
+      get: (path) => hook.get(path),
+      set: (path, value) => report(hook.set(path, value)),
+      push: (path, value) => report(hook.push(path, value)),
+      delete: (path) => report(hook.delete(path)),
+      on: (fn) => hook.on(fn),
+    };
+  }
+
+  /** Run the mounted bundle's cleanup and drop its state listeners. */
+  private release(): void {
+    this.cleanup?.();
+    this.cleanup = null;
+    for (const h of this.hooks.splice(0)) h.dispose();
   }
 
   private fail(err: unknown): void {
@@ -201,7 +255,6 @@ export class ComponentMount {
   destroy(): void {
     this.token++;
     this.stopObserve?.();
-    this.cleanup?.();
-    this.cleanup = null;
+    this.release();
   }
 }
