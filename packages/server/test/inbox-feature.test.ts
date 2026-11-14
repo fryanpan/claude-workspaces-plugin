@@ -35,7 +35,7 @@ const deps = (): FeatureDeps => ({
   notifyLanding: (part) => notified.push(part),
   requestAddress: () => address,
   boardOfSocket: () => null,
-  personRoleOn: () => null,
+  personAccessOn: () => null,
   agentTokenKey: () => 'k'.repeat(64),
   ownerNoticeBoards: () => [],
   isBoardLive: () => true,

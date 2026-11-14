@@ -30,6 +30,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
+import type { AccessRole } from '../share/board-access.ts';
 import type { TaskStore } from '../tasks.ts';
 import type { PushAuth, PushCredential } from './credential.ts';
 import { type GitRunner, realGit } from './git.ts';
@@ -81,10 +82,7 @@ export interface GitPusherOptions {
   taskStore: TaskStore;
   credential: PushCredential;
   /** What a person may do on a board, or null for a non-member (`FeatureDeps`). */
-  personRoleOn: (
-    boardId: string,
-    person: { id: string; email?: string },
-  ) => 'owner' | 'member' | null;
+  personAccessOn: (boardId: string, person: { id: string; email?: string }) => AccessRole | null;
   /** Upstream's URL for `owner/name`. Tests point it at a local bare repo. */
   remoteUrlFor?: (repo: string, auth: PushAuth['kind']) => string;
   runGit?: GitRunner;
@@ -358,7 +356,9 @@ export class GitPusher {
    * Why this answer does not approve the push, or null when it does. It must
    * choose Push, carry `answeredBy` (written only for a person proved by
    * their own sign-in), name no agent id, and come from a human member of
-   * the push's board — its owner when the board reserves the `push` step.
+   * the push's board who may edit it — its owner when the board reserves the
+   * `push` step. A comment or view member can answer the item, and their
+   * Push still sends nothing: publishing code is an edit.
    */
   private approvalRefusal(
     record: PushRecord,
@@ -367,9 +367,12 @@ export class GitPusher {
     if (answer.answeredWith !== PUSH_APPROVE) return 'the answer did not choose Push';
     const who = answer.answeredBy;
     if (!who || !this.byPerson(who)) return 'the item was answered by an agent, not a person';
-    const role = this.o.personRoleOn(record.boardId, who);
-    if (role === null) return 'the person who answered is not a member of this board';
-    if (role !== 'owner' && this.o.taskStore.requireOwnerFor(record.boardId).includes('push')) {
+    const access = this.o.personAccessOn(record.boardId, who);
+    if (access === null) return 'the person who answered is not a member of this board';
+    if (access === 'comment' || access === 'view') {
+      return `the person who answered has ${access} access, which cannot approve a push`;
+    }
+    if (access !== 'owner' && this.o.taskStore.requireOwnerFor(record.boardId).includes('push')) {
       return "this board reserves pushes for its owner's approval";
     }
     return null;
