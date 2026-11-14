@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
  * `bun run check:cloudflare-tf`: the Terraform config is formatted, every
- * environment's root is valid, and prod plans what
- * `deploys/prod/tests/plan.tftest.hcl` says against a mock provider. A member
+ * root is valid, prod plans what `deploys/prod/tests/plan.tftest.hcl` says
+ * against a mock provider, and `ci-secrets/tests/apply.tftest.hcl` passes. A member
  * of `bun run verify`, a step of CI's `gates` job, and the first step of
  * `.github/workflows/cloudflare.yml`.
  *
@@ -15,7 +15,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { ENVS, TF_DIR, envDir } from './terraform.ts';
+import { CI_SECRETS_DIR, ENVS, TF_DIR, envDir } from './terraform.ts';
 
 function run(cwd: string, args: string[], dataDir: string): void {
   const env = {
@@ -49,4 +49,12 @@ for (const env of ENVS) {
   run(envDir(env), ['validate', '-no-color'], checkData(env));
 }
 run(envDir('prod'), ['test', '-no-color'], checkData('prod'));
-console.log('check:cloudflare-tf: formatted, every environment valid, and the plan tests pass');
+// CI's credentials (`ci-secrets/`): its own root, local state, mock providers.
+run(
+  CI_SECRETS_DIR,
+  ['init', '-backend=false', '-input=false', '-lockfile=readonly'],
+  checkData('ci-secrets'),
+);
+run(CI_SECRETS_DIR, ['validate', '-no-color'], checkData('ci-secrets'));
+run(CI_SECRETS_DIR, ['test', '-no-color'], checkData('ci-secrets'));
+console.log('check:cloudflare-tf: formatted, every root valid, and the plan tests pass');
