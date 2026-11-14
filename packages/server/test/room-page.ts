@@ -25,8 +25,11 @@ export function joinRoom(
   url: string,
   origin: string,
   headers: Record<string, string> = {},
+  /** Reuse a client id, as y-websocket does across a reconnect. */
+  clientID?: number,
 ): RoomPage {
   const ydoc = new Y.Doc();
+  if (clientID !== undefined) ydoc.clientID = clientID;
   const awareness = new awarenessProtocol.Awareness(ydoc);
   const ws = new WebSocket(url, { headers: { origin, ...headers } } as unknown as string[]);
   ws.binaryType = 'arraybuffer';

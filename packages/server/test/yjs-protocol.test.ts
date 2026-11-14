@@ -258,8 +258,10 @@ describe('onMessage — awareness', () => {
     onOpen(r, a.ws);
     onMessage(r, a.ws, awarenessFrame(4242, 'Alice'));
     // A socket its upgrade stamped nothing on is a guest, whatever it typed.
-    const user = (r.awareness.getStates().get(4242) as { user?: { name?: string } }).user;
-    expect(user?.name).toMatch(/^Guest /);
+    const user = (r.awareness.getStates().get(4242) as { user?: { id?: string; kind?: string } })
+      .user;
+    expect(user?.kind).toBe('guest');
+    expect(user?.id).toMatch(/^guest-/);
   });
 
   it('broadcasts presence to the other peers but not to its origin', () => {

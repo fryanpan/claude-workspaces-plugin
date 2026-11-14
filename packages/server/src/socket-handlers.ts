@@ -41,7 +41,7 @@ import type { AppVoiceRelay } from './app-voice/relay.ts';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { SocketEditor } from './edit-sessions.ts';
 import type { MeetingRelay } from './meeting-protocol.ts';
-import type { PresenceUser } from './presence-identity.ts';
+import type { PresenceStamp } from './presence-identity.ts';
 import type { RecallMeetingRelay } from './recall-meeting.ts';
 import type { SpokenReplyRelay } from './spoken-reply/relay.ts';
 import type { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
@@ -100,7 +100,7 @@ export type UpgradeData = {
   widgetDoorGrant?: { token: string; origin: string };
   editor?: SocketEditor;
   /** Who peers see this socket's presence as (`presence-identity.ts`). */
-  presenceUser?: PresenceUser;
+  presenceUser?: PresenceStamp;
   /** A voice socket's proven speaker, and its mark when a mock relayed it —
    *  what the notes the server writes after the page has gone carry. */
   author?: User | null;

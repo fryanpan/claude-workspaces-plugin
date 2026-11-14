@@ -708,10 +708,13 @@ that `yjs-protocol.ts` syncs against an empty doc, so awareness flows both ways
 and none of the board's megabyte does. Each page announces `user` and its
 person's `spot` (core's `workspace-presence.ts`), but the server sets the
 name: `presence-identity.ts` decides at the upgrade who the socket is (the
-proven person, a share visitor's `guest-` id, `Guest` for a read-only socket,
-or the owner where writes need no sign-in), and `yjs-protocol.ts` writes that
-over `user` in every state the socket sends, dropping any entry for another
-socket's client id or the server's own. The server announces no
+proven person; the owner for a writable loopback socket that proved nobody;
+otherwise a guest whose `guest-` id is hashed from the page's own browser id,
+so it matches the guest's comments), and `yjs-protocol.ts` writes that over
+`user` in every state the socket sends. It strips the fields only the server
+writes, and drops any entry for the server's own client id or for one another
+socket holds, unless that state is gone or the new socket is the same person
+(a reconnect). The server announces no
 `user`; its own state carries `agentSpots`, one entry per agent, written by
 `agent-spots.ts` when an agent calls `point_at` (`routes/workspace-point.ts`:
 a board page, a panel, a thread, the review queue, the workspaces list, or a

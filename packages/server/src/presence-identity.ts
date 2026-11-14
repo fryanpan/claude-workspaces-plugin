@@ -10,12 +10,17 @@
  * name. The page's own copy still says what the page set; every other reader
  * hears the server's.
  *
- * The same rewrite drops any entry for a client id the socket does not own:
- * one another socket introduced, or the server's own slot. The server's slot
- * carries `agentSpots` and `personDirective`, so a page that wrote it could
- * move where agents are drawn pointing and which tab an agent's `show` moves.
+ * The same rewrite drops any entry for a client id the socket may not carry
+ * (the server's own slot, or one another socket holds), and strips the
+ * fields only the server writes (`agentSpots`, `personDirective`, the
+ * whiteboard's agent pointers, a doc's agent focus) from every state it
+ * keeps: a page that wrote them could move where agents are drawn pointing
+ * and which tab an agent's `show` moves.
  */
-import type { User } from '@claude-workspaces/core';
+import { type User, guestNameFor } from '@claude-workspaces/core';
+import { AGENT_FOCUS_FIELD } from '@claude-workspaces/core/spoken-reply';
+import { AGENT_POINTERS_FIELD } from '@claude-workspaces/core/whiteboard-scene';
+import { AGENT_SPOTS_FIELD, DIRECTIVE_FIELD } from '@claude-workspaces/core/workspace-presence';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { sanitizeVisitorAuthor } from './share/visitor-identity.ts';
@@ -28,9 +33,43 @@ export interface PresenceUser {
   /** `agent` when the proven id is a roster agent (a board-token socket). */
   kind: 'person' | 'agent' | 'guest';
   /** True when a proof named this identity. False for a guest, and for the
-   *  owner name given to an unproven socket on a single-person deployment. */
+   *  owner name given to an unproven loopback socket. */
   verified: boolean;
 }
+
+/**
+ * The rule for a guest: a socket that proved nobody and is not the owner.
+ * The id comes from the page's own stable browser id hashed with `scope`, the
+ * namespace `sanitizeVisitorAuthor` gives a share visitor's comments. So a
+ * guest keeps one id across tabs and reloads, the id matches the one their
+ * comments carry, it never names a member, and the raw browser id is never
+ * broadcast. The guest keeps the display name they typed unless it is
+ * reserved or a roster member's.
+ */
+export interface GuestStamp {
+  kind: 'guest';
+  verified: false;
+  /** The share the visitor came through, or `local` for any other guest. */
+  scope: string;
+  /** True for a display name a guest may not show: a roster member's. */
+  reservedName?: (name: string) => boolean;
+}
+
+/** What an upgrade stamps on a socket: a fixed name, or the guest rule. */
+export type PresenceStamp = PresenceUser | GuestStamp;
+
+/** The scope of a guest who did not come through a share. */
+export const LOCAL_GUEST_SCOPE = 'local';
+
+/** Fields only the server's own awareness slot carries. Every page state is
+ *  stripped of them, so no page can move where agents are drawn pointing or
+ *  focused, or which tab an agent's `show` moves. */
+const SERVER_ONLY_FIELDS = [
+  AGENT_SPOTS_FIELD,
+  DIRECTIVE_FIELD,
+  AGENT_POINTERS_FIELD,
+  AGENT_FOCUS_FIELD,
+] as const;
 
 /** What an upgrade knows about the socket it is opening. */
 export interface PresenceProof {
@@ -38,53 +77,30 @@ export interface PresenceProof {
   proven: User | null;
   /** Whether a proven id is an agent's roster row. */
   isAgent: (id: string) => boolean;
-  /** The share or membership key of a share visitor, or null. */
+  /** The share key of a share visitor (as its comments use it), or null. */
   shareKey: string | null;
   /** The socket may read and may not write: the sign-in gate refused it. */
   readOnly: boolean;
-  /** The deployment owner, for a writable socket that proved nobody. */
+  /** The socket came through the tunnel or from a peer that is not loopback. */
+  offBox: boolean;
+  /** The deployment owner, for a writable loopback socket that proved nobody. */
   owner: () => { id: string; name: string };
-  /** A per-socket id the server holds (`newSocketSeed`); seeds a guest. */
-  socketSeed: string;
-}
-
-/** A fresh per-socket seed. Server-held: no page chooses it. */
-export function newSocketSeed(): string {
-  return crypto.randomUUID().replace(/-/g, '');
+  /** A display name a guest may not show (a roster member's). */
+  reservedName?: (name: string) => boolean;
 }
 
 /**
- * A guest's presence. A share visitor's id is seeded by the share, the same
- * namespace `sanitizeVisitorAuthor` gives their comments; any other guest is
- * `Guest` and four characters of the seed.
- */
-export function guestPresenceUser(seed: string, shareKey: string | null): PresenceUser {
-  if (shareKey !== null) {
-    const guest = sanitizeVisitorAuthor({ id: seed }, { shareKey });
-    return { id: guest.id, name: guest.name, color: guest.color, kind: 'guest', verified: false };
-  }
-  const short = seed.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'anon';
-  const id = `guest-${short}`;
-  return {
-    id,
-    name: `Guest ${short.slice(0, 4)}`,
-    color: colorFor(id),
-    kind: 'guest',
-    verified: false,
-  };
-}
-
-/**
- * The name a socket shows, in this order:
+ * The stamp for a socket, in this order:
  *  1. the identity the request proved (an agent token, Access, a session or
  *     a widget token, as `provenAuthor` ranks them);
- *  2. a share visitor with no proof: a `guest-` id seeded by the share;
- *  3. a read-only socket that proved nobody: `Guest` and four characters;
- *  4. a writable socket that proved nobody: the owner, unverified. Such a
- *     socket exists only where writes need no sign-in, which is a
- *     single-person deployment.
+ *  2. a share visitor with no proof: a guest scoped by the share;
+ *  3. a read-only socket, or one from off this machine (tunnel, tailnet,
+ *     LAN), that proved nobody: a guest scoped `local`;
+ *  4. a writable loopback socket that proved nobody: the owner, unverified.
+ *     That is the single-person local setup, where agent follow must keep
+ *     working without a sign-in.
  */
-export function presenceUserFor(p: PresenceProof): PresenceUser {
+export function presenceUserFor(p: PresenceProof): PresenceStamp {
   if (p.proven) {
     return {
       id: p.proven.id,
@@ -94,7 +110,14 @@ export function presenceUserFor(p: PresenceProof): PresenceUser {
       verified: true,
     };
   }
-  if (p.shareKey !== null || p.readOnly) return guestPresenceUser(p.socketSeed, p.shareKey);
+  const guest = (scope: string): GuestStamp => ({
+    kind: 'guest',
+    verified: false,
+    scope,
+    ...(p.reservedName ? { reservedName: p.reservedName } : {}),
+  });
+  if (p.shareKey !== null) return guest(p.shareKey);
+  if (p.readOnly || p.offBox) return guest(LOCAL_GUEST_SCOPE);
   const owner = p.owner();
   return {
     id: owner.id,
@@ -103,6 +126,23 @@ export function presenceUserFor(p: PresenceProof): PresenceUser {
     kind: 'person',
     verified: false,
   };
+}
+
+/** A stamp that is the guest rule rather than a fixed name. */
+export function isGuestStamp(stamp: PresenceStamp): stamp is GuestStamp {
+  return 'scope' in stamp;
+}
+
+/** The name a stamp puts on one state, given the `user` the page announced. */
+export function resolveStamp(stamp: PresenceStamp, claimed: unknown): PresenceUser {
+  const claimedColor = validColor((claimed as { color?: unknown } | null)?.color);
+  if (!isGuestStamp(stamp)) {
+    // A page keeps the colour it picked: it names nobody.
+    return { ...stamp, color: claimedColor ?? stamp.color };
+  }
+  const guest = sanitizeVisitorAuthor(claimed, { shareKey: stamp.scope });
+  const name = stamp.reservedName?.(guest.name) ? guestNameFor(guest.id) : guest.name;
+  return { id: guest.id, name, color: guest.color, kind: 'guest', verified: false };
 }
 
 /** The `user` field the server writes into a stamped state. */
@@ -117,16 +157,21 @@ export function stampedUserField(stamp: PresenceUser): Record<string, unknown> {
 }
 
 export interface StampOptions {
-  /** The name written over `user` in every non-null state. */
-  stamp: PresenceUser;
-  /** Whether a client id belongs to another socket or to the server. */
-  isForeign: (clientId: number) => boolean;
+  /** The rule written over `user` in every non-null state. */
+  stamp: PresenceStamp;
+  /**
+   * Whether the socket may carry this client id, given the name its entry
+   * would be stamped with (null for a removal). False for the server's own
+   * slot and for a client id another socket holds (`yjs-protocol.ts`).
+   */
+  mayCarry: (clientId: number, user: PresenceUser | null) => boolean;
 }
 
 /**
  * Rewrite one y-protocols awareness update: drop every entry the socket may
- * not carry, and replace `user` in each remaining non-null state with the
- * stamp. Returns null when no entry is left, or when the update is malformed.
+ * not carry, strip the server-only fields from each remaining state, and
+ * replace `user` with the stamp. Returns null when no entry is left, or when
+ * the update is malformed.
  *
  * Wire format (`y-protocols/awareness` `encodeAwarenessUpdate`): a count,
  * then for each entry its client id, its clock and its state as JSON.
@@ -140,23 +185,20 @@ export function stampAwarenessUpdate(update: Uint8Array, opts: StampOptions): Ui
       const clientId = decoding.readVarUint(dec);
       const clock = decoding.readVarUint(dec);
       const raw = decoding.readVarString(dec);
-      if (opts.isForeign(clientId)) continue;
       const state: unknown = JSON.parse(raw);
       if (state === null) {
-        kept.push({ clientId, clock, json: raw });
+        if (opts.mayCarry(clientId, null)) kept.push({ clientId, clock, json: raw });
         continue;
       }
       if (typeof state !== 'object' || Array.isArray(state)) continue;
-      const user = (state as { user?: { color?: unknown } }).user;
-      const stamp = {
-        ...opts.stamp,
-        // A page keeps the colour it picked: it names nobody.
-        color: validColor(user?.color) ?? opts.stamp.color,
-      };
+      const own = { ...(state as Record<string, unknown>) };
+      for (const field of SERVER_ONLY_FIELDS) delete own[field];
+      const user = resolveStamp(opts.stamp, own.user);
+      if (!opts.mayCarry(clientId, user)) continue;
       kept.push({
         clientId,
         clock,
-        json: JSON.stringify({ ...(state as object), user: stampedUserField(stamp) }),
+        json: JSON.stringify({ ...own, user: stampedUserField(user) }),
       });
     }
   } catch {

@@ -7,9 +7,9 @@ import * as Y from 'yjs';
 import { clientStateIsDead, peekSyncFrame } from './board-sync-gate.ts';
 import type { FeedbackWs, LiveDoc } from './doc-store.ts';
 import {
+  LOCAL_GUEST_SCOPE,
+  type PresenceStamp,
   type PresenceUser,
-  guestPresenceUser,
-  newSocketSeed,
   stampAwarenessUpdate,
 } from './presence-identity.ts';
 import { captureServerError } from './sentry.ts';
@@ -62,8 +62,9 @@ type WsState = {
    * from its `open` handler and step 2 only from a later `message`.
    */
   deadState?: boolean;
-  /** The stamp for a socket its upgrade gave none: a guest, made once. */
-  fallbackStamp?: PresenceUser;
+  /** The name this socket's last state was stamped with: who holds its
+   *  client ids, when another socket asks to take one over. */
+  presence?: PresenceUser;
 };
 
 function state(ws: FeedbackWs): WsState {
@@ -89,27 +90,51 @@ export function announcedNameOf(doc: LiveDoc, ws: FeedbackWs): string | undefine
   return undefined;
 }
 
-/** The presence identity this socket's states are stamped with. A socket
- *  its upgrade stamped nothing on is a guest — fail closed. */
-function stampOf(ws: FeedbackWs): PresenceUser {
-  if (ws.data.presenceUser) return ws.data.presenceUser;
-  const st = state(ws);
-  st.fallbackStamp ??= guestPresenceUser(newSocketSeed(), null);
-  return st.fallbackStamp;
+/** The rule this socket's states are stamped with. A socket its upgrade
+ *  stamped nothing on is a guest — fail closed. */
+const FALLBACK_STAMP: PresenceStamp = { kind: 'guest', verified: false, scope: LOCAL_GUEST_SCOPE };
+function stampOf(ws: FeedbackWs): PresenceStamp {
+  return ws.data.presenceUser ?? FALLBACK_STAMP;
 }
 
 /**
- * Whether a client id belongs to someone other than `ws`: the server's own
- * awareness, or a client id another open socket introduced first.
+ * Whether `ws` may carry an entry for `clientId`, stamped `user` (null for a
+ * removal). Never the server's own slot. A client id another open socket
+ * holds may be taken over only when:
+ *  - its state is gone, so nobody is using it;
+ *  - both sockets are the same person: y-websocket keeps one client id across
+ *    a reconnect, and the old socket may sit half-open for minutes.
+ * Accepted ids are added to `accepted`; the caller moves them to `ws`.
  */
-function foreignTo(doc: LiveDoc, ws: FeedbackWs): (clientId: number) => boolean {
-  return (clientId) => {
-    if (clientId === doc.awareness.clientID) return true;
+function carryRule(
+  doc: LiveDoc,
+  ws: FeedbackWs,
+  accepted: Set<number>,
+): (clientId: number, user: PresenceUser | null) => boolean {
+  return (clientId, user) => {
+    if (clientId === doc.awareness.clientID) return false;
+    const mine = user ?? state(ws).presence;
+    const live = doc.awareness.getStates().has(clientId);
     for (const peer of doc.conns) {
-      if (peer !== ws && state(peer).knownClientIds.has(clientId)) return true;
+      if (peer === ws || !state(peer).knownClientIds.has(clientId)) continue;
+      if (!live) continue;
+      const held = state(peer).presence;
+      if (held === undefined || mine === undefined || held.id !== mine.id) return false;
     }
-    return false;
+    accepted.add(clientId);
+    if (user) state(ws).presence = user;
+    return true;
   };
+}
+
+/** Forget a removed client id on every socket, so a state the outdated
+ *  sweep dropped does not stay pinned to a socket that went quiet. */
+function forgetRemoved(doc: LiveDoc, removed: number[]): void {
+  if (removed.length === 0) return;
+  for (const peer of doc.conns) {
+    const known = state(peer).knownClientIds;
+    for (const id of removed) known.delete(id);
+  }
 }
 
 /**
@@ -141,6 +166,7 @@ function ensureBroadcaster(doc: LiveDoc): void {
     { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
     origin: unknown,
   ) => {
+    forgetRemoved(doc, removed);
     const ids = [...added, ...updated, ...removed];
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MSG_AWARENESS);
@@ -296,19 +322,21 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
         // The server sets the name: every state gets this socket's stamp, and
         // an entry for another socket's client id or the server's own is
         // dropped (`presence-identity.ts`).
+        const accepted = new Set<number>();
         const payload = stampAwarenessUpdate(decoding.readVarUint8Array(dec), {
           stamp: stampOf(ws),
-          isForeign: foreignTo(doc, ws),
+          mayCarry: carryRule(doc, ws, accepted),
         });
         if (payload === null) return;
-        // Track which client IDs this ws is contributing so disconnect only
-        // removes *their* awareness states, not every peer's.
-        const before = new Set(doc.awareness.getStates().keys());
         awarenessProtocol.applyAwarenessUpdate(doc.awareness, payload, ws);
-        const after = doc.awareness.getStates().keys();
-        const ws_state = state(ws);
-        for (const id of after) {
-          if (!before.has(id)) ws_state.knownClientIds.add(id);
+        // Track which client IDs this ws is contributing so disconnect only
+        // removes *their* awareness states, not every peer's. A taken-over id
+        // leaves the socket that held it, so that socket's close keeps it.
+        const live = doc.awareness.getStates();
+        const own = state(ws).knownClientIds;
+        for (const id of accepted) {
+          for (const peer of doc.conns) if (peer !== ws) state(peer).knownClientIds.delete(id);
+          if (live.has(id)) own.add(id);
         }
         return;
       }

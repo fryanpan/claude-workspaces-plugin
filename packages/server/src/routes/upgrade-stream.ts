@@ -63,7 +63,7 @@ import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
-import { type PresenceUser, newSocketSeed, presenceUserFor } from '../presence-identity.ts';
+import { type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
@@ -169,9 +169,9 @@ export interface UpgradeStreamContext {
   offBoxView: (
     payload: { event: string } & Record<string, unknown>,
   ) => { event: string } | undefined;
-  /** Who a presence socket is when it proved nobody on a deployment that
-   *  lets it write (the owner), and whether a proven id is an agent's.
-   *  Absent in a test's fake context: the owner registry, and no agents. */
+  /** Who an unproven writable loopback presence socket is (the owner), which
+   *  proven ids are agents, and which names a guest may not show. Absent in
+   *  a test's fake context: the owner registry, no agents, no members. */
   presenceRoster?: PresenceRoster;
 }
 
@@ -179,6 +179,8 @@ export interface UpgradeStreamContext {
 export interface PresenceRoster {
   owner: () => { id: string; name: string };
   isAgent: (id: string) => boolean;
+  /** A display name a guest may not show: a roster member's. */
+  reservedName?: (name: string) => boolean;
 }
 
 const REGISTRY_ROSTER: PresenceRoster = {
@@ -377,16 +379,17 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
       !crossOriginCredentials(req.headers, policyFor(req)) && ownerProven();
     // Who every peer sees this socket's presence as: never what the page
     // announces (`presence-identity.ts`).
-    const presenceUser = (readOnly: boolean): PresenceUser =>
+    // The share key is the one a visitor's comments are named under
+    // (`request-attribution.ts`), so presence and comments agree.
+    const presenceUser = (readOnly: boolean): PresenceStamp =>
       presenceUserFor({
         proven: socketAuthor(),
         isAgent: roster.isAgent,
-        shareKey: visitor
-          ? (visitorShareId ?? visitorMemberKey ?? visitor.workspaceId ?? '')
-          : null,
+        shareKey: visitor ? (visitorShareId ?? visitor.workspaceId ?? '') : null,
         readOnly,
+        offBox: offBox(req),
         owner: roster.owner,
-        socketSeed: newSocketSeed(),
+        ...(roster.reservedName ? { reservedName: roster.reservedName } : {}),
       });
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and

@@ -2331,6 +2331,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return (opts.identifyAgentCaller ?? identifyCallerAgent)(peer, server.port ?? 0);
   };
 
+  // Every name a roster row or the owner goes by, lowercased: a guest may not
+  // show one in presence. Rebuilt only when a row changes.
+  let memberNameCache: { rev: number; names: Set<string> } | null = null;
+  const memberNames = (): Set<string> => {
+    const rev = identities.revision();
+    if (memberNameCache?.rev !== rev) {
+      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
+      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
+      memberNameCache = { rev, names };
+    }
+    return memberNameCache.names;
+  };
   const { serveUpgradeAndStreamRoutes } = createUpgradeStream({
     server: { upgrade: (req, options) => server.upgrade(req, options) },
     docStore,
@@ -2353,14 +2365,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
-    // Who an unproven writable presence socket is (the owner, on a
-    // deployment that needs no sign-in), and which proven ids are agents.
+    // Who an unproven writable loopback presence socket is (the owner), which
+    // proven ids are agents, and which names a guest may not show
+    // (presence-identity.ts).
     presenceRoster: {
       owner: () => {
         const id = ownerIdentityIds().at(-1) ?? 'owner';
         return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
       },
       isAgent: (id) => identities.get(id)?.kind === 'agent',
+      reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
     },
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).

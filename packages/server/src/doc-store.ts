@@ -138,7 +138,7 @@ import { type BufferCounters, MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
 import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
-import type { PresenceUser } from './presence-identity.ts';
+import type { PresenceStamp } from './presence-identity.ts';
 import {
   deletePrivateMeta,
   liftPrivateMetaFromYdoc,
@@ -233,7 +233,7 @@ export type WsCtx = {
   personProof?: 'owner' | 'other';
   /** Who every peer sees this socket's presence as, set by the server at
    *  the upgrade (`presence-identity.ts`). Absent: a guest (`yjs-protocol.ts`). */
-  presenceUser?: PresenceUser;
+  presenceUser?: PresenceStamp;
   /**
    * The board widget token and page origin a tailnet widget door socket was
    * admitted with. Like `shareId`: the token is checked once at the upgrade,
