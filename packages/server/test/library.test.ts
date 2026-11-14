@@ -194,6 +194,9 @@ describe('buildLibrary', () => {
         docs: [
           meta('d-goals', { title: 'Learning goals', workspaceId: 'w-test' }),
           meta('d-member', { title: 'A set member', workspaceId: 'r-2' }),
+          // A set file under the board's own id is still a set member: only a
+          // doc with no file path in a set is read as one filed on the board.
+          meta('d-file', { title: 'A set file', workspaceId: 'w-test', relPath: 'notes.md' }),
         ],
       }),
     );

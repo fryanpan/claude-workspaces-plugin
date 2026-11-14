@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { basename, posix } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
-import { attachmentIdOf } from '@claude-workspaces/core';
+import { attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
 import { type FolderState, type FolderView, folderOfDoc, liveFolders } from './library-folders.ts';
@@ -261,13 +261,15 @@ export function displayNames(relPaths: readonly string[]): Map<string, string> {
 type LooseFile = ProjectFile & { fileId?: string };
 
 /**
- * Whether a doc belongs to an attachment set, whose own page lists it. A set
- * id that is this board's own id names no set: coach setup used to write the
- * Coach board's id there, and those docs are filed on the board.
+ * Whether a doc belongs to an attachment set, whose own page lists it. Coach
+ * setup used to write the Coach board's id in the set field of docs that
+ * have no file path in a set; those are filed on the board, so they are not
+ * set members. A doc with a set file path is a member whatever the id.
  */
 function inAttachmentSet(meta: DocMeta, workspaceId: string): boolean {
   const id = attachmentIdOf(meta);
-  return id !== undefined && id !== workspaceId;
+  if (id === undefined) return false;
+  return id !== workspaceId || isAttachmentMember(meta);
 }
 
 /** The doc keys this board's docs already hold — the files the repo listing
