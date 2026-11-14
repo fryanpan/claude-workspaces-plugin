@@ -31,6 +31,7 @@ function TaskCard({ task, onToggle }: { task: Task; onToggle: (id: string) => vo
           <wa-button id={trigger} appearance="outlined">
             {task.owner}
           </wa-button>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: wa-button fires click on Enter and Space itself */}
           <wa-button id={`toggle-${task.id}`} variant="brand" onClick={() => onToggle(task.id)}>
             {task.done ? 'Reopen' : 'Mark done'}
           </wa-button>

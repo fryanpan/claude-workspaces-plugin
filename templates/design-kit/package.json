@@ -6,5 +6,12 @@
   "dependencies": {
     "@awesome.me/webawesome": "3.14.0",
     "preact": "10.29.8"
+  },
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "serve": "bun run scripts/build.ts && bun run scripts/serve.ts",
+    "test": "CW_BROWSER_TESTS=1 bun test test/",
+    "measure": "bun run scripts/measure.ts",
+    "typecheck": "tsc --noEmit -p ."
   }
 }
