@@ -6,7 +6,7 @@ export interface RateRule {
   windowMs: number;
 }
 
-/** 3 attempts per email address per 15 minutes, across every email route. */
+/** 3 attempts per email address per route per 15 minutes. */
 export const EMAIL_RULE: RateRule = { name: 'email', max: 3, windowMs: 15 * 60_000 };
 /** 20 auth requests per client IP per minute. */
 export const IP_RULE: RateRule = { name: 'ip', max: 20, windowMs: 60_000 };

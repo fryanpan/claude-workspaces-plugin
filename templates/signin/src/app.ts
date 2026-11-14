@@ -52,7 +52,9 @@ export function createApp(options: AppOptions) {
     if (EMAIL_LIMITED_PATHS.has(path)) {
       const email = normaliseEmail(await emailInBody(c.req.raw));
       if (email) {
-        const byEmail = await takeRateSlot(c.env.DB, EMAIL_RULE, email, now());
+        // One bucket per route and address: a sign-up, a reset and a sign-in
+        // in the same quarter hour each have their own allowance.
+        const byEmail = await takeRateSlot(c.env.DB, EMAIL_RULE, `${path}:${email}`, now());
         if (!byEmail.allowed) return tooMany(byEmail.retryAfterSeconds);
       }
     }

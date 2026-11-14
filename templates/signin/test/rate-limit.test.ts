@@ -10,7 +10,7 @@ afterAll(() => h.dispose());
 
 const MINUTE = 60_000;
 
-describe('per-email limit: 3 per 15 minutes, kept in D1', () => {
+describe('per-email limit: 3 per route per 15 minutes, kept in D1', () => {
   it('refuses the 4th attempt for one address, even from different IPs', async () => {
     await signUpVerified(h, 'alice@example.com', 'Alice'); // counts once
     h.clock.advance(15 * MINUTE);
@@ -24,26 +24,61 @@ describe('per-email limit: 3 per 15 minutes, kept in D1', () => {
     expect(statuses).toEqual([200, 200, 200, 429]);
   });
 
-  it('counts across routes, answers Retry-After, and frees a slot when the oldest attempt ages out', async () => {
+  it('refuses one route past its limit, answers Retry-After, and frees a slot when the oldest attempt ages out', async () => {
     const email = 'bob@example.com';
     const c = h.client();
-    await c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' }); // t=0
+    const ask = () => c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' });
+    expect((await ask()).status).toBe(200); // t=0
     h.clock.advance(5 * MINUTE);
-    await c.post('/api/auth/request-password-reset', { email, redirectTo: '/reset' }); // t=5
-    await c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' }); // t=5
+    expect((await ask()).status).toBe(200); // t=5
+    expect((await ask()).status).toBe(200); // t=5
     h.clock.advance(5 * MINUTE);
-    const refused = await c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' }); // t=10
+    const refused = await ask(); // t=10
     expect(refused.status).toBe(429);
     expect(refused.headers.get('retry-after')).toBe(String(5 * 60));
 
+    // Another route for the same address has its own allowance.
+    const reset = await c.post('/api/auth/request-password-reset', { email, redirectTo: '/reset' });
+    expect(reset.status).toBe(200);
+
     h.clock.advance(5 * MINUTE - 1); // one millisecond before t=0 leaves the window
-    expect((await c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' })).status).toBe(
-      429,
-    );
+    expect((await ask()).status).toBe(429);
     h.clock.advance(1);
-    expect((await c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' })).status).toBe(
+    expect((await ask()).status).toBe(200);
+  });
+
+  it('lets a normal sign-up, sign-in, reset and sign-in happen inside 15 minutes', async () => {
+    h.clock.advance(15 * MINUTE);
+    const email = 'harborlight@example.com';
+    const c = h.client();
+    const signUp = await c.post('/api/auth/sign-up/email', {
+      email,
+      password: PASSWORD,
+      name: 'Harborlight',
+    });
+    expect(signUp.status).toBe(200);
+    await c.call(h.mailTo('verify-email', email).url);
+    h.clock.advance(MINUTE);
+    expect((await c.post('/api/auth/sign-in/email', { email, password: PASSWORD })).status).toBe(
       200,
     );
+    h.clock.advance(MINUTE);
+    expect(
+      (await c.post('/api/auth/request-password-reset', { email, redirectTo: '/reset' })).status,
+    ).toBe(200);
+    const link = await c.call(h.mailTo('reset-password', email).url);
+    const token = new URL(link.headers.get('location') ?? '', 'http://x').searchParams.get('token');
+    expect(
+      (await c.post('/api/auth/reset-password', { token, newPassword: 'a-brand-new-password' }))
+        .status,
+    ).toBe(200);
+    h.clock.advance(MINUTE);
+    const signIn = await c.post('/api/auth/sign-in/email', {
+      email,
+      password: 'a-brand-new-password',
+    });
+    expect(signIn.status).toBe(200);
+    expect(await c.userId()).not.toBeNull();
   });
 
   it('counts a form-encoded attempt the same as a JSON one', async () => {

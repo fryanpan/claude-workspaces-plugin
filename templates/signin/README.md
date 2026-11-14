@@ -68,10 +68,11 @@ each isolate.
   `CF-Connecting-IP` header, which Cloudflare sets on every request and a
   client cannot override. Behind any other proxy, read the IP from a header
   that proxy controls instead.
-- **3 attempts per email address per 15 minutes**, counted together across
-  the four routes above. A legitimate person who signs up, signs in, asks for
-  a reset and then signs in again uses four, so the last one waits. To count
-  each route separately, add the route path to the key in `src/app.ts`.
+- **3 attempts per email address per route per 15 minutes.** The routes are
+  the four above. Each has its own count for each address, so a person who
+  signs up, signs in, asks for a reset and signs in again in the same quarter
+  hour is never refused. Three password guesses or three magic links in a row
+  for one address use up that route's allowance.
 
 A refused request gets a 429 with a `Retry-After` header. Refused attempts
 are not counted, so hammering a locked address does not extend its lockout.
