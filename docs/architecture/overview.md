@@ -2589,6 +2589,17 @@ which it sets to the chart's height (`plotHeight`) before Plot arrives, so
 the doc does not move when it does. It fetches Plot and `buildPlot`
 from `/app/plot/plot.js` the first time a doc shows one, for KaTeX's reason
 below; `plot-entry.ts` is what the build compiles to that path.
+A `<StreetMap>` is read by name the same way. Core's `map-spec.ts` turns its
+literal props, and the JSON file its `src` names beside the doc, into a
+spec (markers, radius rings in feet, category-coloured points, legend
+entries); core's `map-basemaps.ts` is the list of street maps a tag may name
+by key, with the origins each loads tiles from, and is the one place a
+provider is added. `mdx-street-map.ts` reads the `src` file through the
+doc's files route, draws the legend, and fetches Leaflet from
+`/app/map/map.js` (built from `map-entry.ts`) and its stylesheet the first
+time a doc shows a map; markers and rings are SVG paths, points one canvas.
+The files route serves a `src` file only when a `<StreetMap>` in the doc's
+live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
 
 A component tag in an `.mdx` doc runs, not just previews, and the modules
 that do it are described in [mdx-components](mdx-components.md). Core's

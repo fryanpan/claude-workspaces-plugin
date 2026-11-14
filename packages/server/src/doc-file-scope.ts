@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import { parseFileEmbedDirective } from '@claude-workspaces/core/board-embeds';
+import { mapDataPaths } from '@claude-workspaces/core/map-spec';
+import { mdxFlowSources } from '@claude-workspaces/core/mdx-components';
 import * as Y from 'yjs';
 import { isGitListed } from './doc-file-listing.ts';
 import { boundFiles } from './slow-fs.ts';
@@ -103,4 +105,18 @@ export async function servingFolder(
     if (await pagePresent(dir, p)) return p.folder;
   }
   return null;
+}
+
+/**
+ * The serving folder for a `.json` file a `<StreetMap src="…">` tag in the
+ * doc's CURRENT content names exactly, or null. The folder is the file's own,
+ * so `readDocFile` asks git about that folder alone; and only the named file
+ * is admitted, so a tag naming `data/reports.json` opens no sibling of it. A
+ * file at the doc's own level is allowed here, unlike a framed page's folder,
+ * because the grant is one file, not the folder around it.
+ */
+export function mapDataFolder(ydoc: Y.Doc, segments: string[]): string[] | null {
+  const asked = segments.join('/');
+  const named = mapDataPaths(mdxFlowSources(prose.getProseFragment(ydoc)));
+  return named.some((p) => p.join('/') === asked) ? segments.slice(0, -1) : null;
 }

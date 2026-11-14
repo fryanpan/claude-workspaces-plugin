@@ -380,6 +380,28 @@ async function emit(buildId: string): Promise<boolean> {
     if (!isWatch) process.exit(1);
     return false;
   }
+  // Leaflet, for a `<StreetMap>` (`mdx-street-map.ts`), for the same reason;
+  // its stylesheet beside it. Markers are drawn as paths, so Leaflet's marker
+  // images are never asked for and are not copied.
+  const mapResult = await Bun.build({
+    entrypoints: [join(pkgRoot, 'src', 'map-entry.ts')],
+    outdir: join(dist, 'map'),
+    target: 'browser',
+    format: 'esm',
+    splitting: false,
+    naming: { entry: 'map.js' },
+    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
+  });
+  if (!mapResult.success) {
+    console.error('map build failed:');
+    for (const m of mapResult.logs) console.error(m);
+    if (!isWatch) process.exit(1);
+    return false;
+  }
+  const leafletDist = dirname(
+    createRequire(join(pkgRoot, 'package.json')).resolve('leaflet/dist/leaflet.css'),
+  );
+  cpSync(join(leafletDist, 'leaflet.css'), join(dist, 'map', 'leaflet.css'));
   const katexDist = dirname(
     createRequire(join(pkgRoot, 'package.json')).resolve('katex/dist/katex.min.css'),
   );

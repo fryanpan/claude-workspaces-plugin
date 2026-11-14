@@ -1148,6 +1148,72 @@ body.is-archived #editor .ProseMirror {
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
+/* A <StreetMap> (mdx-street-map.ts): a Leaflet map in the page. The slot is
+   its own stacking context, so Leaflet's panes (z-index 400 to 1000) stay
+   under the doc's sticky bars and sheets. Its height is set inline before
+   Leaflet loads, so the doc does not move when the map arrives. */
+#editor > .ProseMirror .mdx-map {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  cursor: auto;
+  overflow: hidden;
+}
+#editor > .ProseMirror .mdx-map .leaflet-container {
+  font: 12px / 1.4 var(--sans);
+}
+/* Leaflet's layers sit in zero-width panes and are sized by their own style,
+   so the prose column's narrow-screen max-width on media would shrink the
+   points' canvas to nothing. */
+#editor > .ProseMirror .mdx-map canvas,
+#editor > .ProseMirror .mdx-map svg,
+#editor > .ProseMirror .mdx-map img {
+  max-width: none;
+  max-height: none;
+}
+#editor > .ProseMirror .mdx-map img.leaflet-tile {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+#editor > .ProseMirror .mdx-map .cw-map-popup {
+  font: 13px / 1.4 var(--sans);
+  color: #1f2937;
+  white-space: pre-wrap;
+}
+#editor > .ProseMirror .mdx-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font: 13px / 1.4 var(--sans);
+  color: var(--fg);
+}
+#editor > .ProseMirror .mdx-map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+#editor > .ProseMirror .mdx-map-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+#editor > .ProseMirror .mdx-map-swatch.is-ring {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid;
+  background: transparent;
+}
 /* Each line's own name and last value, at its end inside the plot: the site's
    chart labels its lines there instead of carrying a legend. */
 #editor > .ProseMirror .mdx-chart .mdx-end-label {

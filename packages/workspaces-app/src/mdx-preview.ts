@@ -1,7 +1,8 @@
 /**
  * What an `.mdx` block shows in place of its source: a component's `title` and
  * words, the chart its literal props describe (`mdx-chart.ts`, or for a
- * `<PlotChart>` `mdx-plot-chart.ts`), a muted line
+ * `<PlotChart>` `mdx-plot-chart.ts`, for a `<StreetMap>` `mdx-street-map.ts`),
+ * a muted line
  * for a comment or the imports. A component's name shows only when it has
  * nothing else to show.
  *
@@ -14,6 +15,7 @@
 import { UNREADABLE } from './mdx-chart-props.ts';
 import { type MdxChart, chartOf, drawChart } from './mdx-chart.ts';
 import { type PlotChartSummary, plotChartOf, renderPlotChart } from './mdx-plot-chart.ts';
+import { type StreetMapSummary, renderStreetMap, streetMapOf } from './mdx-street-map.ts';
 
 export type MdxKind = 'esm' | 'expr' | 'jsx';
 
@@ -27,6 +29,8 @@ export interface MdxSummary {
   chart?: MdxChart;
   /** A `<PlotChart>`'s spec and the words around it. */
   plot?: PlotChartSummary;
+  /** A `<StreetMap>`'s props and the words around it. */
+  map?: StreetMapSummary;
   /** A component's children as plain words, tags removed. */
   children?: string;
   /** Why the opening tag could not be read, when it could not. */
@@ -59,6 +63,7 @@ export function summarizeMdx(source: string): MdxSummary {
   const title = props.get('title');
   if (typeof title === 'string') summary.title = title;
   if (name === 'PlotChart') summary.plot = plotChartOf(props);
+  else if (name === 'StreetMap') summary.map = streetMapOf(props);
   else {
     const chart = chartOf(props);
     if (chart) summary.chart = chart;
@@ -295,7 +300,8 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?:
   head.className = 'mdx-head';
   // A component's name is source vocabulary, not what the post says, so it
   // shows only when the block would otherwise be empty.
-  const bare = !summary.title && !summary.chart && !summary.plot && !summary.children;
+  const bare =
+    !summary.title && !summary.chart && !summary.plot && !summary.map && !summary.children;
   if (summary.kind !== 'jsx' || bare) {
     const label = document.createElement('span');
     label.className = summary.kind === 'jsx' ? 'mdx-name' : 'mdx-muted';
@@ -320,6 +326,7 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?:
     note(host, 'mdx-chart-site-ignores', 'The site draws nothing for', chart.siteIgnores);
   }
   if (summary.plot) renderPlotChart(host, summary.plot);
+  if (summary.map) renderStreetMap(host, summary.map);
   if (summary.children) {
     const kids = document.createElement('div');
     kids.className = 'mdx-children';
