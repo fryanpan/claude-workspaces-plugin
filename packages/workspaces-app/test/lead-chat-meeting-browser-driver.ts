@@ -430,7 +430,6 @@ async function main(): Promise<void> {
             : {}),
         });
       }
-
       step(`the watching tab closes its chat, then ends the meeting, at ${width}`);
       await tap(watcher, (await read(watcher)).close as Rect);
       const later = `The ferry leaves at ten, said at ${width}.`;
@@ -441,9 +440,11 @@ async function main(): Promise<void> {
       });
       await shot(watcher, shots, `meeting-closed-bar-${width}`);
       await tap(watcher, closed.bar as Rect);
-      const w = await until('the watching tab’s chat open again', async () => {
+      let endWas = ''; // Tapped once End stops moving: the panel grows out of the bar.
+      const w = await until('the watching tab’s chat open again, and still', async () => {
         const r = await read(watcher);
-        return r.end ? r : null;
+        const [was, now] = [endWas, (endWas = JSON.stringify(r.end))];
+        return r.end && now === was ? r : null;
       });
       await tap(watcher, w.end as Rect);
       await until('the meeting gone on the recording page', async () => {
