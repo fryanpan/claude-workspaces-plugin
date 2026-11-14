@@ -126,11 +126,30 @@ export async function spyOnRouteHandlers(): Promise<RouteHandlerSpy> {
     mock.module(path, () => copy);
   };
 
-  for (const entry of readdirSync(join(SRC, 'routes'))) {
+  // One wrapper per function object. A module that re-exports another's
+  // handler (`tasks.ts` re-exports `handleDispatchAndNoteRoutes`) would
+  // otherwise wrap it a second time, and the two labels would nest in
+  // whatever order the modules were replaced. That order came from
+  // `readdirSync`, which is alphabetical on macOS and not on Linux CI, so
+  // the record differed between machines. Entries are sorted, and a function
+  // already seen keeps the label of the first module that exported it.
+  const wrapped = new Map<Fn, Fn>();
+  const wrappers = new Set<Fn>();
+  const wrapOnce = (fn: Fn, label: string): Fn => {
+    if (wrappers.has(fn)) return fn;
+    const seen = wrapped.get(fn);
+    if (seen) return seen;
+    const spied = wrap(fn, label, answers);
+    wrapped.set(fn, spied);
+    wrappers.add(spied);
+    return spied;
+  };
+
+  for (const entry of readdirSync(join(SRC, 'routes')).sort()) {
     if (!entry.endsWith('.ts') || NOT_FAMILIES.test(entry)) continue;
     await replace(join('routes', entry), (name, value) => {
       if (typeof value !== 'function') return value;
-      if (ROUTE_FUNCTION.test(name)) return wrap(value as Fn, `${entry}:${name}`, answers);
+      if (ROUTE_FUNCTION.test(name)) return wrapOnce(value as Fn, `${entry}:${name}`);
       if (name.startsWith('create')) {
         const factory = value as Fn;
         return (...args: unknown[]) => spiedResult(factory(...args), entry);
