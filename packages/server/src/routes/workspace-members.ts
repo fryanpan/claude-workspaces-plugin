@@ -52,7 +52,7 @@ export async function handleWorkspaceMembers(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { shareLinks, accessProposals, docStore, sse, j, safeJson } = ctx;
+  const { shareLinks, accessProposals, docStore, sse, collabRooms, j, safeJson } = ctx;
   const { req, scope, accessEmail, roleFor, requireOwner, visitor } = rq;
   if (!scope) return undefined;
   const { workspaceId } = scope;
@@ -72,6 +72,8 @@ export async function handleWorkspaceMembers(
   /** Hang up what these members still have open on this board. */
   const hangUp = (emails: readonly string[]): { closedSockets: number; closedStreams: number } => {
     const keys = new Set(emails.map((e) => shareMemberKey(workspaceId, e)));
+    // And the core's room hosts, whose connections carry no member key.
+    collabRooms.recheck();
     return {
       closedSockets: docStore.closeSocketsForShareMembers((k) => keys.has(k)),
       closedStreams: sse.closeForShareMembers((k) => keys.has(k)),

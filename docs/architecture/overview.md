@@ -135,7 +135,10 @@ server's `DocStateStore` fits its storage interface as it is, and
 private-message interface. Workspaces does not run its rooms on it yet; that
 is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
 runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
-that imports only the core.
+that imports only the core. `server/src/collab-rooms.ts` is the registry of
+room hosts the server runs; every revoke calls its `recheck` beside the
+sweep that closes the server's own sockets, so a core connection loses a
+revoked role on the same call.
 
 **Two callers wanting the same thing share one read.** The board shell mounts
 `<meeting-banner>` in each pane, so the calendar read is

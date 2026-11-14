@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MemoryCollabStorage, createRoomHost } from '@claude-workspaces/core/collab';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
@@ -322,6 +323,41 @@ describe('board roles over the real server', () => {
     expect(await member.closed).toBe(1008);
     expect(owner.ws.readyState).toBe(WebSocket.OPEN);
     owner.ws.close();
+  });
+
+  it('a role change or a removal reaches a core room host too', async () => {
+    // Step 3's room host keys nothing on the socket; it asks its role
+    // function again when the server calls `recheckRoles` on a revoke.
+    const who = 'saltmarsh@harborlight.example';
+    await join_(who);
+    const host = createRoomHost({
+      storage: new MemoryCollabStorage(),
+      role: (p) => handle.shareLinks.accessRoleOf(board, p.id),
+    });
+    const unregister = handle.collabRooms.register(host);
+    try {
+      let revoked = 0;
+      const opened = host.connect({
+        roomId: 'harborlight-room',
+        principal: { id: who },
+        send: () => {},
+        onRevoked: () => {
+          revoked++;
+        },
+      });
+      if (!opened.ok) throw new Error(opened.error);
+      expect(opened.connection.role).toBe('edit');
+      expect((await setRole(who, 'view')).status).toBe(200);
+      expect(opened.connection.role).toBe('view');
+      expect(revoked).toBe(0);
+      const removed = await local(`/workspaces/${board}/members/${encodeURIComponent(who)}`, {
+        method: 'DELETE',
+      });
+      expect(removed.status).toBe(200);
+      expect(revoked).toBe(1);
+    } finally {
+      unregister();
+    }
   });
 
   it('revoking a board token hangs up the socket it opened', async () => {
