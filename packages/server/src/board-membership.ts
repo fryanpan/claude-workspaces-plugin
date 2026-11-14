@@ -39,6 +39,7 @@
  * owner's notice on the catch-all board.
  */
 import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
+import { ownerIdentityIds } from './actor-identity.ts';
 import type { DocStore } from './doc-store.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
 import type { AccessRole } from './share/board-access.ts';
@@ -223,6 +224,12 @@ export interface BoardMembership {
   /** The four-word role (`share/board-access.ts`): the seat, then the row's
    *  access level for a member. */
   boardAccessOf: (workspaceId: string, email: string | null, isVisitor: boolean) => AccessRole;
+  /** The four-word role of a PROVEN PERSON on a board, or null when they are
+   *  not on it — see the implementation. */
+  personAccessOn: (
+    workspaceId: string,
+    person: { id: string; email?: string },
+  ) => AccessRole | null;
   /** Who has access to this board, and at what level. */
   boardMembersOf: (workspaceId: string) => ShareLinkMember[];
   /** Every board a doc's discussion actually reaches. */
@@ -597,6 +604,30 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
   ): AccessRole => {
     if (boardRoleOf(workspaceId, email, isVisitor) === 'owner') return 'owner';
     return shareLinks.accessRoleOf(workspaceId, email) ?? 'edit';
+  };
+
+  /**
+   * What a PROVEN PERSON may do on a board, read from who they are rather
+   * than from the request they arrived on: `owner` for the owner's identity
+   * or an operator address, the membership row's access level for a member,
+   * and null for anyone else. Never asked of an agent.
+   *
+   * The one reading every person-keyed decision uses — a push approval, an
+   * agent grant's cap, who a comment may address. It returns the full level
+   * on purpose: those callers used to share a function that answered only
+   * `owner | member`, and one of them (the push approval) took `member` as
+   * enough, so a view-only member could approve a push. A caller that needs
+   * edit has to say so against this value, and cannot be handed a word that
+   * hides the difference.
+   */
+  const personAccessOn = (
+    workspaceId: string,
+    person: { id: string; email?: string },
+  ): AccessRole | null => {
+    if (ownerIdentityIds().includes(person.id)) return 'owner';
+    if (!person.email) return null;
+    if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
+    return shareLinks.accessRoleOf(workspaceId, person.email);
   };
 
   /**
@@ -980,6 +1011,7 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     redeemShareLink,
     boardRoleOf,
     boardAccessOf,
+    personAccessOn,
     boardMembersOf,
     boardsForDoc,
     boardIndexForListing,
