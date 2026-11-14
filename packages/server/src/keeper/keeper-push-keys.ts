@@ -24,11 +24,16 @@
  * GitHub that nothing holds. Once the secret is set, older keys this keeper
  * gave the same app (the same title) are deleted from each repo: the
  * machine's previous secret, which held them, is gone.
+ *
+ * The answer also names, per repo, the Actions secret names a workflow pushed
+ * with the new key could read (`keeper-push-exposure.ts`). That report reads
+ * names only and never fails the run: the keys are already in place.
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { PUSH_KEYS_ENV, encodePushKeys } from '../git-push/credential.ts';
 import { isRepoName } from '../git-push/policy.ts';
 import type { Verdict } from './keeper-policy.ts';
+import { type RepoExposure, repoExposure } from './keeper-push-exposure.ts';
 import { APP_NAME } from './keeper-store.ts';
 
 export interface PushKeysCall {
@@ -183,6 +188,20 @@ export async function makePushKeys(
       if (del.status === 204) retired.push(`${m.repo}#${k.id}`);
     }
   }
+  const exposure: RepoExposure[] = [];
+  for (const m of made) {
+    try {
+      exposure.push(await repoExposure(deps.github, m.repo));
+    } catch {
+      exposure.push({
+        repo: m.repo,
+        defaultBranch: null,
+        defaultBranchProtected: null,
+        repoSecrets: null,
+        sideBranchReadable: [],
+      });
+    }
+  }
   return {
     status: 200,
     body: JSON.stringify({
@@ -190,6 +209,7 @@ export async function makePushKeys(
       app,
       keys: made.map((m) => ({ repo: m.repo, id: m.id, publicKey: m.publicKey })),
       retired,
+      exposure,
     }),
   };
 }
