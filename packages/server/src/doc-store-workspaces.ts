@@ -41,6 +41,7 @@ import {
   moveDocIndex,
   readDocIndex,
 } from './doc-index.ts';
+import type { DocStateArea, DocStateStore } from './doc-state/store.ts';
 import type { LiveDoc, WorkspaceDirNode, WorkspaceFileNode, WorkspaceTree } from './doc-store.ts';
 import { isListedFile, landsOnListed, listedFiles } from './fs-listing.ts';
 import { scanFolderPaths } from './fs-scan.ts';
@@ -114,7 +115,8 @@ export interface DocStoreWorkspacePersistence {
   persistDocNow(doc: LiveDoc): void;
   teardownDoc(doc: LiveDoc, closeReason: string): void;
   releaseAliases(docId: string): void;
-  pathFor(docId: string): string;
+  /** Where each doc's Yjs state lives (`doc-state/store.ts`). */
+  docState(): DocStateStore;
   forgetActivityMtime(docId: string): void;
   setIndexEntry(docId: string, entry: DocIndexEntry): void;
   deleteIndexEntry(docId: string): void;
@@ -831,7 +833,7 @@ export class DocStoreWorkspaces {
     // Pre-flight the collision check across ALL members before moving any.
     const collisions = members
       .map((m) => m.docId)
-      .filter((docId) => existsSync(join(dir, `${docId}.ydoc`)));
+      .filter((docId) => this.p.docState().has(docId, 'archive'));
     if (collisions.length > 0) return { ok: false, error: 'archive-collision', docIds: collisions };
 
     const moved: string[] = [];
@@ -905,7 +907,7 @@ export class DocStoreWorkspaces {
     if (!manifest) return { ok: false, error: 'not-found' };
     const dir = archiveDirPath(this.p.dataDir());
 
-    const collisions = manifest.docIds.filter((docId) => existsSync(this.p.pathFor(docId)));
+    const collisions = manifest.docIds.filter((docId) => this.p.docState().has(docId));
     if (collisions.length > 0) return { ok: false, error: 'restore-collision', docIds: collisions };
 
     const moved: string[] = [];
@@ -969,7 +971,7 @@ export class DocStoreWorkspaces {
     if (setId !== undefined) return { ok: false, error: 'review-member', setId };
 
     const dir = ensureArchiveDir(this.p.dataDir());
-    if (existsSync(join(dir, `${id}.ydoc`))) return { ok: false, error: 'archive-collision' };
+    if (this.p.docState().has(id, 'archive')) return { ok: false, error: 'archive-collision' };
 
     // Flush BEFORE tearing down: teardown cancels the pending debounced write,
     // so without this the archived snapshot is up to 200ms stale — and for a
@@ -1009,7 +1011,7 @@ export class DocStoreWorkspaces {
     | { ok: false; error: 'not-found' | 'restore-collision' | 'move-failed' } {
     const manifest = readDocArchiveManifest(this.p.dataDir(), docId);
     if (!manifest) return { ok: false, error: 'not-found' };
-    if (existsSync(this.p.pathFor(docId))) return { ok: false, error: 'restore-collision' };
+    if (this.p.docState().has(docId)) return { ok: false, error: 'restore-collision' };
 
     const dir = archiveDirPath(this.p.dataDir());
     if (!this.moveDocFiles(docId, dir, this.p.dataDir()))
@@ -1031,14 +1033,11 @@ export class DocStoreWorkspaces {
    */
   private moveDocFiles(docId: string, fromDir: string, toDir: string): boolean {
     this.p.forgetActivityMtime(docId);
-    const ydocFrom = join(fromDir, `${docId}.ydoc`);
-    const ydocTo = join(toDir, `${docId}.ydoc`);
-    try {
-      if (existsSync(ydocFrom)) renameSync(ydocFrom, ydocTo);
-    } catch (err) {
-      console.error(`[doc-store] failed to move ${docId}.ydoc to ${toDir}:`, err);
-      return false;
-    }
+    // The state moves through its store; the sidecar and the index row are
+    // files in the data dir whichever backend holds the state.
+    const toArea: DocStateArea = toDir === this.p.dataDir() ? 'live' : 'archive';
+    const fromArea: DocStateArea = toArea === 'live' ? 'archive' : 'live';
+    if (!this.p.docState().move(docId, fromArea, toArea)) return false;
     const sidecarFrom = privateMetaPath(fromDir, docId);
     const sidecarTo = privateMetaPath(toDir, docId);
     try {
@@ -1047,9 +1046,7 @@ export class DocStoreWorkspaces {
       // The sidecar is recoverable state, so a failure here is logged and the
       // move stands — but put the .ydoc back first so the pair never splits.
       console.error(`[doc-store] failed to move sidecar for ${docId} to ${toDir}:`, err);
-      try {
-        if (existsSync(ydocTo)) renameSync(ydocTo, ydocFrom);
-      } catch {}
+      this.p.docState().move(docId, toArea, fromArea);
       return false;
     }
     // Membership of the resident index map follows the FILE, in the one place
