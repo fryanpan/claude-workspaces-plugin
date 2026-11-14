@@ -111,6 +111,11 @@ export interface MeetingSizeRun {
   /** From the engine hearing a line to the line on screen. */
   recorderMs: number;
   watcherMs: number;
+  /** The open panel's notes, the typing box under them, and the bar left
+   *  on screen with the chat closed (null when it is not). */
+  notesBox: Rect | null;
+  composeBox: Rect | null;
+  closedBar: Rect | null;
   moves: MeetingMove[];
   framesAfterEnd: number;
   endedOnServer: boolean;
