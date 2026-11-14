@@ -617,6 +617,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/doc-components.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/components/*', 'GET HEAD'],
   ]),
+  // An agent's component tools; deliberately outside `components/*`.
+  ...family('routes/doc-component-agent.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/:id/state', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/place', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/component-grants', 'POST'],
+  ]),
   ...family('routes/doc-metadata.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
   ]),
