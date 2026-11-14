@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.368";
+var version2 = "0.1.369";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -16394,8 +16394,120 @@ function secretReadCommand(service) {
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
 
+// packages/mcp/src/component-schemas.ts
+var WORKSPACE_ID = { type: "string", description: "The board the doc is on." };
+var DOC_ID = {
+  type: "string",
+  description: "The doc, bound to an .mdx file, whose components these are."
+};
+var COMPONENT_ID = {
+  type: "string",
+  description: "The state id: the string `id` prop on the tag. 1 to 64 of a-z, 0-9 and -. list_components names them."
+};
+var PATH = {
+  type: "string",
+  description: 'A dot path into the state, like "pins.harborlight" or "log.0".'
+};
+var RUNS = "Every component runs in the doc page for every reader, with the reader’s session; none is framed.";
+var COMPONENT_TOOLS = [
+  {
+    name: "list_components",
+    description: `List an .mdx doc's components: one row per tag, with its state ids, its build status (built, failed with the error, or pending) and whether it has state; then one row per state no tag names, marked placed:false (deleting a tag keeps its state). ${RUNS}`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, docId: DOC_ID },
+      required: ["workspaceId", "docId"]
+    }
+  },
+  {
+    name: "get_component_state",
+    description: "Read a component's state: the whole state, or the value at `path`. Says whether a tag in the doc still names the id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        componentId: COMPONENT_ID,
+        path: PATH
+      },
+      required: ["workspaceId", "docId", "componentId"]
+    }
+  },
+  {
+    name: "set_component_state",
+    description: "Change a component's state in one step. Every open page shows the change within a second. `ops` is a list of at most 100 of {op:'set', path, value}, {op:'push', path, value} (append to a list) and {op:'delete', path}. The list is checked whole against the page's limits (256 KB per component, 2 MB per doc, depth 8, 20 writes a second) and applied in full or not at all. Returns the state after.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        componentId: COMPONENT_ID,
+        ops: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              op: { type: "string", enum: ["set", "push", "delete"] },
+              path: PATH,
+              value: { description: "Any JSON value. Not used by delete." }
+            },
+            required: ["op", "path"]
+          }
+        }
+      },
+      required: ["workspaceId", "docId", "componentId", "ops"]
+    }
+  },
+  {
+    name: "place_component",
+    description: `Insert a component tag into an .mdx doc, under a heading or at the end, with its import line when the doc has none for that file, and build it. Returns the tag as written and the build status; a failed build says why. A local file must be in the doc's git repository under a folder holding component.json; a file git ignores builds only after request_component_grant is approved. ${RUNS}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        importPath: {
+          type: "string",
+          description: "A path relative to the doc, ending .ts, .tsx, .js, .jsx or .mjs (like './map/index.ts'), or an esm.sh URL at an exact version."
+        },
+        name: {
+          type: "string",
+          description: "The tag name. Default: from the file name, like Map for ./map/index.ts."
+        },
+        props: {
+          type: "object",
+          description: 'The tag’s props, which must include a string `id`: the state id. Strings are written as "…"; anything else as {JSON}.'
+        },
+        headingId: {
+          type: "string",
+          description: "Insert under this heading (an id read_doc_outline returned). Default: the end."
+        }
+      },
+      required: ["workspaceId", "docId", "importPath", "props"]
+    }
+  },
+  {
+    name: "request_component_grant",
+    description: "Ask the owner to let docs build components from a folder's files that git ignores. Files an access card on the task you name and changes nothing; you are told when the owner answers. The folder must be inside the doc's git repository and declared by a component.json. A grant covers that folder for docs on every board.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: DOC_ID,
+        folder: { type: "string", description: "Relative to the doc, or absolute." },
+        taskId: { type: "string", description: "The task that needs it; the card is filed there." },
+        why: {
+          type: "string",
+          description: "What the component is for, in at most 600 characters."
+        }
+      },
+      required: ["workspaceId", "docId", "folder", "taskId", "why"]
+    }
+  }
+];
+
 // packages/mcp/src/folder-schemas.ts
-var WORKSPACE_ID = {
+var WORKSPACE_ID2 = {
   type: "string",
   description: "The board whose Library holds the folders."
 };
@@ -16414,7 +16526,7 @@ var FOLDER_TOOLS = [
     description: `List a board's Library folders. Meetings is built in: new meetings land in it, and it cannot be moved or archived. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID },
+      properties: { workspaceId: WORKSPACE_ID2 },
       required: ["workspaceId"]
     }
   },
@@ -16424,7 +16536,7 @@ var FOLDER_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID,
+        workspaceId: WORKSPACE_ID2,
         name: { type: "string", description: "At most 80 characters, no slash." },
         parentId: PARENT_ID
       },
@@ -16436,7 +16548,7 @@ var FOLDER_TOOLS = [
     description: `Rename a Library folder. A name already used beside it is refused. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, name: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID, name: { type: "string" } },
       required: ["workspaceId", "folderId", "name"]
     }
   },
@@ -16445,7 +16557,7 @@ var FOLDER_TOOLS = [
     description: `Move a Library folder, with everything in it, into another folder or to the top level. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID, parentId: PARENT_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID, parentId: PARENT_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16454,7 +16566,7 @@ var FOLDER_TOOLS = [
     description: `Archive a Library folder. Reversible with unarchive_folder: its docs and subfolders show as in no folder until then, and nothing is deleted. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16463,7 +16575,7 @@ var FOLDER_TOOLS = [
     description: `Bring back an archived Library folder with its docs and subfolders where they were. ${ANSWERS}`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID, folderId: FOLDER_ID },
+      properties: { workspaceId: WORKSPACE_ID2, folderId: FOLDER_ID },
       required: ["workspaceId", "folderId"]
     }
   },
@@ -16473,7 +16585,7 @@ var FOLDER_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID,
+        workspaceId: WORKSPACE_ID2,
         docId: { type: "string" },
         folderId: { ...FOLDER_ID, type: ["string", "null"] }
       },
@@ -16564,7 +16676,7 @@ var PERSON_TOOLS = [
 ];
 
 // packages/mcp/src/whiteboard-schemas.ts
-var WORKSPACE_ID2 = {
+var WORKSPACE_ID3 = {
   type: "string",
   description: "The board this whiteboard is on. get_workspace lists the boards you are attached to."
 };
@@ -16598,7 +16710,7 @@ var WHITEBOARD_TOOLS = [
     description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you. Returns `url`, the absolute link to the whiteboard. Give that link to a person.",
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID2, title: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID3, title: { type: "string" } },
       required: ["workspaceId"]
     }
   },
@@ -16608,7 +16720,7 @@ var WHITEBOARD_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: WORKSPACE_ID2,
+        workspaceId: WORKSPACE_ID3,
         docId: { type: "string" },
         shapes: { type: "array", items: SHAPE },
         mode: { type: "string", enum: ["add", "replace"] },
@@ -16626,7 +16738,7 @@ var WHITEBOARD_TOOLS = [
     description: `Read a whiteboard as shapes: {shapes: [{id, kind, x, y, w, h, text, from, to}], count}. A box's words are its text. A person's pen stroke reads kind "freedraw" with its bounding box.`,
     inputSchema: {
       type: "object",
-      properties: { workspaceId: WORKSPACE_ID2, docId: { type: "string" } },
+      properties: { workspaceId: WORKSPACE_ID3, docId: { type: "string" } },
       required: ["workspaceId", "docId"]
     }
   }
@@ -19728,7 +19840,8 @@ var TOOL_LIST = {
     },
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
-    ...FOLDER_TOOLS
+    ...FOLDER_TOOLS,
+    ...COMPONENT_TOOLS
   ]
 };
 
@@ -19743,6 +19856,51 @@ function boardIdOf(toolName, args) {
 }
 function boardPathOf(toolName, args) {
   return `/workspaces/${encodeURIComponent(boardIdOf(toolName, args))}`;
+}
+
+// packages/mcp/src/tools/components.ts
+var str = (v) => typeof v === "string" ? v : "";
+async function handleComponentTool(name, a, ctx) {
+  const doc2 = () => {
+    const docId = str(a.docId);
+    if (docId === "")
+      throw new Error(`${name} needs a docId`);
+    return `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}`;
+  };
+  const state = () => {
+    const id = str(a.componentId);
+    if (id === "")
+      throw new Error(`${name} needs a componentId: the tag's id prop`);
+    return `${doc2()}/agent-components/${encodeURIComponent(id)}/state`;
+  };
+  switch (name) {
+    case "list_components":
+      return ctx.ok(await ctx.http("GET", `${doc2()}/agent-components`));
+    case "get_component_state": {
+      const path = str(a.path);
+      const q = path ? `?path=${encodeURIComponent(path)}` : "";
+      return ctx.ok(await ctx.http("GET", `${state()}${q}`));
+    }
+    case "set_component_state":
+      return ctx.ok(await ctx.http("POST", state(), { ops: a.ops, author: ctx.suggestionAuthor() }));
+    case "place_component":
+      return ctx.ok(await ctx.http("POST", `${doc2()}/agent-components/place`, {
+        importPath: a.importPath,
+        ...a.name !== undefined ? { name: a.name } : {},
+        props: a.props,
+        ...a.headingId !== undefined ? { headingId: a.headingId } : {},
+        author: ctx.suggestionAuthor()
+      }));
+    case "request_component_grant":
+      return ctx.ok(await ctx.http("POST", `${doc2()}/component-grants`, {
+        folder: a.folder,
+        taskId: a.taskId,
+        why: a.why,
+        author: ctx.suggestionAuthor()
+      }));
+    default:
+      return;
+  }
 }
 
 // packages/mcp/src/thread-create.ts
@@ -21752,9 +21910,9 @@ function parseLeadChatAttachment(raw) {
   if (typeof raw !== "object" || raw === null)
     return null;
   const { id, name, type, size, image } = raw;
-  const ok2 = str(id, 100);
-  const label = str(name, FILE_NAME_MAX);
-  const kind = str(type, FILE_TYPE_MAX);
+  const ok2 = str2(id, 100);
+  const label = str2(name, FILE_NAME_MAX);
+  const kind = str2(type, FILE_TYPE_MAX);
   if (!ok2 || !LEAD_CHAT_FILE_ID.test(ok2) || !label || !kind)
     return null;
   if (typeof size !== "number" || !Number.isFinite(size) || size < 0)
@@ -21767,7 +21925,7 @@ function parseLeadChatAttachment(raw) {
     ...image === true ? { image: true } : {}
   };
 }
-function str(v, max) {
+function str2(v, max) {
   return typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
 }
 
@@ -22765,7 +22923,8 @@ function createConnectorSession(deps) {
       handleInboxTool,
       handlePersonTool,
       handleWhiteboardTool,
-      handleFolderTool
+      handleFolderTool,
+      handleComponentTool
     ],
     err
   });

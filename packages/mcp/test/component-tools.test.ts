@@ -19,9 +19,13 @@ afterAll(async () => {
   await mcp?.stop();
 });
 
+/** The requests a call made to the doc, leaving out the auto-watch a docId
+ *  argument starts (`POST /api/agents/<id>/watches`). */
 const sent = async (name: string, args: Record<string, unknown>) => {
   const res = await mcp.call(name, args);
-  return res.sent.map((r) => ({ method: r.method, path: r.path, body: r.body }));
+  return res.sent
+    .filter((r) => r.path.startsWith('/workspaces/'))
+    .map((r) => ({ method: r.method, path: r.url, body: r.body }));
 };
 const DOC = { workspaceId: 'w-1', docId: 'd-1' };
 const BASE = '/workspaces/w-1/docs/d-1';
@@ -98,7 +102,6 @@ describe('the component tools', () => {
   });
 
   it('refuse a call with no component id before any request', async () => {
-    const res = await mcp.call('set_component_state', { ...DOC, ops: [] });
-    expect(res.sent).toEqual([]);
+    expect(await sent('set_component_state', { ...DOC, ops: [] })).toEqual([]);
   });
 });
