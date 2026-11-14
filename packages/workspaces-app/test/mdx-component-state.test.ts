@@ -151,4 +151,17 @@ describe('component state across open pages', () => {
     expect(hook?.set('filter', 'open')).toEqual({ ok: true });
     expect(status(alice)?.hidden).toBe(true);
   });
+
+  it('keeps a failed build’s reason when a later write is accepted', async () => {
+    const server = serverDoc();
+    const alice = openPage(server);
+    await settle(() => hooks.size === 1);
+    const hook = hooks.get(alice);
+    expect(hook?.set('blob', 'x'.repeat(300 * 1024)).ok).toBe(false);
+    componentBuildsMap(server).set(KEY, { hash: HASH, error: 'a bare import', at: Date.now() });
+    await settle(() => status(alice)?.textContent === 'a bare import');
+    expect(hook?.set('filter', 'open')).toEqual({ ok: true });
+    expect(status(alice)?.textContent).toBe('a bare import');
+    expect(status(alice)?.hidden).toBe(false);
+  });
 });

@@ -185,6 +185,7 @@ export class ComponentMount {
     this.status.textContent = text;
     this.status.hidden = text === '';
     this.status.classList.toggle('is-error', build?.error !== undefined);
+    this.status.classList.remove('is-refused');
   }
 
   private async mount(hash: string): Promise<void> {
@@ -249,6 +250,7 @@ export class ComponentMount {
   private fail(err: unknown): void {
     this.status.textContent = err instanceof Error ? err.message : String(err);
     this.status.hidden = false;
+    this.status.classList.remove('is-refused');
     this.status.classList.add('is-error');
   }
 
