@@ -12,7 +12,9 @@ import { REGISTER_USERS } from './auth.ts';
  *   `x-api-key`) registers a plain user. Anyone else is refused.
  *
  * Keys never grant a session (the API-key plugin's session mode stays off),
- * so a key reaches nothing but this route.
+ * so a key reaches nothing but this route. Each key keeps Better Auth's
+ * default allowance of 10 verified requests a day; pass rateLimitMax and
+ * rateLimitTimeWindow to createApiKey to change it.
  */
 export function mountAdminRoutes(app: Hono<AppEnv>): void {
   app.post('/api/agent-keys', async (c) => {
@@ -28,19 +30,21 @@ export function mountAdminRoutes(app: Hono<AppEnv>): void {
   });
 
   app.post('/api/users', async (c) => {
-    const actor = (await sessionAdmin(c)) ?? (await agentOfAdmin(c));
-    if (!actor) return c.json({ code: 'FORBIDDEN' }, 403);
-    const input = parseNewUser(await readJson(c));
-    if (!input) return c.json({ code: 'INVALID_BODY' }, 400);
-    // Called without request headers, Better Auth trusts the caller; the
-    // checks above are the gate. No role is ever passed: plain users only.
     try {
+      const actor = (await sessionAdmin(c)) ?? (await agentOfAdmin(c));
+      if (!actor) return c.json({ code: 'FORBIDDEN' }, 403);
+      const input = parseNewUser(await readJson(c));
+      if (!input) return c.json({ code: 'INVALID_BODY' }, 400);
+      // Called without request headers, Better Auth trusts the caller; the
+      // checks above are the gate. No role is ever passed: plain users only.
       const { user } = await c.var.auth.api.createUser({ body: input });
       return c.json({ user: { id: user.id, email: user.email, name: user.name } }, 201);
     } catch (error) {
-      // e.g. the address is taken: answer Better Auth's own status and code.
-      if (error instanceof APIError)
+      // Better Auth's own refusals keep their status: a taken address is a
+      // 400, and a key past its daily allowance is a 429.
+      if (error instanceof APIError) {
         return Response.json(error.body ?? {}, { status: error.statusCode });
+      }
       throw error;
     }
   });
@@ -60,6 +64,12 @@ async function agentOfAdmin(c: Ctx): Promise<{ id: string } | null> {
   const verdict = await c.var.auth.api.verifyApiKey({
     body: { key, permissions: REGISTER_USERS },
   });
+  if (verdict.error?.code === 'RATE_LIMITED') {
+    throw new APIError('TOO_MANY_REQUESTS', {
+      code: 'RATE_LIMITED',
+      message: verdict.error.message,
+    });
+  }
   if (!verdict.valid || !verdict.key) return null;
   // Read the owner's role now, not when the key was minted.
   const { internalAdapter } = await c.var.auth.$context;

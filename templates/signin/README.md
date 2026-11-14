@@ -65,7 +65,9 @@ Auth's own limiter is turned off because it counts in memory, separately in
 each isolate.
 
 - **20 auth requests per minute per IP.** The IP comes from the
-  `CF-Connecting-IP` header, which Cloudflare sets on every request.
+  `CF-Connecting-IP` header, which Cloudflare sets on every request and a
+  client cannot override. Behind any other proxy, read the IP from a header
+  that proxy controls instead.
 - **3 attempts per email address per 15 minutes**, counted together across
   the four routes above. A legitimate person who signs up, signs in, asks for
   a reset and then signs in again uses four, so the last one waits. To count
@@ -108,6 +110,9 @@ wrangler d1 execute DB --remote --command "UPDATE user SET role = 'admin' WHERE 
   without the permission or a key whose owner is no longer an admin.
 - A key never gives the agent a session, so it reaches nothing but
   `/api/users`.
+- Each key may make 10 requests a day, Better Auth's API-key default. The
+  11th gets a 429. To change it, pass `rateLimitMax` and
+  `rateLimitTimeWindow` where `/api/agent-keys` creates the key.
 
 ## Schema changes
 

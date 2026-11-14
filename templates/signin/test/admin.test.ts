@@ -110,6 +110,27 @@ describe('registering a user', () => {
   });
 });
 
+describe("an agent key's daily allowance", () => {
+  it('registers 10 users a day, then answers 429', async () => {
+    await h.env.DB.prepare(
+      "UPDATE user SET role = 'admin' WHERE email = 'harborlight@example.com'",
+    ).run();
+    const minted = await admin.post('/api/agent-keys', { name: 'busy agent' });
+    const { key } = (await minted.json()) as { key: string };
+    const agent = h.client();
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const res = await agent.post(
+        '/api/users',
+        { email: `saltmarsh${i}@example.com`, name: 'Saltmarsh' },
+        { headers: { 'x-api-key': key } },
+      );
+      statuses.push(res.status);
+    }
+    expect(statuses).toEqual([...Array(10).fill(201), 429]);
+  });
+});
+
 describe('refusing a bad registration', () => {
   it('answers 400 for a malformed body and a taken address, creating nothing', async () => {
     await h.env.DB.prepare(
