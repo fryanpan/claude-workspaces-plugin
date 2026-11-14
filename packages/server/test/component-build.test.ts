@@ -216,7 +216,7 @@ describe('what a build refuses, each with the fix', () => {
     expect(error).toContain('is missing, or is not a file this doc may import');
   });
 
-  it('a doc a walled lead holds', async () => {
+  it('a doc a walled lead holds, where the guards cannot read through tree-fs', async () => {
     const blocks = ["import Greet from './components/greet.tsx'", '<Greet />'];
     const input = componentInputs(blocks)[0];
     if (!input) throw new Error('no tag');

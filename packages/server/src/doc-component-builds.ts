@@ -173,7 +173,8 @@ export class DocComponentBuilds {
           input,
           cdn: this.cdn,
           guards: this.guards,
-          // No git is started in a walled lead's folder; the build refuses it.
+          // No git is started in a walled lead's folder: the build uses the
+          // lead root as its boundary and reads through tree-fs.
           workTree: this.walled(md) ? null : await this.workTreeOf(md),
         });
         // Stamped before the build where the paths were known, so a save
