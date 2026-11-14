@@ -33,7 +33,7 @@ import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { PUSH_KEYS_ENV, encodePushKeys } from '../git-push/credential.ts';
 import { isRepoName } from '../git-push/policy.ts';
 import type { Verdict } from './keeper-policy.ts';
-import { type RepoExposure, repoExposure } from './keeper-push-exposure.ts';
+import { type RepoExposure, repoExposure, unreadExposure } from './keeper-push-exposure.ts';
 import { APP_NAME } from './keeper-store.ts';
 
 export interface PushKeysCall {
@@ -193,13 +193,7 @@ export async function makePushKeys(
     try {
       exposure.push(await repoExposure(deps.github, m.repo));
     } catch {
-      exposure.push({
-        repo: m.repo,
-        defaultBranch: null,
-        defaultBranchProtected: null,
-        repoSecrets: null,
-        sideBranchReadable: [],
-      });
+      exposure.push(unreadExposure(m.repo));
     }
   }
   return {
