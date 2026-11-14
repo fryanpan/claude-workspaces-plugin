@@ -61,7 +61,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/chat-audit.ts': 'not-in-inventory',
   'packages/server/src/client-release.ts': 'not-in-inventory',
   'packages/server/src/coach/setup.ts': 'not-in-inventory',
-  'packages/server/src/component-build.ts': 'refused-when-covered',
+  'packages/server/src/component-build.ts': 'tree-fs',
   'packages/server/src/component-cdn.ts': 'data-dir',
   'packages/server/src/connector/snapshot.ts': 'not-in-inventory',
   'packages/server/src/dependency-install.ts': 'owner-checkout',
