@@ -101,10 +101,14 @@ resource "cloudflare_api_token" "ci_deploy" {
     }
     # Checked here, before anything is made: the secrets need the token.
     precondition {
-      condition = jsonencode(data.github_repository_environment_deployment_policies.deploy.policies) == jsonencode([
-        { pattern = "main", type = "branch" },
-      ])
-      error_message = "The environment must allow deployments from the branch main alone (Settings > Environments > Deployment branches: one rule, main); nothing was made."
+      condition     = local.main_only
+      error_message = "The environment must allow deployments from the branch main alone (Settings > Environments > Deployment branches and tags: Selected, with the one rule main); nothing was made."
+    }
+    # Cloudflare returns a token's value only to the call that made it. An
+    # in-place update that lost it would write empty secrets.
+    postcondition {
+      condition     = self.value != null && self.value != ""
+      error_message = "The token has no value in the state; nothing more was written. Replace it on purpose: terraform apply -replace=cloudflare_api_token.ci_deploy (through cf:ci-secrets, with --drop)."
     }
   }
 }
@@ -143,6 +147,21 @@ locals {
 data "github_repository_environment_deployment_policies" "deploy" {
   repository  = var.repository
   environment = var.environment
+}
+
+data "github_rest_api" "environment" {
+  endpoint = "repos/${var.repository_owner}/${var.repository}/environments/${var.environment}"
+}
+
+locals {
+  branch_policy = try(jsondecode(data.github_rest_api.environment.body).deployment_branch_policy, null)
+  main_only = (
+    try(local.branch_policy.custom_branch_policies, false) == true &&
+    try(local.branch_policy.protected_branches, false) != true &&
+    jsonencode(data.github_repository_environment_deployment_policies.deploy.policies) == jsonencode([
+      { pattern = "main", type = "branch" },
+    ])
+  )
 }
 
 resource "github_actions_environment_secret" "deploy" {

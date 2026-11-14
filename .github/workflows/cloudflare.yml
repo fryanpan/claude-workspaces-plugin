@@ -32,7 +32,9 @@
 # environment's three and the configs; keeper-setup the repository's three.
 # Without the R2 pair, ci-credentials.ts derives the state bucket's key from
 # CLOUDFLARE_API_TOKEN (its id, and the SHA-256 of its value), masks it, and
-# hands it to terraform's environment alone. The token then needs R2 write.
+# hands it to terraform's environment alone. The token then needs R2 write
+# for an apply (read for a plan, which takes no lock); the repository's plan
+# token has no R2 permission, so a plan needs the repository's R2 pair.
 # Variable (optional): CF_TFSTATE_BUCKET, default claude-workspaces-tfstate.
 #
 # This file is outside `bun run verify:parity`, which reads ci.yml only: its

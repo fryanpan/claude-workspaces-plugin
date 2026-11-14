@@ -5,7 +5,7 @@
  * makes is `infra/cloudflare/ci-secrets/tests/apply.tftest.hcl`.
  */
 import { describe, expect, it } from 'bun:test';
-import { type CiSecretsIo, ciSecrets } from '../../../infra/cloudflare/ci-secrets.ts';
+import { type CiSecretsIo, USAGE, ciSecrets } from '../../../infra/cloudflare/ci-secrets.ts';
 import { CONFIG_PATHS } from '../../../infra/cloudflare/vars.ts';
 import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 
@@ -33,7 +33,7 @@ interface Run {
 
 function fake(
   env: Record<string, string | undefined>,
-  opts: { configs?: boolean; fail?: string } = {},
+  opts: { configs?: boolean; fail?: string; show?: string } = {},
 ): Run {
   const calls: Run['calls'] = [];
   const removed: string[] = [];
@@ -61,7 +61,7 @@ function fake(
       if (args[0] === opts.fail) return { status: 1, stdout: '' };
       return {
         status: 0,
-        stdout: args[0] === 'show' ? SHOW : `terraform ${args[0]} said ${CF_TOKEN}`,
+        stdout: args[0] === 'show' ? (opts.show ?? SHOW) : `terraform ${args[0]} said ${CF_TOKEN}`,
       };
     },
     removeFile: (p) => removed.push(p),
@@ -80,20 +80,20 @@ const BOTH = { CLOUDFLARE_API_TOKEN: CF_TOKEN, GITHUB_TOKEN: GH_TOKEN };
 describe('cf:ci-secrets', () => {
   it('runs nothing without both tokens, and names the missing one', async () => {
     const r = fake({ CLOUDFLARE_API_TOKEN: CF_TOKEN });
-    expect(await ciSecrets('apply', r.io)).toBe(1);
+    expect(await ciSecrets(['apply'], r.io)).toBe(1);
     expect(r.calls).toEqual([]);
     expect(r.printed()).toContain('GITHUB_TOKEN not set; nothing was run');
   });
 
   it('refuses an unknown mode', async () => {
     const r = fake(BOTH);
-    expect(await ciSecrets('destroy', r.io)).toBe(2);
+    expect(await ciSecrets(['destroy'], r.io)).toBe(2);
     expect(r.calls).toEqual([]);
   });
 
   it('plans without applying, and prints addresses, never a value', async () => {
     const r = fake({ ...BOTH, FLY_API_TOKEN: FLY_TOKEN }, { configs: true });
-    expect(await ciSecrets('plan', r.io)).toBe(0);
+    expect(await ciSecrets(['plan'], r.io)).toBe(0);
     expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan', 'show']);
     const out = r.printed();
     expect(out).toContain('`cloudflare_api_token.ci_deploy`');
@@ -103,7 +103,7 @@ describe('cf:ci-secrets', () => {
 
   it('applies the saved plan it just made, then removes it', async () => {
     const r = fake(BOTH);
-    expect(await ciSecrets('apply', r.io)).toBe(0);
+    expect(await ciSecrets(['apply'], r.io)).toBe(0);
     const plan = '/fixture/state/ci-secrets/ci-secrets.tfplan';
     expect(r.calls.map((c) => c.args)).toEqual([
       [
@@ -117,12 +117,13 @@ describe('cf:ci-secrets', () => {
       ['show', '-json', plan],
       ['apply', '-input=false', plan],
     ]);
-    expect(r.removed).toEqual([plan]);
+    // Once before the plan (a killed run's leftover), once after.
+    expect(r.removed).toEqual([plan, plan]);
   });
 
   it('hands every credential and config to terraform in its environment only', async () => {
     const r = fake({ ...BOTH, FLY_API_TOKEN: FLY_TOKEN }, { configs: true });
-    await ciSecrets('apply', r.io);
+    await ciSecrets(['apply'], r.io);
     const env = r.calls[0]?.env ?? {};
     expect(env.CLOUDFLARE_API_TOKEN).toBe(CF_TOKEN);
     expect(env.GITHUB_TOKEN).toBe(GH_TOKEN);
@@ -139,16 +140,52 @@ describe('cf:ci-secrets', () => {
 
   it('leaves out a missing config and the Fly token rather than writing an empty secret', async () => {
     const r = fake(BOTH);
-    await ciSecrets('plan', r.io);
+    await ciSecrets(['plan'], r.io);
     const env = r.calls[0]?.env ?? {};
     expect(Object.keys(env).filter((k) => /config|fly/.test(k))).toEqual([]);
-    expect(r.printed()).toContain('its secret is left as GitHub holds it');
+    expect(r.printed()).toContain('apply refuses that without --drop');
   });
 
   it('stops at a failed plan without applying, and still removes the plan file', async () => {
     const r = fake(BOTH, { fail: 'plan' });
-    expect(await ciSecrets('apply', r.io)).toBe(1);
+    expect(await ciSecrets(['apply'], r.io)).toBe(1);
     expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan']);
-    expect(r.removed).toHaveLength(1);
+    expect(r.removed).toHaveLength(2);
+  });
+
+  it('refuses an apply whose plan deletes a secret, and names it', async () => {
+    const show = JSON.stringify({
+      resource_changes: [
+        {
+          address: 'github_actions_environment_secret.deploy["FLY_API_TOKEN"]',
+          change: { actions: ['delete'] },
+        },
+        { address: 'cloudflare_api_token.ci_deploy', change: { actions: ['no-op'] } },
+      ],
+    });
+    const r = fake(BOTH, { show });
+    expect(await ciSecrets(['apply'], r.io)).toBe(1);
+    expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan', 'show']);
+    expect(r.printed()).toContain('github_actions_environment_secret.deploy["FLY_API_TOKEN"]');
+    expect(r.printed()).toContain('nothing was applied');
+  });
+
+  it('refuses a replaced token the same way, and applies both with --drop', async () => {
+    const show = JSON.stringify({
+      resource_changes: [
+        { address: 'cloudflare_api_token.ci_deploy', change: { actions: ['delete', 'create'] } },
+      ],
+    });
+    const refused = fake(BOTH, { show });
+    expect(await ciSecrets(['apply'], refused.io)).toBe(1);
+    const dropped = fake(BOTH, { show });
+    expect(await ciSecrets(['apply', '--drop'], dropped.io)).toBe(0);
+    expect(dropped.calls.map((c) => c.args[0])).toContain('apply');
+  });
+
+  it('rejects an unknown flag', async () => {
+    const r = fake(BOTH);
+    expect(await ciSecrets(['apply', '--force'], r.io)).toBe(2);
+    expect(r.printed()).toBe(USAGE);
   });
 });

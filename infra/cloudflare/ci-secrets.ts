@@ -15,12 +15,19 @@
  * Each value reaches terraform in its environment and nowhere else: never an
  * argument, a file this writes, or a printed line. What prints is the plan's
  * resource addresses and verbs (`plan-summary.ts`). The state is local, in
- * `state/ci-secrets/` (or `$CW_TF_WORK_DIR/ci-secrets` when the keeper runs
- * it), mode 700, because it holds the token's value and the shared R2 bucket
- * is readable by every pull request's plan. The saved plan holds the values
- * too, so it is removed when the run ends.
+ * `~/.local/state/claude-workspaces/ci-secrets/` (or `$CW_TF_WORK_DIR/ci-secrets`
+ * when the keeper runs it), outside every checkout, mode 700, because it holds
+ * the token's value and the shared R2 bucket is readable by every pull
+ * request's plan. The saved plan holds the values too, so it is removed when
+ * the run ends and again when the next one starts.
+ *
+ * An apply whose plan deletes anything is refused unless `--drop` is given:
+ * an input left out (no FLY_API_TOKEN, a config missing from this checkout)
+ * would otherwise delete the secret an earlier apply wrote, and the
+ * workflows would then skip their deploys without failing.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CI_ENVIRONMENT, CI_REPO } from '../../packages/server/src/keeper/keeper-github.ts';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
@@ -57,12 +64,27 @@ export interface CiSecretsIo {
 const value = (env: Record<string, string | undefined>, name: string): string =>
   env[name]?.trim() ?? '';
 
-/** Exit code: 0 done, 1 failed, 2 bad usage. */
-export async function ciSecrets(mode: string | undefined, io: CiSecretsIo): Promise<number> {
-  if (mode !== 'plan' && mode !== 'apply') {
-    io.err('usage: bun run cf:ci-secrets plan|apply\n');
+/** Addresses a `terraform show -json` plan deletes, replacements included. */
+export function deletions(showJson: string): string[] {
+  const plan = JSON.parse(showJson) as {
+    resource_changes?: { address?: string; change?: { actions?: string[] } }[];
+  };
+  return (plan.resource_changes ?? [])
+    .filter((rc) => (rc.change?.actions ?? []).includes('delete'))
+    .map((rc) => rc.address ?? '(no address)')
+    .sort();
+}
+
+export const USAGE = 'usage: bun run cf:ci-secrets plan|apply [--drop]\n';
+
+/** Exit code: 0 done, 1 failed or refused, 2 bad usage. */
+export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number> {
+  const [mode, ...flags] = argv;
+  if ((mode !== 'plan' && mode !== 'apply') || flags.some((f) => f !== '--drop')) {
+    io.err(USAGE);
     return 2;
   }
+  const drop = flags.includes('--drop');
   const say = (s: string) => io.err(`[cf:ci-secrets] ${s}\n`);
   const missing = ['CLOUDFLARE_API_TOKEN', 'GITHUB_TOKEN'].filter((n) => value(io.env, n) === '');
   if (missing.length) {
@@ -98,7 +120,11 @@ export async function ciSecrets(mode: string | undefined, io: CiSecretsIo): Prom
     if (text === null) absent.push(rel);
     else tfEnv[CONFIG_VAR[key as keyof ConfigPaths]] = text;
   }
-  if (absent.length) say(`no ${absent.join(', ')}: its secret is left as GitHub holds it`);
+  if (absent.length) {
+    say(
+      `no ${absent.join(', ')}: this run does not write its secret, and deletes one an earlier apply wrote (apply refuses that without --drop)`,
+    );
+  }
 
   const init = io.terraform(
     [
@@ -115,6 +141,8 @@ export async function ciSecrets(mode: string | undefined, io: CiSecretsIo): Prom
     return 1;
   }
   const plan = join(io.stateDir, 'ci-secrets.tfplan');
+  // A run that was killed left its plan, which holds the values.
+  io.removeFile(plan);
   try {
     const planned = io.terraform(['plan', '-input=false', `-out=${plan}`], tfEnv);
     if (planned.status !== 0) {
@@ -128,6 +156,13 @@ export async function ciSecrets(mode: string | undefined, io: CiSecretsIo): Prom
     }
     io.out(planSummary(shown.stdout, 'ci-secrets'));
     if (mode === 'plan') return 0;
+    const gone = deletions(shown.stdout);
+    if (gone.length && !drop) {
+      say(
+        `the plan deletes ${gone.join(', ')}: a missing input (FLY_API_TOKEN, a config) or a token Terraform would replace. Supply it, or pass --drop to delete on purpose; nothing was applied`,
+      );
+      return 1;
+    }
     const applied = io.terraform(['apply', '-input=false', plan], tfEnv);
     if (applied.status !== 0) {
       say(`terraform apply exited ${applied.status}`);
@@ -141,12 +176,16 @@ export async function ciSecrets(mode: string | undefined, io: CiSecretsIo): Prom
 }
 
 if (import.meta.main) {
+  // Outside every checkout: a worktree is deleted when its branch is done, and
+  // a lost state makes the next apply mint a second token.
   const work = process.env.CW_TF_WORK_DIR?.trim();
-  const stateDir = work ? join(work, 'ci-secrets') : join(TF_DIR, 'state', 'ci-secrets');
+  const stateDir = work
+    ? join(work, 'ci-secrets')
+    : join(homedir(), '.local', 'state', 'claude-workspaces', 'ci-secrets');
   const dataDir = `${stateDir}-data`;
   for (const d of [stateDir, dataDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
   const repo = resolve(TF_DIR, '..', '..');
-  ciSecrets(process.argv[2], {
+  ciSecrets(process.argv.slice(2), {
     env: process.env,
     read: (rel) => {
       const p = join(repo, rel);

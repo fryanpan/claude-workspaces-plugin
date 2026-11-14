@@ -47,7 +47,8 @@ variable "environment" {
 }
 
 # The three gitignored configs' contents. Each is written to a repository
-# secret when set; null leaves that secret as it is.
+# secret when set. Null takes the secret out of this configuration, so an
+# earlier apply's copy is deleted; `cf:ci-secrets` refuses that without --drop.
 variable "router_config" {
   description = "infra/board-router-worker/router.local.json, for CF_ROUTER_CONFIG."
   type        = string
@@ -70,7 +71,7 @@ variable "share_link_config" {
 }
 
 variable "fly_api_token" {
-  description = "A Fly deploy token for fly.yml, written to FLY_API_TOKEN in the environment when set. Fly has no maintained provider, so Terraform cannot make it."
+  description = "A Fly deploy token for fly.yml, written to FLY_API_TOKEN in the environment when set; null deletes an earlier apply's copy. Fly has no maintained provider, so Terraform cannot make it."
   type        = string
   default     = null
   sensitive   = true

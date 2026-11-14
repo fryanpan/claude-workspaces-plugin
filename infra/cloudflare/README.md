@@ -237,11 +237,22 @@ only; the run prints resource addresses and verbs, never a value. Every
 output that carries a value is `sensitive`.
 
 **The state is local, and holds the token's value.** It sits in
-`state/ci-secrets/` (mode 700, files 600), or under `$CW_TF_WORK_DIR` when the
-keeper runs it, never in the R2 bucket: the repository's read-only state key,
+`~/.local/state/claude-workspaces/ci-secrets/` (mode 700, files 600), outside
+every checkout so deleting a worktree cannot lose it, or under
+`$CW_TF_WORK_DIR` when the keeper runs it, never in the R2 bucket: the repository's read-only state key,
 which every same-repo pull request's plan holds, reads the whole bucket. Whoever
 can read that folder can read the token; that is the cost of Terraform owning
-it. The saved plan holds the values too and is removed when the run ends.
+it. A lost state makes the next apply mint a second token and leave the first
+active, so delete the old one in the dashboard if that happens. The saved
+plan holds the values too and is removed when the run ends.
+
+**An apply that deletes anything is refused** unless `--drop` is given. A
+missing input deletes what an earlier apply wrote: run without
+`FLY_API_TOKEN`, or from a checkout without the configs, and the plan drops
+that secret, after which the workflows skip their deploys rather than fail.
+The token also refuses to be made unless `cloudflare-prod` allows
+deployments from `main` alone (the check the keeper makes), and an apply that
+finds the token with no value in its state stops before writing anything.
 
 ## State
 

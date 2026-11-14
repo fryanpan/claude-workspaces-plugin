@@ -214,5 +214,11 @@ describe('fly.yml', () => {
     );
     expect(holders.map((st) => st.name)).toEqual(['Deploy each project machine']);
     expect(steps.find((st) => st.run?.includes('bun install'))?.env).toBeUndefined();
+    // A secret spelled inside a script would reach the log's command echo.
+    for (const w of [fly, wf]) {
+      for (const job of Object.values(w.jobs)) {
+        for (const st of job.steps ?? []) expect(st.run ?? '').not.toContain('secrets.');
+      }
+    }
   });
 });

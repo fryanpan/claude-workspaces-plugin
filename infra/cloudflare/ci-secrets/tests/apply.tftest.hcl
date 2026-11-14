@@ -14,6 +14,13 @@ override_data {
   }
 }
 
+override_data {
+  target = data.github_rest_api.environment
+  values = {
+    body = "{\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}}"
+  }
+}
+
 override_resource {
   target = cloudflare_api_token.ci_deploy
   values = {
@@ -150,6 +157,48 @@ run "an_environment_other_branches_can_deploy_to_gets_no_secret" {
     target = data.github_repository_environment_deployment_policies.deploy
     values = {
       policies = tolist([{ pattern = "*", type = "branch" }])
+    }
+  }
+
+  expect_failures = [cloudflare_api_token.ci_deploy]
+}
+
+run "main_beside_a_tag_rule_is_not_main_alone" {
+  command = plan
+
+  override_data {
+    target = data.github_repository_environment_deployment_policies.deploy
+    values = {
+      policies = tolist([{ pattern = "main", type = "branch" }, { pattern = "v*", type = "tag" }])
+    }
+  }
+
+  expect_failures = [cloudflare_api_token.ci_deploy]
+}
+
+run "protected_branches_mode_is_not_main_alone" {
+  command = plan
+
+  override_data {
+    target = data.github_rest_api.environment
+    values = {
+      body = "{\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":true}}"
+    }
+  }
+
+  expect_failures = [cloudflare_api_token.ci_deploy]
+}
+
+run "a_token_with_no_value_writes_nothing" {
+  command = apply
+  # Its own state: the runs above already hold a token with a value.
+  state_key = "no-value"
+
+  override_resource {
+    target = cloudflare_api_token.ci_deploy
+    values = {
+      id    = "0123456789abcdef0123456789abcdef"
+      value = ""
     }
   }
 
