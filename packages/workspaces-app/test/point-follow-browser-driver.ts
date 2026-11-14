@@ -29,6 +29,7 @@ import {
   docView,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   until,
 } from './follow-browser-kit.ts';
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
       const firstPerson = await openPerson(width, height, {
         anonId: `first-person${width}`,
         name: 'Alice',
+        signIn: true,
         ws,
         follow: 'a-agent-house-lead',
       });
@@ -178,6 +180,7 @@ async function main(): Promise<void> {
       const secondPerson = await openPerson(width, height, {
         anonId: `second-person${width}`,
         name: 'Bob',
+        signIn: true,
         ws,
       });
       await navigate(secondPerson, `${base}${B}`);
@@ -186,7 +189,7 @@ async function main(): Promise<void> {
       );
       // Alice follows Bob from the board.
       await firstPerson.evaluate(
-        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-anon-second-person${width}' }))`,
+        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-${personIdOf(`second-person${width}`)}' }))`,
       );
       await navigate(firstPerson, `${base}${B}`);
       await until('the board', async () => ((await firstPerson.evaluate(BOARD_UP)) ? true : null));
