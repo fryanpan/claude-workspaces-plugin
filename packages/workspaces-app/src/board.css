@@ -4926,9 +4926,17 @@ html:has(.board-walk-cred-form) {
 .library-cols,
 .library-tbl .library-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px;
   column-gap: 16px;
   align-items: center;
+}
+.library-cols {
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+/* A row's time column is as wide as its own time, not the header's 104px:
+   right-aligned in 104px, "5h ago" left 60px of the name's room empty at 430.
+   Every time still ends on the same right edge, under its header. */
+.library-tbl .library-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 .library-cols {
   padding: 0 0 4px;
@@ -5146,9 +5154,19 @@ html:has(.board-walk-cred-form) {
   --lf-more-w: 44px;
   --lf-hit: 44px;
 }
-.lf-tbl .library-cols,
-.lf-tbl .library-row {
+.lf-tbl .library-cols {
   grid-template-columns: minmax(0, 1fr) 104px var(--lf-more-w);
+}
+.lf-tbl .library-row {
+  grid-template-columns: minmax(0, 1fr) auto var(--lf-more-w);
+}
+/* A folder has no time, so its name runs up to the ⋯ (Bryan, 14 Nov: "Names
+   cut off too early. Give them a lot more room."). */
+.lf-tbl .lf-folder {
+  grid-template-columns: minmax(0, 1fr) var(--lf-more-w);
+}
+.lf-folder > .library-when {
+  display: none;
 }
 /* Star / Unstar in a row's ⋯ menu (`board/library-starred.ts`), so the name
    keeps the width a per-row star would take (Bryan, 13 Nov). */
@@ -5307,8 +5325,10 @@ html:has(.board-walk-cred-form) {
   font-variant-numeric: tabular-nums;
 }
 .lf-landhint {
-  /* Gives its room up long before the folder's name does. */
-  flex: 0 1000 auto;
+  /* Takes only the room the name leaves: with a zero basis the name never
+     shrinks for it. Under the old 1000x shrink factor Bryan's phone still
+     showed "Meetin…" beside "new meetings la…". */
+  flex: 1 1 0;
   min-width: 0;
   font-size: 12px;
   color: var(--fg-muted);
