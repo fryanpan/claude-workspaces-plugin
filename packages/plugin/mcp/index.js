@@ -14274,6 +14274,34 @@ function createCallToolHandler(deps) {
   };
 }
 
+// packages/mcp/src/addressed-elsewhere.ts
+var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+function commentOf(event, payload) {
+  if (!payload || typeof payload !== "object")
+    return;
+  const p = payload;
+  if (p.comment && typeof p.comment === "object")
+    return p.comment;
+  if (event !== "thread.created")
+    return;
+  const comments = p.thread?.comments;
+  if (!Array.isArray(comments) || comments.length === 0)
+    return;
+  const lastComment = comments[comments.length - 1];
+  return lastComment && typeof lastComment === "object" ? lastComment : undefined;
+}
+function isAddressedElsewhere(event, payload, selfId) {
+  if (!COMMENT_EVENTS.has(event))
+    return false;
+  const self = selfId.trim().toLowerCase();
+  if (self === "" || self.startsWith("known-"))
+    return false;
+  const to = commentOf(event, payload)?.addressedTo;
+  if (!Array.isArray(to) || to.length === 0)
+    return false;
+  return !to.some((a) => a !== null && typeof a === "object" && typeof a.id === "string" && a.id.trim().toLowerCase() === self);
+}
+
 // packages/mcp/src/app-unreachable-line.ts
 function appUnreachableLine(p) {
   const app = p.title ? `"${p.title}" (${p.docId ?? "?"})` : p.docId ?? "an attached app";
@@ -15170,7 +15198,7 @@ function spawnRequestedLine(p) {
 }
 
 // packages/mcp/src/self-authored.ts
-var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
+var COMMENT_EVENTS2 = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
 var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
 var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard|person)\./;
@@ -15202,7 +15230,7 @@ function frameActorId(event, payload) {
     return stringOf(p.agentId);
   if (ACTOR_FAMILY_RE.test(event))
     return idOf(p.actor);
-  if (!COMMENT_EVENTS.has(event))
+  if (!COMMENT_EVENTS2.has(event))
     return;
   const direct = idOf(p.comment?.author);
   if (direct)
@@ -15353,6 +15381,8 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
     return;
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
     return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
+    return;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   let body;
   switch (event) {
@@ -15500,6 +15530,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId))
     return;
   if (event === "review_item.answered")
     return;
@@ -16675,6 +16707,12 @@ var CONFIRM_SCOPED_OVERWRITE = {
   type: "boolean",
   description: "Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance."
 };
+var ADDRESSEES_SCHEMA = {
+  type: "array",
+  items: { type: "string" },
+  maxItems: 10,
+  description: "Who this comment is for: person ids, emails or display names, or agent ids or names, on this board. Only they are notified, and the thread waits on them. Everyone who can read the doc still sees it. Omit to notify the board as usual."
+};
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -16771,7 +16809,8 @@ var TOOL_LIST = {
           docId: { type: "string" },
           threadId: { type: "string" },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "threadId", "text"]
       }
@@ -17056,7 +17095,8 @@ var TOOL_LIST = {
             required: ["replacement"]
           },
           text: { type: "string" },
-          review: REVIEW_ITEM_SCHEMA
+          review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA
         },
         required: ["workspaceId", "docId", "text"]
       }
@@ -19682,7 +19722,8 @@ function threadCreateRequest(input, author, board) {
         author,
         text: input.text,
         anchor: { kind: "subject" },
-        ...input.review !== undefined ? { review: input.review } : {}
+        ...input.review !== undefined ? { review: input.review } : {},
+        ...input.to !== undefined ? { to: input.to } : {}
       }
     };
   }
@@ -19697,7 +19738,8 @@ function threadCreateRequest(input, author, board) {
       ...input.occurrence !== undefined ? { occurrence: input.occurrence } : {},
       ...input.path !== undefined ? { path: input.path } : {},
       ...input.suggest !== undefined ? { suggest: input.suggest } : {},
-      ...input.review !== undefined ? { review: input.review } : {}
+      ...input.review !== undefined ? { review: input.review } : {},
+      ...input.to !== undefined ? { to: input.to } : {}
     }
   };
 }
@@ -19772,8 +19814,13 @@ async function handleDocsTool(name, a, ctx) {
       return ok2(res);
     }
     case "post_reply": {
-      const { docId, threadId, text, review } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, { author: AUTHOR, text, ...review !== undefined ? { review } : {} });
+      const { docId, threadId, text, review, to } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, {
+        author: AUTHOR,
+        text,
+        ...review !== undefined ? { review } : {},
+        ...to !== undefined ? { to } : {}
+      });
       return ok2(res);
     }
     case "link_review_item": {

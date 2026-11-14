@@ -1,3 +1,4 @@
+import { isAddressedElsewhere } from './addressed-elsewhere.ts';
 /**
  * The two renderers that turn a feedback-server event into the one line an
  * agent reads in its context, plus the receipt that follows a voice frame.
@@ -332,6 +333,8 @@ async function emitBoardChannelMessage(
   // report is the one event of the pair a person acts on.
   if (event === 'dispatch.requested') return;
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
+  // A comment addressed to somebody else wakes nobody here: addressed-elsewhere.ts.
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId)) return;
 
   const by = p.actor?.name ? ` by ${p.actor.name}` : '';
   let body: string;
@@ -574,6 +577,8 @@ async function emitChannelMessage(
   // where it cannot affect a browser, which must still watch its own comment
   // appear. Fails OPEN on any ambiguity; see self-authored.ts.
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
+  // A comment addressed to somebody else wakes nobody here: addressed-elsewhere.ts.
+  if (isAddressedElsewhere(event, rawPayload, deps.authorId)) return;
   // An answer's measurement row. The server keeps it off the stream
   // (`ANALYTICS_ONLY_EVENTS`); this is the belt to that suspender, so an
   // older server's frame still costs no turn. The filer hears of the answer

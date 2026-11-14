@@ -801,6 +801,33 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
       // the activity feed's name on the board's own REST surface. The colon
       // is the design guide's custom-verb spelling, and it is what keeps this
       // apart from the five board panes at `/workspaces/<id>/<tab>`.
+      // --- SSE (person-level): the comments addressed to the person this
+      // request PROVED (`stall-wiring.ts tellAddressedPeople`). The channel
+      // is the proven identity, never a path segment, so there is nothing to
+      // name somebody else's with. An agent proof is refused: an agent hears
+      // its addressed comments on the board channel. Under the board's
+      // address only so a share visitor's admission can judge it; the channel
+      // itself spans every board the person is addressed on, each of which
+      // they are a member of (`addressees.ts`).
+      const meEventsMatch = matchWorkspaceRoute(pathname, 'me/events:stream');
+      if (meEventsMatch) {
+        if (taskStore.getWorkspace(meEventsMatch.workspaceId) === undefined) {
+          return j(404, { error: 'workspace not found' });
+        }
+        const me = socketAuthor();
+        if (!me || roster.isAgent(me.id)) {
+          return j(401, { error: 'person_proof_required' });
+        }
+        return openSseStream(
+          sse,
+          `person~${me.id}`,
+          visitorShareId ?? undefined,
+          undefined,
+          undefined,
+          sseLastEventId(req, url),
+          visitorMemberKey ?? undefined,
+        );
+      }
       const wsEventsMatch = matchWorkspaceRoute(pathname, 'events:stream');
       if (wsEventsMatch) {
         const workspaceId = wsEventsMatch.workspaceId;

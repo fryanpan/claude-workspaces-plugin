@@ -1,4 +1,5 @@
 import {
+  type Addressee,
   type Anchor,
   type AnchorRefresh,
   type DeliveryStamp,
@@ -121,6 +122,53 @@ export interface DocThreadPersistence {
   ): void;
 }
 
+/**
+ * What a comment write carries beyond its words. `postComment` is the one
+ * choke point every reply path funnels through, so this is the one shape.
+ *
+ * `generate`: may this write spend the summary API key? Routes pass `false`
+ * for share visitors; defaults to true.
+ */
+export interface PostCommentOpts {
+  generate?: boolean;
+  /**
+   * The Review Item this comment DECLARES, if it declares one.
+   *
+   * Rides on the ordinary comment path rather than a store of its own,
+   * which is what makes every existing mechanism apply to it for free:
+   * threads already sync, anchor, resolve, watch and emit the events
+   * agents listen to, and a person's reply already ends the unanswered
+   * run — which is exactly how a review item leaves the queue.
+   *
+   * `postComment` is the one choke point all three reply paths funnel
+   * through (browser REST, MCP `post_reply`, widget), so this is the
+   * layer where the payload has to be accepted, not the routes above it.
+   */
+  review?: ReviewPayload;
+  /** A spoken comment's clip and raw words — see `VoiceNote`. */
+  voice?: VoiceNote;
+  /** Text a reviewer changed on the page — see `PageEdit`. New threads
+   *  only: a send is its own thread. */
+  pageEdits?: PageEdit[];
+  /** New words an agent proposes for the page — see `PageSuggestion`.
+   *  New threads only, like `pageEdits`. */
+  pageSuggestion?: PageSuggestion;
+  /** A review item, maybe on another board, this reply points at — see
+   *  `LinkedReviewItem`. Replies only. */
+  linkedItem?: LinkedReviewItem;
+  /** This reply was a partial answer: the item's questions it left open,
+   *  carried on the frame so a watching filer is told. */
+  openParts?: string[];
+  /** Sent from inside a mock page — see `WriteVia`. */
+  via?: WriteVia;
+  /** Who the comment is for, resolved by the route against the roster
+   *  (`addressees.ts`). Never taken from a body. */
+  addressedTo?: Addressee[];
+}
+
+/** The writes `createThreadByFind` forwards to `postComment`. */
+export type FindWriteOpts = Pick<PostCommentOpts, 'generate' | 'review' | 'addressedTo'>;
+
 /** The thread verbs. One per `DocStore`, holding no state of its own. */
 export class DocThreads {
   constructor(private readonly p: DocThreadPersistence) {}
@@ -137,39 +185,7 @@ export class DocThreads {
      * summary is not worth granting an outsider an outbound call. Defaults to
      * true so local editors and agents keep working unchanged.
      */
-    opts?: {
-      generate?: boolean;
-      /**
-       * The Review Item this comment DECLARES, if it declares one.
-       *
-       * Rides on the ordinary comment path rather than a store of its own,
-       * which is what makes every existing mechanism apply to it for free:
-       * threads already sync, anchor, resolve, watch and emit the events
-       * agents listen to, and a person's reply already ends the unanswered
-       * run — which is exactly how a review item leaves the queue.
-       *
-       * `postComment` is the one choke point all three reply paths funnel
-       * through (browser REST, MCP `post_reply`, widget), so this is the
-       * layer where the payload has to be accepted, not the routes above it.
-       */
-      review?: ReviewPayload;
-      /** A spoken comment's clip and raw words — see `VoiceNote`. */
-      voice?: VoiceNote;
-      /** Text a reviewer changed on the page — see `PageEdit`. New threads
-       *  only: a send is its own thread. */
-      pageEdits?: PageEdit[];
-      /** New words an agent proposes for the page — see `PageSuggestion`.
-       *  New threads only, like `pageEdits`. */
-      pageSuggestion?: PageSuggestion;
-      /** A review item, maybe on another board, this reply points at — see
-       *  `LinkedReviewItem`. Replies only. */
-      linkedItem?: LinkedReviewItem;
-      /** This reply was a partial answer: the item's questions it left open,
-       *  carried on the frame so a watching filer is told. */
-      openParts?: string[];
-      /** Sent from inside a mock page — see `WriteVia`. */
-      via?: WriteVia;
-    },
+    opts?: PostCommentOpts,
   ): Promise<Thread | null> {
     const doc = this.p.doc(docId);
     if (!doc) return null;
@@ -188,6 +204,7 @@ export class DocThreads {
           ...(opts?.pageEdits ? { pageEdits: opts.pageEdits } : {}),
           ...(opts?.pageSuggestion ? { pageSuggestion: opts.pageSuggestion } : {}),
           ...(opts?.via ? { via: opts.via } : {}),
+          ...(opts?.addressedTo ? { addressedTo: opts.addressedTo } : {}),
         },
       });
       this.p.fireThreadEvent(doc, 'thread.created', t, undefined, opts);
@@ -207,6 +224,7 @@ export class DocThreads {
       text,
       ...(opts?.review ? { review: opts.review } : {}),
       ...(opts?.via ? { via: opts.via } : {}),
+      ...(opts?.addressedTo ? { addressedTo: opts.addressedTo } : {}),
     };
     const comment = opts?.linkedItem
       ? postLinkedReply(doc.ydoc, threadId, { ...reply, linkedItem: opts.linkedItem })
@@ -756,7 +774,7 @@ export class DocThreads {
      * — the worst of the gate's holes, because it needs no pre-existing
      * thread. Defaults to generating, like every other local caller.
      */
-    writeOpts?: { generate?: boolean; review?: ReviewPayload },
+    writeOpts?: FindWriteOpts,
   ): Promise<
     | { ok: true; thread: Thread }
     | {

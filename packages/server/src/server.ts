@@ -19,6 +19,7 @@ import {
   ownerDisplayNames,
   ownerIdentityIds,
 } from './actor-identity.ts';
+import { type AddresseeRoster, resolveAddressees } from './addressees.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -2244,6 +2245,29 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isAgent: (id) => identities.get(id)?.kind === 'agent',
     reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
   };
+  /** A person's role on a board: owner, a member's role, or null. */
+  const personRoleOn = (workspaceId: string, person: { id: string; email?: string }) => {
+    if (ownerIdentityIds().includes(person.id)) return 'owner' as const;
+    if (!person.email) return null;
+    if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner' as const;
+    return shareLinks.roleOf(workspaceId, person.email);
+  };
+  // Who a comment's `to` may name (`addressees.ts`): the owner, a member of a
+  // board the doc is on, or an agent attached to one.
+  const addresseeRoster: AddresseeRoster = {
+    identities,
+    owner: presenceRoster.owner,
+    isMember: (board, person) => personRoleOn(board, person) !== null,
+    attachedAgents: (board) => taskStore.listAttachments(board).map((a) => a.agentId),
+  };
+  const addresseesFor = (docId: string, to: unknown) => {
+    const row = taskIdOfBodyDoc(docId);
+    const rowBoard = row
+      ? (taskStore.getTask(row)?.workspaceId ?? taskStore.getGoalRow(row)?.workspaceId)
+      : undefined;
+    const boards = row ? (rowBoard ? [rowBoard] : []) : [...boardsForDoc(docId)];
+    return resolveAddressees(to, boards, addresseeRoster);
+  };
   const unprovenBrowserAuthor = (req: Request, claimed: unknown): User => {
     const u = resolveStamp(
       presenceUserFor({
@@ -2574,12 +2598,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    personRoleOn: (workspaceId, person) => {
-      if (ownerIdentityIds().includes(person.id)) return 'owner';
-      if (!person.email) return null;
-      if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
-      return shareLinks.roleOf(workspaceId, person.email);
-    },
+    personRoleOn,
     agentTokenKey: agentTokenKeyFor,
     ownerNoticeBoards: () => {
       const first = defaultBoardWorkspaceId();
@@ -2941,6 +2960,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     canonicalDocId,
     backTargetFor,
     resolveWorkspaceForDoc,
+    addresseesFor,
     pageOpened,
     withReviewUrl,
     boardIndexForListing,

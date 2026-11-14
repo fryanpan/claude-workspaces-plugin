@@ -231,3 +231,33 @@ describe('confirm_person', () => {
     expect(last().body).toEqual({ personId: null });
   });
 });
+
+describe('addressing a comment with `to`', () => {
+  const threadPosts = () =>
+    seen.filter(
+      (r) => r.method === 'POST' && /\/docs\/d-quay\/threads(\/[^/]+\/comments)?$/.test(r.path),
+    );
+
+  it('post_reply sends `to` as given, for the server to resolve', async () => {
+    await call('post_reply', {
+      workspaceId: 'w-live',
+      docId: 'd-quay',
+      threadId: 'th1',
+      text: 'Alice?',
+      to: ['Alice'],
+    });
+    expect(threadPosts().at(-1)?.body).toMatchObject({ text: 'Alice?', to: ['Alice'] });
+  });
+
+  it('create_thread sends `to`, and leaves it out when not given', async () => {
+    await call('create_thread', {
+      workspaceId: 'w-live',
+      docId: 'd-quay',
+      text: 'Bob?',
+      to: ['bob@example.com'],
+    });
+    expect(threadPosts().at(-1)?.body).toMatchObject({ text: 'Bob?', to: ['bob@example.com'] });
+    await call('create_thread', { workspaceId: 'w-live', docId: 'd-quay', text: 'Anyone?' });
+    expect('to' in (threadPosts().at(-1)?.body ?? {})).toBe(false);
+  });
+});
