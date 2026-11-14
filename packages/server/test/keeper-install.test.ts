@@ -13,7 +13,15 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,7 +37,8 @@ const SHA = head.stdout.trim();
 /** A keeper root laid out as step 1 makes it, with bun and the clone linked in. */
 function keeperRoot(name: string): string {
   const k = join(tmp, name);
-  for (const d of ['bin', 'releases', 'run', 'state']) mkdirSync(join(k, d), { recursive: true, mode: 0o700 });
+  for (const d of ['bin', 'releases', 'run', 'state'])
+    mkdirSync(join(k, d), { recursive: true, mode: 0o700 });
   symlinkSync(process.execPath, join(k, 'bin', 'bun'));
   symlinkSync(REPO, join(k, 'src'));
   return k;
@@ -77,5 +86,25 @@ describe.skipIf(!existsSync(ZSH) || !SHA)('keeper-install.sh release', () => {
     // where others can write; reaching it still proves every import resolved.
     const last = r.out.trim().split('\n').at(-1) ?? '';
     if (!r.out.includes('unsafe:')) expect(last).toMatch(/^store: ok/);
+  }, 180_000);
+
+  // The Mac already holds a release of 444a6c8c4 marked complete with no
+  // node_modules. A rerun must rebuild that one, and skip a ready one.
+  it('rebuilds a release made before dependencies were installed, and a rerun skips the ready one', () => {
+    const k = keeperRoot('rerun');
+    const old = join(k, 'releases', SHA);
+    mkdirSync(old);
+    writeFileSync(join(old, '.keeper-release-complete'), '');
+    const step4 =
+      'if release_ready "$SHA"; then print -r -- "already ready"; else build_release "$SHA" || exit 9; fi';
+    const first = zsh(k, step4);
+    expect(first.status).toBe(0);
+    expect(first.out).toContain('moved an unfinished release aside');
+    expect(existsSync(join(old, 'packages/server/node_modules/@noble/hashes'))).toBe(true);
+    const asides = readdirSync(join(k, 'releases')).filter((n) => n.startsWith('.unfinished-'));
+    expect(asides).toHaveLength(1);
+    const second = zsh(k, step4);
+    expect(second.status).toBe(0);
+    expect(second.out.trim()).toBe('already ready');
   }, 180_000);
 });

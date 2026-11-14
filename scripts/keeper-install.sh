@@ -40,10 +40,20 @@ keeper() {
 }
 loaded() { $SUDO launchctl print "system/$1" >/dev/null 2>&1; }
 
-READY=.keeper-release-complete
+# A release is ready once its files AND its dependencies are in place. The
+# marker was .keeper-release-complete until releases carried node_modules, so
+# a release built before that is not ready and is rebuilt.
+READY=.keeper-release-ready
+release_ready() { as_relay test -f "$K/releases/$1/$READY"; }
 # Build $K/releases/<sha> from the keeper's clone. It is made under a
 # .partial name and renamed only once it is whole, so a crash leaves nothing
 # that looks finished; an unfinished folder is moved aside, never deleted.
+#
+# git archive carries no node_modules, and without them bun auto-installs
+# each import from its global cache, where @noble/hashes cannot resolve its
+# own @noble/hashes/crypto. So install them, exactly as bun.lock pins them
+# (each package's hash is checked), for the server package only, and run no
+# package's install scripts.
 build_release() {
   local sha=$1 rel="$K/releases/$1" part="$K/releases/.partial-$1" aside
   if as_relay test -e "$rel"; then
@@ -54,12 +64,15 @@ build_release() {
   if as_relay test -e "$part"; then as_relay mv "$part" "$part.old-$(date +%Y%m%d%H%M%S)" || return 1; fi
   as_relay mkdir "$part" || return 1
   as_relay sh -c 'git -C "$1" archive "$2" | tar -x -C "$3"' _ "$K/src" "$sha" "$part" || return 1
+  as_relay sh -c 'cd "$1" && "$2" install --frozen-lockfile --production --ignore-scripts --filter @claude-workspaces/server' \
+    _ "$part" "$K/bin/bun" 2>&1 | sed 's/^/   /' || return 1
   as_relay touch "$part/$READY" || return 1
   as_relay mv "$part" "$rel" || return 1
 }
 
 # packages/server/test/keeper-install.test.ts sources the functions above
-# and runs build_release and keeper on a throwaway tree. No step runs.
+# and runs release_ready, build_release and keeper on a throwaway tree.
+# No step runs.
 [ "${KEEPER_INSTALL_SOURCE_ONLY:-0}" = 1 ] && return 0
 
 step "0. Preflight"
@@ -119,7 +132,7 @@ LIVE=$(as_relay git ls-remote "$URL" refs/heads/main | cut -f1)
 REL="$K/releases/$SHA"
 CURRENT=$(as_relay readlink "$K/app" 2>/dev/null || true)
 CHANGED=0
-if [ "$CURRENT" = "$REL" ] && as_relay test -f "$REL/$READY"; then
+if [ "$CURRENT" = "$REL" ] && release_ready "$SHA"; then
   ok "already on $SHA"
 else
   print -r -- "   GitHub's main is $SHA. Check it is the merge commit you meant to ship"
@@ -129,7 +142,7 @@ else
     read -r answer
     [ "$answer" = y ] || [ "$answer" = Y ] || stop "you did not confirm $SHA"
   fi
-  if ! as_relay test -f "$REL/$READY"; then
+  if ! release_ready "$SHA"; then
     build_release "$SHA" || stop "building the release $REL failed"
   fi
   as_relay ln -sfn "$REL" "$K/app"
