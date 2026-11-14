@@ -5,13 +5,40 @@
  * audit: no-text — the reader is injected; nothing here reads a source file.
  */
 import { describe, expect, it } from 'vitest';
-import { callsBrowserGate, specKey } from './vitest-sequencer.ts';
+import { callsBrowserGate, kindFromEnv, kindOf, specKey } from './vitest-sequencer.ts';
 
 describe('specKey', () => {
   it('is the project and the repo-relative path', () => {
     expect(specKey('dom', '/repo', '/repo/packages/widget/test/a.test.ts')).toBe(
       'dom:packages/widget/test/a.test.ts',
     );
+  });
+});
+
+describe('kindOf', () => {
+  it('puts a file that calls the gate in the browser shards', () => {
+    expect(kindOf('packages/x/test/a-browser.test.ts', true)).toBe('browser');
+  });
+
+  it('puts a file listed as launching Chrome ungated in the browser shards', () => {
+    expect(kindOf('scripts/chrome-orphans.test.ts', false)).toBe('browser');
+  });
+
+  it('puts every other file in the unit shards — the control', () => {
+    expect(kindOf('packages/x/test/a.test.ts', false)).toBe('unit');
+  });
+});
+
+describe('kindFromEnv', () => {
+  it('is null when unset, so a local run keeps every file', () => {
+    expect(kindFromEnv(undefined)).toBeNull();
+    expect(kindFromEnv('')).toBeNull();
+  });
+
+  it('accepts the two kinds and refuses a typo rather than running nothing', () => {
+    expect(kindFromEnv('browser')).toBe('browser');
+    expect(kindFromEnv('unit')).toBe('unit');
+    expect(() => kindFromEnv('browsers')).toThrow();
   });
 });
 

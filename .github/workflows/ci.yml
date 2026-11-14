@@ -223,7 +223,7 @@ jobs:
           CW_BROWSER_TESTS: '1'
         run: bun run check:meeting-smoke
 
-  # The client + unit suite, in sixteen shards of three workers each.
+  # The client + unit suite, as two kinds of shard: `client` and `client-browser`.
   #
   # It is CPU-bound — 134 seconds of CPU inside 42 of wall clock locally, with
   # vitest's fork pool already saturating the runner — so more processes on one
@@ -258,15 +258,17 @@ jobs:
   # than the replay assumed. Twelve brought the average shard down to the
   # floor the slowest single files set, about 65-77s.
   #
-  # THREE WORKERS, NOT FOUR. Longest-first starts each shard's four heaviest
-  # files together, and those are browser drivers that launch one or more
-  # Chromes each. That is four of them on a 4-vCPU runner from the first
-  # second. Main's order started four browser files at once too, but they
-  # were a random mix of heavy and light. Browser timing windows then lost:
-  # 3 of this PR's first 4 runs failed a browser file, against 14 of 95 runs
-  # on other branches in the same 24h. So each shard runs three files at a
-  # time, which leaves a core free, and sixteen shards keep the per-shard
-  # time where twelve had it.
+  # TWO KINDS OF SHARD. Longest-first started each shard's four heaviest
+  # files together, and those are Chrome drivers: four of them on a 4-vCPU
+  # runner from the first second. Main's order also started four browser
+  # files at once, but as a mix of heavy and light. Browser timing windows
+  # lost in 4 of this PR's first 5 runs, against about 15% of runs on other
+  # branches. So the files that launch Chrome (`CW_VITEST_KIND=browser`, decided
+  # per file in scripts/vitest-sequencer.ts) run in `client-browser`: two
+  # workers per runner, lighter than main's four. Every other file runs here
+  # (`CW_VITEST_KIND=unit`) with the full four workers. Replaying the table:
+  # 130 browser files, 2,076s, are at most ~76s per shard across 14 shards of
+  # two workers; 817 unit files, 759s, are ~64s across 3 shards of four.
   client:
     runs-on: ubuntu-latest
     permissions:
@@ -277,7 +279,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add a shard here and the coverage job's expected count below too.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -293,8 +295,9 @@ jobs:
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
           CW_BROWSER_TESTS: '1'
+          CW_VITEST_KIND: unit
         run: |
-          bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=3 \
+          bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} \
             --coverage.enabled --coverage.reporter=lcovonly \
             --coverage.reportsDirectory=.coverage/vitest
       - uses: actions/upload-artifact@v4
@@ -303,7 +306,41 @@ jobs:
         # an artifact-shaped hole nobody can read.
         if: ${{ !cancelled() }}
         with:
-          name: lcov-client-${{ matrix.shard }}
+          name: lcov-client-unit-${{ matrix.shard }}
+          path: .coverage/vitest/lcov.info
+          if-no-files-found: error
+
+  # The Chrome-launching files of the client suite: two workers per runner, so
+  # no runner has more than two of them running at once. Why they are apart:
+  # the comment above `client`.
+  client-browser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add a shard here and the coverage job's expected count below too.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Test (browser)
+        env:
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_BROWSER_TESTS: '1'
+          CW_VITEST_KIND: browser
+        run: |
+          bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=2 \
+            --coverage.enabled --coverage.reporter=lcovonly \
+            --coverage.reportsDirectory=.coverage/vitest
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: lcov-client-browser-${{ matrix.shard }}
           path: .coverage/vitest/lcov.info
           if-no-files-found: error
 
@@ -359,7 +396,7 @@ jobs:
   # reads. `--list` prints the per-file gap so it can be worked down.
   coverage:
     runs-on: ubuntu-latest
-    needs: [client, server]
+    needs: [client, client-browser, server]
     permissions:
       contents: read
     steps:
@@ -387,8 +424,8 @@ jobs:
           cat .lcov/lcov-server-*/lcov.info > .coverage/server/lcov.info
           client=$(ls -d .lcov/lcov-client-* | wc -l)
           server=$(ls -d .lcov/lcov-server-* | wc -l)
-          if [ "$client" -ne 16 ] || [ "$server" -ne 2 ]; then
-            echo "::error::merged $client client and $server server lcov file(s), expected 16 and 2 — the coverage number would be measured from part of the suite."
+          if [ "$client" -ne 17 ] || [ "$server" -ne 2 ]; then
+            echo "::error::merged $client client and $server server lcov file(s), expected 17 (3 unit + 14 browser) and 2 — the coverage number would be measured from part of the suite."
             exit 1
           fi
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
@@ -403,7 +440,7 @@ jobs:
   # fails until it is).
   ci:
     runs-on: ubuntu-latest
-    needs: [gates, gates-build, client, server, coverage]
+    needs: [gates, gates-build, client, client-browser, server, coverage]
     if: always()
     permissions: {}
     steps:
