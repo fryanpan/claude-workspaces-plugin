@@ -76,6 +76,8 @@ const READ = `(() => {
   const btn = host && host.shadowRoot && host.shadowRoot.querySelector('button');
   const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
   const q = (s) => sr && sr.querySelector(s);
+  // A tab behind another draws no frames, so the panel's grow animation stalls part-way; read the end state.
+  for (const a of q('.lc-pane')?.getAnimations?.() ?? []) a.finish();
   const box = (el) => { if (!el || el.hidden) return null; const r = el.getBoundingClientRect(); return r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
   const lead = sr ? [...sr.querySelectorAll('.lc-line[data-lead="1"]')] : [];
   return {
@@ -371,13 +373,9 @@ async function main(): Promise<void> {
         const row = r.lead.find((l) => l.text.includes(line));
         return row?.said === 'said' ? r : null;
       });
-      // Read once the watching tab's panel has grown out of its button: a
-      // tab behind another runs that animation slowly, and a reading taken
-      // part-way finds the one-line row scaled to a few pixels.
-      const watch = await until('the lead’s line on the watching tab, full size', async () => {
+      const watch = await until('the lead’s line on the watching tab', async () => {
         const r = await read(watcher);
-        const row = r.lead.find((l) => l.text.includes(line));
-        return row?.box && row.box.height > 10 ? r : null;
+        return r.lead.some((l) => l.text.includes(line)) ? r : null;
       });
       sizes.push({
         width,
