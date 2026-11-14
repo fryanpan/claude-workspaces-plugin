@@ -150,4 +150,32 @@ describe('the deploy’s make-push-keys step', () => {
       ),
     ).rejects.toThrow('denied');
   });
+
+  it('prints which secrets a workflow pushed with each key could read', async () => {
+    const lines = await makePushKeysThroughKeeper(
+      'cw-riverbend-test',
+      REPOS,
+      async () => ({
+        status: 200,
+        body: JSON.stringify({
+          keys: [{ repo: 'Riverbend/app', id: 12 }],
+          exposure: [
+            {
+              repo: 'Riverbend/app',
+              defaultBranch: 'main',
+              defaultBranchProtected: false,
+              repoSecrets: ['FLY_API_TOKEN'],
+              sideBranchReadable: ['FLY_API_TOKEN'],
+            },
+          ],
+        }),
+      }),
+      { CW_KEEPER_URL: 'http://localhost:9' },
+    );
+    expect(lines).toEqual([
+      'Riverbend/app: write deploy key 12',
+      'Riverbend/app: a workflow on any branch can read FLY_API_TOKEN (repository secrets)',
+      'Riverbend/app: default branch main is not protected, so the deploy key can push a workflow there and reach every secret, environment ones too',
+    ]);
+  });
 });

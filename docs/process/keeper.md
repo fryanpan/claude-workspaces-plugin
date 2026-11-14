@@ -253,6 +253,18 @@ reports and refuses before writing without it. Store it once, piping it in so it
 `machine:deploy --push-repo` then asks the keeper for the keys, and each
 request waits for your passkey with every repo listed on the page.
 
+A write deploy key can push a workflow file, and GitHub cannot stop it. The
+server holds every push that touches `.github/` for a person, but a server
+that is broken into skips that hold. So once the keys are in place the keeper
+reads, per repo, its repository-level Actions secret names and whether its
+default branch refuses a direct push. The deploy prints any secret a workflow
+on a side branch could read, and says when the default branch is unprotected,
+because then the key can push the workflow to the default branch and reach
+environment secrets too. It reads names only, never values, and writes
+nothing (`packages/server/src/keeper/keeper-push-exposure.ts`). A ruleset's
+bypass list is not read, so a ruleset that lets deploy keys bypass it still
+reads as protected.
+
 ## 5. Retire the old tokens
 
 ```bash
