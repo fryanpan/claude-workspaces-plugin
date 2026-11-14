@@ -12,7 +12,8 @@
       "packages/plugin/mcp",
       "**/.coverage",
       "**/.terraform",
-      "**/.terraform-check"
+      "**/.terraform-check",
+      "**/.astro"
     ]
   },
   "organizeImports": {
