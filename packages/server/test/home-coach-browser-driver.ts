@@ -4,8 +4,7 @@
  * real server and the real client build, at 1180x820 and at 430x932.
  *
  * Signed in on loopback with the session cookie the emailed-code sign-in sets
- * (signed with the data dir's own key). The page itself runs "Set up my
- * coach" once, so the Coach board and its Learning goals doc exist, and an
+ * (signed with the data dir's own key). The page POSTs `/coach/setup` once, so the Coach board and its Learning goals doc exist, and an
  * agent files one review item so Home's review region has content. Every
  * page's coach stream is replaced before any script runs with one that offers
  * a moment, so a page that mounts the coach card draws it.

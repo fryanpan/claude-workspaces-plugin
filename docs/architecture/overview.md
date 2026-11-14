@@ -2980,21 +2980,20 @@ and answers and the setting go at once. With no session holding a stream
 the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
 windows and 48 hours, across a restart) and go as one digest when its stream
 comes back. Past 400 turns in a day it sends
-nothing and the front page says the coach is paused for today. The session raises a moment on `POST /coach/moments`, and
+nothing until the next day. The session raises a moment on `POST /coach/moments`, and
 `coach/judge.ts` refuses one that does not copy three words in order from the
 goal it names, or arrives while another is open. A moment goes to his pages over
 `/coach/stream` (`coach/hub.ts`) and follows him: every page he has open
 shows it until he answers in any one, which clears it on the rest. That is
 the board (task pages included), every doc surface (`doc/doc-coach.ts`,
-mounted for markdown, folder files, diffs and code alike), the front page,
+mounted for markdown, folder files, diffs and code alike), the review walk,
 and the host page around a mock or dev server (`coach-page.ts`, its own
 `/app/coach.js`, since the sandboxed frame cannot draw it). A page on a
 board that is off for the coach shows it too, marked so, and tells the
 session nothing. He answers with a thumbs up, or a thumbs down with a few
 words of why that reach the session in `coach.answer`. In the session, `mcp/src/coach-line.ts` renders each frame and
 `coach_moment` raises a moment; the persona is the plugin's `coaching` skill.
-With no session holding a stream the front page says it is offline, and
-only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
+With no session holding a stream only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
 `coach/wiring.ts` composes it for `server.ts`. `scripts/coach-eval.ts` plays
 the fixture days to a real coach session and scores it.
 

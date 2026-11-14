@@ -34,7 +34,7 @@ const empty = (): CoachState => ({
   offBoards: [],
 });
 
-/** One week's answers, for the front page's line and the wrong-call rate. */
+/** One week's answers, for the wrong-call rate. */
 export interface CoachWeek {
   moments: number;
   /** Thumbs up, with the old cards' Thanks. */

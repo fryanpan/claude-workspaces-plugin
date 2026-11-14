@@ -8,6 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCROLL_SETTLE_MS, WROTE_PAUSE_MS, mountCoachCard } from '../src/coach-card.ts';
 
+const OFF_HERE = 'Coach is off for this board · Turn back on';
+
 type Posted = { url: string; body: Record<string, unknown> };
 let posted: Posted[];
 let status: number;
@@ -280,8 +282,24 @@ describe('the card', () => {
     card()?.querySelector<HTMLButtonElement>('.cw-coach-off')?.click();
     await flush();
     expect(card()?.querySelector('.cw-coach-line')?.textContent).toBe(MOMENT.line);
-    expect(card()?.querySelector('button.cw-coach-off')).toBeNull();
-    expect(card()?.querySelector('.cw-coach-off')?.textContent).toBe('Coach is off for this board');
+    expect(card()?.querySelector('.cw-coach-off')?.textContent).toBe(OFF_HERE);
+  });
+
+  it('a board turned off turns back on from the same place, since Home no longer lists off boards', async () => {
+    mount();
+    await flush();
+    FakeStream.last?.emit({ type: 'moment', moment: { ...MOMENT, at: 1 }, off: true });
+    const off = card()?.querySelector<HTMLButtonElement>('button.cw-coach-off');
+    expect(off?.textContent).toBe(OFF_HERE);
+    off?.click();
+    await flush();
+    expect(posted.at(-1)).toEqual({
+      url: '/coach/boards',
+      body: { workspaceId: 'w-harbor', off: false },
+    });
+    expect(card()?.querySelector('button.cw-coach-off')?.textContent).toBe(
+      'Coach off for this board',
+    );
   });
 });
 
@@ -292,7 +310,7 @@ describe('the card follows him', () => {
     expect(FakeStream.last?.url).toBe('/coach/stream?workspaceId=w-harbor&docId=d-post');
   });
 
-  it('on the front page it sends no view, opens the stream naming nowhere, and draws the same card without the board switch', async () => {
+  it('on a page with no board it sends no view, opens the stream naming nowhere, and draws the same card without the board switch', async () => {
     const c = mount({ workspaceId: undefined });
     await flush();
     expect(posted).toEqual([]);
