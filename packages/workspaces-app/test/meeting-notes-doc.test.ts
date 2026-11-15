@@ -84,6 +84,13 @@ async function openDoc(meta: Record<string, unknown>): Promise<void> {
     () => expect(document.querySelector('#editor > .ProseMirror[contenteditable]')).not.toBeNull(),
     { timeout: 5000, interval: 5 },
   );
+  // The app loads the lead chat as its own chunk and does not wait for it.
+  // A file that ends while that import is still loading fails its run with
+  // an EnvironmentTeardownError, though every case passed.
+  await vi.waitFor(
+    () => expect(document.querySelector('[data-lead-chat="layer"]')).not.toBeNull(),
+    { timeout: 5000, interval: 5 },
+  );
 }
 
 const commentPill = () => document.getElementById('comment-pill') as HTMLElement;
