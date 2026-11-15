@@ -54,7 +54,7 @@ export interface Round {
   barOnBoard: Bar;
   /** Alice followed Bob onto the doc: her address, her strip's ring, and the
    *  bar on the doc page. */
-  followed: { address: string; ringOnBob: boolean; ms: number; bar: Bar };
+  followed: { address: string; ringOnBob: boolean; ms: number; bar: Bar; rows: Row[] };
   /** Alice tapped Stop on the bar: whether the follow is still held, and
    *  whether her page started to leave when Bob next moved. */
   stopped: {
@@ -305,6 +305,7 @@ async function main(): Promise<void> {
         async () => (await alice.evaluate(READ_BAR)) as Bar | null,
       );
       const deckOnDoc = (await alice.evaluate(DECK_BOX)) as Box;
+      const docRows = await readList(alice);
 
       step(`Alice taps Stop on the bar at ${width}`);
       await tapOn(alice, '.board-follow-bar button');
@@ -355,7 +356,13 @@ async function main(): Promise<void> {
         here: { place: 'here', rows: hereRows, ms: hereMs },
         card,
         barOnBoard,
-        followed: { address: followedAddress, ringOnBob, ms: followMs, bar: barOnDoc },
+        followed: {
+          address: followedAddress,
+          ringOnBob,
+          ms: followMs,
+          bar: barOnDoc,
+          rows: docRows,
+        },
         stopped: {
           ringOnBob: stoppedRing,
           stored,

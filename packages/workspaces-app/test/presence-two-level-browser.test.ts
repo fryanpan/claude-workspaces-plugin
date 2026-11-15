@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 // Types only: importing a value would run the driver in this process.
-import type { Round, TwoLevelRun } from './presence-two-level-browser-driver.ts';
+import type { Round, Row, TwoLevelRun } from './presence-two-level-browser-driver.ts';
 
 /** The browser these cases may launch, or null to skip them.
  *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
@@ -118,6 +118,16 @@ describe.skipIf(CHROME === null)('the two-level presence strip, in a browser', (
       expect(went.address).toMatch(/^\/workspaces\/w-[^/?]+(\?.*)?$/);
     }, 60_000);
   }
+
+  it('names the lead the same on the board and on a doc', () => {
+    for (const width of [1180, 430]) {
+      const { here, followed } = round(width);
+      const lead = (rows: Row[]) => rows.filter((r) => r.name !== 'Bob').map((r) => r.name);
+      // The board's roster knows the lead by its id; both pages show its name.
+      expect(lead(here.rows), `board at ${width}`).toEqual(['Harborlight']);
+      expect(lead(followed.rows), `doc at ${width}`).toEqual(['Harborlight']);
+    }
+  }, 60_000);
 
   it('draws the deck at the same place and size on the board and on a doc', () => {
     for (const width of [1180, 430]) {

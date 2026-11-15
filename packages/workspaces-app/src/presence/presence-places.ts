@@ -98,6 +98,12 @@ export interface PlaceContext {
   titles?: ReadonlyMap<string, string>;
 }
 
+/** The name an agent's spot carries, when the spot is an agent's. */
+function agentNameOf(spot: PresenceSpot): string | undefined {
+  const name = (spot as { name?: unknown }).name;
+  return typeof name === 'string' && name.trim() ? name : undefined;
+}
+
 /**
  * Each chip with `here` (on the reader's page), `line` (the row's words),
  * `page` (the name of their page) and `place` (the card's sentence). A
@@ -118,6 +124,9 @@ export function placeChips(chips: PresenceChip[], ctx: PlaceContext): PresenceCh
     const q = quoteOf(spot);
     return {
       ...chip,
+      // An agent goes by the name it points under, as every page draws it:
+      // the board's roster knows only its id.
+      ...(chip.kind === 'agent' ? { label: agentNameOf(spot) ?? chip.label } : {}),
       here,
       line: here ? hereLine(chip, q, page) : `On ${page}`,
       page,

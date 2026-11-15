@@ -125,6 +125,24 @@ describe('placeChips', () => {
     expect(placed[0]).toEqual({ ...chip('p-me', 'Alice (you)'), self: true });
   });
 
+  it('names an agent the board knows only by id with the name it points under', () => {
+    // The board's roster labels the lead by its id; a doc draws it by the
+    // name on its spot. Both pages show that name.
+    const [lead] = placeChips([chip('a-agent-lead', 'agent-lead', 'agent')], {
+      states,
+      selfClientId: SELF,
+      mine: { surface: 'board' },
+    });
+    expect(lead?.label).toBe('Harborlight');
+    // CONTROL: an agent with no spot keeps the label it came with.
+    const [quiet] = placeChips([chip('a-agent-quiet', 'agent-quiet', 'agent')], {
+      states,
+      selfClientId: SELF,
+      mine: { surface: 'board' },
+    });
+    expect(quiet?.label).toBe('agent-quiet');
+  });
+
   it('moves a person to here once the reader is on their page', () => {
     const onPlan = placeChips([chip('p-cam', 'Riverbend')], {
       states,
