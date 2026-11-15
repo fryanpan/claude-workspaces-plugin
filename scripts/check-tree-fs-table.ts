@@ -97,6 +97,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/doc-move.ts': 'never-covered',
   'packages/server/src/doc-origin-repo.ts': 'refused-when-covered',
   'packages/server/src/doc-store-workspaces.ts': 'tree-fs',
+  // `<dataDir>/_history/<docId>.yhist`, a path built from the data dir alone.
+  'packages/server/src/doc-history/log.ts': 'data-dir',
   'packages/server/src/doc-state/disk.ts': 'data-dir',
   'packages/server/src/doc-store.ts': 'tree-fs',
   'packages/server/src/file-binding.ts': 'tree-fs',
