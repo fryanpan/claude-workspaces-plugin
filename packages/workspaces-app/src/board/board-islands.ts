@@ -28,7 +28,8 @@ import type { ReviewItem } from './board-review-model.ts';
 import { mountGoalDetailIsland } from './goal-detail-island.tsx';
 import { mountHomeActivityIsland } from './home-activity-island.tsx';
 import { mountHomeReviewIsland } from './home-review-island.tsx';
-import { mountDriftIsland, mountPresenceIsland } from './presence-island.tsx';
+import { mountBoardPresence } from './presence-core-switch.ts';
+import { mountDriftIsland } from './presence-island.tsx';
 import type { RecentAnswer } from './recent-answers.ts';
 import { type DetailTab, mountTaskDetailIsland } from './task-detail-island.tsx';
 import { mountWalkthroughIsland } from './walkthrough-island.tsx';
@@ -145,24 +146,20 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
   // top-right cluster, and the drift notices in the settings panel. Same
   // contract, and mounted once for the same reason — the strip repaints on
   // every awareness update and a 30s tick, and a rebuilt circle used to drop
-  // the long-press running on it.
-  mountPresenceIsland(
-    el('board-people'),
-    {
-      onTap: (chip) => jumpTo(chip.key),
-      onLongPress: (chip) => {
-        const next = state.followedKey === chip.key ? null : chip.key;
-        follow(next);
-        showToast(
-          next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
-        );
-      },
-      // The "+N" circle's names have to reach a touch screen, where a title
-      // attribute never shows. A toast is enough: it answers "who else".
-      onOverflow: (hiddenChips) =>
-        showToast(`Also here: ${hiddenChips.map((c) => c.label).join(', ')}`),
+  // the long-press running on it. On a board the collab core serves the
+  // circles are Web Awesome avatars instead (`presence-core-switch.ts`); the
+  // handlers and the data are the same either way.
+  mountBoardPresence(el('board-people'), {
+    onTap: (chip) => jumpTo(chip.key),
+    onLongPress: (chip) => {
+      const next = state.followedKey === chip.key ? null : chip.key;
+      follow(next);
+      showToast(next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following');
     },
-    { compact: true },
-  );
+    // The "+N" circle's names have to reach a touch screen, where a title
+    // attribute never shows. A toast is enough: it answers "who else".
+    onOverflow: (hiddenChips) =>
+      showToast(`Also here: ${hiddenChips.map((c) => c.label).join(', ')}`),
+  });
   mountDriftIsland(el('board-drift'));
 }

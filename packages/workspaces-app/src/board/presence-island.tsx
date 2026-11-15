@@ -27,7 +27,7 @@
  * only reads. Handlers are bound once at mount.
  */
 import { signal } from '@preact/signals';
-import { type ComponentChildren, Fragment, render } from 'preact';
+import { type ComponentChildren, Fragment, type JSX, render } from 'preact';
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
 import {
   type DriftNotice,
@@ -57,6 +57,32 @@ export const LONG_PRESS_MS = 550;
  *  (4 × 28px + gaps ≈ 124px) still leaves the workspace name room at 430px. */
 const MAX_CIRCLES = 4;
 
+/**
+ * How a compact circle draws. Everything else — the press gesture, the keyed
+ * rows, the four-slot clamp, the titles and labels — is the strip's, so two
+ * faces behave identically. The classic face paints the button itself; the
+ * Web Awesome face (`presence-island-wa.tsx`) puts a `<wa-avatar>` inside a
+ * bare button and is loaded only on a board the collab core serves.
+ */
+export interface PresenceFace {
+  /** The class every circle button carries, the "+N" included. */
+  base: string;
+  /** The button's own inline style, if the face paints the button. */
+  style?: (chip: PresenceChip) => JSX.CSSProperties;
+  /** What sits inside one person's or agent's circle. */
+  circle: (chip: PresenceChip) => ComponentChildren;
+  /** What sits inside the "+N" circle. */
+  more: (hidden: PresenceChip[]) => ComponentChildren;
+}
+
+/** Today's circle: a filled button with the initials in a span. */
+export const CLASSIC_FACE: PresenceFace = {
+  base: 'board-presence-circle',
+  style: (chip) => ({ background: `hsl(${presenceHue(chip.label)}, 45%, 45%)` }),
+  circle: (chip) => <span class="board-presence-initials">{initialsOf(chip.label)}</span>,
+  more: (hidden) => `+${hidden.length}`,
+};
+
 export interface PresenceData {
   chips: PresenceChip[];
   followedKey: string | null;
@@ -85,8 +111,9 @@ function PresenceButton(props: {
   compact: boolean;
   followed: boolean;
   handlers: PresenceHandlers;
+  face: PresenceFace;
 }) {
-  const { chip, compact, followed, handlers } = props;
+  const { chip, compact, followed, handlers, face } = props;
   // A long-press follows; a tap jumps. The press has TWO endings —
   // pointercancel is the common one on mobile — and both must disarm the
   // timer or one scroll wedges the strip.
@@ -101,7 +128,7 @@ function PresenceButton(props: {
   // with nothing left to act on is still a timer to clear.
   useEffect(() => disarm, []);
 
-  const base = compact ? 'board-presence-circle' : 'board-presence-chip';
+  const base = compact ? face.base : 'board-presence-chip';
   return (
     <button
       type="button"
@@ -113,7 +140,7 @@ function PresenceButton(props: {
       // title alone is read weakly or not at all depending on the reader.
       // The long-form chip shows the name, so it needs no second copy.
       aria-label={compact ? chip.title : undefined}
-      style={compact ? { background: `hsl(${presenceHue(chip.label)}, 45%, 45%)` } : undefined}
+      style={compact ? face.style?.(chip) : undefined}
       onPointerDown={() => {
         longFired.current = false;
         disarm();
@@ -130,7 +157,7 @@ function PresenceButton(props: {
       }}
     >
       {compact ? (
-        <span class="board-presence-initials">{initialsOf(chip.label)}</span>
+        face.circle(chip)
       ) : (
         <Fragment>
           <span class="board-presence-name">{chip.label}</span>
@@ -143,17 +170,21 @@ function PresenceButton(props: {
 
 /** The "+N" circle. Its names have to reach a touch screen, where a title
  *  attribute never shows — hence the callback as well as the tooltip. */
-function OverflowCircle(props: { hidden: PresenceChip[]; handlers: PresenceHandlers }) {
+function OverflowCircle(props: {
+  hidden: PresenceChip[];
+  handlers: PresenceHandlers;
+  face: PresenceFace;
+}) {
   const names = props.hidden.map((c) => c.label).join(', ');
   return (
     <button
       type="button"
-      class="board-presence-circle board-presence-more"
+      class={`${props.face.base} board-presence-more`}
       title={names}
       aria-label={`${props.hidden.length} more: ${names}`}
       onClick={() => props.handlers.onOverflow?.(props.hidden)}
     >
-      {`+${props.hidden.length}`}
+      {props.face.more(props.hidden)}
     </button>
   );
 }
@@ -175,6 +206,7 @@ function PresenceStrip(props: {
   host: HTMLElement;
   handlers: PresenceHandlers;
   compact: boolean;
+  face: PresenceFace;
 }) {
   const { chips, followedKey } = presenceData.value;
   useHostVisibility(props.host, chips.length === 0);
@@ -192,9 +224,12 @@ function PresenceStrip(props: {
           compact={props.compact}
           followed={followedKey === chip.key}
           handlers={props.handlers}
+          face={props.face}
         />
       ))}
-      {hidden.length > 0 && <OverflowCircle hidden={hidden} handlers={props.handlers} />}
+      {hidden.length > 0 && (
+        <OverflowCircle hidden={hidden} handlers={props.handlers} face={props.face} />
+      )}
     </Fragment>
   );
 }
@@ -256,12 +291,17 @@ function mountInto(host: HTMLElement, name: string, tree: ComponentChildren): ()
 export function mountPresenceIsland(
   host: HTMLElement,
   handlers: PresenceHandlers,
-  opts: { compact?: boolean } = {},
+  opts: { compact?: boolean; face?: PresenceFace } = {},
 ): () => void {
   return mountInto(
     host,
     'presence',
-    <PresenceStrip host={host} handlers={handlers} compact={opts.compact ?? false} />,
+    <PresenceStrip
+      host={host}
+      handlers={handlers}
+      compact={opts.compact ?? false}
+      face={opts.face ?? CLASSIC_FACE}
+    />,
   );
 }
 

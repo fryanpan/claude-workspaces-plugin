@@ -158,6 +158,17 @@ share sweeps and eviction holds see it. Both paths sync the same Y.Doc the
 doc store persists to the same `.ydoc`, so switching loses nothing.
 `server/test/collab-core-board.test.ts` drives both paths side by side.
 
+**A board on the core draws its presence strip from Web Awesome** (D1 step
+10). The board record (`GET /workspaces/<id>?format=json`) carries
+`collabCore.active`, and the switch sends the board's open pages a page-only
+`collab-core.changed` frame, so `workspaces-app/src/board/presence-core-switch.ts`
+swaps the strip on an open page and re-reads the record after a stream gap.
+`presence-island-wa.tsx` is an `import()` chunk: `<wa-avatar>` faces inside
+the strip's own buttons (`presence-island.tsx` takes the face as an option,
+so press, follow and clamp are shared), and it links the Web Awesome theme
+file `workspaces-app/src/wa-theme.css`, built to `/app/wa-theme.css` by
+`scripts/build-wa-theme.ts`. A board on the current code fetches neither.
+
 Presence and follow sit in the same folder. `presence.ts` is the server
 half: one entry per tab, a person shown once at their most recently active
 tab among the tabs the viewer may see (the rule

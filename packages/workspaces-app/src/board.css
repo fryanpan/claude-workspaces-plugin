@@ -840,6 +840,58 @@ body.board-body {
 .board-presence-agent .board-presence-name::before {
   content: "🤖 ";
 }
+/* The Web Awesome strip, on a board the collab core serves
+   (`presence-island-wa.tsx`). The same 28px circles as `.board-presence-circle`
+   in styles.css, drawn by a `<wa-avatar>` inside a bare button: the button
+   keeps the press, the focus and the 36px hit area, and the avatar carries
+   the fill, the shape and the rings. Two classes on the button, so the base
+   `.board-following` ring (one class, in styles.css) lands on the avatar
+   rather than on the button as well. */
+.board-people .board-presence-wa {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.board-people .board-presence-wa.board-presence-agent {
+  border-radius: 9px;
+}
+.board-presence-wa::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.board-presence-wa wa-avatar {
+  --size: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background-color: var(--bg-hover);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.board-presence-wa wa-avatar[shape="rounded"] {
+  border-radius: 9px;
+}
+.board-presence-wa.board-presence-more wa-avatar {
+  background-color: var(--bg-panel);
+  color: var(--fg-muted);
+}
+.board-presence-wa.board-presence-unresponsive wa-avatar {
+  border-color: var(--yellow);
+}
+.board-presence-wa.board-following wa-avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
 .board-drift {

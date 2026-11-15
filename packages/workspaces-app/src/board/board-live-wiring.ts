@@ -43,6 +43,7 @@ import type { BoardState } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
 import { ACTIVITY_REFRESH_EVENTS } from './board-presence-model.ts';
 import { startHomeClock } from './home-clock.ts';
+import { listenCollabCore, rereadCollabCore } from './presence-core-switch.ts';
 
 /** The row shape `loadDiscussion` accepts — a task or a goal, both of which
  *  keep their comments in a body doc, so the id is always resolvable. */
@@ -339,6 +340,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   // archived or renamed (`page-nudges.ts` on the server), and who has access.
   es.addEventListener('library.changed', () => libraryChanged());
   es.addEventListener('members.changed', () => membersChanged());
+  // The owner switched the collab core for this board: redraw the strip.
+  listenCollabCore(es);
 
   // A task going done takes its discussion out of the queue, and so does an
   // item taken back: a reader's Mark read, or a run's output item whose files
@@ -389,6 +392,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
       if (state.pane === 'home') void loadHome();
       libraryChanged();
       membersChanged();
+      // A flip of the collab core sent while the stream was down.
+      void rereadCollabCore(workspaceId);
     },
   });
   // Its own line, under the reconnect banner rather than sharing it: that one
