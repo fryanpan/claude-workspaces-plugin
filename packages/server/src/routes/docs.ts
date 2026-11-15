@@ -87,6 +87,7 @@ import { handleDocComponentsRoute } from './doc-components.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocFileMoveRoute } from './doc-file-move.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
+import type { DocCreateAnswer, DocCreateBody } from './doc-lifecycle-contract.ts';
 import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
@@ -183,7 +184,7 @@ export async function handleDocCreateListRoutes(
     // A file bind names a host path. Agents only — see
     // browserCannotBindBody for why a page, on any origin, is refused.
     if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
-    const body = await safeJson(req);
+    const body = sent<DocCreateBody>(await safeJson(req));
     const docId = (body?.docId as string) ?? '';
     if (!isValidDocId(docId)) return j(400, { error: 'bad docId' });
     const type = (body?.type as DocType) ?? 'markdown';
@@ -457,17 +458,21 @@ export async function handleDocCreateListRoutes(
     const pageLinks = mockupHtml === null ? [] : rootRelativePageLinks(mockupHtml);
     const warning = mockupLinkWarning(pageLinks, pageLinks.length ? boardApp() : undefined);
     const decorated = withReviewUrl(doc.meta);
-    return j(200, {
-      ...(warning ? { warning: warning.message, linkWarning: warning } : {}),
-      docId: doc.docId,
-      // The page to hand a person: every make-or-attach answer says `url`.
-      ...(decorated.reviewUrl ? { url: decorated.reviewUrl } : {}),
-      meta: decorated,
-      // Where the doc landed, in the same call that created it — a
-      // caller who supplied no workspace still learns which one it got.
-      hubWorkspaceId: boardWorkspaceId,
-      ...(attached ? { attached } : {}),
-    });
+    return j(
+      200,
+      answerAs<DocCreateAnswer>({
+        warning: warning?.message,
+        linkWarning: warning,
+        docId: doc.docId,
+        // The page to hand a person: every make-or-attach answer says `url`.
+        url: decorated.reviewUrl || undefined,
+        meta: decorated,
+        // Where the doc landed, in the same call that created it — a
+        // caller who supplied no workspace still learns which one it got.
+        hubWorkspaceId: boardWorkspaceId,
+        attached,
+      }),
+    );
   }
   if (restIs(scope, 'docs') && req.method === 'GET') {
     // `?workspaceId=` scopes the listing. Without honouring it here,

@@ -62,8 +62,7 @@ import {
 } from '../app-proxy.ts';
 import { withAppVoiceSeed } from '../app-voice/seed.ts';
 import { APP_DOWN_HEADER, renderAppWaiting } from '../app-waiting-page.ts';
-import type { BrowserSentryConfig } from '../browser-sentry.ts';
-import { injectSentryHead } from '../browser-sentry.ts';
+import { type BrowserSentryConfig, injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
 import { type FrameHost, repeatedDoorRedirect } from '../frame-host.ts';
 import { type WorkspaceScope, restIs } from '../middleware/workspace-scope.ts';
@@ -80,6 +79,8 @@ import { injectWidget } from '../mockup-widget.ts';
 import { loopbackFetch } from '../outbound-fetch.ts';
 import { readAppAssetManifest, renderAppNotFound } from '../shells.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
+import type { AppAttachBody } from './doc-lifecycle-contract.ts';
+import { sent } from './route-contract.ts';
 
 /** What the app routes read. Every member is long-lived. */
 export interface AppRoutesContext {
@@ -191,14 +192,13 @@ async function attachApp(
   const { docStore, j } = ctx;
   // A bind names something on this machine. Agents only, as every bind is.
   if (isBrowserRequest(rq.req.headers)) return j(403, browserCannotBindBody());
-  const body = await ctx.safeJson(rq.req);
+  const body = sent<AppAttachBody>(await ctx.safeJson(rq.req));
   const name = typeof body?.docId === 'string' ? body.docId : '';
   if (!ctx.isValidDocId(name)) return j(400, { error: 'bad docId' });
   const origin = parseLoopbackOrigin(body?.origin, ctx.ownPort());
   if (!origin.ok) return j(400, { error: 'origin_not_loopback', message: origin.error });
-  // Whether the dev server serves under the board's prefix (Vite's `base`).
-  // Omitted keeps what the app already has, so a re-attach for its link
-  // cannot turn the mode off by forgetting it.
+  // Whether the dev server serves under the board's prefix (Vite's `base`). Omitted keeps
+  // what the app has, so a re-attach for its link cannot turn the mode off by forgetting it.
   const servesPrefix = body?.servesPrefix;
   if (servesPrefix !== undefined && typeof servesPrefix !== 'boolean') {
     return j(400, { error: 'bad servesPrefix', message: 'servesPrefix must be true or false.' });

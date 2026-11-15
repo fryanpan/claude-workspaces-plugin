@@ -4,6 +4,7 @@ export * from './sse.ts';
 export { createServer } from './server.ts';
 export type {
   DocEditsContract,
+  DocLifecycleContract,
   DocThreadsContract,
   MountsApi,
   ThreadByFindBody,
