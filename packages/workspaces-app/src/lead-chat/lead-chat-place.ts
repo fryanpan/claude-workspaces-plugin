@@ -8,6 +8,13 @@
  * of the page's bottom-right corner, whose buttons belong to the comment
  * widget and the doc's mic and are never covered.
  *
+ * The corner's buttons can arrive after the bar does: the board loads the
+ * widget once its socket is ready, and its mic pushes the thread list beside
+ * the comment button. So the bar is placed again whenever
+ * the widget changes, not only when the chat draws — otherwise it kept the
+ * room it measured before the widget existed until some later draw, often
+ * the first word heard, and then lost 60px while the person spoke.
+ *
  * The open panel docks on the right edge of a wide screen, under the board's
  * top bar, at the width `lead-chat-dock.ts` keeps. On a narrow screen it is a
  * sheet down to the board's navbar, or over the keyboard while one is up.
@@ -21,12 +28,15 @@ export const NARROW_MAX = 1100;
  *  be measured. */
 export const CORNER_ROOM = 72;
 const BAR_H_NARROW = 50;
+const WIDGET_TAG = 'claude-feedback-widget';
 
 export interface LeadChatPlacer {
   /** Re-measure and place the bar and the panel. */
   place(): void;
   /** Hide the comment widget's corner buttons, or show them again. */
   hideWidget(hide: boolean): void;
+  /** Stop following the widget's corner. */
+  stop(): void;
 }
 
 export interface LeadChatPlacerOpts {
@@ -59,7 +69,7 @@ export function createPlacer(opts: LeadChatPlacerOpts): LeadChatPlacer {
    *  given. */
   const cornerLeft = (vw: number, vh: number, row?: { top: number; bottom: number }): number => {
     const els: Element[] = [];
-    const widget = doc.querySelector('claude-feedback-widget');
+    const widget = doc.querySelector(WIDGET_TAG);
     if (widget?.shadowRoot) els.push(...widget.shadowRoot.querySelectorAll('button'));
     // Unmeasured, the default room — except on a row the caller names, where
     // only a button actually on that row takes any.
@@ -77,7 +87,7 @@ export function createPlacer(opts: LeadChatPlacerOpts): LeadChatPlacer {
   /** A sheet covers the screen, so the widget's corner buttons step aside
    *  while it is up rather than sit over its composer. */
   const hideWidget = (hide: boolean): void => {
-    const widget = doc.querySelector<HTMLElement>('claude-feedback-widget');
+    const widget = doc.querySelector<HTMLElement>(WIDGET_TAG);
     if (widget) widget.style.visibility = hide ? 'hidden' : '';
   };
 
@@ -134,5 +144,55 @@ export function createPlacer(opts: LeadChatPlacerOpts): LeadChatPlacer {
     dock.docked(docking ? dock.width(vw) : null);
   };
 
-  return { place, hideWidget };
+  const stop = watchCorner(doc, win, place);
+  return { place, hideWidget, stop };
+}
+
+/**
+ * Call `changed`, at most once a frame, whenever the widget's corner may have
+ * moved: the widget added to the page or removed, defined, or a button in it
+ * added, removed or restyled. Answers the function that stops watching.
+ */
+export function watchCorner(doc: Document, win: Window, changed: () => void): () => void {
+  if (typeof MutationObserver === 'undefined') return () => {};
+  let frame: number | null = null;
+  const soon = (): void => {
+    if (frame === null)
+      frame = win.requestAnimationFrame(() => {
+        frame = null;
+        changed();
+      });
+  };
+  const inside = new MutationObserver(soon);
+  let watched: ShadowRoot | null = null;
+  let stopped = false;
+  const follow = (): void => {
+    if (stopped) return;
+    const root = doc.querySelector(WIDGET_TAG)?.shadowRoot ?? null;
+    if (root === watched) return;
+    inside.disconnect();
+    watched = root;
+    if (root) {
+      inside.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'hidden', 'style'],
+      });
+    }
+    soon();
+  };
+  // The widget is a child of the body: a doc page adds a fresh one per doc.
+  const outside = new MutationObserver(follow);
+  outside.observe(doc.body, { childList: true });
+  // Defining the tag upgrades an element already on the page, which gives it
+  // its shadow root and its buttons without adding anything to the body.
+  void win.customElements?.whenDefined(WIDGET_TAG).then(follow);
+  follow();
+  return () => {
+    stopped = true;
+    outside.disconnect();
+    inside.disconnect();
+    if (frame !== null) win.cancelAnimationFrame(frame);
+  };
 }

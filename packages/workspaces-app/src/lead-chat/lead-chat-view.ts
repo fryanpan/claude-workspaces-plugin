@@ -220,7 +220,11 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     storage: opts.storage ?? null,
     onResize: () => place(),
   });
-  const { place, hideWidget } = createPlacer({
+  const {
+    place,
+    hideWidget,
+    stop: stopPlacing,
+  } = createPlacer({
     doc,
     win,
     placement: opts.placement,
@@ -410,6 +414,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     nearTop: () => !pane.hidden && list.scrollTop < OLDER_AT,
     place,
     destroy() {
+      stopPlacing();
       hideWidget(false);
       dock.docked(null);
       dock.full(false);
