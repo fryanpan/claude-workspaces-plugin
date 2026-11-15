@@ -142,6 +142,20 @@ room hosts the server runs; every revoke calls its `recheck` beside the
 sweep that closes the server's own sockets, so a core connection loses a
 revoked role on the same call.
 
+**A new app starts from the app kit.** `bun run new-app <dir>`
+(`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
+after the folder: a Bun server with Hono routes, a doc socket the core's
+room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
+theme. The template points back into this repo in exactly two files, a
+re-export of `core/src/collab/` and an `@import` of
+`workspaces-app/src/wa-theme.css`, and the generator replaces both with
+copies, so the made app depends on nothing here. Sign-in is a typed slot
+(`SignIn.principal(request)`) holding a name-only development provider that
+refuses to start under `APP_ENV=production`; `templates/signin`, a
+Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,
+builds and runs an app outside the repo and syncs a doc between two of its
+pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
+
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
 (`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every

@@ -1,0 +1,157 @@
+/**
+ * What `bun run new-app` hands an agent: an app that builds, serves its pages
+ * in the shared theme behind sign-in, and syncs a doc between two signed-in
+ * pages through the collab core, saving it across a restart.
+ *
+ * The app is made into a temp folder outside the repo and run as its own
+ * process; `scripts/app-kit-harness.ts` says why its dependencies are linked
+ * rather than installed. The two pages are the made app's own page client
+ * (`src/client/sync.ts`), imported from the made app. The same flow in two
+ * real browser tabs is `scripts/app-kit-browser.test.ts`.
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  type RunningApp,
+  makeBuiltApp,
+  signInAs,
+  startApp,
+} from '../../../scripts/app-kit-harness.ts';
+import { shiftIndex, splice } from '../../../templates/app-kit/src/client/text-binding.ts';
+import { waitFor } from './wait-for.ts';
+
+type ConnectDoc = typeof import('../../../templates/app-kit/src/client/sync.ts').connectDoc;
+
+let parent: string;
+let appDir: string;
+let dataDir: string;
+let app: RunningApp;
+let connectDoc: ConnectDoc;
+const closers: Array<() => void> = [];
+
+beforeAll(async () => {
+  parent = mkdtempSync(join(tmpdir(), 'app-kit-'));
+  appDir = makeBuiltApp(parent);
+  dataDir = join(parent, 'data');
+  app = await startApp(appDir, dataDir);
+  // The made app's own copy, not the template's: what ships is what syncs.
+  ({ connectDoc } = (await import(join(appDir, 'src/client/sync.ts'))) as {
+    connectDoc: ConnectDoc;
+  });
+}, 120_000);
+
+afterAll(async () => {
+  for (const close of closers.splice(0)) close();
+  await app?.stop();
+  rmSync(parent, { recursive: true, force: true });
+});
+
+function page(url: string, cookie: string) {
+  const sync = connectDoc(url, { headers: { cookie } });
+  closers.push(sync.close);
+  return sync;
+}
+
+describe('an app made by new-app', () => {
+  it('sends a signed-out visitor to sign-in, and a signed-in one to the app', async () => {
+    const out = await fetch(`${app.base}/docs/harborlight`, { redirect: 'manual' });
+    expect(out.status).toBe(303);
+    expect(out.headers.get('location')).toBe('/auth/sign-in');
+
+    const cookie = await signInAs(app.base, 'Alice');
+    const res = await fetch(`${app.base}/docs/harborlight`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('data-doc="harborlight"');
+    expect(html).toContain('label="Alice"');
+  });
+
+  it('serves the shared theme it links', async () => {
+    const html = await (await fetch(`${app.base}/auth/sign-in`)).text();
+    expect(html).toContain('href="/assets/theme.css"');
+    const theme = await fetch(`${app.base}/assets/theme.css`);
+    expect(theme.headers.get('content-type')).toContain('text/css');
+    // The theme file's brand hue, and the Web Awesome base it imports.
+    const css = await theme.text();
+    expect(css).toContain('--wa-color-brand-50');
+    expect(css).toContain('--wa-color-blue-50');
+  });
+
+  it('serves only the files its build wrote', async () => {
+    expect((await fetch(`${app.base}/assets/main.js`)).status).toBe(200);
+    expect((await fetch(`${app.base}/assets/..%2Fpackage.json`)).status).toBe(404);
+    expect((await fetch(`${app.base}/assets/server.ts`)).status).toBe(404);
+  });
+
+  it('syncs a doc between two signed-in pages', async () => {
+    const cookie = await signInAs(app.base, 'Alice');
+    const one = page(app.ws('harborlight'), cookie);
+    const two = page(app.ws('harborlight'), cookie);
+    await Promise.all([one.synced, two.synced]);
+    one.doc.getText('body').insert(0, 'from page one');
+    await waitFor(() => two.doc.getText('body').toString() === 'from page one', {
+      describe: 'page two to see page one’s edit',
+    });
+    two.doc.getText('body').insert(0, 'and two: ');
+    await waitFor(() => one.doc.getText('body').toString() === 'and two: from page one', {
+      describe: 'page one to see page two’s edit',
+    });
+  });
+
+  it('refuses a doc socket from nobody, and from another site', async () => {
+    const upgrade = { upgrade: 'websocket', connection: 'upgrade' };
+    const anon = await fetch(`${app.base}/docs/harborlight/ws`, { headers: upgrade });
+    expect(anon.status).toBe(401);
+    const cookie = await signInAs(app.base, 'Alice');
+    const cross = await fetch(`${app.base}/docs/harborlight/ws`, {
+      headers: { ...upgrade, cookie, origin: 'http://saltmarsh.example' },
+    });
+    expect(cross.status).toBe(403);
+    // Control: a socket from the app's own origin, same cookie, syncs.
+    const own = connectDoc(app.ws('harborlight'), { headers: { cookie, origin: app.base } });
+    closers.push(own.close);
+    await own.synced;
+    expect(own.status()).toBe('synced');
+  });
+
+  it('keeps a doc across a restart', async () => {
+    const cookie = await signInAs(app.base, 'Bob');
+    const writer = page(app.ws('riverbend'), cookie);
+    await writer.synced;
+    writer.doc.getText('body').insert(0, 'kept on disk');
+    // A fresh page reading it back proves the server applied the edit before
+    // the restart.
+    const check = page(app.ws('riverbend'), cookie);
+    await check.synced;
+    await waitFor(() => check.doc.getText('body').toString() === 'kept on disk', {
+      describe: 'the server to hold the edit',
+    });
+    for (const close of closers.splice(0)) close();
+    await app.stop();
+    app = await startApp(appDir, dataDir);
+    const again = page(app.ws('riverbend'), await signInAs(app.base, 'Bob'));
+    await again.synced;
+    expect(again.doc.getText('body').toString()).toBe('kept on disk');
+  });
+});
+
+describe('the textarea binding', () => {
+  it('turns one edit into one splice', () => {
+    expect(splice('hello world', 'hello, world')).toEqual({ index: 5, remove: 0, insert: ',' });
+    expect(splice('abc', 'ac')).toEqual({ index: 1, remove: 1, insert: '' });
+    expect(splice('aaa', 'aaaa')).toEqual({ index: 3, remove: 0, insert: 'a' });
+  });
+
+  it('keeps the cursor on its character when another tab edits', () => {
+    // Text inserted before the cursor pushes it right; after it, not at all.
+    expect(shiftIndex([{ insert: 'xy' }], 3)).toBe(5);
+    expect(shiftIndex([{ retain: 5 }, { insert: 'xy' }], 3)).toBe(3);
+    // Text deleted before it pulls it left; a delete spanning it lands at the start.
+    expect(shiftIndex([{ delete: 2 }], 3)).toBe(1);
+    expect(shiftIndex([{ retain: 1 }, { delete: 5 }], 3)).toBe(1);
+    // Inserted exactly at the cursor goes after it.
+    expect(shiftIndex([{ retain: 3 }, { insert: 'z' }], 3)).toBe(3);
+  });
+});
