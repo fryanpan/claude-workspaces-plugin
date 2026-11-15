@@ -1,0 +1,5 @@
+/*
+ * The shared theme. In the template this imports the theme file the board
+ * uses; `bun run new-app` replaces this file with a copy of it.
+ */
+@import "../../../packages/workspaces-app/src/wa-theme.css";
