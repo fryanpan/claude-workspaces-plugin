@@ -295,6 +295,28 @@ describe('mount routes', () => {
     });
   });
 
+  describe('what the Hono app answers that no handler claims', () => {
+    // The routes moved into a Hono app (`mounts-api.ts`). Its `notFound`
+    // keeps the old chain's last line: anything under `/api/mounts` that no
+    // route claims is a 405, and a body that is not JSON reads as `{}`.
+    it('answers 405 to a method or a sub-path no route takes', async () => {
+      expect((await send('/api/mounts', { method: 'PATCH', body: '{}' })).status).toBe(405);
+      expect((await send('/api/mounts/privacy')).status).toBe(405);
+      expect((await send('/api/mounts/nothing-here')).status).toBe(405);
+      // Hono would answer a HEAD with the GET handler; `mounts.ts` refuses it.
+      expect((await send('/api/mounts', { method: 'HEAD' })).status).toBe(405);
+      expect((await send('/api/mounts/files', { method: 'HEAD' })).status).toBe(405);
+      // The control: the same path with the method it takes is answered.
+      expect((await send('/api/mounts')).status).toBe(200);
+    });
+
+    it('reads a body that is not JSON as empty, so the path check refuses it', async () => {
+      const r = await send('/api/mounts', { method: 'POST', body: '{not json' });
+      expect(r.status).toBe(400);
+      expect(((await r.json()) as { error: string }).error).toContain('path');
+    });
+  });
+
   describe('the table is not reachable from off the box', () => {
     it('refuses a request that came through the edge', async () => {
       const r = await send('/api/mounts', { headers: { 'cf-ray': 'test-ray-3' } });
