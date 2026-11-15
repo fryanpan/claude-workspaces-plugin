@@ -9,8 +9,6 @@
  */
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ServerWebSocket } from 'bun';
-import { Hono } from 'hono';
 import {
   type CollabConnection,
   type CollabStorage,
@@ -19,7 +17,9 @@ import {
   type RoleFn,
   type RoomHost,
   createRoomHost,
-} from './collab/index.ts';
+} from '@claude-workspaces/app-kit/collab';
+import type { ServerWebSocket } from 'bun';
+import { Hono } from 'hono';
 import { docPage, homePage } from './page.ts';
 import type { SignIn } from './sign-in.ts';
 
