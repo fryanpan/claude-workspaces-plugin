@@ -123,6 +123,50 @@ describe('judgeSocketWrite', () => {
     expect(judgeSocketWrite(server, access('view'), empty)).toBeNull();
   });
 
+  it('passes a step 2 that only repeats deletes the doc already holds, from any role', () => {
+    // Yjs sends a doc's WHOLE delete set in every step 2, whatever the state
+    // vector it answers. Resolving a thread overwrites its status, which
+    // deletes the old value under `threads`, so every page that reconnects
+    // to such a doc re-sends that delete. It writes nothing.
+    const { server, client } = pair();
+    (server.getMap('threads').get('th-1') as Y.Map<unknown>).set('status', 'resolved');
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(server, Y.encodeStateVector(client)));
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, 0);
+    syncProtocol.writeSyncStep2(enc, client, Y.encodeStateVector(server));
+    const reply = encoding.toUint8Array(enc);
+    for (const role of ['owner', 'edit', 'comment', 'view'] as const) {
+      expect(judgeSocketWrite(server, access(role), reply)).toBeNull();
+    }
+    // A page that typed while away sends its text with that same delete set:
+    // an edit socket's text edit, not a threads write.
+    client.getText('content').insert(0, 'Saltmarsh: ');
+    const enc2 = encoding.createEncoder();
+    encoding.writeVarUint(enc2, 0);
+    syncProtocol.writeSyncStep2(enc2, client, Y.encodeStateVector(server));
+    expect(judgeSocketWrite(server, access('edit'), encoding.toUint8Array(enc2))).toBeNull();
+    expect(judgeSocketWrite(server, access('view'), encoding.toUint8Array(enc2))).toBe('role');
+  });
+
+  it('still refuses a delete under threads the doc has not made, beside one it has', () => {
+    const { server, client } = pair();
+    const thread = server.getMap('threads').get('th-1') as Y.Map<unknown>;
+    thread.set('status', 'resolved');
+    thread.set('author', 'Alice');
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(server, Y.encodeStateVector(client)));
+    // The client deletes the live author: its update's delete set names that
+    // item alongside nothing else, and a step 2 names it beside the old status.
+    const del = diff(client, (d) =>
+      (d.getMap('threads').get('th-1') as Y.Map<unknown>).delete('author'),
+    );
+    expect(judgeSocketWrite(server, access('owner'), frame(del))).toBe('threads');
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, 0);
+    syncProtocol.writeSyncStep2(enc, client, Y.encodeStateVector(server));
+    expect(judgeSocketWrite(server, access('owner'), encoding.toUint8Array(enc))).toBe('threads');
+    expect(judgeSocketWrite(server, access('view'), encoding.toUint8Array(enc))).toBe('role');
+  });
+
   it('never judges a sync step 1', () => {
     const { server, client } = pair();
     const enc = encoding.createEncoder();
