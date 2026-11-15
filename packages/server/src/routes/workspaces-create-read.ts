@@ -10,7 +10,6 @@ import {
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
-import { leadSetId } from '../board-socket-roots.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -19,9 +18,9 @@ import {
 } from '../share/redact-workspace.ts';
 import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
-import { treeFsMode } from '../tree-fs.ts';
 import { wantsJson } from '../workspace-path.ts';
 import type * as Contract from './attachments-contract.ts';
+import { type LeadBind, refuseLeadBind } from './lead-bind-scope.ts';
 import { refuseLeadDiff } from './lead-diff-scope.ts';
 import { answerAs, sent } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
@@ -442,59 +441,4 @@ export async function handleWorkspaceCreateRead(
     });
   }
   return undefined;
-}
-
-/** The most files a lead's bind may ask the scan for. */
-const LEAD_MAX_FILES = 5_000;
-
-interface LeadBind {
-  board: string;
-  /** The registered root the folder resolved to: what is bound. */
-  root: string;
-  setId: string;
-}
-
-/**
- * Why a lead's `POST /workspaces` is refused, or what it binds. Only a
- * folder bind; only on the lead's own board; never re-filing a set by id,
- * which could name one on another board; and only a folder that resolves to
- * a root registered for that board (`board-socket-roots.ts`). Every read
- * and write the bind leads to then goes through `tree-fs.ts`.
- */
-function refuseLeadBind(
-  leadBoard: string | null,
-  body: Record<string, unknown> | null,
-  leadBindRoot: (boardId: string, folderPath: string) => string | null,
-): { error: string; message: string } | LeadBind {
-  const refuse = (message: string) => ({ error: 'out_of_lead_scope', message });
-  if (leadBoard === null) return refuse('Only a board’s lead may bind a folder from here.');
-  // The bind is safe only because its reads and writes are contained; where
-  // the contained calls are not (any platform but macOS on arm64), refuse.
-  if (treeFsMode() !== 'contained')
-    return refuse('A lead’s folder bind needs the contained file calls, which this server lacks.');
-  const folderPath = body?.folderPath;
-  if (typeof folderPath !== 'string' || folderPath === '')
-    return refuse('A lead may bind a folder here, and not create a board.');
-  if (body?.hubWorkspaceId !== leadBoard)
-    return refuse('A lead binds a folder onto its own board only.');
-  if (body?.setId !== undefined || body?.workspaceId !== undefined)
-    return refuse('A lead may not re-file an attachment set by id.');
-  if (body?.privacy !== undefined && body.privacy !== 'local-only')
-    return refuse('A lead may keep a set local-only, and may not make it shareable.');
-  const { maxFiles } = body;
-  if (
-    maxFiles !== undefined &&
-    !(
-      Number.isInteger(maxFiles) &&
-      (maxFiles as number) > 0 &&
-      (maxFiles as number) <= LEAD_MAX_FILES
-    )
-  )
-    return refuse(`A lead’s maxFiles is a whole number from 1 to ${LEAD_MAX_FILES}.`);
-  const root = leadBindRoot(leadBoard, folderPath);
-  if (root === null)
-    return refuse(
-      'A lead binds one of the folders registered for its board (PUT /api/board-sockets/<board>/roots), and narrows to a subfolder with include.',
-    );
-  return { board: leadBoard, root, setId: leadSetId(root, leadBoard) };
 }

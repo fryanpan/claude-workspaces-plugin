@@ -1,143 +1,120 @@
 /**
- * What a board's lead may not bind through `POST /workspaces` on its own
- * socket (`refuseLeadBind`, `routes/workspaces-create-read.ts`). The route
- * holds the body to a folder bind on the lead's own board, under a root
- * registered for that board, with no set id, no shareable privacy and a
- * bounded scan. Each refusal is a 403 naming `out_of_lead_scope`, and none
- * leaves a set behind.
+ * What a board's lead may not bind through `POST /workspaces`.
  *
- * The refusals are judged before any file is read, so this suite runs on
- * every platform. A bind that passes them reads the folder through
- * `tree-fs.ts`, and `walled-folder-bind.test.ts` covers that half on macOS.
- * Fixtures synthetic, temp dirs.
+ * `refuseLeadBind` (`routes/lead-bind-scope.ts`) judges the body. A bind
+ * must be a folder bind on the lead's own board, under a root registered for
+ * that board, with no set id, no shareable privacy and a bounded scan. On a
+ * server without the contained file calls it refuses every lead bind first,
+ * which is every platform but macOS on arm64.
+ *
+ * So the body's rules are driven here through the function, with the mode
+ * passed in, and they run on every platform. The route's half is driven over
+ * a real lead socket: the refusal reaches the lead as a 403 and leaves no set.
+ * A bind that passes reads the folder through `tree-fs.ts`, which
+ * `walled-folder-bind.test.ts` covers on macOS. Fixtures synthetic.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { leadSetId } from '../src/board-socket-roots.ts';
 import { boardSocketPath } from '../src/board-sockets.ts';
+import { refuseLeadBind } from '../src/routes/lead-bind-scope.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
-let h: ServerHandle;
-let dataDir: string;
-let workDir: string;
-let socketRoot: string;
-let socketDir: string;
-let base: string;
-let harborlight: string;
-let riverbend: string;
-let ownRoot: string;
-let elsewhere: string;
+const LEAD = 'w-harbor';
+const ROOT = '/tmp/harborlight-project';
+/** The board's one registered root, as `board-socket-roots.ts` would answer. */
+const rootOf = (board: string, folder: string) =>
+  board === LEAD && (folder === ROOT || folder.startsWith(`${ROOT}/`)) ? ROOT : null;
+const judge = (body: Record<string, unknown> | null, mode: 'contained' | 'legacy' = 'contained') =>
+  refuseLeadBind(LEAD, body, rootOf, mode);
+const own = { folderPath: ROOT, hubWorkspaceId: LEAD };
 
-const json = { 'content-type': 'application/json' };
-const tcp = (path: string, init: RequestInit = {}) =>
-  fetch(`${base}${path}`, { ...init, headers: { ...json, ...(init.headers ?? {}) } });
-
-async function board(name: string): Promise<string> {
-  const res = await tcp('/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
-  return ((await res.json()) as { workspace: { id: string } }).workspace.id;
-}
-
-/** `POST /workspaces` as Harborlight's lead, on its board socket. */
-async function leadBind(body: Record<string, unknown>): Promise<{ status: number; json: unknown }> {
-  const res = await fetch('http://board/workspaces', {
-    method: 'POST',
-    unix: boardSocketPath(socketDir, harborlight),
-    headers: json,
-    body: JSON.stringify(body),
-  } as RequestInit);
-  return { status: res.status, json: await res.json() };
-}
-
-function folder(name: string): string {
-  const dir = join(workDir, name);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'notes.md'), `# ${name}\n`);
-  return dir;
-}
-
-async function setCount(): Promise<number> {
-  const res = await tcp(`/workspaces/${harborlight}/attachments?archived=true`);
-  const listed = (await res.json()) as { archived: unknown[] };
-  const live = await tcp(`/workspaces/${harborlight}?format=json`);
-  const docIds = ((await live.json()) as { workspace: { docIds?: string[] } }).workspace.docIds;
-  return listed.archived.length + (docIds?.length ?? 0);
-}
-
-beforeAll(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), 'lead-bind-refusals-'));
-  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'lead-bind-refusals-work-')));
-  socketRoot = mkdtempSync(
-    process.platform === 'darwin' ? '/private/tmp/lbr-' : join(tmpdir(), 'lbr-'),
-  );
-  socketDir = join(socketRoot, 'boards');
-  h = createServer({ port: 0, dataDir, boardSocketDir: socketDir });
-  base = `http://127.0.0.1:${h.port}`;
-  harborlight = await board('Harborlight');
-  riverbend = await board('Riverbend');
-  ownRoot = folder('harborlight-project');
-  elsewhere = folder('saltmarsh-project');
-  const roots = await tcp(`/api/board-sockets/${harborlight}/roots`, {
-    method: 'PUT',
-    body: JSON.stringify({ roots: [ownRoot] }),
+describe('refuseLeadBind', () => {
+  it('binds the board’s own root, under the set id the board owns', () => {
+    expect(judge(own)).toEqual({ board: LEAD, root: ROOT, setId: leadSetId(ROOT, LEAD) });
+    expect(judge({ ...own, privacy: 'local-only', maxFiles: 5_000 })).toMatchObject({
+      root: ROOT,
+    });
   });
-  expect(roots.status).toBe(200);
-});
 
-afterAll(async () => {
-  await h.stop();
-  for (const d of [dataDir, workDir, socketRoot]) rmSync(d, { recursive: true, force: true });
-});
-
-describe('a lead’s POST /workspaces is refused when it', () => {
-  const cases: Array<[string, () => Record<string, unknown>, string]> = [
-    ['creates a board', () => ({ name: 'Another' }), 'not create a board'],
-    [
-      'binds onto another board',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: riverbend }),
-      'its own board only',
-    ],
-    [
-      'names a set id',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: harborlight, setId: 'set-1' }),
-      're-file an attachment set',
-    ],
-    [
-      'names a set id by its old name',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: harborlight, workspaceId: 'set-1' }),
-      're-file an attachment set',
-    ],
-    [
-      'asks for a shareable set',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: harborlight, privacy: 'workspace' }),
-      'may not make it shareable',
-    ],
-    [
-      'asks the scan for no files',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: harborlight, maxFiles: 0 }),
-      'maxFiles is a whole number',
-    ],
-    [
-      'asks the scan for too many files',
-      () => ({ folderPath: ownRoot, hubWorkspaceId: harborlight, maxFiles: 5_001 }),
-      'maxFiles is a whole number',
-    ],
+  const refusals: Array<[string, Record<string, unknown> | null, string]> = [
+    ['creates a board', { name: 'Riverbend' }, 'not create a board'],
+    ['sends no body', null, 'not create a board'],
+    ['binds onto another board', { ...own, hubWorkspaceId: 'w-river' }, 'its own board only'],
+    ['names a set id', { ...own, setId: 'set-1' }, 're-file an attachment set'],
+    ['names a set id by its old name', { ...own, workspaceId: 'set-1' }, 're-file'],
+    ['asks for a shareable set', { ...own, privacy: 'workspace' }, 'may not make it shareable'],
+    ['asks the scan for no files', { ...own, maxFiles: 0 }, 'maxFiles is a whole number'],
+    ['asks for too many files', { ...own, maxFiles: 5_001 }, 'maxFiles is a whole number'],
+    ['asks for part of a file', { ...own, maxFiles: 1.5 }, 'maxFiles is a whole number'],
     [
       'binds a folder under no root of its board',
-      () => ({ folderPath: elsewhere, hubWorkspaceId: harborlight }),
+      { ...own, folderPath: '/tmp/saltmarsh-project' },
       'folders registered for its board',
     ],
   ];
-
-  for (const [what, body, says] of cases) {
-    it(what, async () => {
-      const before = await setCount();
-      const r = await leadBind(body());
-      expect(r.status).toBe(403);
-      const refusal = r.json as { error: string; message: string };
-      expect(refusal.error).toBe('out_of_lead_scope');
-      expect(refusal.message).toContain(says);
-      expect(await setCount()).toBe(before);
+  for (const [what, body, says] of refusals) {
+    it(`refuses a lead that ${what}`, () => {
+      const r = judge(body) as { error: string; message: string };
+      expect(r.error).toBe('out_of_lead_scope');
+      expect(r.message).toContain(says);
     });
   }
+
+  it('refuses even its own root where the contained calls are missing', () => {
+    expect(judge(own, 'legacy')).toMatchObject({
+      error: 'out_of_lead_scope',
+      message: expect.stringContaining('needs the contained file calls'),
+    });
+  });
+
+  it('refuses a caller that is no board’s lead', () => {
+    expect(refuseLeadBind(null, own, rootOf, 'contained')).toMatchObject({
+      message: expect.stringContaining('Only a board’s lead'),
+    });
+  });
+});
+
+describe('a lead’s POST /workspaces on its board socket', () => {
+  let h: ServerHandle;
+  let dataDir: string;
+  let socketRoot: string;
+  let socketDir: string;
+  let board = '';
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'lead-bind-refusals-'));
+    socketRoot = mkdtempSync(
+      process.platform === 'darwin' ? '/private/tmp/lbr-' : join(tmpdir(), 'lbr-'),
+    );
+    socketDir = join(socketRoot, 'boards');
+    h = createServer({ port: 0, dataDir, boardSocketDir: socketDir });
+    const res = await fetch(`http://127.0.0.1:${h.port}/workspaces`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Harborlight' }),
+    });
+    board = ((await res.json()) as { workspace: { id: string } }).workspace.id;
+  });
+
+  afterAll(async () => {
+    await h.stop();
+    for (const d of [dataDir, socketRoot]) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('is refused as out of scope, and leaves no set behind', async () => {
+    const res = await fetch('http://board/workspaces', {
+      method: 'POST',
+      unix: boardSocketPath(socketDir, board),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Riverbend' }),
+    } as RequestInit);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe('out_of_lead_scope');
+    const live = await fetch(`http://127.0.0.1:${h.port}/workspaces/${board}?format=json`);
+    const docIds = ((await live.json()) as { workspace: { docIds?: string[] } }).workspace.docIds;
+    expect(docIds ?? []).toEqual([]);
+  });
 });
