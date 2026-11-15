@@ -1,10 +1,12 @@
 /**
  * The lead's network wall, pure half: the allowlist file's format, the
- * iptables rules, and how the boot probe's answers are judged.
+ * iptables rules (the fallback; the native nftables table, tried first, is
+ * `lead-egress-nft.ts`), and how the boot probe's answers are judged.
  * `lead-egress.ts` applies the rules; `lead-proxy.ts` enforces the list.
  * Tested in `packages/server/test/project-machine-lead-egress.test.ts`.
  *
- * Two layers. The firewall: one chain, CW-LEAD-EGRESS, in the filter table of
+ * Two layers. The firewall: one nftables table matched by `meta skuid`, or,
+ * on a kernel without it, one chain, CW-LEAD-EGRESS, in the filter table of
  * each address family, which OUTPUT enters by owner match on each walled
  * uid. It accepts loopback and rejects everything else, DNS included. The
  * proxy: `lead-proxy.ts`, on loopback as its own user (which the firewall

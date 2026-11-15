@@ -118,6 +118,11 @@ describe('the rules', () => {
   });
 });
 
+/**
+ * A fake iptables. `nft` is absent unless the test runs it, so these cases
+ * reach the iptables fallback; the nft path is
+ * `project-machine-lead-egress-nft.test.ts`.
+ */
 function fakeTables(fail: Record<string, string> = {}) {
   const calls: string[] = [];
   const chain: Record<string, string[]> = {};
@@ -127,6 +132,7 @@ function fakeTables(fail: Record<string, string> = {}) {
     calls.push(argv.join(' '));
     const ok = (stdout = ''): Ran => ({ status: 0, stdout, stderr: '' });
     if (fail[cmd]) return { status: 2, stdout: '', stderr: fail[cmd] };
+    if (cmd === 'nft') return { status: 127, stdout: '', stderr: 'nft: command not found' };
     const tool = cmd.replace('-restore', '');
     if (cmd.endsWith('-restore')) {
       chain[tool] = (stdin ?? '').split('\n').filter((l) => l.startsWith('-A '));
@@ -143,6 +149,14 @@ function fakeTables(fail: Record<string, string> = {}) {
       output[tool].unshift(rule);
       return ok();
     }
+    if (args[0] === '-D') {
+      output[tool] = output[tool].filter((r) => r !== rule);
+      return ok();
+    }
+    if (args[0] === '-F' || args[0] === '-X') {
+      delete chain[tool];
+      return ok();
+    }
     if (args[0] === '-S') return ok(`-N ${CHAIN}\n${(chain[tool] ?? []).join('\n')}\n`);
     return { status: 1, stdout: '', stderr: `unexpected ${argv.join(' ')}` };
   };
@@ -154,7 +168,7 @@ describe('applying the wall', () => {
     const t = fakeTables();
     expect(apply(t.run, WALLED_UIDS, LIST)).toEqual({
       ok: true,
-      line: `uids ${WALLED_UIDS.join(', ')} reach loopback only, IPv4 and IPv6; out through http://127.0.0.1:3128 to the 1 hosts on lead-egress.allow`,
+      line: `uids ${WALLED_UIDS.join(', ')} reach loopback only, IPv4 and IPv6, by iptables chain ${CHAIN}, because nft -f: nft: command not found; out through http://127.0.0.1:3128 to the 1 hosts on lead-egress.allow`,
     });
     for (const tool of ['iptables', 'ip6tables']) {
       expect(t.output[tool]).toEqual(
@@ -182,19 +196,36 @@ describe('applying the wall', () => {
     });
     expect(apply(t.run, WALLED_UIDS, LIST)).toEqual({
       ok: false,
-      line: 'IPv6 rules could not be loaded (ip6tables-restore: ip6tables-restore: unable to initialize table filter; ip6tables-legacy-restore: ip6tables-legacy-restore: no such module)',
+      line: 'nft -f: nft: command not found; IPv6 rules could not be loaded (ip6tables-restore: ip6tables-restore: unable to initialize table filter; ip6tables-legacy-restore: ip6tables-legacy-restore: no such module)',
     });
   });
 
-  it('fails when the owner match will not take', () => {
+  it('moves on to legacy when the owner match will not take, taking out what it loaded', () => {
+    const t = fakeTables();
+    // The jump fails under iptables-nft, after its chain loaded; legacy takes it.
+    const run: Runner = (argv, stdin) =>
+      argv[0] === 'iptables' && argv[1] === '-I' && argv.includes(String(WALLED_UIDS[1]))
+        ? { status: 1, stdout: '', stderr: "Couldn't load match `owner'" }
+        : t.run(argv, stdin);
+    const r = apply(run, WALLED_UIDS, LIST);
+    expect(r.ok).toBe(true);
+    expect(t.output['iptables-legacy']).toHaveLength(WALLED_UIDS.length);
+    // What iptables-nft had loaded is gone: no jump, no chain.
+    expect(t.output.iptables).toEqual([]);
+    expect(t.chain.iptables).toBeUndefined();
+    expect(t.calls).toContain(`iptables -X ${CHAIN}`);
+  });
+
+  it('fails, naming each backend, when the owner match will not take anywhere', () => {
     const t = fakeTables();
     const run: Runner = (argv, stdin) =>
       argv[1] === '-I'
         ? { status: 1, stdout: '', stderr: "Couldn't load match `owner'" }
         : t.run(argv, stdin);
+    const u = WALLED_UIDS[0];
     expect(apply(run, WALLED_UIDS, LIST)).toEqual({
       ok: false,
-      line: `iptables: could not send uid ${WALLED_UIDS[0]} into ${CHAIN}: Couldn't load match \`owner'`,
+      line: `nft -f: nft: command not found; IPv4 rules could not be loaded (iptables: could not send uid ${u} into ${CHAIN}: Couldn't load match \`owner'; iptables-legacy: could not send uid ${u} into ${CHAIN}: Couldn't load match \`owner')`,
     });
   });
 

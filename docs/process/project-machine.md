@@ -415,13 +415,22 @@ pinned Claude Code build).
 
 ### The lead's limits: checking them on a machine
 
+The wall loads as a native nftables table, `inet cw_lead_egress`, matched by
+`meta skuid`. Fly's kernel (6.12, measured 15 November) has no `xt_owner`, so
+iptables' `-m owner` match fails there under both iptables-nft and
+iptables-legacy; nftables' own skuid match loads and enforces. The iptables
+chain is kept as the fallback for a kernel where nft fails, and the boot line
+names which one loaded and, for the fallback, why nft did not.
+
 The tests prove the rules, the proxy and the watchdog on Docker's Linux kernel
 (`CW_CONTAINER_TESTS=1 bun test packages/server/test/project-machine-lead-limits-container.test.ts`),
 not on Fly's. On a test machine with a lead, after a deploy:
 
 1. `fly logs --app cw-<project> --no-tail | grep -E "lead's (memory|network)"`.
    The memory line names the cgroup or the watchdog; the network line must
-   read `the lead's network wall holds`.
+   read `the lead's network wall holds`, and the `wall is in` line before it
+   must say `by nft table inet cw_lead_egress`. `fly ssh console --app
+   cw-<project> -C "nft list table inet cw_lead_egress"` prints the table.
 2. The wall, by hand, as the lead (`env -i`, so root's secrets stay root's,
    and the proxy given the way the entrypoint gives it):
    ```bash
