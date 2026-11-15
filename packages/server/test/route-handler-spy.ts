@@ -29,16 +29,17 @@
  * exactly as the module it replaces: it only records.
  *
  * Not spied on: the chain modules themselves (`request-chain*.ts`), the route
- * table, and `hono-front.ts` — those decide which family runs and are not
- * families. A Hono family that moves later is registered from its own module,
- * whose `handle*` functions are still spied on.
+ * table, `hono-front.ts` and `hono-families.ts` — those decide which family
+ * runs and are not families. A family Hono answers is registered in
+ * `hono-families.ts` by importing its module's `handle*` function, so the
+ * spied copy is what Hono calls and the record names the same handler.
  */
 import { mock } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = join(import.meta.dir, '..', 'src');
-const NOT_FAMILIES = /^(request-chain.*|route-table.*|hono-front)\.ts$/;
+const NOT_FAMILIES = /^(request-chain.*|route-table.*|hono-front|hono-families)\.ts$/;
 const ROUTE_FUNCTION = /^(handle|serve)/;
 
 /** The gate functions, and the return values that mean "refused". */

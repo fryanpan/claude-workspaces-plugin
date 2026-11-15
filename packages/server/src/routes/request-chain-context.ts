@@ -23,7 +23,6 @@ import type {
 } from '../request-attribution.ts';
 import type { SseBus } from '../sse.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
-import type { AccessRoutesContext } from './access.ts';
 import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
@@ -32,7 +31,6 @@ import type { BoardLinkRoutesContext } from './board-links.ts';
 import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
 import type { BoardTokenRoutesContext } from './board-tokens.ts';
 import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
-import type { CoachRoutesContext } from './coach.ts';
 import type { DocMoveRoutesContext } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
 import type { GithubHubRoutesContext } from './github-hub.ts';
@@ -43,17 +41,13 @@ import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
 import type { MountRoutesContext } from './mounts.ts';
 import type { OpsRoutesContext } from './ops.ts';
 import type { PrivateMessageRoutesContext } from './private-messages.ts';
-import type { PromptRoutesContext } from './prompts.ts';
 import type { RecallWebhookRoutesContext } from './recall-webhook.ts';
 import type { RepoRoutesContext } from './repos.ts';
 import type { ReviewFileRoutesContext } from './review-files.ts';
-import type { ReviewQueueRoutesContext } from './review-queue.ts';
 import type { ShellStatic } from './shell-static.ts';
 import type { TaskRoutesContext } from './tasks.ts';
 import type { UpgradeStream } from './upgrade-stream.ts';
 import type { VoiceAgentLlmRoutesContext } from './voice-agent-llm.ts';
-import type { VoiceApiRoutesContext } from './voice-api.ts';
-import type { VoicePageRoutesContext } from './voice-page.ts';
 import type { LibraryRoutesContext } from './workspace-library.ts';
 import type { WorkspaceRoutesContext } from './workspaces.ts';
 
@@ -87,8 +81,9 @@ export interface RequestChainContext {
     admitted: AttributableRequest,
     widgetIdentity: IdentityRecord | null,
   ) => Promise<Response | null>;
-  /** The Hono app (`hono-front.ts`), tried below the gates and above every
-   *  family the chain still holds. */
+  /** The Hono app (`hono-front.ts`) with the families it answers
+   *  (`hono-families.ts`), tried below the gates and above every family the
+   *  chain still holds. */
   honoFront: HonoFront;
   authShareRoutesCtx: AuthShareRoutesContext;
   voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
@@ -121,18 +116,12 @@ export interface RequestChainContext {
   meetingCalendarRoutesCtx: MeetingCalendarRoutesContext;
 
   // ── The top-level families and the tail (`request-chain-tail.ts`) ──
-  promptRoutesCtx: PromptRoutesContext;
   sse: SseBus;
-  reviewQueueRoutesCtx: ReviewQueueRoutesContext;
-  voicePageRoutesCtx: VoicePageRoutesContext;
-  accessRoutesCtx: AccessRoutesContext;
-  voiceApiRoutesCtx: VoiceApiRoutesContext;
   /** Every registered feature's routes (`features.ts`), tried at the
    *  position the inbox routes held. */
   featureRoutes: FeatureRoutes;
   /** A person's private conversation with their own lead agent. */
   privateMessageRoutesCtx: PrivateMessageRoutesContext;
-  coachRoutesCtx: CoachRoutesContext;
   serveShellRoutes: ShellStatic['serveShellRoutes'];
   /** The wrong-form board links and the relative-link open route
    *  (`board-links.ts`). */

@@ -988,8 +988,8 @@ export interface ServerOptions {
    */
   loopBlockThresholdMs?: number;
   /**
-   * Families mounted on the Hono app after `HONO_FAMILIES`
-   * (`routes/hono-front.ts`, types in `hono-env.ts`). Production passes none; a test mounts a probe
+   * Families mounted on the Hono app after the production ones
+   * (`routes/hono-families.ts`, types in `hono-env.ts`). Production passes none; a test mounts a probe
    * route so it can show the gates run before Hono answers.
    */
   honoFamilies?: readonly HonoFamily[];
