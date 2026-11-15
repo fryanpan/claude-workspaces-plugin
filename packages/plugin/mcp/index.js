@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.374";
+var version2 = "0.1.375";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20200,6 +20200,7 @@ var mountsClient = (http) => typedClient(http);
 var docThreadsClient = (http) => typedClient(http);
 var docEditsClient = (http) => typedClient(http);
 var docLifecycleClient = (http) => typedClient(http);
+var attachmentsClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -20281,6 +20282,9 @@ async function handleDocsTool(name, a, ctx) {
   });
   const boardDocs = () => docLifecycleClient(http).workspaces[":ws"];
   const lifecycleApi = () => boardDocs().docs[":docId"];
+  const sets = () => attachmentsClient(http).workspaces;
+  const boardParam = () => ({ ws: encodeURIComponent(boardId()) });
+  const setParam = (setId) => ({ ...boardParam(), setId: encodeURIComponent(setId) });
   const editsApi = () => docEditsClient(http).workspaces[":ws"].docs[":docId"];
   const docParam = (docId) => ({
     ws: encodeURIComponent(boardId()),
@@ -20520,19 +20524,21 @@ async function handleDocsTool(name, a, ctx) {
         producedBy,
         privacy
       } = a;
-      const res = await http("POST", "/workspaces", {
-        folderPath,
-        owner: CWD,
-        ...setId ? { workspaceId: setId } : {},
-        hubWorkspaceId: boardId(),
-        ...title ? { title } : {},
-        ...include ? { include } : {},
-        ...exclude ? { exclude } : {},
-        ...maxFiles !== undefined ? { maxFiles } : {},
-        ...producedBy ? { producedBy } : {},
-        ...privacy !== undefined ? { privacy } : {}
-      });
-      if (subscribe !== false && res?.workspaceId) {
+      const res = await sets().$post({
+        json: {
+          folderPath,
+          owner: CWD,
+          workspaceId: setId || undefined,
+          hubWorkspaceId: boardId(),
+          title: title || undefined,
+          include: include || undefined,
+          exclude: exclude || undefined,
+          maxFiles,
+          producedBy: producedBy || undefined,
+          privacy
+        }
+      }).then((r) => r.json());
+      if (subscribe !== false && "workspaceId" in res && res.workspaceId) {
         await watchWorkspace(res.workspaceId);
       }
       return ok2(res);
@@ -20550,19 +20556,22 @@ async function handleDocsTool(name, a, ctx) {
         subscribe,
         producedBy
       } = a;
-      const res = await http("POST", `${board()}/attachments`, {
-        repo,
-        base,
-        ...target ? { target } : {},
-        owner: CWD,
-        ...reviewId ? { reviewId } : {},
-        ...title ? { title } : {},
-        ...exclude ? { exclude } : {},
-        ...groups ? { groups } : {},
-        ...maxFiles !== undefined ? { maxFiles } : {},
-        ...producedBy ? { producedBy } : {}
-      });
-      if (subscribe !== false && res?.reviewId) {
+      const res = await sets()[":ws"].attachments.$post({
+        param: boardParam(),
+        json: {
+          repo,
+          base,
+          target: target || undefined,
+          owner: CWD,
+          reviewId: reviewId || undefined,
+          title: title || undefined,
+          exclude: exclude || undefined,
+          groups: groups || undefined,
+          maxFiles,
+          producedBy: producedBy || undefined
+        }
+      }).then((r) => r.json());
+      if (subscribe !== false && res.reviewId) {
         await watchWorkspace(res.reviewId);
       }
       return ok2(res);
@@ -20570,26 +20579,28 @@ async function handleDocsTool(name, a, ctx) {
     case "delete_review":
     case "delete_attachment_set": {
       const { setId, force, purge } = a;
-      const params = [force ? "force=true" : "", purge ? "purge=true" : ""].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      const res = await http("DELETE", `${board()}/attachments/${encodeURIComponent(setId)}${qs}`);
+      const res = await sets()[":ws"].attachments[":setId"].$delete({
+        param: setParam(setId),
+        query: { force: force ? "true" : undefined, purge: purge ? "true" : undefined }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "archive_review":
     case "archive_attachment_set": {
       const { setId, reason } = a;
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/archive`, {
-        author: AUTHOR,
-        ...reason !== undefined ? { reason } : {}
-      });
+      const res = await sets()[":ws"].attachments[":setId"].archive.$post({
+        param: setParam(setId),
+        json: { author: AUTHOR, reason }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "unarchive_review":
     case "unarchive_attachment_set": {
       const { setId } = a;
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/unarchive`, {
-        author: AUTHOR
-      });
+      const res = await sets()[":ws"].attachments[":setId"].unarchive.$post({
+        param: setParam(setId),
+        json: { author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "archive_doc": {
@@ -20604,14 +20615,15 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "list_archived_reviews":
     case "list_archived_attachments": {
-      const res = await http("GET", `${board()}/attachments?archived=true`);
+      const res = await sets()[":ws"].attachments.$get({ param: boardParam(), query: { archived: "true" } }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_workspace": {
       const { workspaceId, force, purge } = a;
-      const params = [force ? "force=true" : "", purge ? "purge=true" : ""].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      const res = await http("DELETE", `/workspaces/${encodeURIComponent(workspaceId)}${qs}`);
+      const res = await sets()[":ws"].$delete({
+        param: { ws: encodeURIComponent(workspaceId) },
+        query: { force: force ? "true" : undefined, purge: purge ? "true" : undefined }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "refresh_workspace":
@@ -20619,7 +20631,7 @@ async function handleDocsTool(name, a, ctx) {
     case "refresh_attachment_set": {
       const { setId, workspaceId } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/refresh`, {});
+      const res = await sets()[":ws"].attachments[":setId"].refresh.$post({ param: setParam(id), json: {} }).then((r) => r.json());
       return ok2(res);
     }
     case "set_workspace_groups":
@@ -20627,9 +20639,7 @@ async function handleDocsTool(name, a, ctx) {
     case "set_attachment_groups": {
       const { setId, workspaceId, groups } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/groups`, {
-        groups
-      });
+      const res = await sets()[":ws"].attachments[":setId"].groups.$post({ param: setParam(id), json: { groups } }).then((r) => r.json());
       return ok2(res);
     }
     case "find_and_replace": {

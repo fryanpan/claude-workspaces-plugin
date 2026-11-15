@@ -22,6 +22,7 @@ import type { Hono } from 'hono';
  */
 import { hc } from 'hono/client';
 import type {
+  AttachmentsContract,
   DocEditsContract,
   DocLifecycleContract,
   DocThreadsContract,
@@ -50,3 +51,4 @@ export const mountsClient = (http: Http) => typedClient<MountsApi>(http);
 export const docThreadsClient = (http: Http) => typedClient<DocThreadsContract>(http);
 export const docEditsClient = (http: Http) => typedClient<DocEditsContract>(http);
 export const docLifecycleClient = (http: Http) => typedClient<DocLifecycleContract>(http);
+export const attachmentsClient = (http: Http) => typedClient<AttachmentsContract>(http);

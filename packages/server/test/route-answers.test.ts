@@ -25,7 +25,8 @@
  * the chain may have done something else.
  *
  * THE STATE each request meets. `:ws`, `:taskId` and `:docId` are a real
- * board, a task on it and a doc filed on it, so most rows reach their own
+ * board, a task on it and a doc filed on it, and `:setId` a folder attachment
+ * on it (built only for the rows that name one), so most rows reach their own
  * handler rather than the workspace scope's 404. Every other parameter is
  * `exampleFor`'s stand-in, which names nothing. Reads share one seed. Every
  * write (POST, PUT, DELETE) gets a board, task and doc of its own, so an
@@ -41,7 +42,7 @@
  * here may pull, restart or update a plugin cache.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Deployer } from '../src/deploy.ts';
@@ -61,7 +62,19 @@ interface Seed {
   ws: string;
   taskId: string;
   docId: string;
+  /** A browsed folder attached to the board, for the rows that name one. */
+  setId?: string;
 }
+
+/**
+ * The query a row's read needs to reach its handler. `GET …/attachments` is
+ * only answered with `?archived=true`, the one form any caller sends
+ * (`list_archived_attachments`); without it the request falls through to the
+ * board's not-found page and the row records nothing about the route.
+ */
+const READ_QUERY: Record<string, string> = {
+  '/workspaces/:ws/attachments': '?archived=true',
+};
 
 /** One request's answer, as one comparable line. */
 async function answerOf(
@@ -98,6 +111,7 @@ function addressFor(pattern: string, seed: Seed): string {
     ':ws': seed.ws,
     ':taskId': seed.taskId,
     ':docId': encodeURIComponent(seed.docId),
+    ...(seed.setId ? { ':setId': encodeURIComponent(seed.setId) } : {}),
   };
   return exampleFor(pattern)
     .split('/')
@@ -113,25 +127,38 @@ describe('every route-table row is answered as recorded', () => {
   let spy: RouteHandlerSpy;
   const answers = new Map<string, string>();
 
-  const seed = async (): Promise<Seed> => {
+  const seed = async (withSet = false): Promise<Seed> => {
     seeds += 1;
-    const ws = handle.tasks.createWorkspace(`Riverbend ${seeds}`).id;
+    // Seeds are built in parallel, so `seeds` moves on during the awaits.
+    const n = seeds;
+    const ws = handle.tasks.createWorkspace(`Riverbend ${n}`).id;
     const filed = handle.tasks.createTask(ws, {
       title: 'Harborlight survey',
       assignee: 'human',
       actor: { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' },
     });
     if (!filed.ok) throw new Error('seed: task create refused');
-    const file = join(dataDir, `saltmarsh-${seeds}.md`);
+    const file = join(dataDir, `saltmarsh-${n}.md`);
     writeFileSync(file, '# Saltmarsh\n\nBody.\n');
     const res = await fetch(`${base}/workspaces/${ws}/docs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ docId: `saltmarsh-${seeds}`, sourceUrl: file }),
+      body: JSON.stringify({ docId: `saltmarsh-${n}`, sourceUrl: file }),
     });
     if (res.status !== 200) throw new Error(`seed: doc create → ${res.status}`);
     const { docId } = (await res.json()) as { docId: string };
-    return { ws, taskId: filed.task.id, docId };
+    if (!withSet) return { ws, taskId: filed.task.id, docId };
+    const folder = join(dataDir, `riverbend-${n}`);
+    mkdirSync(folder);
+    writeFileSync(join(folder, 'notes.md'), '# Riverbend\n');
+    const set = await fetch(`${base}/workspaces/${ws}/attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repo: folder, reviewId: `riverbend-${n}` }),
+    });
+    if (set.status !== 200) throw new Error(`seed: attachment → ${set.status}`);
+    const { reviewId } = (await set.json()) as { reviewId: string };
+    return { ws, taskId: filed.task.id, docId, setId: reviewId };
   };
 
   beforeAll(async () => {
@@ -172,7 +199,7 @@ describe('every route-table row is answered as recorded', () => {
     });
     base = `http://127.0.0.1:${handle.port}`;
 
-    const shared = await seed();
+    const shared = await seed(true);
     // Every row's own methods, plus a HEAD beside every GET: Hono answers a
     // HEAD from a GET handler by itself, so a family that moves would start
     // answering HEAD where the chain did something else.
@@ -192,11 +219,11 @@ describe('every route-table row is answered as recorded', () => {
     // parallel batches: seeding is about half the work, and the spy only
     // attributes one request at a time, so the recorded requests themselves
     // stay sequential.
-    const writes = ordered.filter((r) => !READS.has(r.method)).length;
+    const writes = ordered.filter((r) => !READS.has(r.method));
     const own: Seed[] = [];
-    for (let i = 0; i < writes; i += SEED_BATCH) {
-      const batch = Math.min(SEED_BATCH, writes - i);
-      own.push(...(await Promise.all(Array.from({ length: batch }, () => seed()))));
+    for (let i = 0; i < writes.length; i += SEED_BATCH) {
+      const batch = writes.slice(i, i + SEED_BATCH);
+      own.push(...(await Promise.all(batch.map((r) => seed(r.e.pattern.includes(':setId'))))));
     }
     let nextOwn = 0;
     for (const { e, method } of ordered) {
@@ -206,7 +233,8 @@ describe('every route-table row is answered as recorded', () => {
       if (!at) throw new Error(`no seed left for ${key}`);
       const hasBody = !READS.has(method);
       spy.begin();
-      const res = await fetch(`${base}${addressFor(e.pattern, at)}`, {
+      const query = READS.has(method) ? (READ_QUERY[e.pattern] ?? '') : '';
+      const res = await fetch(`${base}${addressFor(e.pattern, at)}${query}`, {
         method,
         redirect: 'manual',
         headers: hasBody ? { 'content-type': 'application/json' } : {},
@@ -217,6 +245,7 @@ describe('every route-table row is answered as recorded', () => {
           .replaceAll(base, '<base>')
           .replaceAll(at.ws, ':ws')
           .replaceAll(at.taskId, ':taskId')
+          .replaceAll(at.setId ?? ':setId', ':setId')
           .replaceAll(encodeURIComponent(at.docId), ':docId')
           .replaceAll(at.docId, ':docId');
       answers.set(key, await answerOf(res, method, normalize, spy.answeredBy()));
@@ -253,6 +282,7 @@ describe('every route-table row is answered as recorded', () => {
     // and the snapshot would hold nothing about the handlers behind it.
     expect(answers.get('GET /workspaces/:ws/tasks/:taskId/detail')).toStartWith('200 ');
     expect(answers.get('GET /workspaces/:ws/docs/:docId/content')).toStartWith('200 ');
+    expect(answers.get('GET /workspaces/:ws/attachments/:setId/files')).toStartWith('200 ');
   });
 
   it('names the module behind each answer (positive control for the spy)', () => {

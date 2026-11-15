@@ -21,7 +21,9 @@ import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import { wantsJson } from '../workspace-path.ts';
+import type * as Contract from './attachments-contract.ts';
 import { refuseLeadDiff } from './lead-diff-scope.ts';
+import { answerAs, sent } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -87,7 +89,7 @@ export async function handleWorkspaceCreateRead(
   // goals hang off (plan §3.12 commit 1). Nothing is migrated between
   // the two; attach_doc LINKS existing docs/attachments to a board workspace.
   if (pathname === '/workspaces' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<Contract.WorkspacesPostBody>(await safeJson(req));
     const folderPath = body?.folderPath as string | undefined;
     // A board's lead reaches this path (`middleware/lead-scope.ts`) for a
     // folder bind on its own board, and nothing else: the path names no
@@ -140,10 +142,13 @@ export async function handleWorkspaceCreateRead(
       // workspace that doesn't exist yet), so the route brings the
       // board doc up itself.
       taskProjection.ensureWorkspace(workspace.id);
-      return j(200, {
-        workspace,
-        url: `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspace.id)}`,
-      });
+      return j(
+        200,
+        answerAs<Contract.BoardCreateAnswer>({
+          workspace,
+          url: `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspace.id)}`,
+        }),
+      );
     }
     if (!folderPath || typeof folderPath !== 'string') {
       return j(400, { error: 'folderPath (folder bind) or name (board workspace) required' });
@@ -210,23 +215,26 @@ export async function handleWorkspaceCreateRead(
       reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
     }));
     const entryUrl = reviewEntryUrl(boardWorkspaceId, res.workspaceId, files);
-    return j(200, {
-      ...res,
-      // The review's id, under the name the CRDT already stores it as.
-      // `workspaceId` (from ...res) carries the SAME value and is
-      // deprecated for one release — a caller built before the rename
-      // reads it by that name, and a key must never change MEANING.
-      setId: res.workspaceId,
-      hubWorkspaceId: boardWorkspaceId,
-      // Said on every answer, not only when asked for: a caller that omitted
-      // the flag is told its folder is shareable rather than left to assume.
-      privacy,
-      privacyNote: privacyNote(privacy),
-      files,
-      links: withLinkUrls(boardWorkspaceId, res.links),
-      entryUrl,
-      url: entryUrl,
-    });
+    return j(
+      200,
+      answerAs<Contract.FolderBindAnswer>({
+        ...res,
+        // The review's id, under the name the CRDT already stores it as.
+        // `workspaceId` (from ...res) carries the SAME value and is
+        // deprecated for one release — a caller built before the rename
+        // reads it by that name, and a key must never change MEANING.
+        setId: res.workspaceId,
+        hubWorkspaceId: boardWorkspaceId,
+        // Said on every answer, not only when asked for: a caller that omitted
+        // the flag is told its folder is shareable rather than left to assume.
+        privacy,
+        privacyNote: privacyNote(privacy),
+        files,
+        links: withLinkUrls(boardWorkspaceId, res.links),
+        entryUrl,
+        url: entryUrl,
+      }),
+    );
   }
   // --- REST: diff attachments — POST /workspaces/<ws>/attachments ---
   // One doc per changed file, grouped as a review (= the review id), FILED ON
@@ -248,7 +256,7 @@ export async function handleWorkspaceCreateRead(
     // and makes every file in it lazily openable, so this is the wider
     // of the two, not the narrower.
     if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
-    const body = await safeJson(req);
+    const body = sent<Contract.DiffReviewBody>(await safeJson(req));
     // A board's lead reaches this path for its own board only
     // (`middleware/lead-scope.ts`); the body is held to its roots here.
     const lead = rq.leadBoard ? refuseLeadDiff(rq.leadBoard, body, ctx.leadDiffRepo) : null;
@@ -319,15 +327,18 @@ export async function handleWorkspaceCreateRead(
     const entryUrl = reviewEntryUrl(boardWorkspaceId, res.reviewId, files);
     // `setId` is the same value as `reviewId`, under the name the CRDT
     // stores it as — both stay, and neither changes meaning.
-    return j(200, {
-      ...res,
-      setId: res.reviewId,
-      hubWorkspaceId: boardWorkspaceId,
-      files,
-      ...(res.links ? { links: withLinkUrls(boardWorkspaceId, res.links) } : {}),
-      entryUrl,
-      url: entryUrl,
-    });
+    return j(
+      200,
+      answerAs<Contract.DiffReviewAnswer>({
+        ...res,
+        setId: res.reviewId,
+        hubWorkspaceId: boardWorkspaceId,
+        files,
+        links: res.links ? withLinkUrls(boardWorkspaceId, res.links) : undefined,
+        entryUrl,
+        url: entryUrl,
+      }),
+    );
   }
   // List bound workspaces with rolled-up triage signals (fileCount,
   // openThreads, allIdle, owner, lastActivityAt). The daily triage uses

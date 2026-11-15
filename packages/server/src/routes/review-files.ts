@@ -26,7 +26,9 @@ import {
   redactWorkspaceTreeForVisitor,
 } from '../share/redact-meta.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import type { SetGroupsBody } from './attachments-contract.ts';
 import { serveReviewRaw } from './review-raw.ts';
+import { sent } from './route-contract.ts';
 
 /**
  * ===== A review is addressed under the board that holds it. =====
@@ -166,7 +168,7 @@ export async function handleReviewFileRoutes(
   const wsGroupsMatch = matchRest(scope, REVIEW_REST.groups);
   if (wsGroupsMatch && req.method === 'POST') {
     const setId = decodeURIComponent(wsGroupsMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<SetGroupsBody>(await safeJson(req));
     const groups = body?.groups;
     if (!Array.isArray(groups)) return j(400, { error: 'groups array required' });
     const res = docStore.setWorkspaceGroups(
