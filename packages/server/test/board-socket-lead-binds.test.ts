@@ -35,7 +35,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardSocketPath } from '../src/board-sockets.ts';
+import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { boundFiles } from '../src/slow-fs.ts';
 import { tinyPng } from './tiny-png.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -199,10 +201,29 @@ describe('a bound folder under a lead’s root, after the bind', () => {
     renameSync(join(root, 'sub'), join(root, 'sub.moved'));
     symlinkSync(outside, join(root, 'sub'));
     await rewrite(docId, '# harbor plan\n\nSecond pass.\n');
-    // The refusal reports itself on the doc rather than failing quietly.
-    const said = await waitFor(() => h.docStore.getSyncError(docId), {
-      describe: 'the refused write-back reported on the doc',
-    });
+    // The refusal reports itself on the doc rather than failing quietly. A
+    // guarded write slower than the deadline (300ms under the test scale, and
+    // CI's runners have taken 815ms over a stat) comes back `timeout`, not
+    // `refused`, and quarantines the path for the backoff (slow-fs.ts). Once
+    // the backoff ends, write again: that write is the one the guard judges.
+    const plan = join(root, 'sub', 'plan.md');
+    let parked = false;
+    const said = await waitFor(
+      async () => {
+        const error = h.docStore.getSyncError(docId);
+        if (error) return error;
+        if (boundFiles.quarantined(plan)) parked = true;
+        else if (parked) {
+          parked = false;
+          await rewrite(docId, '# harbor plan\n\nThird pass.\n');
+        }
+        return undefined;
+      },
+      {
+        timeout: DOC_STORE_TIMINGS.boundReadRetryMs + 4000,
+        describe: 'the refused write-back reported on the doc',
+      },
+    );
     expect(JSON.stringify(said)).toContain('Not saved to disk');
     expect(existsSync(join(outside, 'plan.md'))).toBe(false);
     expect(readdirSync(outside)).toEqual([]);
