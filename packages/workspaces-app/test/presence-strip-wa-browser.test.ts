@@ -32,9 +32,8 @@ const reading = (width: number, phase: Reading['phase']): Reading => {
 
 /** What a reader sees of a circle, without which element paints it. */
 const look = (c: Circle) => ({
-  // The name only: the rest of the label is an age ("1s ago") that moves
-  // between two readings taken seconds apart.
-  name: c.label.split(' · ')[0],
+  key: c.key,
+  here: c.here,
   following: c.following,
   box: c.box,
   paint: c.paint,
@@ -51,17 +50,23 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
     it(`draws the same people, boxes, fills and follow ring as today's at ${width}`, () => {
       const classic = reading(width, 'classic');
       const wa = reading(width, 'wa');
-      // A control: the reader, Bob and the lead, with Bob followed — so two
-      // equal readings are not two empty strips agreeing.
-      expect(classic.circles.length).toBeGreaterThanOrEqual(3);
-      expect(classic.circles.filter((c) => c.following).map((c) => c.label)).toEqual([
-        expect.stringMatching(/^Bob/),
+      // A control: Bob and the lead (the reader is never drawn), with Bob
+      // followed — so two equal readings are not two empty strips agreeing.
+      expect(classic.circles.length).toBeGreaterThanOrEqual(2);
+      expect(classic.circles.filter((c) => c.following).map((c) => c.key)).toEqual([
+        run?.bobKeys[width],
       ]);
       expect(classic.circles.every((c) => c.face === 'classic')).toBe(true);
       expect(wa.circles.every((c) => c.face === 'wa')).toBe(true);
       expect(wa.themeLinked).toBe(true);
       expect(wa.circles.map(look)).toEqual(classic.circles.map(look));
-      for (const c of wa.circles) expect([c.paint.w, c.paint.h]).toEqual([28, 28]);
+      // On the reader's page 28px; elsewhere in the workspace 20px. Bob is
+      // on the board with Alice, so at least one of each size is a control.
+      expect(wa.circles.some((c) => c.here)).toBe(true);
+      for (const c of wa.circles) {
+        const size = c.here ? 28 : 20;
+        expect([c.paint.w, c.paint.h]).toEqual([size, size]);
+      }
     }, 60_000);
 
     it(`draws the same circles before the Web Awesome theme has loaded, at ${width}`, () => {
@@ -74,7 +79,7 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
       const classic = reading(width, 'classic').toast;
       const wa = reading(width, 'wa').toast;
       expect(classic?.face).toBe('classic');
-      expect(classic?.text).toBe('Following Bob — long-press again to stop');
+      expect(classic?.text).toBe('Following Bob — tap the page to stop');
       expect(wa?.face).toBe('wa');
       expect(wa?.classicShown, 'one toast, not two').toBe(false);
       const {
@@ -119,7 +124,7 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
         const toast = reading(width, phase).toast;
         // CONTROL: the chip is on the page, and the toast is the follow toast.
         expect(toast?.chip, 'the ≡ chip is shown').not.toBeNull();
-        expect(toast?.text).toBe('Following Bob — long-press again to stop');
+        expect(toast?.text).toBe('Following Bob — tap the page to stop');
         const t = toast?.box ?? { x: 0, y: 0, w: 0, h: 0 };
         const c = toast?.chip ?? { x: 0, y: 0, w: 0, h: 0 };
         const w = Math.min(t.x + t.w, c.x + c.w) - Math.max(t.x, c.x);

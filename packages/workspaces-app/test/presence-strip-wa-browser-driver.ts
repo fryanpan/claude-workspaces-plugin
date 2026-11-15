@@ -5,7 +5,8 @@
  * 430x932.
  *
  * Alice has the board open; Bob and the board's lead are on it too. The
- * driver reads her strip on the current code, follows Bob with a long-press,
+ * driver reads her strip's deck on the current code, follows Bob by holding
+ * his row in the list the deck opens,
  * then switches the board onto the collab core with her page still open and
  * reads the strip again once it has swapped, following Bob again so the follow
  * toast shows from that side too. Then it switches the board back.
@@ -28,12 +29,16 @@ import {
   deadline,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   until,
 } from './follow-browser-kit.ts';
 
 export interface Circle {
-  label: string;
+  /** The participant the circle draws (`p-<id>` / `a-<agentId>`). */
+  key: string;
+  /** On the reader's page (28px) or elsewhere in the workspace (20px). */
+  here: boolean;
   face: 'classic' | 'wa';
   following: boolean;
   /** The button's box, rounded to whole pixels. */
@@ -84,23 +89,26 @@ export interface Reading {
 
 export interface WaStripRun {
   readings: Reading[];
+  /** Bob's circle key at each width, so a reading can name him. */
+  bobKeys: Record<number, string>;
 }
 
 const step = (what: string): void => {
   process.stderr.write(`[wa-strip-driver] ${what}\n`);
 };
 
-/** Every circle in the strip, read the way a reader sees it. */
+/** Every circle in the strip's deck, read the way a reader sees it. */
 const READ_STRIP = `(() => {
   const round = (n) => Math.round(n);
-  return [...document.querySelectorAll('#board-people button')].map((b) => {
+  return [...document.querySelectorAll('#board-people .board-presence-deck > [data-key]')].map((b) => {
     const avatar = b.querySelector('wa-avatar');
     const painter = avatar ?? b;
     const r = b.getBoundingClientRect();
     const p = painter.getBoundingClientRect();
     const s = getComputedStyle(painter);
     return {
-      label: b.getAttribute('aria-label') ?? '',
+      key: b.getAttribute('data-key') ?? '',
+      here: b.classList.contains('board-presence-here'),
       face: avatar ? 'wa' : 'classic',
       following: b.classList.contains('board-following'),
       box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
@@ -233,18 +241,34 @@ async function read(cdp: Cdp, width: number, phase: Reading['phase']): Promise<R
   };
 }
 
-/** Hold the mouse on a circle until the follow ring is on (`ring`) or off. */
-async function longPress(cdp: Cdp, label: string, ring = true): Promise<void> {
-  const at = (await cdp.evaluate(`(() => {
-    const b = [...document.querySelectorAll('#board-people button')]
-      .find((x) => (x.getAttribute('aria-label') ?? '').startsWith(${JSON.stringify(label)}));
-    if (!b) return null;
-    const r = b.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  })()`)) as { x: number; y: number } | null;
-  if (!at) throw new Error(`no circle for ${label}`);
-  const mouse = (type: 'mousePressed' | 'mouseReleased') =>
+/** The centre of the first element `selector` matches, or null. */
+const centreOf = (selector: string) => `(() => {
+  const e = document.querySelector(${JSON.stringify(selector)});
+  if (!e) return null;
+  const r = e.getBoundingClientRect();
+  return r.width ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+})()`;
+
+/** Open the deck's list by hovering it, hold the mouse on `key`'s row until
+ *  the follow ring is on (`ring`) or off, and wait for the list to close. */
+async function longPress(cdp: Cdp, key: string, ring = true): Promise<void> {
+  const deck = await until(
+    'the deck',
+    async () =>
+      (await cdp.evaluate(centreOf('#board-people .board-presence-deck'))) as {
+        x: number;
+        y: number;
+      } | null,
+  );
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: deck.x, y: deck.y });
+  const row = `#board-people .board-presence-row[data-key="${key}"] .board-presence-who`;
+  const at = await until(
+    `the row for ${key}`,
+    async () => (await cdp.evaluate(centreOf(row))) as { x: number; y: number } | null,
+  );
+  const mouse = (type: 'mouseMoved' | 'mousePressed' | 'mouseReleased') =>
     cdp.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  await mouse('mouseMoved');
   await mouse('mousePressed');
   await until(ring ? 'the follow ring' : 'the ring gone', async () =>
     (await cdp.evaluate(`!!document.querySelector('#board-people .board-following')`)) === ring
@@ -252,6 +276,13 @@ async function longPress(cdp: Cdp, label: string, ring = true): Promise<void> {
       : null,
   );
   await mouse('mouseReleased');
+  // Move off the strip, so hovering does not open the list again.
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 400 });
+  await until('the list closed', async () =>
+    (await cdp.evaluate(`!document.querySelector('#board-people .board-presence-list')`))
+      ? true
+      : null,
+  );
 }
 
 async function shoot(cdp: Cdp, dir: string | undefined, name: string): Promise<void> {
@@ -268,6 +299,7 @@ async function main(): Promise<void> {
   const board = await bootBoard('wa-strip', { collabCore: true });
   const { base, ws, post } = board;
   const readings: Reading[] = [];
+  const bobKeys: Record<number, string> = {};
   try {
     for (const [width, height] of SIZES) {
       await post(`/workspaces/${ws}/collab-core`, { on: false });
@@ -284,16 +316,18 @@ async function main(): Promise<void> {
         signIn: true,
         ws,
       });
+      const bobKey = `p-${personIdOf(`bob-${width}`)}`;
+      bobKeys[width] = bobKey;
       await navigate(bob, `${base}/workspaces/${ws}`);
       await navigate(alice, `${base}/workspaces/${ws}`);
-      const bobHere = `[...document.querySelectorAll('#board-people button')].some((b) => (b.getAttribute('aria-label') ?? '').startsWith('Bob'))`;
+      const bobHere = `!!document.querySelector('#board-people .board-presence-deck [data-key="${bobKey}"]')`;
       await until('Bob in the strip', async () => ((await alice.evaluate(bobHere)) ? true : null));
       await until('the lead in the strip', async () =>
         (await alice.evaluate(`!!document.querySelector('#board-people .board-presence-agent')`))
           ? true
           : null,
       );
-      await longPress(alice, 'Bob');
+      await longPress(alice, bobKey);
       readings.push(await read(alice, width, 'classic'));
       await shoot(alice, shots, `strip-classic-${width}`);
 
@@ -315,8 +349,8 @@ async function main(): Promise<void> {
           ? true
           : null,
       );
-      await longPress(alice, 'Bob', false);
-      await longPress(alice, 'Bob');
+      await longPress(alice, bobKey, false);
+      await longPress(alice, bobKey);
       await until('the Web Awesome toast', async () =>
         (await alice.evaluate(`!!document.querySelector('wa-toast.board-wa-toast wa-toast-item')`))
           ? true
@@ -344,7 +378,7 @@ async function main(): Promise<void> {
     board.lead.close();
     await shutdown();
   }
-  const run: WaStripRun = { readings };
+  const run: WaStripRun = { readings, bobKeys };
   process.stdout.write(`${JSON.stringify(run)}\n`);
   process.exit(0);
 }
