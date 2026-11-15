@@ -24,6 +24,19 @@ const REMOVED_KEYFRAMES = [
   'cw-inline-flash',
 ];
 
+/**
+ * The loops the owner chose, each by name with his words. Exact selectors,
+ * so a new looping rule is never covered by an old exception. An entry the
+ * walk no longer finds fails too, so the list cannot outlive its rule.
+ */
+const CHOSEN_LOOPS: Record<string, string> = {
+  // An agent working on a comment (`doc/thread-mark.ts`): three dots that
+  // brighten and fade in turn on a 4.5s cycle, still under reduced motion.
+  // The owner on the comment-states mock: "Make it a slower animation", then
+  // "Looks right — Breathing". The same mark the widget draws on app pins.
+  '.thread-mark .cw-breathe': 'Breathing, the owner’s pick for the Working mark',
+};
+
 /** A sheet the pages never load, holding one looping rule for the walk to find. */
 const PROBE_CSS =
   '@keyframes calm-probe-spin { to { transform: rotate(360deg); } } .calm-probe { animation: calm-probe-spin 1s linear infinite; }';
@@ -87,9 +100,12 @@ describe('calm by default — the app stylesheets', () => {
     uninstall = installSheets('tokens.css', 'styles.css', 'doc.css', 'board.css', 'settings.css');
     unprobe = installProbe();
     const { infinite } = walkAll();
-    // Control: the probe is seen, so an empty remainder is a real result.
-    expect(infinite).toContain('.calm-probe');
-    expect(infinite.filter((sel) => sel !== '.calm-probe')).toEqual([]);
+    // Every chosen loop is still there, or its exception goes.
+    for (const sel of Object.keys(CHOSEN_LOOPS)) expect(infinite, sel).toContain(sel);
+    // Control: the probe is an infinite loop no exception names, and it is
+    // the one thing left once the chosen loops are set aside, so the
+    // exceptions let through what they name and nothing else.
+    expect(infinite.filter((sel) => !(sel in CHOSEN_LOOPS))).toEqual(['.calm-probe']);
   });
 
   it('paints a pending summary and a corrected word with no animation', () => {
