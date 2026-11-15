@@ -91,6 +91,7 @@ import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
+import type { HonoBoardEnv } from './hono-env.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
@@ -177,6 +178,7 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { honoBoardFamilies } from './routes/hono-board-families.ts';
 import { honoFamilies } from './routes/hono-families.ts';
 import { createHonoFront } from './routes/hono-front.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
@@ -3574,16 +3576,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           .map(linkCandidateOf);
       },
     },
-    docRoutesCtx,
-    appRoutesCtx,
-    workspaceRoutesCtx,
-    taskRoutesCtx,
-    chatAuditRoutesCtx,
-    libraryRoutesCtx,
-    docMoveRoutesCtx,
-    handleArchiveRoutes,
-    reviewFileRoutesCtx,
-    meetingCalendarRoutesCtx,
+    honoBoardFront: createHonoFront<HonoBoardEnv>(
+      honoBoardFamilies({
+        docRoutesCtx,
+        appRoutesCtx,
+        workspaceRoutesCtx,
+        taskRoutesCtx,
+        chatAuditRoutesCtx,
+        libraryRoutesCtx,
+        docMoveRoutesCtx,
+        handleArchiveRoutes,
+        reviewFileRoutesCtx,
+        meetingCalendarRoutesCtx,
+        requireSignInToWrite,
+        policyFor,
+      }),
+    ),
     featureRoutes: features.routes,
     serveShellRoutes,
   });

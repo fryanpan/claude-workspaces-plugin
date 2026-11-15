@@ -11,9 +11,9 @@
  * (`hono-front.ts`, with the families in `hono-families.ts`), then the
  * sign-in and share routes, the two vendor
  * callbacks, the upgrades and streams, and the workspace scope — and then the
- * two halves below them:
- * the board and REST families (`request-chain-board.ts`) and the top-level
- * families with the tail (`request-chain-tail.ts`).
+ * two halves below them: the board families, a second Hono app
+ * (`hono-board-families.ts`), and the top-level families with the tail
+ * (`request-chain-tail.ts`).
  *
  * The order is behaviour. Every comment below that says a position is
  * load-bearing says so about the order of these calls, which is why they
@@ -37,7 +37,6 @@ import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
 import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
-import { serveBoardRoutes } from './request-chain-board.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
 import { createRequestGates } from './request-chain-gates.ts';
 import { serveTopLevelRoutes } from './request-chain-tail.ts';
@@ -277,10 +276,11 @@ export function createRequestChain(
         if (scoped.kind === 'scope') scope = scoped.scope;
       }
 
-      // ── Below the scope ── the board and REST families, then the
-      // top-level families and the tail, in that order and in the order
-      // each file lists them. `null` from the first means nothing there
-      // claimed the address; the second always answers.
+      // ── Below the scope ── the board families, then the top-level
+      // families and the tail. The board families are the second Hono app
+      // (`hono-board-families.ts`), tried here with the scope beside the
+      // gates' proof, in the order the board run used to try them; null
+      // means none claimed the address. The tail always answers.
       const mayMintAppVoice = (): boolean =>
         mayMintAppVoiceFor({
           visitor: visitor !== null,
@@ -289,8 +289,16 @@ export function createRequestChain(
           mustSignIn: requireSignInToWrite && browserProvedNobody(),
           frameGrant: gate.frameAppVoice,
         });
+      const boarded = await ctx.honoBoardFront(req, {
+        gate,
+        attribution,
+        ownerProven,
+        scope,
+        mayMintAppVoice,
+      });
+      if (boarded) return boarded;
       const rq = { req, url, pathname, scope, gate, attribution, ownerProven, mayMintAppVoice };
-      return (await serveBoardRoutes(ctx, rq)) ?? (await serveTopLevelRoutes(ctx, rq));
+      return await serveTopLevelRoutes(ctx, rq);
     }
   };
 }

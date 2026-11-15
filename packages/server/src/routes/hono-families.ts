@@ -47,7 +47,7 @@
  */
 import type { Context, Hono, Next } from 'hono';
 import type { FeatureRoutes } from '../feature-module.ts';
-import type { HonoAppEnv, HonoFamily } from '../hono-env.ts';
+import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
 import { HOLDS_PATH } from '../keeper/keeper-announce.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { RECALL_STATUS_PATH } from '../middleware/recall-callback-gate.ts';
@@ -124,7 +124,10 @@ export interface HonoFamiliesContext {
 }
 
 /** The per-request values the chain used to pass, read off `c.env`. */
-function chainValues(c: Context<HonoAppEnv>, ctx: HonoFamiliesContext) {
+export function chainValues<E extends HonoGateEnv>(
+  c: Context<{ Bindings: E }>,
+  ctx: Pick<HonoFamiliesContext, 'requireSignInToWrite' | 'policyFor'>,
+) {
   const req = c.req.raw;
   const url = new URL(req.url);
   const { gate, attribution, ownerProven } = c.env;
@@ -148,29 +151,33 @@ function chainValues(c: Context<HonoAppEnv>, ctx: HonoFamiliesContext) {
 }
 
 type Answer = Response | null | undefined;
-type ChainValues = ReturnType<typeof chainValues>;
+type ChainValues = ReturnType<typeof chainValues<HonoGateEnv>>;
 
 /**
- * Register one family's handler on every pattern in `patterns`.
+ * Register one family's handler on every pattern in `patterns`, handing it
+ * what `values` reads off the request.
  *
  * Two patterns can match one address (`/access` and `/access/*` both match
  * `/access`), and Hono runs every match in turn; a request is tried once per
  * family, so a handler that declined is not asked again.
  */
-function claim(
-  app: Hono<HonoAppEnv>,
-  ctx: HonoFamiliesContext,
+export function claimWith<E extends HonoGateEnv, V>(
+  app: Hono<{ Bindings: E }>,
+  values: (c: Context<{ Bindings: E }>) => V,
   patterns: readonly string[],
-  answer: (v: ChainValues) => Answer | Promise<Answer>,
+  answer: (v: V) => Answer | Promise<Answer>,
 ): void {
   const tried = new WeakSet<Request>();
-  const middleware = async (c: Context<HonoAppEnv>, next: Next): Promise<Response | undefined> => {
+  const middleware = async (
+    c: Context<{ Bindings: E }>,
+    next: Next,
+  ): Promise<Response | undefined> => {
     if (tried.has(c.req.raw)) {
       await next();
       return undefined;
     }
     tried.add(c.req.raw);
-    const res = await answer(chainValues(c, ctx));
+    const res = await answer(values(c));
     if (!res) {
       await next();
       return undefined;
@@ -182,6 +189,16 @@ function claim(
     return res;
   };
   for (const pattern of patterns) app.all(pattern, middleware);
+}
+
+/** `claimWith` over the front's own values. */
+function claim(
+  app: Hono<HonoAppEnv>,
+  ctx: HonoFamiliesContext,
+  patterns: readonly string[],
+  answer: (v: ChainValues) => Answer | Promise<Answer>,
+): void {
+  claimWith(app, (c) => chainValues(c, ctx), patterns, answer);
 }
 
 /** The families, in the order the chain used to try them. */

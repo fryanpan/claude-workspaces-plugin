@@ -11,6 +11,7 @@
 import type { addressesLocalOnlySet } from '../attachment-privacy.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { FeatureRoutes } from '../feature-module.ts';
+import type { HonoBoardEnv } from '../hono-env.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
@@ -21,23 +22,13 @@ import type {
   RequestAttribution,
 } from '../request-attribution.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
-import type { AppRoutesContext } from './apps.ts';
-import type { createArchiveRoutes } from './archive.ts';
 import type { BoardImportRoutesContext } from './board-import.ts';
 import type { BoardLinkRoutesContext } from './board-links.ts';
-import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
-import type { DocMoveRoutesContext } from './doc-move.ts';
-import type { DocRoutesContext } from './docs-routes-context.ts';
 import type { GithubHubRoutesContext } from './github-hub.ts';
 import type { HomeFeedRoutesContext } from './home-feed.ts';
 import type { HonoFront } from './hono-front.ts';
-import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
-import type { ReviewFileRoutesContext } from './review-files.ts';
 import type { ShellStatic } from './shell-static.ts';
-import type { TaskRoutesContext } from './tasks.ts';
 import type { UpgradeStream } from './upgrade-stream.ts';
-import type { LibraryRoutesContext } from './workspace-library.ts';
-import type { WorkspaceRoutesContext } from './workspaces.ts';
 
 export interface RequestChainContext {
   // ── The front door ──
@@ -78,17 +69,11 @@ export interface RequestChainContext {
   taskStore: TaskStore;
   workspacesOfMember: (collection: string, memberId: string) => readonly string[];
 
-  // ── The board and REST families (`request-chain-board.ts`) ──
-  docRoutesCtx: DocRoutesContext;
-  appRoutesCtx: AppRoutesContext;
-  workspaceRoutesCtx: WorkspaceRoutesContext;
-  taskRoutesCtx: TaskRoutesContext;
-  chatAuditRoutesCtx: ChatAuditRoutesContext;
-  libraryRoutesCtx: LibraryRoutesContext;
-  docMoveRoutesCtx: DocMoveRoutesContext;
-  handleArchiveRoutes: ReturnType<typeof createArchiveRoutes>['handleArchiveRoutes'];
-  reviewFileRoutesCtx: ReviewFileRoutesContext;
-  meetingCalendarRoutesCtx: MeetingCalendarRoutesContext;
+  // ── The board families ──
+  /** The board app (`hono-front.ts`) with the families it answers
+   *  (`hono-board-families.ts`), tried below the workspace scope with the
+   *  scope in its env, and above the top-level families and the tail. */
+  honoBoardFront: HonoFront<HonoBoardEnv>;
 
   // ── The top-level families and the tail (`request-chain-tail.ts`) ──
   /** Every registered feature's routes (`features.ts`), tried at the
