@@ -5,13 +5,17 @@
  */
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
+import * as awarenessProtocol from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 
 const MSG_SYNC = 0;
+const MSG_AWARENESS = 1;
 
 export interface Page {
   ydoc: Y.Doc;
+  /** Who is here, as the server told this page; a state set on it is sent. */
+  awareness: awarenessProtocol.Awareness;
   /** Resolves once the server's first sync step 2 has arrived. */
   ready: Promise<void>;
   /** `sync:<step>` for a sync frame, else the frame's kind, in arrival order. */
@@ -27,6 +31,7 @@ export function openPage(
   opts: { quiet?: boolean; cookie?: string } = {},
 ): Page {
   const ydoc = new Y.Doc();
+  const awareness = new awarenessProtocol.Awareness(ydoc);
   const kinds: string[] = [];
   const headers = { origin, ...(opts.cookie ? { cookie: opts.cookie } : {}) };
   const ws = new WebSocket(url, { headers } as unknown as string[]);
@@ -47,6 +52,9 @@ export function openPage(
     const kind = decoding.readVarUint(dec);
     if (kind !== MSG_SYNC) {
       kinds.push(String(kind));
+      if (kind === MSG_AWARENESS) {
+        awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(dec), ws);
+      }
       return;
     }
     const step = decoding.peekVarUint(dec);
@@ -63,7 +71,30 @@ export function openPage(
       ws.send(syncFrame((enc) => syncProtocol.writeUpdate(enc, update)));
     });
   }
-  return { ydoc, ready, kinds, sendRaw: (f) => ws.send(f), close: () => ws.close() };
+  awareness.on(
+    'update',
+    ({ added, updated }: { added: number[]; updated: number[] }, from: unknown) => {
+      if (from !== 'local' || ws.readyState !== WebSocket.OPEN) return;
+      const enc = encoding.createEncoder();
+      encoding.writeVarUint(enc, MSG_AWARENESS);
+      encoding.writeVarUint8Array(
+        enc,
+        awarenessProtocol.encodeAwarenessUpdate(awareness, [...added, ...updated]),
+      );
+      ws.send(encoding.toUint8Array(enc));
+    },
+  );
+  return {
+    ydoc,
+    awareness,
+    ready,
+    kinds,
+    sendRaw: (f) => ws.send(f),
+    close: () => {
+      awareness.destroy();
+      ws.close();
+    },
+  };
 }
 
 export function syncFrame(write: (enc: encoding.Encoder) => void): Uint8Array {

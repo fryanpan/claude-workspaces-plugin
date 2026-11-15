@@ -1,15 +1,16 @@
-/**
- * Creating a board or binding a folder, the diff review beside it, and the two reads of a board.
- *
- * Lifted verbatim out of `createServer`'s request closure; the handlers
- * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
- */
 import { classifyActor } from '../actor-identity.ts';
 import {
   ATTACHMENT_PRIVACY_ERROR,
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
+/**
+ * Creating a board or binding a folder, the diff review beside it, and the two reads of a board.
+ *
+ * Lifted verbatim out of `createServer`'s request closure; the handlers
+ * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
+ */
+import { collabCoreView } from '../collab-core-switch.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -434,10 +435,11 @@ export async function handleWorkspaceCreateRead(
       // usually an agent deciding whether to work here and a boolean
       // gives it nothing to act on.
       ...(isRetired(stored) ? { retired: retiredNotice(stored) } : {}),
-      // Whether this board's sockets take the collab core: its own setting
-      // AND the server-wide one. The board page reads it to pick which
-      // presence strip to draw; `collab-core.changed` says when it moves.
-      collabCore: { active: collabCoreSwitch.usesCore(workspaceId) },
+      // Whether this board's sockets take the collab core (`active`): its
+      // own setting AND the server-wide one. The board page reads it to pick
+      // which presence strip to draw and to paint the owner's switch;
+      // `collab-core.changed` says when it moves.
+      collabCore: collabCoreView(collabCoreSwitch, workspaceId),
     });
   }
   return undefined;
