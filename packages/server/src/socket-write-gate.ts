@@ -190,7 +190,12 @@ export function rootsTouched(ydoc: Y.Doc, update: Uint8Array): Set<string | null
       for (let i = Y.findIndexSS(held, clock); i < held.length; i++) {
         const struct = held[i];
         if (!struct || struct.id.clock >= end) break;
-        if (struct instanceof Y.Item && struct.parent instanceof Y.AbstractType) {
+        // Already deleted: deleting it again is a no-op (see `writesNothing`).
+        if (
+          struct instanceof Y.Item &&
+          !struct.deleted &&
+          struct.parent instanceof Y.AbstractType
+        ) {
           roots.add(rootOfType(struct.parent as AnyType));
         }
       }
@@ -200,11 +205,36 @@ export function rootsTouched(ydoc: Y.Doc, update: Uint8Array): Set<string | null
   return roots;
 }
 
-/** Whether an update changes anything at all. An empty step 2 is what every
- *  client sends when it has nothing new, and it is never a refusal. */
-function writesNothing(update: Uint8Array): boolean {
+/**
+ * Whether an update changes nothing in this doc, and so is never a refusal.
+ *
+ * Yjs sends a doc's WHOLE delete set in every step 2, whatever state vector
+ * it answers, so the step 2 a page sends back on every reconnect names every
+ * delete the doc has ever made. Resolving a comment overwrites its status — a
+ * delete under `threads` — so before this read the delete set, each reconnect
+ * to a doc with a resolved comment was judged a threads write (every one of
+ * the 423 report-only refusals prod logged), and the same frame from a
+ * comment or view socket was judged a role write. Deleting an item the doc already holds as deleted is a no-op
+ * in Yjs, so a delete set made only of those writes nothing.
+ */
+function writesNothing(ydoc: Y.Doc, update: Uint8Array): boolean {
   const { structs, ds } = Y.decodeUpdate(update);
-  return structs.length === 0 && ds.clients.size === 0;
+  if (structs.length > 0) return false;
+  for (const [client, ranges] of ds.clients) {
+    const state = Y.getState(ydoc.store, client);
+    const held = ydoc.store.clients.get(client) ?? [];
+    for (const { clock, len } of ranges) {
+      if (len === 0) continue;
+      const end = clock + len;
+      if (end > state) return false;
+      for (let i = Y.findIndexSS(held, clock); i < held.length; i++) {
+        const struct = held[i];
+        if (!struct || struct.id.clock >= end) break;
+        if (struct instanceof Y.Item && !struct.deleted) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /** The refusal this frame earns, or null when it may be applied. */
@@ -216,7 +246,7 @@ export function judgeSocketWrite(
   const update = updateOfSyncFrame(frame);
   if (update === null) return null;
   try {
-    if (writesNothing(update)) return null;
+    if (writesNothing(ydoc, update)) return null;
     if (access && !mayEditDocs(access.role)) return 'role';
     const roots = rootsTouched(ydoc, update);
     if (roots.has(null)) return 'unresolved';
