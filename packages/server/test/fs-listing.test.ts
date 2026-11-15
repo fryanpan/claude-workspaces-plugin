@@ -140,10 +140,14 @@ describe('folder listing cache', () => {
     try {
       const t0 = Date.now();
       expect(isListedFile(repo, 'Harborlight.md')).toBe(true);
+      // The listing's own stamp: the clock can tick between reading t0 and
+      // the build, which made its age at t0 read -1 on CI.
+      const at = t0 - (listingAge(repo, t0) ?? 0);
       setSystemTime(new Date(t0 + LISTING_KEEP_WARM_MS + PAST_TTL_MS));
       expect(warmListings()).toBe(0);
       setSystemTime();
-      expect(listingAge(repo, t0)).toBe(0);
+      // Not rebuilt by the tick: still the listing stamped at the read.
+      expect(listingAge(repo, at)).toBe(0);
     } finally {
       setSystemTime();
       rmSync(repo, { recursive: true, force: true });
