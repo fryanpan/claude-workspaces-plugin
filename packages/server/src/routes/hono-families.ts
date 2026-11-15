@@ -1,11 +1,10 @@
 /**
  * ── The route families Hono answers (milestone M12) ──
  *
- * Each family here used to be a call in the ordered chain
- * (`request-chain.ts` and the two files below it). It is now registered on
- * the Hono app (`hono-front.ts`) under the path patterns it claims, and its
- * handler is the same function the chain called, handed the same
- * per-request values. The chain no longer calls it.
+ * Each family here used to be a call in the hand-ordered chain that
+ * `hono-app.ts` replaced. It is now registered on the Hono app
+ * (`hono-front.ts`) under the path patterns it claims, and its handler is
+ * the same function the chain called, handed the same per-request values.
  *
  * Moved so far: sign-in and share (`auth-share.ts`), the two vendor
  * callbacks (the voice agent's LLM call and Recall's status webhook), the

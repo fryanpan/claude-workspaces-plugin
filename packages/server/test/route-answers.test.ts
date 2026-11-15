@@ -1,8 +1,8 @@
 /**
  * What answers every address in the route table, recorded and held.
  *
- * Milestone M12 moves route families one at a time from the ordered chain
- * (`routes/request-chain.ts`) into the Hono app (`routes/hono-front.ts`). A
+ * Milestone M12 moved route families one at a time from the ordered chain
+ * (now `routes/hono-app.ts`) into the Hono app (`routes/hono-front.ts`). A
  * move is correct when nothing a caller can see changes. This file is that
  * check: it drives one real request per (pattern, method) row of
  * `ROUTE_TABLE` through a running server and compares each answer with

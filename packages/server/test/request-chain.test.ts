@@ -1,5 +1,5 @@
 /**
- * The request chain's front door and gates (routes/request-chain.ts), driven
+ * The router's front door and gates (routes/hono-app.ts, routes/hono-gates.ts), driven
  * directly with a context whose families are never reached.
  *
  * What is pinned here is the ORDER at the top of the chain: the bad-path
@@ -12,13 +12,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { HonoOpenAppEnv } from '../src/hono-env.ts';
 import type { Admission } from '../src/request-admission.ts';
+import type { HonoAppContext } from '../src/routes/hono-app-context.ts';
+import { createHonoApp } from '../src/routes/hono-app.ts';
 import { createHonoFront } from '../src/routes/hono-front.ts';
 import {
   type HonoOpenFamiliesContext,
   honoOpenFamilies,
 } from '../src/routes/hono-open-families.ts';
-import type { RequestChainContext } from '../src/routes/request-chain-context.ts';
-import { createRequestChain } from '../src/routes/request-chain.ts';
 
 const j = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -71,13 +71,13 @@ const chain = (admit: (req: Request) => Admission) => {
       seen.admitted.push(new URL(req.url).pathname);
       return admit(req);
     },
-  } as unknown as RequestChainContext;
-  return { handle: createRequestChain(ctx), seen };
+  } as unknown as HonoAppContext;
+  return { handle: createHonoApp(ctx), seen };
 };
 
 const refused = (): Admission => ({ admitted: false, response: j(403, { error: 'refused' }) });
 
-describe('createRequestChain', () => {
+describe('createHonoApp', () => {
   it('answers a malformed path segment before any gate, through CORS', async () => {
     const { handle, seen } = chain(refused);
     const res = await handle(new Request('http://localhost/api/docs/%E0%A4%A'));

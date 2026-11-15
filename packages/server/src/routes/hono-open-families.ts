@@ -4,7 +4,7 @@
  * The home feed, the board import and the GitHub hub. Their callers name
  * nobody — a peer server, a relay, a loopback tool — so each family checks
  * its own caller, and all three are tried inside the gates
- * (`request-chain-gates.ts`): below the CORS preflight and the cross-origin
+ * (`hono-gates.ts`): below the CORS preflight and the cross-origin
  * write gates, above admission. That is where they sat in the chain, and this
  * app is tried from the same line, so nothing above or below them moved.
  *

@@ -178,6 +178,7 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { createHonoApp } from './routes/hono-app.ts';
 import { honoBoardFamilies } from './routes/hono-board-families.ts';
 import { honoFamilies } from './routes/hono-families.ts';
 import { createHonoFront } from './routes/hono-front.ts';
@@ -191,7 +192,6 @@ import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
-import { createRequestChain } from './routes/request-chain.ts';
 import { type ReviewFileRoutesContext } from './routes/review-files.ts';
 import { type ReviewQueueRoutesContext } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
@@ -3483,8 +3483,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several
-    // early returns and a hoisted inner `route` declaration that a wrapping
-    // try/finally would move out of function scope. This wrapper is the one
+    // early returns. This wrapper is the one
     // place every request passes through exactly once — the route table and
     // the fallback both call it — so one `finally` cannot leak an entry, not
     // even for an upgrade that answers `undefined`.
@@ -3492,10 +3491,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return withEventOrigin(origin, () => handleRequest(req)).finally(settled);
   }
 
-  // The ordered chain every request runs — see routes/request-chain.ts. Built
+  // The router every request runs — see routes/hono-app.ts. Built
   // last, from every route family's context above; it reads nothing per
   // request but the request.
-  const handleRequest = createRequestChain({
+  const handleRequest = createHonoApp({
     docStore,
     applyCors,
     refreshSession,

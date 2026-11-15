@@ -1,7 +1,7 @@
 /**
  * The gates run once, before both routers.
  *
- * The front Hono app sits below `routes/request-chain-gates.ts` and above the
+ * The front Hono app sits below `routes/hono-gates.ts` and above the
  * upgrade-and-stream run and the board app. This file drives a real server, with a probe
  * family mounted on the Hono app, and shows three things:
  *
