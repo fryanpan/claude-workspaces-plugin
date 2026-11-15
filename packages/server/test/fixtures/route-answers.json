@@ -538,6 +538,7 @@
   "POST /workspaces/:ws/docs/:docId/agent-components/place": "400 application/json error=author {id,name} is required: component writes are attributed {error} | by docs.ts:handleDocResourceRoutes > doc-component-agent.ts:handleDocComponentAgentRoute",
   "POST /workspaces/:ws/docs/:docId/archive": "200 application/json {docId,manifest,ok} | by archive.ts:handleArchiveRoutes",
   "POST /workspaces/:ws/docs/:docId/assets": "415 application/json error=only PNG, JPEG, GIF and WebP images are stored {error} | by docs.ts:handleDocResourceRoutes > doc-assets.ts:handleDocAssetsRoute",
+  "POST /workspaces/:ws/docs/:docId/block_edits": "400 application/json error=edits must be an array {error,ok} | by docs.ts:handleDocResourceRoutes > doc-edit-routes.ts:handleDocEditRoutes",
   "POST /workspaces/:ws/docs/:docId/component-grants": "400 application/json error=author {id,name} is required: component writes are attributed {error} | by docs.ts:handleDocResourceRoutes > doc-component-agent.ts:handleDocComponentAgentRoute",
   "POST /workspaces/:ws/docs/:docId/content": "400 application/json error=markdown is required {error} | by docs.ts:handleDocResourceRoutes > doc-edit-routes.ts:handleDocEditRoutes",
   "POST /workspaces/:ws/docs/:docId/delete_block_at_anchor": "400 application/json error=exactly one of threadId or anchorId required {error} | by docs.ts:handleDocResourceRoutes > doc-edit-routes.ts:handleDocEditRoutes",

@@ -8,6 +8,7 @@
  * (an author, a review payload), so the contract names it without
  * constraining its shape.
  */
+import type { Thread } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { Hono } from 'hono';
 import type { HeldFields } from '../review-gate-types.ts';
@@ -95,6 +96,31 @@ export interface ThreadPromoteBody {
   options?: unknown;
 }
 
+/** A new thread on the doc's subject (the MCP sends `anchor: subject`). */
+export interface ThreadCreateBody {
+  author?: unknown;
+  text: string;
+  anchor: unknown;
+  pageEdits?: unknown;
+  requestId?: string;
+  voice?: unknown;
+  review?: unknown;
+  to?: unknown;
+}
+/** A new thread on the text `find` names. */
+export interface ThreadByFindBody {
+  author?: unknown;
+  text: string;
+  find: string;
+  contextBefore?: string;
+  contextAfter?: string;
+  occurrence?: number;
+  path?: string;
+  suggest?: unknown;
+  review?: unknown;
+  to?: unknown;
+}
+
 /** The answers an MCP tool reads fields of. The others stay untyped. */
 export type ThreadReviseAnswer = {
   thread: unknown;
@@ -110,11 +136,22 @@ export interface ThreadPromoteAnswer {
   shapeGaps?: unknown;
 }
 
+/** A created thread. Its `thread.id` is what the agent's next call names. */
+export type ThreadCreateAnswer = {
+  thread: Thread;
+  reviewAdvice?: unknown;
+  threadUrl?: string;
+  url?: string;
+  reviewItemId?: string;
+} & HeldFields;
+
 const DOC = '/workspaces/:ws/docs/:docId';
 const THREAD = `${DOC}/threads/:threadId`;
 
 export const docThreadsContract = new Hono()
   .get(`${DOC}/threads`, query<{ status?: string }>(), contractOnly)
+  .post(`${DOC}/threads`, json<ThreadCreateBody>(), answers<ThreadCreateAnswer>())
+  .post(`${DOC}/threads/by_find`, json<ThreadByFindBody>(), answers<ThreadCreateAnswer>())
   .get(THREAD, contractOnly)
   .post(`${THREAD}/comments`, json<ThreadCommentBody>(), contractOnly)
   .post(`${THREAD}/answer`, json<ThreadAnswerBody>(), contractOnly)

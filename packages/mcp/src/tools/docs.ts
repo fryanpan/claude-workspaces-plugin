@@ -25,7 +25,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
-import { docThreadsClient } from '../server-client.ts';
+import { docEditsClient, docThreadsClient } from '../server-client.ts';
 import { inactiveWatches } from '../sse-loop.ts';
 import { type ThreadCreateInput, threadCreateRequest } from '../thread-create.ts';
 import type { RestoreState, WatchCoverage } from '../watch-coverage.ts';
@@ -138,10 +138,24 @@ export async function handleDocsTool(
     docId: encodeURIComponent(docId),
     threadId: encodeURIComponent(threadId),
   });
+  /** One doc's edit and anchor routes, through the typed client. */
+  const editsApi = () => docEditsClient(http).workspaces[':ws'].docs[':docId'];
+  const docParam = (docId: string) => ({
+    ws: encodeURIComponent(boardId()),
+    docId: encodeURIComponent(docId),
+  });
+  const anchorParam = (docId: string, anchorId: string) => ({
+    ...docParam(docId),
+    anchorId: encodeURIComponent(anchorId),
+  });
+  const suggestionParam = (docId: string, sid: string) => ({
+    ...docParam(docId),
+    sid: encodeURIComponent(sid),
+  });
   // Sent on every scoped edit: the author is whose get_doc reads the server's
   // stale-write rule judges the edit by, and the confirm flag is forwarded
   // only when true, so the default stays the protected path.
-  const scoped = (): Record<string, unknown> => ({
+  const scoped = (): { author: unknown; confirmOverwriteHumanEdits?: true } => ({
     author: AUTHOR,
     ...(a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}),
   });
@@ -297,13 +311,14 @@ export async function handleDocsTool(
     case 'create_thread': {
       // Two endpoints; omitting `find` opens the thread on the subject.
       // See thread-create.ts.
-      const { path, body } = threadCreateRequest(
-        a as unknown as ThreadCreateInput,
-        AUTHOR,
-        board(),
-      );
-      const res = await http('POST', path, body);
-      return ok(res);
+      const input = a as unknown as ThreadCreateInput;
+      const req = threadCreateRequest(input, AUTHOR, board());
+      const param = docParam(input.docId);
+      const res =
+        req.by === 'find'
+          ? await threadsApi().threads.by_find.$post({ param, json: req.body })
+          : await threadsApi().threads.$post({ param, json: req.body });
+      return ok(await res.json());
     }
     case 'resolve_thread': {
       const { docId, threadId } = a as { docId: string; threadId: string };
@@ -683,25 +698,29 @@ export async function handleDocsTool(
         parseInlineMarks?: boolean;
         suggest?: boolean;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/find_and_replace`,
-        {
-          ...scoped(),
-          find,
-          replace,
-          ...(contextBefore !== undefined ? { contextBefore } : {}),
-          ...(contextAfter !== undefined ? { contextAfter } : {}),
-          ...(occurrence !== undefined ? { occurrence } : {}),
-          ...(replaceAll === true ? { replaceAll: true } : {}),
-          // Forwarded whenever it is a boolean, not only when true: a
-          // proposal's offered text parses by DEFAULT, so `false` is the
-          // only way to ask for literal characters and dropping it here
-          // would answer the opposite of what the caller wrote.
-          ...(typeof parseInlineMarks === 'boolean' ? { parseInlineMarks } : {}),
-          ...(suggest === true ? { suggest: true, author: suggestionAuthor() } : {}),
-        },
-      );
+      // Absent fields are named as `undefined`, which the JSON body leaves
+      // out: a named field is one a server-side rename fails typecheck on.
+      const res = await editsApi()
+        .find_and_replace.$post({
+          param: docParam(docId),
+          json: {
+            ...scoped(),
+            find,
+            replace,
+            contextBefore,
+            contextAfter,
+            occurrence,
+            replaceAll: replaceAll === true ? true : undefined,
+            // Forwarded whenever it is a boolean, not only when true: a
+            // proposal's offered text parses by DEFAULT, so `false` is the
+            // only way to ask for literal characters and dropping it here
+            // would answer the opposite of what the caller wrote.
+            parseInlineMarks: typeof parseInlineMarks === 'boolean' ? parseInlineMarks : undefined,
+            suggest: suggest === true ? true : undefined,
+            ...(suggest === true ? { author: suggestionAuthor() } : {}),
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'rewrite_thread_region': {
@@ -729,23 +748,23 @@ export async function handleDocsTool(
     }
     case 'list_suggestions': {
       const { docId } = a as { docId: string };
-      const res = await http('GET', `${board()}/docs/${encodeURIComponent(docId)}/suggestions`);
+      const res = await editsApi()
+        .suggestions.$get({ param: docParam(docId) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'accept_suggestion': {
       const { docId, sid } = a as { docId: string; sid: string };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/suggestions/${encodeURIComponent(sid)}/accept`,
-      );
+      const res = await editsApi()
+        .suggestions[':sid'].accept.$post({ param: suggestionParam(docId, sid) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'reject_suggestion': {
       const { docId, sid } = a as { docId: string; sid: string };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/suggestions/${encodeURIComponent(sid)}/reject`,
-      );
+      const res = await editsApi()
+        .suggestions[':sid'].reject.$post({ param: suggestionParam(docId, sid) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'resolve_all_suggestions': {
@@ -754,11 +773,9 @@ export async function handleDocsTool(
         action: 'accept' | 'reject';
         authorId?: string;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/suggestions/resolve_all`,
-        { action, ...(authorId !== undefined ? { authorId } : {}) },
-      );
+      const res = await editsApi()
+        .suggestions.resolve_all.$post({ param: docParam(docId), json: { action, authorId } })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'insert_after_thread': {
@@ -807,13 +824,12 @@ export async function handleDocsTool(
         occurrence?: number;
         label?: string;
       };
-      const res = await http('POST', `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors`, {
-        find,
-        ...(contextBefore !== undefined ? { contextBefore } : {}),
-        ...(contextAfter !== undefined ? { contextAfter } : {}),
-        ...(occurrence !== undefined ? { occurrence } : {}),
-        ...(label !== undefined ? { label } : {}),
-      });
+      const res = await editsApi()
+        .agent_anchors.$post({
+          param: docParam(docId),
+          json: { find, contextBefore, contextAfter, occurrence, label },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'edit_at_anchor': {
@@ -822,11 +838,12 @@ export async function handleDocsTool(
         anchorId: string;
         op: { kind: 'replace' | 'insert_after'; text: string };
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`,
-        { ...scoped(), ...op },
-      );
+      const res = await editsApi()
+        .agent_anchors[':anchorId'].edit.$post({
+          param: anchorParam(docId, anchorId),
+          json: { ...scoped(), kind: op.kind, text: op.text },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'read_doc_outline': {
@@ -847,14 +864,19 @@ export async function handleDocsTool(
     }
     case 'apply_block_edits': {
       const { docId, edits } = a as { docId: string; edits: unknown };
-      const res = await http('POST', `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits,
-        // Always sent: block edits are ATTRIBUTED — the id is what later lets
-        // this session rewrite its own blocks and stops it rewriting anyone
-        // else's, and the name/colour are what a proposal is signed with when
-        // an edit lands on a block a person has since touched.
-        author: suggestionAuthor(),
-      });
+      const res = await editsApi()
+        .block_edits.$post({
+          param: docParam(docId),
+          json: {
+            edits,
+            // Always sent: block edits are ATTRIBUTED — the id is what later lets
+            // this session rewrite its own blocks and stops it rewriting anyone
+            // else's, and the name/colour are what a proposal is signed with when
+            // an edit lands on a block a person has since touched.
+            author: suggestionAuthor(),
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'insert_blocks_under_heading': {
@@ -863,10 +885,15 @@ export async function handleDocsTool(
         headingId: string;
         markdown: string;
       };
-      const res = await http('POST', `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits: [{ op: 'insert_under_heading', headingId, markdown }],
-        author: suggestionAuthor(),
-      });
+      const res = await editsApi()
+        .block_edits.$post({
+          param: docParam(docId),
+          json: {
+            edits: [{ op: 'insert_under_heading', headingId, markdown }],
+            author: suggestionAuthor(),
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'insert_blocks_at_anchor': {
@@ -876,19 +903,19 @@ export async function handleDocsTool(
         markdown: string;
         placement?: 'after-block' | 'top-level';
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/insert_blocks`,
-        { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
-      );
+      const res = await editsApi()
+        .agent_anchors[':anchorId'].insert_blocks.$post({
+          param: anchorParam(docId, anchorId),
+          json: { ...scoped(), markdown, placement },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'delete_anchor': {
       const { docId, anchorId } = a as { docId: string; anchorId: string };
-      const res = await http(
-        'DELETE',
-        `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}`,
-      );
+      const res = await editsApi()
+        .agent_anchors[':anchorId'].$delete({ param: anchorParam(docId, anchorId) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'delete_block_at_anchor': {
@@ -897,15 +924,12 @@ export async function handleDocsTool(
         threadId?: string;
         anchorId?: string;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/delete_block_at_anchor`,
-        {
-          ...scoped(),
-          ...(threadId !== undefined ? { threadId } : {}),
-          ...(anchorId !== undefined ? { anchorId } : {}),
-        },
-      );
+      const res = await editsApi()
+        .delete_block_at_anchor.$post({
+          param: docParam(docId),
+          json: { ...scoped(), threadId, anchorId },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'delete_blocks_in_range': {
@@ -926,19 +950,20 @@ export async function handleDocsTool(
         startOccurrence?: number;
         endOccurrence?: number;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/delete_blocks_in_range`,
-        {
-          ...scoped(),
-          startFind,
-          endFind,
-          ...(contextBefore !== undefined ? { contextBefore } : {}),
-          ...(contextAfter !== undefined ? { contextAfter } : {}),
-          ...(startOccurrence !== undefined ? { startOccurrence } : {}),
-          ...(endOccurrence !== undefined ? { endOccurrence } : {}),
-        },
-      );
+      const res = await editsApi()
+        .delete_blocks_in_range.$post({
+          param: docParam(docId),
+          json: {
+            ...scoped(),
+            startFind,
+            endFind,
+            contextBefore,
+            contextAfter,
+            startOccurrence,
+            endOccurrence,
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'delete_section': {
@@ -948,16 +973,12 @@ export async function handleDocsTool(
         level?: number;
         occurrence?: number;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/delete_section`,
-        {
-          ...scoped(),
-          heading,
-          ...(level !== undefined ? { level } : {}),
-          ...(occurrence !== undefined ? { occurrence } : {}),
-        },
-      );
+      const res = await editsApi()
+        .delete_section.$post({
+          param: docParam(docId),
+          json: { ...scoped(), heading, level, occurrence },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'observe_url': {
