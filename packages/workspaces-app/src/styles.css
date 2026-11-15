@@ -1079,6 +1079,94 @@ body.threads-resizing {
 .cw-ic-done {
   background-image: var(--ic-done);
 }
+/* An agent's mark on the card's glyph (doc/thread-mark.ts), the same two
+   marks the widget draws on an app's pins (widget comment-view-css.ts, same
+   motion and colours): the glyph becomes a disc, purple with three white dots
+   that brighten and fade in turn on a 4.5s cycle while an agent works, teal
+   with a white check that draws itself once when it is done. Here, not in
+   doc.css, because the board renders this card too. The disc keeps the
+   glyph's box, so the card does not move when a mark arrives. Positions are
+   the widget's 16px layout in percent. Longhands, as there, so tests can
+   read them computed. */
+.thread-glyph.thread-mark {
+  background: #5b3f8f;
+  border-radius: 50%;
+}
+.thread-glyph.thread-mark[data-mark="done"] {
+  background: #0a7b83;
+}
+.thread-mark .cw-pg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.thread-mark .cw-pg svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.thread-mark .cw-breathe {
+  position: absolute;
+  top: 41.5%;
+  width: 16.9%;
+  height: 16.9%;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.35;
+  animation-name: cw-breathe;
+  animation-duration: 4.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-delay: 0s;
+}
+.thread-mark .cw-breathe:nth-child(1) {
+  left: 19.7%;
+}
+.thread-mark .cw-breathe:nth-child(2) {
+  left: 41.5%;
+  animation-delay: 0.75s;
+}
+.thread-mark .cw-breathe:nth-child(3) {
+  left: 63.4%;
+  animation-delay: 1.5s;
+}
+@keyframes cw-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.thread-mark .cw-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.thread-mark .cw-draw {
+  stroke-dashoffset: 1;
+  animation-name: cw-draw;
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.3, 0.6, 0.3, 1);
+  animation-delay: 0.12s;
+  animation-fill-mode: forwards;
+}
+@keyframes cw-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-mark .cw-breathe {
+    animation-name: none;
+    opacity: 0.85;
+  }
+  .thread-mark .cw-draw {
+    animation-name: none;
+    stroke-dashoffset: 0;
+  }
+}
 /* No red "new" dot or ring on a card that changed since the reader last
    looked: calm by default (owner, 2026-09-13), no badges. */
 /* The folded face of a declared thread answers in place, and the field IS how
