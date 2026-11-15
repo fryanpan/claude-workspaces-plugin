@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
+import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
 
 const answers = JSON.parse(
@@ -38,6 +39,18 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
     // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
     app: docEditsContract as unknown as Hono<any>,
     servedBy: ['doc-edit-routes.ts:handleDocEditRoutes'],
+  },
+  {
+    name: 'doc lifecycle',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: docLifecycleContract as unknown as Hono<any>,
+    servedBy: [
+      'docs.ts:handleDocCreateListRoutes',
+      'doc-resource.ts:handleDocResourceCore',
+      'doc-edit-routes.ts:handleDocEditRoutes',
+      'archive.ts:handleArchiveRoutes',
+      'apps.ts:handleAppRoutes',
+    ],
   },
 ];
 

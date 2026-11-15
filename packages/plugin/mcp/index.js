@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.373";
+var version2 = "0.1.374";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20199,6 +20199,7 @@ function typedClient(http) {
 var mountsClient = (http) => typedClient(http);
 var docThreadsClient = (http) => typedClient(http);
 var docEditsClient = (http) => typedClient(http);
+var docLifecycleClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -20243,8 +20244,7 @@ var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason", "taskId", "why
 async function watchCreated(watchDoc, a, res) {
   if (a.subscribe === false)
     return;
-  const made = res?.docId;
-  const docId = typeof made === "string" && made !== "" ? made : a.docId;
+  const docId = res.docId !== undefined && res.docId !== "" ? res.docId : a.docId;
   if (typeof docId === "string" && docId !== "")
     await watchDoc(docId);
 }
@@ -20279,6 +20279,8 @@ async function handleDocsTool(name, a, ctx) {
     docId: encodeURIComponent(docId),
     threadId: encodeURIComponent(threadId)
   });
+  const boardDocs = () => docLifecycleClient(http).workspaces[":ws"];
+  const lifecycleApi = () => boardDocs().docs[":docId"];
   const editsApi = () => docEditsClient(http).workspaces[":ws"].docs[":docId"];
   const docParam = (docId) => ({
     ws: encodeURIComponent(boardId()),
@@ -20299,19 +20301,17 @@ async function handleDocsTool(name, a, ctx) {
   switch (name) {
     case "list_docs": {
       const { kind, query, sourcePrefix, limit, cursor, full } = a;
-      const params = new URLSearchParams;
-      if (kind)
-        params.set("kind", kind);
-      if (query)
-        params.set("query", query);
-      if (sourcePrefix)
-        params.set("sourcePrefix", sourcePrefix);
-      params.set("limit", String(typeof limit === "number" && limit > 0 ? Math.min(Math.floor(limit), 500) : 50));
-      if (cursor)
-        params.set("cursor", cursor);
-      if (full)
-        params.set("full", "1");
-      const res = await http("GET", `${board()}/docs?${params.toString()}`);
+      const res = await boardDocs().docs.$get({
+        param: { ws: encodeURIComponent(boardId()) },
+        query: {
+          kind: kind || undefined,
+          query: query || undefined,
+          sourcePrefix: sourcePrefix || undefined,
+          limit: String(typeof limit === "number" && limit > 0 ? Math.min(Math.floor(limit), 500) : 50),
+          cursor: cursor || undefined,
+          full: full ? "1" : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "list_threads": {
@@ -20428,72 +20428,83 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "get_doc": {
       const { docId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/content?reader=${encodeURIComponent(AUTHOR.id)}`);
+      const res = await lifecycleApi().content.$get({ param: docParam(docId), query: { reader: AUTHOR.id } }).then((r) => r.json());
       return ok2(res);
     }
     case "doc_status": {
       const { docId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/status`);
+      const res = await lifecycleApi().status.$get({ param: docParam(docId) }).then((r) => r.json());
       return ok2(res);
     }
     case "create_review_doc":
     case "attach_markdown": {
       const { docId, path, title, setId, producedBy } = a;
-      const res = await http("POST", `${board()}/docs`, {
-        docId,
-        type: "markdown",
-        sourceUrl: path,
-        owner: CWD,
-        ...title ? { title } : {},
-        ...setId ? { setId } : {},
-        ...producedBy ? { producedBy } : {}
-      });
+      const res = await boardDocs().docs.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          type: "markdown",
+          sourceUrl: path,
+          owner: CWD,
+          title: title || undefined,
+          setId: setId || undefined,
+          producedBy: producedBy || undefined
+        }
+      }).then((r) => r.json());
       await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "set_doc_content": {
       const { docId, markdown, confirmOverwriteHumanEdits } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/content`, {
-        markdown,
-        author: AUTHOR,
-        ...confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}
-      });
+      const res = await lifecycleApi().content.$post({
+        param: docParam(docId),
+        json: {
+          markdown,
+          author: AUTHOR,
+          confirmOverwriteHumanEdits: confirmOverwriteHumanEdits === true ? true : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "reparse_from_disk": {
       const { docId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/reparse_from_disk`);
+      const res = await lifecycleApi().reparse_from_disk.$post({ param: docParam(docId) }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_doc": {
       const { docId, force } = a;
-      const qs = force ? "?force=true" : "";
-      const res = await http("DELETE", `${board()}/docs/${encodeURIComponent(docId)}${qs}`);
+      const res = await lifecycleApi().$delete({ param: docParam(docId), query: { force: force ? "true" : undefined } }).then((r) => r.json());
       return ok2(res);
     }
     case "bind_mock":
     case "attach_mockup": {
       const { docId, sourceHtmlPath, title } = a;
-      const res = await http("POST", `${board()}/docs`, {
-        docId,
-        type: "mockup",
-        owner: CWD,
-        ...sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {},
-        ...title ? { title } : {}
-      });
+      const res = await boardDocs().docs.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          type: "mockup",
+          owner: CWD,
+          sourceUrl: sourceHtmlPath || undefined,
+          title: title || undefined
+        }
+      }).then((r) => r.json());
       await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "attach_app": {
       const { docId, origin, title, servesPrefix } = a;
-      const res = await http("POST", `${board()}/apps`, {
-        docId,
-        origin,
-        owner: CWD,
-        producedBy: { agentId: AUTHOR.id },
-        ...title ? { title } : {},
-        ...typeof servesPrefix === "boolean" ? { servesPrefix } : {}
-      });
+      const res = await boardDocs().apps.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          origin,
+          owner: CWD,
+          producedBy: { agentId: AUTHOR.id },
+          title: title || undefined,
+          servesPrefix: typeof servesPrefix === "boolean" ? servesPrefix : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "bind_folder":
@@ -20583,17 +20594,12 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "archive_doc": {
       const { docId, reason } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/archive`, {
-        author: AUTHOR,
-        ...reason !== undefined ? { reason } : {}
-      });
+      const res = await lifecycleApi().archive.$post({ param: docParam(docId), json: { author: AUTHOR, reason } }).then((r) => r.json());
       return ok2(res);
     }
     case "unarchive_doc": {
       const { docId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/unarchive`, {
-        author: AUTHOR
-      });
+      const res = await lifecycleApi().unarchive.$post({ param: docParam(docId), json: { author: AUTHOR } }).then((r) => r.json());
       return ok2(res);
     }
     case "list_archived_reviews":

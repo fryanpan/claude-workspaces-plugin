@@ -27,6 +27,7 @@ import {
   type InsertBlocksAtAnchorBody,
   type ResolveAllSuggestionsBody,
 } from './doc-edits-contract.ts';
+import type { SetContentBody } from './doc-lifecycle-contract.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
@@ -146,7 +147,7 @@ export async function handleDocEditRoutes(
   // Write-the-bound-file + reparse_from_disk, which raced the
   // write-back and clobbered (see docs/research/2026-08-03 review).
   if (rest === 'content' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<SetContentBody>(await safeJson(req));
     const markdown = String(body?.markdown ?? '');
     if (markdown.length === 0) return j(400, { error: 'markdown is required' });
     // Stale-write guard (2026-08-26 incident): a whole-doc rewrite
