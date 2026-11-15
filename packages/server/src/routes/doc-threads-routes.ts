@@ -63,6 +63,7 @@ import type {
   ThreadInsertAfterBody,
   ThreadInsertBlocksAfterBody,
   ThreadProgressBody,
+  ThreadReviseAnswer,
   ThreadReviseBody,
   ThreadRewriteRegionBody,
   ThreadSummaryBody,
@@ -78,7 +79,7 @@ import {
   scopedEditGuard,
   withSyncError,
 } from './docs-routes-context.ts';
-import { sent } from './route-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 /**
  * The id of the item a write just raised — the STANDING declaration on the
@@ -682,12 +683,17 @@ export async function handleDocThreadRoutes(
         docLink && itemBoard
           ? new URL(reviewItemPath(itemBoard, itemKey), docLink).href
           : undefined;
-      return j(200, {
-        thread: docStore.getThread(docId, threadId) ?? res.thread,
-        review: gate.review,
-        ...(url !== undefined ? { url } : {}),
-        ...heldFields(gate),
-      });
+      return j(
+        200,
+        answerAs<ThreadReviseAnswer>({
+          thread: docStore.getThread(docId, threadId) ?? res.thread,
+          review: gate.review,
+          // Named, not spread, so a field renamed in the answer type fails
+          // here; JSON drops an undefined one, as the spread did.
+          url,
+          ...heldFields(gate),
+        }),
+      );
     }
     // Taking the ASK back — the asker's exit, as opposed to /answer
     // (the reader's) and /revise (a correction that keeps asking).

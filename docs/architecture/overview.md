@@ -486,7 +486,15 @@ a family takes the second unless its handler is small.
      `sent<Body>(await safeJson(req))`. A field the branch reads that the
      interface does not declare is now a type error, so the interface has
      to match what the server reads.
-  3. Add the contract to `CONTRACTS` in `test/route-contracts.test.ts`, with
+  3. Where an MCP tool reads a field of the answer, declare the answer type
+     and give that route `answers<Answer>()` instead of `contractOnly`. The
+     branch builds its JSON as `answerAs<Answer>({...})`, naming each field
+     the tool reads as a property rather than spreading it in, because a
+     spread escapes TypeScript's excess-property check (`JSON.stringify` drops
+     an `undefined` one, so the bytes do not change). Delete the tool's
+     `as {...}` cast so it reads the typed answer. A route whose answer no
+     tool reads stays untyped; the PR body lists them.
+  4. Add the contract to `CONTRACTS` in `test/route-contracts.test.ts`, with
      the handlers that may answer it. A declared route whose row in
      `fixtures/route-answers.json` is missing, or answered by another
      handler, fails there.
@@ -498,9 +506,11 @@ passing each parameter through `encodeURIComponent`, because `hc` does not
 encode them. Prove it with a vitest case that records each tool's method,
 path and body against the old spelling (the existing tool tests must pass
 unchanged), `@ts-expect-error` probes for an unknown field, a missing field,
-a missing route and a wrong method, and two mutations: rename a body field
-and see the server handler and the MCP fail typecheck, and misspell a
-declared path and see `route-contracts.test.ts` fail. `route-answers.test.ts`
+a missing route and a wrong method, at least one probe per family on a
+request field and one on an answer field, and three mutations: rename a
+body field and an answer field and see both the server handler and the MCP
+fail typecheck, and misspell a declared path and see
+`route-contracts.test.ts` fail. `route-answers.test.ts`
 must not change. Report `build:mcp`'s bundle size before and after.
 
 The shared types are the

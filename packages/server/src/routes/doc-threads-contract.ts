@@ -8,8 +8,10 @@
  * (an author, a review payload), so the contract names it without
  * constraining its shape.
  */
+import type { Task } from '@claude-workspaces/core/task-wire';
 import { Hono } from 'hono';
-import { contractOnly, json, query } from './route-contract.ts';
+import type { HeldFields } from '../review-gate-types.ts';
+import { answers, contractOnly, json, query } from './route-contract.ts';
 
 /** The two fields every scoped edit's guard reads (`scopedEditGuard`). */
 export interface ScopedEditFields {
@@ -93,6 +95,21 @@ export interface ThreadPromoteBody {
   options?: unknown;
 }
 
+/** The answers an MCP tool reads fields of. The others stay untyped. */
+export type ThreadReviseAnswer = {
+  thread: unknown;
+  review: unknown;
+  url?: string;
+} & HeldFields;
+export interface ThreadPromoteAnswer {
+  task: Task;
+  url?: string;
+  visibility?: unknown;
+  placement: { placed: boolean; goals?: unknown[] };
+  ignoredLinks?: unknown[];
+  shapeGaps?: unknown;
+}
+
 const DOC = '/workspaces/:ws/docs/:docId';
 const THREAD = `${DOC}/threads/:threadId`;
 
@@ -102,7 +119,7 @@ export const docThreadsContract = new Hono()
   .post(`${THREAD}/comments`, json<ThreadCommentBody>(), contractOnly)
   .post(`${THREAD}/answer`, json<ThreadAnswerBody>(), contractOnly)
   .post(`${THREAD}/edit-comment`, json<ThreadEditCommentBody>(), contractOnly)
-  .post(`${THREAD}/revise`, json<ThreadReviseBody>(), contractOnly)
+  .post(`${THREAD}/revise`, json<ThreadReviseBody>(), answers<ThreadReviseAnswer>())
   .post(`${THREAD}/withdraw`, json<ThreadWithdrawBody>(), contractOnly)
   .post(`${THREAD}/withdraw/undo`, json<ThreadWithdrawBody>(), contractOnly)
   .post(`${THREAD}/summary`, json<ThreadSummaryBody>(), contractOnly)
@@ -115,6 +132,6 @@ export const docThreadsContract = new Hono()
   .post(`${THREAD}/insert_after`, json<ThreadInsertAfterBody>(), contractOnly)
   .post(`${THREAD}/insert_blocks_after`, json<ThreadInsertBlocksAfterBody>(), contractOnly)
   .post(`${THREAD}/linked-items`, json<ThreadLinkedItemBody>(), contractOnly)
-  .post(`${THREAD}/promote`, json<ThreadPromoteBody>(), contractOnly);
+  .post(`${THREAD}/promote`, json<ThreadPromoteBody>(), answers<ThreadPromoteAnswer>());
 
 export type DocThreadsContract = typeof docThreadsContract;

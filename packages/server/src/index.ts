@@ -3,3 +3,4 @@ export * from './webhooks.ts';
 export * from './sse.ts';
 export { createServer } from './server.ts';
 export type { DocThreadsContract, MountsApi } from './server.ts';
+export type { HeldFields } from './review-gate-types.ts';

@@ -28,6 +28,7 @@
 import { parseThreadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-schedule';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { HeldFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
@@ -199,7 +200,7 @@ async function resolveReviewItemId(
  * the item was HELD, with the reason and the server's own next-step line.
  * One helper for both doors (add, revise) so they cannot spell it two ways.
  */
-function heldResult(res: { held?: boolean; heldReason?: string; message?: string }): {
+function heldResult(res: Pick<HeldFields, 'held' | 'heldReason' | 'message'>): {
   held?: true;
   heldReason?: string;
   message?: string;
@@ -337,7 +338,7 @@ export async function handleTaskTool(
         dueAt?: number;
         links?: unknown[];
       };
-      const res = (await threadsApi()
+      const res = await threadsApi()
         .threads[':threadId'].promote.$post({
           param: threadParam(docId, threadId),
           json: {
@@ -353,12 +354,7 @@ export async function handleTaskTool(
             author: AUTHOR,
           },
         })
-        .then((r) => r.json())) as {
-        task: TaskPayload;
-        ignoredLinks?: unknown[];
-        placement?: { placed: boolean; goals?: unknown[] };
-        url?: string;
-      };
+        .then((r) => r.json());
       return ok({
         ...taskCreatedSummary(
           res.url !== undefined ? { ...res.task, url: res.url } : res.task,
@@ -1017,17 +1013,12 @@ export async function handleTaskTool(
             '`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply',
           );
         }
-        const docRes = (await threadsApi()
+        const docRes = await threadsApi()
           .threads[':threadId'].revise.$post({
             param: threadParam(docId, threadId),
             json: { ...patch, commentId },
           })
-          .then((r) => r.json())) as {
-          url?: string;
-          held?: boolean;
-          heldReason?: string;
-          message?: string;
-        };
+          .then((r) => r.json());
         // The hold, forwarded. This used to be dropped with a comment
         // saying the doc route runs no gate — true when it was written and
         // false since the gate reached this surface, which left a filer
@@ -1056,17 +1047,12 @@ export async function handleTaskTool(
               '`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply',
             );
           }
-          const docRes = (await threadsApi()
+          const docRes = await threadsApi()
             .threads[':threadId'].revise.$post({
               param: threadParam(address.docId, address.threadId),
               json: { ...patch, commentId: address.commentId },
             })
-            .then((r) => r.json())) as {
-            url?: string;
-            held?: boolean;
-            heldReason?: string;
-            message?: string;
-          };
+            .then((r) => r.json());
           return ok({
             reviewItemId,
             docId: address.docId,

@@ -13,11 +13,15 @@
  *   `sent<B>(await safeJson(req))`, where `B` is the type the contract
  *   declares. A field renamed in `B` fails typecheck in the handler that reads
  *   it and in the MCP tool that sends it.
+ * - **Answers.** Where an MCP tool reads a field of the answer, the contract
+ *   declares it as `R` with `answers<R>()`, the branch builds its JSON with
+ *   `answerAs<R>({...})`, and the tool reads the typed answer. A renamed
+ *   answer field then fails typecheck on both sides too.
  * - **Paths.** `test/route-contracts.test.ts` holds every declared route to a
  *   row of `test/fixtures/route-answers.json` that a family handler answers.
  *   A declared path that no family serves fails there.
  */
-import type { MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler, TypedResponse } from 'hono';
 
 /** What a handler sees of a field a caller sent: present or not, unchecked. */
 export type Sent<T> = { [K in keyof T]?: unknown };
@@ -50,6 +54,16 @@ const REFUSAL = 'a route contract was asked to serve a request; it only declares
 /** The handler of every declared route. Reaching it is a wiring bug. */
 export function contractOnly(): Response {
   throw new Error(REFUSAL);
+}
+
+/** The handler of a declared route whose answer `R` an MCP tool reads. */
+export function answers<R>(): () => Response & TypedResponse<R, 200, 'json'> {
+  return contractOnly as () => Response & TypedResponse<R, 200, 'json'>;
+}
+
+/** A branch's answer, checked against the type its contract declares. */
+export function answerAs<R>(body: R): R {
+  return body;
 }
 
 async function neverRuns(): Promise<void> {

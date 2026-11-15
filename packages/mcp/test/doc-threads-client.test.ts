@@ -4,9 +4,10 @@
  *
  * The cases record what reached `http` for the tools no other test pins:
  * the same method, path and body the hand-spelled paths sent, with ids
- * percent-encoded as before. `typeProbes` never runs; `bun run typecheck`
- * compiles it, and each `@ts-expect-error` fails the typecheck if the line
- * under it stops being an error.
+ * percent-encoded as before. `typeProbes` (request bodies) and
+ * `answerProbes` (answer fields) never run; `bun run typecheck` compiles
+ * them, and each `@ts-expect-error` fails the typecheck if the line under it
+ * stops being an error.
  */
 import { describe, expect, it } from 'vitest';
 import { docThreadsClient } from '../src/server-client.ts';
@@ -123,4 +124,22 @@ function typeProbes(client: ReturnType<typeof docThreadsClient>): void {
   void thread.withdraw.$post({ param, json: { commentId: 'c-1' } });
   void thread.resolve.$post({ param });
 }
+
+/** The answers the tools read are typed too. Compiled, never called. */
+async function answerProbes(client: ReturnType<typeof docThreadsClient>): Promise<void> {
+  const thread = client.workspaces[':ws'].docs[':docId'].threads[':threadId'];
+  const param = { ws: 'w', docId: 'd', threadId: 't' };
+  const revised = await (await thread.revise.$post({ param, json: { commentId: 'c' } })).json();
+  // @ts-expect-error — the revise answer's link is `url`, not `link`.
+  void revised.link;
+  const promoted = await (await thread.promote.$post({ param, json: {} })).json();
+  // @ts-expect-error — a promoted task's words are `title`, not `name`.
+  void promoted.task.name;
+  // The control: the fields the tools read are there, with their types.
+  const url: string | undefined = revised.url;
+  const heldReason: string | undefined = revised.heldReason;
+  const title: string = promoted.task.title;
+  void [url, heldReason, title];
+}
 void typeProbes;
+void answerProbes;
