@@ -9,6 +9,10 @@ import type { LeadChatViewModel } from './lead-chat-view.ts';
 /** Said while listening is on here and another tab hears the reader. */
 export const PAUSED = 'Paused. Listening in your other tab.';
 
+/** Said while the lead's session compacts its context, in place of
+ *  "Listening…": it is busy, and what the reader says waits. */
+export const COMPACTING = 'Compacting…';
+
 /** Starts the status while words are being heard. */
 export const HEARD = 'Heard: ';
 
@@ -44,7 +48,9 @@ export function barLines(m: LeadChatViewModel): BarLine[] {
     who: x.role === 'agent' ? x.author.name : 'You',
     text: x.text.replace(/\s+/g, ' '),
   }));
-  if (m.listening && m.paused && (m.voice ?? 'listening') === 'listening') {
+  if (m.compacting && !m.heard) {
+    lines.push({ who: m.lead?.name ?? 'Your lead', text: COMPACTING, dim: true });
+  } else if (m.listening && m.paused && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: PAUSED, dim: true });
   } else if (m.listening && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: m.heard || 'Listening…', dim: !m.heard, live: !!m.heard });
@@ -58,6 +64,7 @@ export function barLines(m: LeadChatViewModel): BarLine[] {
 export function statusLine(m: LeadChatViewModel): string {
   if (m.notice) return m.notice;
   const lead = m.lead?.name ?? 'Your lead';
+  if (m.compacting && !(m.listening && m.heard)) return COMPACTING;
   if (m.listening && m.voice === 'working') return `${lead} is working on it`;
   if (m.listening && m.voice === 'speaking') return `${lead} is answering`;
   if (m.listening && m.paused) return PAUSED;

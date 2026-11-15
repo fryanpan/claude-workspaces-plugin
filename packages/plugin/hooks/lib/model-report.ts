@@ -14,6 +14,12 @@
  * for a marked lead and only for a `/model <name>` command, the shape the board
  * types. It also skips that one question when the owner types it in that
  * terminal. Anything else gets no answer, so Claude Code asks as usual.
+ *
+ * `PreCompact` and `PostCompact` bracket a context compaction, so the chat can
+ * say "Compacting…" while the lead is busy and its words wait. They post for a
+ * marked lead only. The server also clears the state on the next turn start,
+ * turn end or session start, so a compaction that never reports its end does
+ * not hold the line.
  */
 import type { SecretReader } from './access-headers.ts';
 import {
@@ -33,6 +39,7 @@ export interface ModelBody {
   model?: string;
   effort?: string;
   started?: boolean;
+  compacting?: boolean;
 }
 
 const modelIn = (v: unknown): string | undefined =>
@@ -53,6 +60,8 @@ export function decideModelReport(payload: unknown, dir = mirrorDir()): ModelBod
     const model = modelIn(p.to_model);
     return model ? { kind: 'model', model } : undefined;
   }
+  if (event === 'PreCompact') return { kind: 'model', compacting: true };
+  if (event === 'PostCompact') return { kind: 'model', compacting: false };
   if (event === 'Stop') {
     const level = (p.effort as { level?: unknown } | null | undefined)?.level;
     return typeof level === 'string' && EFFORT.test(level)

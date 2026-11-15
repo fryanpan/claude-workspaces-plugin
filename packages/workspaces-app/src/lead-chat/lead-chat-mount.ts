@@ -216,6 +216,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       listening: heard.phase !== 'off',
       ...(heard.phase !== 'off' ? { voice: heard.phase } : {}),
       ...(heard.paused ? { paused: true } : {}),
+      ...(s.leadModel?.compacting ? { compacting: true } : {}),
       heard: heard.heard,
       notice: ui.notice || heard.notice,
       ...(meet ? { meeting: meet.model() } : {}),

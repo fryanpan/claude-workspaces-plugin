@@ -79,6 +79,8 @@ export interface LeadChatViewModel {
   voice?: 'listening' | 'working' | 'speaking';
   /** Listening is on and another of the reader's tabs hears them. */
   paused?: boolean;
+  /** The lead's session is compacting its context. */
+  compacting?: boolean;
   /** What the listener has heard of the question in progress. */
   heard: string;
   /** A one-line notice: a send that failed, a blocked microphone. */
