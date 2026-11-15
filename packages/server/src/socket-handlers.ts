@@ -68,6 +68,9 @@ export interface SocketHandlersContext {
   core?: CoreSync;
   /** A board room opened: where its agents last pointed (`agent-spots.ts`). */
   onBoardRoomOpen?: (workspaceId: string, awareness: Awareness) => void;
+  /** Called once, when this process's first doc or board editing socket
+   *  opens — the reconnect end of a restart's gap (`server-starts.ts`). */
+  onFirstClientSocket?: (at: number) => void;
 }
 
 /**
@@ -132,6 +135,7 @@ export type UpgradeData = {
  */
 export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandler<UpgradeData> {
   const { docStore, meetingRelay, recallRelay, voiceRelay, spokenRelay, appVoiceRelay } = ctx;
+  let firstClientSocketSeen = false;
 
   return {
     // Yjs sync step 2 hands a fresh tab the WHOLE doc state in one binary
@@ -197,6 +201,10 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       }
       onOpen(doc, typed, ctx.core);
       docStore.notePageOpened(doc);
+      if (!firstClientSocketSeen) {
+        firstClientSocketSeen = true;
+        ctx.onFirstClientSocket?.(Date.now());
+      }
     },
     message(ws, message) {
       if (ws.data.kind === 'recall') {
