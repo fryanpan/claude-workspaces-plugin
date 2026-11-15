@@ -15,6 +15,8 @@
 import { type User, answerAsksBack } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
+import type { MoreInfoBody, TicketAnswer } from './review-items-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 import {
   type TaskRouteRequest,
   type TaskRoutesContext,
@@ -100,7 +102,7 @@ export async function handleTaskReviewMoreInfo(
   const reviewItemId = decodeURIComponent(match[2] ?? '');
   const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
   if (denied) return denied;
-  const body = await safeJson(rq.req);
+  const body = sent<MoreInfoBody>(await safeJson(rq.req));
   const question = typeof body?.question === 'string' ? body.question.trim() : '';
   if (question.length === 0) return j(400, { error: 'question required' });
   const author = rq.authorFor(body?.author);
@@ -110,5 +112,5 @@ export async function handleTaskReviewMoreInfo(
   });
   if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
   taskProjection.refreshTask(res.task);
-  return j(200, res);
+  return j(200, answerAs<TicketAnswer>(res));
 }

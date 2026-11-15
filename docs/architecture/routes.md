@@ -382,8 +382,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/release` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets` | POST | `routes/task-review-items.ts` | trusted-local |  |
-| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw` | POST | `routes/task-review-items.ts` | share-scope |  |
-| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo` | POST | `routes/task-review-items.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw` | POST | `routes/task-review-withdraw.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo` | POST | `routes/task-review-withdraw.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/schedule` | POST | `routes/task-fields.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/title` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/transition` | POST | `routes/task-status-links.ts` | share-scope |  |

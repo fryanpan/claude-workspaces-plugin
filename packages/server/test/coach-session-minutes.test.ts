@@ -280,7 +280,11 @@ describe('a replayed day of steady work', () => {
       expect(Math.abs(counted - spentMinutes) / spentMinutes).toBeLessThanOrEqual(0.2);
       w.stop();
     }
-  });
+    // Disk-bound, not CPU-bound: the coach persists its state, backlog and
+    // coverage as a day of windows closes, about 320 file replacements per
+    // replayed day. CI runs it in 0.6s at the median (35 runs), but one
+    // runner whose stats took up to 519ms ran it in 7.4s.
+  }, 30_000);
 });
 
 describe('the coach lead’s stream', () => {
