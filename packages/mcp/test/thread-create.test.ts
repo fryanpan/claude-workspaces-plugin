@@ -123,6 +123,7 @@ describe('threadCreateRequest — a page and a suggestion', () => {
       BOARD,
     );
     expect(r.path).toBe(`${BOARD}/docs/d-app/threads/by_find`);
+    if (r.by !== 'find') throw new Error(`went by ${r.by}`);
     expect(r.body.path).toBe('/calendar');
     expect(r.body.suggest).toEqual({ replacement: 'Riverbend Street walk' });
   });

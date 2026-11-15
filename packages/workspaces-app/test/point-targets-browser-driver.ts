@@ -72,6 +72,14 @@ const lastLineShown = (word: string) =>
 const SETTINGS_SCROLLER = `[...document.querySelectorAll('#board-settings-view, #board-settings-view *')].find((e) => e.scrollHeight - e.clientHeight > 40 && /auto|scroll/.test(getComputedStyle(e).overflowY))`;
 const scrollSettings = `(() => { const e = ${SETTINGS_SCROLLER}; if (!e) return false; e.scrollTop = 30; return true; })()`;
 const settingsScrolled = `(() => { const e = ${SETTINGS_SCROLLER}; return !!e && e.scrollTop > 0; })()`;
+/** Every address a page writes over the one it loaded at. A follower is sent
+ *  to each one, so a page that passes through a second address on its way to
+ *  the first sends the follower on three journeys, and the follow ends on
+ *  whichever lands. */
+const RECORD_ADDRESS_WRITES = `(() => { const w = (window.__addressWrites = []); for (const k of ['pushState', 'replaceState']) { const f = history[k].bind(history); history[k] = (s, t, u) => { if (u != null) w.push(String(u)); return f(s, t, u); }; } })()`;
+/** Compared parsed, so the same address spelled another way still matches. */
+const onlyWrote = (path: string) =>
+  `(() => { const key = (u) => { const x = new URL(u, location.href); return decodeURIComponent(x.pathname) + '?' + [...x.searchParams].sort().join('&'); }; const want = key(${JSON.stringify(path)}); return (window.__addressWrites ?? []).every((u) => key(u) === want); })()`;
 
 async function main(): Promise<void> {
   deadline('point-targets-driver', 200_000);
@@ -262,6 +270,9 @@ async function main(): Promise<void> {
         ws,
       });
       const secondPersonSessions = await frameSessions(secondPerson);
+      await secondPerson.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: RECORD_ADDRESS_WRITES,
+      });
       await navigate(secondPerson, `${base}${onDoc}`);
       await firstPerson.evaluate(
         `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-${personIdOf(`second-person-targets${width}`)}' }))`,
@@ -307,6 +318,10 @@ async function main(): Promise<void> {
         'person board page',
         () => navigate(secondPerson, `${base}${onSettings}`),
         onSettings,
+        // The phone's settings opens through its list: that step must not
+        // reach the address, or the room hears it. Only the 430 run passes
+        // through the list, so only it can fail this.
+        async () => (await secondPerson.evaluate(onlyWrote(onSettings))) === true,
       );
       await moved(
         'person board scroll',
