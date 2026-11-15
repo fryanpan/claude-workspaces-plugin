@@ -930,6 +930,19 @@ wa-toast.board-wa-toast wa-toast-item::part(accent),
 wa-toast.board-wa-toast wa-toast-item::part(close-button) {
   display: none;
 }
+/* Unlike .board-toast, which the feedback widget's buttons draw over, a
+   <wa-toast> is a popover in the top layer and draws over them, so at 430
+   it covered the widget's "≡" chip. At ≤1100 with a widget on the page the
+   toast is centred in the room left of the widget's column instead: the
+   chip stands 76px in from the right edge (`.fab-list.side`, widget-mic.ts)
+   and is 44px or wider, so 160px clears it with room for a count. A
+   board-to-browser check of the two boxes is presence-strip-wa-browser.test.ts. */
+@media (max-width: 1100px) {
+  body:has(claude-feedback-widget) wa-toast.board-wa-toast {
+    inset-inline-start: calc((100vw - 160px) / 2);
+    max-width: calc(100vw - 160px - 24px);
+  }
+}
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
 .board-drift {

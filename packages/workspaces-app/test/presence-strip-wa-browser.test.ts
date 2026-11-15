@@ -77,9 +77,38 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
       expect(classic?.text).toBe('Following Bob — long-press again to stop');
       expect(wa?.face).toBe('wa');
       expect(wa?.classicShown, 'one toast, not two').toBe(false);
-      const { face: _a, classicShown: _b, ...waLook } = wa ?? ({} as Toast);
-      const { face: _c, classicShown: _d, ...classicLook } = classic ?? ({} as Toast);
+      const { face: _a, classicShown: _b, chip: _c, onTop: _d, ...waLook } = wa ?? ({} as Toast);
+      const {
+        face: _e,
+        classicShown: _f,
+        chip: _g,
+        onTop: _h,
+        ...classicLook
+      } = classic ?? ({} as Toast);
+      // Narrow, the Web Awesome toast is centred in the room left of the
+      // widget's column (the next case), so where it starts and how wide it
+      // wraps differ there; its row, height and dress are today's.
+      if (width <= 1100) {
+        waLook.box = { ...waLook.box, x: 0, w: 0 };
+        classicLook.box = { ...classicLook.box, x: 0, w: 0 };
+      }
       expect(waLook).toEqual(classicLook);
+    }, 60_000);
+
+    it(`keeps the Web Awesome toast off the widget's "≡" chip at ${width}`, () => {
+      const wa = reading(width, 'wa').toast;
+      // CONTROL: the chip is on the page, and the toast is the follow toast.
+      expect(wa?.chip, 'the ≡ chip is shown').not.toBeNull();
+      expect(wa?.text).toBe('Following Bob — long-press again to stop');
+      const t = wa?.box ?? { x: 0, y: 0, w: 0, h: 0 };
+      const c = wa?.chip ?? { x: 0, y: 0, w: 0, h: 0 };
+      const w = Math.min(t.x + t.w, c.x + c.w) - Math.max(t.x, c.x);
+      const h = Math.min(t.y + t.h, c.y + c.h) - Math.max(t.y, c.y);
+      expect(
+        w > 0 && h > 0 ? w * h : 0,
+        `toast ${JSON.stringify(t)} on chip ${JSON.stringify(c)}`,
+      ).toBe(0);
+      expect(wa?.onTop).toBeNull();
     }, 60_000);
 
     it(`swaps back to today's strip on the open page at ${width}`, () => {

@@ -64,6 +64,11 @@ export interface Toast {
   font: string;
   /** Whether the board's own toast is showing as well. */
   classicShown: boolean;
+  /** The feedback widget's "≡" chip (`.fab-list`) when it is shown, and
+   *  which of the two the browser paints at the overlap's centre. */
+  chip: { x: number; y: number; w: number; h: number } | null;
+  /** 'toast', 'chip', or null when the two boxes do not overlap. */
+  onTop: 'toast' | 'chip' | 'other' | null;
 }
 
 export interface Reading {
@@ -118,12 +123,39 @@ const READ_TOAST = `(() => {
   const r = painter.getBoundingClientRect();
   const s = getComputedStyle(painter);
   const inner = getComputedStyle(content ?? painter);
+  const widget = document.querySelector('claude-feedback-widget');
+  const list = widget?.shadowRoot?.querySelector('.fab-list');
+  const c = list && getComputedStyle(list).display !== 'none' ? list.getBoundingClientRect() : null;
+  // Who is painted where the two boxes overlap: the top layer is hit-tested
+  // like any other layer, so the deepest element at that point names it.
+  let onTop = null;
+  if (c) {
+    const x0 = Math.max(r.left, c.left), x1 = Math.min(r.right, c.right);
+    const y0 = Math.max(r.top, c.top), y1 = Math.min(r.bottom, c.bottom);
+    if (x1 > x0 && y1 > y0) {
+      const x = (x0 + x1) / 2, y = (y0 + y1) / 2;
+      let e = document.elementFromPoint(x, y);
+      while (e?.shadowRoot) {
+        const inner = e.shadowRoot.elementFromPoint(x, y);
+        if (!inner || inner === e) break;
+        e = inner;
+      }
+      const host = (n) => { while (n && n.getRootNode() instanceof ShadowRoot) n = n.getRootNode().host; return n; };
+      const top = host(e);
+      onTop = !top ? 'other'
+        : list.contains(e) ? 'chip'
+        : top.closest('wa-toast.board-wa-toast') || (classic && classic.contains(top)) ? 'toast'
+        : 'other';
+    }
+  }
   return {
     text: (item ?? classic).textContent.trim(),
     face: frame ? 'wa' : 'classic',
     box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
     background: s.backgroundColor, color: inner.color, radius: s.borderTopLeftRadius,
     shadow: s.boxShadow, padding: inner.padding, font: inner.font, classicShown,
+    chip: c && { x: round(c.x), y: round(c.y), w: round(c.width), h: round(c.height) },
+    onTop,
   };
 })()`;
 
