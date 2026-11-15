@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.370";
+var version2 = "0.1.371";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -21880,6 +21880,300 @@ async function declareWorkspaceLead(args, deps) {
   };
 }
 
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/utils.js
+var mergePath = (base, path) => {
+  base = base.replace(/\/+$/, "");
+  base = base + "/";
+  path = path.replace(/^\/+/, "");
+  return base + path;
+};
+var replaceUrlParam = (urlString, params) => {
+  for (const [k, v] of Object.entries(params)) {
+    const reg = new RegExp("/:" + k + "(?:{[^/]+})?\\??(?=/|$)");
+    urlString = urlString.replace(reg, () => v ? `/${v}` : "");
+  }
+  return urlString;
+};
+var buildSearchParams = (query) => {
+  const searchParams = new URLSearchParams;
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined)
+      continue;
+    if (Array.isArray(v))
+      for (const v2 of v) {
+        if (v2 === undefined)
+          continue;
+        searchParams.append(k, v2);
+      }
+    else
+      searchParams.set(k, v);
+  }
+  return searchParams;
+};
+var replaceUrlProtocol = (urlString, protocol) => {
+  switch (protocol) {
+    case "ws":
+      return urlString.replace(/^http/, "ws");
+    case "http":
+      return urlString.replace(/^ws/, "http");
+  }
+};
+var removeIndexString = (urlString) => {
+  if (/^https?:\/\/[^\/]+?\/index(?=\?|$)/.test(urlString))
+    return urlString.replace(/\/index(?=\?|$)/, "/");
+  return urlString.replace(/\/index(?=\?|$)/, "");
+};
+function isObject2(item) {
+  return typeof item === "object" && item !== null && !Array.isArray(item);
+}
+function deepMerge(target, source) {
+  if (!isObject2(target) && !isObject2(source))
+    return source;
+  const merged = { ...target };
+  for (const key in source) {
+    const value = source[key];
+    if (isObject2(merged[key]) && isObject2(value))
+      merged[key] = deepMerge(merged[key], value);
+    else
+      merged[key] = value;
+  }
+  return merged;
+}
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/utils/cookie.js
+var validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
+var _serialize = (name, value, opt = {}) => {
+  if (!validCookieNameRegEx.test(name))
+    throw new Error("Invalid cookie name");
+  let cookie = `${name}=${value}`;
+  if (/^__secure-/i.test(name) && !opt.secure)
+    throw new Error("__Secure- Cookie must have Secure attributes");
+  if (/^__host-/i.test(name)) {
+    if (!opt.secure)
+      throw new Error("__Host- Cookie must have Secure attributes");
+    if (opt.path !== "/")
+      throw new Error('__Host- Cookie must have Path attributes with "/"');
+    if (opt.domain)
+      throw new Error("__Host- Cookie must not have Domain attributes");
+  }
+  for (const key of [
+    "domain",
+    "path",
+    "sameSite",
+    "priority"
+  ])
+    if (opt[key] && /[;\r\n]/.test(opt[key]))
+      throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
+  if (opt && typeof opt.maxAge === "number" && opt.maxAge >= 0) {
+    if (opt.maxAge > 34560000)
+      throw new Error("Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration.");
+    cookie += `; Max-Age=${opt.maxAge | 0}`;
+  }
+  if (opt.domain && opt.prefix !== "host")
+    cookie += `; Domain=${opt.domain}`;
+  if (opt.path)
+    cookie += `; Path=${opt.path}`;
+  if (opt.expires) {
+    if (opt.expires.getTime() - Date.now() > 34560000000)
+      throw new Error("Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future.");
+    cookie += `; Expires=${opt.expires.toUTCString()}`;
+  }
+  if (opt.httpOnly)
+    cookie += "; HttpOnly";
+  if (opt.secure)
+    cookie += "; Secure";
+  if (opt.sameSite)
+    cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
+  if (opt.priority)
+    cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
+  if (opt.partitioned) {
+    if (!opt.secure)
+      throw new Error("Partitioned Cookie must have Secure attributes");
+    cookie += "; Partitioned";
+  }
+  return cookie;
+};
+var serialize = (name, value, opt) => {
+  value = encodeURIComponent(value);
+  return _serialize(name, value, opt);
+};
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/client.js
+var createProxy = (callback, path) => {
+  return new Proxy(() => {}, {
+    get(_obj, key) {
+      if (typeof key !== "string" || key === "then")
+        return;
+      return createProxy(callback, [...path, key]);
+    },
+    apply(_1, _2, args) {
+      return callback({
+        path,
+        args
+      });
+    }
+  });
+};
+var appendQueryParams = (url, searchParams) => {
+  const queryString = searchParams.toString();
+  return queryString ? `${url}?${queryString}` : url;
+};
+var ClientRequestImpl = class {
+  url;
+  method;
+  buildSearchParams;
+  queryParams = undefined;
+  pathParams = {};
+  rBody;
+  cType = undefined;
+  constructor(url, method, options) {
+    this.url = url;
+    this.method = method;
+    this.buildSearchParams = options.buildSearchParams;
+  }
+  fetch = async (args, opt) => {
+    if (args) {
+      if (args.query)
+        this.queryParams = this.buildSearchParams(args.query);
+      if (args.form) {
+        const form = new FormData;
+        for (const [k, v] of Object.entries(args.form)) {
+          if (v === undefined)
+            continue;
+          if (Array.isArray(v))
+            for (const v2 of v) {
+              if (v2 === undefined)
+                continue;
+              form.append(k, v2);
+            }
+          else
+            form.append(k, v);
+        }
+        this.rBody = form;
+      }
+      if (args.json !== undefined) {
+        this.rBody = JSON.stringify(args.json);
+        this.cType = "application/json";
+      }
+      if (args.param)
+        this.pathParams = args.param;
+    }
+    let methodUpperCase = this.method.toUpperCase();
+    const headerValues = {
+      ...args?.header,
+      ...typeof opt?.headers === "function" ? await opt.headers() : opt?.headers
+    };
+    if (args?.cookie) {
+      const cookies = [];
+      for (const [key, value] of Object.entries(args.cookie)) {
+        if (value === undefined)
+          continue;
+        cookies.push(serialize(key, value));
+      }
+      if (cookies.length > 0)
+        headerValues["Cookie"] = cookies.join("; ");
+    }
+    if (this.cType)
+      headerValues["Content-Type"] = this.cType;
+    const headers = new Headers;
+    for (const [key, value] of Object.entries(headerValues))
+      if (value !== undefined)
+        headers.set(key, value);
+    let url = this.url;
+    url = removeIndexString(url);
+    url = replaceUrlParam(url, this.pathParams);
+    if (this.queryParams)
+      url = appendQueryParams(url, this.queryParams);
+    methodUpperCase = this.method.toUpperCase();
+    const setBody = !(methodUpperCase === "GET" || methodUpperCase === "HEAD");
+    return (opt?.fetch || fetch)(url, {
+      body: setBody ? this.rBody : undefined,
+      method: methodUpperCase,
+      headers,
+      ...opt?.init
+    });
+  };
+};
+var hc = (baseUrl, options) => createProxy(function proxyCallback(opts) {
+  const buildSearchParamsOption = options?.buildSearchParams ?? buildSearchParams;
+  const parts = [...opts.path];
+  const lastParts = parts.slice(-3).reverse();
+  if (lastParts[0] === "toString") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback.toString();
+  }
+  if (lastParts[0] === "valueOf") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback;
+  }
+  let method = "";
+  if (/^\$/.test(lastParts[0])) {
+    const last = parts.pop();
+    if (last)
+      method = last.replace(/^\$/, "");
+  }
+  const path = parts.join("/");
+  const url = mergePath(baseUrl, path);
+  if (method === "url" || method === "path") {
+    let result = removeIndexString(url);
+    if (opts.args[0]) {
+      if (opts.args[0].param)
+        result = replaceUrlParam(result, opts.args[0].param);
+      if (opts.args[0].query)
+        result = appendQueryParams(result, buildSearchParamsOption(opts.args[0].query));
+    }
+    if (method === "url")
+      return new URL(result);
+    return result.slice(baseUrl.replace(/\/+$/, "").length).replace(/^\/?/, "/");
+  }
+  if (method === "ws") {
+    const normalizedUrl = removeIndexString(url);
+    const webSocketUrl = replaceUrlProtocol(opts.args[0]?.param ? replaceUrlParam(normalizedUrl, opts.args[0].param) : normalizedUrl, "ws");
+    const targetUrl = new URL(webSocketUrl);
+    const queryParams = opts.args[0]?.query;
+    if (queryParams)
+      buildSearchParamsOption(queryParams).forEach((value, key) => {
+        targetUrl.searchParams.append(key, value);
+      });
+    const establishWebSocket = (...args) => {
+      if (options?.webSocket !== undefined && typeof options.webSocket === "function")
+        return options.webSocket(...args);
+      return new WebSocket(...args);
+    };
+    return establishWebSocket(targetUrl.toString());
+  }
+  const req = new ClientRequestImpl(url, method, { buildSearchParams: buildSearchParamsOption });
+  if (method) {
+    options ??= {};
+    const reqOptions = { ...opts.args[1] };
+    const baseHeaders = options.headers;
+    const reqHeaders = reqOptions.headers;
+    if (baseHeaders && reqHeaders)
+      reqOptions.headers = async () => ({
+        ...typeof baseHeaders === "function" ? await baseHeaders() : baseHeaders,
+        ...typeof reqHeaders === "function" ? await reqHeaders() : reqHeaders
+      });
+    const args = deepMerge(options, reqOptions);
+    return req.fetch(opts.args[0], args);
+  }
+  return req;
+}, []);
+
+// packages/mcp/src/mounts-client.ts
+var PLACEHOLDER_ORIGIN = "http://claude-workspaces.invalid";
+function mountsClient(http) {
+  return hc(PLACEHOLDER_ORIGIN, {
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      const data = await http(init?.method ?? "GET", `${url.pathname}${url.search}`, body);
+      return Response.json(data);
+    }
+  });
+}
+
 // packages/mcp/src/parallelism-cap.ts
 function parseCapArg(raw) {
   if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1) {
@@ -22230,51 +22524,62 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "mount_folder": {
       const { path, privacy } = a;
-      return ok2(await http("POST", "/api/mounts", { path, ...privacy === undefined ? {} : { privacy } }));
+      const res = await mountsClient(http).api.mounts.$post({
+        json: { path, ...privacy === undefined ? {} : { privacy } }
+      });
+      return ok2(await res.json());
     }
     case "list_mounts": {
       const { path, mountId, after, limit } = a;
-      const q = new URLSearchParams;
-      if (path !== undefined)
-        q.set("path", path);
-      if (mountId !== undefined)
-        q.set("mountId", mountId);
-      if (after !== undefined)
-        q.set("after", after);
-      if (limit !== undefined)
-        q.set("limit", String(limit));
-      const qs = q.toString();
-      const route = mountId === undefined ? "/api/mounts" : "/api/mounts/files";
-      return ok2(await http("GET", qs === "" ? route : `${route}?${qs}`));
+      const mounts = mountsClient(http).api.mounts;
+      if (mountId === undefined) {
+        return ok2(await (await mounts.$get({ query: { path } })).json());
+      }
+      const res = await mounts.files.$get({
+        query: {
+          path,
+          mountId,
+          after,
+          limit: limit === undefined ? undefined : String(limit)
+        }
+      });
+      return ok2(await res.json());
     }
     case "unmount_folder": {
       const { path, mountId } = a;
-      return ok2(await http("DELETE", "/api/mounts", { path, mountId }));
+      const res = await mountsClient(http).api.mounts.$delete({ json: { path, mountId } });
+      return ok2(await res.json());
     }
     case "set_project_privacy": {
       const { path, privacy, mountId } = a;
-      return ok2(await http("PUT", "/api/mounts/privacy", {
-        path,
-        privacy,
-        ...mountId === undefined ? {} : { mountId }
-      }));
+      const res = await mountsClient(http).api.mounts.privacy.$put({
+        json: { path, privacy, ...mountId === undefined ? {} : { mountId } }
+      });
+      return ok2(await res.json());
     }
     case "set_project_conventions": {
       const { path, conventionsPath } = a;
-      return ok2(await http("PUT", "/api/mounts/conventions", { path, conventionsPath }));
+      const res = await mountsClient(http).api.mounts.conventions.$put({
+        json: { path, conventionsPath }
+      });
+      return ok2(await res.json());
     }
     case "read_project_conventions": {
       const { path } = a;
-      return ok2(await http("GET", `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+      const res = await mountsClient(http).api.mounts.conventions.$get({ query: { path } });
+      return ok2(await res.json());
     }
     case "set_project_meetings": {
       const { path, meetingsPath, retention, gitignore } = a;
-      return ok2(await http("PUT", "/api/mounts/meetings", {
-        path,
-        meetingsPath,
-        ...retention !== undefined ? { retention } : {},
-        ...gitignore !== undefined ? { gitignore } : {}
-      }));
+      const res = await mountsClient(http).api.mounts.meetings.$put({
+        json: {
+          path,
+          meetingsPath,
+          ...retention !== undefined ? { retention } : {},
+          ...gitignore !== undefined ? { gitignore } : {}
+        }
+      });
+      return ok2(await res.json());
     }
     case "set_doc_title": {
       const { workspaceId, docId, title } = a;

@@ -43,6 +43,7 @@
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "hono": "4.13.18",
       },
       "devDependencies": {
         "@claude-workspaces/core": "workspace:*",

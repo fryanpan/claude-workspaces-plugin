@@ -28,6 +28,7 @@ import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { declareWorkspaceLead } from '../declare-lead.ts';
 import { sayRefusal } from '../meeting-feed-line.ts';
+import { mountsClient } from '../mounts-client.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
 import { readChatAttachment } from './chat-attachment.ts';
 import { placeOf, refusalOf } from './person.ts';
@@ -672,9 +673,10 @@ export async function handleWorkspaceTool(
     // the routes behind them are loopback-only.
     case 'mount_folder': {
       const { path, privacy } = a as { path: string; privacy?: string };
-      return ok(
-        await http('POST', '/api/mounts', { path, ...(privacy === undefined ? {} : { privacy }) }),
-      );
+      const res = await mountsClient(http).api.mounts.$post({
+        json: { path, ...(privacy === undefined ? {} : { privacy }) },
+      });
+      return ok(await res.json());
     }
     case 'list_mounts': {
       const { path, mountId, after, limit } = a as {
@@ -683,38 +685,46 @@ export async function handleWorkspaceTool(
         after?: string;
         limit?: number;
       };
-      const q = new URLSearchParams();
-      if (path !== undefined) q.set('path', path);
-      if (mountId !== undefined) q.set('mountId', mountId);
-      if (after !== undefined) q.set('after', after);
-      if (limit !== undefined) q.set('limit', String(limit));
-      const qs = q.toString();
+      const mounts = mountsClient(http).api.mounts;
       // One mount's FILES, or the whole table — two answers, and which one
       // the caller wanted is said by naming a mount.
-      const route = mountId === undefined ? '/api/mounts' : '/api/mounts/files';
-      return ok(await http('GET', qs === '' ? route : `${route}?${qs}`));
+      if (mountId === undefined) {
+        return ok(await (await mounts.$get({ query: { path } })).json());
+      }
+      const res = await mounts.files.$get({
+        query: {
+          // The route answers 400 without a path; the server says so, not this.
+          path: path as string,
+          mountId,
+          after,
+          limit: limit === undefined ? undefined : String(limit),
+        },
+      });
+      return ok(await res.json());
     }
     case 'unmount_folder': {
       const { path, mountId } = a as { path: string; mountId: string };
-      return ok(await http('DELETE', '/api/mounts', { path, mountId }));
+      const res = await mountsClient(http).api.mounts.$delete({ json: { path, mountId } });
+      return ok(await res.json());
     }
     case 'set_project_privacy': {
       const { path, privacy, mountId } = a as { path: string; privacy: string; mountId?: string };
-      return ok(
-        await http('PUT', '/api/mounts/privacy', {
-          path,
-          privacy,
-          ...(mountId === undefined ? {} : { mountId }),
-        }),
-      );
+      const res = await mountsClient(http).api.mounts.privacy.$put({
+        json: { path, privacy, ...(mountId === undefined ? {} : { mountId }) },
+      });
+      return ok(await res.json());
     }
     case 'set_project_conventions': {
       const { path, conventionsPath } = a as { path: string; conventionsPath: string };
-      return ok(await http('PUT', '/api/mounts/conventions', { path, conventionsPath }));
+      const res = await mountsClient(http).api.mounts.conventions.$put({
+        json: { path, conventionsPath },
+      });
+      return ok(await res.json());
     }
     case 'read_project_conventions': {
       const { path } = a as { path: string };
-      return ok(await http('GET', `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+      const res = await mountsClient(http).api.mounts.conventions.$get({ query: { path } });
+      return ok(await res.json());
     }
     case 'set_project_meetings': {
       const { path, meetingsPath, retention, gitignore } = a as {
@@ -723,14 +733,15 @@ export async function handleWorkspaceTool(
         retention?: string;
         gitignore?: boolean;
       };
-      return ok(
-        await http('PUT', '/api/mounts/meetings', {
+      const res = await mountsClient(http).api.mounts.meetings.$put({
+        json: {
           path,
           meetingsPath,
           ...(retention !== undefined ? { retention } : {}),
           ...(gitignore !== undefined ? { gitignore } : {}),
-        }),
-      );
+        },
+      });
+      return ok(await res.json());
     }
     case 'set_doc_title': {
       const { workspaceId, docId, title } = a as {

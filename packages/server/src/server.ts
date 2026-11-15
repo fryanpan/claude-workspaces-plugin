@@ -313,6 +313,13 @@ export {
 export type { ServerOptions };
 
 /**
+ * The typed routes another package's client reads. Re-exported here because
+ * only this module may import out of `routes/`, and the MCP child's
+ * `hc<MountsApi>` needs the type (never the code) of the app that answers.
+ */
+export type { MountsApi } from './routes/mounts-api.ts';
+
+/**
  * `revisedRange` off a request body: the offsets into the NEW detail that a
  * caller says changed.
  *
