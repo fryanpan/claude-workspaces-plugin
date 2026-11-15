@@ -727,7 +727,11 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // writable doc afterwards — see `widgetDoorGrant` on the admission.
         const readOnly = !mayCreate || widgetDoorGrant !== null;
         if (!docStore.get(docId)) {
-          if (type === 'mockup') {
+          // An archived id is not free. A doc page's comment widget names
+          // `type=mockup` too, and when the archive closes its socket it
+          // reconnects: creating here filed an empty mock under the archived
+          // id, on the board, in place of the doc "Put it back" restores.
+          if (type === 'mockup' && !docStore.isArchivedDoc(docId)) {
             // Nothing to read yet, so refusing here gates no read: the doc
             // this socket would have created does not exist for anybody.
             if (!mayCreate) return j(401, signInRequiredBody());

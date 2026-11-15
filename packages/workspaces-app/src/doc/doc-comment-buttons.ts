@@ -18,7 +18,9 @@
  * The element is made at once and the widget's code follows in its own chunk
  * (`doc-comment-buttons-chunk.ts`), so none of it is in the doc's first load.
  */
+import { readDocMeta } from '@claude-workspaces/core';
 import { EMBED_PARAM } from '@claude-workspaces/core/board-embeds';
+import type * as Y from 'yjs';
 import type { MountScope } from '../mount-scope.ts';
 
 /** The widget's tag, as `widget.ts` defines it. */
@@ -33,7 +35,11 @@ export interface CommentButtonsOpts {
   doc: Document;
   /** The board in the page's address. */
   workspaceId: string;
+  /** The id in the page's address, which may be an alias. */
   docId: string;
+  /** The doc's synced state. Its meta names the canonical id, which is the
+   *  one the widget is given. */
+  ydoc?: Y.Doc;
   /** The page's `location.search`. */
   search: string;
   scope: MountScope;
@@ -54,7 +60,11 @@ export function mountCommentButtons(opts: CommentButtonsOpts): HTMLElement | nul
   for (const old of doc.querySelectorAll(WIDGET_TAG)) old.remove();
   const el = doc.createElement(WIDGET_TAG);
   el.setAttribute('workspace-id', opts.workspaceId);
-  el.setAttribute('doc-id', opts.docId);
+  // The canonical id, never the address's alias. The widget's socket creates
+  // a mock that does not exist, and archiving releases the alias, so a widget
+  // on the alias reconnected after an archive and made an empty mock under
+  // the name the page was opened by.
+  el.setAttribute('doc-id', (opts.ydoc && readDocMeta(opts.ydoc).docId) || opts.docId);
   // This page is ours and already knows the reader's name (`mockup-widget.ts`
   // explains the attribute).
   el.setAttribute('identity-scope', 'host');
