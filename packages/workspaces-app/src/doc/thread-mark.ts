@@ -22,9 +22,9 @@ import {
  *  the same clock, so a second copy continues the first one's draw. */
 const clock = createProgressClock();
 
-const SAYS = { working: 'is working on this', done: 'marked this done' } as const;
+const SAYS = { working: 'is working on this', done: 'finished this' } as const;
 
-/** Put `t`'s mark on its card's glyph, and say it in the glyph's title. An
+/** Put `t`'s mark on its card's glyph, and give it a name to hear. An
  *  unmarked card is still told to the clock, so a later Done draws. */
 export function markGlyph(glyph: HTMLElement, t: Thread, open: boolean): void {
   const p = open ? t.progress : undefined;
@@ -32,6 +32,12 @@ export function markGlyph(glyph: HTMLElement, t: Thread, open: boolean): void {
   if (!p) return;
   glyph.classList.add('thread-mark');
   glyph.dataset.mark = p.state;
-  glyph.title = `${authorLabel(p.by)} ${SAYS[p.state]} · ${formatTime(p.at)}`;
+  // The one glyph a screen reader hears: an unmarked glyph repeats what the
+  // caret's name says, a mark says something nothing else on the card does.
+  const said = `${authorLabel(p.by)} ${SAYS[p.state]}`;
+  glyph.removeAttribute('aria-hidden');
+  glyph.setAttribute('role', 'img');
+  glyph.setAttribute('aria-label', said);
+  glyph.title = `${said} · ${formatTime(p.at)}`;
   glyph.innerHTML = progressMarkHtml(p.state, sinceDone);
 }

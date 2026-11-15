@@ -177,6 +177,20 @@ describe('an agent mark on a doc comment card', () => {
     expect(marked.title).toContain('Harborlight notes is working on this');
   });
 
+  it('names the mark for a screen reader, and leaves a plain glyph silent', () => {
+    const id = 't-named';
+    const plain = glyphOf(render({ ...thread(), id }));
+    expect(plain.getAttribute('aria-hidden')).toBe('true');
+    expect(plain.getAttribute('aria-label')).toBeNull();
+    const working = glyphOf(render({ ...thread('working'), id }));
+    expect(working.getAttribute('aria-hidden')).toBeNull();
+    expect(working.getAttribute('role')).toBe('img');
+    expect(working.getAttribute('aria-label')).toBe('Harborlight notes is working on this');
+    const done = glyphOf(render({ ...thread('done'), id }));
+    expect(done.getAttribute('role')).toBe('img');
+    expect(done.getAttribute('aria-label')).toBe('Harborlight notes finished this');
+  });
+
   it('a resolved thread wears no mark', () => {
     const glyph = glyphOf(render({ ...thread('done', 'resolved'), id: 't-resolved' }));
     expect(glyph.classList.contains('thread-mark')).toBe(false);
