@@ -59,13 +59,13 @@ const flips = (frames: readonly Frame[]) =>
 describe('the board record and frame that pick the presence strip', () => {
   it('says active once the board is switched on, and tells open pages but no agent', async () => {
     const { base, ws } = await boot(true);
-    expect(await record(base, ws)).toEqual({ active: false });
+    expect(await record(base, ws)).toMatchObject({ active: false });
     const { page, agent } = await streamsFor(base, ws);
 
     await flip(ws, true);
     await waitFor(() => flips(page.frames).length === 1, { describe: 'the page hears the flip' });
     expect(flips(page.frames)).toEqual([true]);
-    expect(await record(base, ws)).toEqual({ active: true });
+    expect(await record(base, ws)).toMatchObject({ active: true });
 
     // The agent's stream is open and hearing board news (the control): a
     // task filed now reaches it, and the flip before it never did.
@@ -88,12 +88,12 @@ describe('the board record and frame that pick the presence strip', () => {
       describe: 'the page hears the flip back',
     });
     expect(flips(page.frames)).toEqual([true, false]);
-    expect(await record(base, ws)).toEqual({ active: false });
+    expect(await record(base, ws)).toMatchObject({ active: false });
   });
 
   it('stays inactive on a server started with the collab core off', async () => {
     const { base, ws } = await boot(false);
     await flip(ws, true);
-    expect(await record(base, ws)).toEqual({ active: false });
+    expect(await record(base, ws)).toMatchObject({ active: false });
   });
 });

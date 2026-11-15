@@ -142,12 +142,30 @@ room hosts the server runs; every revoke calls its `recheck` beside the
 sweep that closes the server's own sockets, so a core connection loses a
 revoked role on the same call.
 
+**A new app starts from the app kit.** `bun run new-app <dir>`
+(`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
+after the folder: a Bun server with Hono routes, a doc socket the core's
+room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
+theme. The template points back into this repo in exactly two files, a
+re-export of `core/src/collab/` and an `@import` of
+`workspaces-app/src/wa-theme.css`, and the generator replaces both with
+copies, so the made app depends on nothing here. Sign-in is a typed slot
+(`SignIn.principal(request)`) holding a name-only development provider that
+refuses to start under `APP_ENV=production`; `templates/signin`, a
+Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,
+builds and runs an app outside the repo and syncs a doc between two of its
+pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
+
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
 (`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every
-board off) and the server-wide one (`CW_COLLAB_CORE`, read at boot, off
-unless `on`); a board takes the core only when both are on, so turning the
-server-wide one off returns every board to the current code on one restart.
+board off) and the server-wide one (`collab-core-server.json`, set by the
+same route, off until set; `CW_COLLAB_CORE` fixes it when the environment
+sets it); a board takes the core only when both are on, so turning the
+server-wide one off returns every board to the current code for every socket
+opened afterwards. The owner moves a board with one tap on the settings
+page's Collab core row (`workspaces-app/src/board/collab-core-row.ts`), which
+sends both settings in one request.
 The board and doc socket upgrades read it at connect and stamp the socket
 `core`. `server/src/collab-core-path.ts` is one core room host over the doc
 store's live docs: for a `core` socket it sends sync step 1 and answers the
