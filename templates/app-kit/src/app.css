@@ -38,6 +38,24 @@ body {
   text-decoration: none;
 }
 
+.app-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-s);
+  max-width: 24rem;
+}
+
+.app-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-2xs);
+}
+
+.app-error {
+  color: var(--wa-color-danger-on-quiet);
+  margin: 0;
+}
+
 .app-quiet {
   color: var(--wa-color-text-quiet);
   font-size: var(--wa-font-size-s);

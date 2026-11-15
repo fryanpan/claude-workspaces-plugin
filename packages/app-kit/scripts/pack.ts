@@ -3,7 +3,8 @@
  * Pack `@claude-workspaces/app-kit` into a tarball an app outside this repo
  * can install: `bun run --cwd packages/app-kit pack [outDir]`.
  *
- * The package's two source files point back into this repo, so the packed
+ * `src/auth/` is this package's own and is packed as it is. Its two other
+ * source files point back into this repo, so the packed
  * copy replaces them with what they point at:
  *
  *   src/collab/   becomes the files of `packages/core/src/collab/`, which
@@ -51,6 +52,8 @@ export function packKit(outDir: string): string {
     );
     cpSync(join(PKG_ROOT, 'README.md'), join(stage, 'README.md'));
     cpSync(join(REPO, 'LICENSE'), join(stage, 'LICENSE'));
+    // Files that live in this package (src/auth/) go as they are.
+    cpSync(join(PKG_ROOT, 'src/auth'), join(stage, 'src/auth'), { recursive: true });
     cpSync(join(REPO, 'packages/core/src/collab'), join(stage, 'src/collab'), {
       recursive: true,
       filter: (src) => !src.endsWith('.test.ts'),
