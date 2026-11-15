@@ -59,6 +59,11 @@ export class CollabCoreSwitch {
     return this.serverWide && this.boards.has(workspaceId);
   }
 
+  /** Whether any board is switched on, whatever the server-wide setting. */
+  anyBoardOn(): boolean {
+    return this.boards.size > 0;
+  }
+
   /** Every board switched on, sorted. */
   boardsOn(): string[] {
     return [...this.boards].sort();

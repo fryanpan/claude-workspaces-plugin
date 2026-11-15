@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · socket-write-gate · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · doc-history/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -157,6 +157,20 @@ write gate; presence, the access frame and the probe stay in
 share sweeps and eviction holds see it. Both paths sync the same Y.Doc the
 doc store persists to the same `.ydoc`, so switching loses nothing.
 `server/test/collab-core-board.test.ts` drives both paths side by side.
+
+**A board on the core keeps history** (D1 step 12). `server/src/doc-history/`
+records every saved change to a doc of a board on the core, with who made it:
+the identity a socket's upgrade proved, or the identity the request being
+answered proved (`event-origin.ts` carries it below the route), never a name
+a page sends. `log.ts` is one append-only file per doc,
+`_history/<docId>.yhist`, beside the `.ydoc` and never instead of it, so the
+current code reads nothing new and switching a board off loses nothing.
+`replay.ts` reads a doc as it was after any record and names who changed
+each part since; `restore.ts` puts a past version back as one forward edit,
+which `recorder.ts` records as a change of its own. `recorder.ts` attaches to
+every doc the store wires (`DocStore`'s `onDocWired`) and records nothing
+for a board on the current code. No route serves it yet; `ServerHandle`'s
+`docHistory` is the server function.
 
 Presence and follow sit in the same folder. `presence.ts` is the server
 half: one entry per tab, a person shown once at their most recently active

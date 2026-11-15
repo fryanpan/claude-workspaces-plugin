@@ -75,7 +75,9 @@ import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
 import { confirmGrantFolder } from './doc-components-agent.ts';
-import { DocStore } from './doc-store.ts';
+import { DiskHistoryStore } from './doc-history/log.ts';
+import { DocHistory } from './doc-history/recorder.ts';
+import { DocStore, type LiveDoc } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
@@ -385,6 +387,9 @@ export interface ServerHandle {
   /** Which boards the collab core serves, and its room host over the doc
    *  store's docs. Exposed so a test can read which path a socket took. */
   collabCore: { switch: CollabCoreSwitch; path: CollabCorePath };
+  /** History for the docs of boards on the core (`doc-history/recorder.ts`).
+   *  Exposed so a test can read and restore versions; no route serves it. */
+  docHistory: DocHistory;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -597,8 +602,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // membership, both built further down. Until then only the owner is trusted.
   let commentTrustFor: CommentTrustFor | null = null;
   let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
+  // Built before the store so it attaches to every doc the store wires. Which
+  // docs it records is late-bound: the core switch and the board membership
+  // are built further down. Until then it records nothing.
+  let historyScope: ((doc: LiveDoc) => boolean) | null = null;
+  const docHistory = new DocHistory({
+    store: new DiskHistoryStore(dataDir),
+    inScope: (doc) => historyScope?.(doc) ?? false,
+  });
   const docStore: DocStore = new DocStore({
     dataDir,
+    onDocWired: (doc) => docHistory.attach(doc),
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,
@@ -2139,6 +2153,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     getDoc: (id) => docStore.peek(id),
     rooms: collabRooms,
   });
+  // History rides the board's core switch: a board doc by its own id, any
+  // other doc by the boards it sits on.
+  historyScope = (doc) => {
+    if (!collabCoreSwitch.serverWide || !collabCoreSwitch.anyBoardOn()) return false;
+    if (doc.docId.startsWith('ws:')) return collabCoreSwitch.usesCore(doc.docId.slice(3));
+    for (const ws of boardsForDoc(doc.docId)) if (collabCoreSwitch.usesCore(ws)) return true;
+    return false;
+  };
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -3905,6 +3927,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     collabRooms,
     sweepDeadShares,
     collabCore: { switch: collabCoreSwitch, path: collabCorePath },
+    docHistory,
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason
