@@ -82,3 +82,12 @@ export interface GateRunOpts {
    */
   heldInReply?: boolean;
 }
+
+/** What a filing route adds to its answer for whatever the gate said. */
+export type HeldFields = {
+  held?: boolean;
+  heldReason?: string;
+  message?: string;
+  refused?: unknown;
+  admitted?: unknown;
+};

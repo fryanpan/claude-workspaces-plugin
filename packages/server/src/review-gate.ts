@@ -56,7 +56,7 @@ import {
 } from '@claude-workspaces/core/review-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
-import type { GateRunOpts, ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
+import type { GateRunOpts, HeldFields, ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
 import {
   admittedLessSpecificMessage,
   admittedUnjudgedMessage,
@@ -1357,7 +1357,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
    * because until that was said the filer read a bare 200 as "it passed".
    * `admittedUnjudged` is the machine-readable half of the same fact.
    */
-  function heldFields(gate: ReviewGate | ThreadReviewGate | undefined): Record<string, unknown> {
+  function heldFields(gate: ReviewGate | ThreadReviewGate | undefined): HeldFields {
     if (gate?.held) {
       // `refused` names the fleet rule when that is what stopped it.
       const refused = 'item' in gate ? gate.item.judge?.refused : gate.review.judge?.refused;

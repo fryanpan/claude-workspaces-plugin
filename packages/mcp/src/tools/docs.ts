@@ -25,6 +25,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
+import { docThreadsClient } from '../server-client.ts';
 import { inactiveWatches } from '../sse-loop.ts';
 import { type ThreadCreateInput, threadCreateRequest } from '../thread-create.ts';
 import type { RestoreState, WatchCoverage } from '../watch-coverage.ts';
@@ -130,6 +131,13 @@ export async function handleDocsTool(
   /** The board this call is addressed under — see board-path.ts. */
   const boardId = (): string => boardIdOf(name, a);
   const board = (): string => boardPathOf(name, a);
+  /** One doc's thread routes, through the typed client (`server-client.ts`). */
+  const threadsApi = () => docThreadsClient(http).workspaces[':ws'].docs[':docId'];
+  const threadParam = (docId: string, threadId: string) => ({
+    ws: encodeURIComponent(boardId()),
+    docId: encodeURIComponent(docId),
+    threadId: encodeURIComponent(threadId),
+  });
   // Sent on every scoped edit: the author is whose get_doc reads the server's
   // stale-write rule judges the edit by, and the confirm flag is forwarded
   // only when true, so the default stays the protected path.
@@ -171,16 +179,19 @@ export async function handleDocsTool(
     }
     case 'list_threads': {
       const { docId, status } = a as { docId: string; status?: string };
-      const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-      const res = await http('GET', `${board()}/docs/${encodeURIComponent(docId)}/threads${qs}`);
+      const res = await threadsApi()
+        .threads.$get({
+          param: { ws: encodeURIComponent(boardId()), docId: encodeURIComponent(docId) },
+          query: status ? { status } : {},
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'get_thread': {
       const { docId, threadId } = a as { docId: string; threadId: string };
-      const res = await http(
-        'GET',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}`,
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].$get({ param: threadParam(docId, threadId) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'post_reply': {
@@ -191,16 +202,17 @@ export async function handleDocsTool(
         review?: unknown;
         to?: unknown;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`,
-        {
-          author: AUTHOR,
-          text,
-          ...(review !== undefined ? { review } : {}),
-          ...(to !== undefined ? { to } : {}),
-        },
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].comments.$post({
+          param: threadParam(docId, threadId),
+          json: {
+            author: AUTHOR,
+            text,
+            ...(review !== undefined ? { review } : {}),
+            ...(to !== undefined ? { to } : {}),
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'link_review_item': {
@@ -210,11 +222,12 @@ export async function handleDocsTool(
         item: unknown;
         text?: string;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/linked-items`,
-        { author: AUTHOR, item, ...(text !== undefined ? { text } : {}) },
-      );
+      const res = await threadsApi()
+        .threads[':threadId']['linked-items'].$post({
+          param: threadParam(docId, threadId),
+          json: { author: AUTHOR, item, ...(text !== undefined ? { text } : {}) },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'edit_comment': {
@@ -225,11 +238,12 @@ export async function handleDocsTool(
         text: string;
         reason?: string;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/edit-comment`,
-        { author: AUTHOR, commentId, text, ...(reason !== undefined ? { reason } : {}) },
-      );
+      const res = await threadsApi()
+        .threads[':threadId']['edit-comment'].$post({
+          param: threadParam(docId, threadId),
+          json: { author: AUTHOR, commentId, text, ...(reason !== undefined ? { reason } : {}) },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'post_status': {
@@ -293,10 +307,9 @@ export async function handleDocsTool(
     }
     case 'resolve_thread': {
       const { docId, threadId } = a as { docId: string; threadId: string };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/resolve`,
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].resolve.$post({ param: threadParam(docId, threadId) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_thread_progress': {
@@ -304,11 +317,12 @@ export async function handleDocsTool(
       if (state !== 'working' && state !== 'done' && state !== 'open') {
         return err("state must be 'working', 'done' or 'open'");
       }
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/progress`,
-        { state, author: AUTHOR },
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].progress.$post({
+          param: threadParam(docId, threadId),
+          json: { state, author: AUTHOR },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'summarize_thread': {
@@ -317,19 +331,19 @@ export async function handleDocsTool(
         threadId: string;
         force?: boolean;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/summary`,
-        force ? { force: true } : undefined,
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].summary.$post({
+          param: threadParam(docId, threadId),
+          json: force ? { force: true } : {},
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'reopen_thread': {
       const { docId, threadId } = a as { docId: string; threadId: string };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/reopen`,
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].reopen.$post({ param: threadParam(docId, threadId) })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'get_doc': {
@@ -698,18 +712,19 @@ export async function handleDocsTool(
         parseInlineMarks?: boolean;
         suggest?: boolean;
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`,
-        {
-          ...scoped(),
-          replacement,
-          // Forwarded as a boolean, never only-when-true — see
-          // find_and_replace above.
-          ...(typeof parseInlineMarks === 'boolean' ? { parseInlineMarks } : {}),
-          ...(suggest === true ? { suggest: true, author: suggestionAuthor() } : {}),
-        },
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].rewrite_region.$post({
+          param: threadParam(docId, threadId),
+          json: {
+            ...scoped(),
+            replacement,
+            // Forwarded as a boolean, never only-when-true — see
+            // find_and_replace above.
+            ...(typeof parseInlineMarks === 'boolean' ? { parseInlineMarks } : {}),
+            ...(suggest === true ? { suggest: true, author: suggestionAuthor() } : {}),
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'list_suggestions': {
@@ -760,11 +775,12 @@ export async function handleDocsTool(
             : 'insert_after_thread needs a non-empty `text` — nothing was inserted.',
         );
       }
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`,
-        { ...scoped(), text },
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].insert_after.$post({
+          param: threadParam(docId, threadId),
+          json: { ...scoped(), text },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'insert_blocks_after_thread': {
@@ -774,11 +790,12 @@ export async function handleDocsTool(
         markdown: string;
         placement?: 'after-block' | 'top-level';
       };
-      const res = await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_blocks_after`,
-        { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
-      );
+      const res = await threadsApi()
+        .threads[':threadId'].insert_blocks_after.$post({
+          param: threadParam(docId, threadId),
+          json: { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'create_anchor': {

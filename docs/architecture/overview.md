@@ -83,7 +83,7 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `mounts-client.ts` is Hono's typed client (`hc<MountsApi>`) over the child's `http()` call; the mount tools send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount and doc-thread tools send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
@@ -465,33 +465,53 @@ put a stale `content-length` on a compressed body.
   stale-client 410, the wrong-prefix hint and the board's not-found page. An
   address none of them claims gets the chain's bare 404.
 
-**Converting a family so the MCP calls it typed.** The mounts family is the
-worked example (PR 1661); the other families still go through `claimWith`
-with hand-spelled paths in the MCP.
+**Converting a family so the MCP calls it typed.** There are two ways, and
+a family takes the second unless its handler is small.
 
-1. Move the family's `/api/...` routes into a chained Hono app in its own
-   module, `routes/<family>-api.ts`, built from the family's existing context:
-   `new Hono().get(path, …).post(path, …)…`. Keep each handler body as it
-   was. Declare body fields with a validator-shaped middleware (`jsonBody<T>`
-   / `queryOf<Q>` in `mounts-api.ts`) so the types reach the client, while
-   the old validators still decide what is refused. Give it a `notFound`
-   that answers what the old chain answered for an unclaimed method or
-   sub-path, and export `type <Family>Api = ReturnType<typeof <family>Api>`.
-2. Keep the `claimWith` line in `hono-families.ts` and the family's
-   `handle…Routes` entry point. Run the family's gates there as before
-   (`offBox` for mounts), refuse HEAD where the family refused it (Hono
-   would run the GET handler), then hand the request to the app, built once
-   per context (`apiFor` in `mounts.ts`). Order in the chain is unchanged.
-3. Re-export the type from `server.ts` and `server/src/index.ts`.
-4. In `mcp/src/`, build `hc<Family>Api` over `http()` the way
-   `mounts-client.ts` does, with `import type` only, and switch each tool's
-   call site to `client.api.<path>.$get/$post/…`.
-5. Prove it: a vitest case recording each tool's method, path and body
-   against the old spelling, `@ts-expect-error` probes for an unknown field,
-   a missing field, a missing route and a wrong method, and a mutation (rename
-   a server field, see typecheck fail in the MCP). `route-answers.test.ts`
-   must not change. Report `build:mcp`'s bundle size before and after; it
-   should grow only by the hc client, once.
+- **A serving app.** The mounts family (PR 1661) moved its handler bodies
+  into a chained Hono app, `routes/mounts-api.ts`, behind the family's
+  existing `claimWith` line and `offBox` gate. Its `notFound` answers the
+  old 405, and `mounts.ts` refuses HEAD before the app, because Hono would
+  answer HEAD with the GET handler. This is right for a family of a few
+  hundred lines.
+- **A contract.** A family whose handler is long keeps serving as it does,
+  and a contract declares the routes the MCP calls
+  (`routes/route-contract.ts`; the doc threads' is
+  `routes/doc-threads-contract.ts`). The steps:
+  1. In `routes/<family>-contract.ts`, export one interface per body and a
+     chained `new Hono()` declaring each route with `json<Body>()` or
+     `query<Q>()` and the handler `contractOnly`, which never runs. Use the
+     path the route-answers fixture uses, parameter names included.
+  2. In each handler branch, read the body as
+     `sent<Body>(await safeJson(req))`. A field the branch reads that the
+     interface does not declare is now a type error, so the interface has
+     to match what the server reads.
+  3. Where an MCP tool reads a field of the answer, declare the answer type
+     and give that route `answers<Answer>()` instead of `contractOnly`. The
+     branch builds its JSON as `answerAs<Answer>({...})`, naming each field
+     the tool reads as a property rather than spreading it in, because a
+     spread escapes TypeScript's excess-property check (`JSON.stringify` drops
+     an `undefined` one, so the bytes do not change). Delete the tool's
+     `as {...}` cast so it reads the typed answer. A route whose answer no
+     tool reads stays untyped; the PR body lists them.
+  4. Add the contract to `CONTRACTS` in `test/route-contracts.test.ts`, with
+     the handlers that may answer it. A declared route whose row in
+     `fixtures/route-answers.json` is missing, or answered by another
+     handler, fails there.
+
+Either way, re-export the type from `server.ts` and `server/src/index.ts`,
+add a client to `mcp/src/server-client.ts` (`import type` only), and switch
+each tool's call site to `client.workspaces[':ws']….$post({ param, json })`,
+passing each parameter through `encodeURIComponent`, because `hc` does not
+encode them. Prove it with a vitest case that records each tool's method,
+path and body against the old spelling (the existing tool tests must pass
+unchanged), `@ts-expect-error` probes for an unknown field, a missing field,
+a missing route and a wrong method, at least one probe per family on a
+request field and one on an answer field, and three mutations: rename a
+body field and an answer field and see both the server handler and the MCP
+fail typecheck, and misspell a declared path and see
+`route-contracts.test.ts` fail. `route-answers.test.ts`
+must not change. Report `build:mcp`'s bundle size before and after.
 
 The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`

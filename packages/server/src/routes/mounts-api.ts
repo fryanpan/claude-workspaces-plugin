@@ -15,7 +15,7 @@ import type { MountRoutesContext } from './mount-routes-context.ts';
  * The mount table's REST routes, `/api/mounts…`, as a typed Hono app.
  *
  * WHY TYPED. The MCP child calls these routes through Hono's client
- * (`hc<MountsApi>`, `packages/mcp/src/mounts-client.ts`). The client reads the
+ * (`hc<MountsApi>`, `packages/mcp/src/server-client.ts`). The client reads the
  * request shapes declared here, so renaming a field on one side and not the
  * other fails `bun run typecheck` instead of failing at a session's first
  * call. Each route declares what a caller sends (`json` or `query`), and each
