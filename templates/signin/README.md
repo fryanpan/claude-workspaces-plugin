@@ -12,7 +12,10 @@ limits.
 ## Copy it into a new app
 
 1. Copy this folder into the new repository, including `migrations/` and
-   `test/`. It does not depend on anything else in this repo.
+   `test/`. Its sign-in rules come from `@claude-workspaces/app-kit/auth`:
+   run `bun run --cwd packages/app-kit pack` in this repo, copy the tarball
+   into the new repository's `vendor/`, and point the dependency at it
+   (`"file:./vendor/claude-workspaces-app-kit-<version>.tgz"`).
 2. Run `bun install` (or `npm install`). The versions are pinned.
 3. Create the database with `wrangler d1 create <name>`, then put its id in
    `wrangler.jsonc` in place of `REPLACE_ME_D1_DATABASE_ID`. Rename `name`

@@ -52,6 +52,9 @@ export function makeBuiltApp(parent: string, name = 'riverbend-notes'): string {
 export interface RunningApp {
   base: string;
   ws: (docId: string) => string;
+  /** The link in the latest mail of `kind` the app printed for `to`, once it
+   *  has printed one (the kit's mailer prints each mail as a line). */
+  mailLink: (kind: string, to: string) => Promise<string>;
   /** SIGTERM: the app saves every open doc, then exits. */
   stop: () => Promise<void>;
 }
@@ -64,41 +67,88 @@ export function startApp(dir: string, dataDir: string): Promise<RunningApp> {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exited = new Promise<void>((r) => child.once('exit', () => r()));
-  return new Promise((resolveStart, reject) => {
-    let out = '';
-    const onData = (d: Buffer): void => {
-      out += String(d);
-      const m = /listening on (http:\/\/\S+)/.exec(out);
-      if (!m?.[1]) return;
-      child.stdout?.off('data', onData);
-      const base = m[1];
-      resolveStart({
-        base,
-        ws: (docId) => `${base.replace(/^http/, 'ws')}/docs/${docId}/ws`,
-        stop: async () => {
-          if (child.exitCode === null) child.kill('SIGTERM');
-          await exited;
-        },
-      });
-    };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', (d) => {
-      out += String(d);
+  let out = '';
+  const watchers = new Set<() => void>();
+  const onOutput = (d: Buffer): void => {
+    out += String(d);
+    for (const w of [...watchers]) w();
+  };
+  child.stdout?.on('data', onOutput);
+  child.stderr?.on('data', onOutput);
+
+  /** Resolves with `find(out)` once it is not null; rejects after 10s. */
+  const when = <T>(find: () => T | null, what: string): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const check = (): void => {
+        const found = find();
+        if (found === null) return;
+        watchers.delete(check);
+        clearTimeout(timer);
+        resolve(found);
+      };
+      const timer = setTimeout(() => {
+        watchers.delete(check);
+        reject(new Error(`the app never printed ${what}:\n${out}`));
+      }, 10_000);
+      watchers.add(check);
+      check();
     });
-    child.once('exit', (code) =>
-      reject(new Error(`the app exited (${code}) before listening:\n${out}`)),
-    );
+
+  const started = when(() => /listening on (http:\/\/\S+)/.exec(out)?.[1] ?? null, 'its address');
+  const died = new Promise<never>((_, reject) =>
+    child.once('exit', (code) => reject(new Error(`the app exited (${code}):\n${out}`))),
+  );
+  return Promise.race([started, died]).then((base) => ({
+    base,
+    ws: (docId) => `${base.replace(/^http/, 'ws')}/docs/${docId}/ws`,
+    mailLink: (kind, to) =>
+      when(() => {
+        const lines = out.split('\n').filter((l) => l.startsWith(`[mail:${kind}] to=${to} `));
+        return lines.at(-1)?.split(' ').at(-1) ?? null;
+      }, `a ${kind} mail to ${to}`),
+    stop: async () => {
+      if (child.exitCode === null) child.kill('SIGTERM');
+      await exited;
+    },
+  }));
+}
+
+export const PASSWORD = 'correct horse battery staple';
+
+/** POST a form the way the app's page does: from the app's own origin. */
+export function postForm(base: string, path: string, fields: Record<string, string>, cookie = '') {
+  return fetch(`${base}${path}`, {
+    method: 'POST',
+    body: new URLSearchParams(fields),
+    headers: { origin: base, ...(cookie ? { cookie } : {}) },
+    redirect: 'manual',
   });
 }
 
-/** Sign in through the app's own form; returns the Cookie header to send. */
-export async function signInAs(base: string, name: string): Promise<string> {
-  const res = await fetch(`${base}/auth/sign-in`, {
-    method: 'POST',
-    body: new URLSearchParams({ name }),
-    redirect: 'manual',
-  });
-  const set = res.headers.get('set-cookie');
-  if (res.status !== 303 || !set) throw new Error(`sign-in answered ${res.status}`);
-  return set.split(';')[0] ?? '';
+/** The Cookie header that sends back every cookie a response set. */
+export function cookieFrom(res: Response): string {
+  return res.headers
+    .getSetCookie()
+    .map((c) => c.split(';')[0] ?? '')
+    .join('; ');
+}
+
+/** Sign in on the app's form; returns the Cookie header to send. */
+export async function signIn(app: RunningApp, email: string, password = PASSWORD): Promise<string> {
+  const res = await postForm(app.base, '/auth/sign-in', { email, password });
+  if (res.status !== 303) throw new Error(`sign-in answered ${res.status}: ${await res.text()}`);
+  return cookieFrom(res);
+}
+
+/** Make an account, follow the mailed verification link, sign in. */
+export async function signUpVerified(
+  app: RunningApp,
+  email: string,
+  name: string,
+): Promise<string> {
+  const res = await postForm(app.base, '/auth/sign-up', { name, email, password: PASSWORD });
+  if (res.status !== 200) throw new Error(`sign-up answered ${res.status}: ${await res.text()}`);
+  const verified = await fetch(await app.mailLink('verify-email', email), { redirect: 'manual' });
+  if (verified.status >= 400) throw new Error(`verification answered ${verified.status}`);
+  return signIn(app, email);
 }
