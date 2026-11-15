@@ -213,6 +213,11 @@ describe('fly.yml', () => {
         !/!= ''/.test(values(st.env)),
     );
     expect(holders.map((st) => st.name)).toEqual(['Deploy each project machine']);
+    // machine:deploy reads the Keychain's cw-board-owner-email from this name
+    // in CI (mac-ops.ts secretEnvName); without it the server has no owner.
+    expect(holders[0]?.env?.CW_SECRET_CW_BOARD_OWNER_EMAIL).toBe(
+      '${{ secrets.CW_SECRET_CW_BOARD_OWNER_EMAIL }}',
+    );
     expect(steps.find((st) => st.run?.includes('bun install'))?.env).toBeUndefined();
     // A secret spelled inside a script would reach the log's command echo.
     for (const w of [fly, wf]) {
