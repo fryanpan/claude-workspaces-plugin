@@ -47,6 +47,22 @@ describe('decideModelReport', () => {
     expect(decideModelReport({ ...lead, hook_event_name: 'Stop' }, dir)).toBeUndefined();
   });
 
+  it('reports a compaction starting and ending for the lead alone', () => {
+    const lead = { session_id: 's-lead' };
+    expect(
+      decideModelReport({ ...lead, hook_event_name: 'PreCompact', trigger: 'auto' }, dir),
+    ).toEqual({ kind: 'model', compacting: true });
+    expect(
+      decideModelReport({ ...lead, hook_event_name: 'PostCompact', trigger: 'auto' }, dir),
+    ).toEqual({ kind: 'model', compacting: false });
+    expect(
+      decideModelReport({ session_id: 's-other', hook_event_name: 'PreCompact' }, dir),
+    ).toBeUndefined();
+    expect(
+      decideModelReport({ ...lead, agent_id: 'a-1', hook_event_name: 'PreCompact' }, dir),
+    ).toBeUndefined();
+  });
+
   it('ignores a subagent', () => {
     expect(
       decideModelReport(

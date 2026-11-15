@@ -112,6 +112,28 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-report.ts\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/model-report.ts\"",
+            "async": true
+          }
+        ]
+      }
+    ],
     "PreModelSwitch": [
       {
         "hooks": [
