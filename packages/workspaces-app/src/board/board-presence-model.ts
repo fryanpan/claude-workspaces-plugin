@@ -481,6 +481,14 @@ export interface PresenceChip {
    *  identity: it is minted fresh on every connect. */
   clientId?: number;
   state?: PresenceAgent['state'];
+  /** The reader's own chip. The strip draws the reader nowhere: the "me"
+   *  button beside it already does. */
+  self?: boolean;
+  /** On the reader's page, as opposed to elsewhere in the workspace
+   *  (`presence/presence-places.ts`). Absent until a page has placed it. */
+  here?: boolean;
+  /** Where they are, in words, for the strip's list. */
+  line?: string;
 }
 
 /** What the attachments read says about plugin versions. */
@@ -859,6 +867,7 @@ export function presenceChips(
       title: `${p.name} · in ${where} · ${timeAgo(p.lastActive, now)}`,
       docId: p.docId,
       clientId: p.clientId,
+      ...(p.self ? { self: true } : {}),
     });
   }
   // Attached is not present. A session that exited keeps its roster row —
