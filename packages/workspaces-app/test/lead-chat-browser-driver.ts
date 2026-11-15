@@ -21,13 +21,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -38,6 +32,7 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { CHROME_LOG_ARGS, connectWatched, dumpRunning, onceWithin } from './chrome-stall.ts';
 import type { LeadChatRun, Rect, SurfaceRun, VoiceRun } from './lead-chat-browser-reading.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
@@ -115,6 +110,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--mute-audio',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-${width}-${process.pid}`,
@@ -122,7 +118,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
       browsers.push(started);
     },
   );
-  const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
+  const cdp = await connectWatched(b, `page at ${width}`, step);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -139,7 +135,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
 }
 
 async function go(cdp: Cdp, url: string): Promise<Read> {
-  const loaded = cdp.once('Page.loadEventFired');
+  const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
   await cdp.send('Page.navigate', { url });
   await loaded;
   return until('the agent button on the page', async () => {
@@ -475,6 +471,9 @@ async function main(): Promise<void> {
 
     const run: LeadChatRun = { surfaces: runs, voice };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(step);
+    throw e;
   } finally {
     lead?.close();
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
@@ -485,9 +484,9 @@ async function main(): Promise<void> {
 
 setTimeout(() => {
   step('gave up after 230s');
-  void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
-    process.exit(3),
-  );
+  void dumpRunning(step)
+    .finally(() => Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))))
+    .finally(() => process.exit(3));
 }, 230_000).unref();
 await main();
 process.exit(0);
