@@ -11,36 +11,46 @@ bun run build
 bun run start                        # http://127.0.0.1:3000
 ```
 
-Open it in two tabs, sign in, open the same doc in both, and type: each tab
-shows the other's edits as they are made. Docs are saved to `data/` and kept
+Make an account at `/auth/sign-up`. Until a mail provider is wired, the
+verification link is printed in the terminal running the app; open it, then
+sign in. Open the same doc in two tabs and type: each tab shows the other's
+edits as they are made. Docs and accounts are saved to `data/` and kept
 across restarts.
 
 ## What is in it
 
 | File | What it does |
 | --- | --- |
-| `src/server.ts` | Starts the app. `PORT` (0 picks a free port), `HOST`, `DATA_DIR`, `APP_ENV`. |
+| `src/server.ts` | Starts the app. `PORT` (0 picks a free port), `HOST`, `DATA_DIR`, `APP_URL`, `AUTH_SECRET`, `APP_ENV`. |
 | `src/app.ts` | The Hono routes for pages and assets, and the doc socket at `/docs/<id>/ws`. `role` there says who may open which doc. |
 | `src/sign-in.ts` | The sign-in slot: `SignIn.principal(request)` says who sent a request. |
-| `src/file-storage.ts` | Saves each doc as `data/<id>.ydoc`. |
+| `src/password-sign-in.ts` | Password sign-in on Better Auth, accounts and sessions in `data/auth.sqlite`. |
+| `src/mail.ts` | Where verification and reset mails go: printed to the terminal until you wire a provider. |
+| `src/file-storage.ts` | Saves each doc as `data/docs/<id>.ydoc`. |
 | `src/page.ts` | The HTML for each page. |
 | `src/client/` | The page script: the Web Awesome components, the doc socket (`sync.ts`) and the textarea binding. |
 | `src/theme.css` | Imports the shared theme from the app kit package. |
-| `vendor/` | The app kit package, `@claude-workspaces/app-kit`, as a tarball: the collaboration core (`@claude-workspaces/app-kit/collab`, rooms that sync a Yjs doc between pages) and the shared theme. |
+| `vendor/` | The app kit package, `@claude-workspaces/app-kit`, as a tarball: the collaboration core (`@claude-workspaces/app-kit/collab`, rooms that sync a Yjs doc between pages), the shared theme, and the shared password sign-in rules (`@claude-workspaces/app-kit/auth`). |
 | `src/app.css` | The app's own styles, every value a `--wa-*` token. |
 
 ## Sign-in
 
-The kit ships one provider, `devSignIn`: anybody can type a name and be that
-person. It exists so the app runs on the first try, and `server.ts` refuses
-to start with it when `APP_ENV=production`.
+People make an account with a name, an email and a password, open the link
+mailed to them, and then sign in by password. A session is a row in
+`data/auth.sqlite` named by a signed, HttpOnly cookie; signing out deletes
+the row. The cookie is signed with `AUTH_SECRET`, or with a secret made on
+first start in `data/auth-secret` (readable only by its owner).
 
-For real accounts, write a `SignIn` whose `principal` reads your session, and
-pass it in `server.ts` in place of `devSignIn()`. Nothing else changes: every
-page and the doc socket ask `principal` and nothing else. The
-claude-workspaces repo's `templates/signin` is a Cloudflare Worker with
-password, magic-link and Google sign-in on Better Auth; a provider that reads
-its session is not part of this kit yet.
+The rules (how a password is hashed and checked, that an email is verified
+before a password signs in, what ends a session, which mails go out) are
+`passwordAuthOptions` from the app kit package, the same options the
+claude-workspaces sign-in Worker template runs. `src/password-sign-in.ts`
+adds only this app's database, secret, rate limit (20 auth requests a minute
+per address, in memory) and form pages.
+
+Before `APP_ENV=production`, wire a mail provider in `src/mail.ts`:
+`server.ts` refuses to start while mail only prints to the terminal. Password
+reset mails go out, but the kit has no page to set the new password yet.
 
 ## Who may open a doc
 

@@ -1,19 +1,8 @@
+import type { Mailer } from '@claude-workspaces/app-kit/auth';
 import type { Env } from './env.ts';
 
-export type MailKind = 'verify-email' | 'magic-link' | 'reset-password';
-
-export interface Mail {
-  kind: MailKind;
-  to: string;
-  subject: string;
-  text: string;
-  /** The link the mail carries. Tests follow it. */
-  url: string;
-}
-
-export interface Mailer {
-  send(mail: Mail): Promise<void>;
-}
+export type { Mail, MailKind, Mailer } from '@claude-workspaces/app-kit/auth';
+export { composeMail } from '@claude-workspaces/app-kit/auth';
 
 /**
  * The template ships no mail provider. Wire yours here (Resend, Postmark,
@@ -34,13 +23,4 @@ export function mailerFromEnv(env: Env): Mailer {
       throw new Error('No mail transport configured: wire a provider in src/mail.ts');
     },
   };
-}
-
-export function composeMail(kind: MailKind, to: string, url: string): Mail {
-  const subject = {
-    'verify-email': 'Verify your email',
-    'magic-link': 'Your sign-in link',
-    'reset-password': 'Reset your password',
-  }[kind];
-  return { kind, to, subject, url, text: `${subject}: ${url}` };
 }
