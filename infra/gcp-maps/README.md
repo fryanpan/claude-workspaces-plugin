@@ -53,6 +53,9 @@ gcloud auth application-default login
 The account needs, on the project, permission to enable services
 (Service Usage Admin) and to make keys (API Keys Admin).
 
+The project must have a billing account linked. Google refuses Maps
+requests from a project without one, and this root does not link it.
+
 ## Running it
 
 ```bash
