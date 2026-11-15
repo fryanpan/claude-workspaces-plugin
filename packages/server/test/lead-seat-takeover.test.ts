@@ -30,6 +30,17 @@ describe('a stale seat is takeable; a live one is not', () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
+  /**
+   * The store's clock, moved only by `later`. The windows are 20ms and an
+   * attach reads the clock more than once, so on the wall clock a loaded
+   * runner could age the attach it had just made past its own window
+   * (`seat.live` false, CI run 43744013210).
+   */
+  let clockMs = 1_000_000;
+  const later = (ms: number): void => {
+    clockMs += ms;
+  };
+
   /** Windows in milliseconds, and a stale window short enough to cross. */
   function tightStore(): TaskStore {
     const dataDir = mkdtempSync(join(tmpdir(), 'seat-takeover-'));
@@ -40,6 +51,7 @@ describe('a stale seat is takeable; a live one is not', () => {
       heartbeatFreshMs: 20,
       observedWorkFreshMs: 20,
       leadSeatStaleMs: 60,
+      now: () => clockMs,
     });
     stores.push(store);
     return store;
@@ -77,14 +89,14 @@ describe('a stale seat is takeable; a live one is not', () => {
     expect(store.getWorkspace(ws.id)?.leadAgentId).toBe('incumbent');
   });
 
-  it('CONTROL: a lead that is quiet but holding a stream keeps its seat', async () => {
+  it('CONTROL: a lead that is quiet but holding a stream keeps its seat', () => {
     // The same rule at the other end of the clock. A lead deep in a long
     // build makes no observable call for far longer than any window, and its
     // MCP child is holding the channel open the whole time.
     const store = tightStore();
     const ws = store.createWorkspace('quiet');
     attach(store, ws.id, 'incumbent');
-    await new Promise((r) => setTimeout(r, 120));
+    later(120);
     store.setAgentStreamProbe((wsId, agentId) => wsId === ws.id && agentId === 'incumbent');
     const peer = attach(store, ws.id, 'bystander');
     expect(peer.lead).toBe(false);
@@ -92,11 +104,11 @@ describe('a stale seat is takeable; a live one is not', () => {
     expect(peer.seatTakenFrom).toBeUndefined();
   });
 
-  it('takes a seat whose holder is gone, and says whose it was', async () => {
+  it('takes a seat whose holder is gone, and says whose it was', () => {
     const store = tightStore();
     const ws = store.createWorkspace('renamed');
     attach(store, ws.id, 'agent-live-feedback');
-    await new Promise((r) => setTimeout(r, 120));
+    later(120);
 
     const reborn = attach(store, ws.id, 'agent-workspaces');
     expect(reborn.lead).toBe(true);
@@ -106,7 +118,7 @@ describe('a stale seat is takeable; a live one is not', () => {
     expect(store.getWorkspace(ws.id)?.leadAgentId).toBe('agent-workspaces');
   });
 
-  it('the handover is recorded, not silent', async () => {
+  it('the handover is recorded, not silent', () => {
     // The seat change goes through the ordinary hand-over path, so the board
     // repaints and the audit trail carries who took it from whom. A quiet
     // reassignment would be a second invisible seat change, which is the
@@ -118,20 +130,20 @@ describe('a stale seat is takeable; a live one is not', () => {
       if (ev.type === 'workspace.lead_changed') events.push(ev.workspaceId);
     });
     attach(store, ws.id, 'gone');
-    await new Promise((r) => setTimeout(r, 120));
+    later(120);
     events.length = 0;
     attach(store, ws.id, 'reborn');
     expect(events).toContain(ws.id);
   });
 
-  it('the same agent re-attaching refreshes rather than taking from itself', async () => {
+  it('the same agent re-attaching refreshes rather than taking from itself', () => {
     // A long-running session re-attaches defensively. It is its own stale
     // holder, and reporting that it seized the seat from itself would be a
     // false alarm on the one surface that must stay trustworthy.
     const store = tightStore();
     const ws = store.createWorkspace('refresh');
     attach(store, ws.id, 'steady');
-    await new Promise((r) => setTimeout(r, 120));
+    later(120);
     const again = attach(store, ws.id, 'steady');
     expect(again.lead).toBe(true);
     expect(again.seatTakenFrom).toBeUndefined();
