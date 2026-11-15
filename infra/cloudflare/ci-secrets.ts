@@ -9,6 +9,10 @@
  *   GITHUB_TOKEN          a classic token with repo scope, which writing
  *                         Actions secrets needs
  *   FLY_API_TOKEN         optional: written to the environment's FLY_API_TOKEN
+ *   CW_OWNER_EMAIL        optional: the board owner's address, written to the
+ *                         environment's CW_SECRET_CW_BOARD_OWNER_EMAIL, which
+ *                         machine:deploy reads in CI as the Keychain's
+ *                         cw-board-owner-email
  *   CLOUDFLARE_ACCOUNT_ID optional: else the one account the token reaches
  *   CF_TFSTATE_BUCKET     optional: the state bucket the token may write
  *
@@ -114,6 +118,8 @@ export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number
   if (bucket) tfEnv.TF_VAR_state_bucket = bucket;
   const fly = value(io.env, 'FLY_API_TOKEN');
   if (fly) tfEnv.TF_VAR_fly_api_token = fly;
+  const ownerEmail = value(io.env, 'CW_OWNER_EMAIL');
+  if (ownerEmail) tfEnv.TF_VAR_owner_email = ownerEmail;
   const absent: string[] = [];
   for (const [key, rel] of Object.entries(CONFIG_PATHS.prod)) {
     const text = io.read(rel);
@@ -159,7 +165,7 @@ export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number
     const gone = deletions(shown.stdout);
     if (gone.length && !drop) {
       say(
-        `the plan deletes ${gone.join(', ')}: a missing input (FLY_API_TOKEN, a config) or a token Terraform would replace. Supply it, or pass --drop to delete on purpose; nothing was applied`,
+        `the plan deletes ${gone.join(', ')}: a missing input (FLY_API_TOKEN, CW_OWNER_EMAIL, a config) or a token Terraform would replace. Supply it, or pass --drop to delete on purpose; nothing was applied`,
       );
       return 1;
     }

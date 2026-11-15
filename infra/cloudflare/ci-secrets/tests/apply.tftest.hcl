@@ -103,7 +103,7 @@ run "the_r2_key_is_derived_from_the_token" {
 
   assert {
     condition     = output.environment_secrets == tolist(["CLOUDFLARE_API_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"])
-    error_message = "no Fly token given, so no FLY_API_TOKEN is written"
+    error_message = "no Fly token or owner address given, so neither is written"
   }
 
   assert {
@@ -120,6 +120,7 @@ run "configs_and_the_fly_token_are_written_when_given" {
     access_config     = "{\"projects\":{}}"
     share_link_config = "name = \"share-link-gate\""
     fly_api_token     = "fixture-fly-riverbend"
+    owner_email       = "alice@harborlight.test"
   }
 
   assert {
@@ -135,6 +136,11 @@ run "configs_and_the_fly_token_are_written_when_given" {
   assert {
     condition     = github_actions_environment_secret.deploy["FLY_API_TOKEN"].value == "fixture-fly-riverbend"
     error_message = "the Fly token goes to the environment"
+  }
+
+  assert {
+    condition     = github_actions_environment_secret.deploy["CW_SECRET_CW_BOARD_OWNER_EMAIL"].value == "alice@harborlight.test"
+    error_message = "the owner's address goes to the environment under the name machine:deploy reads"
   }
 }
 
