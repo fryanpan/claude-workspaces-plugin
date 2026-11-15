@@ -24,13 +24,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -39,6 +33,7 @@ import {
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { CHROME_LOG_ARGS, boundCdp, connectWatched, dumpRunning, watchOf } from './chrome-stall.ts';
 import type { MeetingBrowserRun, MeetingSizeRun, Rect } from './lead-chat-browser-reading.ts';
 import { bounded, go, read, tap, until } from './lead-chat-meeting-page.ts';
 
@@ -50,6 +45,10 @@ const step = (what: string): void => {
 };
 
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
+/** A dump, written without becoming the step under way. */
+const dump = (text: string): void => {
+  process.stderr.write(`[lead-chat-meeting-driver] ${text}\n`);
+};
 
 async function setup(cdp: Cdp, width: number, height: number): Promise<Cdp> {
   await cdp.send('Page.enable');
@@ -76,6 +75,7 @@ async function openBrowser(width: number, height: number) {
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--mute-audio',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-meeting-${width}-${process.pid}`,
@@ -84,15 +84,24 @@ async function openBrowser(width: number, height: number) {
     },
   );
   const main = await setup(
-    await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS)),
+    await connectWatched(b, `recording tab at ${width}`, dump),
     width,
     height,
   );
   // A second tab of the same browser: its own session storage, so it is not
   // the recorder — only a page watching the meeting.
-  const res = await fetch(`http://127.0.0.1:${b.port}/json/new?about:blank`, { method: 'PUT' });
+  const res = await fetch(`http://127.0.0.1:${b.port}/json/new?about:blank`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(15_000),
+  });
   const target = (await res.json()) as { webSocketDebuggerUrl: string };
-  const watcher = await setup(await Cdp.connect(target.webSocketDebuggerUrl), width, height);
+  const second = await Cdp.connect(target.webSocketDebuggerUrl);
+  const w = watchOf(main);
+  const watcher = await setup(
+    w ? boundCdp(second, w, `watching tab at ${width}`, dump) : second,
+    width,
+    height,
+  );
   return { main, watcher, browser: b };
 }
 
@@ -391,6 +400,9 @@ async function main(): Promise<void> {
     }
     const run: MeetingBrowserRun = { sizes };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(dump);
+    throw e;
   } finally {
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
     await handle?.stop();
@@ -400,9 +412,9 @@ async function main(): Promise<void> {
 
 setTimeout(() => {
   process.stderr.write(`[lead-chat-meeting-driver] gave up after 230s, during: ${current}\n`);
-  void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
-    process.exit(3),
-  );
+  void dumpRunning(dump)
+    .finally(() => Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))))
+    .finally(() => process.exit(3));
 }, 230_000).unref();
 await main();
 process.exit(0);
