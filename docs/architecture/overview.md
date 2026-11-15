@@ -407,10 +407,10 @@ guard would say otherwise. What the table still cannot see is whether an
 `owner-in-handler` route really carries its refusal — that one is the
 reviewer's, and the routes that have it carry their own tests.
 
-Dispatch stays with the ordered chain on purpose, and the chain is
-`routes/request-chain.ts` (shared shapes in `request-chain-context.ts`); since
-M12 it holds no route family itself, only the order in which the three Hono
-apps and the upgrade-and-stream run are tried.
+Dispatch is one ordered Hono router on purpose: `routes/hono-app.ts`
+(shared shapes in `hono-app-context.ts`). Since M12 it holds no route family
+itself, only the order in which the gates, the three Hono apps and the
+upgrade-and-stream run are tried, each as a middleware on `*`.
 `createServer` builds its context once and matches no route itself. Bun
 matches by specificity; this router's order is behaviour in eight documented
 places, among them the Recall status webhook immediately above the
@@ -420,11 +420,17 @@ unmatched address reaches through `fetch`, and the table is the registry
 rather than the router.
 
 **Hono, below the gates (M12).** Every route family now answers through one
-of three Hono apps (`routes/hono-front.ts` builds each), each tried from the
-line its families used to hold, so the chain's order is unchanged. The gates —
-the preflight, the cross-origin write gates, admission, the local-only gate,
-attribution and the two sign-in gates — are `routes/request-chain-gates.ts`,
-and they run once per request.
+of three Hono apps (`routes/hono-front.ts` builds each), each called from the
+router's middleware at the position its families held in the old
+hand-ordered chain, so the order is unchanged. The gates — the preflight, the
+cross-origin write gates, admission, the local-only gate, attribution and the
+two sign-in gates — are the router's first middleware
+(`routes/hono-gates.ts`), and they run once per request. The front door
+around the router — the bad-path refusal, the Sentry span, conditional GETs,
+compression, the session refresh, CORS and the slow log — stays a plain
+function in `hono-app.ts`: those rewrite the finished `Response`, and Hono's
+`c.res` setter copies the old response's headers onto the new one, which would
+put a stale `content-length` on a compressed body.
 
 - **The open app** (`routes/hono-open-families.ts`) is tried inside the gates,
   above admission: the home feed, the board import and the GitHub hub, whose
@@ -438,10 +444,15 @@ and they run once per request.
   workspaces list's stream and private messages. It is tried above the
   upgrade block, so Recall's webhook still precedes the `/recall/` upgrade,
   and a websocket upgrade never enters it.
-- **The upgrade-and-stream run** (`routes/upgrade-stream.ts`) stays a direct
-  call. A socket `server.upgrade` took over has no `Response` to return, and
-  a Hono handler must return one; the three SSE openers in that run share its
-  per-request socket judgements, so they stay with it.
+- **The upgrade-and-stream run** (`routes/upgrade-stream.ts`) is a router
+  middleware. When it upgrades a socket, the middleware returns an empty
+  `Response`, the router marks the request, and the front door hands Bun
+  `undefined` as `fetch` did before. `test/hono-upgrade-probe.test.ts` reads
+  the raw bytes on the connection and proves Bun writes exactly one status
+  line, the 101, whether the upgrade happens at once or after an await, and
+  whatever the handler returns afterwards. The
+  three SSE openers in that run share its per-request socket judgements, so
+  they stay with it.
 - **The board app** is tried below that run. Its first middleware is the
   workspace scope, which puts the resolved scope in `c.var` or answers with
   its refusal; then the board families (`routes/hono-board-families.ts`) in
@@ -890,7 +901,7 @@ board's origin with the reader's cookie. Nothing inside the page is rewritten,
 so the site builds its links under the prefix. The page's query reaches the dev
 server byte for byte minus the frame flag, and the host page hands its
 fragment to the frame. Every answer at an app's address carries
-`Cloudflare-CDN-Cache-Control: no-store`, stamped last in `request-chain.ts`,
+`Cloudflare-CDN-Cache-Control: no-store`, stamped last in `routes/hono-app.ts`,
 so the edge keeps no copy of an app's files, whatever the dev server said. What this does not carry
 behind a sign-in is in [security.md](security.md).
 

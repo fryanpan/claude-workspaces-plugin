@@ -1,6 +1,6 @@
 /**
- * The request chain's shared vocabulary: every long-lived value the chain
- * reads (`RequestChainContext`).
+ * The router app's shared vocabulary: every long-lived value `hono-app.ts`
+ * and its gates read (`HonoAppContext`).
  *
  * `createServer` builds the context once, after every route family's own
  * context exists. Nothing in it is per request; what the gates proved about a
@@ -16,7 +16,7 @@ import type { AttributableRequest, RequestAttribution } from '../request-attribu
 import type { HonoFront } from './hono-front.ts';
 import type { UpgradeStream } from './upgrade-stream.ts';
 
-export interface RequestChainContext {
+export interface HonoAppContext {
   // ── The front door ──
   docStore: DocStore;
   /** CORS headers for the request's origin, stamped on the way out. */
