@@ -29,6 +29,7 @@ import { isOwnerActor } from '../actor-identity.ts';
 import { withAppDoorCacheRule } from '../app-proxy.ts';
 import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
+import { setRequestAuthor } from '../event-origin.ts';
 import { refusedWriteLine } from '../middleware/refused-write-log.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from '../middleware/workspace-scope.ts';
 import { malformedPathSegment } from '../path-params.ts';
@@ -166,6 +167,8 @@ export function createRequestChain(
         browserProvedNobody,
         provenAuthor,
       } = attribution;
+      // Writers that see no request read who it proved from here.
+      setRequestAuthor(provenAuthor);
       /** A person proof naming the owner — never a body, a widget token or
        *  an agent token. Incoming Messages is shown to and moved by this
        *  alone (routes/inbox.ts). */

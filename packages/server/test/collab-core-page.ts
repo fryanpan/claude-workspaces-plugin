@@ -21,10 +21,15 @@ export interface Page {
   close: () => void;
 }
 
-export function openPage(url: string, origin: string, opts: { quiet?: boolean } = {}): Page {
+export function openPage(
+  url: string,
+  origin: string,
+  opts: { quiet?: boolean; cookie?: string } = {},
+): Page {
   const ydoc = new Y.Doc();
   const kinds: string[] = [];
-  const ws = new WebSocket(url, { headers: { origin } } as unknown as string[]);
+  const headers = { origin, ...(opts.cookie ? { cookie: opts.cookie } : {}) };
+  const ws = new WebSocket(url, { headers } as unknown as string[]);
   ws.binaryType = 'arraybuffer';
   let synced: () => void = () => {};
   const ready = new Promise<void>((r) => {
