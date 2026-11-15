@@ -29,6 +29,7 @@ import type {
   DocThreadsContract,
   MountsApi,
   ShareContract,
+  TaskStateContract,
 } from '../../server/src/index.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
@@ -56,3 +57,4 @@ export const docLifecycleClient = (http: Http) => typedClient<DocLifecycleContra
 export const attachmentsClient = (http: Http) => typedClient<AttachmentsContract>(http);
 export const shareClient = (http: Http) => typedClient<ShareContract>(http);
 export const agentNotesClient = (http: Http) => typedClient<AgentNotesContract>(http);
+export const taskStateClient = (http: Http) => typedClient<TaskStateContract>(http);

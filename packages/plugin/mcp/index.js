@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.376";
+var version2 = "0.1.377";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20203,6 +20203,7 @@ var docLifecycleClient = (http) => typedClient(http);
 var attachmentsClient = (http) => typedClient(http);
 var shareClient = (http) => typedClient(http);
 var agentNotesClient = (http) => typedClient(http);
+var taskStateClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -21547,6 +21548,11 @@ async function handleTaskTool(name, a, ctx) {
   const { http, ok: ok2, err: err2, AUTHOR, claimNoticeFor: claimNoticeFor2 } = ctx;
   const board = () => boardPathOf(name, a);
   const threadsApi = () => docThreadsClient(http).workspaces[":ws"].docs[":docId"];
+  const taskApi = () => taskStateClient(http).workspaces[":ws"].tasks[":taskId"];
+  const taskParam = (taskId) => ({
+    ws: encodeURIComponent(boardIdOf(name, a)),
+    taskId: encodeURIComponent(taskId)
+  });
   const threadParam = (docId, threadId) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     docId: encodeURIComponent(docId),
@@ -21680,12 +21686,15 @@ async function handleTaskTool(name, a, ctx) {
     case "task_transition": {
       const { taskId, to, note, usage } = a;
       const claimNotice = to === "in-progress" ? await claimNoticeFor2(taskId) : undefined;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/transition`, {
-        to,
-        author: AUTHOR,
-        ...note !== undefined ? { note } : {},
-        ...usage !== undefined ? { usage } : {}
-      });
+      const res = await (await taskApi().transition.$post({
+        param: taskParam(taskId),
+        json: {
+          to,
+          author: AUTHOR,
+          note,
+          usage
+        }
+      })).json();
       return ok2({
         taskId,
         status: res.task.status,
@@ -21695,11 +21704,14 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "assign_task": {
       const { taskId, assignee, assigneeKind } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/assignee`, {
-        assignee,
-        ...assigneeKind !== undefined ? { assigneeKind } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().assignee.$post({
+        param: taskParam(taskId),
+        json: {
+          assignee,
+          assigneeKind,
+          author: AUTHOR
+        }
+      })).json();
       return ok2({
         taskId,
         assignee: res.task.assignee,
@@ -21713,10 +21725,10 @@ async function handleTaskTool(name, a, ctx) {
       if (ids.length === 0 || ids.some((id) => typeof id !== "string" || id === "")) {
         return err2("blockedBy must be a task id, or an array of them");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/park`, {
-        blockedBy: ids,
-        author: AUTHOR
-      });
+      const res = await (await taskApi().park.$post({
+        param: taskParam(taskId),
+        json: { blockedBy: ids, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         blockedBy: res.after,
@@ -21729,10 +21741,10 @@ async function handleTaskTool(name, a, ctx) {
       if (clear !== true && (typeof waitingOn !== "string" || waitingOn.trim() === "")) {
         return err2("waitingOn is required: say what this task is waiting on, in words a reader understands — or pass clear: true to end the wait");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/wait`, {
-        ...clear === true ? { clear: true } : { what: waitingOn, ...hours !== undefined ? { hours } : {} },
-        author: AUTHOR
-      });
+      const res = await (await taskApi().wait.$post({
+        param: taskParam(taskId),
+        json: clear === true ? { clear: true, author: AUTHOR } : { what: waitingOn, hours, author: AUTHOR }
+      })).json();
       if (clear === true)
         return ok2({ taskId, cleared: true, changed: res.changed ?? false });
       return ok2({
@@ -21745,10 +21757,10 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "archive_task": {
       const { taskId, reason } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/archive`, {
-        ...reason !== undefined ? { reason } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().archive.$post({
+        param: taskParam(taskId),
+        json: { reason, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         archivedAt: res.task.archivedAt ?? null,
@@ -21775,9 +21787,7 @@ async function handleTaskTool(name, a, ctx) {
       if (taskId === undefined) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
-        author: AUTHOR
-      });
+      const res = await (await taskApi().restore.$post({ param: taskParam(taskId), json: { author: AUTHOR } })).json();
       return ok2({
         taskId,
         goal: res.task.goal,
@@ -21844,12 +21854,15 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_task_goal": {
       const { taskId, goal, position, batchId } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/goal`, {
-        goal,
-        author: AUTHOR,
-        ...position !== undefined ? { position } : {},
-        ...batchId !== undefined ? { batchId } : {}
-      });
+      const res = await (await taskApi().goal.$post({
+        param: taskParam(taskId),
+        json: {
+          goal,
+          author: AUTHOR,
+          position,
+          batchId
+        }
+      })).json();
       return ok2({ taskId, goal: res.task.goal, order: res.task.order, changed: res.changed });
     }
     case "set_goal_list": {
@@ -22103,11 +22116,10 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_task_dependencies": {
       const { taskId, after, afterEnforce } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/after`, {
-        after,
-        ...afterEnforce !== undefined ? { afterEnforce } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().after.$post({
+        param: taskParam(taskId),
+        json: { after, afterEnforce, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         changed: res.changed,
@@ -22120,14 +22132,17 @@ async function handleTaskTool(name, a, ctx) {
       if (rule === undefined) {
         return err2("rule required — a rule object to set, or null to clear the schedule.");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/schedule`, {
-        rule,
-        ...timezone !== undefined ? { timezone } : {},
-        ...until !== undefined ? { until } : {},
-        ...onMissed !== undefined ? { onMissed } : {},
-        ...output !== undefined ? { output } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().schedule.$post({
+        param: taskParam(taskId),
+        json: {
+          rule,
+          timezone,
+          until,
+          onMissed,
+          output,
+          author: AUTHOR
+        }
+      })).json();
       const schedule = res.task.schedule ?? null;
       const nextAt = schedule ? nextOccurrence(schedule) : undefined;
       return ok2({

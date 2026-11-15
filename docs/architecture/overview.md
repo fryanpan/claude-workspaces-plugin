@@ -83,7 +83,7 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount, doc-thread, doc-edit, doc-lifecycle, attachment and sharing tools and `post_status` send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount, doc-thread, doc-edit, doc-lifecycle, attachment and sharing tools, `post_status` and the tools that move one task or change one of its fields send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
@@ -146,10 +146,16 @@ revoked role on the same call.
 (`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
 after the folder: a Bun server with Hono routes, a doc socket the core's
 room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
-theme. The template points back into this repo in exactly two files, a
-re-export of `core/src/collab/` and an `@import` of
-`workspaces-app/src/wa-theme.css`, and the generator replaces both with
-copies, so the made app depends on nothing here. Sign-in is a typed slot
+theme. The core and the theme reach the app as one versioned package,
+`packages/app-kit` (`@claude-workspaces/app-kit`, exporting `./collab` and
+`./theme.css`). In this repo its two files re-export `core/src/collab/` and
+`@import` `workspaces-app/src/wa-theme.css`; `packages/app-kit/scripts/pack.ts`
+packs a tarball whose copies of those files are the real ones, and the
+generator puts that tarball in the app's `vendor/` and names it as a
+`file:` dependency, so the made app holds no copy of their source and
+depends on nothing here. A tarball rather than GitHub Packages (which needs
+a token even to install) or a git dependency (which cannot name one
+package inside this monorepo). Sign-in is a typed slot
 (`SignIn.principal(request)`) holding a name-only development provider that
 refuses to start under `APP_ENV=production`; `templates/signin`, a
 Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,
@@ -498,7 +504,8 @@ a family takes the second unless its handler is small.
   `routes/doc-threads-contract.ts`, the doc edits' `doc-edits-contract.ts`,
   a doc's lifecycle `doc-lifecycle-contract.ts`, attachment sets'
   `attachments-contract.ts`, sharing `share-contract.ts`, an agent's
-  status notes `agent-notes-contract.ts`).
+  status notes `agent-notes-contract.ts`, one task's status and fields
+  `task-state-contract.ts`).
   The steps:
   1. In `routes/<family>-contract.ts`, export one interface per body and a
      chained `new Hono()` declaring each route with `json<Body>()` or

@@ -640,6 +640,7 @@
   "POST /workspaces/:ws/tasks/:taskId/schedule": "400 application/json error=author required {error} | by tasks.ts:handleTaskRoutes > task-fields.ts:handleTaskFields",
   "POST /workspaces/:ws/tasks/:taskId/title": "400 application/json error=title required {error} | by tasks.ts:handleTaskRoutes > task-fields.ts:handleTaskFields",
   "POST /workspaces/:ws/tasks/:taskId/transition": "400 application/json error=author + to required {error} | by tasks.ts:handleTaskRoutes > task-status-links.ts:handleTaskStatusAndLinks",
+  "POST /workspaces/:ws/tasks/:taskId/wait": "400 application/json error=author required {error} | by tasks.ts:handleTaskRoutes > task-fields.ts:handleTaskFields",
   "POST /workspaces/:ws/tasks/batch": "400 application/json error=tasks must be a non-empty array of task bodies {error} | by tasks.ts:handleTaskRoutes > tasks-batch.ts:handleTaskBatch",
   "POST /workspaces/:ws/voice": "400 application/json error=transcript required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-settings.ts:handleWorkspaceSettings",
   "POST /workspaces/:ws/voice-queue/:id/ack": "200 application/json {cleared,ok} | by workspaces.ts:handleWorkspaceAttachmentRoutes > workspace-attachments.ts:handleWorkspaceAttachments",

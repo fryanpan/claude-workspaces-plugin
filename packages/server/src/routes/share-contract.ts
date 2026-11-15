@@ -6,11 +6,11 @@
  * board's audience, the same door the board's Settings panel uses).
  */
 import { Hono } from 'hono';
+import type { LockRequest } from '../share/board-lock.ts';
+import type { FlipRequest } from '../share/sharing-flip.ts';
 import type { SharingStatus } from '../share/sharing-gate.ts';
 import { answers, contractOnly, json } from './route-contract.ts';
 
-/** Who asked, where an approval card names them. */
-type Actor = { id?: string; name?: string };
 /** Filed on a task as an approval card when the change needs the owner. */
 type Approval = { taskId?: string; why?: string };
 
@@ -39,20 +39,13 @@ export interface ShareTtlBody {
   ttlSeconds?: number;
   ttl?: unknown;
 }
-/** Read by `share-switch.ts`, which refuses a key it does not know. */
-export interface SharingSwitchBody extends Approval {
-  enabled: boolean;
-  workspaceId?: string;
-  reason?: string;
-  actor?: Actor;
-}
-/** Read by `share/board-lock.ts`, which refuses a key it does not know. */
-export interface BoardLockBody extends Approval {
-  workspaceId: string;
-  locked: boolean;
-  reason?: string;
-  actor?: Actor;
-}
+/**
+ * The switch and the lock are read by strict parsers that refuse a key they
+ * do not know, so each body IS what its parser returns: a field renamed there
+ * fails typecheck in the parser and in the tool that sends it.
+ */
+export type SharingSwitchBody = FlipRequest;
+export type BoardLockBody = LockRequest;
 export interface MemberRoleBody extends Approval {
   role: string;
   author?: unknown;
