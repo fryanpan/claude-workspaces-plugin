@@ -24,7 +24,9 @@ import type { BoardWorkspace, ParallelismCapChange } from '../tasks.ts';
  * a visitor already sees agent ids on the presence strip through
  * `PublicAttachment`, and the header says "nobody" without it.
  */
-export function redactBoardWorkspaceForVisitor(workspace: BoardWorkspace): Partial<BoardWorkspace> {
+export function redactBoardWorkspaceForVisitor(
+  workspace: BoardWorkspace,
+): Pick<BoardWorkspace, 'id' | 'name' | 'goals' | 'createdAt'> & Partial<BoardWorkspace> {
   return {
     id: workspace.id,
     name: workspace.name,

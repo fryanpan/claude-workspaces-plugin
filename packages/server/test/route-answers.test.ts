@@ -81,6 +81,8 @@ const READ_QUERY: Record<string, string> = {
   '/workspaces/:ws/attachments': '?archived=true',
   // Without it the address is the board's Tasks tab, which the shell answers.
   '/workspaces/:ws/tasks': '?format=json',
+  // Without it the address is the board page, which the shell answers.
+  '/workspaces/:ws': '?format=json',
 };
 
 /** One request's answer, as one comparable line. */
