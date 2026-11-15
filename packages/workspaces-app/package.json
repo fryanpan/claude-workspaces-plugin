@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@awesome.me/webawesome": "3.14.0",
     "@claude-workspaces/core": "workspace:*",
     "@claude-workspaces/widget": "workspace:*",
     "@codemirror/commands": "^6.7.1",

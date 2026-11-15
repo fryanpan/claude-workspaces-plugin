@@ -85,6 +85,7 @@ import {
 import { createBoardWalkthrough } from './board-walkthrough.ts';
 import { mountIslandProbe } from './island-probe.tsx';
 import { createLibraryPage } from './library-page.ts';
+import { collabCoreActive, collabCoreOf } from './presence-core-switch.ts';
 import { createRepaintGuard } from './repaint-guard.ts';
 
 /**
@@ -235,7 +236,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // `?format=json` is what asks for the RECORD. This path also serves the
   // board page — one address, HTML by default — so a read without it would
   // hand this fetch the shell that is currently running it.
-  const initialRead = fetchJson<{ workspace: BoardWorkspaceInfo }>(
+  const initialRead = fetchJson<{ workspace: BoardWorkspaceInfo; collabCore?: unknown }>(
     `/workspaces/${encodeURIComponent(workspaceId)}?format=json`,
   );
 
@@ -285,6 +286,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
 
   const initial = await initialRead;
   if (initial) state.info = initial.workspace;
+  // Which presence strip to draw; the live wiring keeps it current.
+  collabCoreActive.value = collabCoreOf(initial);
   buildShell(document, root, state.info?.name ?? workspaceId, workspaceId);
   // Now that there is a header to sit under. See signin/write-gate.ts.
   if (!writeAccess.canWrite) showSignInBar();

@@ -12,6 +12,7 @@ import {
 } from '@claude-workspaces/core/asset-manifest';
 import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
+import { buildWaTheme } from './build-wa-theme.ts';
 import { buildWhiteboard, copyWhiteboardAssets } from './build-whiteboard.ts';
 import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
 import { stripCssComments } from './strip-css-comments.ts';
@@ -63,6 +64,7 @@ const HASHED = [
   'settings.css',
   'whiteboard.css',
   'tokens.css',
+  'wa-theme.css',
   'index.html',
 ];
 
@@ -280,15 +282,13 @@ async function emit(buildId: string): Promise<boolean> {
     }
   }
 
-  // The whiteboard page: its own entry, React and Excalidraw split behind it.
-  const whiteboardErrors = await buildWhiteboard({
-    pkgRoot,
-    dist,
-    define,
-    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
-  });
+  const minify = process.env.NODE_ENV !== 'dev' && !isWatch;
+  const whiteboardErrors = [
+    ...(await buildWhiteboard({ pkgRoot, dist, define, minify })),
+    ...(await buildWaTheme(pkgRoot, dist)),
+  ];
   if (whiteboardErrors.length > 0) {
-    console.error('whiteboard build failed:');
+    console.error('whiteboard or theme build failed:');
     for (const m of whiteboardErrors) console.error(m);
     if (!isWatch) process.exit(1);
     return false;

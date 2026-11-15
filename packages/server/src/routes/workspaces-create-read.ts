@@ -41,6 +41,7 @@ export async function handleWorkspaceCreateRead(
     fileUnderBoardWorkspace,
     attachmentPrivacy,
     externalBaseUrl,
+    collabCoreSwitch,
   } = ctx;
   /**
    * The page a review opens on: its meatiest member, or — when it has no
@@ -423,6 +424,10 @@ export async function handleWorkspaceCreateRead(
       // usually an agent deciding whether to work here and a boolean
       // gives it nothing to act on.
       ...(isRetired(stored) ? { retired: retiredNotice(stored) } : {}),
+      // Whether this board's sockets take the collab core: its own setting
+      // AND the server-wide one. The board page reads it to pick which
+      // presence strip to draw; `collab-core.changed` says when it moves.
+      collabCore: { active: collabCoreSwitch.usesCore(workspaceId) },
     });
   }
   return undefined;
