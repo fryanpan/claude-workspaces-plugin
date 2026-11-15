@@ -481,6 +481,19 @@ export interface PresenceChip {
    *  identity: it is minted fresh on every connect. */
   clientId?: number;
   state?: PresenceAgent['state'];
+  /** The reader's own chip. The strip draws the reader nowhere: the "me"
+   *  button beside it already does. */
+  self?: boolean;
+  /** On the reader's page, as opposed to elsewhere in the workspace
+   *  (`presence/presence-places.ts`). Absent until a page has placed it. */
+  here?: boolean;
+  /** Where they are, in words, for the strip's list. */
+  line?: string;
+  /** The name of the page they are on ("Library", "quay.md"). */
+  page?: string;
+  /** Where they are as the card says it: the page, and what they are
+   *  reading or pointing at there. */
+  place?: string;
 }
 
 /** What the attachments read says about plugin versions. */
@@ -759,6 +772,13 @@ export function presenceHue(label: string): number {
   return h;
 }
 
+/** A chip's hue. A person's comes from their name; an agent's from its id,
+ *  because an agent's label moves from its id to the name it points under
+ *  the first time it points, and its colour must not move with it. */
+export function chipHue(chip: Pick<PresenceChip, 'kind' | 'key' | 'label'>): number {
+  return presenceHue(chip.kind === 'agent' && chip.key.startsWith('a-') ? chip.key : chip.label);
+}
+
 /**
  * WHO a presence entry is, as opposed to which connection it arrived over.
  *
@@ -859,6 +879,7 @@ export function presenceChips(
       title: `${p.name} · in ${where} · ${timeAgo(p.lastActive, now)}`,
       docId: p.docId,
       clientId: p.clientId,
+      ...(p.self ? { self: true } : {}),
     });
   }
   // Attached is not present. A session that exited keeps its roster row —

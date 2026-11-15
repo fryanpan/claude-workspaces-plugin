@@ -2,15 +2,13 @@
  * The board's presence strip drawn from Web Awesome components (D1 step 10).
  *
  * Only the face changes. Each circle is a `<wa-avatar>` — initials, a circle
- * for a person and a rounded square for an agent — inside a bare button, and
- * the button is the strip's own (`presence-island.tsx`): the same keyed rows,
- * long-press to follow, tap to jump, four-slot clamp, titles and labels. A
- * native button rather than `<wa-button>` because the press gesture, focus
- * and the 36px hit area are the behaviour this must keep, and they live on
- * the button.
+ * for a person and a rounded square for an agent — inside a bare span, and
+ * the deck and the list around it are the strip's own (`presence-deck.tsx`):
+ * the same keyed rows, hold or Follow to follow, tap to go there, titles and
+ * labels. Native buttons rather than `<wa-button>`, because the press
+ * gesture, focus and the hit area are the behaviour this must keep.
  *
- * The strip's toasts — "Following Alice — long-press again to stop" and the
- * "+N" names — come from `<wa-toast>` here, styled in board.css to look and
+ * The strip's follow toast ("Stopped following") comes from `<wa-toast>` here, styled in board.css to look and
  * time out like the board's own toast: one at a time, a new one replacing the
  * last, gone after 3.5s, no close button and no animation.
  *
@@ -23,7 +21,7 @@ import '@awesome.me/webawesome/dist/components/toast/toast.js';
 import type WaToast from '@awesome.me/webawesome/dist/components/toast/toast.js';
 import type { JSX } from 'preact';
 import { BUILD_ID } from '../stale-client.ts';
-import { type PresenceChip, initialsOf, presenceHue } from './board-presence-model.ts';
+import { type PresenceChip, chipHue, initialsOf } from './board-presence-model.ts';
 import {
   type PresenceFace,
   type PresenceHandlers,
@@ -54,9 +52,8 @@ export const WA_FACE: PresenceFace = {
   base: 'board-presence-wa',
   circle: (chip: PresenceChip) =>
     avatar(initialsOf(chip.label), chip.kind === 'agent' ? 'rounded' : 'circle', {
-      backgroundColor: `hsl(${presenceHue(chip.label)}, 45%, 45%)`,
+      backgroundColor: `hsl(${chipHue(chip)}, 45%, 45%)`,
     }),
-  more: (hidden: PresenceChip[]) => avatar(`+${hidden.length}`, 'circle'),
 };
 
 /** Where the theme file is served. The build id busts a cached copy when the

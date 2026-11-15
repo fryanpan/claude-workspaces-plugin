@@ -102,9 +102,12 @@ export const TOOL = `(() => {
   return on ? on.dataset.testid.replace('toolbar-', '') : null;
 })()`;
 
-export const chipTitle = `(() => {
-  const chip = document.querySelector('.board-people .board-presence-agent');
-  return chip ? chip.getAttribute('title') : null;
+/** Where the strip's deck draws the lead: 'here' on the reader's page,
+ *  'away' elsewhere in the workspace, or null when it is not drawn. */
+export const leadPlace = `(() => {
+  const chip = document.querySelector('.board-people .board-presence-deck .board-presence-agent');
+  if (!chip) return null;
+  return chip.classList.contains('board-presence-here') ? 'here' : 'away';
 })()`;
 
 export const CANVAS = `(() => {

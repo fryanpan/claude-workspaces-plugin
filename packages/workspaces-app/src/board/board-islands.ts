@@ -143,10 +143,10 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
   mountGoalDetailIsland(el('board-goal-detail'));
 
   // The presence strip, in both places it renders: who is here in the
-  // top-right cluster, and the drift notices in the settings panel. Same
-  // contract, and mounted once for the same reason — the strip repaints on
-  // every awareness update and a 30s tick, and a rebuilt circle used to drop
-  // the long-press running on it. On a board the collab core serves the
+  // top-right deck and the list it opens, and the drift notices in the
+  // settings panel. Same contract, and mounted once for the same reason — the
+  // strip repaints on every awareness update and a 30s tick, and a rebuilt
+  // row would drop the long-press running on it. On a board the collab core serves the
   // circles are Web Awesome avatars instead (`presence-core-switch.ts`); the
   // handlers and the data are the same either way.
   mountBoardPresence(el('board-people'), {
@@ -154,15 +154,10 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
     onLongPress: (chip) => {
       const next = state.followedKey === chip.key ? null : chip.key;
       follow(next);
-      stripToast(
-        next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
-        showToast,
-      );
+      // Starting a follow raises the follow bar, which stays; only the stop
+      // needs a word, because the bar it ends goes with it.
+      if (!next) stripToast('Stopped following', showToast);
     },
-    // The "+N" circle's names have to reach a touch screen, where a title
-    // attribute never shows. A toast is enough: it answers "who else".
-    onOverflow: (hiddenChips) =>
-      stripToast(`Also here: ${hiddenChips.map((c) => c.label).join(', ')}`, showToast),
   });
   mountDriftIsland(el('board-drift'));
 }

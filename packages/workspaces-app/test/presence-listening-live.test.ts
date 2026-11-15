@@ -40,12 +40,10 @@ function rosterSays(listening: boolean): void {
   });
 }
 
-/** The agent circles only. The reader's own circle stays throughout, which is
- *  the control: an empty strip would also satisfy "the agent is gone". */
+/** The agent circles in the strip's deck. */
 const agentCircles = () => [
-  ...el('board-people').querySelectorAll('.board-presence-circle.board-presence-agent'),
+  ...el('board-people').querySelectorAll('.board-presence-deck .board-presence-agent'),
 ];
-const allCircles = () => [...el('board-people').querySelectorAll('.board-presence-circle')];
 
 /** Push one server frame at the feed the boot wired. */
 async function feed(event: string, data: unknown): Promise<void> {
@@ -63,9 +61,7 @@ describe('the board learns an agent stopped listening', () => {
   it('drops its circle on a live frame, with no reload', async () => {
     rosterSays(true);
     await bootTestBoard();
-    expect(agentCircles().map((c) => c.getAttribute('aria-label'))).toEqual([
-      expect.stringContaining(RIVERBEND),
-    ]);
+    expect(agentCircles().map((c) => c.getAttribute('data-key'))).toEqual([`a-${RIVERBEND}`]);
 
     // The subscription goes. The server's only announcement is this frame —
     // nothing is written, so nothing else would have woken the board.
@@ -78,9 +74,10 @@ describe('the board learns an agent stopped listening', () => {
     });
 
     expect(agentCircles()).toHaveLength(0);
-    // The reader is still here and still drawn: this was the agent leaving,
-    // not the strip being wiped.
-    expect(allCircles()).toHaveLength(1);
+    // The reader is never drawn, so with the agent gone the strip is empty
+    // and takes no room. The case below is the control that the frame, not
+    // some other wake-up, did it.
+    expect(el('board-people').classList.contains('hidden')).toBe(true);
   });
 
   it('the frame is what does it — the same roster change goes unread without one', async () => {

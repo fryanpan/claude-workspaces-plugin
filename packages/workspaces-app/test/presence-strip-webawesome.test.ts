@@ -68,32 +68,40 @@ function joinBoard(board: Booted, user: { id: string; name: string }) {
   };
 }
 
-/** What a reader can tell about each circle: who, which face, which ring. */
+/** What a reader can tell about each circle of the deck: who, which face,
+ *  which ring. */
 function strip() {
-  return [...el('board-people').querySelectorAll<HTMLButtonElement>('button')].map((b) => {
-    const avatar = b.querySelector('wa-avatar');
-    return {
-      label: b.getAttribute('aria-label'),
-      title: b.getAttribute('title'),
-      kind: b.classList.contains('board-presence-agent') ? 'agent' : 'person',
-      following: b.classList.contains('board-following'),
-      // What the avatar drew in its shadow root, not the property it was
-      // handed: a component that never rendered would still hold the prop.
-      initials: avatar
-        ? avatar.shadowRoot?.querySelector('[part="initials"]')?.textContent
-        : b.textContent,
-      shape: avatar?.getAttribute('shape') ?? null,
-    };
-  });
+  return [...el('board-people').querySelectorAll<HTMLElement>('.board-presence-deck > *')].map(
+    (b) => {
+      const avatar = b.querySelector('wa-avatar');
+      return {
+        label: b.getAttribute('data-key'),
+        kind: b.classList.contains('board-presence-agent') ? 'agent' : 'person',
+        following: b.classList.contains('board-following'),
+        // What the avatar drew in its shadow root, not the property it was
+        // handed: a component that never rendered would still hold the prop.
+        initials: avatar
+          ? avatar.shadowRoot?.querySelector('[part="initials"]')?.textContent
+          : b.textContent,
+        shape: avatar?.getAttribute('shape') ?? null,
+      };
+    },
+  );
 }
 
-const circleFor = (name: string): HTMLButtonElement => {
-  const found = el('board-people').querySelector<HTMLButtonElement>(
-    `button[aria-label^="${name}"]`,
-  );
-  if (!found) throw new Error(`no presence circle for ${name}`);
+/** The row standing for `name` in the list the deck opens. */
+async function rowFor(name: string): Promise<HTMLButtonElement> {
+  const deck = el('board-people').querySelector<HTMLButtonElement>('.board-presence-deck');
+  if (deck && deck.getAttribute('aria-expanded') !== 'true') {
+    deck.click();
+    await settle();
+  }
+  const found = [
+    ...el('board-people').querySelectorAll<HTMLButtonElement>('.board-presence-who'),
+  ].find((b) => b.title.startsWith(name));
+  if (!found) throw new Error(`no presence row for ${name}`);
   return found;
-};
+}
 
 beforeEach(() => {
   recordSays(undefined);
@@ -113,7 +121,7 @@ async function followAlice(active: boolean) {
   const alice = joinBoard(board, { id: 'u-alice', name: 'Alice' });
   await alice({ surface: 'board' });
   const before = strip();
-  await longPress(board, circleFor('Alice'));
+  await longPress(board, await rowFor('Alice'));
   const after = strip();
   await alice({ surface: 'doc', docId: 'saltmarsh-notes' });
   return { board, before, after, navigations: board.location.navigations };
@@ -122,7 +130,7 @@ async function followAlice(active: boolean) {
 describe('done-when 1: the Web Awesome strip shows what today’s does', () => {
   it('draws each circle from a wa-avatar: a circle for a person, a rounded square for an agent', async () => {
     const { before } = await followAlice(true);
-    const avatars = [...el('board-people').querySelectorAll('button > wa-avatar')];
+    const avatars = [...el('board-people').querySelectorAll('.board-presence-deck wa-avatar')];
     expect(avatars).toHaveLength(before.length);
     expect(customElements.get('wa-avatar'), 'the component registered itself').toBeDefined();
     expect(before.map((c) => [c.kind, c.shape])).toEqual(
@@ -138,16 +146,15 @@ describe('done-when 1: the Web Awesome strip shows what today’s does', () => {
     const wa = await followAlice(true);
 
     const who = (s: ReturnType<typeof strip>) =>
-      s.map(({ label, title, kind, following, initials }) => ({
+      s.map(({ label, kind, following, initials }) => ({
         label,
-        title,
         kind,
         following,
         initials: initials?.trim(),
       }));
-    // A control: the strip has the reader, Alice and the agent, and the ring
-    // moved — so equal lists are not two empty strips agreeing.
-    expect(classic.before.map((c) => c.kind).sort()).toEqual(['agent', 'person', 'person']);
+    // A control: the deck has Alice and the agent (never the reader), and the
+    // ring moved — so equal lists are not two empty strips agreeing.
+    expect(classic.before.map((c) => c.kind).sort()).toEqual(['agent', 'person']);
     expect(who(classic.after).filter((c) => c.following)).toHaveLength(1);
 
     expect(who(wa.before)).toEqual(who(classic.before));

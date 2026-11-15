@@ -1,6 +1,6 @@
 /**
- * The presence strip as a Preact island — the circle cluster and the drift
- * notices that `renderPresence` used to rebuild from scratch on every paint.
+ * The presence strip as a Preact island — the deck of people that
+ * `renderPresence` used to rebuild from scratch on every paint.
  *
  * Three families of properties under test:
  *
@@ -15,26 +15,21 @@
  *     arrived on a replacement whose disarm closure knew nothing about the
  *     armed timer, and the follow fired anyway. Pinned below.
  *
- *  3. Behavior parity with the vanilla renderer: circles with initials, the
- *     four-slot clamp and its "+N", liveness classes, following, the
- *     long-form chip, and both drift notices. These are the renderPresence
- *     tests from board-render.test.ts, re-aimed at the island.
+ *  3. The strip as design F: a deck of circles that opens into a list of
+ *     two groups (here with you, elsewhere), rows that open a card on a tap and
+ *     follow on a hold or on Follow, liveness classes and the long-form chip.
+ *
+ * The card a row opens and the Following bar are `presence-card.test.tsx`;
+ * the drift notices the same module mounts are `presence-drift-island.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  type DriftNotice,
-  type PresenceChip,
-  clientDriftNotice,
-  pluginDriftNotice,
-} from '../src/board/board-presence-model.ts';
+import type { PresenceChip } from '../src/board/board-presence-model.ts';
 import {
   type PresenceHandlers,
-  driftData,
-  mountDriftIsland,
   mountPresenceIsland,
   presenceData,
 } from '../src/board/presence-island.tsx';
-import { IPAD, installSheets, setViewport, styleOf } from './css-harness.ts';
+import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /** Component re-renders from a signal write are scheduled — settle them. */
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -83,6 +78,20 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The deck's circles, in order. */
+const deckCircles = (host: HTMLElement) => [
+  ...host.querySelectorAll<HTMLElement>('.board-presence-deck .board-presence-circle'),
+];
+/** Open the list, as a tap on the deck does, and settle the render. */
+async function openList(host: HTMLElement): Promise<void> {
+  host.querySelector<HTMLButtonElement>('.board-presence-deck')?.click();
+  await tick();
+}
+/** Each row's "who" button, in order. */
+const rowButtons = (host: HTMLElement) => [
+  ...host.querySelectorAll<HTMLButtonElement>('.board-presence-who'),
+];
+
 function mountPeople(
   chips: PresenceChip[],
   handlers: PresenceHandlers = noop(),
@@ -96,26 +105,17 @@ function mountPeople(
   return { host, handlers };
 }
 
-function mountDrift(notices: Array<DriftNotice | null>) {
-  const host = document.createElement('div');
-  host.className = 'board-presence';
-  document.body.appendChild(host);
-  driftData.value = notices;
-  dispose.push(mountDriftIsland(host));
-  return { host };
-}
-
 describe('presence island contract', () => {
   it('keeps an unchanged participant as the IDENTICAL node object when another changes', async () => {
-    const { host } = mountPeople([person('Ana Reyes'), agent('task-list-ux')]);
-    const circles = host.querySelectorAll('.board-presence-circle');
+    const { host } = mountPeople([person('Alice Riverbend'), agent('task-list-ux')]);
+    const circles = deckCircles(host);
     expect(circles).toHaveLength(2);
     const anasCircle = circles[0] as HTMLElement;
 
     // The agent's liveness moves — the commonest real update on this strip.
     presenceData.value = {
       chips: [
-        person('Ana Reyes'),
+        person('Alice Riverbend'),
         agent('task-list-ux', {
           state: 'unresponsive',
           title: 'task-list-ux · process up, agent unresponsive · last tool call 40m ago',
@@ -125,7 +125,7 @@ describe('presence island contract', () => {
     };
     await tick();
 
-    const after = host.querySelectorAll('.board-presence-circle');
+    const after = deckCircles(host);
     expect(after[1]?.classList.contains('board-presence-unresponsive')).toBe(true);
     // The identity property the migration exists for: same object, not a
     // recreated equal.
@@ -135,32 +135,37 @@ describe('presence island contract', () => {
   it('keeps the node when only the person’s own reading changes', async () => {
     // The 30s tick rewrites every title ("just now" → "40s ago") and nothing
     // else. Under the vanilla renderer that alone rebuilt the whole strip.
-    const { host } = mountPeople([person('Ana Reyes'), person('Ben Ito')]);
-    const [a, b] = [...host.querySelectorAll('.board-presence-circle')];
+    const { host } = mountPeople([person('Alice Riverbend'), person('Bob Saltmarsh')]);
+    await openList(host);
+    const [a, b] = rowButtons(host);
 
     presenceData.value = {
       chips: [
-        person('Ana Reyes', { title: 'Ana Reyes · in board · 40s ago' }),
-        person('Ben Ito', { title: 'Ben Ito · in board · 40s ago' }),
+        person('Alice Riverbend', { line: 'On Library' }),
+        person('Bob Saltmarsh', { line: 'On Library' }),
       ],
       followedKey: null,
     };
     await tick();
 
-    const after = host.querySelectorAll('.board-presence-circle');
+    const after = rowButtons(host);
     expect(after[0]).toBe(a);
     expect(after[1]).toBe(b);
-    expect(after[0]?.getAttribute('title')).toBe('Ana Reyes · in board · 40s ago');
+    expect(after[0]?.getAttribute('title')).toBe('Alice Riverbend · On Library');
   });
 
-  it('a focused circle keeps focus across a signal update', async () => {
-    const { host } = mountPeople([person('Ana Reyes'), person('Ben Ito')]);
-    const ben = host.querySelectorAll('.board-presence-circle')[1] as HTMLButtonElement;
+  it('a focused row keeps focus across a signal update', async () => {
+    const { host } = mountPeople([person('Alice Riverbend'), person('Bob Saltmarsh')]);
+    await openList(host);
+    const ben = rowButtons(host)[1] as HTMLButtonElement;
     ben.focus();
     expect(document.activeElement).toBe(ben);
 
     presenceData.value = {
-      chips: [person('Ana Reyes', { title: 'Ana Reyes · in doc-2 · just now' }), person('Ben Ito')],
+      chips: [
+        person('Alice Riverbend', { title: 'Alice Riverbend · in doc-2 · just now' }),
+        person('Bob Saltmarsh'),
+      ],
       followedKey: null,
     };
     await tick();
@@ -174,12 +179,12 @@ describe('presence island contract', () => {
     host.appendChild(vanillaChild);
     document.body.appendChild(host);
 
-    presenceData.value = { chips: [person('Ana Reyes')], followedKey: null };
+    presenceData.value = { chips: [person('Alice Riverbend')], followedKey: null };
     const unmount = mountPresenceIsland(host, noop(), { compact: true });
 
     const wrapper = host.querySelector('[data-preact-island="presence"]');
     expect(wrapper).not.toBeNull();
-    expect(wrapper?.querySelector('.board-presence-circle')).not.toBeNull();
+    expect(wrapper?.querySelector('.board-presence-deck')).not.toBeNull();
     expect(host.firstChild).toBe(vanillaChild);
 
     unmount();
@@ -190,7 +195,7 @@ describe('presence island contract', () => {
     expect(host.childNodes.length).toBe(1);
   });
 
-  it('the wrapper is out of layout, so circles stay direct flex items', () => {
+  it('the wrapper is out of layout, so the deck stays a direct flex item', () => {
     // Without `display: contents` on the island's wrapper the whole strip
     // becomes ONE flex item of `.board-presence`, and the 430px fit, the gap and
     // `.board-drift`'s own-line rule all stop applying.
@@ -200,7 +205,10 @@ describe('presence island contract', () => {
     // the wrapper Preact creates is a DIRECT child of a `.board-presence` host —
     // which is the half a text read cannot see. happy-dom lays nothing out, so
     // this is the `display` the browser would use, not the row it produces.
-    const { host } = mountPeople([person('Ana Reyes'), person('Ben Ito')]);
+    const { host } = mountPeople([
+      person('Alice Riverbend', { here: true }),
+      person('Bob Saltmarsh', { here: true }),
+    ]);
     const wrapper = host.querySelector('[data-preact-island="presence"]') as HTMLElement;
     expect(wrapper).not.toBeNull();
     expect(styleOf(wrapper).display).toBe('contents');
@@ -228,15 +236,20 @@ describe('presence island — a repaint under a live press', () => {
     // about the running timer, and the follow fired on a released press.
     vi.useFakeTimers();
     const handlers = noop();
-    const { host } = mountPeople([person('Ana Reyes'), person('Ben Ito')], handlers);
-    const ana = host.querySelectorAll('.board-presence-circle')[0] as HTMLButtonElement;
+    const { host } = mountPeople([person('Alice Riverbend'), person('Bob Saltmarsh')], handlers);
+    host.querySelector<HTMLButtonElement>('.board-presence-deck')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    const ana = rowButtons(host)[0] as HTMLButtonElement;
 
     ana.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     vi.advanceTimersByTime(200);
 
     // A 30s tick / awareness update lands mid-press.
     presenceData.value = {
-      chips: [person('Ana Reyes'), person('Ben Ito', { title: 'Ben Ito · in doc-9 · just now' })],
+      chips: [
+        person('Alice Riverbend'),
+        person('Bob Saltmarsh', { title: 'Bob Saltmarsh · in doc-9 · just now' }),
+      ],
       followedKey: null,
     };
     await vi.advanceTimersByTimeAsync(0);
@@ -246,7 +259,7 @@ describe('presence island — a repaint under a live press', () => {
     // the DOM rather than reusing `ana` is what makes this a regression test;
     // dispatching on the captured reference would pass even against a
     // renderer that had replaced the node the reader is touching.)
-    const underTheFinger = host.querySelectorAll('.board-presence-circle')[0] as HTMLButtonElement;
+    const underTheFinger = rowButtons(host)[0] as HTMLButtonElement;
     expect(underTheFinger).toBe(ana);
     underTheFinger.dispatchEvent(new Event('pointerup', { bubbles: true }));
     vi.advanceTimersByTime(LONG_ENOUGH);
@@ -258,12 +271,14 @@ describe('presence island — a repaint under a live press', () => {
     // a real long-press either.
     vi.useFakeTimers();
     const handlers = noop();
-    const { host } = mountPeople([person('Ana Reyes')], handlers);
-    const ana = host.querySelector('.board-presence-circle') as HTMLButtonElement;
+    const { host } = mountPeople([person('Alice Riverbend')], handlers);
+    host.querySelector<HTMLButtonElement>('.board-presence-deck')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    const ana = rowButtons(host)[0] as HTMLButtonElement;
 
     ana.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     presenceData.value = {
-      chips: [person('Ana Reyes', { title: 'Ana Reyes · in board · 40s ago' })],
+      chips: [person('Alice Riverbend', { title: 'Alice Riverbend · in board · 40s ago' })],
       followedKey: null,
     };
     await vi.advanceTimersByTimeAsync(0);
@@ -275,11 +290,13 @@ describe('presence island — a repaint under a live press', () => {
     expect(handlers.onTap).not.toHaveBeenCalled();
   });
 
-  it('a cancelled press disarms — one scroll must not wedge the strip', () => {
+  it('a cancelled press disarms — one scroll must not wedge the strip', async () => {
     vi.useFakeTimers();
     const handlers = noop();
-    const { host } = mountPeople([person('Ana Reyes')], handlers);
-    const ana = host.querySelector('.board-presence-circle') as HTMLButtonElement;
+    const { host } = mountPeople([person('Alice Riverbend')], handlers);
+    host.querySelector<HTMLButtonElement>('.board-presence-deck')?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    const ana = rowButtons(host)[0] as HTMLButtonElement;
     ana.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     ana.dispatchEvent(new Event('pointercancel', { bubbles: true }));
     vi.advanceTimersByTime(LONG_ENOUGH);
@@ -287,202 +304,178 @@ describe('presence island — a repaint under a live press', () => {
   });
 });
 
-describe('presence island — compact circle mode (the top-right cluster)', () => {
-  it('renders circles with initials, keeping the full detail in title and aria-label', () => {
-    const { host } = mountPeople([person('Ana Reyes'), agent('task-list-ux')]);
-    const circles = host.querySelectorAll('.board-presence-circle');
-    expect(circles.length).toBe(2);
-    // No long-form chip anywhere in compact mode…
+describe('presence island — the deck and its list (design F)', () => {
+  it('draws one deck button whose circles carry initials, and no long-form chip', () => {
+    const { host } = mountPeople([person('Alice Riverbend'), agent('task-list-ux')]);
+    expect(host.querySelectorAll('button.board-presence-deck')).toHaveLength(1);
     expect(host.querySelector('.board-presence-chip')).toBeNull();
-    const [p, a] = [...circles];
+    const [p, a] = deckCircles(host);
     expect(p?.querySelector('.board-presence-initials')?.textContent).toBe('AR');
-    expect(p?.getAttribute('title')).toBe('Ana Reyes · in board · just now');
-    expect(p?.getAttribute('aria-label')).toBe('Ana Reyes · in board · just now');
-    // …and the agent circle keeps the kind class the styling keys off.
     expect(a?.classList.contains('board-presence-agent')).toBe(true);
     expect(a?.querySelector('.board-presence-initials')?.textContent).toBe('TL');
+    // Closed: no list yet.
+    expect(host.querySelector('.board-presence-list')).toBeNull();
+  });
+
+  it('opens into two groups: here with you on this page, elsewhere in the workspace', async () => {
+    const { host } = mountPeople([
+      person('Alice Riverbend', { here: true, line: 'At “Tides”' }),
+      person('Bob Saltmarsh', { here: false, line: 'On Riverbend launch plan' }),
+      agent('task-list-ux', { here: false, line: 'On Tasks' }),
+    ]);
+    presenceData.value = { ...presenceData.value, page: 'Quay', app: 'Harborlight' };
+    await tick();
+    const deck = host.querySelector<HTMLButtonElement>('.board-presence-deck');
+    expect(deck?.getAttribute('aria-label')).toBe('1 here with you, 2 elsewhere');
+    expect(deck?.getAttribute('aria-expanded')).toBe('false');
+    // Here first, full size; the rest after it, small.
+    expect(deckCircles(host).map((c) => c.classList.contains('board-presence-here'))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    await openList(host);
+    expect(deck?.getAttribute('aria-expanded')).toBe('true');
+    const list = host.querySelector('.board-presence-list');
+    const lines = [...(list?.children ?? [])].map((el) =>
+      el.classList.contains('board-presence-group')
+        ? `# ${el.textContent}`
+        : `${el.querySelector('b')?.textContent} / ${el.querySelector('small')?.textContent}`,
+    );
+    expect(lines).toEqual([
+      '# Here with you · Quay',
+      'Alice Riverbend / At “Tides”',
+      '# Elsewhere in Harborlight',
+      'Bob Saltmarsh / On Riverbend launch plan',
+      'task-list-ux / On Tasks',
+    ]);
+  });
+
+  it('says "Only you" under the first group when nobody shares the page', async () => {
+    const { host } = mountPeople([person('Bob Saltmarsh', { here: false, line: 'On Tasks' })]);
+    await openList(host);
+    expect(host.querySelector('.board-presence-only')?.textContent).toBe('Only you');
+  });
+
+  it('a row opens its card and closes the list; Follow on the row follows', async () => {
+    const chip = person('Bob Saltmarsh', { here: false, line: 'On Tasks' });
+    const handlers = noop();
+    const { host } = mountPeople([chip], handlers);
+    await openList(host);
+    rowButtons(host)[0]?.click();
+    await tick();
+    expect(handlers.onTap).not.toHaveBeenCalled();
+    expect(host.querySelector('.board-presence-deck')?.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('.board-presence-card')?.getAttribute('aria-label')).toBe(
+      'Bob Saltmarsh',
+    );
+    await openList(host);
+    expect(host.querySelector('.board-presence-card')).toBeNull();
+    const follow = host.querySelector<HTMLButtonElement>('.board-presence-follow');
+    expect(follow?.textContent).toBe('Follow');
+    expect(follow?.getAttribute('aria-label')).toBe('Follow Bob Saltmarsh');
+    follow?.click();
+    expect(handlers.onLongPress).toHaveBeenCalledWith(chip);
+  });
+
+  it('marks who is followed, on the deck and in the list, with Stop on their row', async () => {
+    const chip = agent('quill', { state: 'unresponsive' });
+    const { host } = mountPeople([chip], noop(), { followedKey: chip.key });
+    const [circle] = deckCircles(host);
+    expect(circle?.classList.contains('board-presence-unresponsive')).toBe(true);
+    expect(circle?.classList.contains('board-following')).toBe(true);
+    await openList(host);
+    expect(host.querySelector('.board-presence-follow')?.textContent).toBe('Stop');
+    expect(rowButtons(host)[0]?.getAttribute('title')).toContain('· following');
+  });
+
+  it('draws at most four circles in the deck; the list names everyone', async () => {
+    const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) => person(n));
+    const { host } = mountPeople(chips);
+    expect(deckCircles(host)).toHaveLength(4);
+    await openList(host);
+    expect(rowButtons(host)).toHaveLength(5);
+  });
+
+  it('shows three of those circles on a phone, so its slot stays narrow', () => {
+    const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) => person(n));
+    const { host } = mountPeople(chips);
+    const shown = () => deckCircles(host).filter((c) => styleOf(c).display !== 'none').length;
+    expect(shown()).toBe(4);
+    setViewport(PHONE);
+    expect(shown()).toBe(3);
+  });
+
+  it('closes on Escape and on a tap outside the strip', async () => {
+    const { host } = mountPeople([person('Alice Riverbend')]);
+    const deck = host.querySelector<HTMLButtonElement>('.board-presence-deck');
+    await openList(host);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await tick();
+    expect(deck?.getAttribute('aria-expanded')).toBe('false');
+    await openList(host);
+    expect(deck?.getAttribute('aria-expanded')).toBe('true');
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tick();
+    expect(deck?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('closes when keyboard focus leaves the strip, and stays open while it moves inside', async () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    const { host } = mountPeople([person('Alice')]);
+    const deck = host.querySelector<HTMLButtonElement>('.board-presence-deck');
+    await openList(host);
+    const follow = host.querySelector<HTMLButtonElement>('.board-presence-follow');
+    rowButtons(host)[0]?.dispatchEvent(
+      new FocusEvent('focusout', { bubbles: true, relatedTarget: follow }),
+    );
+    await tick();
+    expect(deck?.getAttribute('aria-expanded')).toBe('true');
+    follow?.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: outside }));
+    await tick();
+    expect(deck?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('draws the followed participant first, and names the follow on the deck', async () => {
+    const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) =>
+      person(n, { here: true }),
+    );
+    const { host } = mountPeople(chips, noop(), { followedKey: 'p-Saltmarsh' });
+    // Fifth in the room, so without the rule the deck would not draw it.
+    expect(deckCircles(host)[0]?.dataset.key).toBe('p-Saltmarsh');
+    expect(host.querySelector('.board-presence-deck')?.getAttribute('aria-label')).toBe(
+      '5 here with you, 0 elsewhere, following Saltmarsh',
+    );
+  });
+
+  it('titles a row with the words it shows, never the chip’s doc id', async () => {
+    const chip = person('Bob', { title: 'Bob · in d-123 · 3s ago', line: 'On Riverbend plan' });
+    const { host } = mountPeople([chip]);
+    await openList(host);
+    expect(rowButtons(host)[0]?.getAttribute('title')).toBe('Bob · On Riverbend plan');
   });
 
   it('renders the long form when compact is off — the name and the surface, spelled out', () => {
-    // Positive control for the assertion above: the same chip, long-form.
-    const { host } = mountPeople([person('Ana Reyes')], noop(), { compact: false });
+    const { host } = mountPeople([person('Alice Riverbend')], noop(), { compact: false });
     const chip = host.querySelector('.board-presence-chip');
-    expect(chip?.textContent).toContain('Ana Reyes');
+    expect(chip?.textContent).toContain('Alice Riverbend');
     expect(chip?.querySelector('.board-presence-where')?.textContent).toBe('board');
-    // The name is visible here, so it is not repeated into an aria-label.
-    expect(chip?.getAttribute('aria-label')).toBeNull();
-    expect(host.querySelector('.board-presence-circle')).toBeNull();
+    expect(host.querySelector('.board-presence-deck')).toBeNull();
   });
 
-  it('keeps tap, liveness state, and following on a circle', () => {
-    const chip = agent('quill', { state: 'unresponsive' });
-    const handlers = noop();
-    const { host } = mountPeople([chip], handlers, { followedKey: chip.key });
-    const el = host.querySelector<HTMLButtonElement>('.board-presence-circle');
-    expect(el?.classList.contains('board-presence-unresponsive')).toBe(true);
-    expect(el?.classList.contains('board-following')).toBe(true);
-    expect(el?.getAttribute('title')).toContain('following — long-press to stop');
-    el?.click();
-    expect(handlers.onTap).toHaveBeenCalledWith(chip);
-  });
-
-  it('clamps at four: five people render as three circles plus a "+2" that names the rest', () => {
-    const chips = ['Ana', 'Ben', 'Cam', 'Dee', 'Eli'].map((n) => person(n));
-    const handlers = noop();
-    const overflowed: PresenceChip[][] = [];
-    const { host } = mountPeople(chips, { ...handlers, onOverflow: (h) => overflowed.push(h) });
-    expect(host.querySelectorAll('.board-presence-circle').length).toBe(4); // 3 + the slot
-    const more = host.querySelector<HTMLButtonElement>('.board-presence-more');
-    expect(more?.textContent).toBe('+2');
-    expect(more?.getAttribute('title')).toBe('Dee, Eli');
-    expect(more?.getAttribute('aria-label')).toBe('2 more: Dee, Eli');
-    more?.click();
-    expect(overflowed).toEqual([[chips[3], chips[4]]]);
-  });
-
-  it('exactly four renders four circles and no overflow slot — the cap is a footprint', () => {
-    const { host } = mountPeople(['Ana', 'Ben', 'Cam', 'Dee'].map((n) => person(n)));
-    expect(host.querySelectorAll('.board-presence-circle').length).toBe(4);
-    expect(host.querySelector('.board-presence-more')).toBeNull();
-  });
-
-  it('hides the host when nobody is here, and unhides when somebody arrives', async () => {
-    const { host } = mountPeople([]);
+  it('hides the host when nobody but the reader is here, and unhides when somebody arrives', async () => {
+    const { host } = mountPeople([person('Me', { self: true })]);
     expect(host.classList.contains('hidden')).toBe(true);
+    expect(host.querySelector('.board-presence-deck')).toBeNull();
 
-    presenceData.value = { chips: [person('Ana Reyes')], followedKey: null };
+    presenceData.value = {
+      chips: [person('Me', { self: true }), person('Alice Riverbend')],
+      followedKey: null,
+    };
     await tick();
     expect(host.classList.contains('hidden')).toBe(false);
-    expect(host.querySelectorAll('.board-presence-circle').length).toBe(1);
-  });
-});
-
-describe('presence island — plugin drift', () => {
-  const drift = () =>
-    pluginDriftNotice({
-      version: '0.1.26',
-      behind: [{ agentId: 'agent-quill', pluginVersion: '0.1.12' }],
-    });
-
-  it('shows the notice even when nobody is present to draw a chip for', () => {
-    // An away session draws no chip, and an away session is exactly the one
-    // most likely to be stranded on an old bundle. Hiding the region on
-    // "no chips" would hide the drift with it.
-    const { host } = mountDrift([drift()]);
-    expect(host.classList.contains('hidden')).toBe(false);
-    const note = host.querySelector('.board-drift');
-    expect(note?.textContent).toContain('older plugin than 0.1.26');
-    expect(note?.textContent).toContain('agent-quill 0.1.12');
-    expect(note?.textContent).toContain(
-      'command claude plugin update claude-workspaces@claude-workspaces',
-    );
-  });
-
-  it('renders nothing when there is no notice at all', async () => {
-    // Positive control: the same island WITH a notice puts a .board-drift in,
-    // so this absence means the notice is what drives it.
-    const { host } = mountDrift([drift()]);
-    expect(host.querySelector('.board-drift')).not.toBeNull();
-
-    driftData.value = [null];
-    await tick();
-    expect(host.querySelector('.board-drift')).toBeNull();
-    expect(host.classList.contains('hidden')).toBe(true);
-  });
-
-  it('renders the clear reading quietly, and the alarm loudly', async () => {
-    // A coverage line is on the board permanently. If it wore the alarm's
-    // styling it would teach everyone to skim past the alarm — so the class
-    // has to differ, and both halves are asserted in the same pass so
-    // neither is a claim about a world the other does not inhabit.
-    const { host } = mountDrift([pluginDriftNotice({ version: '0.1.40', behind: [], checked: 1 })]);
-    const quiet = host.querySelector('.board-drift');
-    expect(quiet?.classList.contains('board-drift-quiet')).toBe(true);
-    expect(quiet?.textContent).toContain('No attached session is behind 0.1.40 (1 checked)');
-    expect(quiet?.textContent).toContain('a peer that never attached is absent here');
-
-    driftData.value = [drift()];
-    await tick();
-    expect(host.querySelector('.board-drift')?.classList.contains('board-drift-quiet')).toBe(false);
-  });
-
-  it('a board nobody has attached to does not render as all-clear', () => {
-    // The defect, in the surface: an empty `behind` list used to render as
-    // nothing, and nothing reads exactly like clearance.
-    const { host } = mountDrift([pluginDriftNotice({ version: '0.1.40', behind: [], checked: 0 })]);
-    expect(host.classList.contains('hidden')).toBe(false);
-    expect(host.querySelector('.board-drift')?.textContent).toContain(
-      'no session has attached to this board',
-    );
-  });
-});
-
-describe('presence island — client release drift', () => {
-  const now = Date.UTC(2026, 7, 16, 12, 0, 0);
-  const stale = () =>
-    clientDriftNotice(
-      {
-        releaseId: '20260813T014455123Z-000003',
-        publishedAt: now - 72 * 60 * 60 * 1000,
-        ageMs: 72 * 60 * 60 * 1000,
-        sourceRef: 'a1b2c3d',
-        consecutiveFailures: 2,
-        failingSince: now - 10 * 60 * 60 * 1000,
-        lastError: 'client release: markdownApp bundle is incomplete — app.js missing',
-        stale: true,
-      },
-      now,
-    );
-  const pluginDrift = () =>
-    pluginDriftNotice({
-      version: '0.1.26',
-      behind: [{ agentId: 'agent-quill', pluginVersion: '0.1.12' }],
-    });
-
-  it('shows the stale-client notice on a board with nobody present', () => {
-    // Nobody being present is not a reason to hide it — it is about every
-    // browser that loads this board, including the one reading it now.
-    const { host } = mountDrift([stale()]);
-    expect(host.classList.contains('hidden')).toBe(false);
-    const note = host.querySelector('.board-drift');
-    expect(note?.textContent).toContain('3d ago');
-    expect(note?.textContent).toContain('app.js missing');
-    expect(note?.textContent).toContain('restart');
-  });
-
-  it('shows both drifts at once — they are different problems', () => {
-    // The agents being behind on the plugin and the browser being behind on
-    // the client are independent failures with different fixes; one must not
-    // hide the other.
-    const { host } = mountDrift([pluginDrift(), stale()]);
-    const notes = [...host.querySelectorAll('.board-drift')];
-    expect(notes.length).toBe(2);
-    expect(notes[0]?.textContent).toContain('older plugin than 0.1.26');
-    expect(notes[1]?.textContent).toContain('published 3d ago');
-  });
-
-  it('a slot going quiet leaves the other notice’s node alone', async () => {
-    // Notices are keyed on their SLOT — 0 is always the plugin reading and 1
-    // always the client's — so a fixed plugin does not rebuild the client
-    // note sitting beside it.
-    const { host } = mountDrift([pluginDrift(), stale()]);
-    const clientNote = host.querySelectorAll('.board-drift')[1] as HTMLElement;
-
-    driftData.value = [null, stale()];
-    await tick();
-    const after = host.querySelectorAll('.board-drift');
-    expect(after.length).toBe(1);
-    expect(after[0]).toBe(clientNote);
-  });
-
-  it('draws nothing when neither drift is real', async () => {
-    // Positive control first, so the absence below means something.
-    const { host } = mountDrift([stale()]);
-    expect(host.querySelector('.board-drift')).not.toBeNull();
-
-    driftData.value = [null, null];
-    await tick();
-    expect(host.querySelector('.board-drift')).toBeNull();
-    expect(host.classList.contains('hidden')).toBe(true);
+    // The reader is never one of the circles.
+    expect(deckCircles(host)).toHaveLength(1);
   });
 });

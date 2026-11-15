@@ -218,12 +218,22 @@ describe('following', () => {
     peer(person('u-peer', 'Bob', { surface: 'doc', docId: 'd-quay', blockId: 'b-1' }, 1));
     const target = new EventTarget();
     const strip = new EventTarget();
-    stopOnOwnInput(target, p.follower, (t) => t === strip);
+    const stops: string[] = [];
+    stopOnOwnInput(
+      target,
+      p.follower,
+      (t) => t === strip,
+      () => stops.push('stopped'),
+    );
+    // No follow running: a tap ends nothing, and says nothing.
+    target.dispatchEvent(new Event('pointerdown'));
+    expect(stops).toEqual([]);
     p.follower.follow('p-u-peer');
 
-    // A tap anywhere on the page.
+    // A tap anywhere on the page ends it, and the page is told once.
     target.dispatchEvent(new Event('pointerdown'));
     expect(p.follower.key()).toBeNull();
+    expect(stops).toEqual(['stopped']);
 
     // Positive control for the strip exclusion: a strip press leaves it on.
     p.follower.follow('p-u-peer');

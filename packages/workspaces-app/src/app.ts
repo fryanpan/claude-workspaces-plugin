@@ -18,6 +18,7 @@ import { wireKeyboardInset } from './keyboard-inset.ts';
 import { libraryIdOf, recordLibraryView } from './library-view.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
+import { pageOwnTitle, pageWorkspaceName } from './page-tab-title.ts';
 import {
   dropEarlyRedline,
   dropEarlyRedlineOnFailure,
@@ -250,6 +251,10 @@ async function joinDocPagePresence(
     storage: sessionStorage,
     inputTarget: env.window,
     notify: showToast,
+    // The tab's name for the doc, never the crumb: the crumb can be a path
+    // on this machine, which is not workspace content.
+    title: pageOwnTitle,
+    app: pageWorkspaceName,
   });
   docSpot.onDocSpotMove((spot, heading) => {
     const current = docIdFromPathOrNull(location.pathname);
