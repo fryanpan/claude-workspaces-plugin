@@ -892,6 +892,40 @@ body.board-body {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
+/* The strip's toasts beside the Web Awesome strip: a <wa-toast> dressed as
+   .board-toast — same place, font, ground, padding, corner and width, with
+   no accent bar, close button or slide. Web Awesome sets its own font size on
+   each layer, so each layer inherits instead. */
+wa-toast.board-wa-toast {
+  --gap: 0;
+  /* Auto, as .board-toast is: from left 50% it shrinks to fit the half it
+     has, so it wraps where today's toast wraps. */
+  width: auto;
+  max-width: min(90vw, 480px);
+  font: inherit;
+  padding: 0 0 calc(20px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
+  z-index: 80;
+}
+wa-toast.board-wa-toast wa-toast-item {
+  font: inherit;
+}
+wa-toast.board-wa-toast wa-toast-item::part(toast-item) {
+  font: inherit;
+  background: var(--fg);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  animation: none;
+}
+wa-toast.board-wa-toast wa-toast-item::part(content) {
+  padding: 10px 16px;
+  font: inherit;
+  color: var(--bg);
+}
+wa-toast.board-wa-toast wa-toast-item::part(accent),
+wa-toast.board-wa-toast wa-toast-item::part(close-button) {
+  display: none;
+}
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
 .board-drift {

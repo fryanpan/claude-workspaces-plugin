@@ -5,7 +5,7 @@
  *
  * What a fake DOM cannot say: that the avatars paint the same 28px circles
  * in the same places as today's strip, with the same ring on the person
- * being followed, and that switching the board swaps the strip on a page
+ * being followed, the same follow toast, and that switching the board swaps the strip on a page
  * that is already open.
  */
 import { spawnSync } from 'node:child_process';
@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 // Types only: importing a value would run the driver in this process.
-import type { Circle, Reading, WaStripRun } from './presence-strip-wa-browser-driver.ts';
+import type { Circle, Reading, Toast, WaStripRun } from './presence-strip-wa-browser-driver.ts';
 
 /** The browser these cases may launch, or null to skip them.
  *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
@@ -62,6 +62,18 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
       expect(wa.themeLinked).toBe(true);
       expect(wa.circles.map(look)).toEqual(classic.circles.map(look));
       for (const c of wa.circles) expect([c.paint.w, c.paint.h]).toEqual([28, 28]);
+    }, 60_000);
+
+    it(`shows the follow toast from Web Awesome, looking like today's, at ${width}`, () => {
+      const classic = reading(width, 'classic').toast;
+      const wa = reading(width, 'wa').toast;
+      expect(classic?.face).toBe('classic');
+      expect(classic?.text).toBe('Following Bob — long-press again to stop');
+      expect(wa?.face).toBe('wa');
+      expect(wa?.classicShown, 'one toast, not two').toBe(false);
+      const { face: _a, classicShown: _b, ...waLook } = wa ?? ({} as Toast);
+      const { face: _c, classicShown: _d, ...classicLook } = classic ?? ({} as Toast);
+      expect(waLook).toEqual(classicLook);
     }, 60_000);
 
     it(`swaps back to today's strip on the open page at ${width}`, () => {

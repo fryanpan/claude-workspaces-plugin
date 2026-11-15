@@ -28,7 +28,7 @@ import type { ReviewItem } from './board-review-model.ts';
 import { mountGoalDetailIsland } from './goal-detail-island.tsx';
 import { mountHomeActivityIsland } from './home-activity-island.tsx';
 import { mountHomeReviewIsland } from './home-review-island.tsx';
-import { mountBoardPresence } from './presence-core-switch.ts';
+import { mountBoardPresence, stripToast } from './presence-core-switch.ts';
 import { mountDriftIsland } from './presence-island.tsx';
 import type { RecentAnswer } from './recent-answers.ts';
 import { type DetailTab, mountTaskDetailIsland } from './task-detail-island.tsx';
@@ -154,12 +154,15 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
     onLongPress: (chip) => {
       const next = state.followedKey === chip.key ? null : chip.key;
       follow(next);
-      showToast(next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following');
+      stripToast(
+        next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
+        showToast,
+      );
     },
     // The "+N" circle's names have to reach a touch screen, where a title
     // attribute never shows. A toast is enough: it answers "who else".
     onOverflow: (hiddenChips) =>
-      showToast(`Also here: ${hiddenChips.map((c) => c.label).join(', ')}`),
+      stripToast(`Also here: ${hiddenChips.map((c) => c.label).join(', ')}`, showToast),
   });
   mountDriftIsland(el('board-drift'));
 }

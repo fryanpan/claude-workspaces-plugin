@@ -65,7 +65,22 @@ export function listenCollabCore(stream: EventTarget): void {
 
 type WaModule = {
   mountWaPresenceIsland: (host: HTMLElement, handlers: PresenceHandlers) => () => void;
+  showWaToast?: (message: string) => void;
+  removeWaToast?: () => void;
 };
+
+/** The Web Awesome toast while the Web Awesome strip is drawn, else null. */
+let waToast: ((message: string) => void) | null = null;
+
+/**
+ * Show one of the strip's toasts — the follow notice or the "+N" names — in
+ * the face the strip is drawn in: a `<wa-toast>` beside the Web Awesome strip,
+ * `fallback` (the board's own toast) beside today's.
+ */
+export function stripToast(message: string, fallback: (message: string) => void): void {
+  if (waToast) waToast(message);
+  else fallback(message);
+}
 const loadWa = (): Promise<WaModule> => import('./presence-island-wa.tsx');
 
 /**
@@ -87,6 +102,7 @@ export function mountBoardPresence(
     const mine = ++generation;
     if (want === drawn) return;
     if (want === 'classic') {
+      waToast = null;
       dispose();
       dispose = mountPresenceIsland(host, handlers, { compact: true });
       drawn = 'classic';
@@ -96,7 +112,12 @@ export function mountBoardPresence(
       (m) => {
         if (mine !== generation) return;
         dispose();
-        dispose = m.mountWaPresenceIsland(host, handlers);
+        const unmount = m.mountWaPresenceIsland(host, handlers);
+        dispose = () => {
+          unmount();
+          m.removeWaToast?.();
+        };
+        waToast = m.showWaToast ?? null;
         drawn = 'wa';
       },
       (err) => console.error('[presence] the Web Awesome strip did not load:', err),
@@ -105,6 +126,7 @@ export function mountBoardPresence(
   return () => {
     stop();
     generation++;
+    waToast = null;
     dispose();
   };
 }

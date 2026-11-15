@@ -7,7 +7,8 @@
  * Alice has the board open; Bob and the board's lead are on it too. The
  * driver reads her strip on the current code, follows Bob with a long-press,
  * then switches the board onto the collab core with her page still open and
- * reads the strip again once it has swapped. Then it switches the board back.
+ * reads the strip again once it has swapped, following Bob again so the follow
+ * toast shows from that side too. Then it switches the board back.
  * Each reading is every circle's box and the computed fill, border, ring and
  * shape of whatever paints it, so the test can say the two strips look the
  * same rather than only that both rendered.
@@ -50,11 +51,27 @@ export interface Circle {
   };
 }
 
+/** The follow toast as a reader sees it, off whichever element paints it. */
+export interface Toast {
+  text: string;
+  face: 'classic' | 'wa';
+  box: { x: number; y: number; w: number; h: number };
+  background: string;
+  color: string;
+  radius: string;
+  shadow: string;
+  padding: string;
+  font: string;
+  /** Whether the board's own toast is showing as well. */
+  classicShown: boolean;
+}
+
 export interface Reading {
   width: number;
   phase: 'classic' | 'wa' | 'classic-again';
   circles: Circle[];
   themeLinked: boolean;
+  toast: Toast | null;
 }
 
 export interface WaStripRun {
@@ -88,6 +105,28 @@ const READ_STRIP = `(() => {
   });
 })()`;
 
+/** The toast showing now, if any: the board's own, or the Web Awesome one. */
+const READ_TOAST = `(() => {
+  const round = (n) => Math.round(n);
+  const classic = document.getElementById('board-toast');
+  const classicShown = !!classic && !classic.classList.contains('hidden');
+  const item = document.querySelector('wa-toast.board-wa-toast wa-toast-item');
+  const frame = item?.shadowRoot?.querySelector('[part="toast-item"]');
+  const content = item?.shadowRoot?.querySelector('[part="content"]');
+  const painter = frame ?? (classicShown ? classic : null);
+  if (!painter) return null;
+  const r = painter.getBoundingClientRect();
+  const s = getComputedStyle(painter);
+  const inner = getComputedStyle(content ?? painter);
+  return {
+    text: (item ?? classic).textContent.trim(),
+    face: frame ? 'wa' : 'classic',
+    box: { x: round(r.x), y: round(r.y), w: round(r.width), h: round(r.height) },
+    background: s.backgroundColor, color: inner.color, radius: s.borderTopLeftRadius,
+    shadow: s.boxShadow, padding: inner.padding, font: inner.font, classicShown,
+  };
+})()`;
+
 const FACE = (face: 'classic' | 'wa') =>
   face === 'wa'
     ? `!!document.querySelector('#board-people .board-presence-wa wa-avatar')`
@@ -97,11 +136,12 @@ async function read(cdp: Cdp, width: number, phase: Reading['phase']): Promise<R
   const circles = (await cdp.evaluate(READ_STRIP)) as Circle[];
   const themeLinked =
     (await cdp.evaluate(`!!document.querySelector('link[data-wa-theme]')`)) === true;
-  return { width, phase, circles, themeLinked };
+  const toast = (await cdp.evaluate(READ_TOAST)) as Toast | null;
+  return { width, phase, circles, themeLinked, toast };
 }
 
-/** Hold the mouse on Bob's circle past the long-press threshold. */
-async function longPress(cdp: Cdp, label: string): Promise<void> {
+/** Hold the mouse on a circle until the follow ring is on (`ring`) or off. */
+async function longPress(cdp: Cdp, label: string, ring = true): Promise<void> {
   const at = (await cdp.evaluate(`(() => {
     const b = [...document.querySelectorAll('#board-people button')]
       .find((x) => (x.getAttribute('aria-label') ?? '').startsWith(${JSON.stringify(label)}));
@@ -113,8 +153,8 @@ async function longPress(cdp: Cdp, label: string): Promise<void> {
   const mouse = (type: 'mousePressed' | 'mouseReleased') =>
     cdp.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
   await mouse('mousePressed');
-  await until('the follow ring', async () =>
-    (await cdp.evaluate(`!!document.querySelector('#board-people .board-following')`))
+  await until(ring ? 'the follow ring' : 'the ring gone', async () =>
+    (await cdp.evaluate(`!!document.querySelector('#board-people .board-following')`)) === ring
       ? true
       : null,
   );
@@ -168,6 +208,23 @@ async function main(): Promise<void> {
       await post(`/workspaces/${ws}/collab-core`, { on: true });
       await until('the Web Awesome strip', async () =>
         (await alice.evaluate(FACE('wa'))) ? true : null,
+      );
+      // Stop following Bob and follow him again, so the follow toast shows
+      // from the Web Awesome side. First let the classic phase's toast time
+      // out, so a board toast showing below is one these presses raised.
+      await until('the board toast gone', async () =>
+        (await alice.evaluate(
+          `document.getElementById('board-toast')?.classList.contains('hidden')`,
+        ))
+          ? true
+          : null,
+      );
+      await longPress(alice, 'Bob', false);
+      await longPress(alice, 'Bob');
+      await until('the Web Awesome toast', async () =>
+        (await alice.evaluate(`!!document.querySelector('wa-toast.board-wa-toast wa-toast-item')`))
+          ? true
+          : null,
       );
       readings.push(await read(alice, width, 'wa'));
       await shoot(alice, shots, `strip-webawesome-${width}`);

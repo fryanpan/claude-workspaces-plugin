@@ -9,11 +9,18 @@
  * and the 36px hit area are the behaviour this must keep, and they live on
  * the button.
  *
+ * The strip's toasts — "Following Alice — long-press again to stop" and the
+ * "+N" names — come from `<wa-toast>` here, styled in board.css to look and
+ * time out like the board's own toast: one at a time, a new one replacing the
+ * last, gone after 3.5s, no close button and no animation.
+ *
  * Loaded by `presence-core-switch.ts` with `import()`, so this module, the
- * avatar and Lit are a chunk of their own that a board on the current code
+ * avatar, the toast and Lit are a chunk of their own that a board on the current code
  * never fetches. Linking the theme file happens here for the same reason.
  */
 import '@awesome.me/webawesome/dist/components/avatar/avatar.js';
+import '@awesome.me/webawesome/dist/components/toast/toast.js';
+import type WaToast from '@awesome.me/webawesome/dist/components/toast/toast.js';
 import type { JSX } from 'preact';
 import { BUILD_ID } from '../stale-client.ts';
 import { type PresenceChip, initialsOf, presenceHue } from './board-presence-model.ts';
@@ -70,4 +77,32 @@ export function linkWaTheme(doc: Document = document): void {
 export function mountWaPresenceIsland(host: HTMLElement, handlers: PresenceHandlers): () => void {
   linkWaTheme(host.ownerDocument);
   return mountPresenceIsland(host, handlers, { compact: true, face: WA_FACE });
+}
+
+/** How long a strip toast stands: the board toast's own default. */
+export const WA_TOAST_MS = 3500;
+
+/** The one `<wa-toast>` the strip's toasts go through, made on first use. */
+function toastStack(doc: Document): WaToast {
+  const found = doc.querySelector<WaToast>('wa-toast.board-wa-toast');
+  if (found) return found;
+  const stack = doc.createElement('wa-toast');
+  stack.className = 'board-wa-toast';
+  stack.setAttribute('placement', 'bottom-center');
+  doc.body.appendChild(stack);
+  return stack;
+}
+
+/** Show `message` as the strip's toast, replacing one still showing. */
+export function showWaToast(message: string, doc: Document = document): void {
+  const stack = toastStack(doc);
+  for (const item of stack.querySelectorAll('wa-toast-item')) item.remove();
+  stack
+    .create(message, { duration: WA_TOAST_MS, variant: 'neutral' })
+    .catch((err) => console.error('[presence] the Web Awesome toast did not show:', err));
+}
+
+/** Take the toast stack off the page, when the strip goes back to today's. */
+export function removeWaToast(doc: Document = document): void {
+  doc.querySelector('wa-toast.board-wa-toast')?.remove();
 }

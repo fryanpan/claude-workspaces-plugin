@@ -15,6 +15,7 @@ import {
   listenCollabCore,
   mountBoardPresence,
   rereadCollabCore,
+  stripToast,
 } from '../src/board/presence-core-switch.ts';
 import { presenceData } from '../src/board/presence-island.tsx';
 
@@ -32,9 +33,11 @@ const alice: PresenceChip = {
 function deferredLoad() {
   const loads: Array<(ok: boolean) => void> = [];
   const mounted: string[] = [];
+  const toasts: string[] = [];
   const load = () =>
     new Promise<{
       mountWaPresenceIsland: (host: HTMLElement) => () => void;
+      showWaToast: (message: string) => void;
     }>((resolve, reject) => {
       loads.push((ok) =>
         ok
@@ -46,11 +49,12 @@ function deferredLoad() {
                 mounted.push('wa');
                 return () => marker.remove();
               },
+              showWaToast: (message) => toasts.push(message),
             })
           : reject(new Error('chunk 404')),
       );
     });
-  return { load, loads, mounted };
+  return { load, loads, mounted, toasts };
 }
 
 let host: HTMLElement;
@@ -92,6 +96,26 @@ describe('mountBoardPresence', () => {
     collabCoreActive.value = false;
     await tick();
     expect(face()).toBe('classic');
+  });
+
+  it('shows the strip’s toasts in the face the strip is drawn in', async () => {
+    const d = deferredLoad();
+    const board: string[] = [];
+    const boardToast = (m: string) => board.push(m);
+    dispose = mountBoardPresence(host, { onTap: vi.fn(), onLongPress: vi.fn() }, d.load);
+    stripToast('Following Alice — long-press again to stop', boardToast);
+
+    collabCoreActive.value = true;
+    d.loads[0]?.(true);
+    await tick();
+    stripToast('Stopped following', boardToast);
+
+    collabCoreActive.value = false;
+    await tick();
+    stripToast('Also here: Bob', boardToast);
+
+    expect(board).toEqual(['Following Alice — long-press again to stop', 'Also here: Bob']);
+    expect(d.toasts).toEqual(['Stopped following']);
   });
 
   it('drops a load that a later flip overtook', async () => {
