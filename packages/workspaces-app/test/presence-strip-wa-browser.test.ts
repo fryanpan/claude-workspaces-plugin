@@ -5,7 +5,7 @@
  *
  * What a fake DOM cannot say: that the avatars paint the same 28px circles
  * in the same places as today's strip, with the same ring on the person
- * being followed, the same follow toast, and that switching the board swaps the strip on a page
+ * being followed, the same stop-following toast, and that switching the board swaps the strip on a page
  * that is already open.
  */
 import { spawnSync } from 'node:child_process';
@@ -75,11 +75,11 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
       expect(unthemed.circles.map(look)).toEqual(reading(width, 'classic').circles.map(look));
     }, 60_000);
 
-    it(`shows the follow toast from Web Awesome, looking like today's, at ${width}`, () => {
+    it(`shows the stop-following toast from Web Awesome, looking like today's, at ${width}`, () => {
       const classic = reading(width, 'classic').toast;
       const wa = reading(width, 'wa').toast;
       expect(classic?.face).toBe('classic');
-      expect(classic?.text).toBe('Following Bob — tap the page to stop');
+      expect(classic?.text).toBe('Stopped following');
       expect(wa?.face).toBe('wa');
       expect(wa?.classicShown, 'one toast, not two').toBe(false);
       const {
@@ -122,9 +122,9 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
     for (const phase of ['classic', 'wa'] as const) {
       it(`keeps the ${phase === 'wa' ? 'Web Awesome' : "board's own"} toast off the widget's "≡" chip at ${width}`, () => {
         const toast = reading(width, phase).toast;
-        // CONTROL: the chip is on the page, and the toast is the follow toast.
+        // CONTROL: the chip is on the page, and the toast is the stop-following toast.
         expect(toast?.chip, 'the ≡ chip is shown').not.toBeNull();
-        expect(toast?.text).toBe('Following Bob — tap the page to stop');
+        expect(toast?.text).toBe('Stopped following');
         const t = toast?.box ?? { x: 0, y: 0, w: 0, h: 0 };
         const c = toast?.chip ?? { x: 0, y: 0, w: 0, h: 0 };
         const w = Math.min(t.x + t.w, c.x + c.w) - Math.max(t.x, c.x);

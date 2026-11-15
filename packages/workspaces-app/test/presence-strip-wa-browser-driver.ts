@@ -8,8 +8,8 @@
  * driver reads her strip's deck on the current code, follows Bob by holding
  * his row in the list the deck opens,
  * then switches the board onto the collab core with her page still open and
- * reads the strip again once it has swapped, following Bob again so the follow
- * toast shows from that side too. Then it switches the board back.
+ * reads the strip again once it has swapped, following Bob and stopping again
+ * so the stop toast shows from that side too. Then it switches the board back.
  * Each reading is every circle's box and the computed fill, border, ring and
  * shape of whatever paints it, so the test can say the two strips look the
  * same rather than only that both rendered.
@@ -227,8 +227,15 @@ async function shadeAround(cdp: Cdp, box: Toast['box']): Promise<Toast['shade']>
   return SHADE_POINTS.map(([side, d], i) => ({ at: `${side} ${d}px`, lum: lums[i] ?? -1 }));
 }
 
-async function read(cdp: Cdp, width: number, phase: Reading['phase']): Promise<Reading> {
-  const circles = (await cdp.evaluate(READ_STRIP)) as Circle[];
+async function read(
+  cdp: Cdp,
+  width: number,
+  phase: Reading['phase'],
+  /** The deck as read earlier, while the follow was on: the toast is only
+   *  raised once it stops. */
+  following?: Circle[],
+): Promise<Reading> {
+  const circles = following ?? ((await cdp.evaluate(READ_STRIP)) as Circle[]);
   const themeLinked =
     (await cdp.evaluate(`!!document.querySelector('link[data-wa-theme]')`)) === true;
   const toast = (await cdp.evaluate(READ_TOAST)) as Omit<Toast, 'shade'> | null;
@@ -327,9 +334,20 @@ async function main(): Promise<void> {
           ? true
           : null,
       );
+      // Following raises no toast (the bar says it); stopping does. So read
+      // the deck while following, then stop and read the toast.
       await longPress(alice, bobKey);
-      readings.push(await read(alice, width, 'classic'));
+      const classicCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
       await shoot(alice, shots, `strip-classic-${width}`);
+      await longPress(alice, bobKey, false);
+      await until('the board toast', async () =>
+        (await alice.evaluate(
+          `document.getElementById('board-toast')?.classList.contains('hidden') === false`,
+        ))
+          ? true
+          : null,
+      );
+      readings.push(await read(alice, width, 'classic', classicCircles));
 
       step(`switch on at ${width}`);
       // Switching on from loopback needs the owner's own proof
@@ -339,9 +357,9 @@ async function main(): Promise<void> {
       await until('the Web Awesome strip', async () =>
         (await alice.evaluate(FACE('wa'))) ? true : null,
       );
-      // Stop following Bob and follow him again, so the follow toast shows
-      // from the Web Awesome side. First let the classic phase's toast time
-      // out, so a board toast showing below is one these presses raised.
+      // Follow Bob and stop, so the stop toast shows from the Web Awesome
+      // side. First let the classic phase's toast time out, so a board toast
+      // showing below is one these presses raised.
       await until('the board toast gone', async () =>
         (await alice.evaluate(
           `document.getElementById('board-toast')?.classList.contains('hidden')`,
@@ -349,15 +367,19 @@ async function main(): Promise<void> {
           ? true
           : null,
       );
-      await longPress(alice, bobKey, false);
       await longPress(alice, bobKey);
+      const waCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
+      await shoot(alice, shots, `strip-webawesome-${width}`);
+      await longPress(alice, bobKey, false);
       await until('the Web Awesome toast', async () =>
         (await alice.evaluate(`!!document.querySelector('wa-toast.board-wa-toast wa-toast-item')`))
           ? true
           : null,
       );
-      readings.push(await read(alice, width, 'wa'));
-      await shoot(alice, shots, `strip-webawesome-${width}`);
+      readings.push(await read(alice, width, 'wa', waCircles));
+      // Follow again, so the readings below have Bob followed as the two
+      // above did.
+      await longPress(alice, bobKey);
       // The theme file arrives after the strip mounts, so the strip has to be
       // right without it: read it again with the theme switched off, as a
       // reader on a slow link sees it first.

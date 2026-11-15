@@ -16,10 +16,11 @@
  *     armed timer, and the follow fired anyway. Pinned below.
  *
  *  3. The strip as design F: a deck of circles that opens into a list of
- *     two groups (here with you, elsewhere), rows that go there on a tap and
+ *     two groups (here with you, elsewhere), rows that open a card on a tap and
  *     follow on a hold or on Follow, liveness classes and the long-form chip.
  *
- * The drift notices the same module mounts are `presence-drift-island.test.tsx`.
+ * The card a row opens and the Following bar are `presence-card.test.tsx`;
+ * the drift notices the same module mounts are `presence-drift-island.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PresenceChip } from '../src/board/board-presence-model.ts';
@@ -356,16 +357,20 @@ describe('presence island — the deck and its list (design F)', () => {
     expect(host.querySelector('.board-presence-only')?.textContent).toBe('Only you');
   });
 
-  it('a row goes there on a tap, follows on Follow, and closes the list', async () => {
+  it('a row opens its card and closes the list; Follow on the row follows', async () => {
     const chip = person('Bob Saltmarsh', { here: false, line: 'On Tasks' });
     const handlers = noop();
     const { host } = mountPeople([chip], handlers);
     await openList(host);
     rowButtons(host)[0]?.click();
-    expect(handlers.onTap).toHaveBeenCalledWith(chip);
     await tick();
+    expect(handlers.onTap).not.toHaveBeenCalled();
     expect(host.querySelector('.board-presence-deck')?.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('.board-presence-card')?.getAttribute('aria-label')).toBe(
+      'Bob Saltmarsh',
+    );
     await openList(host);
+    expect(host.querySelector('.board-presence-card')).toBeNull();
     const follow = host.querySelector<HTMLButtonElement>('.board-presence-follow');
     expect(follow?.textContent).toBe('Follow');
     expect(follow?.getAttribute('aria-label')).toBe('Follow Bob Saltmarsh');
@@ -440,30 +445,6 @@ describe('presence island — the deck and its list (design F)', () => {
     const { host } = mountPeople([chip]);
     await openList(host);
     expect(rowButtons(host)[0]?.getAttribute('title')).toBe('Bob · On Riverbend plan');
-  });
-
-  it('announces a follow the page opened with, once, and not one the reader just chose', async () => {
-    const bob = person('Bob');
-    const onArrive = vi.fn();
-    const { host } = mountPeople([bob], { ...noop(), onArrive }, { followedKey: bob.key });
-    await tick();
-    expect(onArrive).toHaveBeenCalledTimes(1);
-    expect(onArrive).toHaveBeenCalledWith(bob);
-    // A repaint does not announce it again.
-    presenceData.value = { chips: [{ ...bob, line: 'On Tasks' }], followedKey: bob.key };
-    await tick();
-    expect(onArrive).toHaveBeenCalledTimes(1);
-
-    // CONTROL: a reader who taps Follow is told by that tap's own handler.
-    const fresh = vi.fn();
-    dispose.pop()?.();
-    host.remove();
-    const second = mountPeople([bob], { ...noop(), onArrive: fresh });
-    await openList(second.host);
-    second.host.querySelector<HTMLButtonElement>('.board-presence-follow')?.click();
-    presenceData.value = { chips: [bob], followedKey: bob.key };
-    await tick();
-    expect(fresh).not.toHaveBeenCalled();
   });
 
   it('renders the long form when compact is off — the name and the surface, spelled out', () => {

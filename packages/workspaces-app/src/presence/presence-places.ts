@@ -68,12 +68,25 @@ export function spotLabel(spot: PresenceSpot, titles: ReadonlyMap<string, string
   return 'a doc';
 }
 
-/** The row's second line for somebody on the reader's page. */
-function hereLine(chip: PresenceChip, spot: PresenceSpot): string {
+/** The words a spot quotes, cut to one line, or null. */
+function quoteOf(spot: PresenceSpot): string | null {
   const q = spot.quote?.trim();
-  if (!q) return chip.kind === 'agent' ? 'Pointing here' : 'Here with you';
-  const short = q.length > 80 ? `${q.slice(0, 79)}…` : q;
-  return chip.kind === 'agent' ? `Pointing at “${short}”` : `At “${short}”`;
+  if (!q) return null;
+  return q.length > 80 ? `${q.slice(0, 79)}…` : q;
+}
+
+/** The row's second line for somebody on the reader's page: what they are
+ *  at, or the page's name. The group heading already says "Here with you". */
+function hereLine(chip: PresenceChip, q: string | null, page: string): string {
+  if (!q) return `On ${page}`;
+  return chip.kind === 'agent' ? `Pointing at “${q}”` : `At “${q}”`;
+}
+
+/** The card's sentence: the page, and what they are reading or pointing at. */
+function placeSentence(chip: PresenceChip, spot: PresenceSpot, q: string | null, page: string) {
+  if (!q) return `On ${page}`;
+  if (chip.kind === 'agent') return `Pointing at “${q}” on ${page}`;
+  return spot.surface === 'board' ? `On ${page}, at “${q}”` : `On ${page}, reading “${q}”`;
 }
 
 export interface PlaceContext {
@@ -86,9 +99,10 @@ export interface PlaceContext {
 }
 
 /**
- * Each chip with `here` (on the reader's page) and `line` (where they are,
- * in words). A participant the room has no spot for (an agent that has not
- * pointed anywhere yet) is elsewhere: the reader cannot see them here.
+ * Each chip with `here` (on the reader's page), `line` (the row's words),
+ * `page` (the name of their page) and `place` (the card's sentence). A
+ * participant the room has no spot for (an agent that has not pointed
+ * anywhere yet) is elsewhere: the reader cannot see them here.
  */
 export function placeChips(chips: PresenceChip[], ctx: PlaceContext): PresenceChip[] {
   const titles = new Map([...(ctx.titles ?? []), ...titlesFromStates(ctx.states)]);
@@ -96,17 +110,18 @@ export function placeChips(chips: PresenceChip[], ctx: PlaceContext): PresenceCh
     if (chip.self) return chip;
     const spot = spotOfParticipant(ctx.states, chip.key, ctx.selfClientId);
     if (!spot) {
-      return {
-        ...chip,
-        here: false,
-        line: chip.kind === 'agent' ? 'Not pointing at anything' : 'In this workspace',
-      };
+      const line = chip.kind === 'agent' ? 'Not pointing at anything' : 'In this workspace';
+      return { ...chip, here: false, line, place: line };
     }
     const here = samePlace(spot, ctx.mine);
+    const page = spotLabel(spot, titles);
+    const q = quoteOf(spot);
     return {
       ...chip,
       here,
-      line: here ? hereLine(chip, spot) : `On ${spotLabel(spot, titles)}`,
+      line: here ? hereLine(chip, q, page) : `On ${page}`,
+      page,
+      place: placeSentence(chip, spot, q, page),
     };
   });
 }

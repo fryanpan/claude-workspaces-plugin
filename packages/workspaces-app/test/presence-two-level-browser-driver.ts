@@ -5,9 +5,11 @@
  *
  * Alice has the board open. Bob opens a doc in a second browser, and Alice's
  * strip shows him under "Elsewhere in Harborlight". Bob comes to the board,
- * and Alice's strip moves him under "Here with you". Alice taps Follow on his
- * row; Bob opens the doc again, and Alice's browser goes there with him.
- * Alice taps the doc herself, and the follow ends.
+ * and Alice's strip moves him under "Here with you". Alice taps his row, and
+ * his card opens; she taps Follow on it, and a bar says she is following him.
+ * Bob opens the doc again, and Alice's browser goes there with him. Alice
+ * taps Stop on the bar, and the follow ends. Bob goes back to the board;
+ * Alice opens his card and taps Go there, and her browser goes to the board.
  *
  * Every live step is timed from the moment the server's presence room holds
  * the change, and each must land on Alice's page within `LIVE_MS`: the poll
@@ -46,21 +48,51 @@ export interface Round {
   elsewhere: { place: string; rows: Row[]; ms: number };
   /** Bob on the board: the same. */
   here: { place: string; rows: Row[]; ms: number };
-  /** Alice followed Bob onto the doc: her address, her strip's ring, and
-   *  what the doc page told her when it opened. */
-  followed: { address: string; ringOnBob: boolean; ms: number; notice: string };
-  /** Alice tapped the doc: whether the follow is still held, and whether her
-   *  page started to leave when Bob next moved. */
+  /** Bob's card, opened from his row while he was on the board. */
+  card: Card;
+  /** The bar on the board, right after Alice tapped Follow on the card. */
+  barOnBoard: Bar;
+  /** Alice followed Bob onto the doc: her address, her strip's ring, and the
+   *  bar on the doc page. */
+  followed: { address: string; ringOnBob: boolean; ms: number; bar: Bar };
+  /** Alice tapped Stop on the bar: whether the follow is still held, and
+   *  whether her page started to leave when Bob next moved. */
   stopped: {
     ringOnBob: boolean;
     stored: string | null;
     address: string;
     leftPage: boolean;
     notice: string;
+    bar: boolean;
   };
-  /** The deck's box on the board and on the doc, before and after. */
-  deckOnBoard: { x: number; y: number; w: number; h: number };
-  deckOnDoc: { x: number; y: number; w: number; h: number };
+  /** Alice, on the doc, opened Bob's card (he is on the board) and tapped Go
+   *  there: the card she read, and the address her browser reached. */
+  went: { card: Card; address: string };
+  /** The deck's box on the board and on the doc, each with Bob here and the
+   *  lead elsewhere. */
+  deckOnBoard: Box;
+  deckOnDoc: Box;
+}
+
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Card {
+  name: string;
+  tag: string;
+  where: string;
+  buttons: string[];
+}
+
+export interface Bar {
+  label: string;
+  text: string;
+  page: string;
+  box: Box;
 }
 
 export interface TwoLevelRun {
@@ -103,11 +135,37 @@ const TOAST = `(() => {
   return t && !t.classList.contains('hidden') ? t.textContent : null;
 })()`;
 
-const DECK_BOX = `(() => {
-  const d = document.querySelector('.board-presence-deck');
+const boxOf = (selector: string) => `(() => {
+  const d = document.querySelector(${JSON.stringify(selector)});
   if (!d) return null;
   const r = d.getBoundingClientRect();
   return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+})()`;
+const DECK_BOX = boxOf('.board-presence-deck');
+
+/** The open card: whose, the where-line, and its buttons' words. */
+const READ_CARD = `(() => {
+  const c = document.querySelector('.board-presence-card');
+  if (!c) return null;
+  return {
+    name: c.getAttribute('aria-label') ?? '',
+    tag: c.querySelector('.board-presence-card-tag')?.textContent ?? '',
+    where: c.querySelector('.board-presence-card-where')?.textContent ?? '',
+    buttons: [...c.querySelectorAll('.board-presence-act')].map((b) => b.textContent),
+  };
+})()`;
+
+/** The Following bar, while it shows. */
+const READ_BAR = `(() => {
+  const b = document.querySelector('.board-follow-bar');
+  if (!b) return null;
+  const r = b.getBoundingClientRect();
+  return {
+    label: b.getAttribute('aria-label') ?? '',
+    text: b.querySelector('.board-follow-text > span')?.textContent ?? '',
+    page: b.querySelector('.board-follow-text small')?.textContent ?? '',
+    box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+  };
 })()`;
 
 /** The centre of the first element `selector` matches, or null. */
@@ -135,8 +193,25 @@ async function readList(cdp: Cdp): Promise<Row[]> {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
   await until('the list closed', async () =>
     (await cdp.evaluate(`!document.querySelector('.board-presence-list')`)) ? true : null,
-  );
+  ).catch(async (e) => {
+    step(
+      JSON.stringify(
+        await cdp.evaluate(
+          `({ cls: document.querySelector('.board-presence-f')?.className, exp: document.querySelector('.board-presence-deck')?.getAttribute('aria-expanded'), active: document.activeElement?.className, at: location.pathname })`,
+        ),
+      ),
+    );
+    throw e;
+  });
   return rows;
+}
+
+/** Open `key`'s card from the list, and read it. */
+async function openCard(cdp: Cdp, key: string): Promise<Card> {
+  await tapOn(cdp, '.board-presence-deck');
+  await until('the list open', async () => (await cdp.evaluate(READ_LIST)) as Row[]);
+  await tapOn(cdp, `.board-presence-row[data-key="${key}"] .board-presence-who`);
+  return until('the card open', async () => (await cdp.evaluate(READ_CARD)) as Card | null);
 }
 
 /** How long, from now, until `read` answers within `LIVE_MS`. */
@@ -187,7 +262,6 @@ async function main(): Promise<void> {
         (await alice.evaluate(placeOf(bobKey))) === 'elsewhere' ? true : null,
       );
       const elsewhereRows = await readList(alice);
-      const deckOnBoard = (await alice.evaluate(DECK_BOX)) as Round['deckOnBoard'];
 
       step(`Bob comes to the board at ${width}`);
       await navigate(bob, `${base}/workspaces/${ws}`);
@@ -198,13 +272,18 @@ async function main(): Promise<void> {
         (await alice.evaluate(placeOf(bobKey))) === 'here' ? true : null,
       );
       const hereRows = await readList(alice);
+      // Bob here and the lead elsewhere: the same deck the doc draws below.
+      const deckOnBoard = (await alice.evaluate(DECK_BOX)) as Box;
 
-      step(`Alice follows Bob at ${width}`);
-      await tapOn(alice, '.board-presence-deck');
-      await until('the list open', async () => (await alice.evaluate(READ_LIST)) as Row[]);
-      await tapOn(alice, `.board-presence-row[data-key="${bobKey}"] .board-presence-follow`);
+      step(`Alice follows Bob from his card at ${width}`);
+      const card = await openCard(alice, bobKey);
+      await tapOn(alice, '.board-presence-card [data-act="follow"]');
       await until('the follow ring on Bob', async () =>
         (await alice.evaluate(ringOn(bobKey))) ? true : null,
+      );
+      const barOnBoard = await until(
+        'the Following bar',
+        async () => (await alice.evaluate(READ_BAR)) as Bar | null,
       );
       // Bob opens the doc; following, Alice's browser goes there too.
       const arrived = alice.once('Page.loadEventFired');
@@ -221,28 +300,31 @@ async function main(): Promise<void> {
         (await alice.evaluate(placeOf(bobKey))) === 'here' ? true : null,
       );
       const ringOnBob = (await alice.evaluate(ringOn(bobKey))) === true;
-      const arrivedNotice = await until(
-        'the doc page says it is following',
-        async () => (await alice.evaluate(TOAST)) as string | null,
+      const barOnDoc = await until(
+        'the Following bar on the doc',
+        async () => (await alice.evaluate(READ_BAR)) as Bar | null,
       );
-      const deckOnDoc = (await alice.evaluate(DECK_BOX)) as Round['deckOnDoc'];
+      const deckOnDoc = (await alice.evaluate(DECK_BOX)) as Box;
 
-      step(`Alice taps the doc at ${width}`);
-      await tapOn(alice, '#editor');
+      step(`Alice taps Stop on the bar at ${width}`);
+      await tapOn(alice, '.board-follow-bar button');
       await until('the follow ring gone', async () =>
         (await alice.evaluate(ringOn(bobKey))) ? null : true,
       );
-      const stoppedNotice = await until('the doc page says the follow stopped', async () => {
-        const t = (await alice.evaluate(TOAST)) as string | null;
-        return t === arrivedNotice ? null : t;
-      });
+      const stoppedNotice = await until(
+        'the doc page says the follow stopped',
+        async () => (await alice.evaluate(TOAST)) as string | null,
+      );
+      const barAfterStop = (await alice.evaluate(READ_BAR)) !== null;
       const stored = (await alice.evaluate(`sessionStorage.getItem('cw-follow:${ws}')`)) as
         | string
         | null;
       // Bob moves again: a page still following would leave the doc.
+      // Counted only until Go there below, which is meant to load a page.
+      let watching = true;
       let leftPage = false;
       alice.on('Page.frameStartedLoading', () => {
-        leftPage = true;
+        if (watching) leftPage = true;
       });
       await navigate(bob, `${base}/workspaces/${ws}`);
       await until('Bob on the board, in the room', async () =>
@@ -254,19 +336,35 @@ async function main(): Promise<void> {
         (await alice.evaluate(placeOf(bobKey))) === 'elsewhere' ? true : null,
       );
       const stoppedAddress = (await alice.evaluate(ADDRESS)) as string;
+      const stoppedRing = (await alice.evaluate(ringOn(bobKey))) === true;
+      watching = false;
+      const leftWhileStopped = leftPage;
+
+      step(`Alice goes to Bob from his card at ${width}`);
+      const goCard = await openCard(alice, bobKey);
+      const boardPath = `/workspaces/${ws}`;
+      await tapOn(alice, '.board-presence-card [data-act="go"]');
+      const wentAddress = await until('Alice taken to the board', async () => {
+        const at = (await alice.evaluate(ADDRESS).catch(() => null)) as string | null;
+        return at?.startsWith(boardPath) && !at.includes('/docs/') ? at : null;
+      });
 
       rounds.push({
         width,
         elsewhere: { place: 'elsewhere', rows: elsewhereRows, ms: elsewhereMs },
         here: { place: 'here', rows: hereRows, ms: hereMs },
-        followed: { address: followedAddress, ringOnBob, ms: followMs, notice: arrivedNotice },
+        card,
+        barOnBoard,
+        followed: { address: followedAddress, ringOnBob, ms: followMs, bar: barOnDoc },
         stopped: {
-          ringOnBob: (await alice.evaluate(ringOn(bobKey))) === true,
+          ringOnBob: stoppedRing,
           stored,
           address: stoppedAddress,
-          leftPage,
+          leftPage: leftWhileStopped,
           notice: stoppedNotice,
+          bar: barAfterStop,
         },
+        went: { card: goCard, address: wentAddress },
         deckOnBoard,
         deckOnDoc,
       });

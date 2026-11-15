@@ -113,7 +113,7 @@ describe('createBoardChromeRegion', () => {
     expect([page, app]).toEqual(['Tasks', 'Harborlight']);
     expect(chips.map((c) => [c.label, c.self ?? false, c.here, c.line])).toEqual([
       ['Alice (you)', true, undefined, undefined],
-      ['Bob', false, true, 'Here with you'],
+      ['Bob', false, true, 'On Tasks'],
       ['Riverbend', false, false, 'On Riverbend launch plan'],
     ]);
   });

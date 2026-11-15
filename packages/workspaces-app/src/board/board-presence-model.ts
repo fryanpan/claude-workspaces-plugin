@@ -489,6 +489,11 @@ export interface PresenceChip {
   here?: boolean;
   /** Where they are, in words, for the strip's list. */
   line?: string;
+  /** The name of the page they are on ("Library", "quay.md"). */
+  page?: string;
+  /** Where they are as the card says it: the page, and what they are
+   *  reading or pointing at there. */
+  place?: string;
 }
 
 /** What the attachments read says about plugin versions. */

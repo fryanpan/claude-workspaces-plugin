@@ -37,6 +37,47 @@
    Appending at the end is what starts that up again. */
 /* ================= MAIN LAYOUT ================= */
 
+/* Where the presence deck sits (design F, Bryan 2026-11-15): 104px in from
+   the window's right edge on a wide screen and 140px on a phone, the same as
+   on the board (board.css, PRESENCE STRIP). The toolbar's right edge is the
+   window's less 14px (12px on a phone). The host stays in the row as a slot,
+   kept while nobody is here, after the format and preview buttons and before
+   comments and More; on a phone Aa moves after it. The slot widens by More's
+   width when More is hidden, so its left edge never moves under the deck. */
+#topbar .toolbar {
+  position: relative;
+}
+#doc-people {
+  order: 1;
+  flex: none;
+  width: 96px;
+}
+#doc-people:has(~ #doc-more[hidden]) {
+  width: 140px;
+}
+#doc-people.hidden {
+  display: flex !important;
+  visibility: hidden;
+}
+#toggle-threads,
+#doc-more {
+  order: 2;
+}
+#doc-people .board-presence-f {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 90px;
+}
+@media (max-width: 1100px) {
+  #toggle-format {
+    order: 2;
+  }
+  #doc-people .board-presence-f {
+    right: 128px;
+  }
+}
+
 #main {
   position: relative;
   display: grid;

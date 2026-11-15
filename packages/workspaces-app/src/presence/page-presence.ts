@@ -14,7 +14,6 @@ import {
   PERSON_SPOT_FIELD,
   type PresenceSpot,
 } from '@claude-workspaces/core/workspace-presence';
-import { followingText } from '../board/presence-deck.tsx';
 import { mountPresenceIsland, presenceData } from '../board/presence-island.tsx';
 import { boardSocketUrl } from '../doc-path.ts';
 import { type AttentionHost, watchAttention } from './attention.ts';
@@ -115,14 +114,14 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     const off = mountPresenceIsland(
       el,
       {
-        // A tap goes there once; a long-press keeps going there.
+        // The card's Go there goes there once; Follow or a hold keeps going there.
         onTap: (chip) => follower.jump(chip.key),
         onLongPress: (chip) => {
           const next = follower.key() === chip.key ? null : chip.key;
           follower.follow(next);
-          deps.notify?.(next ? followingText(chip.label) : 'Stopped following');
+          // The follow bar says a follow is on; the stop needs a word.
+          if (!next) deps.notify?.('Stopped following');
         },
-        onArrive: (chip) => deps.notify?.(followingText(chip.label)),
       },
       { compact: true },
     );

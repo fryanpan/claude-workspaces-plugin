@@ -168,6 +168,8 @@ body.board-body {
    first task row most of a screen down. */
 .board-cluster {
   grid-area: cluster;
+  /* The presence deck is placed against this box (PRESENCE STRIP below). */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -840,6 +842,31 @@ body.board-body {
 .board-presence-agent .board-presence-name::before {
   content: "🤖 ";
 }
+/* Where the deck sits (design F, Bryan 2026-11-15): 104px in from the
+   window's right edge on a wide screen and 140px on a phone, the same as on a
+   doc (doc.css, MAIN LAYOUT), so a reader moving between the two finds it
+   where they left it. The cluster's right edge is the window's less 14px.
+   The host stays in the row as a fixed slot, kept while nobody is here, so
+   nothing beside it moves as people arrive and leave. */
+#board-people {
+  flex: none;
+  width: 96px;
+}
+#board-people.hidden {
+  display: flex !important;
+  visibility: hidden;
+}
+#board-people .board-presence-f {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 90px;
+}
+@media (max-width: 1100px) {
+  #board-people .board-presence-f {
+    right: 126px;
+  }
+}
 /* The Web Awesome strip, on a board the collab core serves
    (`presence-island-wa.tsx`). The same 28px circles as `.board-presence-circle`
    in styles.css, drawn by a `<wa-avatar>` inside a bare button: the button
@@ -901,7 +928,8 @@ body.board-body {
   --size: 20px;
   font-size: 0;
 }
-.board-presence-row .board-presence-wa wa-avatar {
+.board-presence-row .board-presence-wa wa-avatar,
+.board-follow-bar .board-presence-wa wa-avatar {
   --size: 24px;
   font-size: 9.5px;
 }

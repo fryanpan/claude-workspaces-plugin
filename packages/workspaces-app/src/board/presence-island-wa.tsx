@@ -8,8 +8,7 @@
  * labels. Native buttons rather than `<wa-button>`, because the press
  * gesture, focus and the hit area are the behaviour this must keep.
  *
- * The strip's follow toast ("Following Alice — tap the page to stop")
- * comes from `<wa-toast>` here, styled in board.css to look and
+ * The strip's follow toast ("Stopped following") comes from `<wa-toast>` here, styled in board.css to look and
  * time out like the board's own toast: one at a time, a new one replacing the
  * last, gone after 3.5s, no close button and no animation.
  *

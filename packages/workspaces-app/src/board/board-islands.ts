@@ -29,7 +29,6 @@ import { mountGoalDetailIsland } from './goal-detail-island.tsx';
 import { mountHomeActivityIsland } from './home-activity-island.tsx';
 import { mountHomeReviewIsland } from './home-review-island.tsx';
 import { mountBoardPresence, stripToast } from './presence-core-switch.ts';
-import { followingText } from './presence-deck.tsx';
 import { mountDriftIsland } from './presence-island.tsx';
 import type { RecentAnswer } from './recent-answers.ts';
 import { type DetailTab, mountTaskDetailIsland } from './task-detail-island.tsx';
@@ -155,9 +154,10 @@ export function mountBoardIslands(deps: BoardIslandDeps): void {
     onLongPress: (chip) => {
       const next = state.followedKey === chip.key ? null : chip.key;
       follow(next);
-      stripToast(next ? followingText(chip.label) : 'Stopped following', showToast);
+      // Starting a follow raises the follow bar, which stays; only the stop
+      // needs a word, because the bar it ends goes with it.
+      if (!next) stripToast('Stopped following', showToast);
     },
-    onArrive: (chip) => stripToast(followingText(chip.label), showToast),
   });
   mountDriftIsland(el('board-drift'));
 }

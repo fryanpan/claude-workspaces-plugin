@@ -132,6 +132,9 @@ describe('placeChips', () => {
       mine: { surface: 'doc', docId: 'plan' },
     });
     expect(onPlan[0]?.here).toBe(true);
-    expect(onPlan[0]?.line).toBe('Here with you');
+    // The group heading already says "here"; the row names the page.
+    expect(onPlan[0]?.line).toBe('On Riverbend launch plan');
+    expect(onPlan[0]?.page).toBe('Riverbend launch plan');
+    expect(onPlan[0]?.place).toBe('On Riverbend launch plan');
   });
 });

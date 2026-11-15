@@ -7,8 +7,10 @@
  * the workspace. Hovering it with a mouse, or tapping it, opens a list below
  * it in two groups, "Here with you · <page>" and "Elsewhere in <workspace>",
  * and each circle slides from its place in the deck to its row. A row says
- * where that participant is and has a Follow button; tapping the row goes
- * there once, and holding it follows, as holding a circle always has.
+ * where that participant is and has a Follow button; tapping the row opens
+ * their card (Go there / Follow, `presence-card.tsx`), and holding it
+ * follows, as holding a circle always has. While the reader follows
+ * somebody, the follow bar says so.
  *
  * Every row and every deck circle is keyed on the participant, so a repaint
  * (an awareness update, an agent refresh, the 30s tick) keeps the node the
@@ -17,21 +19,14 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { PresenceChip } from './board-presence-model.ts';
+import { FollowBar, PresenceCard } from './presence-card.tsx';
 
 export interface PresenceHandlers {
   /** Go to where they are, once. */
   onTap: (chip: PresenceChip) => void;
   /** Follow them, or stop following them. */
   onLongPress: (chip: PresenceChip) => void;
-  /** This page opened already following `chip` — a follow brought the
-   *  reader here, or they reloaded mid-follow. Called once, so the page can
-   *  say so: a follow that takes the reader's navigation over must not run
-   *  unannounced. */
-  onArrive?: (chip: PresenceChip) => void;
 }
-
-/** What the page says when a follow starts or carries the reader onto it. */
-export const followingText = (label: string): string => `Following ${label} — tap the page to stop`;
 
 /** How long a press must be held before it follows rather than jumps.
  *  Exported so a driven test holds the press the board's own threshold asks
@@ -117,18 +112,17 @@ function Row(props: {
   followed: boolean;
   handlers: PresenceHandlers;
   close: () => void;
-  /** The reader followed or stopped from this row. */
-  chose: () => void;
+  /** Open this participant's card. */
+  open: () => void;
 }) {
-  const { chip, face, followed, handlers, close, chose } = props;
+  const { chip, face, followed, handlers, close, open } = props;
   const press = usePress(
     () => {
       close();
-      handlers.onTap(chip);
+      open();
     },
     () => {
       close();
-      chose();
       handlers.onLongPress(chip);
     },
   );
@@ -151,7 +145,6 @@ function Row(props: {
         aria-label={followed ? `Stop following ${chip.label}` : `Follow ${chip.label}`}
         onClick={() => {
           close();
-          chose();
           handlers.onLongPress(chip);
         }}
       >
@@ -242,18 +235,17 @@ export function PresenceDeck(props: {
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPointer = useRef('mouse');
   const root = useRef<HTMLDivElement>(null);
+  /** The card and the bar: beside the wrapper, not in it, so a mouse passing
+   *  over the bar does not count as hovering the deck and drop the list over
+   *  it. Still part of the strip for a tap or focus outside. */
+  const floats = useRef<HTMLDivElement>(null);
+  const inStrip = (n: Node) => !!(root.current?.contains(n) || floats.current?.contains(n));
   const deck = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLElement>(null);
-  // Whether the reader has followed or stopped from this strip, and whether
-  // a follow this page opened with has been announced.
-  const chose = useRef(false);
-  const announced = useRef(false);
   const followedChip = others.find((c) => c.key === followedKey);
-  useEffect(() => {
-    if (!followedChip || announced.current || chose.current) return;
-    announced.current = true;
-    handlers.onArrive?.(followedChip);
-  }, [followedChip?.key]);
+  // Whose card is open, by participant, so a repaint keeps it open on them.
+  const [cardKey, setCardKey] = useState<string | null>(null);
+  const cardChip = cardKey ? others.find((c) => c.key === cardKey) : undefined;
 
   // Mirrors `open` for the listeners below, which outlive the render that
   // made them.
@@ -273,7 +265,9 @@ export function PresenceDeck(props: {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     if (!deck.current || !list.current) return;
     if (open) {
-      // Open: place the list, then slide the circles out of the deck.
+      // Open: place the list, then slide the circles out of the deck. The
+      // list replaces any card that was showing.
+      setCardKey(null);
       setClosing(false);
       placeList(deck.current, list.current);
       flip(deck.current, list.current, true);
@@ -288,41 +282,46 @@ export function PresenceDeck(props: {
 
   // A tap anywhere else, or Escape, closes it; a resize places it again.
   // A layout effect, so the listeners are there before the next input.
+  const listening = open || cardChip !== undefined;
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!listening) return;
     const doc = root.current?.ownerDocument;
     const win = doc?.defaultView;
     if (!doc || !win) return;
     const outside = (ev: Event) => {
-      if (ev.target instanceof Node && root.current?.contains(ev.target)) return;
+      if (ev.target instanceof Node && inStrip(ev.target)) return;
       close();
+      setCardKey(null);
     };
     const key = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
       close();
+      setCardKey(null);
       deck.current?.focus();
     };
     // Keyboard focus leaving the strip closes it, as a tap outside does.
     const blur = (ev: FocusEvent) => {
       const to = ev.relatedTarget;
-      if (to instanceof Node && root.current?.contains(to)) return;
-      if (to !== null) close();
+      if (to instanceof Node && inStrip(to)) return;
+      if (to === null) return;
+      close();
+      setCardKey(null);
     };
     const resize = () => {
       if (deck.current && list.current) placeList(deck.current, list.current);
     };
     doc.addEventListener('pointerdown', outside, true);
     doc.addEventListener('keydown', key);
-    root.current?.addEventListener('focusout', blur);
+    const parts = [root.current, floats.current];
+    for (const el of parts) el?.addEventListener('focusout', blur);
     win.addEventListener('resize', resize);
-    const host = root.current;
     return () => {
-      host?.removeEventListener('focusout', blur);
+      for (const el of parts) el?.removeEventListener('focusout', blur);
       doc.removeEventListener('pointerdown', outside, true);
       doc.removeEventListener('keydown', key);
       win.removeEventListener('resize', resize);
     };
-  }, [open]);
+  }, [listening]);
 
   useEffect(
     () => () => {
@@ -348,76 +347,101 @@ export function PresenceDeck(props: {
         followed={chip.key === followedKey}
         handlers={handlers}
         close={close}
-        chose={() => {
-          chose.current = true;
-        }}
+        open={() => setCardKey(chip.key)}
       />
     ));
   const shown = open || closing;
-
   return (
-    <div
-      ref={root}
-      class={`board-presence-f${open ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
-      onPointerEnter={(ev) => {
-        if (ev.pointerType !== 'mouse') return;
-        if (leaveTimer.current) clearTimeout(leaveTimer.current);
-        if (!open) setOpen(true);
-      }}
-      onPointerLeave={(ev) => {
-        if (ev.pointerType !== 'mouse' || pinned.current) return;
-        if (leaveTimer.current) clearTimeout(leaveTimer.current);
-        leaveTimer.current = setTimeout(() => {
-          if (!pinned.current) close();
-        }, LEAVE_MS);
-      }}
-    >
-      <button
-        ref={deck}
-        type="button"
-        class="board-presence-deck"
-        aria-haspopup="true"
-        aria-expanded={open ? 'true' : 'false'}
-        aria-label={summary}
-        title={summary.replace(', ', ' · ')}
-        onPointerDown={(ev) => {
-          lastPointer.current = ev.pointerType || 'mouse';
+    <>
+      <div
+        ref={root}
+        class={`board-presence-f${open ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
+        onPointerEnter={(ev) => {
+          if (ev.pointerType !== 'mouse') return;
+          if (leaveTimer.current) clearTimeout(leaveTimer.current);
+          if (!open) setOpen(true);
         }}
-        onClick={() => {
-          // A mouse already opened it by hovering; the click keeps it open.
-          if (lastPointer.current === 'mouse' && open && !pinned.current) {
-            pinned.current = true;
-            return;
-          }
-          if (open) close();
-          else {
-            pinned.current = true;
-            setOpen(true);
-          }
+        onPointerLeave={(ev) => {
+          if (ev.pointerType !== 'mouse' || pinned.current) return;
+          if (leaveTimer.current) clearTimeout(leaveTimer.current);
+          leaveTimer.current = setTimeout(() => {
+            if (!pinned.current) close();
+          }, LEAVE_MS);
         }}
       >
-        {deckChips.map((chip) => (
-          <Circle key={chip.key} chip={chip} face={face} followed={chip.key === followedKey} />
-        ))}
-      </button>
-      {shown && (
-        <section
-          ref={list}
-          class="board-presence-list"
-          aria-label={`Who is in ${props.app ?? 'this workspace'}`}
+        <button
+          ref={deck}
+          type="button"
+          class="board-presence-deck"
+          aria-haspopup="true"
+          aria-expanded={open ? 'true' : 'false'}
+          aria-label={summary}
+          title={summary.replace(', ', ' · ')}
+          onPointerDown={(ev) => {
+            lastPointer.current = ev.pointerType || 'mouse';
+          }}
+          onClick={() => {
+            // A mouse already opened it by hovering; the click keeps it open.
+            if (lastPointer.current === 'mouse' && open && !pinned.current) {
+              pinned.current = true;
+              return;
+            }
+            if (open) close();
+            else {
+              pinned.current = true;
+              setOpen(true);
+            }
+          }}
         >
-          <span class="board-presence-group">
-            {props.page ? `Here with you · ${props.page}` : 'Here with you'}
-          </span>
-          {here.length > 0 ? rows(here) : <div class="board-presence-only">Only you</div>}
-          {away.length > 0 && (
+          {deckChips.map((chip) => (
+            <Circle key={chip.key} chip={chip} face={face} followed={chip.key === followedKey} />
+          ))}
+        </button>
+        {shown && (
+          <section
+            ref={list}
+            class="board-presence-list"
+            aria-label={`Who is in ${props.app ?? 'this workspace'}`}
+          >
             <span class="board-presence-group">
-              {`Elsewhere in ${props.app ?? 'this workspace'}`}
+              {props.page ? `Here with you · ${props.page}` : 'Here with you'}
             </span>
-          )}
-          {rows(away)}
-        </section>
-      )}
-    </div>
+            {here.length > 0 ? rows(here) : <div class="board-presence-only">Only you</div>}
+            {away.length > 0 && (
+              <span class="board-presence-group">
+                {`Elsewhere in ${props.app ?? 'this workspace'}`}
+              </span>
+            )}
+            {rows(away)}
+          </section>
+        )}
+      </div>
+      <div ref={floats} class="board-presence-floats">
+        {cardChip && (
+          <PresenceCard
+            chip={cardChip}
+            face={face}
+            followed={cardChip.key === followedKey}
+            app={props.app}
+            anchor={deck.current}
+            onGo={() => {
+              setCardKey(null);
+              handlers.onTap(cardChip);
+            }}
+            onFollow={() => {
+              setCardKey(null);
+              handlers.onLongPress(cardChip);
+            }}
+          />
+        )}
+        {followedChip && (
+          <FollowBar
+            chip={followedChip}
+            face={face}
+            onStop={() => handlers.onLongPress(followedChip)}
+          />
+        )}
+      </div>
+    </>
   );
 }

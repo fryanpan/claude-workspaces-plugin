@@ -6,8 +6,10 @@
  *
  * What a fake DOM cannot say: that a person who opens another page in a
  * second browser moves between the strip's two groups on an already-open page
- * within a second, that Follow takes the reader's browser where they go, and
- * that the reader's own tap ends the follow.
+ * within a second, that a person's card goes there once or follows, that
+ * Follow takes the reader's browser where they go under a bar that says so,
+ * that the bar's Stop ends it, and that the deck sits at the same place on
+ * the board and on a doc.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -59,10 +61,36 @@ describe.skipIf(CHROME === null)('the two-level presence strip, in a browser', (
       expect(here.rows.find((r) => r.name === 'Bob')).toEqual({
         group: 'Here with you · Tasks',
         name: 'Bob',
-        line: 'Here with you',
+        // The heading already says "here"; the row names the page.
+        line: 'On Tasks',
       });
       // The lead points at the Library, so stays elsewhere: one row per group.
       expect(here.rows.filter((r) => r.group.startsWith('Elsewhere')).length).toBe(1);
+    }, 60_000);
+
+    it(`opens a card on a row tap: where they are, Show me and Follow at ${width}`, () => {
+      const { card } = round(width);
+      expect(card).toEqual({
+        name: 'Bob',
+        tag: 'Here with you',
+        where: 'Here with youOn Tasks',
+        buttons: ['Show me', 'Follow'],
+      });
+    }, 60_000);
+
+    it(`says who the reader follows in a bar, on the board and on the doc, at ${width}`, () => {
+      const { barOnBoard, followed } = round(width);
+      expect(barOnBoard.label).toBe('Following Bob');
+      expect(barOnBoard.text).toBe('Following Bob');
+      expect(barOnBoard.page).toBe('Tasks');
+      expect(followed.bar.page).toBe('quay.md');
+      if (width === 1180) {
+        // Wide: at the bottom of the window.
+        expect(followed.bar.box.y + followed.bar.box.h).toBeGreaterThan(820 - 80);
+      } else {
+        // Phone: under the header, above the page.
+        expect(followed.bar.box.y).toBeLessThan(140);
+      }
     }, 60_000);
 
     it(`takes the follower to the followed person's page at ${width}`, () => {
@@ -70,25 +98,33 @@ describe.skipIf(CHROME === null)('the two-level presence strip, in a browser', (
       expect(followed.ms).toBeLessThanOrEqual(LIVE_MS);
       expect(followed.address).toMatch(/^\/workspaces\/w-[^/]+\/docs\/d-[^/]+$/);
       expect(followed.ringOnBob).toBe(true);
-      // The page the follow opened says why the reader is there.
-      expect(followed.notice).toBe('Following Bob — tap the page to stop');
     }, 60_000);
 
-    it(`ends the follow when the follower taps their own page at ${width}`, () => {
+    it(`ends the follow when the follower taps Stop on the bar at ${width}`, () => {
       const { followed, stopped } = round(width);
       expect(stopped.ringOnBob).toBe(false);
+      expect(stopped.bar).toBe(false);
       expect(stopped.stored).toBeNull();
       expect(stopped.notice).toBe('Stopped following');
       // Bob went back to the board; Alice stayed on the doc.
       expect(stopped.leftPage).toBe(false);
       expect(stopped.address).toBe(followed.address);
     }, 60_000);
+
+    it(`goes to a person elsewhere from their card, once, at ${width}`, () => {
+      const { went } = round(width);
+      expect(went.card.tag).toBe('Elsewhere in Harborlight');
+      expect(went.card.buttons).toEqual(['Go there', 'Follow']);
+      expect(went.address).toMatch(/^\/workspaces\/w-[^/?]+(\?.*)?$/);
+    }, 60_000);
   }
 
-  it('keeps the deck the same height and top on the board and on a doc', () => {
+  it('draws the deck at the same place and size on the board and on a doc', () => {
     for (const width of [1180, 430]) {
       const { deckOnBoard, deckOnDoc } = round(width);
-      expect([deckOnDoc.y, deckOnDoc.h], `at ${width}`).toEqual([deckOnBoard.y, deckOnBoard.h]);
+      expect(deckOnDoc, `at ${width}`).toEqual(deckOnBoard);
+      // 104px in from the right on a wide screen, 140px on a phone.
+      expect(deckOnBoard.x + deckOnBoard.w, `at ${width}`).toBe(width === 1180 ? 1076 : 290);
     }
   }, 60_000);
 });
