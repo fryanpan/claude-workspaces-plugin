@@ -69,6 +69,9 @@ export interface Toast {
   chip: { x: number; y: number; w: number; h: number } | null;
   /** 'toast', 'chip', or null when the two boxes do not overlap. */
   onTop: 'toast' | 'chip' | 'other' | null;
+  /** What is painted around the toast: luminance 0–255 at points a set
+   *  distance outside its box (`SHADE_POINTS`), so its shadow as drawn. */
+  shade: Array<{ at: string; lum: number }>;
 }
 
 export interface Reading {
@@ -164,12 +167,70 @@ const FACE = (face: 'classic' | 'wa') =>
     ? `!!document.querySelector('#board-people .board-presence-wa wa-avatar')`
     : `!!document.querySelector('#board-people .board-presence-circle')`;
 
+/** Where the shade around a toast is sampled, each a side of its box and a
+ *  distance outside it in px: below its middle, beside its middle, and below
+ *  each corner, where a shadow cut off at the toast's width shows as a hard
+ *  edge. */
+const SHADE_POINTS: Array<['below' | 'left' | 'right' | 'below-left' | 'below-right', number]> = [
+  ['below', 8],
+  ['below', 24],
+  ['below', 44],
+  ['left', 8],
+  ['left', 24],
+  ['right', 8],
+  ['right', 24],
+  ['below-left', 14],
+  ['below-right', 14],
+];
+
+/** The toast's surroundings as painted: a screenshot of the viewport, read
+ *  back through a canvas on the page at points around the toast's box. */
+async function shadeAround(cdp: Cdp, box: Toast['box']): Promise<Toast['shade']> {
+  // The whole viewport: a clip reaching past its edge is cut to it, which
+  // would shift every point. Points off the screen read -1 on both toasts.
+  const shot = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
+    data: string;
+  };
+  const [left, right, top, bottom] = [box.x, box.x + box.w, box.y, box.y + box.h];
+  const [midX, midY] = [(left + right) / 2, (top + bottom) / 2];
+  const points = SHADE_POINTS.map(([side, d]) => {
+    if (side === 'below') return [midX, bottom + d];
+    if (side === 'left') return [left - d, midY];
+    if (side === 'right') return [right + d, midY];
+    if (side === 'below-left') return [left - d, bottom + d];
+    return [right + d, bottom + d];
+  }).map(([x, y]) => [Math.round(x ?? 0), Math.round(y ?? 0)]);
+  const lums = (await cdp.evaluate(`new Promise((done) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const k = img.width / innerWidth;
+      done(${JSON.stringify(points)}.map(([x, y]) => {
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return -1;
+        const [r, gr, b] = g.getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data;
+        return Math.round(0.2126 * r + 0.7152 * gr + 0.0722 * b);
+      }));
+    };
+    img.src = 'data:image/png;base64,${shot.data}';
+  })`)) as number[];
+  return SHADE_POINTS.map(([side, d], i) => ({ at: `${side} ${d}px`, lum: lums[i] ?? -1 }));
+}
+
 async function read(cdp: Cdp, width: number, phase: Reading['phase']): Promise<Reading> {
   const circles = (await cdp.evaluate(READ_STRIP)) as Circle[];
   const themeLinked =
     (await cdp.evaluate(`!!document.querySelector('link[data-wa-theme]')`)) === true;
-  const toast = (await cdp.evaluate(READ_TOAST)) as Toast | null;
-  return { width, phase, circles, themeLinked, toast };
+  const toast = (await cdp.evaluate(READ_TOAST)) as Omit<Toast, 'shade'> | null;
+  return {
+    width,
+    phase,
+    circles,
+    themeLinked,
+    toast: toast && { ...toast, shade: await shadeAround(cdp, toast.box) },
+  };
 }
 
 /** Hold the mouse on a circle until the follow ring is on (`ring`) or off. */
