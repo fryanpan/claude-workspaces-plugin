@@ -1,0 +1,5 @@
+# Read by `bun test` started in packages/server. Bun reads only the
+# bunfig.toml in the directory it starts in, so without this file a run from
+# here skipped the repo root's preloads. See test/suite.preload.ts.
+[test]
+preload = ["./test/suite.preload.ts"]

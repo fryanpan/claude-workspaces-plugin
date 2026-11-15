@@ -1,5 +1,5 @@
 /**
- * Loaded by every `bun test` run (bunfig.toml [test].preload): after each
+ * Loaded by every `bun test` run (through suite.preload.ts): after each
  * test, two probes — can the process still open a file descriptor, and can
  * the machine still allocate a socket? When either says no, the test is
  * failed with a message naming the exhaustion, because at that point every

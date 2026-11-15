@@ -3839,3 +3839,28 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   NO_SOUND report says how many frames were all zero. A fake audio graph
   must render zeros from a dead source, or it tests a browser that does not
   exist.
+
+## Preloads load only from the directory `bun test` starts in, so a server test run from packages/server failed on a fixture's bare `not found` 404
+
+- **Symptom:** a server test run as `cd packages/server && bun test test/<file>`
+  fails with a bare `not found` 404, or with Bun's `Failed to parse JSON`
+  on the body `not found`. The same file passes from the repo root.
+  On 15 Nov 2026 this cost two builder investigations: the batch 5
+  share-link-flow failures and the PR 1660 404s.
+- **Cause:** Bun reads only the `bunfig.toml` in the directory it was
+  started in. The repo root's bunfig held the preloads, so a run from
+  packages/server loaded none of them. An env probe showed
+  `CW_TEST_BIND_HOST` and `CW_TEST_TIMING_SCALE` unset from packages/server
+  and set from the root. Without the loopback preload, test servers bind
+  every interface. On macOS, a `127.0.0.1:P` listener in another process
+  (here `app-dev-server-fixture.ts` and `vite-base-fixture.ts`, which
+  answer `not found` with a 404) takes the IPv4 connects meant for the test
+  server.
+- **Fix:** `packages/server/test/suite.preload.ts` is the one preload. It
+  imports the three preloads in order. The repo root, `packages/server` and
+  `packages/server/test` each have a bunfig naming it, so runs from those
+  three directories load the same preloads.
+  `packages/server/test/preload-from-any-dir.test.ts` runs a probe from each
+  directory, and from `src/` as the control, which loads none.
+- **Still true:** a run started in any other directory loads no preload.
+  Run tests from the repo root with the file path.
