@@ -146,13 +146,22 @@ revoked role on the same call.
 (`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
 after the folder: a Bun server with Hono routes, a doc socket the core's
 room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
-theme. The template points back into this repo in exactly two files, a
-re-export of `core/src/collab/` and an `@import` of
-`workspaces-app/src/wa-theme.css`, and the generator replaces both with
-copies, so the made app depends on nothing here. Sign-in is a typed slot
-(`SignIn.principal(request)`) holding a name-only development provider that
-refuses to start under `APP_ENV=production`; `templates/signin`, a
-Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,
+theme. The core and the theme reach the app as one versioned package,
+`packages/app-kit` (`@claude-workspaces/app-kit`, exporting `./collab` and
+`./theme.css`). In this repo its two files re-export `core/src/collab/` and
+`@import` `workspaces-app/src/wa-theme.css`; `packages/app-kit/scripts/pack.ts`
+packs a tarball whose copies of those files are the real ones, and the
+generator puts that tarball in the app's `vendor/` and names it as a
+`file:` dependency, so the made app holds no copy of their source and
+depends on nothing here. A tarball rather than GitHub Packages (which needs
+a token even to install) or a git dependency (which cannot name one
+package inside this monorepo). Sign-in is a typed slot
+(`SignIn.principal(request)`) filled by password sign-in on Better Auth over
+bun:sqlite (`templates/app-kit/src/password-sign-in.ts`). Its rules are
+`passwordAuthOptions` (`packages/app-kit/src/auth/password.ts`, exported as
+`@claude-workspaces/app-kit/auth`), which `templates/signin`, the Cloudflare
+Worker on D1, spreads into its own Better Auth config too, so hashing,
+verification and session rules have one source. `server/test/app-kit.test.ts` makes,
 builds and runs an app outside the repo and syncs a doc between two of its
 pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
 
