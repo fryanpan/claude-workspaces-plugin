@@ -534,6 +534,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/assignee', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/due', 'POST'],
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/schedule', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/wait', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/park', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/archive', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/restore', 'POST'],

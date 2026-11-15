@@ -14,7 +14,6 @@
 import { stamped } from '../log-stamp.ts';
 import { FLIP_REASON_MAX, type FlipRequest } from './sharing-flip.ts';
 
-const KNOWN_KEYS = new Set(['workspaceId', 'locked', 'reason', 'actor', 'taskId', 'why']);
 const ACTOR_FIELD_MAX = 200;
 
 export interface LockRequest {
@@ -27,12 +26,22 @@ export interface LockRequest {
   why?: string;
 }
 
+/** The body keys this route reads, one per field of `LockRequest`. */
+const KNOWN_KEYS: Record<keyof LockRequest, true> = {
+  workspaceId: true,
+  locked: true,
+  reason: true,
+  actor: true,
+  taskId: true,
+  why: true,
+};
+
 export type LockParse = { ok: true; value: LockRequest } | { ok: false; error: string };
 
 /** Read a lock request body, refusing anything it would otherwise drop. */
 export function parseLockRequest(body: Record<string, unknown> | null): LockParse {
   if (!body) return { ok: false, error: 'body must be a JSON object' };
-  const unknown = Object.keys(body).filter((k) => !KNOWN_KEYS.has(k));
+  const unknown = Object.keys(body).filter((k) => !Object.hasOwn(KNOWN_KEYS, k));
   if (unknown.length > 0) {
     return { ok: false, error: `unknown field(s): ${unknown.sort().join(', ')}` };
   }

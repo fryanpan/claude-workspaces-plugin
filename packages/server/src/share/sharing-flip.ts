@@ -28,8 +28,16 @@ export const FLIP_REASON_MAX = 500;
 /** How long a self-reported actor field may be. */
 const ACTOR_FIELD_MAX = 200;
 
-/** The body keys this route reads. Anything else is refused. */
-const KNOWN_KEYS = new Set(['enabled', 'workspaceId', 'reason', 'actor', 'taskId', 'why']);
+/** The body keys this route reads, one per field of `FlipRequest`. Anything
+ *  else is refused. */
+const KNOWN_KEYS: Record<keyof FlipRequest, true> = {
+  enabled: true,
+  workspaceId: true,
+  reason: true,
+  actor: true,
+  taskId: true,
+  why: true,
+};
 
 export interface FlipRequest {
   enabled: boolean;
@@ -48,7 +56,7 @@ export type FlipParse = { ok: true; value: FlipRequest } | { ok: false; error: s
 /** Read a switch request body, refusing anything it would otherwise drop. */
 export function parseFlipRequest(body: Record<string, unknown> | null): FlipParse {
   if (!body) return { ok: false, error: 'body must be a JSON object' };
-  const unknown = Object.keys(body).filter((k) => !KNOWN_KEYS.has(k));
+  const unknown = Object.keys(body).filter((k) => !Object.hasOwn(KNOWN_KEYS, k));
   if (unknown.length > 0) {
     return { ok: false, error: `unknown field(s): ${unknown.sort().join(', ')}` };
   }
