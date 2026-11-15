@@ -1,11 +1,12 @@
 {
   "name": "@claude-workspaces/app-kit",
-  "version": "0.1.0",
-  "description": "The collab core and the shared Web Awesome theme, for apps made with `bun run new-app`.",
+  "version": "0.2.0",
+  "description": "The collab core, the shared Web Awesome theme and the shared password sign-in options, for apps made with `bun run new-app`.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./auth": "./src/auth/password.ts",
     "./collab": "./src/collab/index.ts",
     "./theme.css": "./src/theme.css"
   },
