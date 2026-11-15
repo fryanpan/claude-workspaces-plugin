@@ -1,18 +1,19 @@
 /**
- * ── The board families Hono answers, below the workspace scope (M12) ──
+ * ── The board app: the workspace scope and the families below it (M12) ──
  *
- * The whole board run that used to be `request-chain-board.ts`: docs,
+ * The workspace scope (the app's first middleware, below), then the whole
+ * board run that used to be `request-chain-board.ts`: docs,
  * whiteboards, attached apps, the board's own routes, tasks, goals, the
  * thread promote, dispatches and notes, chat-audit, the Library, the doc
  * move, agent attachments, archive, the board delete, a review's files,
  * meetings and the calendar, and one doc's resource routes.
  *
- * WHY A SECOND APP. Every family here reads the workspace scope, which the
- * chain resolves below the stream block. The front app (`hono-families.ts`)
- * is tried above that block, so these cannot join it without overtaking the
- * upgrades and the resolver. This app is tried exactly where the run was —
- * after the scope, before the top-level families and the tail — with the
- * scope in `c.env` beside the gates' proof.
+ * WHY A SECOND APP. Every family here reads the workspace scope, which is
+ * resolved below the stream block. The front app (`hono-families.ts`) is
+ * tried above that block, so these cannot join it without overtaking the
+ * upgrades. This app is tried exactly where the scope was, right below the
+ * stream block, with the gates' proof in `c.env` and the scope in `c.var`;
+ * the tail (`hono-tail-families.ts`) is registered after these families.
  *
  * ORDER. The families are registered in the run's order, and Hono runs the
  * middleware that match one address in registration order, so a family is
@@ -30,6 +31,9 @@
  */
 import type { Context, Hono } from 'hono';
 import type { HonoBoardAppEnv, HonoBoardFamily } from '../hono-env.ts';
+import { type WorkspaceScopeDeps, resolveWorkspaceScope } from '../middleware/workspace-scope.ts';
+import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
+import type { BoardWorkspace } from '../tasks.ts';
 import { type AppRoutesContext, handleAppRoutes } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './chat-audit-routes.ts';
@@ -72,12 +76,17 @@ export interface HonoBoardFamiliesContext
   handleArchiveRoutes: ReturnType<typeof createArchiveRoutes>['handleArchiveRoutes'];
   reviewFileRoutesCtx: ReviewFileRoutesContext;
   meetingCalendarRoutesCtx: MeetingCalendarRoutesContext;
+  /** What the workspace scope reads: the board, and which boards hold a row. */
+  workspaceRecord: WorkspaceScopeDeps<BoardWorkspace>['workspaceRecord'];
+  workspacesOfMember: WorkspaceScopeDeps<BoardWorkspace>['workspacesOfMember'];
+  j: (status: number, body: unknown) => Response;
 }
 
 /** The per-request values the board run read, off `c.env`. */
 function boardValues(c: Context<HonoBoardAppEnv>, ctx: HonoBoardFamiliesContext) {
   const base = chainValues(c, ctx);
-  const { gate, attribution, scope, mayMintAppVoice } = c.env;
+  const { gate, attribution, mayMintAppVoice } = c.env;
+  const { scope } = c.var;
   return {
     ...base,
     scope,
@@ -129,9 +138,57 @@ const scoped = (v: BoardValues) => ({
   requireOwner: v.requireOwner,
 });
 
-/** The families, in the order the board run used to try them. */
+/**
+ * The workspace scope (`middleware/workspace-scope.ts`), as the app's first
+ * middleware. It ran in the chain at exactly this point — below the stream
+ * block, above every board family — and resolves every `/workspaces/<id>/…`
+ * request once: does the board exist, and does the row named under it
+ * belong to it. A refusal is the answer and no family sees the request;
+ * otherwise the scope goes into `c.var` for the families below, and `pass`
+ * (not a board path, or a board page) leaves it undefined. Whether the
+ * CALLER may reach the board is not asked here: `shareScopeAllows` in the
+ * host guard has already answered it.
+ */
+function workspaceScope(ctx: HonoBoardFamiliesContext): HonoBoardFamily {
+  return (app) =>
+    app.use('*', async (c, next) => {
+      const req = c.req.raw;
+      const url = new URL(req.url);
+      const scoped = resolveWorkspaceScope(
+        {
+          workspaceRecord: ctx.workspaceRecord,
+          workspacesOfMember: ctx.workspacesOfMember,
+          j: ctx.j,
+          // A browser asked for a page; answer it with one — naming the
+          // board it can go back to, which is the whole difference between
+          // a dead end and a wrong turn. Unless the BOARD is what is
+          // missing, in which case there is nowhere on it to go and the
+          // board's own not-found page is the honest answer: offering to
+          // open a board that does not exist is a second dead end.
+          notFoundPage: (address) =>
+            new Response(
+              address.boardExists
+                ? renderBoardMemberNotFound(address.workspaceId, askedAddress(url))
+                : renderBoardNotFound(address.workspaceId, askedAddress(url)),
+              { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
+            ),
+        },
+        { pathname: url.pathname, method: req.method, url, accept: req.headers.get('accept') },
+      );
+      if (scoped.kind === 'refused') return scoped.response;
+      c.set('scope', scoped.kind === 'scope' ? scoped.scope : undefined);
+      await next();
+      return undefined;
+    });
+}
+
+/**
+ * The scope, then the families, in the order the board run used to try
+ * them. `server.ts` appends the tail (`hono-tail-families.ts`) after these.
+ */
 export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamily[] {
   return [
+    workspaceScope(ctx),
     // routes/docs.ts and routes/whiteboard-routes.ts — `docs` (list and
     // create) and `whiteboards` (create), two exact remainders.
     (app) =>

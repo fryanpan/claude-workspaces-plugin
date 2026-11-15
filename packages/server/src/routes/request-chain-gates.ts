@@ -3,8 +3,9 @@
  *
  * The run of checks `request-chain.ts` makes before any router sees a
  * request, moved here whole and in the same order: the CORS preflight, the
- * cross-origin write gate, the home feed and the GitHub hub (each above
- * admission with its own caller check), admission, the unopened folder
+ * cross-origin write gate, the home feed, the board import and the GitHub hub
+ * (each above admission with its own caller check, and answered by the open
+ * Hono app, `hono-open-families.ts`), admission, the unopened folder
  * member, the local-only gate, attribution, the sign-in write gate and the
  * fresh sign-in check.
  *
@@ -24,9 +25,6 @@ import {
 import { memberAddressed } from '../middleware/workspace-scope.ts';
 import { isGatedWrite, signInRequiredBody } from '../middleware/write-gate.ts';
 import { matchWorkspaceRoute } from '../workspace-path.ts';
-import { handleBoardImportRoute } from './board-import.ts';
-import { handleGithubHubRoute } from './github-hub.ts';
-import { handleHomeFeedRoute } from './home-feed.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
 
 /**
@@ -41,7 +39,7 @@ export function createRequestGates(
     policyFor,
     j,
     requestAddress,
-    homeFeedCtx,
+    honoOpenFront,
     admit,
     localOnlyGate,
     attributeRequest,
@@ -117,10 +115,8 @@ export function createRequestGates(
     }
 
     // ── Home feed, board import, GitHub hub ── ABOVE admission, own gates: callers name nobody.
-    const above =
-      (await handleHomeFeedRoute(homeFeedCtx, req, pathname)) ??
-      (await handleBoardImportRoute(ctx.boardImportCtx, req, pathname)) ??
-      (await handleGithubHubRoute(ctx.githubHubCtx, req, pathname));
+    // The open Hono app (`hono-open-families.ts`), tried from this line.
+    const above = await honoOpenFront(req, {});
     if (above) return above;
 
     // ── Request admission ── see request-admission.ts.

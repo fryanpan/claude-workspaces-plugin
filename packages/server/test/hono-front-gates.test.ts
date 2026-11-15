@@ -1,8 +1,8 @@
 /**
  * The gates run once, before both routers.
  *
- * Hono sits below `routes/request-chain-gates.ts` and above every family the
- * ordered chain still holds. This file drives a real server, with a probe
+ * The front Hono app sits below `routes/request-chain-gates.ts` and above the
+ * upgrade-and-stream run and the board app. This file drives a real server, with a probe
  * family mounted on the Hono app, and shows three things:
  *
  * - a share visitor is refused on a path Hono answers AND on a path the

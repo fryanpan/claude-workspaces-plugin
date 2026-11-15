@@ -1,33 +1,19 @@
 /**
- * The request chain's shared vocabulary: every long-lived value the ordered
- * chain reads (`RequestChainContext`), and what one admitted request carries
- * from the gates in `request-chain.ts` into the two halves below them
- * (`ChainRequest`).
+ * The request chain's shared vocabulary: every long-lived value the chain
+ * reads (`RequestChainContext`).
  *
  * `createServer` builds the context once, after every route family's own
- * context exists. Nothing in it is per request; the request and what the
- * gates proved about it travel as `ChainRequest`.
+ * context exists. Nothing in it is per request; what the gates proved about a
+ * request travels to the Hono apps as their env (`hono-env.ts`).
  */
 import type { addressesLocalOnlySet } from '../attachment-privacy.ts';
 import type { DocStore } from '../doc-store.ts';
-import type { FeatureRoutes } from '../feature-module.ts';
-import type { HonoBoardEnv } from '../hono-env.ts';
+import type { HonoBoardEnv, HonoOpenAppEnv } from '../hono-env.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
-import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { RequestAdmission } from '../request-admission.ts';
-import type {
-  AttributableRequest,
-  Attribution,
-  RequestAttribution,
-} from '../request-attribution.ts';
-import type { BoardWorkspace, TaskStore } from '../tasks.ts';
-import type { BoardImportRoutesContext } from './board-import.ts';
-import type { BoardLinkRoutesContext } from './board-links.ts';
-import type { GithubHubRoutesContext } from './github-hub.ts';
-import type { HomeFeedRoutesContext } from './home-feed.ts';
+import type { AttributableRequest, RequestAttribution } from '../request-attribution.ts';
 import type { HonoFront } from './hono-front.ts';
-import type { ShellStatic } from './shell-static.ts';
 import type { UpgradeStream } from './upgrade-stream.ts';
 
 export interface RequestChainContext {
@@ -46,9 +32,10 @@ export interface RequestChainContext {
   requestAddress: (req: Request) => string | undefined;
 
   // ── The gates, in chain order ──
-  homeFeedCtx: HomeFeedRoutesContext;
-  boardImportCtx: BoardImportRoutesContext;
-  githubHubCtx: GithubHubRoutesContext;
+  /** The open Hono app (`hono-front.ts`) with the families it answers
+   *  (`hono-open-families.ts`): the home feed, the board import and the
+   *  GitHub hub, tried inside the gates above admission. */
+  honoOpenFront: HonoFront<HonoOpenAppEnv['Bindings']>;
   admit: RequestAdmission['admit'];
   localOnlyGate: Parameters<typeof addressesLocalOnlySet>[1];
   attributeRequest: RequestAttribution['attributeRequest'];
@@ -61,46 +48,15 @@ export interface RequestChainContext {
     admitted: AttributableRequest,
     widgetIdentity: IdentityRecord | null,
   ) => Promise<Response | null>;
-  /** The Hono app (`hono-front.ts`) with the families it answers
-   *  (`hono-families.ts`), tried below the gates and above every family the
-   *  chain still holds. */
+  /** The front Hono app (`hono-front.ts`) with the families it answers
+   *  (`hono-families.ts`), tried below the gates and above the stream run. */
   honoFront: HonoFront;
   serveUpgradeAndStreamRoutes: UpgradeStream['serveUpgradeAndStreamRoutes'];
-  taskStore: TaskStore;
   workspacesOfMember: (collection: string, memberId: string) => readonly string[];
 
-  // ── The board families ──
-  /** The board app (`hono-front.ts`) with the families it answers
-   *  (`hono-board-families.ts`), tried below the workspace scope with the
-   *  scope in its env, and above the top-level families and the tail. */
+  // ── The board app ──
+  /** The board app (`hono-front.ts`): the workspace scope, the board
+   *  families (`hono-board-families.ts`) and the tail
+   *  (`hono-tail-families.ts`), tried below the stream block. */
   honoBoardFront: HonoFront<HonoBoardEnv>;
-
-  // ── The top-level families and the tail (`request-chain-tail.ts`) ──
-  /** Every registered feature's routes (`features.ts`), tried at the
-   *  position the inbox routes held. */
-  featureRoutes: FeatureRoutes;
-  serveShellRoutes: ShellStatic['serveShellRoutes'];
-  /** The wrong-form board links and the relative-link open route
-   *  (`board-links.ts`). */
-  boardLinkRoutesCtx: BoardLinkRoutesContext;
-}
-
-/**
- * One request the gates admitted and attributed, with the workspace scope
- * they resolved. The two halves below the gates read their per-request
- * values off this rather than re-deriving any of them.
- */
-export interface ChainRequest {
-  req: Request;
-  url: URL;
-  pathname: string;
-  scope: WorkspaceScope<BoardWorkspace> | undefined;
-  gate: AttributableRequest;
-  attribution: Extract<Attribution, { attributed: true }>;
-  /** A person proof naming the owner — never a body, a widget token or an
-   *  agent token. */
-  ownerProven: () => boolean;
-  /** Whether a mock's or app's frame served on this request carries an app
-   *  voice token (`app-voice/gate.ts`). */
-  mayMintAppVoice: () => boolean;
 }
