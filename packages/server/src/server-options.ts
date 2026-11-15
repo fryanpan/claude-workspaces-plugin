@@ -682,6 +682,18 @@ export interface ServerOptions {
    */
   homeFeedClientId?: string;
   /**
+   * On a project machine, where a board pushed from the Mac is received
+   * (`routes/board-import.ts`, from `CW_BOARD_IMPORT_DIR`). Absent, the
+   * family claims no path.
+   */
+  boardImport?: {
+    dir: string;
+    /** The boards this machine takes (`CW_BOARD_IMPORT_BOARDS`). */
+    boards: readonly string[];
+    /** The one service token admitted (`CW_BOARD_IMPORT_CLIENT_ID`), when set. */
+    clientId?: string;
+  };
+  /**
    * WHO may come through `proxiedTrustedHosts`, by the email Cloudflare
    * Access verified — folded the way the roster folds addresses.
    *

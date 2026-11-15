@@ -24,6 +24,7 @@ import {
 import { memberAddressed } from '../middleware/workspace-scope.ts';
 import { isGatedWrite, signInRequiredBody } from '../middleware/write-gate.ts';
 import { matchWorkspaceRoute } from '../workspace-path.ts';
+import { handleBoardImportRoute } from './board-import.ts';
 import { handleGithubHubRoute } from './github-hub.ts';
 import { handleHomeFeedRoute } from './home-feed.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
@@ -115,9 +116,10 @@ export function createRequestGates(
       });
     }
 
-    // ── Home feed, GitHub hub ── ABOVE admission, own gates: callers name nobody.
+    // ── Home feed, board import, GitHub hub ── ABOVE admission, own gates: callers name nobody.
     const above =
       (await handleHomeFeedRoute(homeFeedCtx, req, pathname)) ??
+      (await handleBoardImportRoute(ctx.boardImportCtx, req, pathname)) ??
       (await handleGithubHubRoute(ctx.githubHubCtx, req, pathname));
     if (above) return above;
 

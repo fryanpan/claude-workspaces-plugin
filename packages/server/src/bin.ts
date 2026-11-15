@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDiscovery } from '@claude-workspaces/core/discovery-file';
+import { parseImportBoards } from '../../../infra/project-machine/board-import-store.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
@@ -63,6 +64,9 @@ const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
 // routes/home-feed.ts). Either unset turns that half off.
 const homeRemotesConfig = homeRemotesFromEnv(process.env);
 const homeFeedClientId = process.env.CW_HOME_FEED_CLIENT_ID?.trim() || undefined;
+// A project machine's pushed-board import (routes/board-import.ts); unset off one.
+const boardImportDir = process.env.CW_BOARD_IMPORT_DIR?.trim() || undefined;
+const boardImportClientId = process.env.CW_BOARD_IMPORT_CLIENT_ID?.trim() || undefined;
 const {
   requestedPort,
   hostname,
@@ -272,6 +276,15 @@ while (!handle) {
       proxiedTrustedEmails,
       ...(homeRemotesConfig ? { homeRemotes: { config: homeRemotesConfig } } : {}),
       ...(homeFeedClientId ? { homeFeedClientId } : {}),
+      ...(boardImportDir
+        ? {
+            boardImport: {
+              dir: boardImportDir,
+              boards: parseImportBoards(process.env.CW_BOARD_IMPORT_BOARDS),
+              ...(boardImportClientId ? { clientId: boardImportClientId } : {}),
+            },
+          }
+        : {}),
       ...(frameOrigin ? { frameOrigin } : {}),
       ...(frameBoardHosts ? { frameBoardHosts } : {}),
       allowedOrigins,
