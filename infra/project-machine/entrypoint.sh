@@ -124,7 +124,8 @@ chown -h cwdev:cwdevsrc "$DEV_ROOT"
 # cannot read the server's data dir, which holds the board's tokens and keys,
 # except through the server. And the server cannot read the lead's folder, so
 # no doc is ever bound to a file the lead can write (docs/process/project-machine.md).
-chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT" "$IMPORTS"
+chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT"
+chmod 0700 "$IMPORTS"
 chmod 0710 "$SOCKETS"
 chmod 0755 "$RELEASES"
 chmod 2770 "$DEV_ROOT"

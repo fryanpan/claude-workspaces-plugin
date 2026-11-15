@@ -108,12 +108,13 @@ async function readLimits(req: Request): Promise<BoardLimits | null> {
 }
 
 export async function handleBoardImportRoute(
-  ctx: BoardImportRoutesContext,
+  ctx: BoardImportRoutesContext | undefined,
   req: Request,
   pathname: string,
 ): Promise<Response | null> {
+  // A chain built without this family (a test's, or an older caller's) declines too.
+  if (!ctx?.place) return null;
   const { place, j } = ctx;
-  if (!place) return null;
   const m = IMPORT_PATH.exec(pathname);
   if (!m) return null;
   if (!(await boardImportCallerAllowed(ctx, req))) return j(403, { error: 'forbidden' });

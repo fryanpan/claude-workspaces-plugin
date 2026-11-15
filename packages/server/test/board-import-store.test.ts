@@ -41,6 +41,12 @@ describe('the board import route', () => {
     expect(res).toBeNull();
   });
 
+  it('declines when the chain carries no context for it at all', async () => {
+    expect(
+      await handleBoardImportRoute(undefined, tunnel(), `/api/board-import/${BOARD}`),
+    ).toBeNull();
+  });
+
   it('admits the one configured client id and no other', async () => {
     const ctx = (commonName: string) => ({
       clientId: 'riverbend.access',
