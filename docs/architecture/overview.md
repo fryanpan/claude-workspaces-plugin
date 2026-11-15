@@ -428,9 +428,13 @@ an address no Hono family claims falls through to the rest of the chain
 unchanged, and a websocket upgrade never enters Hono. The families Hono
 answers are registered in `routes/hono-families.ts`: so far sign-in and
 share (`auth-share.ts`), ops, mounts, prompts, the cross-board review queue,
-voice (page and API), access, Incoming Messages, the keeper holds and the
-coach. A family can move only if it
-takes no workspace scope and claims no path that anything above its old
+voice (page and API), access, Incoming Messages, the keeper holds, the
+coach, the voice agent's LLM call, Recall's status webhook, the hosted MCP
+connector, agent identity, board tokens, board-socket roots, the repo
+registry, the load reports, the workspaces list's stream and private
+messages. Recall's webhook must be tried before the `/recall/` websocket
+upgrade, and it is, because Hono is tried above the upgrade block. A family
+can move only if it takes no workspace scope and claims no path that anything above its old
 position answers, because Hono is tried above all of it. The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
 names one of them. `test/route-answers.test.ts` drives one request per

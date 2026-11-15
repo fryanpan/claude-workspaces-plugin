@@ -30,6 +30,16 @@ const ctx = {
   voiceApiRoutesCtx: { j, tokens: { verify: () => null } },
   accessRoutesCtx: { j },
   coachRoutesCtx: { j, wiring: {} },
+  voiceAgentLlmRoutesCtx: { j },
+  recallWebhookRoutesCtx: { j },
+  mcpConnectorCtx: { j, boardOfSocket: () => null },
+  agentIdentityRoutesCtx: { j },
+  boardTokenRoutesCtx: { j },
+  boardSocketRootsRoutesCtx: { j },
+  repoRoutesCtx: { j },
+  loadReportRoutesCtx: { j },
+  landingStreamCtx: { j },
+  privateMessageRoutesCtx: { j },
   requireSignInToWrite: false,
   policyFor: () => ({ requestOrigin: undefined }),
 } as unknown as HonoFamiliesContext;
@@ -87,10 +97,41 @@ describe('honoFamilies', () => {
       '/s/a/b',
       '/share/a/b',
       '/workspaces/w-1/git/push',
+      // Beside the batch-three families' patterns, but not under them.
+      '/mcp/x',
+      '/api/agents/a-1',
+      '/api/agents/a-1/messages',
+      '/api/board-sockets/w-1',
+      '/api/load-reports/x',
+      '/landing/events',
     ];
     for (const path of unclaimed) {
       expect(await front(at(path), envFor(false))).toBeNull();
     }
+  });
+
+  it('reaches the batch-three families at their own refusals', async () => {
+    // routes/mcp-connector.ts refuses a share visitor on a plain socket.
+    expect((await front(at('/mcp', { method: 'POST' }), envFor(true)))?.status).toBe(403);
+    // routes/landing-stream.ts answers 405 to anything but a GET.
+    expect(
+      (await front(at('/landing/events:stream', { method: 'POST' }), envFor(false)))?.status,
+    ).toBe(405);
+    // routes/private-messages.ts wants a person, never a share visitor.
+    const mine = await front(at('/api/me/messages'), envFor(true));
+    expect(mine?.status).toBe(403);
+    expect(await mine?.json()).toEqual({ error: 'person_proof_required' });
+    // routes/agent-identity.ts refuses a share visitor its stream bearer.
+    expect((await front(at('/api/agents/a-1/token'), envFor(true)))?.status).toBe(403);
+  });
+
+  it('answers Recall’s status POST itself, so the `/recall/` upgrade never sees it', async () => {
+    // With no webhook secret configured the route answers its own 404 —
+    // not null, which would hand the request on to the chain's upgrade block.
+    const res = await front(at('/recall/status', { method: 'POST' }), envFor(false));
+    expect(res?.status).toBe(404);
+    expect(await res?.json()).toEqual({ error: 'not_found' });
+    expect(await front(at('/recall/b-1'), envFor(false))).toBeNull();
   });
 
   it('answers a HEAD with the status and headers of its answer and no body', async () => {
