@@ -924,7 +924,19 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     settingsPanel.openSettings();
     settingsView.show(place === 'list' ? null : place);
   };
-  if (bootLoc.settings) showSettingsAt(bootLoc.settings);
+  // The address is the input here, as it is for Back. Opening settings on
+  // the phone passes through its list before the pane the address names, and
+  // writing that step would tell a follower `?settings=list` between two
+  // `?settings=board`s: three navigations, and the follow ends on whichever
+  // one lands.
+  if (bootLoc.settings) {
+    applyingHistory = true;
+    try {
+      showSettingsAt(bootLoc.settings);
+    } finally {
+      applyingHistory = false;
+    }
+  }
 
   // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
   leadChat = mountLeadChat({
