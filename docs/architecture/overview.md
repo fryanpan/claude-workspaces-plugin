@@ -426,9 +426,10 @@ request, above both routers. Below them the chain tries the Hono app
 (`routes/hono-front.ts`) first, handing it what the gates proved as `c.env`;
 an address no Hono family claims falls through to the rest of the chain
 unchanged, and a websocket upgrade never enters Hono. The families Hono
-answers are registered in `routes/hono-families.ts`: so far prompts, the
-cross-board review queue, voice (page and API), access and the coach, each
-moved out of `routes/request-chain-tail.ts`. A family can move only if it
+answers are registered in `routes/hono-families.ts`: so far sign-in and
+share (`auth-share.ts`), ops, mounts, prompts, the cross-board review queue,
+voice (page and API), access, Incoming Messages, the keeper holds and the
+coach. A family can move only if it
 takes no workspace scope and claims no path that anything above its old
 position answers, because Hono is tried above all of it. The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`

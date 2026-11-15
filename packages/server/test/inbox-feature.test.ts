@@ -113,10 +113,12 @@ describe('inboxFeature', () => {
 });
 
 describe('startServerFeatures', () => {
-  it('routes to the inbox at the registered position and stops it', async () => {
+  it('hands Hono the inbox routes, keeps them off the chain, and stops them', async () => {
     const features = startServerFeatures(deps());
-    expect((await features.routes(rq('/inbox/rows')))?.status).toBe(405);
-    expect(await features.routes(rq('/settings/prompts'))).toBeNull();
+    expect((await features.inboxRoutes(rq('/inbox/rows')))?.status).toBe(405);
+    expect(await features.inboxRoutes(rq('/settings/prompts'))).toBeNull();
+    // The chain's feature routes are git push's alone now.
+    expect(await features.routes(rq('/inbox/rows'))).toBeNull();
     expect(features.inbox.landingSection(new Map())).toBe('');
     // Stopping is synchronous and does not throw; a second registry over the
     // same directory starts cleanly after it.

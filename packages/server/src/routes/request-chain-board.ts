@@ -25,8 +25,6 @@ import {
 import { handleLoadReportRoutes } from './load-reports.ts';
 import { handleMcpConnectorRoute } from './mcp-connector.ts';
 import { handleMeetingCalendarRoutes } from './meetings-calendar.ts';
-import { handleMountRoutes } from './mounts.ts';
-import { handleOpsMetricsRoute, handleOpsRoutes, handleSummaryBackfillRoute } from './ops.ts';
 import { handleRepoRoutes } from './repos.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
 import { handleReviewFileRoutes } from './review-files.ts';
@@ -47,7 +45,6 @@ export async function serveBoardRoutes(
   rq: ChainRequest,
 ): Promise<Response | null> {
   const {
-    opsRoutesCtx,
     docRoutesCtx,
     appRoutesCtx,
     workspaceRoutesCtx,
@@ -64,7 +61,6 @@ export async function serveBoardRoutes(
     chatAuditRoutesCtx,
     repoRoutesCtx,
     loadReportRoutesCtx,
-    mountRoutesCtx,
     libraryRoutesCtx,
     docMoveRoutesCtx,
     handleArchiveRoutes,
@@ -81,41 +77,6 @@ export async function serveBoardRoutes(
     widgetIdentity: attribution.widgetIdentity,
     requestOrigin: () => policyFor(req).requestOrigin,
   };
-
-  // --- REST: run the summary backfill on request --- see
-  // ./routes/ops.ts. Same chain position as before the split: above the
-  // metrics route, which is the next call below.
-  {
-    const handled = await handleSummaryBackfillRoute(opsRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
-    });
-    if (handled) return handled;
-  }
-
-  // --- REST: what this process currently costs ---
-  //
-  // The 2026-08-29 jetsam kill left nothing to read: the server was at
-  // 2.6 GB and the only evidence of how it got there was the absence of
-  // the process. `DocStore.stats()` is also written to the log every five
-  // minutes; this route is the same numbers on demand, so the NEXT
-  // incident can be sampled over time instead of reconstructed.
-  //
-  // Counts only — no doc ids, no paths, no titles. That is what makes
-  // it safe to leave un-gated for anyone already past the front door,
-  // and it still refuses a share visitor: an external reviewer invited
-  // to one document has no business reading how many others exist.
-  {
-    const handled = handleOpsMetricsRoute(opsRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
-    });
-    if (handled) return handled;
-  }
 
   // --- REST: docs, created and listed — ./routes/docs.ts ---
   // A whiteboard is created beside them (./routes/whiteboard-routes.ts):
@@ -322,22 +283,10 @@ export async function serveBoardRoutes(
     });
     if (handled) return handled;
   }
-  // --- Operator routes: plugin refresh, push and deploy — ./routes/ops.ts ---
-  // Same chain position as before the split: after the chat-audit
-  // routes, before the agent attachments.
-  {
-    const handled = await handleOpsRoutes(opsRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
-    });
-    if (handled) return handled;
-  }
   // --- The repo registry: checkouts, and which copy is live ---
-  // ./routes/repos.ts. Placed beside the operator routes because it
-  // shares their gate: loopback only, no edge, no visitor. Order is not
-  // load-bearing — no other family claims `/api/repos`.
+  // ./routes/repos.ts. It shares the operator routes' gate (loopback only,
+  // no edge, no visitor; those are answered by Hono now, hono-families.ts).
+  // Order is not load-bearing — no other family claims `/api/repos`.
   {
     const handled = await handleRepoRoutes(repoRoutesCtx, {
       req,
@@ -352,20 +301,6 @@ export async function serveBoardRoutes(
   // claims `/api/load-reports`.
   {
     const handled = await handleLoadReportRoutes(loadReportRoutesCtx, { req, pathname, visitor });
-    if (handled) return handled;
-  }
-  // --- Mounted project folders: the mount table, and a file's address ---
-  // ./routes/mounts.ts. Two gates in one family — `/api/mounts` shares the
-  // loopback-only gate above, and `/mounts/<fileId>` is the member-facing
-  // address. Order is not load-bearing: no other family claims either
-  // prefix.
-  {
-    const handled = await handleMountRoutes(mountRoutesCtx, {
-      req,
-      pathname,
-      url,
-      visitor,
-    });
     if (handled) return handled;
   }
   // --- The board's Library --- ./routes/workspace-library.ts, its

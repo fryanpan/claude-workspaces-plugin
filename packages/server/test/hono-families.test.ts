@@ -19,6 +19,11 @@ const j = (status: number, body: unknown) =>
   });
 
 const ctx = {
+  authShareRoutesCtx: { j },
+  opsRoutesCtx: { j, requestAddress: () => '127.0.0.1' },
+  mountRoutesCtx: { j },
+  inboxRoutes: () => null,
+  keeperHoldsRoutes: () => null,
   promptRoutesCtx: { j },
   reviewQueueRoutesCtx: { j },
   voicePageRoutesCtx: { j },
@@ -65,8 +70,25 @@ describe('honoFamilies', () => {
     expect(await front(at('/access/a/b'), envFor(false))).toBeNull();
   });
 
+  it('keeps the operator routes’ visitor refusal', async () => {
+    // routes/ops.ts refuses a share visitor before its loopback and `cf-ray` tests.
+    const res = await front(at('/api/deploy', { method: 'POST' }), envFor(true));
+    expect(res?.status).toBe(403);
+  });
+
   it('hands back null for addresses no moved family claims', async () => {
-    for (const path of ['/workspaces/w-1/tasks', '/api/docs', '/coach', '/voice-agent/v1/x']) {
+    const unclaimed = [
+      '/workspaces/w-1/tasks',
+      '/api/docs',
+      '/coach',
+      '/voice-agent/v1/x',
+      // Beside the share family's patterns, but not under them.
+      '/api/sharex',
+      '/s/a/b',
+      '/share/a/b',
+      '/workspaces/w-1/git/push',
+    ];
+    for (const path of unclaimed) {
       expect(await front(at(path), envFor(false))).toBeNull();
     }
   });

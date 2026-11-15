@@ -3506,6 +3506,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ),
     honoFront: createHonoFront([
       ...honoFamilies({
+        authShareRoutesCtx,
+        opsRoutesCtx,
+        mountRoutesCtx,
+        inboxRoutes: features.inboxRoutes,
+        keeperHoldsRoutes: features.keeperHoldsRoutes,
         promptRoutesCtx,
         reviewQueueRoutesCtx,
         voicePageRoutesCtx,
@@ -3517,7 +3522,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       }),
       ...(opts.honoFamilies ?? []),
     ]),
-    authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,
     serveUpgradeAndStreamRoutes,
@@ -3545,7 +3549,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           .map(linkCandidateOf);
       },
     },
-    opsRoutesCtx,
     docRoutesCtx,
     appRoutesCtx,
     workspaceRoutesCtx,
@@ -3560,7 +3563,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     chatAuditRoutesCtx,
     repoRoutesCtx,
     loadReportRoutesCtx,
-    mountRoutesCtx,
     libraryRoutesCtx,
     docMoveRoutesCtx,
     handleArchiveRoutes,
