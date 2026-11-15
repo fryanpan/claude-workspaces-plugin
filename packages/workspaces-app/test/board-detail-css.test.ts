@@ -370,13 +370,25 @@ describe('the board keeps its floor in rendered pixels, not just in tokens', () 
    * to choose — and because two runs of the same Chrome measured 15 and then
    * 19, which is precisely why no constant belongs in the stylesheet.
    */
-  const boardAt = (vw: number, sb = 0): number => {
+  const boardAt = (vw: number, sb = 0): number => boardFor(vw)(sb);
+
+  /**
+   * `boardAt` for one viewport, as a function of the scrollbar. Every cascade
+   * read happens here, once; only the arithmetic depends on `sb`. Each read
+   * resolves the whole stylesheet in happy-dom, and reading them again for
+   * every scrollbar took one case past vitest's 5s on a loaded CI shard
+   * (runs 43729174658, 43744013210, 43746113960).
+   */
+  const boardFor = (vw: number): ((sb?: number) => number) => {
     const inset = tokenPx('--board-inset', vw);
     const boardMin = tokenPx('--board-min', vw);
-    const rootW = Math.min(openCapAt(vw), vw - sb);
-    const mainW = rootW - gutters(vw);
+    const cap = openCapAt(vw);
+    const gutter = gutters(vw);
     const want = tokenPx('--board-detail-pane-w', vw) + tokenPx('--board-detail-gap', vw);
-    return mainW - Math.min(want, mainW - inset - boardMin) - inset;
+    return (sb = 0) => {
+      const mainW = Math.min(cap, vw - sb) - gutter;
+      return mainW - Math.min(want, mainW - inset - boardMin) - inset;
+    };
   };
 
   /** Overlay, both values this Chrome produced, Windows, and one absurdly
@@ -473,16 +485,18 @@ describe('the board keeps its floor in rendered pixels, not just in tokens', () 
     for (const vw of [1661, 1720, 1920, 2400, 4000]) {
       const inset = tokenPx('--board-inset', vw);
       const keep = tokenPx('--board-keep', vw);
+      const cap = openCapAt(vw);
+      const gutter = gutters(vw);
+      const board = boardFor(vw);
+      const paneW = tokenPx('--board-detail-pane-w', vw);
+      const panelMax = splitPanel(vw).maxWidth;
       for (const sb of scrollbars) {
         const layout = vw - sb;
-        const rootW = Math.min(openCapAt(vw), layout);
-        const boardRight = (layout - rootW) / 2 + gutters(vw) / 2 + inset + boardAt(vw, sb);
+        const rootW = Math.min(cap, layout);
+        const boardRight = (layout - rootW) / 2 + gutter / 2 + inset + board(sb);
         // The panel's own clamp, read from the cascade and resolved against
         // the layout box the fixed panel's percentage refers to.
-        const panelW = Math.min(
-          tokenPx('--board-detail-pane-w', vw),
-          evalPx(splitPanel(vw).maxWidth, layout),
-        );
+        const panelW = Math.min(paneW, evalPx(panelMax, layout));
         expect(
           layout - panelW - boardRight,
           `board ends at ${boardRight}, panel starts at ${layout - panelW} (${vw}px, ${sb}px scrollbar)`,
@@ -501,8 +515,9 @@ describe('the board keeps its floor in rendered pixels, not just in tokens', () 
   it('honours --board-min at 1661, 1920 and 2400', () => {
     for (const vw of [1661, 1920, 2400]) {
       const boardMin = tokenPx('--board-min', vw);
+      const board = boardFor(vw);
       for (const sb of scrollbars) {
-        const w = boardAt(vw, sb);
+        const w = board(sb);
         expect(w, `board is ${w}px at ${vw}px with a ${sb}px scrollbar`).toBeGreaterThanOrEqual(
           boardMin,
         );
@@ -514,10 +529,11 @@ describe('the board keeps its floor in rendered pixels, not just in tokens', () 
   // gave a narrower list, so the machine this is read on was the worst case.
   it('never gives a wider screen a narrower board', () => {
     const widths = [1661, 1720, 1920, 2200, 2400, 2800];
+    const boards = widths.map(boardFor);
     for (const sb of scrollbars) {
       for (let i = 1; i < widths.length; i += 1) {
-        const prev = boardAt(widths[i - 1] as number, sb);
-        const here = boardAt(widths[i] as number, sb);
+        const prev = (boards[i - 1] as (sb: number) => number)(sb);
+        const here = (boards[i] as (sb: number) => number)(sb);
         expect(
           here,
           `${widths[i - 1]}px gave ${prev}px, ${widths[i]}px gave ${here}px (${sb}px scrollbar)`,
