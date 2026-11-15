@@ -29,6 +29,7 @@ import { handleTaskGrants } from './task-grants.ts';
 import { handleTaskReviewAnswerUndo } from './task-review-answer-undo.ts';
 import { handleTaskReviewMoreInfo } from './task-review-ask-back.ts';
 import { handleTaskReviewItems } from './task-review-items.ts';
+import { handleTaskReviewWithdraw } from './task-review-withdraw.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 import { handleTaskSecrets } from './task-secrets.ts';
 import { handleTaskStatusAndLinks } from './task-status-links.ts';
@@ -63,6 +64,7 @@ export async function handleTaskRoutes(
     // And the access door, for the same reason: `/access` is its own suffix.
     (await handleTaskAccess(ctx, rq)) ??
     (await handleTaskReviewItems(ctx, rq)) ??
+    (await handleTaskReviewWithdraw(ctx, rq)) ??
     (await handleTaskReviewMoreInfo(ctx, rq)) ??
     // After the family: `/answer/undo` is a suffix none of its patterns
     // match, since each of theirs is anchored.

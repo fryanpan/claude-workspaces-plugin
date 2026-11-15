@@ -28,7 +28,9 @@ import type {
   DocLifecycleContract,
   DocThreadsContract,
   MountsApi,
+  ReviewItemsContract,
   ShareContract,
+  TaskBoardContract,
   TaskContentContract,
   TaskStateContract,
 } from '../../server/src/index.ts';
@@ -60,3 +62,5 @@ export const shareClient = (http: Http) => typedClient<ShareContract>(http);
 export const agentNotesClient = (http: Http) => typedClient<AgentNotesContract>(http);
 export const taskStateClient = (http: Http) => typedClient<TaskStateContract>(http);
 export const taskContentClient = (http: Http) => typedClient<TaskContentContract>(http);
+export const taskBoardClient = (http: Http) => typedClient<TaskBoardContract>(http);
+export const reviewItemsClient = (http: Http) => typedClient<ReviewItemsContract>(http);

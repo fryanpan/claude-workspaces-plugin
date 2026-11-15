@@ -15,6 +15,8 @@ import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { type TaskStatus, isRetired, retiredRefusal } from '../tasks.ts';
 import { wantsJson } from '../workspace-path.ts';
+import { answerAs, queryOf } from './route-contract.ts';
+import type { TaskListAnswer, TaskListQuery } from './task-board-contract.ts';
 import type { ReviewGate, TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -46,22 +48,19 @@ export async function handleTaskListCreate(
     // The board's existence is not asked here any more —
     // `middleware/workspace-scope.ts` asked it once, above every handler, and
     // refused with this same 404 when the answer was no.
-    const status = url.searchParams.get('status') as TaskStatus | null;
+    const q = queryOf<TaskListQuery>(url);
+    const status = q.status as TaskStatus | undefined;
     const tasks = taskStore.listTasks(workspaceId, {
       ...(status ? { status } : {}),
-      ...(url.searchParams.get('goal') ? { goal: url.searchParams.get('goal') ?? '' } : {}),
-      ...(url.searchParams.get('assignee')
-        ? { assignee: url.searchParams.get('assignee') ?? '' }
-        : {}),
-      ...(url.searchParams.get('needs')
-        ? { needs: url.searchParams.get('needs') as 'action' | 'decision' }
-        : {}),
+      ...(q.goal ? { goal: q.goal } : {}),
+      ...(q.assignee ? { assignee: q.assignee } : {}),
+      ...(q.needs ? { needs: q.needs as 'action' | 'decision' } : {}),
       // ADDITIVE, and the default is the narrowing: a caller built
       // before archiving existed keeps getting the rows it always got,
       // minus the ones somebody has since removed. That is the safe
       // direction — the failure it cannot produce is an old bundle
       // resurrecting a task its user archived.
-      includeArchived: url.searchParams.get('includeArchived') === 'true',
+      includeArchived: q.includeArchived === 'true',
     });
     // The kind the BOARD resolves, not just the one somebody declared.
     // An agent has no other way to ask "which of my rows read as an
@@ -76,17 +75,20 @@ export async function handleTaskListCreate(
     // vouches for the owner — a person, or an owner too generic to
     // resolve to one session.
     const ownerSessionOf = taskProjection.ownerSessionReader(workspaceId);
-    return j(200, {
-      workspaceId,
-      tasks: tasks.map((t) => {
-        const session = ownerSessionOf(t);
-        return {
-          ...t,
-          ownerKind: ownerKindOf(t),
-          ...(session !== undefined ? { ownerSession: session } : {}),
-        };
+    return j(
+      200,
+      answerAs<TaskListAnswer>({
+        workspaceId,
+        tasks: tasks.map((t) => {
+          const session = ownerSessionOf(t);
+          return {
+            ...t,
+            ownerKind: ownerKindOf(t),
+            ...(session !== undefined ? { ownerSession: session } : {}),
+          };
+        }),
       }),
-    });
+    );
   }
   if (wsTasksMatch && scope && req.method === 'POST') {
     // The board comes off the scope. An unknown one was already a 404

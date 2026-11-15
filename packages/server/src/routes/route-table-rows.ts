@@ -506,6 +506,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // `refuseOwnerOnlyWrite` besides, which is what fails closed if the
     // allowlist ever gains the prefix.
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets', 'POST'],
+  ]),
+  ...family('routes/task-review-withdraw.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo', 'POST'],
   ]),

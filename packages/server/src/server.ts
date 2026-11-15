@@ -323,6 +323,8 @@ export type { AttachmentsContract } from './routes/attachments-contract.ts';
 export type { ShareContract } from './routes/share-contract.ts';
 export type { TaskStateContract } from './routes/task-state-contract.ts';
 export type { TaskContentContract } from './routes/task-content-contract.ts';
+export type { TaskBoardContract } from './routes/task-board-contract.ts';
+export type { ReviewItemsContract } from './routes/review-items-contract.ts';
 export type { DocEditsContract } from './routes/doc-edits-contract.ts';
 export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
 export type {

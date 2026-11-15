@@ -139,6 +139,10 @@ export interface LeadModelState {
    *  (`server/src/lead-chat/lead-model.ts`), and no chip shows it. */
   pending?: { model?: LeadModelAlias; effort?: LeadEffort };
   problem?: LeadModelProblem;
+  /** The lead's session is compacting its context: set by its PreCompact
+   *  hook, cleared by PostCompact, a new session, or a turn starting or
+   *  ending. The chat says "Compacting…" in place of "Listening…". */
+  compacting?: true;
 }
 
 /** The board-stream event a change to that rides. Pages only. */
