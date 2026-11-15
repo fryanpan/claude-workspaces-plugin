@@ -85,3 +85,22 @@ describe('CollabCoreSwitch', () => {
     expect(() => sw.set('../etc', true)).toThrow(/board id/);
   });
 });
+
+describe('CollabCoreSwitch.onChange', () => {
+  it('tells a listener after each real change, and anyBoardOn follows', () => {
+    const sw = new CollabCoreSwitch({ dataDir: fresh(), serverWide: true });
+    let told = 0;
+    const off = sw.onChange(() => told++);
+    expect(sw.anyBoardOn()).toBe(false);
+    sw.set('harborlight', true);
+    expect(told).toBe(1);
+    expect(sw.anyBoardOn()).toBe(true);
+    // Setting what is already set changes nothing and tells nobody.
+    sw.set('harborlight', true);
+    expect(told).toBe(1);
+    off();
+    sw.set('harborlight', false);
+    expect(told).toBe(1);
+    expect(sw.anyBoardOn()).toBe(false);
+  });
+});

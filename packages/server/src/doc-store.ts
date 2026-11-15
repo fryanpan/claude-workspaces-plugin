@@ -489,6 +489,10 @@ export interface DocStoreConfig {
   /** How long a doc's body must go unedited before an author's edit session
    *  is written (`edit-sessions.ts`). Injectable for tests; 60s otherwise. */
   editSessionIdleMs?: number;
+  /** Called once for each live doc as its events are wired, after the
+   *  store's own listeners: where the doc history attaches
+   *  (`doc-history/recorder.ts`). */
+  onDocWired?: (doc: LiveDoc) => void;
 }
 
 /** How long a doc must go quiet before an authoring burst commits one
@@ -2253,6 +2257,7 @@ export class DocStore {
     this.docs.set(docId, doc);
     this.hydratedAt.set(docId, this.now());
     this.fanout.wireEvents(doc);
+    this.cfg.onDocWired?.(doc);
     // A person's keystroke hands the block back: the block-authorship model
     // only means anything if "still marked the agent's" also means "no person
     // has touched it since". Prose docs only — a flat doc has no addressable

@@ -218,6 +218,7 @@ install` never sees them.
 | `R2_ACCESS_KEY_ID` | `cloudflare-prod` | the token's id |
 | `R2_SECRET_ACCESS_KEY` | `cloudflare-prod` | the SHA-256 of the token's value |
 | `FLY_API_TOKEN` | `cloudflare-prod` | `FLY_API_TOKEN` from the runner's environment, when set |
+| `CW_SECRET_CW_BOARD_OWNER_EMAIL` | `cloudflare-prod` | `CW_OWNER_EMAIL` from the runner's environment, when set; `fly.yml` hands it to `machine:deploy` as the Keychain's `cw-board-owner-email` |
 | `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | repository | the three gitignored configs, each when present |
 
 The token gets the apply permissions below plus Workers R2 Storage Bucket
