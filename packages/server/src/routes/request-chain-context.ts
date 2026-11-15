@@ -26,7 +26,6 @@ import type { BoardWorkspace, TaskStore } from '../tasks.ts';
 import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
-import type { AuthShareRoutesContext } from './auth-share.ts';
 import type { BoardLinkRoutesContext } from './board-links.ts';
 import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
 import type { BoardTokenRoutesContext } from './board-tokens.ts';
@@ -38,8 +37,6 @@ import type { HomeFeedRoutesContext } from './home-feed.ts';
 import type { HonoFront } from './hono-front.ts';
 import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
-import type { MountRoutesContext } from './mounts.ts';
-import type { OpsRoutesContext } from './ops.ts';
 import type { PrivateMessageRoutesContext } from './private-messages.ts';
 import type { RecallWebhookRoutesContext } from './recall-webhook.ts';
 import type { RepoRoutesContext } from './repos.ts';
@@ -85,7 +82,6 @@ export interface RequestChainContext {
    *  (`hono-families.ts`), tried below the gates and above every family the
    *  chain still holds. */
   honoFront: HonoFront;
-  authShareRoutesCtx: AuthShareRoutesContext;
   voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
   recallWebhookRoutesCtx: RecallWebhookRoutesContext;
   serveUpgradeAndStreamRoutes: UpgradeStream['serveUpgradeAndStreamRoutes'];
@@ -93,7 +89,6 @@ export interface RequestChainContext {
   workspacesOfMember: (collection: string, memberId: string) => readonly string[];
 
   // ── The board and REST families (`request-chain-board.ts`) ──
-  opsRoutesCtx: OpsRoutesContext;
   docRoutesCtx: DocRoutesContext;
   appRoutesCtx: AppRoutesContext;
   workspaceRoutesCtx: WorkspaceRoutesContext;
@@ -108,7 +103,6 @@ export interface RequestChainContext {
   chatAuditRoutesCtx: ChatAuditRoutesContext;
   repoRoutesCtx: RepoRoutesContext;
   loadReportRoutesCtx: LoadReportRoutesContext;
-  mountRoutesCtx: MountRoutesContext;
   libraryRoutesCtx: LibraryRoutesContext;
   docMoveRoutesCtx: DocMoveRoutesContext;
   handleArchiveRoutes: ReturnType<typeof createArchiveRoutes>['handleArchiveRoutes'];

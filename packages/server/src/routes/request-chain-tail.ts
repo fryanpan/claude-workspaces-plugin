@@ -2,29 +2,24 @@
  * ── The request chain, last third: the top-level families and the tail ──
  *
  * The families that belong to the server rather than to one board and are
- * still on the chain — the workspaces list's stream, the registered features
- * (`features.ts`), private messages and the webhook log — and then the tail:
- * the shell and static serving, the task address, the stale-client 410, the
- * wrong-prefix hint, the board's own not-found page and the bare 404. Moved
- * whole and in order out of `createServer`'s `route()`; see
- * `request-chain.ts` for why the order is behaviour.
+ * still on the chain — the workspaces list's stream, the git-push feature
+ * (`features.ts`) and private messages — and then the tail: the shell and
+ * static serving, the task address, the stale-client 410, the wrong-prefix
+ * hint, the board's own not-found page and the bare 404. Moved whole and in
+ * order out of `createServer`'s `route()`; see `request-chain.ts` for why
+ * the order is behaviour.
  *
  * The prompt settings, the cross-board review queue, the voice page and API,
- * the access page and the goal coach were here too, interleaved with these.
- * They are answered by Hono now (`hono-families.ts`), which is tried above
- * the whole chain below the gates; each claims paths nothing in the chain
- * answers, so taking them out of this run reorders nothing that is left.
- *
- * The registered features sit where the Incoming Messages routes sat, which
- * was the first family moved behind them. Each family above and below claims
- * a prefix nothing else answers, so a registered family added there shadows
- * nothing.
+ * the access page, Incoming Messages, the keeper holds, the goal coach and
+ * the webhook log were here too, interleaved with these. They are answered
+ * by Hono now (`hono-families.ts`), which is tried above the whole chain
+ * below the gates; each claims paths nothing in the chain answers, so taking
+ * them out of this run reorders nothing that is left.
  *
  * Always answers: the last line is the 404.
  */
 import { handleBoardLinkRoutes } from './board-links.ts';
 import { handleLandingStreamRoute } from './landing-stream.ts';
-import { handleWebhookLogRoute } from './ops.ts';
 import { handlePrivateMessageRoutes } from './private-messages.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
 import { handleStaleClient } from './stale-client.ts';
@@ -42,13 +37,12 @@ export async function serveTopLevelRoutes(
     policyFor,
     featureRoutes,
     privateMessageRoutesCtx,
-    opsRoutesCtx,
     serveShellRoutes,
     boardLinkRoutesCtx,
   } = ctx;
   const { req, url, pathname, gate, attribution, ownerProven } = rq;
   const { visitor, visitorHome, boardAgent } = gate;
-  const { authorFor, provenIdentityFor } = attribution;
+  const { provenIdentityFor } = attribution;
 
   // --- SSE: the workspaces list's change feed --- see
   // ./routes/landing-stream.ts. Top-level, like `/` it serves.
@@ -57,10 +51,10 @@ export async function serveTopLevelRoutes(
     if (handled) return handled;
   }
 
-  // --- The registered features --- see ./features.ts. At the position
-  // Incoming Messages held, the first family moved behind them: messages
-  // are the owner's, not a board's, and `/inbox/` is a prefix nothing above
-  // answers. Every family registered there claims a prefix of its own.
+  // --- The registered features still on the chain --- see ./features.ts.
+  // Git push alone: it claims `/workspaces/<board>/git/`, which sits below
+  // the workspace scope above. Incoming Messages and the keeper holds were
+  // here too and are answered by Hono now (hono-families.ts).
   {
     const handled = await featureRoutes({
       req,
@@ -84,18 +78,6 @@ export async function serveTopLevelRoutes(
       visitor,
       boardAgent,
       provenIdentityFor,
-    });
-    if (handled) return handled;
-  }
-
-  // --- Web log --- see ./routes/ops.ts. Same chain position as before
-  // the split: under the doc resource routes, above the shell tail.
-  {
-    const handled = handleWebhookLogRoute(opsRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
     });
     if (handled) return handled;
   }
