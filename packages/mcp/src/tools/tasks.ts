@@ -28,9 +28,11 @@
 import { parseThreadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-schedule';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { HeldFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
-import { boardPathOf } from '../board-path.ts';
+import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
+import { docThreadsClient } from '../server-client.ts';
 import {
   LIST_TASK_FIELDS,
   NEXT_TASK_FIELDS,
@@ -198,7 +200,7 @@ async function resolveReviewItemId(
  * the item was HELD, with the reason and the server's own next-step line.
  * One helper for both doors (add, revise) so they cannot spell it two ways.
  */
-function heldResult(res: { held?: boolean; heldReason?: string; message?: string }): {
+function heldResult(res: Pick<HeldFields, 'held' | 'heldReason' | 'message'>): {
   held?: true;
   heldReason?: string;
   message?: string;
@@ -220,6 +222,13 @@ export async function handleTaskTool(
   const { http, ok, err, AUTHOR, claimNoticeFor } = ctx;
   /** The board this call is addressed under — see board-path.ts. */
   const board = (): string => boardPathOf(name, a);
+  /** One doc's thread routes, through the typed client (`server-client.ts`). */
+  const threadsApi = () => docThreadsClient(http).workspaces[':ws'].docs[':docId'];
+  const threadParam = (docId: string, threadId: string) => ({
+    ws: encodeURIComponent(boardIdOf(name, a)),
+    docId: encodeURIComponent(docId),
+    threadId: encodeURIComponent(threadId),
+  });
   switch (name) {
     case 'create_tasks': {
       const { workspaceId, tasks, sourceDoc } = a as {
@@ -329,27 +338,23 @@ export async function handleTaskTool(
         dueAt?: number;
         links?: unknown[];
       };
-      const res = (await http(
-        'POST',
-        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/promote`,
-        {
-          workspaceId,
-          ...(title !== undefined ? { title } : {}),
-          ...(body !== undefined ? { body } : {}),
-          ...(assignee !== undefined ? { assignee } : {}),
-          ...(assigneeKind !== undefined ? { assigneeKind } : {}),
-          ...(needs !== undefined ? { needs } : {}),
-          ...(goal !== undefined ? { goal } : {}),
-          ...(dueAt !== undefined ? { dueAt } : {}),
-          ...(links !== undefined ? { links } : {}),
-          author: AUTHOR,
-        },
-      )) as {
-        task: TaskPayload;
-        ignoredLinks?: unknown[];
-        placement?: { placed: boolean; goals?: unknown[] };
-        url?: string;
-      };
+      const res = await threadsApi()
+        .threads[':threadId'].promote.$post({
+          param: threadParam(docId, threadId),
+          json: {
+            workspaceId,
+            ...(title !== undefined ? { title } : {}),
+            ...(body !== undefined ? { body } : {}),
+            ...(assignee !== undefined ? { assignee } : {}),
+            ...(assigneeKind !== undefined ? { assigneeKind } : {}),
+            ...(needs !== undefined ? { needs } : {}),
+            ...(goal !== undefined ? { goal } : {}),
+            ...(dueAt !== undefined ? { dueAt } : {}),
+            ...(links !== undefined ? { links } : {}),
+            author: AUTHOR,
+          },
+        })
+        .then((r) => r.json());
       return ok({
         ...taskCreatedSummary(
           res.url !== undefined ? { ...res.task, url: res.url } : res.task,
@@ -909,18 +914,17 @@ export async function handleTaskTool(
         // An item raised on a doc thread records its answer where the ask
         // lives — the same door the reader's own tap goes through.
         if (address.kind === 'doc-thread') {
-          await http(
-            'POST',
-            `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(
-              address.threadId,
-            )}/answer`,
-            {
-              text,
-              commentId: address.commentId,
-              ...(answeredWith !== undefined ? { optionId: answeredWith } : {}),
-              author: AUTHOR,
-            },
-          );
+          await threadsApi()
+            .threads[':threadId'].answer.$post({
+              param: threadParam(address.docId, address.threadId),
+              json: {
+                text,
+                commentId: address.commentId,
+                ...(answeredWith !== undefined ? { optionId: answeredWith } : {}),
+                author: AUTHOR,
+              },
+            })
+            .then((r) => r.json());
           return ok({
             reviewItemId,
             docId: address.docId,
@@ -1009,11 +1013,12 @@ export async function handleTaskTool(
             '`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply',
           );
         }
-        const docRes = (await http(
-          'POST',
-          `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/revise`,
-          { ...patch, commentId },
-        )) as { url?: string; held?: boolean; heldReason?: string; message?: string };
+        const docRes = await threadsApi()
+          .threads[':threadId'].revise.$post({
+            param: threadParam(docId, threadId),
+            json: { ...patch, commentId },
+          })
+          .then((r) => r.json());
         // The hold, forwarded. This used to be dropped with a comment
         // saying the doc route runs no gate — true when it was written and
         // false since the gate reached this surface, which left a filer
@@ -1042,13 +1047,12 @@ export async function handleTaskTool(
               '`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply',
             );
           }
-          const docRes = (await http(
-            'POST',
-            `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(
-              address.threadId,
-            )}/revise`,
-            { ...patch, commentId: address.commentId },
-          )) as { url?: string; held?: boolean; heldReason?: string; message?: string };
+          const docRes = await threadsApi()
+            .threads[':threadId'].revise.$post({
+              param: threadParam(address.docId, address.threadId),
+              json: { ...patch, commentId: address.commentId },
+            })
+            .then((r) => r.json());
           return ok({
             reviewItemId,
             docId: address.docId,
@@ -1114,13 +1118,15 @@ export async function handleTaskTool(
         threadId: string;
         commentId: string;
       }) => {
-        await http(
-          'POST',
-          `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(
-            address.threadId,
-          )}/withdraw${undo ? '/undo' : ''}`,
-          { ...body, commentId: address.commentId },
-        );
+        await (undo
+          ? threadsApi().threads[':threadId'].withdraw.undo
+          : threadsApi().threads[':threadId'].withdraw
+        )
+          .$post({
+            param: threadParam(address.docId, address.threadId),
+            json: { ...body, commentId: address.commentId },
+          })
+          .then((r) => r.json());
         return ok({
           ...(reviewItemId !== undefined ? { reviewItemId } : {}),
           ...address,
@@ -1188,13 +1194,12 @@ export async function handleTaskTool(
         // stamped, so the item stays open and stays on the queue, exactly
         // as the ticket form's info request does.
         if (address.kind === 'doc-thread') {
-          await http(
-            'POST',
-            `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(
-              address.threadId,
-            )}/comments`,
-            { author: AUTHOR, text: question },
-          );
+          await threadsApi()
+            .threads[':threadId'].comments.$post({
+              param: threadParam(address.docId, address.threadId),
+              json: { author: AUTHOR, text: question },
+            })
+            .then((r) => r.json());
           return ok({
             reviewItemId,
             docId: address.docId,

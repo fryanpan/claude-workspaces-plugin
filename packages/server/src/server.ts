@@ -318,6 +318,7 @@ export type { ServerOptions };
  * `hc<MountsApi>` needs the type (never the code) of the app that answers.
  */
 export type { MountsApi } from './routes/mounts-api.ts';
+export type { DocThreadsContract } from './routes/doc-threads-contract.ts';
 
 /**
  * `revisedRange` off a request body: the offsets into the NEW detail that a

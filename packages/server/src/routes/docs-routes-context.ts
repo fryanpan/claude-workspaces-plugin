@@ -32,7 +32,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { LinkedDockItem } from '../mockup-linked-items.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
-import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
+import type { GateRunOpts, HeldFields, ThreadReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
 import type { AccessProposals } from '../share/access-proposals.ts';
@@ -241,7 +241,7 @@ export interface DocRoutesContext {
     author: User,
   ) => Promise<ThreadReviewGate>;
   /** The response fields a filing route adds when the gate held the item. */
-  heldFields: (gate: ThreadReviewGate | undefined) => Record<string, unknown>;
+  heldFields: (gate: ThreadReviewGate | undefined) => HeldFields;
   /** Replace a task's body markdown through the body doc. */
   rewriteTaskBody: (
     task: Task,

@@ -28,8 +28,8 @@ import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { declareWorkspaceLead } from '../declare-lead.ts';
 import { sayRefusal } from '../meeting-feed-line.ts';
-import { mountsClient } from '../mounts-client.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
+import { mountsClient } from '../server-client.ts';
 import { readChatAttachment } from './chat-attachment.ts';
 import { placeOf, refusalOf } from './person.ts';
 

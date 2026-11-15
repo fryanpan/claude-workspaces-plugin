@@ -90,6 +90,7 @@ import { handleDocFilesRoute } from './doc-files.ts';
 import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
+import type { ThreadPromoteAnswer, ThreadPromoteBody } from './doc-threads-contract.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
 import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
@@ -98,6 +99,7 @@ import type {
   DocRouteRequest,
   DocRoutesContext,
 } from './docs-routes-context.ts';
+import { answerAs, sent } from './route-contract.ts';
 import { handleWhiteboardRoutes } from './whiteboard-routes.ts';
 /** The anchor's display snippet, whichever anchor kind carries it — an
  *  orphan keeps its original's snippet. */
@@ -565,7 +567,7 @@ export async function handleDocPromoteRoute(
   if (promoteMatch && req.method === 'POST') {
     const docId = canonicalDocId(decodeURIComponent(promoteMatch[1] ?? ''));
     const threadId = decodeURIComponent(promoteMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<ThreadPromoteBody>(await safeJson(req));
     /**
      * THE PATH NAMES THE DESTINATION, and this is the clearest thing the
      * cutover fixes on the whole share surface.
@@ -673,23 +675,28 @@ export async function handleDocPromoteRoute(
     );
     // The new task's link: a task's thread URL is the task's own page.
     const url = threadUrl(`task:${res.task.id}`, Boolean(visitor));
-    return j(200, {
-      task: res.task,
-      ...(url !== undefined ? { url } : {}),
-      ...(promoteVisibility !== undefined ? { visibility: promoteVisibility } : {}),
-      // Third create path, same report. Promoting a thread has exactly
-      // the same goal semantics as a create, so an agent that learns to
-      // read `placement` on one and finds it missing on another is being
-      // taught the field is unreliable.
-      placement: {
-        ...res.placement,
-        ...(res.placement.placed
-          ? {}
-          : { goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []) }),
-      },
-      ...(promoteLinks.ignored.length > 0 ? { ignoredLinks: promoteLinks.ignored } : {}),
-      ...(res.shapeGaps !== undefined ? { shapeGaps: res.shapeGaps } : {}),
-    });
+    return j(
+      200,
+      answerAs<ThreadPromoteAnswer>({
+        task: res.task,
+        // Named, not spread, so a renamed answer field fails here; JSON
+        // drops an undefined one, as the spread did.
+        url,
+        ...(promoteVisibility !== undefined ? { visibility: promoteVisibility } : {}),
+        // Third create path, same report. Promoting a thread has exactly
+        // the same goal semantics as a create, so an agent that learns to
+        // read `placement` on one and finds it missing on another is being
+        // taught the field is unreliable.
+        placement: {
+          ...res.placement,
+          ...(res.placement.placed
+            ? {}
+            : { goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []) }),
+        },
+        ignoredLinks: promoteLinks.ignored.length > 0 ? promoteLinks.ignored : undefined,
+        ...(res.shapeGaps !== undefined ? { shapeGaps: res.shapeGaps } : {}),
+      }),
+    );
   }
   return undefined;
 }

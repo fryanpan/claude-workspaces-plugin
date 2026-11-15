@@ -14,7 +14,7 @@
  * session's first failing call.
  */
 import { describe, expect, it } from 'vitest';
-import { mountsClient } from '../src/mounts-client.ts';
+import { mountsClient } from '../src/server-client.ts';
 import { type WorkspaceToolContext, handleWorkspaceTool } from '../src/tools/workspace.ts';
 
 interface Call {

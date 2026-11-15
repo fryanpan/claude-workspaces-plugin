@@ -23,7 +23,9 @@ import { parseLinkItemRequest, resolveLinkedItem } from '../linked-review-item.t
 import { writeViaOf } from '../mockup-frame.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
+import type { ThreadLinkedItemBody } from './doc-threads-contract.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
+import { sent } from './route-contract.ts';
 
 const PATH = /^threads\/([^/]+)\/linked-items$/;
 /** The longest note an agent may put above the link. */
@@ -38,7 +40,7 @@ export async function handleDocThreadLinkedItemRoute(
   const { docStore, taskStore, j, safeJson } = ctx;
   if (rq.visitor) return j(403, { error: 'linking a review item is not open to share visitors' });
   const threadId = decodeURIComponent(m[1] ?? '');
-  const body = await safeJson(rq.req);
+  const body = sent<ThreadLinkedItemBody>(await safeJson(rq.req));
   if (!body) return j(400, { error: 'JSON body required' });
   const user = rq.authorFor(body.author);
   if (!user) return j(400, { error: 'author required' });
