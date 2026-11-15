@@ -54,3 +54,60 @@ export function setThreadProgress(
   });
   return true;
 }
+
+/*
+ * The mark as drawn, on every surface that draws one: the widget's pin on an
+ * app or mock (`comment-extras.ts` in the widget) and the thread card's glyph
+ * on a doc and on the board (`thread-mark.ts` in workspaces-app). One copy of
+ * the markup and of the clock that decides whether a check draws, so the two
+ * cannot drift; each surface's stylesheet sizes it for its own place.
+ *
+ * Working: three dots that brighten and fade in turn ("Breathing", the
+ * owner's pick on the comment-states mock). Done: a check that draws itself
+ * once, on the change this page saw. Both hold still under reduced motion.
+ */
+
+/** The check's draw: a .12s wait, then .55s of stroke (`.cw-draw`). */
+export const MARK_DRAW_WAIT_MS = 120;
+export const MARK_DRAW_MS = 670;
+
+const DOTS =
+  '<span class="cw-pg"><i class="cw-breathe"></i><i class="cw-breathe"></i><i class="cw-breathe"></i></span>';
+
+/**
+ * The mark's markup, from constants only (safe as innerHTML).
+ *
+ * `sinceDone` is how long ago this page saw the thread turn done, from
+ * `createProgressClock`; null when it never saw the change, which shows the
+ * check already drawn. Inside the draw, a rebuild continues it with a
+ * negative delay rather than restarting it.
+ */
+export function progressMarkHtml(state: ProgressState, sinceDone: number | null): string {
+  if (state === 'working') return DOTS;
+  const drawing = sinceDone !== null && sinceDone < MARK_DRAW_MS;
+  const delay =
+    drawing && sinceDone ? ` style="animation-delay:${MARK_DRAW_WAIT_MS - sinceDone}ms"` : '';
+  return `<span class="cw-pg"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="cw-check${drawing ? ' cw-draw' : ''}" pathLength="1" d="M4.2 8.4l2.5 2.5L11.9 5.6"${delay}/></svg></span>`;
+}
+
+/**
+ * Remembers each thread's mark as this page last saw it, so a check draws on
+ * the transition and not on every rebuild. Call it for every thread a render
+ * shows, marked or not: a thread first seen open and then done is a
+ * transition; one first seen done is not.
+ *
+ * Returns how long ago the thread turned done, or null.
+ */
+export function createProgressClock(): (
+  threadId: string,
+  state: ProgressState | 'open',
+  now?: number,
+) => number | null {
+  const marks = new Map<string, { state: string; at: number | null }>();
+  return (threadId, state, now = Date.now()) => {
+    const prev = marks.get(threadId);
+    const at = state !== 'done' ? null : prev?.state === 'done' ? prev.at : prev ? now : null;
+    marks.set(threadId, { state, at });
+    return at === null ? null : now - at;
+  };
+}

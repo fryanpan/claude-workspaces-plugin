@@ -1,5 +1,10 @@
 import { readLinkedItem } from '@claude-workspaces/core/linked-item';
-import { PROGRESS_KEY, readThreadProgress } from '@claude-workspaces/core/thread-progress';
+import {
+  PROGRESS_KEY,
+  createProgressClock,
+  progressMarkHtml,
+  readThreadProgress,
+} from '@claude-workspaces/core/thread-progress';
 import type { LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc, formatTime } from '@claude-workspaces/core/ui-shared';
 import type * as Y from 'yjs';
@@ -80,18 +85,9 @@ export function decorateProgress(pop: HTMLElement, t: Thread): void {
   }
 }
 
-/** When each thread's mark was last seen to change, per widget, so a Done
+/** Each widget's clock: when it saw each thread's mark change, so a Done
  *  check draws on the transition and not on every rebuild of the pin. */
-const seen = new WeakMap<FeedbackWidgetEl, Map<string, { state: string; at: number | null }>>();
-
-/** The check's draw: .12s wait, then .55s (`.cw-draw`, `comment-view-css.ts`). */
-const DRAW_WAIT_MS = 120;
-const DRAW_MS = 670;
-
-const DOTS =
-  '<span class="cw-pg"><i class="cw-breathe"></i><i class="cw-breathe"></i><i class="cw-breathe"></i></span>';
-const check = (cls: string, delay: string) =>
-  `<span class="cw-pg"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="cw-check${cls}" pathLength="1" d="M4.2 8.4l2.5 2.5L11.9 5.6"${delay}/></svg></span>`;
+const clocks = new WeakMap<FeedbackWidgetEl, ReturnType<typeof createProgressClock>>();
 
 /** Each pin wears its thread's mark. The budgeted bundle draws the pins and
  *  knows only open and resolved; this runs after it, on every render, and
@@ -103,15 +99,12 @@ const check = (cls: string, delay: string) =>
  *  when the page first reads it shows the check drawn, with no motion; a
  *  rebuild during the draw continues it rather than restarting it. */
 export function markPins(el: FeedbackWidgetEl, rows: ThreadRow[]): void {
-  let marks = seen.get(el);
-  if (!marks) seen.set(el, (marks = new Map()));
+  let clock = clocks.get(el);
+  if (!clock) clocks.set(el, (clock = createProgressClock()));
   const now = Date.now();
   for (const r of rows) {
     const p = r.thread.progress;
-    const state = p?.state ?? 'open';
-    const prev = marks.get(r.thread.id);
-    const at = state !== 'done' ? null : prev?.state === 'done' ? prev.at : prev ? now : null;
-    marks.set(r.thread.id, { state, at });
+    const sinceDone = clock(r.thread.id, p?.state ?? 'open', now);
     if (!p) continue;
     const pin = el.pinLayer?.querySelector<HTMLElement>(
       `.cfw-pin[data-thread-id="${CSS.escape(r.thread.id)}"]`,
@@ -119,16 +112,6 @@ export function markPins(el: FeedbackWidgetEl, rows: ThreadRow[]): void {
     if (!pin) continue;
     pin.dataset.state = p.state;
     if (pin.querySelector('.cw-pg')) continue;
-    const since = at === null ? DRAW_MS : now - at;
-    const drawing = since < DRAW_MS;
-    pin.insertAdjacentHTML(
-      'beforeend',
-      p.state === 'working'
-        ? DOTS
-        : check(
-            drawing ? ' cw-draw' : '',
-            drawing && since ? ` style="animation-delay:${DRAW_WAIT_MS - since}ms"` : '',
-          ),
-    );
+    pin.insertAdjacentHTML('beforeend', progressMarkHtml(p.state, sinceDone));
   }
 }
