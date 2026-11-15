@@ -34,7 +34,7 @@ import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import { CHROME_LOG_ARGS, connectWatched, dumpRunning, onceWithin } from './chrome-stall.ts';
 import type { LeadChatRun, Rect, SurfaceRun, VoiceRun } from './lead-chat-browser-reading.ts';
-import { TAP_PROBE_INSTALL, TAP_PROBE_READ } from './lead-chat-tap-probe.ts';
+import { TAP_PROBE_INSTALL, TAP_PROBE_READ, tapDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 
@@ -147,14 +147,8 @@ async function go(cdp: Cdp, url: string): Promise<Read> {
   });
 }
 
-/** A real tap at the centre of a box, so a covered button fails here. */
-async function tap(cdp: Cdp, r: Rect): Promise<void> {
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
-  }
-}
+/** A real tap at the centre of a box; see `tapDelivered`. */
+const tap = (cdp: Cdp, r: Rect): Promise<void> => tapDelivered(cdp, r, step);
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lead-chat-'));
