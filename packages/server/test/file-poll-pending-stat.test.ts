@@ -203,7 +203,11 @@ describe('the file poll while one bound file’s stat is pending', () => {
       expect(line).not.toContain(root);
       expect(line).not.toContain('harborlight.md');
       // One line per window, though the held file is stat'd again after it.
-      expect(lines.filter((l) => l.startsWith('[file-poll]'))).toHaveLength(1);
+      // Counted for this doc only: the window is per DocStore, and a store
+      // another test file left polling in this process logs its own slow
+      // stats into the same console (CI logged `d1` lines here).
+      expect(lines.filter((l) => l.startsWith('[file-poll] d-harbor:'))).toHaveLength(1);
+      expect(lines.filter((l) => l.includes(root))).toEqual([]);
     } finally {
       errors.mockRestore();
     }
