@@ -9,6 +9,7 @@ export type {
   DocLifecycleContract,
   DocThreadsContract,
   MountsApi,
+  ReviewItemsContract,
   ShareContract,
   TaskBoardContract,
   TaskContentContract,

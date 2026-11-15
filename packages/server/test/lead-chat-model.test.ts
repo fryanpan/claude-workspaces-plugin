@@ -93,6 +93,37 @@ describe('LeadModels', () => {
   });
 });
 
+describe('LeadModels compacting', () => {
+  it('tells pages a compaction starts and ends, and never writes it to disk', () => {
+    const t = models();
+    t.m.observed(BOARD, { model: 'claude-opus-5-5' });
+    t.m.observed(BOARD, { compacting: true });
+    expect(t.frames.at(-1)?.state).toEqual({ model: 'claude-opus-5-5', compacting: true });
+    expect(t.make().read(BOARD)).toEqual({ model: 'claude-opus-5-5' });
+    t.m.observed(BOARD, { compacting: false });
+    expect(t.frames.at(-1)?.state).toEqual({ model: 'claude-opus-5-5' });
+    t.cleanup();
+  });
+
+  it('a turn starting or ending, or a new session, ends a compaction that never said so', () => {
+    const t = models();
+    for (const end of [
+      () => t.m.turnStarted(BOARD),
+      () => t.m.turnEnded(BOARD),
+      () => t.m.observed(BOARD, { started: true }),
+    ]) {
+      t.m.observed(BOARD, { compacting: true });
+      expect(t.m.read(BOARD).compacting).toBe(true);
+      const before = t.frames.length;
+      end();
+      expect(t.m.read(BOARD).compacting).toBeUndefined();
+      expect(t.frames.length).toBe(before + 1);
+      expect(t.frames.at(-1)?.state.compacting).toBeUndefined();
+    }
+    t.cleanup();
+  });
+});
+
 describe('leadModelLabel', () => {
   it('names an alias and a model id, and nothing it cannot read', () => {
     expect(leadModelLabel('opus')).toBe('Opus 5.5');
@@ -175,6 +206,29 @@ describe('the route', () => {
     });
     page.close();
     agent.close();
+  });
+
+  it('shows an open page the lead compacting, then not', async () => {
+    const base = `http://127.0.0.1:${s.handle.port}`;
+    const page = await pageStream(base, s.board);
+    const report = (body: unknown) =>
+      s.local(`${s.scope}/agents/${encodeURIComponent(LEAD)}/mirror`, post(body));
+    const shown = async () =>
+      (
+        (await (await s.owner(`${s.scope}/lead-chat`)).json()) as {
+          leadModel: { compacting?: true };
+        }
+      ).leadModel.compacting;
+    const frames = () => page.events.filter((e) => e === 'lead-chat.model').length;
+
+    expect((await report({ kind: 'model', compacting: true })).status).toBe(202);
+    await waitFor(() => frames() === 1, { timeout: 1000 });
+    expect(await shown()).toBe(true);
+    expect((await report({ kind: 'model', compacting: false })).status).toBe(202);
+    await waitFor(() => frames() === 2, { timeout: 1000 });
+    expect(await shown()).toBeUndefined();
+    expect((await report({ kind: 'model', compacting: 'yes' })).status).toBe(400);
+    page.close();
   });
 
   it('refuses a report that is not a model id', async () => {
