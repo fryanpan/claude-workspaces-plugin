@@ -8,6 +8,7 @@
  *
  * Prints one line, `listening on <url>`, once it accepts connections.
  */
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import { createApp } from './app.ts';
@@ -15,6 +16,10 @@ import { FileCollabStorage } from './file-storage.ts';
 import { devSignIn } from './sign-in.ts';
 
 const root = join(import.meta.dirname, '..');
+if (!existsSync(join(root, 'dist'))) {
+  console.error('No dist/ yet: run `bun run build` first.');
+  process.exit(1);
+}
 const signIn = devSignIn();
 if (signIn.devOnly && process.env.APP_ENV === 'production') {
   console.error('Refusing to start: the development sign-in lets anyone be anyone.');
