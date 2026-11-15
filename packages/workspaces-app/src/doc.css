@@ -2548,6 +2548,19 @@ body:has(.doc-floats.is-floating > .plan-float:not([hidden])) {
   margin-left: auto;
 }
 
+/* ================= THE CORNER BUTTONS (doc/doc-comment-buttons.ts) =================
+   The comment widget's round buttons in the bottom-right corner. Inside its
+   shadow root they stand at the top of the page (z 2147483647), which on a
+   doc put them over the phone's comment composer and its Send button, the
+   comment sheet and the full-screen thread. A stacking context on the host
+   keeps them above the doc and its comment pill (800) and below each of those
+   (950 and up), so an overlay covers them the way it covers the doc and
+   nothing moves or hides as it opens. */
+claude-feedback-widget {
+  position: relative;
+  z-index: 930;
+}
+
 /* ================= THE AGENT'S CURSOR (doc/agent-focus.ts) =================
    The words an agent is pointing at, tinted in its own colour, with a caret
    and its name at their start. Steady, like every other mark here — no
