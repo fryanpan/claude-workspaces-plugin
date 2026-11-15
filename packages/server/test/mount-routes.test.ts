@@ -303,6 +303,9 @@ describe('mount routes', () => {
       expect((await send('/api/mounts', { method: 'PATCH', body: '{}' })).status).toBe(405);
       expect((await send('/api/mounts/privacy')).status).toBe(405);
       expect((await send('/api/mounts/nothing-here')).status).toBe(405);
+      // Hono would answer a HEAD with the GET handler; `mounts.ts` refuses it.
+      expect((await send('/api/mounts', { method: 'HEAD' })).status).toBe(405);
+      expect((await send('/api/mounts/files', { method: 'HEAD' })).status).toBe(405);
       // The control: the same path with the method it takes is answered.
       expect((await send('/api/mounts')).status).toBe(200);
     });
