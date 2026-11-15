@@ -90,6 +90,58 @@ describe("an agent's mark in the comment view", () => {
     expect(pinOf(el, 't-one')?.dataset.state).toBe('done');
   });
 
+  it('breathes on the pin of a comment an agent is working on, slowly and in turn', () => {
+    const { el, ydoc } = seeded();
+    // CONTROL: an unmarked pin carries no dots.
+    expect(pinOf(el, 't-one')?.querySelectorAll('.cw-breathe')).toHaveLength(0);
+    setThreadProgress(ydoc, 't-one', 'working', AGENT, T0 + 1000);
+    renderThreadsInto(el);
+    const dots = [...(pinOf(el, 't-one')?.querySelectorAll<HTMLElement>('.cw-breathe') ?? [])];
+    expect(dots).toHaveLength(3);
+    const styles = dots.map((d) => getComputedStyle(d));
+    expect(styles.map((s) => s.animationName)).toEqual(['cw-breathe', 'cw-breathe', 'cw-breathe']);
+    expect(styles.map((s) => s.animationDuration)).toEqual(['4.5s', '4.5s', '4.5s']);
+    expect(styles.map((s) => s.animationIterationCount)).toEqual([
+      'infinite',
+      'infinite',
+      'infinite',
+    ]);
+    // happy-dom reports a value as the sheet wrote it, so .75s keeps its form.
+    expect(styles.map((s) => s.animationDelay)).toEqual(['0s', '.75s', '1.5s']);
+    // Done stops the breathing: the rebuilt pin carries no dots.
+    setThreadProgress(ydoc, 't-one', 'done', AGENT, T0 + 2000);
+    renderThreadsInto(el);
+    expect(pinOf(el, 't-one')?.dataset.state).toBe('done');
+    expect(pinOf(el, 't-one')?.querySelectorAll('.cw-breathe')).toHaveLength(0);
+  });
+
+  it('holds the dots still when the reader asks for reduced motion', () => {
+    const settings = (
+      window as unknown as {
+        happyDOM: { settings: { device: { prefersReducedMotion: string } } };
+      }
+    ).happyDOM.settings.device;
+    const { el, ydoc } = seeded();
+    setThreadProgress(ydoc, 't-one', 'working', AGENT, T0 + 1000);
+    renderThreadsInto(el);
+    const dot = () => pinOf(el, 't-one')?.querySelector<HTMLElement>('.cw-breathe') ?? null;
+    // CONTROL: the dot breathes with motion allowed.
+    const moving = dot();
+    expect(moving && getComputedStyle(moving).animationName).toBe('cw-breathe');
+    settings.prefersReducedMotion = 'reduce';
+    try {
+      // The next render rebuilds the pin, as any change on the doc does.
+      renderThreadsInto(el);
+      const still = dot();
+      expect(still, 'the dots are still drawn').not.toBeNull();
+      const s = still ? getComputedStyle(still) : null;
+      expect(s?.animationName).toBe('none');
+      expect(s?.opacity).toBe('.85');
+    } finally {
+      settings.prefersReducedMotion = 'no-preference';
+    }
+  });
+
   it('opened, a done thread says who marked it, and Resolve leads', () => {
     const { el, ydoc } = seeded();
     setThreadProgress(ydoc, 't-one', 'done', AGENT, T0 + 2000);
