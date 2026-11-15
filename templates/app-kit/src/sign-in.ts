@@ -1,3 +1,4 @@
+import type { Principal } from '@claude-workspaces/app-kit/collab';
 /**
  * Sign-in: the one slot the app asks "who sent this request?".
  *
@@ -7,7 +8,6 @@
  * `server.ts` refuses to start with it when `APP_ENV=production`.
  */
 import { Hono } from 'hono';
-import type { Principal } from './collab/index.ts';
 
 export interface SignIn {
   /** Who sent this request, or null when nobody is signed in. */

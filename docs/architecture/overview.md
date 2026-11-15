@@ -146,10 +146,16 @@ revoked role on the same call.
 (`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
 after the folder: a Bun server with Hono routes, a doc socket the core's
 room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
-theme. The template points back into this repo in exactly two files, a
-re-export of `core/src/collab/` and an `@import` of
-`workspaces-app/src/wa-theme.css`, and the generator replaces both with
-copies, so the made app depends on nothing here. Sign-in is a typed slot
+theme. The core and the theme reach the app as one versioned package,
+`packages/app-kit` (`@claude-workspaces/app-kit`, exporting `./collab` and
+`./theme.css`). In this repo its two files re-export `core/src/collab/` and
+`@import` `workspaces-app/src/wa-theme.css`; `packages/app-kit/scripts/pack.ts`
+packs a tarball whose copies of those files are the real ones, and the
+generator puts that tarball in the app's `vendor/` and names it as a
+`file:` dependency, so the made app holds no copy of their source and
+depends on nothing here. A tarball rather than GitHub Packages (which needs
+a token even to install) or a git dependency (which cannot name one
+package inside this monorepo). Sign-in is a typed slot
 (`SignIn.principal(request)`) holding a name-only development provider that
 refuses to start under `APP_ENV=production`; `templates/signin`, a
 Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,

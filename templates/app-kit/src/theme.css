@@ -1,5 +1,5 @@
 /*
- * The shared theme. In the template this imports the theme file the board
- * uses; `bun run new-app` replaces this file with a copy of it.
+ * The shared theme, from the app kit package. Bundled by scripts/build.ts
+ * into dist/theme.css.
  */
-@import "../../../packages/workspaces-app/src/wa-theme.css";
+@import "@claude-workspaces/app-kit/theme.css";
