@@ -22,11 +22,13 @@ import type { Hono } from 'hono';
  */
 import { hc } from 'hono/client';
 import type {
+  AgentNotesContract,
   AttachmentsContract,
   DocEditsContract,
   DocLifecycleContract,
   DocThreadsContract,
   MountsApi,
+  ShareContract,
 } from '../../server/src/index.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
@@ -52,3 +54,5 @@ export const docThreadsClient = (http: Http) => typedClient<DocThreadsContract>(
 export const docEditsClient = (http: Http) => typedClient<DocEditsContract>(http);
 export const docLifecycleClient = (http: Http) => typedClient<DocLifecycleContract>(http);
 export const attachmentsClient = (http: Http) => typedClient<AttachmentsContract>(http);
+export const shareClient = (http: Http) => typedClient<ShareContract>(http);
+export const agentNotesClient = (http: Http) => typedClient<AgentNotesContract>(http);

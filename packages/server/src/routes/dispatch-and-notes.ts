@@ -18,6 +18,7 @@ import { recordDispatchRequested } from '../dispatch-request-event.ts';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { filingStateFor } from '../unfiled-ask-filing.ts';
 import { judgeTurnNote } from '../unfiled-ask.ts';
+import type { AgentNoteAnswer } from './agent-notes-contract.ts';
 import { handleLeadMirrorRoute } from './lead-mirror.ts';
 import { handlePromptMarkRoute } from './prompt-marks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -121,6 +122,8 @@ export async function handleDispatchAndNoteRoutes(
     proposeAllowRule,
   } = ctx;
   const { req, scope, visitor, authorFor } = rq;
+  /** A note route's 202, as the contract declares it. */
+  const noted = (body: AgentNoteAnswer) => j(202, body);
   // A visitor that is this board's own lead (`middleware/lead-scope.ts`) is
   // the session whose notes these are, so the two notes routes below let it
   // through on that board. Every other route here refuses it as a visitor.
@@ -303,7 +306,11 @@ export async function handleDispatchAndNoteRoutes(
     if (!res.ok) return j(404, { error: res.error });
     proposeAllowRule(res.task, note);
     agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
-    return j(202, { ok: true, taskId: res.task.id, workspaceId: res.task.workspaceId });
+    return noted({
+      ok: true,
+      taskId: res.task.id,
+      workspaceId: res.task.workspaceId,
+    });
   }
   // --- REST: agent turn / denial / status notes on the CURRENT row ---
   // The plugin's Stop and PermissionDenied hooks post once per turn to
@@ -422,7 +429,7 @@ export async function handleDispatchAndNoteRoutes(
       // answers with the PREVIOUS turn rather than with this one.
       const nudge = judgeAndRecord(ctx, boardId, note);
       agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
-      return j(202, {
+      return noted({
         ok: true,
         taskId: res.task.id,
         workspaceId: res.task.workspaceId,
@@ -474,11 +481,11 @@ export async function handleDispatchAndNoteRoutes(
       ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
     });
-    return j(202, {
+    return noted({
       ok: true,
       workspaceId: boardId,
       ...(task ? { taskId: task.id } : {}),
-      ...(target.ambiguous ? { needsFiling: true } : {}),
+      ...(target.ambiguous ? { needsFiling: true as const } : {}),
       ...(logged !== undefined ? { logged } : {}),
       ...(nudge ? { unfiledAsk: nudge } : {}),
     });

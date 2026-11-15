@@ -83,7 +83,7 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount, doc-thread, doc-edit, doc-lifecycle and attachment tools send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount, doc-thread, doc-edit, doc-lifecycle, attachment and sharing tools and `post_status` send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
@@ -479,7 +479,8 @@ a family takes the second unless its handler is small.
   (`routes/route-contract.ts`; the doc threads' is
   `routes/doc-threads-contract.ts`, the doc edits' `doc-edits-contract.ts`,
   a doc's lifecycle `doc-lifecycle-contract.ts`, attachment sets'
-  `attachments-contract.ts`).
+  `attachments-contract.ts`, sharing `share-contract.ts`, an agent's
+  status notes `agent-notes-contract.ts`).
   The steps:
   1. In `routes/<family>-contract.ts`, export one interface per body and a
      chained `new Hono()` declaring each route with `json<Body>()` or
