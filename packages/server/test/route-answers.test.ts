@@ -26,8 +26,8 @@
  *
  * THE STATE each request meets. `:ws`, `:taskId` and `:docId` are a real
  * board, a task on it and a doc filed on it, `:setId` a folder attachment
- * on it and `:goalId` a goal band on it (each built only for the rows that
- * name one), so most rows reach their own
+ * on it, `:goalId` a goal band on it and `:itemId` a review item on the task
+ * (each built only for the rows that name one), so most rows reach their own
  * handler rather than the workspace scope's 404. Every other parameter is
  * `exampleFor`'s stand-in, which names nothing. Reads share one seed. Every
  * write (POST, PUT, DELETE) gets a board, task and doc of its own, so an
@@ -67,6 +67,8 @@ interface Seed {
   setId?: string;
   /** A goal band on the board, for the rows that name one. */
   goalId?: string;
+  /** A review item on the task, for the rows that name one. */
+  itemId?: string;
 }
 
 /**
@@ -118,6 +120,7 @@ function addressFor(pattern: string, seed: Seed): string {
     ':docId': encodeURIComponent(seed.docId),
     ...(seed.setId ? { ':setId': encodeURIComponent(seed.setId) } : {}),
     ...(seed.goalId ? { ':goalId': encodeURIComponent(seed.goalId) } : {}),
+    ...(seed.itemId ? { ':itemId': encodeURIComponent(seed.itemId) } : {}),
   };
   return exampleFor(pattern)
     .split('/')
@@ -145,11 +148,17 @@ describe('every route-table row is answered as recorded', () => {
       actor,
     });
     if (!filed.ok) throw new Error('seed: task create refused');
-    let goal: { goalId?: string } = {};
+    let goal: { goalId?: string; itemId?: string } = {};
     if (pattern.includes(':goalId')) {
       const added = handle.tasks.addGoal(ws, { title: 'Saltmarsh' }, { actor });
       if (!added.ok) throw new Error('seed: goal add refused');
       goal = { goalId: added.goal.id };
+    }
+    if (pattern.includes(':itemId')) {
+      const review = { shape: 'review', headline: 'Is the Riverbend timetable right?' };
+      const item = handle.tasks.addReviewItem(filed.task.id, review, { actor });
+      if (!item.ok) throw new Error('seed: review item refused');
+      goal = { ...goal, itemId: item.item.id };
     }
     const file = join(dataDir, `saltmarsh-${n}.md`);
     writeFileSync(file, '# Saltmarsh\n\nBody.\n');
@@ -213,7 +222,7 @@ describe('every route-table row is answered as recorded', () => {
     base = `http://127.0.0.1:${handle.port}`;
 
     // The shared read seed carries every optional fixture.
-    const shared = await seed(':setId :goalId');
+    const shared = await seed(':setId :goalId :itemId');
     // Every row's own methods, plus a HEAD beside every GET: Hono answers a
     // HEAD from a GET handler by itself, so a family that moves would start
     // answering HEAD where the chain did something else.
@@ -261,6 +270,7 @@ describe('every route-table row is answered as recorded', () => {
           .replaceAll(at.taskId, ':taskId')
           .replaceAll(at.setId ?? ':setId', ':setId')
           .replaceAll(at.goalId ?? ':goalId', ':goalId')
+          .replaceAll(at.itemId ?? ':itemId', ':itemId')
           .replaceAll(encodeURIComponent(at.docId), ':docId')
           .replaceAll(at.docId, ':docId');
       answers.set(key, await answerOf(res, method, normalize, spy.answeredBy()));
