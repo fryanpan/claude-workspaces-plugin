@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.378";
+var version2 = "0.1.379";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20205,6 +20205,7 @@ var shareClient = (http) => typedClient(http);
 var agentNotesClient = (http) => typedClient(http);
 var taskStateClient = (http) => typedClient(http);
 var taskContentClient = (http) => typedClient(http);
+var taskBoardClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -21552,6 +21553,8 @@ async function handleTaskTool(name, a, ctx) {
   const taskApi = () => taskStateClient(http).workspaces[":ws"].tasks[":taskId"];
   const contentApi = () => taskContentClient(http).workspaces[":ws"];
   const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const listsApi = () => taskBoardClient(http).workspaces[":ws"];
+  const wsParam = (workspaceId) => ({ ws: encodeURIComponent(workspaceId) });
   const taskParam = (taskId) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     taskId: encodeURIComponent(taskId)
@@ -21629,44 +21632,42 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "next_tasks": {
       const { workspaceId, assignee, limit, includeBlocked, includeArchived, fields } = a;
-      const qs = new URLSearchParams;
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (limit !== undefined)
-        qs.set("limit", String(limit));
-      if (includeBlocked === true)
-        qs.set("includeBlocked", "true");
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const query = qs.size > 0 ? `?${qs.toString()}` : "";
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`);
+      const res = await (await listsApi().next.$get({
+        param: wsParam(workspaceId),
+        query: {
+          assignee,
+          limit: limit !== undefined ? String(limit) : undefined,
+          includeBlocked: includeBlocked === true ? "true" : undefined,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
+      const queueRows = res.tasks;
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
+        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, queueRows);
         if (missing.length > 0) {
-          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, res.tasks.length));
+          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, queueRows.length));
         }
       }
       return ok2({
         workspaceId,
         ...res.retired ? { retired: res.retired } : {},
         ...res.capacity ? { capacity: res.capacity } : {},
-        tasks: projectQueueRows(res.tasks, fields)
+        tasks: projectQueueRows(queueRows, fields)
       });
     }
     case "list_tasks": {
       const { workspaceId, goal, status, assignee, needs, fields, includeArchived, taskIds } = a;
-      const qs = new URLSearchParams({ format: "json" });
-      if (goal !== undefined)
-        qs.set("goal", goal);
-      if (status !== undefined)
-        qs.set("status", status);
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (needs !== undefined)
-        qs.set("needs", needs);
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`);
+      const res = await (await listsApi().tasks.$get({
+        param: wsParam(workspaceId),
+        query: {
+          format: "json",
+          goal,
+          status,
+          assignee,
+          needs,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
       let rows = res.tasks;
       if (taskIds !== undefined && taskIds.length > 0) {
         const wanted = new Set(taskIds);
@@ -21780,9 +21781,10 @@ async function handleTaskTool(name, a, ctx) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
       if (goalId !== undefined) {
-        const res2 = await http("POST", `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
-          author: AUTHOR
-        });
+        const res2 = await (await listsApi().goals[":goalId"].restore.$post({
+          param: { ...boardParam(), goalId: encodeURIComponent(goalId) },
+          json: { author: AUTHOR }
+        })).json();
         return ok2({
           goalId,
           title: res2.goal.title,
@@ -21872,33 +21874,32 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_goal_list": {
       const { workspaceId, goals, drop } = a;
-      const res = await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
-        goals,
-        ...drop !== undefined ? { drop } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.$put({
+        param: wsParam(workspaceId),
+        json: { goals, drop, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         changed: res.changed,
         created: res.created,
         movedToChores: res.movedToChores,
-        strandedDone: res.strandedDone,
-        ...res.bucketReview ? { bucketReview: res.bucketReview } : {}
+        strandedDone: res.strandedDone
       });
     }
     case "rename_goal": {
       const { workspaceId, goal, title, dueAt } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/rename`, {
-        goal,
-        title,
-        ...dueAt !== undefined ? { dueAt } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.rename.$post({
+        param: wsParam(workspaceId),
+        json: { goal, title, dueAt, author: AUTHOR }
+      })).json();
       return ok2({ workspaceId, goal: res.goal, changed: res.changed });
     }
     case "reorder_goals": {
       const { workspaceId, order } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/reorder`, { order, author: AUTHOR });
+      const res = await (await listsApi().goals.reorder.$post({
+        param: wsParam(workspaceId),
+        json: { order, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         order: res.order,
