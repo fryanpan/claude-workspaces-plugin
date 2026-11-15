@@ -37,12 +37,10 @@ import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
 import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
-import { handleRecallWebhookRoute } from './recall-webhook.ts';
 import { serveBoardRoutes } from './request-chain-board.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
 import { createRequestGates } from './request-chain-gates.ts';
 import { serveTopLevelRoutes } from './request-chain-tail.ts';
-import { handleVoiceAgentLlmRoute } from './voice-agent-llm.ts';
 
 /**
  * The handler `Bun.serve` dispatches every request to, through the
@@ -61,8 +59,6 @@ export function createRequestChain(
     isValidDocId,
     j,
     requireSignInToWrite,
-    voiceAgentLlmRoutesCtx,
-    recallWebhookRoutesCtx,
     serveUpgradeAndStreamRoutes,
     taskStore,
     workspacesOfMember,
@@ -184,43 +180,22 @@ export function createRequestChain(
       // `shareScopeAllows` lets them, and it does not: a share visitor is
       // already proven by Cloudflare Access, and sign-in is not a second way
       // to claim an identity on a share host.
+      //
+      // The two vendor callbacks sat right below them and moved too: the
+      // voice agent's LLM call and Recall's status webhook. The webhook has
+      // to be tried before the `/recall/` websocket upgrade in the stream
+      // block below, whose own test is `startsWith('/recall/')` and would
+      // answer a status POST with the token lookup's 404. Hono is tried
+      // above that block, so it still is — keep it that way.
       const fronted = await ctx.honoFront(req, { gate, attribution, ownerProven });
       if (fronted) return fronted;
-
-      // --- ElevenLabs' agent asking for setup 4's reply --- see
-      // ./routes/voice-agent-llm.ts. It answers one exact path, so where it
-      // sits changes nothing; it is beside Recall's webhook because both are
-      // a vendor's backend calling in on the callback hostname.
-      {
-        const handled = await handleVoiceAgentLlmRoute(voiceAgentLlmRoutesCtx, {
-          req,
-          pathname,
-          shareVisitor: visitor !== null,
-        });
-        if (handled) return handled;
-      }
-
-      // --- Recall's bot status-change webhook --- see
-      // ./routes/recall-webhook.ts. Called from the position the block
-      // held: it must stay IMMEDIATELY above the `/recall/` websocket
-      // upgrade below, because that upgrade's own test is
-      // `startsWith('/recall/')` and would answer a status POST with the
-      // token lookup's 404. That adjacency is behaviour — keep these two
-      // adjacent.
-      {
-        const handled = await handleRecallWebhookRoute(recallWebhookRoutesCtx, {
-          req,
-          pathname,
-        });
-        if (handled) return handled;
-      }
 
       // ── Upgrade and stream ── see routes/upgrade-stream.ts.
       // Six blocks that end in a long-lived connection rather than a body:
       // the three websocket upgrades and the three SSE openers. Called from
-      // the position the run held, so the `/recall/` upgrade still sits
-      // IMMEDIATELY below the status webhook above it — that adjacency is
-      // load-bearing and the comment on the webhook says why. Null means no
+      // the position the run held, so the `/recall/` upgrade is still tried
+      // after Recall's status webhook, which Hono answers above — that
+      // order is load-bearing and the comment on the Hono call says why. Null means no
       // block there claimed this address, which is the same fall-through the
       // run did in place; `upgraded` is the one outcome that must reach Bun
       // as `undefined`, and this is the only place that spells it.

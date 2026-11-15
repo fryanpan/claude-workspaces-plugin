@@ -8,13 +8,15 @@
  * `/api/docs/<id>/meetings...` pattern is tried before the doc catch-all at
  * the bottom, which would otherwise swallow them all.
  *
+ * The hosted MCP connector, agent identity, board tokens, board-socket
+ * roots, the repo registry and the load reports were here too. Hono answers
+ * them now (`hono-families.ts`), above the workspace scope; none of their
+ * paths sits under `/workspaces/` or is claimed by a family left here.
+ *
  * `null` means no family here claimed the address, and the chain goes on to
  * `request-chain-tail.ts`.
  */
-import { handleAgentIdentityRoutes } from './agent-identity.ts';
 import { handleAppRoutes } from './apps.ts';
-import { handleBoardSocketRootsRoutes } from './board-socket-roots.ts';
-import { handleBoardTokenRoutes } from './board-tokens.ts';
 import { handleChatAuditRoutes } from './chat-audit-routes.ts';
 import { handleDocMoveRoute } from './doc-move.ts';
 import {
@@ -22,10 +24,7 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './docs.ts';
-import { handleLoadReportRoutes } from './load-reports.ts';
-import { handleMcpConnectorRoute } from './mcp-connector.ts';
 import { handleMeetingCalendarRoutes } from './meetings-calendar.ts';
-import { handleRepoRoutes } from './repos.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
 import { handleReviewFileRoutes } from './review-files.ts';
 import { handleDispatchAndNoteRoutes, handleTaskRoutes } from './tasks.ts';
@@ -50,17 +49,7 @@ export async function serveBoardRoutes(
     workspaceRoutesCtx,
     taskRoutesCtx,
     policyFor,
-    connectorHost,
-    boardOfSocket,
-    j,
-    requestAddress,
-    agentTokenKeyFor,
-    agentIdentityRoutesCtx,
-    boardTokenRoutesCtx,
-    boardSocketRootsRoutesCtx,
     chatAuditRoutesCtx,
-    repoRoutesCtx,
-    loadReportRoutesCtx,
     libraryRoutesCtx,
     docMoveRoutesCtx,
     handleArchiveRoutes,
@@ -202,57 +191,6 @@ export async function serveBoardRoutes(
     });
     if (handled) return handled;
   }
-  // --- MCP: the hosted connector, loopback agents only --- see
-  // ./routes/mcp-connector.ts. One exact path nothing else answers, so
-  // its position shadows nothing; it sits beside the agent-id routes
-  // because it is the door those agents come through.
-  {
-    const handled = await handleMcpConnectorRoute(
-      {
-        host: connectorHost,
-        j,
-        requestAddress,
-        agentTokenKey: agentTokenKeyFor,
-        boardOfSocket,
-      },
-      { req, pathname, visitor },
-    );
-    if (handled) return handled;
-  }
-  // --- REST: durable agent watches, and the agent merge --- see
-  // ./routes/agent-identity.ts. Same chain position as before the
-  // split: after the promote route, before the builder dispatches.
-  {
-    const handled = await handleAgentIdentityRoutes(agentIdentityRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
-      boardAgent,
-    });
-    if (handled) return handled;
-  }
-  // --- REST: board agent tokens --- see ./routes/board-tokens.ts. One
-  // exact family of paths, so its position changes nothing.
-  {
-    const handled = await handleBoardTokenRoutes(boardTokenRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      boardAgent,
-    });
-    if (handled) return handled;
-  }
-  // --- REST: the folders a board's walled lead can write --- see
-  // ./routes/board-socket-roots.ts. One exact family of paths.
-  {
-    const handled = await handleBoardSocketRootsRoutes(boardSocketRootsRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-    });
-    if (handled) return handled;
-  }
   // --- REST: builder dispatches, and a session's notes on the row it
   // holds --- see ./routes/dispatch-and-notes.ts. Same chain position
   // as before the split: after the agent merge route, before chat-audit.
@@ -281,26 +219,6 @@ export async function serveBoardRoutes(
       pathname,
       visitor,
     });
-    if (handled) return handled;
-  }
-  // --- The repo registry: checkouts, and which copy is live ---
-  // ./routes/repos.ts. It shares the operator routes' gate (loopback only,
-  // no edge, no visitor; those are answered by Hono now, hono-families.ts).
-  // Order is not load-bearing — no other family claims `/api/repos`.
-  {
-    const handled = await handleRepoRoutes(repoRoutesCtx, {
-      req,
-      pathname,
-      url,
-      visitor,
-    });
-    if (handled) return handled;
-  }
-  // --- Load reports from pages on no board, and the slowest-load read ---
-  // ./routes/load-reports.ts. Order is not load-bearing: no other family
-  // claims `/api/load-reports`.
-  {
-    const handled = await handleLoadReportRoutes(loadReportRoutesCtx, { req, pathname, visitor });
     if (handled) return handled;
   }
   // --- The board's Library --- ./routes/workspace-library.ts, its

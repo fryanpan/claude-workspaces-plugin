@@ -1,17 +1,17 @@
 /**
  * ── The request chain, last third: the top-level families and the tail ──
  *
- * The families that belong to the server rather than to one board and are
- * still on the chain — the workspaces list's stream, the git-push feature
- * (`features.ts`) and private messages — and then the tail: the shell and
- * static serving, the task address, the stale-client 410, the wrong-prefix
- * hint, the board's own not-found page and the bare 404. Moved whole and in
+ * The one family that belongs to the server rather than to one board and is
+ * still on the chain — the git-push feature (`features.ts`) — and then the
+ * tail: the shell and static serving, the task address, the stale-client
+ * 410, the wrong-prefix hint, the board's own not-found page and the bare
+ * 404. Moved whole and in
  * order out of `createServer`'s `route()`; see `request-chain.ts` for why
  * the order is behaviour.
  *
  * The prompt settings, the cross-board review queue, the voice page and API,
- * the access page, Incoming Messages, the keeper holds, the goal coach and
- * the webhook log were here too, interleaved with these. They are answered
+ * the access page, Incoming Messages, the keeper holds, the goal coach, the
+ * webhook log, the workspaces list's stream and private messages were here too, interleaved with these. They are answered
  * by Hono now (`hono-families.ts`), which is tried above the whole chain
  * below the gates; each claims paths nothing in the chain answers, so taking
  * them out of this run reorders nothing that is left.
@@ -19,8 +19,6 @@
  * Always answers: the last line is the 404.
  */
 import { handleBoardLinkRoutes } from './board-links.ts';
-import { handleLandingStreamRoute } from './landing-stream.ts';
-import { handlePrivateMessageRoutes } from './private-messages.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
 import { handleStaleClient } from './stale-client.ts';
 import { handleTaskPageRoutes } from './task-page.ts';
@@ -31,25 +29,9 @@ export async function serveTopLevelRoutes(
   ctx: RequestChainContext,
   rq: ChainRequest,
 ): Promise<Response> {
-  const {
-    sse,
-    j,
-    policyFor,
-    featureRoutes,
-    privateMessageRoutesCtx,
-    serveShellRoutes,
-    boardLinkRoutesCtx,
-  } = ctx;
-  const { req, url, pathname, gate, attribution, ownerProven } = rq;
-  const { visitor, visitorHome, boardAgent } = gate;
-  const { provenIdentityFor } = attribution;
-
-  // --- SSE: the workspaces list's change feed --- see
-  // ./routes/landing-stream.ts. Top-level, like `/` it serves.
-  {
-    const handled = handleLandingStreamRoute({ sse, j }, { req, pathname, visitor });
-    if (handled) return handled;
-  }
+  const { policyFor, featureRoutes, serveShellRoutes, boardLinkRoutesCtx } = ctx;
+  const { req, url, pathname, gate, ownerProven } = rq;
+  const { visitor, visitorHome } = gate;
 
   // --- The registered features still on the chain --- see ./features.ts.
   // Git push alone: it claims `/workspaces/<board>/git/`, which sits below
@@ -62,22 +44,6 @@ export async function serveTopLevelRoutes(
       visitor,
       ownerProven: () => ownerProven(),
       requestOrigin: () => policyFor(req).requestOrigin,
-    });
-    if (handled) return handled;
-  }
-
-  // --- REST: private messages --- see ./routes/private-messages.ts. Here
-  // rather than in the board chain because `/api/me/messages` names no board,
-  // and beside the features for the inbox's reason: a person's own, not a
-  // board's. `/api/me/` and `/api/agents/<id>/messages/` are claimed by
-  // nothing above.
-  {
-    const handled = await handlePrivateMessageRoutes(privateMessageRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      boardAgent,
-      provenIdentityFor,
     });
     if (handled) return handled;
   }

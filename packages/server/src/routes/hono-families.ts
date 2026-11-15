@@ -7,9 +7,13 @@
  * handler is the same function the chain called, handed the same
  * per-request values. The chain no longer calls it.
  *
- * Moved so far: sign-in and share (`auth-share.ts`), ops, mounts, prompts,
- * the cross-board review queue, voice (the page and the API), access,
- * Incoming Messages, the keeper holds and the coach. Each one
+ * Moved so far: sign-in and share (`auth-share.ts`), the two vendor
+ * callbacks (the voice agent's LLM call and Recall's status webhook), the
+ * hosted MCP connector, agent identity, board tokens, a walled lead's
+ * folders, the repo registry, load reports, ops, mounts, the workspaces
+ * list's stream, prompts, the cross-board review queue, voice (the page and
+ * the API), access, Incoming Messages, private messages, the keeper holds
+ * and the coach. Each one
  *
  * - takes no workspace scope, so moving it above the scope resolver changes
  *   nothing it reads, and claims no path under `/workspaces/`, so the
@@ -19,8 +23,9 @@
  *   upgrades and streams, the scope and the whole board half, so a family
  *   that moves overtakes all of them. Each of these claims a prefix or exact
  *   paths that none of them names (checked by grep, and held by
- *   `test/route-answers.test.ts`). Sign-in and share sat immediately below
- *   Hono, so for them there was nothing to overtake;
+ *   `test/route-answers.test.ts`). Sign-in and share, then the two vendor
+ *   callbacks, sat immediately below Hono, so for them there was nothing to
+ *   overtake;
  * - imports no presence, socket or Yjs code.
  *
  * HOW A FAMILY IS REGISTERED. `claim` mounts one middleware on every pattern
@@ -45,10 +50,29 @@ import type { FeatureRoutes } from '../feature-module.ts';
 import type { HonoAppEnv, HonoFamily } from '../hono-env.ts';
 import { HOLDS_PATH } from '../keeper/keeper-announce.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
+import { RECALL_STATUS_PATH } from '../middleware/recall-callback-gate.ts';
 import { SHARING_OFF_PAGE_PATH } from '../sharing-off-door.ts';
+import { VOICE_AGENT_LLM_PATH } from '../spoken-reply/agent-llm.ts';
 import { type AccessRoutesContext, handleAccessRoutes } from './access.ts';
+import { type AgentIdentityRoutesContext, handleAgentIdentityRoutes } from './agent-identity.ts';
 import { type AuthShareRoutesContext, handleAuthShareRoutes } from './auth-share.ts';
+import {
+  type BoardSocketRootsRoutesContext,
+  handleBoardSocketRootsRoutes,
+} from './board-socket-roots.ts';
+import { type BoardTokenRoutesContext, handleBoardTokenRoutes } from './board-tokens.ts';
 import { type CoachRoutesContext, handleCoachRoutes } from './coach.ts';
+import {
+  LANDING_STREAM_PATH,
+  type LandingStreamRoutesContext,
+  handleLandingStreamRoute,
+} from './landing-stream.ts';
+import { type LoadReportRoutesContext, handleLoadReportRoutes } from './load-reports.ts';
+import {
+  MCP_CONNECTOR_PATH,
+  type McpConnectorRouteContext,
+  handleMcpConnectorRoute,
+} from './mcp-connector.ts';
 import { type MountRoutesContext, handleMountRoutes } from './mounts.ts';
 import {
   type OpsRoutesContext,
@@ -57,14 +81,31 @@ import {
   handleSummaryBackfillRoute,
   handleWebhookLogRoute,
 } from './ops.ts';
+import {
+  type PrivateMessageRoutesContext,
+  handlePrivateMessageRoutes,
+} from './private-messages.ts';
 import { type PromptRoutesContext, handlePromptRoutes } from './prompts.ts';
+import { type RecallWebhookRoutesContext, handleRecallWebhookRoute } from './recall-webhook.ts';
+import { type RepoRoutesContext, handleRepoRoutes } from './repos.ts';
 import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './review-queue.ts';
+import { type VoiceAgentLlmRoutesContext, handleVoiceAgentLlmRoute } from './voice-agent-llm.ts';
 import { type VoiceApiRoutesContext, handleVoiceApiRoutes } from './voice-api.ts';
 import { type VoicePageRoutesContext, handleVoicePageRoutes } from './voice-page.ts';
 
 /** Everything long-lived the moved families read. Built once by `server.ts`. */
 export interface HonoFamiliesContext {
   authShareRoutesCtx: AuthShareRoutesContext;
+  voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
+  recallWebhookRoutesCtx: RecallWebhookRoutesContext;
+  mcpConnectorCtx: McpConnectorRouteContext;
+  agentIdentityRoutesCtx: AgentIdentityRoutesContext;
+  boardTokenRoutesCtx: BoardTokenRoutesContext;
+  boardSocketRootsRoutesCtx: BoardSocketRootsRoutesContext;
+  repoRoutesCtx: RepoRoutesContext;
+  loadReportRoutesCtx: LoadReportRoutesContext;
+  landingStreamCtx: LandingStreamRoutesContext;
+  privateMessageRoutesCtx: PrivateMessageRoutesContext;
   opsRoutesCtx: OpsRoutesContext;
   mountRoutesCtx: MountRoutesContext;
   /** Incoming Messages and the keeper holds, two of the registered features
@@ -93,6 +134,7 @@ function chainValues(c: Context<HonoAppEnv>, ctx: HonoFamiliesContext) {
     url,
     pathname: url.pathname,
     visitor: gate.visitor,
+    boardAgent: gate.boardAgent,
     authorFor,
     widgetIdentity: attribution.widgetIdentity,
     browserProvedNobody,
@@ -157,6 +199,53 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
         ['/widget-auth', '/api/auth/*', '/api/share', '/api/share/*', '/share/:slug', '/s/:slug'],
         (v) => handleAuthShareRoutes(ctx.authShareRoutesCtx, v),
       ),
+    // routes/voice-agent-llm.ts — one exact path, a vendor calling in.
+    (app) =>
+      claim(app, ctx, [VOICE_AGENT_LLM_PATH], (v) =>
+        handleVoiceAgentLlmRoute(ctx.voiceAgentLlmRoutesCtx, {
+          req: v.req,
+          pathname: v.pathname,
+          shareVisitor: v.visitor !== null,
+        }),
+      ),
+    // routes/recall-webhook.ts — Recall's status POST. It must be tried
+    // before the `/recall/` websocket upgrade in the chain's stream block,
+    // whose own test is `startsWith('/recall/')`. Hono is tried above that
+    // block, and nothing between claims `/recall/status`, so it still is.
+    (app) =>
+      claim(app, ctx, [RECALL_STATUS_PATH], (v) =>
+        handleRecallWebhookRoute(ctx.recallWebhookRoutesCtx, v),
+      ),
+    // routes/mcp-connector.ts — `/mcp`, the hosted connector.
+    (app) =>
+      claim(app, ctx, [MCP_CONNECTOR_PATH], (v) => handleMcpConnectorRoute(ctx.mcpConnectorCtx, v)),
+    // routes/agent-identity.ts — `/api/agent-token` and
+    // `/api/agents/<id>/{token,person,watches,merge}`. Registered before the
+    // private messages, which share the `/api/agents/` prefix, as in the chain.
+    (app) =>
+      claim(app, ctx, ['/api/agent-token', '/api/agents/:agentId/:verb'], (v) =>
+        handleAgentIdentityRoutes(ctx.agentIdentityRoutesCtx, v),
+      ),
+    // routes/board-tokens.ts — `/api/board-tokens` and below it.
+    (app) =>
+      claim(app, ctx, ['/api/board-tokens', '/api/board-tokens/*'], (v) =>
+        handleBoardTokenRoutes(ctx.boardTokenRoutesCtx, v),
+      ),
+    // routes/board-socket-roots.ts — one pattern, a walled lead's folders.
+    (app) =>
+      claim(app, ctx, ['/api/board-sockets/:ws/roots'], (v) =>
+        handleBoardSocketRootsRoutes(ctx.boardSocketRootsRoutesCtx, v),
+      ),
+    // routes/repos.ts — `/api/repos` and below it.
+    (app) =>
+      claim(app, ctx, ['/api/repos', '/api/repos/*'], (v) =>
+        handleRepoRoutes(ctx.repoRoutesCtx, v),
+      ),
+    // routes/load-reports.ts — two exact paths.
+    (app) =>
+      claim(app, ctx, ['/api/load-reports', '/api/load-reports/slowest'], (v) =>
+        handleLoadReportRoutes(ctx.loadReportRoutesCtx, v),
+      ),
     // routes/ops.ts — eight exact paths, four handlers that sat at three
     // positions in the chain. Each handler keeps its own visitor, loopback
     // and `cf-ray` refusals in its own order.
@@ -183,6 +272,11 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
     (app) =>
       claim(app, ctx, ['/mounts', '/mounts/*', '/api/mounts', '/api/mounts/*'], (v) =>
         handleMountRoutes(ctx.mountRoutesCtx, v),
+      ),
+    // routes/landing-stream.ts — the workspaces list's change feed.
+    (app) =>
+      claim(app, ctx, [LANDING_STREAM_PATH], (v) =>
+        handleLandingStreamRoute(ctx.landingStreamCtx, v),
       ),
     // routes/prompts.ts — its own test is `startsWith('/api/prompts')`.
     (app) =>
@@ -228,6 +322,12 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       ),
     // routes/inbox.ts through its feature — its own test is `startsWith('/inbox/')`.
     (app) => claim(app, ctx, ['/inbox/*'], (v) => ctx.inboxRoutes(v)),
+    // routes/private-messages.ts — `/api/me/messages` and an agent's reply
+    // to one person.
+    (app) =>
+      claim(app, ctx, ['/api/me/messages', '/api/agents/:agentId/messages/:personId'], (v) =>
+        handlePrivateMessageRoutes(ctx.privateMessageRoutesCtx, v),
+      ),
     // routes/keeper-holds.ts through its feature — one exact path.
     (app) => claim(app, ctx, [HOLDS_PATH], (v) => ctx.keeperHoldsRoutes(v)),
     // routes/coach.ts — its own test is `startsWith('/coach/')`.

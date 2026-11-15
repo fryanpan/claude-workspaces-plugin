@@ -9,7 +9,6 @@
  * gates proved about it travel as `ChainRequest`.
  */
 import type { addressesLocalOnlySet } from '../attachment-privacy.ts';
-import type { ConnectorHost } from '../connector/host.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { FeatureRoutes } from '../feature-module.ts';
 import type { IdentityRecord } from '../identities.ts';
@@ -21,31 +20,22 @@ import type {
   Attribution,
   RequestAttribution,
 } from '../request-attribution.ts';
-import type { SseBus } from '../sse.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
-import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
 import type { BoardImportRoutesContext } from './board-import.ts';
 import type { BoardLinkRoutesContext } from './board-links.ts';
-import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
-import type { BoardTokenRoutesContext } from './board-tokens.ts';
 import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
 import type { DocMoveRoutesContext } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
 import type { GithubHubRoutesContext } from './github-hub.ts';
 import type { HomeFeedRoutesContext } from './home-feed.ts';
 import type { HonoFront } from './hono-front.ts';
-import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
-import type { PrivateMessageRoutesContext } from './private-messages.ts';
-import type { RecallWebhookRoutesContext } from './recall-webhook.ts';
-import type { RepoRoutesContext } from './repos.ts';
 import type { ReviewFileRoutesContext } from './review-files.ts';
 import type { ShellStatic } from './shell-static.ts';
 import type { TaskRoutesContext } from './tasks.ts';
 import type { UpgradeStream } from './upgrade-stream.ts';
-import type { VoiceAgentLlmRoutesContext } from './voice-agent-llm.ts';
 import type { LibraryRoutesContext } from './workspace-library.ts';
 import type { WorkspaceRoutesContext } from './workspaces.ts';
 
@@ -84,8 +74,6 @@ export interface RequestChainContext {
    *  (`hono-families.ts`), tried below the gates and above every family the
    *  chain still holds. */
   honoFront: HonoFront;
-  voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
-  recallWebhookRoutesCtx: RecallWebhookRoutesContext;
   serveUpgradeAndStreamRoutes: UpgradeStream['serveUpgradeAndStreamRoutes'];
   taskStore: TaskStore;
   workspacesOfMember: (collection: string, memberId: string) => readonly string[];
@@ -95,16 +83,7 @@ export interface RequestChainContext {
   appRoutesCtx: AppRoutesContext;
   workspaceRoutesCtx: WorkspaceRoutesContext;
   taskRoutesCtx: TaskRoutesContext;
-  connectorHost: ConnectorHost;
-  /** The board whose socket a request arrived on (board-sockets.ts), or null. */
-  boardOfSocket: (req: Request) => string | null;
-  agentTokenKeyFor: () => string;
-  agentIdentityRoutesCtx: AgentIdentityRoutesContext;
-  boardTokenRoutesCtx: BoardTokenRoutesContext;
-  boardSocketRootsRoutesCtx: BoardSocketRootsRoutesContext;
   chatAuditRoutesCtx: ChatAuditRoutesContext;
-  repoRoutesCtx: RepoRoutesContext;
-  loadReportRoutesCtx: LoadReportRoutesContext;
   libraryRoutesCtx: LibraryRoutesContext;
   docMoveRoutesCtx: DocMoveRoutesContext;
   handleArchiveRoutes: ReturnType<typeof createArchiveRoutes>['handleArchiveRoutes'];
@@ -112,12 +91,9 @@ export interface RequestChainContext {
   meetingCalendarRoutesCtx: MeetingCalendarRoutesContext;
 
   // ── The top-level families and the tail (`request-chain-tail.ts`) ──
-  sse: SseBus;
   /** Every registered feature's routes (`features.ts`), tried at the
    *  position the inbox routes held. */
   featureRoutes: FeatureRoutes;
-  /** A person's private conversation with their own lead agent. */
-  privateMessageRoutesCtx: PrivateMessageRoutesContext;
   serveShellRoutes: ShellStatic['serveShellRoutes'];
   /** The wrong-form board links and the relative-link open route
    *  (`board-links.ts`). */
