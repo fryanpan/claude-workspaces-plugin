@@ -87,6 +87,16 @@ async function switchBoard(
   ws: string,
   on: boolean,
 ): Promise<{ on: boolean; active: boolean }> {
+  // Switching ON from loopback needs the owner's own proof
+  // (`owner-proof-widenings.test.ts`), and the route is not under test here,
+  // so on goes straight to the switch the route calls. Off is a narrowing,
+  // which the route applies for any local caller.
+  if (on) {
+    const handle = handles.find((h) => base.endsWith(`:${h.port}`));
+    if (!handle) throw new Error(`no server at ${base}`);
+    handle.collabCore.switch.set(ws, true);
+    return { on, active: handle.collabCore.switch.usesCore(ws) };
+  }
   const r = await post(base, `/workspaces/${ws}/collab-core`, { on });
   expect(r.status).toBe(200);
   return (await r.json()) as { on: boolean; active: boolean };

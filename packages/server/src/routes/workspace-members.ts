@@ -17,6 +17,12 @@
  *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
  *   POST   /workspaces/<id>/collab-core          the collab core on or off (owner)
  *
+ * A change that lets somebody do more needs the owner's own proof, because
+ * `requireOwner` passes every agent on this machine: a promotion to Owner
+ * files an access card, and view to comment, either to edit, enforce to report-only
+ * and collab-core off to on are refused with `owner-proof-required`. A
+ * narrowing applies at once.
+ *
  * The READ is a member's, deliberately: everything in a workspace is available
  * to everyone in it (`.claude/rules/workspace-board.md`), and a Regular User
  * who cannot see who else is on the board cannot know who reads what they
@@ -42,7 +48,12 @@ import { COLLAB_CORE_CHANGED } from '@claude-workspaces/core/workspace-presence'
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
-import { parseAccessRole, parseRolesMode, seatAndAccess } from '../share/board-access.ts';
+import {
+  parseAccessRole,
+  parseRolesMode,
+  seatAndAccess,
+  widensAccess,
+} from '../share/board-access.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
@@ -72,6 +83,18 @@ export async function handleWorkspaceMembers(
           message: "Only the board's owner changes who is in this board.",
         })
       : requireOwner(workspaceId);
+  /**
+   * A widening the owner did not make from the board's own page. Only the
+   * Owner promotion files a card; these three are switches the owner flips
+   * in Settings, so an agent's call is refused and changes nothing.
+   */
+  const refuseUnproven = (what: string): Response | null =>
+    proven()
+      ? null
+      : j(403, {
+          error: 'owner-proof-required',
+          message: `Only the board's owner ${what}, from the board's own page.`,
+        });
   /** Hang up what these members still have open on this board. */
   const hangUp = (emails: readonly string[]): { closedSockets: number; closedStreams: number } => {
     const keys = new Set(emails.map((e) => shareMemberKey(workspaceId, e)));
@@ -153,6 +176,11 @@ export async function handleWorkspaceMembers(
         accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
       );
     }
+    // View to comment, or either to edit, lets them do more: the owner's own.
+    if (accessBefore !== null && widensAccess(accessBefore, accessRole)) {
+      const unproven = refuseUnproven('widens what a member may do');
+      if (unproven) return unproven;
+    }
     if (!shareLinks.setMemberRole(workspaceId, email, role, access)) {
       return j(404, { error: 'not a member', workspaceId });
     }
@@ -180,6 +208,11 @@ export async function handleWorkspaceMembers(
     const body = await safeJson(req);
     const mode = parseRolesMode(body?.mode);
     if (!mode) return j(400, { error: "mode must be 'report-only' or 'enforce'" });
+    // Back to report-only applies comment and view members' edits again.
+    if (mode === 'report-only' && shareLinks.rolesModeOf(workspaceId) === 'enforce') {
+      const unproven = refuseUnproven('stops enforcing comment and view');
+      if (unproven) return unproven;
+    }
     shareLinks.setRolesMode(workspaceId, mode);
     console.error(`[roles] board ${workspaceId} roles mode set to ${mode}`);
     return j(200, { ok: true, workspaceId, rolesMode: mode });
@@ -195,6 +228,11 @@ export async function handleWorkspaceMembers(
     if (denied) return denied;
     const body = await safeJson(req);
     if (typeof body?.on !== 'boolean') return j(400, { error: 'on must be true or false' });
+    // On hands this board's writes to different code to judge: the owner's own.
+    if (body.on && !collabCoreSwitch.boardOn(workspaceId)) {
+      const unproven = refuseUnproven('turns the collab core on');
+      if (unproven) return unproven;
+    }
     try {
       collabCoreSwitch.set(workspaceId, body.on);
     } catch (err) {

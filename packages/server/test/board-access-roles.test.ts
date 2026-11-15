@@ -19,6 +19,7 @@ import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
+import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 import { waitFor } from './wait-for.ts';
@@ -110,9 +111,25 @@ describe('board roles over the real server', () => {
     expect(redeemed.status).toBe(302);
   };
 
+  /** The owner's own browser: Access proves the owner, the page says
+   *  same-origin. A widening from loopback alone is refused
+   *  (`owner-proof-widenings.test.ts`). */
+  const postOwner = async (path: string, body: unknown) =>
+    req(path, OWNER_HOST, {
+      method: 'POST',
+      headers: {
+        ...CF_RAY,
+        'x-forwarded-proto': 'https',
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+        origin: `https://${OWNER_HOST}`,
+        'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify(body),
+    });
   const setRole = (email: string, role: string) =>
-    postLocal(`/workspaces/${board}/members/${encodeURIComponent(email)}/role`, { role });
-  const setMode = (mode: string) => postLocal(`/workspaces/${board}/roles-mode`, { mode });
+    postOwner(`/workspaces/${board}/members/${encodeURIComponent(email)}/role`, { role });
+  const setMode = (mode: string) => postOwner(`/workspaces/${board}/roles-mode`, { mode });
 
   const open = async (headers: Record<string, string>, path = `docs/${docId}/y`) => {
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/workspaces/${board}/${path}`, {
@@ -183,6 +200,7 @@ describe('board roles over the real server', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
     });
     base = `http://127.0.0.1:${handle.port}`;
@@ -205,6 +223,7 @@ describe('board roles over the real server', () => {
   afterAll(async () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
+    resetOwnerIdentities();
   });
 
   it('tells each socket its role at connect, and the API sets all four', async () => {
