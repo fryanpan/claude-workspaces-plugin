@@ -772,6 +772,13 @@ export function presenceHue(label: string): number {
   return h;
 }
 
+/** A chip's hue. A person's comes from their name; an agent's from its id,
+ *  because an agent's label moves from its id to the name it points under
+ *  the first time it points, and its colour must not move with it. */
+export function chipHue(chip: Pick<PresenceChip, 'kind' | 'key' | 'label'>): number {
+  return presenceHue(chip.kind === 'agent' && chip.key.startsWith('a-') ? chip.key : chip.label);
+}
+
 /**
  * WHO a presence entry is, as opposed to which connection it arrived over.
  *

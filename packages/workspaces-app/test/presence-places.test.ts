@@ -5,7 +5,7 @@
  */
 import { AGENT_SPOTS_FIELD, PERSON_SPOT_FIELD } from '@claude-workspaces/core/workspace-presence';
 import { describe, expect, it } from 'vitest';
-import type { PresenceChip } from '../src/board/board-presence-model.ts';
+import { type PresenceChip, chipHue, presenceHue } from '../src/board/board-presence-model.ts';
 import {
   PAGE_TITLE_FIELD,
   placeChips,
@@ -134,6 +134,10 @@ describe('placeChips', () => {
       mine: { surface: 'board' },
     });
     expect(lead?.label).toBe('Harborlight');
+    // Its colour is keyed to its id, so the new name does not repaint it.
+    expect(lead && chipHue(lead)).toBe(chipHue(chip('a-agent-lead', 'agent-lead', 'agent')));
+    // CONTROL: the hue of the two labels differs, so the check above can fail.
+    expect(presenceHue('Harborlight')).not.toBe(presenceHue('agent-lead'));
     // CONTROL: an agent with no spot keeps the label it came with.
     const [quiet] = placeChips([chip('a-agent-quiet', 'agent-quiet', 'agent')], {
       states,

@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
+import { presenceHue } from '../src/board/board-presence-model.ts';
 // Types only: importing a value would run the driver in this process.
 import type { Round, Row, TwoLevelRun } from './presence-two-level-browser-driver.ts';
 
@@ -28,6 +29,20 @@ const SPAWN_MS = 210_000;
 /** Every surface is live: a change made elsewhere shows within 1s. The
  *  driver's polls give up at this bound, so a slower page fails the run. */
 const LIVE_MS = 1000;
+
+/** `hsl(h, 45%, 45%)`, the circles' fill, as the browser reports it. */
+function rgbOfHue(h: number): string {
+  const s = 0.45;
+  const l = 0.45;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return `rgb(${[0, 8, 4].map((n) => Math.round(f(n) * 255)).join(', ')})`;
+}
+
+/** The kit's lead (`follow-browser-kit.ts` LEAD), retyped: importing the kit
+ *  here would load a server into the test process. */
+const LEAD = { agentId: 'agent-house-lead', agentName: 'Harborlight' };
 
 let run: TwoLevelRun | null = null;
 const round = (width: number): Round => {
@@ -129,13 +144,17 @@ describe.skipIf(CHROME === null)('the two-level presence strip, in a browser', (
     }
   }, 60_000);
 
-  it('paints the lead the same colour, with the same initials, on the board and on a doc', () => {
+  it("paints the lead in its id's colour, with the same initials, on the board and on a doc", () => {
     for (const width of [1180, 430]) {
       const { leadOnBoard, leadOnDoc } = round(width);
       // CONTROL: the circle was read, and is filled.
       expect(leadOnBoard.fill, `at ${width}`).toMatch(/^rgb\(/);
       expect(leadOnDoc, `at ${width}`).toEqual(leadOnBoard);
       expect(leadOnBoard.initials).toBe('H');
+      // Keyed to the lead's id, so the colour did not move when its label
+      // became its name; the name's hue is a different colour.
+      expect(leadOnBoard.fill).toBe(rgbOfHue(presenceHue(`a-${LEAD.agentId}`)));
+      expect(rgbOfHue(presenceHue(LEAD.agentName))).not.toBe(leadOnBoard.fill);
     }
   }, 60_000);
 
