@@ -737,8 +737,8 @@ export async function handleWorkspaceTool(
         json: {
           path,
           meetingsPath,
-          ...(retention !== undefined ? { retention } : {}),
-          ...(gitignore !== undefined ? { gitignore } : {}),
+          retention,
+          gitignore,
         },
       });
       return ok(await res.json());

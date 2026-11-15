@@ -98,7 +98,7 @@ export async function handleTaskFields(
   const taskTitleMatch = matchRest(scope, /^tasks\/([^/]+)\/title$/);
   if (taskTitleMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskTitleMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TitleBody>(await safeJson(req));
     const title = typeof body?.title === 'string' ? body.title.trim() : '';
     if (title.length === 0) return j(400, { error: 'title required' });
     const author = authorFor(body?.author);
@@ -112,7 +112,7 @@ export async function handleTaskFields(
     taskProjection.refreshTask(res.task);
     // A decision ticket's headline just moved — see `regateDecisionWords`.
     if (res.changed) await regateDecisionWords(taskId, author);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   // update_task_body: replace a task's description after creation.
   // The body is a live `task:<id>` live doc, so this goes THROUGH that
@@ -127,7 +127,7 @@ export async function handleTaskFields(
   const taskBodyMatch = matchRest(scope, /^tasks\/([^/]+)\/body$/);
   if (taskBodyMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskBodyMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TaskBodyBody>(await safeJson(req));
     const markdown = typeof body?.markdown === 'string' ? body.markdown : '';
     // Optional: shaping retitles and rewrites in ONE act, so a clipped
     // capture title is not left behind by the pass that fixed its body.
@@ -152,10 +152,7 @@ export async function handleTaskFields(
     // `rewrite_task` uses to fix a held decision.
     await regateDecisionWords(taskId, author);
     const rewritten = taskStore.getTask(taskId);
-    return j(200, {
-      ok: true,
-      task: rewritten,
-    });
+    return j(200, answerAs<C.TaskBodyAnswer>({ ok: true, task: rewritten }));
   }
   // assign_task (§3.6 task.assigned): hand a task between the human and
   // the agent (or a named identity). Status is untouched — a hand-off
