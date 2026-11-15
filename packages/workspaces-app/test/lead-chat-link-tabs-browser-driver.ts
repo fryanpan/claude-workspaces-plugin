@@ -26,13 +26,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -44,6 +38,13 @@ import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import {
+  CDP_MS,
+  CHROME_LOG_ARGS,
+  connectWatched,
+  dumpRunning,
+  onceWithin,
+} from './chrome-stall.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -149,6 +150,8 @@ const PAGE = `(() => ({
 }))()`;
 
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
+/** A limit for a request to Chrome's own HTTP endpoint. */
+const bound = () => AbortSignal.timeout(CDP_MS);
 
 interface Opened {
   cdp: Cdp;
@@ -164,6 +167,7 @@ async function openBrowser(width: number, height: number): Promise<Opened> {
         '--use-fake-device-for-media-stream',
         '--mute-audio',
         '--autoplay-policy=no-user-gesture-required',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-link-tabs-${width}-${process.pid}`,
@@ -171,7 +175,7 @@ async function openBrowser(width: number, height: number): Promise<Opened> {
       browsers.push(started);
     },
   );
-  const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
+  const cdp = await connectWatched(b, `page at ${width}`, step);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   const mobile = width <= 1100;
@@ -193,7 +197,7 @@ async function openBrowser(width: number, height: number): Promise<Opened> {
 
 /** Every page tab the browser holds. */
 async function tabs(port: number): Promise<Array<{ id: string; url: string }>> {
-  const res = await fetch(`http://127.0.0.1:${port}/json/list`);
+  const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: bound() });
   const list = (await res.json()) as Array<{ id: string; type: string; url: string }>;
   return list.filter((t) => t.type === 'page').map((t) => ({ id: t.id, url: t.url }));
 }
@@ -362,7 +366,7 @@ async function main(): Promise<void> {
         step(`${link} by ${gesture} at ${width}`);
         for (let i = 0; i < 2; i++) {
           if (i === 1) await cdp.evaluate('sessionStorage.clear()');
-          const loaded = cdp.once('Page.loadEventFired');
+          const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
           await cdp.send('Page.navigate', { url: homeUrl });
           await loaded;
         }
@@ -433,7 +437,9 @@ async function main(): Promise<void> {
               8000,
             ).catch(() => false);
         for (const t of await tabs(port)) {
-          if (!before.has(t.id)) await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`);
+          if (!before.has(t.id)) {
+            await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`, { signal: bound() });
+          }
         }
         cases.push({
           width,
@@ -451,6 +457,9 @@ async function main(): Promise<void> {
     }
     const run: LinkTabsRun = { workspaceId: ws, docPath, mockPath, externalUrl, cases };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(step);
+    throw e;
   } finally {
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
     await handle?.stop();
@@ -460,9 +469,9 @@ async function main(): Promise<void> {
 
 setTimeout(() => {
   step('gave up after 230s');
-  void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
-    process.exit(3),
-  );
+  void dumpRunning(step)
+    .finally(() => Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))))
+    .finally(() => process.exit(3));
 }, 230_000).unref();
 await main();
 process.exit(0);

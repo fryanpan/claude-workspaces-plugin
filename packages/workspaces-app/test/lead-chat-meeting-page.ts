@@ -12,8 +12,10 @@
 import { type Cdp, sleep, withTimeout } from '../../../scripts/headless-chrome.ts';
 import type { Rect } from './lead-chat-browser-reading.ts';
 
-/** One CDP answer. Generous: a loaded runner answers in well under a second. */
-const CDP_MS = 15_000;
+/** One CDP answer. Generous: a loaded runner answers in well under a second.
+ *  Above `chrome-stall.ts`'s 15s, so its bound fires first and the error
+ *  thrown carries the browser's state rather than this plain one. */
+const CDP_MS = 20_000;
 /** A page's load event, after which the agent button still has `until`'s 20s. */
 const LOAD_MS = 30_000;
 
