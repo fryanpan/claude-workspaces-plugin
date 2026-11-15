@@ -1,15 +1,9 @@
 # Read by `bun test` from the repo root (the documented gate invocation).
-# The preload makes descriptor exhaustion from concurrent worktree suite
-# runs fail with a message that names contention, instead of surfacing as a
-# bare EMFILE inside whichever test was running. See
-# packages/server/test/fd-contention.ts.
+# The preloads bind test servers to 127.0.0.1, scale the doc cadences, and
+# make descriptor exhaustion name itself; packages/server/test/suite.preload.ts
+# lists them.
 [test]
-preload = [
-  # Ordered: the timing scale must be in the environment before any test file
-  # imports the server, because the doc cadences resolve at module load.
-  "./packages/server/test/timing.preload.ts",
-  "./packages/server/test/fd-contention.preload.ts",
-  # Every test server binds 127.0.0.1, so no other loopback listener can
-  # answer a connect meant for it.
-  "./packages/server/test/loopback-bind.preload.ts",
-]
+# One entry point, also named by packages/server/bunfig.toml and
+# packages/server/test/bunfig.toml, so a run started in either directory
+# loads the same preloads. The list and its order are in the file.
+preload = ["./packages/server/test/suite.preload.ts"]
