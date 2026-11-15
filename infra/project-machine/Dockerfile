@@ -13,6 +13,9 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml tsconfig.json tsconfig.base.json ./
 COPY packages ./packages
 COPY demos ./demos
+# Every root workspace glob has to be here, or bun.lock names a workspace the
+# image lacks and `bun install --frozen-lockfile` refuses the build.
+COPY templates ./templates
 COPY infra/project-machine ./infra/project-machine
 # The server imports the board router's path parser from here.
 COPY infra/board-router-worker ./infra/board-router-worker
