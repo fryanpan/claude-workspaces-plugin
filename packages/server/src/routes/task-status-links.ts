@@ -18,6 +18,7 @@ import {
 import { BAD_REF_ERROR } from '../task-create.ts';
 import { type TaskStatus, isValidRef, taskChip } from '../tasks.ts';
 import { answerAs, sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
 import {
   type TaskRouteRequest,
   type TaskRoutesContext,
@@ -201,7 +202,7 @@ export async function handleTaskStatusAndLinks(
   // narrowing the task-scoped twin above already applies to a visitor,
   // applied to everyone, because the address now names whose question it is.
   if (restIs(scope, 'refs:backlinks') && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<T.RefBody>(await safeJson(req));
     const ref = body?.ref;
     // A malformed ref must NOT fall through to an empty answer: [] and
     // "I didn't understand you" are indistinguishable to the caller,
@@ -211,7 +212,7 @@ export async function handleTaskStatusAndLinks(
       .backlinksFor(ref)
       .filter((t) => t.workspaceId === scope.workspaceId)
       .map(taskChip);
-    return j(200, { ref, tasks });
+    return j(200, answerAs<T.BacklinksAnswer>({ ref, tasks }));
   }
   // Mine the links people already wrote into structured refs — every
   // doc body, task body, goal body, and stored url ref, both
@@ -338,7 +339,7 @@ export async function handleTaskStatusAndLinks(
   }
   if (taskLinksMatch && (req.method === 'POST' || req.method === 'DELETE')) {
     const taskId = decodeURIComponent(taskLinksMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<T.RefBody>(await safeJson(req));
     const ref = body?.ref;
     if (!isValidRef(ref)) return j(400, { error: BAD_REF_ERROR });
     // The ref names its target in the BODY, so the path check that admitted
@@ -359,7 +360,7 @@ export async function handleTaskStatusAndLinks(
     // row for them), so refresh the projection by hand — the same
     // pattern as createWorkspace/attachDoc above.
     taskProjection.refreshTask(res.task);
-    return j(200, { ok: true, changed: res.changed, task: res.task });
+    return j(200, answerAs<T.LinkAnswer>({ ok: true, changed: res.changed, task: res.task }));
   }
   // set_task_goal (§3.10): goal + exact position — the write
   // half of triage and the board's regroup gesture. Every field here is

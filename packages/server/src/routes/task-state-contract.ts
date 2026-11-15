@@ -2,9 +2,9 @@ import type { ExternalWait } from '@claude-workspaces/core/task-wire';
 /**
  * The contract for the routes that move one task or change one of its
  * fields: its status, owner, blockers, wait, goal band, schedule, and its
- * archive (`route-contract.ts` says what a contract is). Two families serve
- * them: `task-status-links.ts` (the transition and the goal band) and
- * `task-fields.ts` (the rest).
+ * archive, title and body (`route-contract.ts` says what a contract is). Two
+ * families serve them: `task-status-links.ts` (the transition and the goal
+ * band) and `task-fields.ts` (the rest).
  *
  * Every body carries `author`, which `authorFor` resolves, so it is
  * `unknown` here.
@@ -59,6 +59,18 @@ export interface ScheduleBody {
   output?: unknown;
   author?: unknown;
 }
+export interface TitleBody {
+  title: string;
+  reason?: string;
+  author?: unknown;
+}
+/** A body rewrite may retitle the row in the same act. */
+export interface TaskBodyBody {
+  markdown: string;
+  title?: string;
+  reason?: string;
+  author?: unknown;
+}
 export interface TaskGoalBody {
   goal: string;
   position?: number;
@@ -96,6 +108,11 @@ export interface WaitAnswer {
   changed?: boolean;
   wait?: ExternalWait;
 }
+/** The rewritten row, read back after the body's live doc flushed. */
+export interface TaskBodyAnswer {
+  ok: true;
+  task: Task | undefined;
+}
 export interface ScheduleAnswer {
   ok: true;
   task: Task;
@@ -112,6 +129,8 @@ export const taskStateContract = new Hono()
   .post(`${task}/restore`, json<RestoreTaskBody>(), answers<TaskChange>())
   .post(`${task}/after`, json<AfterBody>(), answers<TaskChange>())
   .post(`${task}/schedule`, json<ScheduleBody>(), answers<ScheduleAnswer>())
-  .post(`${task}/goal`, json<TaskGoalBody>(), answers<TaskChange>());
+  .post(`${task}/goal`, json<TaskGoalBody>(), answers<TaskChange>())
+  .post(`${task}/title`, json<TitleBody>(), answers<TaskChange>())
+  .post(`${task}/body`, json<TaskBodyBody>(), answers<TaskBodyAnswer>());
 
 export type TaskStateContract = typeof taskStateContract;

@@ -19,6 +19,7 @@ import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
 import { shareContract } from '../src/routes/share-contract.ts';
+import { taskContentContract } from '../src/routes/task-content-contract.ts';
 import { taskStateContract } from '../src/routes/task-state-contract.ts';
 
 const answers = JSON.parse(
@@ -87,6 +88,17 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
     // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
     app: taskStateContract as unknown as Hono<any>,
     servedBy: ['task-fields.ts:handleTaskFields', 'task-status-links.ts:handleTaskStatusAndLinks'],
+  },
+  {
+    name: 'task content',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: taskContentContract as unknown as Hono<any>,
+    servedBy: [
+      'tasks-batch.ts:handleTaskBatch',
+      'workspace-content.ts:handleWorkspaceContent',
+      'task-done-when.ts:handleTaskDoneWhen',
+      'task-status-links.ts:handleTaskStatusAndLinks',
+    ],
   },
 ];
 
