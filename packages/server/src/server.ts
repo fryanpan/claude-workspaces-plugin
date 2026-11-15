@@ -321,6 +321,7 @@ export type { MountsApi } from './routes/mounts-api.ts';
 export type { AgentNotesContract } from './routes/agent-notes-contract.ts';
 export type { AttachmentsContract } from './routes/attachments-contract.ts';
 export type { ShareContract } from './routes/share-contract.ts';
+export type { TaskStateContract } from './routes/task-state-contract.ts';
 export type { DocEditsContract } from './routes/doc-edits-contract.ts';
 export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
 export type {

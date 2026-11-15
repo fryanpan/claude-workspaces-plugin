@@ -10,6 +10,7 @@ export type {
   DocThreadsContract,
   MountsApi,
   ShareContract,
+  TaskStateContract,
   ThreadByFindBody,
   ThreadCreateBody,
 } from './server.ts';
