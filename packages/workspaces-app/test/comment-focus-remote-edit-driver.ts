@@ -41,6 +41,7 @@ import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import {
   ABOVE,
   BELOW,
+  BURST_WORDS,
   CHUNKS,
   FILLER,
   HELPERS,
@@ -48,6 +49,7 @@ import {
   PHRASE,
   PLAN,
   TARGET,
+  WATCH_BURST,
   scrollAnchorTo,
 } from './comment-focus-remote-edit-page.ts';
 import type {
@@ -57,15 +59,6 @@ import type {
   FocusRun,
   FocusScenario,
 } from './comment-focus-remote-edit-reading.ts';
-
-/** What the reader types after each edit of the burst: long enough that
- *  the box wraps onto a new line during it, whatever the font. */
-const BURST_WORDS = [
-  'and the Harborlight pilots board at the north quay before the tide turns ',
-  'then the Riverbend ferry waits at the middle berth for the evening freight ',
-  'and the Saltmarsh tide table decides which slipway takes the loaded ferry ',
-  'then Alice and Bob sign the survey and send it to the harbour office ',
-];
 
 /** Past `onComposerOpened`'s 500ms keyboard fallback. */
 const PAST_OPEN_FOLLOW_MS = 800;
@@ -356,10 +349,11 @@ async function scenario(
     {
       where: 'burst',
       marker: 'Bob lengthens pier 16',
-      // Four edits inside a second, a word typed after each, the way a
-      // builder revising a doc section by section sends them.
+      // Four edits back to back, a word typed after each, the way a builder
+      // revising a doc section by section sends them. Nothing settles the
+      // page in between; the page's own log (WATCH_BURST) is the check.
       run: async () => {
-        const t0 = Date.now();
+        await page.cdp.evaluate(WATCH_BURST);
         for (const [i, send] of [
           () => lengthen(12, 'Riverbend'),
           () =>
@@ -374,8 +368,6 @@ async function scenario(
           // Enough words that the box wraps onto a new line on any font.
           await type(BURST_WORDS[i] ?? '');
         }
-        const ms = Date.now() - t0;
-        if (ms >= 1000) throw new Error(`the burst took ${ms}ms, not under a second`);
       },
     },
   ];
@@ -398,7 +390,18 @@ async function scenario(
     // The reader keeps typing. Whatever box holds focus gets the words.
     await type(CHUNKS[i + 1] ?? '');
     const after = await page.settle();
-    steps.push({ where: edit.where, before, landed, after, typed });
+    const burstLog =
+      edit.where === 'burst'
+        ? ((await page.cdp.evaluate('window.__burstLog')) as string[])
+        : undefined;
+    steps.push({
+      where: edit.where,
+      before,
+      landed,
+      after,
+      typed,
+      ...(burstLog ? { burstLog } : {}),
+    });
   }
   const final = await page.settle();
   page.cdp.close();
