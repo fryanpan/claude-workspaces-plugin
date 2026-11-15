@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.377";
+var version2 = "0.1.378";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20204,6 +20204,7 @@ var attachmentsClient = (http) => typedClient(http);
 var shareClient = (http) => typedClient(http);
 var agentNotesClient = (http) => typedClient(http);
 var taskStateClient = (http) => typedClient(http);
+var taskContentClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -20342,8 +20343,8 @@ async function handleDocsTool(name, a, ctx) {
         json: {
           author: AUTHOR,
           text,
-          ...review !== undefined ? { review } : {},
-          ...to !== undefined ? { to } : {}
+          review,
+          to
         }
       }).then((r) => r.json());
       return ok2(res);
@@ -20352,7 +20353,7 @@ async function handleDocsTool(name, a, ctx) {
       const { docId, threadId, item, text } = a;
       const res = await threadsApi().threads[":threadId"]["linked-items"].$post({
         param: threadParam(docId, threadId),
-        json: { author: AUTHOR, item, ...text !== undefined ? { text } : {} }
+        json: { author: AUTHOR, item, text }
       }).then((r) => r.json());
       return ok2(res);
     }
@@ -20360,7 +20361,7 @@ async function handleDocsTool(name, a, ctx) {
       const { docId, threadId, commentId, text, reason } = a;
       const res = await threadsApi().threads[":threadId"]["edit-comment"].$post({
         param: threadParam(docId, threadId),
-        json: { author: AUTHOR, commentId, text, ...reason !== undefined ? { reason } : {} }
+        json: { author: AUTHOR, commentId, text, reason }
       }).then((r) => r.json());
       return ok2(res);
     }
@@ -20726,7 +20727,7 @@ async function handleDocsTool(name, a, ctx) {
       const { docId, threadId, markdown, placement } = a;
       const res = await threadsApi().threads[":threadId"].insert_blocks_after.$post({
         param: threadParam(docId, threadId),
-        json: { ...scoped(), markdown, ...placement !== undefined ? { placement } : {} }
+        json: { ...scoped(), markdown, placement }
       }).then((r) => r.json());
       return ok2(res);
     }
@@ -21549,6 +21550,8 @@ async function handleTaskTool(name, a, ctx) {
   const board = () => boardPathOf(name, a);
   const threadsApi = () => docThreadsClient(http).workspaces[":ws"].docs[":docId"];
   const taskApi = () => taskStateClient(http).workspaces[":ws"].tasks[":taskId"];
+  const contentApi = () => taskContentClient(http).workspaces[":ws"];
+  const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
   const taskParam = (taskId) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     taskId: encodeURIComponent(taskId)
@@ -21561,7 +21564,10 @@ async function handleTaskTool(name, a, ctx) {
   switch (name) {
     case "create_tasks": {
       const { workspaceId, tasks, sourceDoc } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/tasks/batch`, { tasks, author: AUTHOR, ...sourceDoc !== undefined ? { sourceDoc } : {} });
+      const res = await (await contentApi().tasks.batch.$post({
+        param: { ws: encodeURIComponent(workspaceId) },
+        json: { tasks, author: AUTHOR, sourceDoc }
+      })).json();
       const gapsFor = (taskId) => res.shapeGaps?.find((g) => g.taskId === taskId)?.gaps ?? undefined;
       const adviceFor = (taskId) => res.reviewAdvice?.find((r) => r.taskId === taskId)?.advice ?? undefined;
       const visibilityFor = (taskId) => res.visibility?.find((v) => v.taskId === taskId)?.note ?? undefined;
@@ -21603,14 +21609,14 @@ async function handleTaskTool(name, a, ctx) {
         param: threadParam(docId, threadId),
         json: {
           workspaceId,
-          ...title !== undefined ? { title } : {},
-          ...body !== undefined ? { body } : {},
-          ...assignee !== undefined ? { assignee } : {},
-          ...assigneeKind !== undefined ? { assigneeKind } : {},
-          ...needs !== undefined ? { needs } : {},
-          ...goal !== undefined ? { goal } : {},
-          ...dueAt !== undefined ? { dueAt } : {},
-          ...links !== undefined ? { links } : {},
+          title,
+          body,
+          assignee,
+          assigneeKind,
+          needs,
+          goal,
+          dueAt,
+          links,
           author: AUTHOR
         }
       }).then((r) => r.json());
@@ -21802,22 +21808,17 @@ async function handleTaskTool(name, a, ctx) {
       }
       let doneWhenLines;
       if (doneWhen !== undefined) {
-        const dw = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when`, {
-          lines: doneWhen,
-          author: AUTHOR
-        });
+        const dw = await (await contentApi().tasks[":taskId"]["done-when"].$post({
+          param: taskParam(taskId),
+          json: { lines: doneWhen, author: AUTHOR }
+        })).json();
         doneWhenLines = dw.lines;
       }
-      if (body === undefined && title === undefined) {
-        return ok2({ taskId, doneWhen: doneWhenLines });
-      }
       if (body !== undefined) {
-        const res2 = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/body`, {
-          markdown: body,
-          ...title !== undefined ? { title } : {},
-          ...reason !== undefined ? { reason } : {},
-          author: AUTHOR
-        });
+        const res2 = await (await taskApi().body.$post({
+          param: taskParam(taskId),
+          json: { markdown: body, title, reason, author: AUTHOR }
+        })).json();
         return ok2({
           taskId,
           title: res2.task?.title,
@@ -21826,11 +21827,12 @@ async function handleTaskTool(name, a, ctx) {
           ...doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}
         });
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/title`, {
-        title,
-        ...reason !== undefined ? { reason } : {},
-        author: AUTHOR
-      });
+      if (title === undefined)
+        return ok2({ taskId, doneWhen: doneWhenLines });
+      const res = await (await taskApi().title.$post({
+        param: taskParam(taskId),
+        json: { title, reason, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         title: res.task?.title,
@@ -21843,7 +21845,10 @@ async function handleTaskTool(name, a, ctx) {
       if (!Array.isArray(lines) || lines.length === 0) {
         return err2("lines must name at least one done-when line to report");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`, { lines, author: AUTHOR });
+      const res = await (await contentApi().tasks[":taskId"]["done-when"].report.$post({
+        param: taskParam(taskId),
+        json: { lines, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         lines: res.lines,
@@ -21928,7 +21933,7 @@ async function handleTaskTool(name, a, ctx) {
             json: {
               text,
               commentId: address.commentId,
-              ...answeredWith !== undefined ? { optionId: answeredWith } : {},
+              optionId: answeredWith,
               author: AUTHOR
             }
           }).then((r) => r.json());
@@ -22154,26 +22159,28 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "import_tasks_markdown": {
       const { workspaceId, path, apply } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/import-tasks`, { path, ...apply !== undefined ? { apply } : {}, author: AUTHOR });
-      return ok2(res);
+      const res = await contentApi()["import-tasks"].$post({
+        param: { ws: encodeURIComponent(workspaceId) },
+        json: { path, apply, author: AUTHOR }
+      });
+      return ok2(await res.json());
     }
     case "link_refs": {
       const { taskId, ref } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref
-      });
+      const res = await (await contentApi().tasks[":taskId"].links.$post({ param: taskParam(taskId), json: { ref } })).json();
       return ok2({ taskId, changed: res.changed });
     }
     case "list_backlinks": {
       const { ref } = a;
-      const res = await http("POST", `${board()}/refs:backlinks`, { ref });
+      const res = await (await contentApi()["refs:backlinks"].$post({ param: boardParam(), json: { ref } })).json();
       return ok2({ ref, tasks: res.tasks });
     }
     case "unlink_refs": {
       const { taskId, ref } = a;
-      const res = await http("DELETE", `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref
-      });
+      const res = await (await contentApi().tasks[":taskId"].links.$delete({
+        param: taskParam(taskId),
+        json: { ref }
+      })).json();
       return ok2({ taskId, changed: res.changed });
     }
   }
@@ -22703,8 +22710,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         json: {
           path,
           meetingsPath,
-          ...retention !== undefined ? { retention } : {},
-          ...gitignore !== undefined ? { gitignore } : {}
+          retention,
+          gitignore
         }
       });
       return ok2(await res.json());

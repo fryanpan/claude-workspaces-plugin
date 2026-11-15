@@ -362,6 +362,9 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/assignee` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/body` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/detail` | GET | `routes/task-detail.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/done-when` | POST | `routes/task-done-when.ts` | trusted-local |  |
+| `/workspaces/:ws/tasks/:taskId/done-when/:lineId/check` | POST | `routes/task-done-when.ts` | trusted-local |  |
+| `/workspaces/:ws/tasks/:taskId/done-when/report` | POST | `routes/task-done-when.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/due` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/evidence` | POST | `routes/task-status-links.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/goal` | POST | `routes/task-status-links.ts` | share-scope |  |

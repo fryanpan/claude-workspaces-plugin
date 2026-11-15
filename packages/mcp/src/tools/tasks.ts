@@ -32,7 +32,7 @@ import type { HeldFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
-import { docThreadsClient, taskStateClient } from '../server-client.ts';
+import { docThreadsClient, taskContentClient, taskStateClient } from '../server-client.ts';
 import {
   LIST_TASK_FIELDS,
   NEXT_TASK_FIELDS,
@@ -226,6 +226,9 @@ export async function handleTaskTool(
   const threadsApi = () => docThreadsClient(http).workspaces[':ws'].docs[':docId'];
   /** One task's state routes, through the typed client. */
   const taskApi = () => taskStateClient(http).workspaces[':ws'].tasks[':taskId'];
+  /** The board's content routes: new rows, done-when, links. */
+  const contentApi = () => taskContentClient(http).workspaces[':ws'];
+  const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
   const taskParam = (taskId: string) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     taskId: encodeURIComponent(taskId),
@@ -242,26 +245,12 @@ export async function handleTaskTool(
         tasks: unknown[];
         sourceDoc?: { docId: string; mode?: 'plan' | 'discussion' };
       };
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/tasks/batch`,
-        { tasks, author: AUTHOR, ...(sourceDoc !== undefined ? { sourceDoc } : {}) },
-      )) as {
-        tasks: TaskPayload[];
-        failures: Array<{ index: number; title?: string; error: string; message?: string }>;
-        ignoredLinks?: Array<{ taskId: string; ignored: unknown[] }>;
-        shapeGaps?: Array<{ taskId: string; gaps: string[] }>;
-        reviewAdvice?: Array<{ taskId: string; advice: string }>;
-        held?: Array<{
-          taskId: string;
-          reviewItemId: string;
-          heldReason: string;
-          message: string;
-        }>;
-        visibility?: Array<{ taskId: string; note: string }>;
-        placement?: { unplaced: string[]; goals: unknown[] };
-        sourceDoc?: { docId: string; mode: string; held: boolean };
-      };
+      const res = await (
+        await contentApi().tasks.batch.$post({
+          param: { ws: encodeURIComponent(workspaceId) },
+          json: { tasks, author: AUTHOR, sourceDoc },
+        })
+      ).json();
       const gapsFor = (taskId: string) =>
         res.shapeGaps?.find((g) => g.taskId === taskId)?.gaps ?? undefined;
       // Two advice vocabularies on one response, each about its own half:
@@ -349,14 +338,14 @@ export async function handleTaskTool(
           param: threadParam(docId, threadId),
           json: {
             workspaceId,
-            ...(title !== undefined ? { title } : {}),
-            ...(body !== undefined ? { body } : {}),
-            ...(assignee !== undefined ? { assignee } : {}),
-            ...(assigneeKind !== undefined ? { assigneeKind } : {}),
-            ...(needs !== undefined ? { needs } : {}),
-            ...(goal !== undefined ? { goal } : {}),
-            ...(dueAt !== undefined ? { dueAt } : {}),
-            ...(links !== undefined ? { links } : {}),
+            title,
+            body,
+            assignee,
+            assigneeKind,
+            needs,
+            goal,
+            dueAt,
+            links,
             author: AUTHOR,
           },
         })
@@ -725,25 +714,24 @@ export async function handleTaskTool(
       // rather than after.
       let doneWhenLines: unknown;
       if (doneWhen !== undefined) {
-        const dw = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/done-when`, {
-          lines: doneWhen,
-          author: AUTHOR,
-        })) as { lines?: unknown };
+        const dw = await (
+          await contentApi().tasks[':taskId']['done-when'].$post({
+            param: taskParam(taskId),
+            json: { lines: doneWhen, author: AUTHOR },
+          })
+        ).json();
         doneWhenLines = dw.lines;
-      }
-      if (body === undefined && title === undefined) {
-        return ok({ taskId, doneWhen: doneWhenLines });
       }
       if (body !== undefined) {
         // Body (with or without a title): one attributed act through the
         // /body route — ONE task.body_edited carrying both titles when the
         // same call renamed the row.
-        const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/body`, {
-          markdown: body,
-          ...(title !== undefined ? { title } : {}),
-          ...(reason !== undefined ? { reason } : {}),
-          author: AUTHOR,
-        })) as { task: TaskPayload };
+        const res = await (
+          await taskApi().body.$post({
+            param: taskParam(taskId),
+            json: { markdown: body, title, reason, author: AUTHOR },
+          })
+        ).json();
         // `quote` back, because this call is the one that can have filled
         // it: the caller sees the words it just preserved without a second
         // read.
@@ -755,13 +743,15 @@ export async function handleTaskTool(
           ...(doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}),
         });
       }
+      if (title === undefined) return ok({ taskId, doneWhen: doneWhenLines });
       // Title-only: the /title route, which emits an attributed
       // task.retitled when the name actually moves.
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/title`, {
-        title,
-        ...(reason !== undefined ? { reason } : {}),
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed?: boolean };
+      const res = await (
+        await taskApi().title.$post({
+          param: taskParam(taskId),
+          json: { title, reason, author: AUTHOR },
+        })
+      ).json();
       return ok({
         taskId,
         title: res.task?.title,
@@ -777,11 +767,12 @@ export async function handleTaskTool(
       if (!Array.isArray(lines) || lines.length === 0) {
         return err('lines must name at least one done-when line to report');
       }
-      const res = (await http(
-        'POST',
-        `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`,
-        { lines, author: AUTHOR },
-      )) as { lines: unknown[]; closed: boolean; status: string; held?: unknown[] };
+      const res = await (
+        await contentApi().tasks[':taskId']['done-when'].report.$post({
+          param: taskParam(taskId),
+          json: { lines, author: AUTHOR },
+        })
+      ).json();
       // `held`: owner checks the quality gate kept off the reader's queue,
       // each with the reason and the report that lifts it.
       return ok({
@@ -944,7 +935,7 @@ export async function handleTaskTool(
               json: {
                 text,
                 commentId: address.commentId,
-                ...(answeredWith !== undefined ? { optionId: answeredWith } : {}),
+                optionId: answeredWith,
                 author: AUTHOR,
               },
             })
@@ -1343,32 +1334,34 @@ export async function handleTaskTool(
       };
       // The route result is already the trimmed shape: the mapping on a
       // dry-run; ids + titles + counts (never full task objects) on apply.
-      const res = await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/import-tasks`,
-        { path, ...(apply !== undefined ? { apply } : {}), author: AUTHOR },
-      );
-      return ok(res);
+      const res = await contentApi()['import-tasks'].$post({
+        param: { ws: encodeURIComponent(workspaceId) },
+        json: { path, apply, author: AUTHOR },
+      });
+      return ok(await res.json());
     }
     case 'link_refs': {
       const { taskId, ref } = a as { taskId: string; ref: unknown };
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref,
-      })) as { changed: boolean };
+      const res = await (
+        await contentApi().tasks[':taskId'].links.$post({ param: taskParam(taskId), json: { ref } })
+      ).json();
       return ok({ taskId, changed: res.changed });
     }
     case 'list_backlinks': {
       const { ref } = a as { ref: unknown };
-      const res = (await http('POST', `${board()}/refs:backlinks`, { ref })) as {
-        tasks: unknown[];
-      };
+      const res = await (
+        await contentApi()['refs:backlinks'].$post({ param: boardParam(), json: { ref } })
+      ).json();
       return ok({ ref, tasks: res.tasks });
     }
     case 'unlink_refs': {
       const { taskId, ref } = a as { taskId: string; ref: unknown };
-      const res = (await http('DELETE', `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref,
-      })) as { changed: boolean };
+      const res = await (
+        await contentApi().tasks[':taskId'].links.$delete({
+          param: taskParam(taskId),
+          json: { ref },
+        })
+      ).json();
       return ok({ taskId, changed: res.changed });
     }
   }

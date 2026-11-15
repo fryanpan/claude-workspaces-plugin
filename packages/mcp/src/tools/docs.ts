@@ -241,8 +241,8 @@ export async function handleDocsTool(
           json: {
             author: AUTHOR,
             text,
-            ...(review !== undefined ? { review } : {}),
-            ...(to !== undefined ? { to } : {}),
+            review,
+            to,
           },
         })
         .then((r) => r.json());
@@ -258,7 +258,7 @@ export async function handleDocsTool(
       const res = await threadsApi()
         .threads[':threadId']['linked-items'].$post({
           param: threadParam(docId, threadId),
-          json: { author: AUTHOR, item, ...(text !== undefined ? { text } : {}) },
+          json: { author: AUTHOR, item, text },
         })
         .then((r) => r.json());
       return ok(res);
@@ -274,7 +274,7 @@ export async function handleDocsTool(
       const res = await threadsApi()
         .threads[':threadId']['edit-comment'].$post({
           param: threadParam(docId, threadId),
-          json: { author: AUTHOR, commentId, text, ...(reason !== undefined ? { reason } : {}) },
+          json: { author: AUTHOR, commentId, text, reason },
         })
         .then((r) => r.json());
       return ok(res);
@@ -862,7 +862,7 @@ export async function handleDocsTool(
       const res = await threadsApi()
         .threads[':threadId'].insert_blocks_after.$post({
           param: threadParam(docId, threadId),
-          json: { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
+          json: { ...scoped(), markdown, placement },
         })
         .then((r) => r.json());
       return ok(res);

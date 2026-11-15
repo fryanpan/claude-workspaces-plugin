@@ -10,6 +10,7 @@ export type {
   DocThreadsContract,
   MountsApi,
   ShareContract,
+  TaskContentContract,
   TaskStateContract,
   ThreadByFindBody,
   ThreadCreateBody,

@@ -527,6 +527,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/task-grants.ts', [
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/grant', 'POST'],
   ]),
+  ...family('routes/task-done-when.ts', [
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/report', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/:lineId/check', 'POST'],
+  ]),
   ...family('routes/task-fields.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/after', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/title', 'POST'],

@@ -29,6 +29,7 @@ import type {
   DocThreadsContract,
   MountsApi,
   ShareContract,
+  TaskContentContract,
   TaskStateContract,
 } from '../../server/src/index.ts';
 
@@ -58,3 +59,4 @@ export const attachmentsClient = (http: Http) => typedClient<AttachmentsContract
 export const shareClient = (http: Http) => typedClient<ShareContract>(http);
 export const agentNotesClient = (http: Http) => typedClient<AgentNotesContract>(http);
 export const taskStateClient = (http: Http) => typedClient<TaskStateContract>(http);
+export const taskContentClient = (http: Http) => typedClient<TaskContentContract>(http);

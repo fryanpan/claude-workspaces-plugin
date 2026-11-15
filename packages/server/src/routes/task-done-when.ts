@@ -19,6 +19,8 @@ import {
   type DoneWhenResult,
   parseDoneWhenInput,
 } from '../task-done-when.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Which HTTP status a refusal earns. `not-found` is the row; everything
@@ -58,13 +60,16 @@ export async function handleTaskDoneWhen(
           announceTaskReview: ctx.announceTaskReview,
         })
       : [];
-    return j(200, {
-      taskId,
-      lines: res.lines,
-      closed: res.closed,
-      status: res.task.status,
-      ...(held.length > 0 ? { held } : {}),
-    });
+    return j(
+      200,
+      answerAs<T.DoneWhenAnswer>({
+        taskId,
+        lines: res.lines,
+        closed: res.closed,
+        status: res.task.status,
+        ...(held.length > 0 ? { held } : {}),
+      }),
+    );
   }
 
   // The WHOLE list, every time: the panel's add, its in-place edit and its ×
@@ -74,7 +79,7 @@ export async function handleTaskDoneWhen(
   const linesMatch = matchRest(scope, /^tasks\/([^/]+)\/done-when$/);
   if (linesMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(linesMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<T.DoneWhenBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     // `lines` must be PRESENT, even to clear: an absent key is a caller that
@@ -96,7 +101,7 @@ export async function handleTaskDoneWhen(
   const reportMatch = matchRest(scope, /^tasks\/([^/]+)\/done-when\/report$/);
   if (reportMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(reportMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<T.DoneWhenReportBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     if (!Array.isArray(body?.lines) || body.lines.length === 0) {
