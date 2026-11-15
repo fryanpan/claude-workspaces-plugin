@@ -21,7 +21,7 @@ import {
 import type { ServerWebSocket } from 'bun';
 import { Hono } from 'hono';
 import { docPage, homePage } from './page.ts';
-import type { SignIn } from './sign-in.ts';
+import { type SignIn, sameOrigin } from './sign-in.ts';
 
 export interface AppOptions {
   appName: string;
@@ -94,17 +94,6 @@ function routes(opts: AppOptions) {
 
 /** The Hono app's type, for a typed client (`hc<AppRoutes>`). */
 export type AppRoutes = ReturnType<typeof routes>;
-
-/** A socket from another site would carry the person's cookie; refuse it. */
-function sameOrigin(req: Request): boolean {
-  const origin = req.headers.get('origin');
-  if (!origin) return true;
-  try {
-    return new URL(origin).host === new URL(req.url).host;
-  } catch {
-    return false;
-  }
-}
 
 export function createApp(opts: AppOptions) {
   const host: RoomHost = createRoomHost({

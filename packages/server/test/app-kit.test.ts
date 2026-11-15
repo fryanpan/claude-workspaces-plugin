@@ -1,7 +1,8 @@
 /**
  * What `bun run new-app` hands an agent: an app that builds, serves its pages
- * in the shared theme behind sign-in, and syncs a doc between two signed-in
- * pages through the collab core, saving it across a restart.
+ * in the shared theme behind password sign-in, and syncs a doc between two
+ * signed-in pages through the collab core, keeping the doc and the session
+ * across a restart.
  *
  * The app is made into a temp folder outside the repo and run as its own
  * process; `scripts/app-kit-harness.ts` says why its dependencies are linked
@@ -15,9 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { kitManifest, tarballName } from '../../../packages/app-kit/scripts/pack.ts';
 import {
+  PASSWORD,
   type RunningApp,
+  cookieFrom,
   makeBuiltApp,
-  signInAs,
+  postForm,
+  signIn,
+  signUpVerified,
   startApp,
 } from '../../../scripts/app-kit-harness.ts';
 import { shiftIndex, splice } from '../../../templates/app-kit/src/client/text-binding.ts';
@@ -30,6 +35,8 @@ let appDir: string;
 let dataDir: string;
 let app: RunningApp;
 let connectDoc: ConnectDoc;
+let alice: string;
+let bob: string;
 const closers: Array<() => void> = [];
 
 beforeAll(async () => {
@@ -37,6 +44,8 @@ beforeAll(async () => {
   appDir = makeBuiltApp(parent);
   dataDir = join(parent, 'data');
   app = await startApp(appDir, dataDir);
+  alice = await signUpVerified(app, 'alice@example.com', 'Alice');
+  bob = await signUpVerified(app, 'bob@example.com', 'Bob');
   // The made app's own copy, not the template's: what ships is what syncs.
   ({ connectDoc } = (await import(join(appDir, 'src/client/sync.ts'))) as {
     connectDoc: ConnectDoc;
@@ -81,8 +90,7 @@ describe('an app made by new-app', () => {
     expect(out.status).toBe(303);
     expect(out.headers.get('location')).toBe('/auth/sign-in');
 
-    const cookie = await signInAs(app.base, 'Alice');
-    const res = await fetch(`${app.base}/docs/harborlight`, { headers: { cookie } });
+    const res = await fetch(`${app.base}/docs/harborlight`, { headers: { cookie: alice } });
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('data-doc="harborlight"');
@@ -107,9 +115,8 @@ describe('an app made by new-app', () => {
   });
 
   it('syncs a doc between two signed-in pages', async () => {
-    const cookie = await signInAs(app.base, 'Alice');
-    const one = page(app.ws('harborlight'), cookie);
-    const two = page(app.ws('harborlight'), cookie);
+    const one = page(app.ws('harborlight'), alice);
+    const two = page(app.ws('harborlight'), alice);
     await Promise.all([one.synced, two.synced]);
     one.doc.getText('body').insert(0, 'from page one');
     await waitFor(() => two.doc.getText('body').toString() === 'from page one', {
@@ -125,7 +132,7 @@ describe('an app made by new-app', () => {
     const upgrade = { upgrade: 'websocket', connection: 'upgrade' };
     const anon = await fetch(`${app.base}/docs/harborlight/ws`, { headers: upgrade });
     expect(anon.status).toBe(401);
-    const cookie = await signInAs(app.base, 'Alice');
+    const cookie = alice;
     const cross = await fetch(`${app.base}/docs/harborlight/ws`, {
       headers: { ...upgrade, cookie, origin: 'http://saltmarsh.example' },
     });
@@ -137,8 +144,8 @@ describe('an app made by new-app', () => {
     expect(own.status()).toBe('synced');
   });
 
-  it('keeps a doc across a restart', async () => {
-    const cookie = await signInAs(app.base, 'Bob');
+  it('keeps a doc, and the session, across a restart', async () => {
+    const cookie = bob;
     const writer = page(app.ws('riverbend'), cookie);
     await writer.synced;
     writer.doc.getText('body').insert(0, 'kept on disk');
@@ -152,9 +159,63 @@ describe('an app made by new-app', () => {
     for (const close of closers.splice(0)) close();
     await app.stop();
     app = await startApp(appDir, dataDir);
-    const again = page(app.ws('riverbend'), await signInAs(app.base, 'Bob'));
+    // The same cookie: the session is in auth.sqlite, the secret in the data folder.
+    const again = page(app.ws('riverbend'), bob);
     await again.synced;
     expect(again.doc.getText('body').toString()).toBe('kept on disk');
+  });
+});
+
+describe('password sign-in', () => {
+  it('refuses a password until the email is verified, then signs in', async () => {
+    const email = 'harborlight@example.com';
+    const made = await postForm(app.base, '/auth/sign-up', {
+      name: 'Harborlight',
+      email,
+      password: PASSWORD,
+    });
+    expect(made.status).toBe(200);
+    const early = await postForm(app.base, '/auth/sign-in', { email, password: PASSWORD });
+    expect(early.status).toBe(403);
+    expect(early.headers.getSetCookie()).toEqual([]);
+
+    expect(
+      (await fetch(await app.mailLink('verify-email', email), { redirect: 'manual' })).status,
+    ).toBeLessThan(400);
+    const cookie = await signIn(app, email);
+    const home = await fetch(`${app.base}/`, { headers: { cookie }, redirect: 'manual' });
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain('label="Harborlight"');
+  });
+
+  it('refuses a wrong password, and sets no session', async () => {
+    const res = await postForm(app.base, '/auth/sign-in', {
+      email: 'alice@example.com',
+      password: 'not the password',
+    });
+    expect(res.status).toBe(401);
+    expect(cookieFrom(res)).toBe('');
+    // Control: the right password, same form, signs in.
+    expect(await signIn(app, 'alice@example.com')).not.toBe('');
+  });
+
+  it('refuses a sign-in form posted from another site', async () => {
+    const res = await fetch(`${app.base}/auth/sign-in`, {
+      method: 'POST',
+      body: new URLSearchParams({ email: 'alice@example.com', password: PASSWORD }),
+      headers: { origin: 'http://saltmarsh.example' },
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('ends the session on sign-out', async () => {
+    const cookie = await signIn(app, 'bob@example.com');
+    const before = await fetch(`${app.base}/`, { headers: { cookie }, redirect: 'manual' });
+    expect(before.status).toBe(200);
+    expect((await postForm(app.base, '/auth/sign-out', {}, cookie)).status).toBe(303);
+    const after = await fetch(`${app.base}/`, { headers: { cookie }, redirect: 'manual' });
+    expect(after.status).toBe(303);
   });
 });
 

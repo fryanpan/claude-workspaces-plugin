@@ -1,6 +1,7 @@
 /**
- * An app made by `bun run new-app`, in two real browser tabs: a person signs
- * in on the app's form, opens one doc in both tabs, types in the first, and
+ * An app made by `bun run new-app`, in two real browser tabs: a person makes
+ * an account on the app's form, opens the mailed link, signs in by password,
+ * opens one doc in both tabs, types in the first, and
  * the second shows it. The page carries the shared theme and its Web Awesome
  * components. `packages/server/test/app-kit-browser-driver.ts` drives it;
  * the same flow without a browser is `packages/server/test/app-kit.test.ts`.
@@ -33,7 +34,9 @@ describe.skipIf(CHROME === null)('an app made by new-app, in two browser tabs', 
     r = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? '') as AppKitBrowserReading;
   }, SUITE_MS);
 
-  it('signs in on the app form and lands on the app', () => {
+  it('makes an account, verifies it by the mailed link, and signs in by password', () => {
+    expect(r.afterSignUp).toBe('Check your email');
+    expect(r.afterVerify).toBe('/auth/sign-in');
     expect(r.afterSignIn).toBe('/');
   });
 
