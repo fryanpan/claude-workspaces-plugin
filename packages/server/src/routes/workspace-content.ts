@@ -33,6 +33,8 @@ import {
   resolveAssignee,
 } from '../task-owner.ts';
 import { isRetired, retiredRefusal } from '../tasks.ts';
+import { sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -162,7 +164,7 @@ export async function handleWorkspaceContent(
     // resolved it once above every handler, so the lookup and the 404 that
     // stood further down are DELETED rather than left dormant.
     const { workspaceId, board: workspace } = scope;
-    const body = await safeJson(req);
+    const body = sent<T.ImportTasksBody>(await safeJson(req));
     const path = body?.path;
     if (typeof path !== 'string' || path.length === 0) {
       return j(400, { error: 'path required' });

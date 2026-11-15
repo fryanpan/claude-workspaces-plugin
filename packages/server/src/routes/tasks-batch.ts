@@ -15,6 +15,8 @@ import { indexBatchKeys, resolveRowRefs } from '../task-batch-refs.ts';
 import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { LEGACY_REVIEW_ITEM_ID, type Task, isRetired, retiredRefusal } from '../tasks.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
 import {
   type TaskRouteRequest,
   type TaskRoutesContext,
@@ -86,7 +88,7 @@ export async function handleTaskBatch(
   if (wsTasksBatchMatch && scope && req.method === 'POST') {
     // The board comes off the scope — see `middleware/workspace-scope.ts`.
     const { workspaceId, board: batchBoard } = scope;
-    const body = await safeJson(req);
+    const body = sent<T.TaskBatchBody>(await safeJson(req));
     // Whole-batch, before any row is read: on a retired board every row
     // fails for the same reason, and a hundred copies of one sentence
     // is not a better answer than the sentence.
@@ -156,7 +158,7 @@ export async function handleTaskBatch(
       message?: string;
     }> = [];
     const ignoredLinks: Array<{ taskId: string; ignored: unknown[] }> = [];
-    const shapeGaps: Array<{ taskId: string; gaps: unknown[] }> = [];
+    const shapeGaps: Array<{ taskId: string; gaps: string[] }> = [];
     /** Per row, because a burst files many tickets and "which one came
      *  out thin" is the only useful form of the answer. */
     const reviewAdvice: Array<{ taskId: string; advice: string }> = [];
@@ -375,36 +377,39 @@ export async function handleTaskBatch(
         const url = taskUrlFor(ctx, workspaceId, t.id, Boolean(visitor));
         return url === undefined ? t : { ...t, url };
       });
-    return j(200, {
-      workspaceId,
-      tasks,
-      failures,
-      // Absent when every row was placed — there is nothing to act on,
-      // and a block that is always there is a block nobody reads.
-      ...(unplaced.length > 0
-        ? {
-            placement: {
-              unplaced,
-              goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []),
-            },
-          }
-        : {}),
-      ...(ignoredLinks.length > 0 ? { ignoredLinks } : {}),
-      ...(shapeGaps.length > 0 ? { shapeGaps } : {}),
-      ...(reviewAdvice.length > 0 ? { reviewAdvice } : {}),
-      ...(heldReviews.length > 0 ? { held: heldReviews } : {}),
-      // Absent when every row is ordinarily visible — a note that is
-      // always there is a note nobody reads.
-      ...(visibility.length > 0 ? { visibility } : {}),
-      // What the batch's provenance came out as: the canonical docId
-      // the rows now cite, the mode after defaulting, and whether the
-      // plan gate held the rows as drafts.
-      ...(sourceDoc !== undefined
-        ? {
-            sourceDoc: { docId: sourceDoc.docId, mode: sourceDoc.mode, held: sourceDoc.hold },
-          }
-        : {}),
-    });
+    return j(
+      200,
+      answerAs<T.TaskBatchAnswer>({
+        workspaceId,
+        tasks,
+        failures,
+        // Absent when every row was placed — there is nothing to act on,
+        // and a block that is always there is a block nobody reads.
+        ...(unplaced.length > 0
+          ? {
+              placement: {
+                unplaced,
+                goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []),
+              },
+            }
+          : {}),
+        ...(ignoredLinks.length > 0 ? { ignoredLinks } : {}),
+        ...(shapeGaps.length > 0 ? { shapeGaps } : {}),
+        ...(reviewAdvice.length > 0 ? { reviewAdvice } : {}),
+        ...(heldReviews.length > 0 ? { held: heldReviews } : {}),
+        // Absent when every row is ordinarily visible — a note that is
+        // always there is a note nobody reads.
+        ...(visibility.length > 0 ? { visibility } : {}),
+        // What the batch's provenance came out as: the canonical docId
+        // the rows now cite, the mode after defaulting, and whether the
+        // plan gate held the rows as drafts.
+        ...(sourceDoc !== undefined
+          ? {
+              sourceDoc: { docId: sourceDoc.docId, mode: sourceDoc.mode, held: sourceDoc.hold },
+            }
+          : {}),
+      }),
+    );
   }
   return undefined;
 }
