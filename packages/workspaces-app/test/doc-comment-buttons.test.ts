@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as Y from 'yjs';
 import {
   WIDGET_TAG,
   mountCommentButtons,
@@ -39,6 +40,21 @@ describe('the round comment buttons on a doc page', () => {
     expect(el?.getAttribute('workspace-id')).toBe('w-1');
     expect(el?.getAttribute('identity-scope')).toBe('host');
     expect(load).toHaveBeenCalledWith(el);
+  });
+
+  it('points the widget at the canonical id when the page was opened by an alias', () => {
+    const ydoc = new Y.Doc();
+    ydoc.getMap('meta').set('docId', 'd-riverbend');
+    const el = mountCommentButtons({
+      doc: document,
+      workspaceId: 'w-1',
+      docId: 'riverbend-notes',
+      ydoc,
+      search: '',
+      scope: new MountScope(),
+      load: async () => undefined,
+    });
+    expect(el?.getAttribute('doc-id')).toBe('d-riverbend');
   });
 
   it('takes the widget off when the doc is torn down', () => {

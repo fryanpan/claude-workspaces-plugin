@@ -3363,6 +3363,12 @@ export class DocStore {
     return this.workspaces.archiveDoc(docId, opts);
   }
 
+  /** Whether `docId` is parked in the archive: its id is taken until it is
+   *  put back, so nothing may create a fresh doc under it. */
+  isArchivedDoc(docId: string): boolean {
+    return this.state.has(docId, 'archive');
+  }
+
   unarchiveDoc(
     docId: string,
     opts: { archivedBy: string },

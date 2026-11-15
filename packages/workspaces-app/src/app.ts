@@ -196,6 +196,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
             doc: document,
             workspaceId: board,
             docId: ctx.docId,
+            ydoc: ctx.client.ydoc,
             search: location.search,
             scope: ctx.scope,
           }),
