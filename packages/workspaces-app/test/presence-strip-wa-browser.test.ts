@@ -64,6 +64,12 @@ describe.skipIf(CHROME === null)('the presence strip on Web Awesome, in a browse
       for (const c of wa.circles) expect([c.paint.w, c.paint.h]).toEqual([28, 28]);
     }, 60_000);
 
+    it(`draws the same circles before the Web Awesome theme has loaded, at ${width}`, () => {
+      const unthemed = reading(width, 'wa-unthemed');
+      expect(unthemed.circles.every((c) => c.face === 'wa')).toBe(true);
+      expect(unthemed.circles.map(look)).toEqual(reading(width, 'classic').circles.map(look));
+    }, 60_000);
+
     it(`shows the follow toast from Web Awesome, looking like today's, at ${width}`, () => {
       const classic = reading(width, 'classic').toast;
       const wa = reading(width, 'wa').toast;

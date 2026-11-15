@@ -871,6 +871,10 @@ body.board-body {
 .board-presence-wa wa-avatar {
   --size: 28px;
   box-sizing: border-box;
+  /* Set here, not left to the avatar's var(--wa-border-radius-circle): that
+     variable lives in wa-theme.css, which loads after the strip mounts, and
+     until it arrives the circles paint square. */
+  border-radius: 50%;
   border: 1px solid var(--border);
   background-color: var(--bg-hover);
   color: #fff;

@@ -68,7 +68,7 @@ export interface Toast {
 
 export interface Reading {
   width: number;
-  phase: 'classic' | 'wa' | 'classic-again';
+  phase: 'classic' | 'wa' | 'wa-unthemed' | 'classic-again';
   circles: Circle[];
   themeLinked: boolean;
   toast: Toast | null;
@@ -228,6 +228,12 @@ async function main(): Promise<void> {
       );
       readings.push(await read(alice, width, 'wa'));
       await shoot(alice, shots, `strip-webawesome-${width}`);
+      // The theme file arrives after the strip mounts, so the strip has to be
+      // right without it: read it again with the theme switched off, as a
+      // reader on a slow link sees it first.
+      await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = true`);
+      readings.push(await read(alice, width, 'wa-unthemed'));
+      await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = false`);
 
       step(`switch off at ${width}`);
       await post(`/workspaces/${ws}/collab-core`, { on: false });
