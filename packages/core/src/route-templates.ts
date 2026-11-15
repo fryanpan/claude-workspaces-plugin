@@ -194,9 +194,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   //
   // A tab in a browser and the JSON behind it are one address distinguished
   // by `?format=json`, and a query string is not part of a route pattern, so
-  // `''`, `home` and `tasks` each appear ONCE here and cover both. Two
-  // entries would not have been wrong; they would have been a second place
-  // to forget.
+  // `''`, `home` and `tasks` each appear ONCE here and cover both.
   ['workspaces', ':id'],
   ['workspaces', ':id', 'home'],
   ['workspaces', ':id', 'home', 'read'],
@@ -283,6 +281,9 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'board-tokens', 'refresh'],
   ['api', 'board-tokens', ':id', 'revoke'],
   ['api', 'board-sockets', ':id', 'roots'],
+  // A board pushed onto a project machine (routes/board-import.ts).
+  ['api', 'board-import', ':id'],
+  ['api', 'board-import', ':id', 'print'],
   ['api', 'github-push-keys'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],
