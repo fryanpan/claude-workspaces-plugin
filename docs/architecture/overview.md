@@ -156,9 +156,12 @@ generator puts that tarball in the app's `vendor/` and names it as a
 depends on nothing here. A tarball rather than GitHub Packages (which needs
 a token even to install) or a git dependency (which cannot name one
 package inside this monorepo). Sign-in is a typed slot
-(`SignIn.principal(request)`) holding a name-only development provider that
-refuses to start under `APP_ENV=production`; `templates/signin`, a
-Cloudflare Worker, is not wired to it. `server/test/app-kit.test.ts` makes,
+(`SignIn.principal(request)`) filled by password sign-in on Better Auth over
+bun:sqlite (`templates/app-kit/src/password-sign-in.ts`). Its rules are
+`passwordAuthOptions` (`packages/app-kit/src/auth/password.ts`, exported as
+`@claude-workspaces/app-kit/auth`), which `templates/signin`, the Cloudflare
+Worker on D1, spreads into its own Better Auth config too, so hashing,
+verification and session rules have one source. `server/test/app-kit.test.ts` makes,
 builds and runs an app outside the repo and syncs a doc between two of its
 pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
 
