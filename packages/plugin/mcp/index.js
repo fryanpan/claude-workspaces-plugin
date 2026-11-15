@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.380";
+var version2 = "0.1.383";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -19858,51 +19858,6 @@ function boardPathOf(toolName, args) {
   return `/workspaces/${encodeURIComponent(boardIdOf(toolName, args))}`;
 }
 
-// packages/mcp/src/tools/components.ts
-var str = (v) => typeof v === "string" ? v : "";
-async function handleComponentTool(name, a, ctx) {
-  const doc2 = () => {
-    const docId = str(a.docId);
-    if (docId === "")
-      throw new Error(`${name} needs a docId`);
-    return `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}`;
-  };
-  const state = () => {
-    const id = str(a.componentId);
-    if (id === "")
-      throw new Error(`${name} needs a componentId: the tag's id prop`);
-    return `${doc2()}/agent-components/${encodeURIComponent(id)}/state`;
-  };
-  switch (name) {
-    case "list_components":
-      return ctx.ok(await ctx.http("GET", `${doc2()}/agent-components`));
-    case "get_component_state": {
-      const path = str(a.path);
-      const q = path ? `?path=${encodeURIComponent(path)}` : "";
-      return ctx.ok(await ctx.http("GET", `${state()}${q}`));
-    }
-    case "set_component_state":
-      return ctx.ok(await ctx.http("POST", state(), { ops: a.ops, author: ctx.suggestionAuthor() }));
-    case "place_component":
-      return ctx.ok(await ctx.http("POST", `${doc2()}/agent-components/place`, {
-        importPath: a.importPath,
-        ...a.name !== undefined ? { name: a.name } : {},
-        props: a.props,
-        ...a.headingId !== undefined ? { headingId: a.headingId } : {},
-        author: ctx.suggestionAuthor()
-      }));
-    case "request_component_grant":
-      return ctx.ok(await ctx.http("POST", `${doc2()}/component-grants`, {
-        folder: a.folder,
-        taskId: a.taskId,
-        why: a.why,
-        author: ctx.suggestionAuthor()
-      }));
-    default:
-      return;
-  }
-}
-
 // node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/utils.js
 var mergePath = (base, path) => {
   base = base.replace(/\/+$/, "");
@@ -20207,6 +20162,67 @@ var taskStateClient = (http) => typedClient(http);
 var taskContentClient = (http) => typedClient(http);
 var taskBoardClient = (http) => typedClient(http);
 var reviewItemsClient = (http) => typedClient(http);
+var libraryFoldersClient = (http) => typedClient(http);
+var docComponentsClient = (http) => typedClient(http);
+var personClient = (http) => typedClient(http);
+var whiteboardClient = (http) => typedClient(http);
+var inboxClient = (http) => typedClient(http);
+var leadChatFilesClient = (http) => typedClient(http);
+
+// packages/mcp/src/tools/components.ts
+var str = (v) => typeof v === "string" ? v : "";
+async function handleComponentTool(name, a, ctx) {
+  const api2 = () => docComponentsClient(ctx.http).workspaces[":ws"].docs[":docId"];
+  const doc2 = () => {
+    const docId = str(a.docId);
+    if (docId === "")
+      throw new Error(`${name} needs a docId`);
+    return { ws: encodeURIComponent(boardIdOf(name, a)), docId: encodeURIComponent(docId) };
+  };
+  const state = () => {
+    const id = str(a.componentId);
+    if (id === "")
+      throw new Error(`${name} needs a componentId: the tag's id prop`);
+    return { ...doc2(), id: encodeURIComponent(id) };
+  };
+  const stateApi = () => api2()["agent-components"][":id"].state;
+  switch (name) {
+    case "list_components":
+      return ctx.ok(await (await api2()["agent-components"].$get({ param: doc2() })).json());
+    case "get_component_state": {
+      const path = str(a.path);
+      return ctx.ok(await (await stateApi().$get({ param: state(), query: path ? { path } : {} })).json());
+    }
+    case "set_component_state":
+      return ctx.ok(await (await stateApi().$post({
+        param: state(),
+        json: { ops: a.ops, author: ctx.suggestionAuthor() }
+      })).json());
+    case "place_component":
+      return ctx.ok(await (await api2()["agent-components"].place.$post({
+        param: doc2(),
+        json: {
+          importPath: a.importPath,
+          name: a.name,
+          props: a.props,
+          headingId: a.headingId,
+          author: ctx.suggestionAuthor()
+        }
+      })).json());
+    case "request_component_grant":
+      return ctx.ok(await (await api2()["component-grants"].$post({
+        param: doc2(),
+        json: {
+          folder: a.folder,
+          taskId: a.taskId,
+          why: a.why,
+          author: ctx.suggestionAuthor()
+        }
+      })).json());
+    default:
+      return;
+  }
+}
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -20305,10 +20321,12 @@ async function handleDocsTool(name, a, ctx) {
     ...docParam(docId),
     sid: encodeURIComponent(sid)
   });
-  const scoped = () => ({
-    author: AUTHOR,
-    ...a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}
-  });
+  const scoped = () => {
+    const fields = { author: AUTHOR };
+    if (a.confirmOverwriteHumanEdits === true)
+      fields.confirmOverwriteHumanEdits = true;
+    return fields;
+  };
   switch (name) {
     case "list_docs": {
       const { kind, query, sourcePrefix, limit, cursor, full } = a;
@@ -20986,33 +21004,39 @@ async function handleDocsTool(name, a, ctx) {
 var idOf2 = (v) => typeof v === "string" ? v : "";
 var orNull = (v) => typeof v === "string" && v !== "" ? v : null;
 async function handleFolderTool(name, a, ctx) {
-  const folder = (verb) => {
+  const library = () => libraryFoldersClient(ctx.http).workspaces[":ws"].library;
+  const ws = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const folder = () => {
     const id = idOf2(a.folderId);
     if (id === "")
       throw new Error(`${name} needs a folderId`);
-    return `${boardPathOf(name, a)}/library/folders/${encodeURIComponent(id)}/${verb}`;
+    return { param: { ...ws(), folderId: encodeURIComponent(id) } };
   };
+  const one = () => library().folders[":folderId"];
   switch (name) {
     case "list_folders":
-      return ctx.ok(await ctx.http("GET", `${boardPathOf(name, a)}/library/folders`));
+      return ctx.ok(await (await library().folders.$get({ param: ws() })).json());
     case "create_folder":
-      return ctx.ok(await ctx.http("POST", `${boardPathOf(name, a)}/library/folders`, {
-        name: a.name,
-        parentId: orNull(a.parentId)
-      }));
+      return ctx.ok(await (await library().folders.$post({
+        param: ws(),
+        json: { name: a.name, parentId: orNull(a.parentId) }
+      })).json());
     case "rename_folder":
-      return ctx.ok(await ctx.http("POST", folder("rename"), { name: a.name }));
+      return ctx.ok(await (await one().rename.$post({ ...folder(), json: { name: a.name } })).json());
     case "move_folder":
-      return ctx.ok(await ctx.http("POST", folder("move"), { parentId: orNull(a.parentId) }));
+      return ctx.ok(await (await one().move.$post({ ...folder(), json: { parentId: orNull(a.parentId) } })).json());
     case "archive_folder":
-      return ctx.ok(await ctx.http("POST", folder("archive")));
+      return ctx.ok(await (await one().archive.$post(folder())).json());
     case "unarchive_folder":
-      return ctx.ok(await ctx.http("POST", folder("unarchive")));
+      return ctx.ok(await (await one().unarchive.$post(folder())).json());
     case "move_doc_to_folder": {
       const docId = idOf2(a.docId);
       if (docId === "")
         return ctx.err("move_doc_to_folder needs a docId");
-      return ctx.ok(await ctx.http("PUT", `${boardPathOf(name, a)}/library/docs/${encodeURIComponent(docId)}/folder`, { folderId: orNull(a.folderId) }));
+      return ctx.ok(await (await library().docs[":docId"].folder.$put({
+        param: { ...ws(), docId: encodeURIComponent(docId) },
+        json: { folderId: orNull(a.folderId) }
+      })).json());
     }
     default:
       return;
@@ -21031,14 +21055,10 @@ async function handleInboxTool(name, a, ctx) {
         return ctx.err("rows must be a list");
       if (rows.length === 0 && run === undefined && dismiss === undefined)
         return ctx.err("rows must be a non-empty list unless run or dismiss is given");
-      const res = await ctx.http("POST", "/inbox/rows", {
-        agentId: ctx.AUTHOR.id,
-        pass,
-        rows,
-        ...run !== undefined ? { run } : {},
-        ...dismiss !== undefined ? { dismiss } : {}
+      const res = await inboxClient(ctx.http).inbox.rows.$post({
+        json: { agentId: ctx.AUTHOR.id, pass, rows, run, dismiss }
       });
-      return ctx.ok(res);
+      return ctx.ok(await res.json());
     }
     default:
       return;
@@ -21046,16 +21066,27 @@ async function handleInboxTool(name, a, ctx) {
 }
 
 // packages/mcp/src/tools/person.ts
+var TEXT_PLACE = [
+  "path",
+  "docId",
+  "taskId",
+  "goalId",
+  "threadId",
+  "blockId",
+  "quote"
+];
+var NUMBER_PLACE = ["scroll", "x", "y"];
 function placeOf(a) {
   const place = {};
-  for (const k of ["path", "docId", "taskId", "goalId", "threadId", "blockId", "quote"]) {
+  for (const k of TEXT_PLACE) {
     const v = a[k];
     if (typeof v === "string" && v.trim())
       place[k] = v.trim();
   }
-  for (const k of ["scroll", "x", "y"]) {
-    if (typeof a[k] === "number")
-      place[k] = a[k];
+  for (const k of NUMBER_PLACE) {
+    const v = a[k];
+    if (typeof v === "number")
+      place[k] = v;
   }
   return place;
 }
@@ -21080,12 +21111,15 @@ async function handlePersonTool(name, a, ctx) {
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
   if (!workspaceId)
     return ctx.err("workspaceId is required");
-  const base = `/workspaces/${encodeURIComponent(workspaceId)}/person`;
-  const who = { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name };
+  const person = personClient(ctx.http).workspaces[":ws"].person;
+  const param = { ws: encodeURIComponent(workspaceId) };
   if (name === "watch_person") {
     const on = a.on !== false;
     try {
-      const res = await ctx.http("POST", `${base}/watch`, { ...who, on });
+      const res = await (await person.watch.$post({
+        param,
+        json: { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name, on }
+      })).json();
       return ctx.ok({ watching: on, landing: res.landing ?? null });
     } catch (e) {
       const refused = refusalOf(e, [400, 403, 404]);
@@ -21095,7 +21129,10 @@ async function handlePersonTool(name, a, ctx) {
     }
   }
   try {
-    const res = await ctx.http("POST", `${base}/show`, { ...who, ...placeOf(a) });
+    const res = await (await person.show.$post({
+      param,
+      json: { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name, ...placeOf(a) }
+    })).json();
     return ctx.ok({ shown: true, spot: res.spot });
   } catch (e) {
     const refused = refusalOf(e, [400, 403, 404, 409]);
@@ -21108,13 +21145,16 @@ async function handlePersonTool(name, a, ctx) {
     });
   }
 }
+var agentParam = (ctx) => ({ agentId: encodeURIComponent(ctx.AUTHOR.id) });
 async function confirmPerson(a, ctx) {
   if (a.email !== null && (typeof a.email !== "string" || !a.email.trim())) {
     return ctx.err("email is required (or null to clear)");
   }
-  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
   try {
-    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
+    const res = await (await personClient(ctx.http).api.agents[":agentId"].person.$post({
+      param: agentParam(ctx),
+      json: a.email === null ? { personId: null } : { email: String(a.email).trim() }
+    })).json();
     return ctx.ok({ ok: true, state: res.state ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
@@ -21129,7 +21169,10 @@ async function replyPrivate(a, ctx) {
   if (!personId || !text)
     return ctx.err("personId and text are required");
   try {
-    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`, { text });
+    const res = await (await personClient(ctx.http).api.agents[":agentId"].messages[":personId"].$post({
+      param: { ...agentParam(ctx), personId: encodeURIComponent(personId) },
+      json: { text }
+    })).json();
     return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
@@ -22217,13 +22260,15 @@ async function handleTaskTool(name, a, ctx) {
 
 // packages/mcp/src/tools/whiteboard.ts
 async function handleWhiteboardTool(name, a, ctx) {
+  const board = () => whiteboardClient(ctx.http).workspaces[":ws"];
+  const ws = () => encodeURIComponent(boardIdOf(name, a));
   switch (name) {
     case "create_whiteboard": {
       const title = typeof a.title === "string" ? a.title : undefined;
-      const res = await ctx.http("POST", `${boardPathOf(name, a)}/whiteboards`, {
-        ...title !== undefined ? { title } : {},
-        author: ctx.AUTHOR
-      });
+      const res = await (await board().whiteboards.$post({
+        param: { ws: ws() },
+        json: { title, author: ctx.AUTHOR }
+      })).json();
       if (typeof res?.docId !== "string")
         return ctx.err("the server did not return a whiteboard");
       await ctx.watchDoc(res.docId);
@@ -22235,20 +22280,20 @@ async function handleWhiteboardTool(name, a, ctx) {
         return ctx.err("docId is required");
       if (!Array.isArray(a.shapes))
         return ctx.err("shapes must be a list");
-      const res = await ctx.http("POST", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`, {
-        shapes: a.shapes,
-        ...a.mode !== undefined ? { mode: a.mode } : {},
-        ...a.point !== undefined ? { point: a.point } : {},
-        author: ctx.AUTHOR
+      const res = await board().docs[":docId"].whiteboard.$post({
+        param: { ws: ws(), docId: encodeURIComponent(docId) },
+        json: { shapes: a.shapes, mode: a.mode, point: a.point, author: ctx.AUTHOR }
       });
-      return ctx.ok(res);
+      return ctx.ok(await res.json());
     }
     case "get_whiteboard": {
       const docId = typeof a.docId === "string" ? a.docId : "";
       if (docId === "")
         return ctx.err("docId is required");
-      const res = await ctx.http("GET", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`);
-      return ctx.ok(res);
+      const res = await board().docs[":docId"].whiteboard.$get({
+        param: { ws: ws(), docId: encodeURIComponent(docId) }
+      });
+      return ctx.ok(await res.json());
     }
     default:
       return;
@@ -22359,9 +22404,6 @@ var LEAD_CHAT_FILE_MAX_BYTES = 25 * 1024 * 1024;
 var FILE_NAME_MAX = 160;
 var FILE_TYPE_MAX = 100;
 var LEAD_CHAT_FILE_ID = /^lf-[A-Za-z0-9_-]{8,40}$/;
-function leadChatFilePath(workspaceId, fileId) {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/files/${encodeURIComponent(fileId)}`;
-}
 var LEAD_LINE_MIN_GAP = 1 / 1024;
 function parseLeadChatAttachment(raw) {
   if (typeof raw !== "object" || raw === null)
@@ -22394,7 +22436,10 @@ async function readChatAttachment(ctx, workspaceId, fileId) {
     return ctx.err("workspaceId and fileId are required");
   if (!LEAD_CHAT_FILE_ID.test(fileId))
     return ctx.err("fileId is not a chat file id");
-  const got = await ctx.http("GET", `${leadChatFilePath(workspaceId, fileId)}?encoding=base64`);
+  const got = await (await leadChatFilesClient(ctx.http).workspaces[":ws"]["lead-chat"].files[":id"].$get({
+    param: { ws: encodeURIComponent(workspaceId), id: encodeURIComponent(fileId) },
+    query: { encoding: "base64" }
+  })).json();
   const file = parseLeadChatAttachment(got.file);
   if (!file || typeof got.data !== "string")
     return ctx.err("the server sent no file");

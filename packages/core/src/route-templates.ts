@@ -383,6 +383,8 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'docs', ':id', 'agent-components', 'place'],
   ['workspaces', ':id', 'docs', ':id', 'agent-components', ':id', 'state'],
   ['workspaces', ':id', 'docs', ':id', 'component-grants'],
+  ['workspaces', ':id', 'docs', ':id', 'whiteboard'],
+  ['workspaces', ':id', 'whiteboards'],
   ['workspaces', ':id', 'docs', ':id', 'notes-method'],
   ['workspaces', ':id', 'docs', ':id', 'plan'],
   ['workspaces', ':id', 'docs', ':id', 'plan-request'],

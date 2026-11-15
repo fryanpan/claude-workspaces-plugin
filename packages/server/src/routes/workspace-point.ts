@@ -28,6 +28,14 @@
  */
 import { type PresenceSpot, parseSpot } from '@claude-workspaces/core/workspace-presence';
 import { isValidAgentId } from '../agent-watches.ts';
+import type {
+  PersonShowAnswer,
+  PersonShowBody,
+  PersonWatchAnswer,
+  PersonWatchBody,
+  PlaceFields,
+} from './person-contract.ts';
+import { type Sent, answerAs, sent } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 const ID = /^[A-Za-z0-9:_.~-]{1,200}$/;
@@ -60,7 +68,7 @@ function absolutePath(workspaceId: string, path: string): string | null {
 function buildSpot(
   ctx: WorkspaceRoutesContext,
   workspaceId: string,
-  body: Record<string, unknown>,
+  body: Sent<PlaceFields>,
 ): Built {
   const docId = optId(body.docId);
   const taskId = optId(body.taskId);
@@ -141,7 +149,7 @@ export async function handleWorkspacePoint(
   } catch {
     return ctx.j(400, { error: 'bad board id' });
   }
-  const body = (await ctx.safeJson(req)) ?? {};
+  const body: Sent<PersonShowBody & PersonWatchBody> = sent(await ctx.safeJson(req)) ?? {};
   const agentId = typeof body.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
   // Hearing where the owner is and moving the tab they are reading are new
@@ -156,7 +164,7 @@ export async function handleWorkspacePoint(
     }
     const on = body.on !== false;
     const landing = ctx.personPresence.watch(workspaceId, agentId, on);
-    return ctx.j(200, { ok: true, watching: on, landing });
+    return ctx.j(200, answerAs<PersonWatchAnswer>({ ok: true, watching: on, landing }));
   }
   const built = buildSpot(ctx, workspaceId, body);
   if (!built.ok) return ctx.j(built.status, { error: built.error });
@@ -171,7 +179,7 @@ export async function handleWorkspacePoint(
         message: 'The owner has no tab in front of them on this board.',
       });
     }
-    return ctx.j(200, { ok: true, spot: built.spot });
+    return ctx.j(200, answerAs<PersonShowAnswer>({ ok: true, spot: built.spot }));
   }
   ctx.agentSpots.pointOn(workspaceId, agentId, { ...built.spot, name });
   return ctx.j(200, { ok: true, spot: built.spot });

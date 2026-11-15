@@ -9,11 +9,18 @@ import {
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { boundFiles } from '../slow-fs.ts';
+import type {
+  ComponentGrantBody,
+  ComponentStateQuery,
+  PlaceComponentBody,
+  SetComponentStateBody,
+} from './doc-components-contract.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
   parseSuggestionAuthor,
 } from './docs-routes-context.ts';
+import { queryOf, sent } from './route-contract.ts';
 
 /**
  * What an agent does to a bound `.mdx` doc's components
@@ -61,7 +68,7 @@ export async function handleDocComponentAgentRoute(
   if (req.method === 'GET') {
     if (rest === 'agent-components') return j(200, { docId, components: listComponents(doc) });
     if (state) {
-      const path = url.searchParams.get('path') ?? undefined;
+      const { path } = queryOf<ComponentStateQuery>(url);
       return reply(j, getComponentState(doc, state[1] ?? '', path));
     }
     return j(405, { error: 'method not allowed' });
@@ -70,15 +77,17 @@ export async function handleDocComponentAgentRoute(
     return j(405, { error: 'method not allowed' });
   }
   if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
-  const body = await ctx.safeJson(req);
-  const author = parseSuggestionAuthor(body);
+  const raw = await ctx.safeJson(req);
+  const author = parseSuggestionAuthor(raw);
   if (!author)
     return j(400, { error: 'author {id,name} is required: component writes are attributed' });
 
   if (state) {
+    const body = sent<SetComponentStateBody>(raw);
     return reply(j, setComponentState(doc, state[1] ?? '', body?.ops, author.id));
   }
   if (rest === 'agent-components/place') {
+    const body = sent<PlaceComponentBody>(raw);
     const res = await placeComponent(
       doc,
       {
@@ -98,6 +107,7 @@ export async function handleDocComponentAgentRoute(
   }
 
   // component-grants
+  const body = sent<ComponentGrantBody>(raw);
   const taskId = typeof body?.taskId === 'string' ? body.taskId : '';
   const task = taskId ? ctx.taskStore.getTask(taskId) : undefined;
   if (!task || !ctx.workspacesOfDoc(docId).includes(task.workspaceId)) {

@@ -15,15 +15,21 @@ import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { agentNotesContract } from '../src/routes/agent-notes-contract.ts';
 import { attachmentsContract } from '../src/routes/attachments-contract.ts';
+import { docComponentsContract } from '../src/routes/doc-components-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
+import { inboxContract } from '../src/routes/inbox-contract.ts';
+import { leadChatFilesContract } from '../src/routes/lead-chat-files-contract.ts';
+import { libraryFoldersContract } from '../src/routes/library-folders-contract.ts';
+import { personContract } from '../src/routes/person-contract.ts';
 import { reviewItemsContract } from '../src/routes/review-items-contract.ts';
 import { queryOf } from '../src/routes/route-contract.ts';
 import { shareContract } from '../src/routes/share-contract.ts';
 import { taskBoardContract } from '../src/routes/task-board-contract.ts';
 import { taskContentContract } from '../src/routes/task-content-contract.ts';
 import { taskStateContract } from '../src/routes/task-state-contract.ts';
+import { whiteboardContract } from '../src/routes/whiteboard-contract.ts';
 
 const answers = JSON.parse(
   readFileSync(join(import.meta.dir, 'fixtures', 'route-answers.json'), 'utf8'),
@@ -124,6 +130,49 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
       'task-review-ask-back.ts:handleTaskReviewMoreInfo',
       'workspace-home.ts:handleWorkspaceHome',
     ],
+  },
+  {
+    name: 'library folders',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: libraryFoldersContract as unknown as Hono<any>,
+    servedBy: ['workspace-library-folders.ts:handleLibraryFolderRoutes'],
+  },
+  {
+    name: 'doc components',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: docComponentsContract as unknown as Hono<any>,
+    servedBy: ['doc-component-agent.ts:handleDocComponentAgentRoute'],
+  },
+  {
+    name: 'person',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: personContract as unknown as Hono<any>,
+    servedBy: [
+      'workspace-point.ts:handleWorkspacePoint',
+      'agent-identity.ts:handleAgentIdentityRoutes',
+      'private-messages.ts:handlePrivateMessageRoutes',
+    ],
+  },
+  {
+    name: 'whiteboard',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: whiteboardContract as unknown as Hono<any>,
+    servedBy: [
+      'whiteboard-routes.ts:handleWhiteboardCreateRoute',
+      'whiteboard-routes.ts:handleWhiteboardRoutes',
+    ],
+  },
+  {
+    name: 'inbox',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: inboxContract as unknown as Hono<any>,
+    servedBy: ['inbox.ts:handleInboxRoutes'],
+  },
+  {
+    name: 'lead-chat files',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: leadChatFilesContract as unknown as Hono<any>,
+    servedBy: ['workspace-lead-chat-files.ts:handleLeadChatFiles'],
   },
 ];
 
