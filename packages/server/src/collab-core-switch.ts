@@ -4,12 +4,20 @@
  * Two settings, and a board takes the core path only when both are on:
  *
  *   - Per board: `collab-core-boards.json` in the data folder, the ids of the
- *     boards switched on. Set by `POST /workspaces/<id>/collab-core`. Every
- *     board starts off.
- *   - Server-wide: `CW_COLLAB_CORE`, read once at boot. Off unless it says
- *     `on`. Off returns every board to the current code on the next start,
- *     whatever the file says, and leaves the file alone so the per-board
- *     settings come back when it is turned on again.
+ *     boards switched on. Set by `POST /workspaces/<id>/collab-core`
+ *     (`{ on }`). Every board starts off.
+ *   - Server-wide: `collab-core-server.json` beside it, set by the same route
+ *     (`{ serverWide }`) so the owner can turn it on from a board without an
+ *     edit to the server's launch environment. Off until somebody turns it
+ *     on. Off returns every board to the current code for every socket opened
+ *     afterwards, and leaves the per-board file alone so those settings come
+ *     back when it is turned on again.
+ *
+ * `CW_COLLAB_CORE` (or `ServerOptions.collabCore`) still decides the
+ * server-wide setting when it is set: `on`, `1` or `true` fixes it on, any
+ * other value fixes it off, and a fixed setting cannot be changed at
+ * runtime. So an operator can always force the core off with one variable.
+ * Unset, the file decides.
  *
  * Read at connect: a socket keeps the path it opened on for its life, so a
  * change reaches a board's pages at their next reconnect. Both paths sync the
@@ -26,28 +34,54 @@ export function collabCoreBoardsPath(dataDir: string): string {
   return join(dataDir, 'collab-core-boards.json');
 }
 
-/** `CW_COLLAB_CORE`: on for `on`, `1` or `true`; off for anything else. */
-export function parseCollabCoreDefault(value: string | undefined): boolean {
+export function collabCoreServerPath(dataDir: string): string {
+  return join(dataDir, 'collab-core-server.json');
+}
+
+/**
+ * `CW_COLLAB_CORE`: unset or blank leaves the setting to the runtime switch
+ * (`undefined`); `on`, `1` or `true` fixes it on; anything else fixes it off.
+ */
+export function parseCollabCoreEnv(value: string | undefined): boolean | undefined {
   const v = (value ?? '').trim().toLowerCase();
+  if (v === '') return undefined;
   return v === 'on' || v === '1' || v === 'true';
+}
+
+/** The server-wide setting was fixed by the environment and cannot change. */
+export class CollabCoreFixedError extends Error {
+  constructor(readonly fixedOn: boolean) {
+    super(`the collab core is fixed ${fixedOn ? 'on' : 'off'} by CW_COLLAB_CORE`);
+  }
 }
 
 export interface CollabCoreSwitchOptions {
   dataDir: string;
-  /** The server-wide setting, decided at boot. */
-  serverWide: boolean;
+  /** The server-wide setting as the environment fixes it, or `undefined`
+   *  when it leaves it to the runtime switch. */
+  fixed?: boolean | undefined;
 }
 
 export class CollabCoreSwitch {
-  readonly serverWide: boolean;
+  /** The environment's fixed server-wide setting, if it set one. */
+  readonly fixed: boolean | undefined;
   private readonly path: string;
+  private readonly serverPath: string;
   private readonly boards: Set<string>;
+  private runtimeOn: boolean;
   private readonly listeners = new Set<(workspaceId: string) => void>();
 
   constructor(opts: CollabCoreSwitchOptions) {
-    this.serverWide = opts.serverWide;
+    this.fixed = opts.fixed;
     this.path = collabCoreBoardsPath(opts.dataDir);
+    this.serverPath = collabCoreServerPath(opts.dataDir);
     this.boards = new Set(readBoards(this.path));
+    this.runtimeOn = readServerWide(this.serverPath);
+  }
+
+  /** The server-wide setting in force: the environment's, else the runtime one. */
+  get serverWide(): boolean {
+    return this.fixed ?? this.runtimeOn;
   }
 
   /** The board's own setting, whatever the server-wide one is. */
@@ -78,17 +112,57 @@ export class CollabCoreSwitch {
     if (on) next.add(workspaceId);
     else next.delete(workspaceId);
     replaceFile(this.path, `${JSON.stringify({ boards: [...next].sort() })}\n`, 0o600);
+    const before = this.usesCore(workspaceId);
     if (on) this.boards.add(workspaceId);
     else this.boards.delete(workspaceId);
-    for (const fn of this.listeners) fn(workspaceId);
+    if (this.usesCore(workspaceId) !== before) this.tell(workspaceId);
   }
 
-  /** Be told which board was switched on or off, after it is. Returns the
-   *  unsubscribe. A call that changes nothing tells nobody. */
+  /**
+   * Turn the server-wide setting on or off, and save. Throws
+   * `CollabCoreFixedError` when the environment fixed it to the other value,
+   * and on a failed save. Every board switched on hears the change.
+   */
+  setServerWide(on: boolean): void {
+    if (this.fixed !== undefined) {
+      if (this.fixed !== on) throw new CollabCoreFixedError(this.fixed);
+      return;
+    }
+    if (this.runtimeOn === on) return;
+    replaceFile(this.serverPath, `${JSON.stringify({ on })}\n`, 0o600);
+    this.runtimeOn = on;
+    for (const ws of this.boardsOn()) this.tell(ws);
+  }
+
+  /** Be told which board's path changed, after it does. Returns the
+   *  unsubscribe. A call that changes no board's path tells nobody. */
   onChange(fn: (workspaceId: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
+
+  private tell(workspaceId: string): void {
+    for (const fn of this.listeners) fn(workspaceId);
+  }
+}
+
+/** What a board page is told about its board: whether its sockets take the
+ *  core (`active`), the two settings behind that, and whether the
+ *  environment fixed the server-wide one. */
+export interface CollabCoreView {
+  active: boolean;
+  on: boolean;
+  serverWide: boolean;
+  fixed: 'on' | 'off' | null;
+}
+
+export function collabCoreView(sw: CollabCoreSwitch, workspaceId: string): CollabCoreView {
+  return {
+    active: sw.usesCore(workspaceId),
+    on: sw.boardOn(workspaceId),
+    serverWide: sw.serverWide,
+    fixed: sw.fixed === undefined ? null : sw.fixed ? 'on' : 'off',
+  };
 }
 
 /** The ids the file names. A missing, unreadable or malformed file is every
@@ -103,5 +177,17 @@ function readBoards(path: string): string[] {
   } catch {
     console.error(`[collab-core] ${path} is not JSON; every board takes the current code`);
     return [];
+  }
+}
+
+/** On only when the file says exactly `{"on": true}`; anything else is off. */
+function readServerWide(path: string): boolean {
+  const text = readSmallFile(path);
+  if (text === null) return false;
+  try {
+    return (JSON.parse(text) as { on?: unknown }).on === true;
+  } catch {
+    console.error(`[collab-core] ${path} is not JSON; the collab core stays off`);
+    return false;
   }
 }

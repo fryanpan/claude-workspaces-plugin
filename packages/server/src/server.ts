@@ -65,7 +65,7 @@ import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
 import { CollabCorePath } from './collab-core-path.ts';
-import { CollabCoreSwitch, parseCollabCoreDefault } from './collab-core-switch.ts';
+import { CollabCoreSwitch, collabCoreView, parseCollabCoreEnv } from './collab-core-switch.ts';
 import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
@@ -2176,7 +2176,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    *  over the doc store's live docs (D1 step 5). */
   const collabCoreSwitch = new CollabCoreSwitch({
     dataDir,
-    serverWide: opts.collabCore ?? parseCollabCoreDefault(process.env.CW_COLLAB_CORE),
+    // Set, the environment fixes the server-wide setting; unset, the owner's
+    // runtime switch in the data folder decides (`collab-core-switch.ts`).
+    fixed: opts.collabCore ?? parseCollabCoreEnv(process.env.CW_COLLAB_CORE),
   });
   const collabCorePath = new CollabCorePath({
     getDoc: (id) => docStore.peek(id),
@@ -2195,8 +2197,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // a switch at once, whoever made it. Pages only: no agent acts on which
   // strip a page draws, and each frame costs a session a turn.
   collabCoreSwitch.onChange((workspaceId) => {
-    const active = collabCoreSwitch.usesCore(workspaceId);
-    const frame = { event: COLLAB_CORE_CHANGED, workspaceId, active };
+    const frame = {
+      event: COLLAB_CORE_CHANGED,
+      workspaceId,
+      ...collabCoreView(collabCoreSwitch, workspaceId),
+    };
     sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
   });
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>

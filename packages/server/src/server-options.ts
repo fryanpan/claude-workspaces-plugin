@@ -146,9 +146,10 @@ export interface ServerOptions {
    */
   requireSignInToWrite?: boolean;
   /**
-   * The collab core's server-wide setting (`collab-core-switch.ts`). A board
-   * whose own switch is on takes the core's path only while this is on. Off
-   * by default; unset reads `CW_COLLAB_CORE`.
+   * Fixes the collab core's server-wide setting (`collab-core-switch.ts`). A
+   * board whose own switch is on takes the core's path only while that is on.
+   * Unset reads `CW_COLLAB_CORE`; unset there too, the owner's runtime switch
+   * decides, which starts off.
    */
   collabCore?: boolean;
   /**

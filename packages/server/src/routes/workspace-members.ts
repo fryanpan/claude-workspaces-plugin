@@ -15,7 +15,8 @@
  *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
  *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
- *   POST   /workspaces/<id>/collab-core          the collab core on or off (owner)
+ *   POST   /workspaces/<id>/collab-core          the collab core on or off, for this
+ *                                                board and server-wide (owner)
  *
  * A change that lets somebody do more needs the owner's own proof, because
  * `requireOwner` passes every agent on this machine: a promotion to Owner
@@ -44,6 +45,7 @@
  * a promoted guest can do here locks the operator out of their own board.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import { collabCoreView } from '../collab-core-switch.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
@@ -221,29 +223,51 @@ export async function handleWorkspaceMembers(
 
   // ── Serve this board's sockets with the collab core, or not ───────────
   //
-  // Every board starts off (D1 step 5, `collab-core-switch.ts`). Read at
-  // connect, so a page takes the new path at its next reconnect; and only
-  // while the server-wide `CW_COLLAB_CORE` is on, which `active` reports.
+  // Two settings (`collab-core-switch.ts`): the board's own (`on`) and the
+  // server-wide one (`serverWide`), and a board takes the core only while
+  // both are on. Both start off. The board page's switch sends both in one
+  // request, so moving a board is one tap. Read at connect, so a page takes
+  // the new path at its next reconnect. A server-wide setting the
+  // environment fixed (`CW_COLLAB_CORE`) is refused with 409.
   if (scope.rest === 'collab-core' && req.method === 'POST') {
     const denied = refuseVisitor();
     if (denied) return denied;
     const body = await safeJson(req);
-    if (typeof body?.on !== 'boolean') return j(400, { error: 'on must be true or false' });
-    // On hands this board's writes to different code to judge: the owner's own.
-    if (body.on && !collabCoreSwitch.boardOn(workspaceId)) {
+    const on = typeof body?.on === 'boolean' ? body.on : undefined;
+    const serverWide = typeof body?.serverWide === 'boolean' ? body.serverWide : undefined;
+    const bad = (k: string) => body?.[k] !== undefined && typeof body[k] !== 'boolean';
+    if ((on === undefined && serverWide === undefined) || bad('on') || bad('serverWide')) {
+      return j(400, { error: 'on must be true or false' });
+    }
+    const fixed = collabCoreSwitch.fixed;
+    if (serverWide !== undefined && fixed !== undefined && serverWide !== fixed) {
+      return j(409, {
+        error: 'fixed-by-environment',
+        message: `CW_COLLAB_CORE fixes the collab core ${fixed ? 'on' : 'off'} on this server.`,
+      });
+    }
+    // On hands writes to different code to judge: the owner's own call.
+    const widens =
+      (on === true && !collabCoreSwitch.boardOn(workspaceId)) ||
+      (serverWide === true && !collabCoreSwitch.serverWide);
+    if (widens) {
       const unproven = refuseUnproven('turns the collab core on');
       if (unproven) return unproven;
     }
     try {
-      collabCoreSwitch.set(workspaceId, body.on);
+      if (serverWide !== undefined) collabCoreSwitch.setServerWide(serverWide);
+      if (on !== undefined) collabCoreSwitch.set(workspaceId, on);
     } catch (err) {
       console.error(`[collab-core] could not switch board ${workspaceId}:`, err);
       return j(500, { error: 'could not save the setting' });
     }
-    console.error(`[collab-core] board ${workspaceId} switched ${body.on ? 'on' : 'off'}`);
+    const said = [
+      on === undefined ? null : `board ${workspaceId} ${on ? 'on' : 'off'}`,
+      serverWide === undefined ? null : `server-wide ${serverWide ? 'on' : 'off'}`,
+    ].filter(Boolean);
+    console.error(`[collab-core] switched ${said.join(', ')}`);
     // The switch tells the board's open pages itself (`server.ts`).
-    const active = collabCoreSwitch.usesCore(workspaceId);
-    return j(200, { ok: true, workspaceId, on: body.on, active });
+    return j(200, { ok: true, workspaceId, ...collabCoreView(collabCoreSwitch, workspaceId) });
   }
 
   // ── End one person's access ───────────────────────────────────────────
