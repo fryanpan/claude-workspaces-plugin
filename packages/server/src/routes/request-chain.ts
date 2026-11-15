@@ -37,7 +37,6 @@ import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
 import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
-import { handleAuthShareRoutes } from './auth-share.ts';
 import { handleRecallWebhookRoute } from './recall-webhook.ts';
 import { serveBoardRoutes } from './request-chain-board.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
@@ -62,7 +61,6 @@ export function createRequestChain(
     isValidDocId,
     j,
     requireSignInToWrite,
-    authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,
     serveUpgradeAndStreamRoutes,
@@ -161,13 +159,7 @@ export function createRequestChain(
       if (passed instanceof Response) return passed;
       const { gate, attribution } = passed;
       const { visitor, visitorShareId, visitorMemberKey, widgetDoorGrant } = gate;
-      const {
-        widgetIdentity,
-        provenIdentityFor,
-        accessIdentityFor,
-        browserProvedNobody,
-        provenAuthor,
-      } = attribution;
+      const { widgetIdentity, provenIdentityFor, browserProvedNobody, provenAuthor } = attribution;
       // Writers that see no request read who it proved from here.
       setRequestAuthor(provenAuthor);
       /** A person proof naming the owner — never a body, a widget token or
@@ -185,36 +177,15 @@ export function createRequestChain(
       // through to the ordered chain below exactly as it did before Hono
       // existed. A websocket upgrade never enters it: the Yjs and audio
       // sockets stay on Bun's `server.upgrade`, in the stream block below.
+      //
+      // The sign-in, session and share routes (`auth-share.ts`) are the first
+      // family it answers; they sat right here. They stay AFTER the host
+      // decision on purpose, so a share visitor reaches them only if
+      // `shareScopeAllows` lets them, and it does not: a share visitor is
+      // already proven by Cloudflare Access, and sign-in is not a second way
+      // to claim an identity on a share host.
       const fronted = await ctx.honoFront(req, { gate, attribution, ownerProven });
       if (fronted) return fronted;
-
-      // --- REST: email login ---
-      // Reachability (the host gate, Access, a share session) and identity
-      // (who you are) stay orthogonal: a local host still bypasses the host
-      // guard — it may REACH the server — and still has to say who it is.
-      // These routes are what "saying who you are" means.
-      //
-      // They sit AFTER the host decision on purpose, so a share visitor
-      // reaches them only if `shareScopeAllows` lets them, and it does not:
-      // a share visitor is already proven by Cloudflare Access, and this is
-      // not a second way to claim an identity on a share host.
-
-      // --- Sign-in, session and share links (routes/auth-share.ts) ---
-      // Extracted whole and called from the position the block occupied, so
-      // nothing above or below it overtakes anything. See that file's header
-      // for the two places the order inside it is load-bearing.
-      {
-        const handled = await handleAuthShareRoutes(authShareRoutesCtx, {
-          req,
-          url,
-          pathname,
-          widgetIdentity,
-          browserProvedNobody,
-          provenIdentityFor,
-          accessIdentityFor,
-        });
-        if (handled) return handled;
-      }
 
       // --- ElevenLabs' agent asking for setup 4's reply --- see
       // ./routes/voice-agent-llm.ts. It answers one exact path, so where it
