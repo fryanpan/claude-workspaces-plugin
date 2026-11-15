@@ -5,6 +5,17 @@
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { type GoalListEntry } from '../tasks.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type {
+  GoalListAnswer,
+  GoalListBody,
+  RenameGoalAnswer,
+  RenameGoalBody,
+  ReorderGoalsAnswer,
+  ReorderGoalsBody,
+  RestoreGoalAnswer,
+  RestoreGoalBody,
+} from './task-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 // Moved down from server.ts with the route below, its only caller.
@@ -116,13 +127,13 @@ export async function handleWorkspaceGoals(
   const goalRestoreMatch = pathname.match(/^\/workspaces\/[^/]+\/goals\/([^/]+)\/restore$/);
   if (goalRestoreMatch && req.method === 'POST') {
     const goalId = decodeURIComponent(goalRestoreMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<RestoreGoalBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const res = taskStore.unarchiveGoal(goalId, { actor: author });
     if (!res.ok) return j(404, res);
     if (!res.changed) taskProjection.ensureWorkspace(res.goal.workspaceId);
-    return j(200, res);
+    return j(200, answerAs<RestoreGoalAnswer>(res));
   }
   // set_goal_list (§3.2 edit contract): replace the ordered board
   // sections. Structural validation happens HERE because the store
@@ -131,7 +142,7 @@ export async function handleWorkspaceGoals(
   const wsGoalsMatch = pathname.match(/^\/workspaces\/([^/]+)\/goals$/);
   if (wsGoalsMatch && req.method === 'PUT') {
     const workspaceId = decodeURIComponent(wsGoalsMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<GoalListBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const goals = parseGoalList(body?.goals);
@@ -188,7 +199,7 @@ export async function handleWorkspaceGoals(
             : {};
       return j(res.error === 'workspace-not-found' ? 404 : 400, { ...res, ...detail });
     }
-    return j(200, res);
+    return j(200, answerAs<GoalListAnswer>(res));
   }
   // rename_goal (§3.2): change a band's TITLE without touching its id.
   // Its own route rather than a flag on the PUT above, because the
@@ -197,7 +208,7 @@ export async function handleWorkspaceGoals(
   const wsRenameMatch = pathname.match(/^\/workspaces\/([^/]+)\/goals\/rename$/);
   if (wsRenameMatch && req.method === 'POST') {
     const workspaceId = decodeURIComponent(wsRenameMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<RenameGoalBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const goalId = body?.goal;
@@ -230,7 +241,7 @@ export async function handleWorkspaceGoals(
         res.error === 'reserved-goal-id' ? 400 : res.error === 'goal-not-found' ? 404 : 404;
       return j(status, res);
     }
-    return j(200, res);
+    return j(200, answerAs<RenameGoalAnswer>(res));
   }
   // add_goal: append ONE band. Separate from the PUT above for the same
   // reason rename is — that one replaces the list, so a board adding a
@@ -278,7 +289,7 @@ export async function handleWorkspaceGoals(
   const wsReorderMatch = pathname.match(/^\/workspaces\/([^/]+)\/goals\/reorder$/);
   if (wsReorderMatch && req.method === 'POST') {
     const workspaceId = decodeURIComponent(wsReorderMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<ReorderGoalsBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const order = body?.order;
@@ -315,7 +326,7 @@ export async function handleWorkspaceGoals(
           : {};
       return j(res.error === 'workspace-not-found' ? 404 : 400, { ...res, ...detail });
     }
-    return j(200, res);
+    return j(200, answerAs<ReorderGoalsAnswer>(res));
   }
   return undefined;
 }

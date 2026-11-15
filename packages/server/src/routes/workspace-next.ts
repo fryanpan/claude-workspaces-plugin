@@ -20,6 +20,8 @@ import { BOARDLESS_PAGES, type LoadReportReading, pageTypeOf } from '../slow-loa
 import { buildQueue } from '../task-queue.ts';
 import { eventsLogPath, isRetired, retiredNotice } from '../tasks.ts';
 import { SERVER_TICK_EVENT, analyzeUptime } from '../uptime.ts';
+import { answerAs, queryOf } from './route-contract.ts';
+import type { NextAnswer, NextQuery } from './task-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /**
@@ -65,12 +67,13 @@ export async function handleWorkspaceNext(
     // used to open this block are DELETED rather than left dormant — there
     // is no second copy of "does this board exist" here to drift.
     const { workspaceId, board: workspace } = scope;
-    const limitRaw = url.searchParams.get('limit');
+    const q = queryOf<NextQuery>(url);
+    const limitRaw = q.limit;
     // Same additive flag as `/tasks`, and the same default: an archived
     // row is not work to pick up, so it leaves the queue unless a caller
     // asks for it by name.
-    const includeArchived = url.searchParams.get('includeArchived') === 'true';
-    const wantedOwner = url.searchParams.get('assignee') || undefined;
+    const includeArchived = q.includeArchived === 'true';
+    const wantedOwner = q.assignee || undefined;
     const tasks = taskStore.listTasks(workspaceId, { includeArchived });
     const rows = buildQueue(tasks, workspace.goals, {
       ...(wantedOwner !== undefined ? { assignee: wantedOwner } : {}),
@@ -81,10 +84,10 @@ export async function handleWorkspaceNext(
         ...(wantedOwner !== undefined ? { matches: taskStore.ownerMatcher(wantedOwner) } : {}),
         idOf: (t) => taskStore.ownerIdOf(t),
       },
-      ...(limitRaw !== null && Number.isFinite(Number(limitRaw))
+      ...(limitRaw !== undefined && Number.isFinite(Number(limitRaw))
         ? { limit: Number(limitRaw) }
         : {}),
-      includeBlocked: url.searchParams.get('includeBlocked') === 'true',
+      includeBlocked: q.includeBlocked === 'true',
       // So each row can say whether its BAND has been agreed to. The
       // row is still listed either way — a lead reading the queue
       // should see the band and be able to disagree with it.
@@ -159,21 +162,24 @@ export async function handleWorkspaceNext(
       heldForCapacity += 1;
       return false;
     });
-    return j(200, {
-      workspaceId,
-      tasks: withinCapacity,
-      ...(capView
-        ? {
-            capacity: {
-              cap: capView.cap,
-              inUse: capView.inUse,
-              free: capView.free,
-              ...(heldForCapacity > 0 ? { heldForCapacity } : {}),
-            },
-          }
-        : {}),
-      ...(isRetired(workspace) ? { retired: retiredNotice(workspace) } : {}),
-    });
+    return j(
+      200,
+      answerAs<NextAnswer>({
+        workspaceId,
+        tasks: withinCapacity,
+        ...(capView
+          ? {
+              capacity: {
+                cap: capView.cap,
+                inUse: capView.inUse,
+                free: capView.free,
+                ...(heldForCapacity > 0 ? { heldForCapacity } : {}),
+              },
+            }
+          : {}),
+        ...(isRetired(workspace) ? { retired: retiredNotice(workspace) } : {}),
+      }),
+    );
   }
   // Activity view (§3.9): the per-workspace events.jsonl audit log,
   // read back as rows. This is the surface where the after-the-fact
