@@ -284,6 +284,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/voice-feedback.md` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/voice-feedback/:file` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/whiteboard` | GET, POST | `routes/whiteboard-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/y` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/embeds` | GET | `routes/workspace-embeds.ts` | share-scope |  |
 | `/workspaces/:ws/embeds` | PUT | `routes/workspace-embeds.ts` | trusted-local |  |
@@ -394,4 +395,5 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/voice-queue/:id/answer` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/voice/converse` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/voice/timings` | GET | `routes/workspace-settings.ts` | trusted-local |  |
+| `/workspaces/:ws/whiteboards` | POST | `routes/whiteboard-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/y` | GET | `routes/upgrade-stream.ts` | collab-scope |  |

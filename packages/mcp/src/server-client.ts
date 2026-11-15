@@ -24,15 +24,21 @@ import { hc } from 'hono/client';
 import type {
   AgentNotesContract,
   AttachmentsContract,
+  DocComponentsContract,
   DocEditsContract,
   DocLifecycleContract,
   DocThreadsContract,
+  InboxContract,
+  LeadChatFilesContract,
+  LibraryFoldersContract,
   MountsApi,
+  PersonContract,
   ReviewItemsContract,
   ShareContract,
   TaskBoardContract,
   TaskContentContract,
   TaskStateContract,
+  WhiteboardContract,
 } from '../../server/src/index.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
@@ -64,3 +70,9 @@ export const taskStateClient = (http: Http) => typedClient<TaskStateContract>(ht
 export const taskContentClient = (http: Http) => typedClient<TaskContentContract>(http);
 export const taskBoardClient = (http: Http) => typedClient<TaskBoardContract>(http);
 export const reviewItemsClient = (http: Http) => typedClient<ReviewItemsContract>(http);
+export const libraryFoldersClient = (http: Http) => typedClient<LibraryFoldersContract>(http);
+export const docComponentsClient = (http: Http) => typedClient<DocComponentsContract>(http);
+export const personClient = (http: Http) => typedClient<PersonContract>(http);
+export const whiteboardClient = (http: Http) => typedClient<WhiteboardContract>(http);
+export const inboxClient = (http: Http) => typedClient<InboxContract>(http);
+export const leadChatFilesClient = (http: Http) => typedClient<LeadChatFilesContract>(http);

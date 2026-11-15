@@ -325,10 +325,17 @@ export type { TaskStateContract } from './routes/task-state-contract.ts';
 export type { TaskContentContract } from './routes/task-content-contract.ts';
 export type { TaskBoardContract } from './routes/task-board-contract.ts';
 export type { ReviewItemsContract } from './routes/review-items-contract.ts';
+export type { LibraryFoldersContract } from './routes/library-folders-contract.ts';
+export type { DocComponentsContract } from './routes/doc-components-contract.ts';
+export type { PersonContract, PlaceFields } from './routes/person-contract.ts';
+export type { WhiteboardContract } from './routes/whiteboard-contract.ts';
+export type { InboxContract } from './routes/inbox-contract.ts';
+export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts';
 export type { DocEditsContract } from './routes/doc-edits-contract.ts';
 export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
 export type {
   DocThreadsContract,
+  ScopedEditFields,
   ThreadByFindBody,
   ThreadCreateBody,
 } from './routes/doc-threads-contract.ts';

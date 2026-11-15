@@ -12,6 +12,13 @@ import {
 } from '../library-folders.ts';
 import { type WorkspaceScope, matchRest, restIs } from '../middleware/workspace-scope.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import type {
+  CreateFolderBody,
+  DocFolderBody,
+  MoveFolderBody,
+  RenameFolderBody,
+} from './library-folders-contract.ts';
+import { sent } from './route-contract.ts';
 import type { LibraryRouteRequest, LibraryRoutesContext } from './workspace-library.ts';
 
 /**
@@ -79,7 +86,7 @@ export async function handleLibraryFolderRoutes(
   if (list) {
     if (req.method === 'GET') return j(200, { folders: liveFolders(board.board) });
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    const body = await ctx.safeJson(req);
+    const body = sent<CreateFolderBody>(await ctx.safeJson(req));
     const parentId = parentOf(body?.parentId);
     if (parentId === undefined)
       return j(400, { error: 'bad-parent', message: 'parentId must be a folder id or null.' });
@@ -95,12 +102,17 @@ export async function handleLibraryFolderRoutes(
     const id = decodeURIComponent(verb[1] ?? '');
     if (!FOLDER_ID.test(id))
       return j(404, { error: 'not-found', message: 'No such folder on this board.' });
-    const body = (await ctx.safeJson(req)) ?? {};
+    const raw = await ctx.safeJson(req);
     switch (verb[2]) {
-      case 'rename':
+      case 'rename': {
+        const body = sent<RenameFolderBody>(raw) ?? {};
         return answer(update((b) => renameFolder(b, id, body.name)));
+      }
       case 'move': {
-        const parentId = 'parentId' in body ? parentOf(body.parentId) : undefined;
+        const body = sent<MoveFolderBody>(raw) ?? {};
+        // JSON carries no undefined, so a present key is a defined one; and
+        // `in` would widen the body with whatever name it tests.
+        const parentId = body.parentId !== undefined ? parentOf(body.parentId) : undefined;
         if (parentId === undefined)
           return j(400, { error: 'bad-parent', message: 'parentId must be a folder id or null.' });
         return answer(update((b) => moveFolder(b, id, parentId)));
@@ -120,8 +132,8 @@ export async function handleLibraryFolderRoutes(
   if (!board.board.docIds.includes(docId)) {
     return j(404, { error: 'not-found', message: 'That doc is not on this board.' });
   }
-  const body = await ctx.safeJson(req);
-  const folderId = body && 'folderId' in body ? parentOf(body.folderId) : undefined;
+  const body = sent<DocFolderBody>(await ctx.safeJson(req));
+  const folderId = body?.folderId !== undefined ? parentOf(body.folderId) : undefined;
   if (folderId === undefined) {
     return j(400, { error: 'bad-parent', message: 'folderId must be a folder id or null.' });
   }

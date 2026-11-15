@@ -43,6 +43,8 @@ import type { BoardWorkspace, Task, TaskStore } from '../tasks.ts';
 import type { ThreadOpenerProofs } from '../thread-opener-proofs.ts';
 import type { ThreadRequestDedup } from '../thread-request-dedup.ts';
 import type { createWebhookDispatcher } from '../webhooks.ts';
+import type { ScopedEditFields } from './doc-threads-contract.ts';
+import type { Sent } from './route-contract.ts';
 
 export type { ThreadReviewGate };
 
@@ -91,7 +93,7 @@ export function parsePlacement(
  *  judge it by, and whether the caller confirmed writing over a person's
  *  change. Used by both `doc-threads-routes.ts` and `doc-edit-routes.ts`. */
 export function scopedEditGuard(
-  body: Record<string, unknown> | null,
+  body: Sent<ScopedEditFields> | null,
   authorFor: (claimed: unknown) => User | undefined,
 ): ScopedEditGuard {
   const reader = authorFor(body?.author)?.id;

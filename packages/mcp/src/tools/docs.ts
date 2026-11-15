@@ -23,6 +23,7 @@
  * behaviour or its reply changed here.
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { ScopedEditFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import {
@@ -170,10 +171,13 @@ export async function handleDocsTool(
   // Sent on every scoped edit: the author is whose get_doc reads the server's
   // stale-write rule judges the edit by, and the confirm flag is forwarded
   // only when true, so the default stays the protected path.
-  const scoped = (): { author: unknown; confirmOverwriteHumanEdits?: true } => ({
-    author: AUTHOR,
-    ...(a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}),
-  });
+  // Typed as the contract's fields and assigned by name, so a renamed field
+  // fails typecheck here: a spread would carry the old name through.
+  const scoped = (): ScopedEditFields => {
+    const fields: ScopedEditFields = { author: AUTHOR };
+    if (a.confirmOverwriteHumanEdits === true) fields.confirmOverwriteHumanEdits = true;
+    return fields;
+  };
   switch (name) {
     case 'list_docs': {
       // Every param has to reach the wire: this handler used to issue a
