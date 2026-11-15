@@ -1,9 +1,10 @@
 {
   "_comment": "Per-package line-coverage floors for `bun run coverage`. Set to the measured number rounded down; a number may only go UP. The bar is 80% (scripts/coverage.ts TARGET_PCT); these are where the packages are today.",
   "_server": "server moved 95 -> 75 on 2026-09-06 because its DENOMINATOR changed, not its tests: bun's own line count depends on how the suite was scheduled (the same file reports 298 lines from one run and 660 from the union of that run in chunks, with the identical 295 hit), so the floor is now over the source's code lines instead. Identical hits, bigger denominator. See scripts/coverage.ts, 'The two denominators'.",
+  "_server_types": "server moved 75 -> 83 on 2026-11-15 because its DENOMINATOR changed again, not its tests: the source count no longer counts interface and type-alias declarations, which compile to nothing and which bun never reports hit. Measured on main e9ac273c7 from CI's lcov: 96051/128032 = 75.0% before, 96051/114686 = 83.8% after. Identical hits, smaller denominator; the floor rose with it so the gate is no looser.",
   "core": 94,
   "workspaces-app": 85,
   "mcp": 27,
   "widget": 83,
-  "server": 75
+  "server": 83
 }
