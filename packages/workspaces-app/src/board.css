@@ -909,6 +909,11 @@ wa-toast.board-wa-toast {
   font: inherit;
   padding: 0 0 calc(20px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
   z-index: 80;
+  /* Web Awesome scrolls the stack (overflow-y: auto), which clips the
+     toast's 50px shadow to the stack's own width: a hard-edged grey block
+     under the toast that .board-toast does not have. One toast at a time
+     needs no scrolling. */
+  overflow: visible;
 }
 wa-toast.board-wa-toast wa-toast-item {
   font: inherit;
@@ -929,6 +934,16 @@ wa-toast.board-wa-toast wa-toast-item::part(content) {
 wa-toast.board-wa-toast wa-toast-item::part(accent),
 wa-toast.board-wa-toast wa-toast-item::part(close-button) {
   display: none;
+}
+/* At ≤1100 both toasts stand clear of the feedback widget's "≡" chip; the
+   rule and its reasons are with .board-toast's. This one matters most: a
+   <wa-toast> is a popover in the top layer, so it draws over the chip rather
+   than under it. */
+@media (max-width: 1100px) {
+  body:has(claude-feedback-widget) wa-toast.board-wa-toast {
+    inset-inline-start: calc((100vw - 160px) / 2);
+    max-width: calc(100vw - 160px - 24px);
+  }
 }
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
@@ -7814,6 +7829,19 @@ label.board-sched-chip:hover {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+/* At ≤1100 with a feedback widget on the page, the toast is centred in the
+   room left of the widget's column rather than on the page: centred on the
+   page at 430 its right end ran under the widget's "≡" chip, which stands
+   76px in from the right edge (`.fab-list.side`, widget-mic.ts) and is 44px
+   or wider, so 160px clears it with room for a count. The Web Awesome toast
+   takes the same place (its rule beside the strip's).
+   presence-strip-wa-browser.test.ts reads both boxes against the chip's. */
+@media (max-width: 1100px) {
+  body:has(claude-feedback-widget) .board-toast {
+    left: calc((100vw - 160px) / 2);
+    max-width: calc(100vw - 160px - 24px);
+  }
 }
 .board-toast.hidden {
   display: none;
