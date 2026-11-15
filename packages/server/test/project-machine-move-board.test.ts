@@ -44,28 +44,29 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  if (port === undefined) throw new Error('no port from the probe server');
-  return port;
-}
-
 interface Server {
   base: string;
   child: ChildProcess;
 }
 
+/**
+ * Boots a server on a port it picks itself, and returns once that server says
+ * where it is listening.
+ *
+ * It used to be handed a port a probe had just freed, and was taken as up
+ * once anything answered there. Another process could bind the port in the
+ * gap; this child then refused it, and the test talked to the other server:
+ * the target's own board came back 404 (CI runs 43395696747, 43605410257),
+ * or a task posted to a board the other server never had (43550689908).
+ */
 async function boot(dataDir: string): Promise<Server> {
-  const port = await freePort();
   const child = spawn(
     'bun',
     [
       'run',
       join(repoRoot, 'packages', 'server', 'src', 'bin.ts'),
       '--port',
-      String(port),
+      '0',
       '--host',
       '127.0.0.1',
       '--data-dir',
@@ -73,24 +74,21 @@ async function boot(dataDir: string): Promise<Server> {
     ],
     {
       cwd: repoRoot,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
       env: { ...process.env, CW_SUMMARIES: '0', HOME: join(scratch, 'home') },
     },
   );
   children.push(child);
-  const base = `http://127.0.0.1:${port}`;
-  await waitFor(
-    async () => {
-      try {
-        const res = await fetch(`${base}/api/deploy`, { headers: { host: `localhost:${port}` } });
-        return res.status > 0 ? true : null;
-      } catch {
-        return null;
-      }
-    },
-    { timeout: 30_000, interval: 100, describe: 'the server to answer on loopback' },
-  );
-  return { base, child };
+  let stdout = '';
+  child.stdout?.on('data', (b: Buffer) => {
+    stdout += b.toString();
+  });
+  const port = await waitFor(() => stdout.match(/listening on :(\d+)\r?\n/)?.[1], {
+    timeout: 30_000,
+    interval: 100,
+    describe: 'the server to say where it listens',
+  });
+  return { base: `http://127.0.0.1:${port}`, child };
 }
 
 async function stop(child: ChildProcess): Promise<void> {
