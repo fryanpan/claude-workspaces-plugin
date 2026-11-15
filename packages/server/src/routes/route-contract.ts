@@ -12,7 +12,8 @@
  * - **Fields.** The handler branch reads its body as `Sent<B>` with
  *   `sent<B>(await safeJson(req))`, where `B` is the type the contract
  *   declares. A field renamed in `B` fails typecheck in the handler that reads
- *   it and in the MCP tool that sends it.
+ *   it and in the MCP tool that sends it. A query string is read the same
+ *   way, with `queryOf<Q>(url)`.
  * - **Answers.** Where an MCP tool reads a field of the answer, the contract
  *   declares it as `R` with `answers<R>()`, the branch builds its JSON with
  *   `answerAs<R>({...})`, and the tool reads the typed answer. A renamed
@@ -38,6 +39,19 @@ export function json<B>(): MiddlewareHandler<
   { in: { json: B }; out: { json: Sent<B> } }
 > {
   return neverRuns;
+}
+
+/**
+ * A request's query string, keyed as the contract's `Q` declares it, so a
+ * renamed parameter fails typecheck in the handler that reads it. The first
+ * value of a repeated key wins, as `URLSearchParams.get` answers.
+ */
+export function queryOf<Q>(url: URL): { [K in keyof Q]?: string } {
+  const out: Record<string, string> = Object.create(null);
+  for (const [key, value] of url.searchParams) {
+    if (!Object.hasOwn(out, key)) out[key] = value;
+  }
+  return out as { [K in keyof Q]?: string };
 }
 
 /** Declares the query string `Q`. Never runs. */

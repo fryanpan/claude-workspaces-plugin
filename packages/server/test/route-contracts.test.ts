@@ -18,7 +18,9 @@ import { attachmentsContract } from '../src/routes/attachments-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
+import { queryOf } from '../src/routes/route-contract.ts';
 import { shareContract } from '../src/routes/share-contract.ts';
+import { taskBoardContract } from '../src/routes/task-board-contract.ts';
 import { taskContentContract } from '../src/routes/task-content-contract.ts';
 import { taskStateContract } from '../src/routes/task-state-contract.ts';
 
@@ -100,6 +102,16 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
       'task-status-links.ts:handleTaskStatusAndLinks',
     ],
   },
+  {
+    name: 'task board',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: taskBoardContract as unknown as Hono<any>,
+    servedBy: [
+      'workspace-next.ts:handleWorkspaceNext',
+      'tasks-list-create.ts:handleTaskListCreate',
+      'workspace-goals.ts:handleWorkspaceGoals',
+    ],
+  },
 ];
 
 /** `METHOD /path` for every route the app declares, once each. */
@@ -130,5 +142,23 @@ describe('route contracts', () => {
     expect(by).toBeUndefined();
     const unserved = answers['DELETE /api/attachments']?.split('| by ')[1] ?? '';
     expect(CONTRACTS[0]?.servedBy.some((h) => unserved.includes(h))).toBe(false);
+  });
+});
+
+describe('queryOf', () => {
+  it('reads the first value of a key, as URLSearchParams.get does', () => {
+    const q = queryOf<{ goal?: string; limit?: string }>(
+      new URL('http://x/w?goal=g-1&goal=g-2&limit=3'),
+    );
+    expect(q).toEqual({ goal: 'g-1', limit: '3' });
+  });
+
+  it('answers nothing for a key the request did not send, prototype names included', () => {
+    const q = queryOf<{ constructor?: string; toString?: string }>(
+      new URL('http://x/w?toString=1&__proto__=2'),
+    );
+    expect(q.constructor).toBeUndefined();
+    expect(q.toString).toBe('1');
+    expect(Object.getPrototypeOf(q)).toBeNull();
   });
 });
