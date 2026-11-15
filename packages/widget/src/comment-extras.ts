@@ -17,7 +17,9 @@ import type { FeedbackWidgetEl } from './widget.ts';
  * The owner asked for the mark after an agent's resolve took a comment off
  * his open page at once: "It's a little sudden, and then it feels like it's
  * getting lost." So the agent marks it, the comment stays, and he resolves.
- * Calm: a steady word and a steady pin, nothing that moves or pulses.
+ * Calm: a steady word on the card. The pin of a comment being worked on
+ * breathes, slowly — the one motion, chosen by the owner on the
+ * comment-states mock — and holds still under reduced motion.
  */
 
 const LABEL = { working: 'In progress', done: 'Done' } as const;
@@ -87,6 +89,15 @@ export function markPins(el: FeedbackWidgetEl, rows: ThreadRow[]): void {
     const pin = el.pinLayer?.querySelector<HTMLElement>(
       `.cfw-pin[data-thread-id="${CSS.escape(r.thread.id)}"]`,
     );
-    if (pin) pin.dataset.state = p.state;
+    if (!pin) continue;
+    pin.dataset.state = p.state;
+    // Working: the three breathing dots (`.cw-breathe`, `comment-view-css.ts`).
+    // The renderer rebuilds every pin, so a pin that stops working loses them.
+    if (p.state === 'working' && !pin.querySelector('.cw-pg')) {
+      pin.insertAdjacentHTML(
+        'beforeend',
+        '<span class="cw-pg"><i class="cw-breathe"></i><i class="cw-breathe"></i><i class="cw-breathe"></i></span>',
+      );
+    }
   }
 }
