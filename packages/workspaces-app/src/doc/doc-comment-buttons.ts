@@ -3,9 +3,8 @@
  * speech bubble, the mic and the thread list a mock or an app page shows.
  *
  * Bryan, 14 Nov, on a doc beside a live map embed: "What happened to my
- * commenting tools bottom right?" A doc page had never loaded them; he had
- * them on the app's own page and lost them when the app moved into a doc as
- * an embed. He approved adding them to docs.
+ * commenting tools bottom right?" A doc page had never loaded them; mocks
+ * and app pages always had. He approved adding them to docs.
  *
  * The widget is pointed at the doc on screen, so what it takes lands on that
  * doc's threads and reaches the agent watching it. It is created here, per
