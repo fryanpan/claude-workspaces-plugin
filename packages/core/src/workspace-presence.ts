@@ -160,3 +160,11 @@ export function parseDirective(raw: unknown): PersonDirective | null {
   if (!spot) return null;
   return { to: r.to, seq: r.seq, by: { id: by.id, name: by.name.slice(0, 80) }, spot };
 }
+
+/**
+ * The page-only board frame that says whether the board's sockets now take
+ * the collab core (`POST /workspaces/<id>/collab-core`). Carries `active`:
+ * the board's own setting AND the server-wide one. The board page draws its
+ * presence strip from Web Awesome components while it is true.
+ */
+export const COLLAB_CORE_CHANGED = 'collab-core.changed';

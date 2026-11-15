@@ -840,6 +840,96 @@ body.board-body {
 .board-presence-agent .board-presence-name::before {
   content: "🤖 ";
 }
+/* The Web Awesome strip, on a board the collab core serves
+   (`presence-island-wa.tsx`). The same 28px circles as `.board-presence-circle`
+   in styles.css, drawn by a `<wa-avatar>` inside a bare button: the button
+   keeps the press, the focus and the 36px hit area, and the avatar carries
+   the fill, the shape and the rings. Two classes on the button, so the base
+   `.board-following` ring (one class, in styles.css) lands on the avatar
+   rather than on the button as well. */
+.board-people .board-presence-wa {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.board-people .board-presence-wa.board-presence-agent {
+  border-radius: 9px;
+}
+.board-presence-wa::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.board-presence-wa wa-avatar {
+  --size: 28px;
+  box-sizing: border-box;
+  /* Set here, not left to the avatar's var(--wa-border-radius-circle): that
+     variable lives in wa-theme.css, which loads after the strip mounts, and
+     until it arrives the circles paint square. */
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background-color: var(--bg-hover);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.board-presence-wa wa-avatar[shape="rounded"] {
+  border-radius: 9px;
+}
+.board-presence-wa.board-presence-more wa-avatar {
+  background-color: var(--bg-panel);
+  color: var(--fg-muted);
+}
+.board-presence-wa.board-presence-unresponsive wa-avatar {
+  border-color: var(--yellow);
+}
+.board-presence-wa.board-following wa-avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* The strip's toasts beside the Web Awesome strip: a <wa-toast> dressed as
+   .board-toast — same place, font, ground, padding, corner and width, with
+   no accent bar, close button or slide. Web Awesome sets its own font size on
+   each layer, so each layer inherits instead. */
+wa-toast.board-wa-toast {
+  --gap: 0;
+  /* Auto, as .board-toast is: from left 50% it shrinks to fit the half it
+     has, so it wraps where today's toast wraps. */
+  width: auto;
+  max-width: min(90vw, 480px);
+  font: inherit;
+  padding: 0 0 calc(20px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
+  z-index: 80;
+}
+wa-toast.board-wa-toast wa-toast-item {
+  font: inherit;
+}
+wa-toast.board-wa-toast wa-toast-item::part(toast-item) {
+  font: inherit;
+  background: var(--fg);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  animation: none;
+}
+wa-toast.board-wa-toast wa-toast-item::part(content) {
+  padding: 10px 16px;
+  font: inherit;
+  color: var(--bg);
+}
+wa-toast.board-wa-toast wa-toast-item::part(accent),
+wa-toast.board-wa-toast wa-toast-item::part(close-button) {
+  display: none;
+}
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
 .board-drift {

@@ -38,6 +38,7 @@
  * a promoted guest can do here locks the operator out of their own board.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import { COLLAB_CORE_CHANGED } from '@claude-workspaces/core/workspace-presence';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
@@ -201,12 +202,13 @@ export async function handleWorkspaceMembers(
       return j(500, { error: 'could not save the setting' });
     }
     console.error(`[collab-core] board ${workspaceId} switched ${body.on ? 'on' : 'off'}`);
-    return j(200, {
-      ok: true,
-      workspaceId,
-      on: body.on,
-      active: collabCoreSwitch.usesCore(workspaceId),
-    });
+    const active = collabCoreSwitch.usesCore(workspaceId);
+    // The board's open pages pick their presence strip from this, so they
+    // hear it now rather than at their next reload. Pages only: no agent
+    // acts on which strip a page draws, and each frame costs a session a turn.
+    const frame = { event: COLLAB_CORE_CHANGED, workspaceId, active };
+    sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
+    return j(200, { ok: true, workspaceId, on: body.on, active });
   }
 
   // ── End one person's access ───────────────────────────────────────────

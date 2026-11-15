@@ -1,0 +1,48 @@
+/*
+ * Theme file: Workspaces, for the Web Awesome components the board draws.
+ *
+ * The format is the design-kit trial's (`templates/design-kit/themes/`), in
+ * four parts and this order:
+ *   1. one base theme from the kit
+ *   2. brand hue: the eleven --wa-color-brand-NN steps mapped onto one hue
+ *   3. site tokens: type, radius, surfaces
+ *   4. the compact setting, under [data-density='compact']
+ *
+ * Built to /app/wa-theme.css and linked by `presence-island-wa.tsx` only on a
+ * board the collab core serves, so a board on the current code loads none of
+ * it. The base theme sits in its own cascade layer, so every unlayered rule
+ * in board.css and styles.css still wins over it.
+ */
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+
+:root {
+  /* 2. Brand hue: blue, the board's accent. */
+  --wa-color-brand-95: var(--wa-color-blue-95);
+  --wa-color-brand-90: var(--wa-color-blue-90);
+  --wa-color-brand-80: var(--wa-color-blue-80);
+  --wa-color-brand-70: var(--wa-color-blue-70);
+  --wa-color-brand-60: var(--wa-color-blue-60);
+  --wa-color-brand-50: var(--wa-color-blue-50);
+  --wa-color-brand-40: var(--wa-color-blue-40);
+  --wa-color-brand-30: var(--wa-color-blue-30);
+  --wa-color-brand-20: var(--wa-color-blue-20);
+  --wa-color-brand-10: var(--wa-color-blue-10);
+  --wa-color-brand-05: var(--wa-color-blue-05);
+
+  /* 3. Site tokens: the board's own font, small corners, flat surfaces. */
+  --wa-font-family-body: var(--sans);
+  --wa-font-family-heading: var(--sans);
+  --wa-font-size-scale: 0.9375;
+  --wa-border-radius-scale: 0.75;
+  --wa-shadow-offset-y-scale: 0;
+  --wa-color-surface-lowered: var(--wa-color-gray-95);
+}
+
+/* 4. Compact: a stored per-device preference sets data-density on <html>. */
+:root[data-density="compact"] {
+  --wa-space-scale: 0.625;
+  --wa-font-size-scale: 0.875;
+  --wa-form-control-padding-block: 0.4em;
+  --wa-form-control-padding-inline: 0.65em;
+  --wa-line-height-normal: 1.45;
+}
