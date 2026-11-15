@@ -8,7 +8,8 @@
  * (`request-chain-gates.ts`: the CORS preflight, the cross-origin write gate,
  * the home feed and the GitHub hub, admission, the local-only gate,
  * attribution and the two sign-in gates), then the Hono app
- * (`hono-front.ts`), then the sign-in and share routes, the two vendor
+ * (`hono-front.ts`, with the families in `hono-families.ts`), then the
+ * sign-in and share routes, the two vendor
  * callbacks, the upgrades and streams, and the workspace scope — and then the
  * two halves below them:
  * the board and REST families (`request-chain-board.ts`) and the top-level

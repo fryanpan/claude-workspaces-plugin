@@ -2,9 +2,9 @@
  * ── The Hono app: the router route families move into, one family a PR ──
  *
  * Milestone M12 moves this server's routes from the hand-ordered chain in
- * `request-chain.ts` onto Hono. This file is the first step and moves no
- * route: it builds a Hono app from `HONO_FAMILIES`, which is empty, and the
- * chain tries it below the gates and above every route family it holds.
+ * `request-chain.ts` onto Hono. This file builds the Hono app from a list of
+ * families (`hono-families.ts` holds the ones that have moved), and the chain
+ * tries it below the gates and above every route family it still holds.
  *
  * Three properties hold for every family that joins.
  *
@@ -24,8 +24,8 @@
  * throw inside a Hono handler reaches the chain's Sentry span exactly as a
  * throw inside a chain handler does.
  *
- * MOVING A FAMILY: write it as a `HonoFamily`, add it to `HONO_FAMILIES`, and
- * delete its call from the chain in the same commit. The route-answer
+ * MOVING A FAMILY: register it in `hono-families.ts`, and delete its call
+ * from the chain in the same commit. The route-answer
  * snapshot (`test/route-answers.test.ts`) fails if any address in the route
  * table is answered differently afterwards — and the move has to keep the
  * family's position relative to the eight adjacencies `route-table.ts`
@@ -33,12 +33,6 @@
  */
 import { Hono } from 'hono';
 import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
-
-/**
- * The families Hono answers, in registration order. Empty until the first
- * family moves; see this file's header for how one joins.
- */
-export const HONO_FAMILIES: readonly HonoFamily[] = [];
 
 /** Try the Hono app. Null means no family claimed the request. */
 export type HonoFront = (req: Request, env: HonoGateEnv) => Promise<Response | null>;

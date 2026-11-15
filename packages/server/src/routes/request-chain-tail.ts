@@ -1,35 +1,34 @@
 /**
  * ── The request chain, last third: the top-level families and the tail ──
  *
- * The families that belong to the server rather than to one board — the
- * prompt settings, the workspaces list's stream, the cross-board review
- * queue, the voice page and API, the access page, the registered features (`features.ts`),
- * the goal coach and the webhook log — and then the tail: the shell and
- * static serving, the task address, the stale-client 410, the wrong-prefix
- * hint, the board's own not-found page and the bare 404. Moved whole and in
- * order out of `createServer`'s `route()`; see `request-chain.ts` for why the
- * order is behaviour.
+ * The families that belong to the server rather than to one board and are
+ * still on the chain — the workspaces list's stream, the registered features
+ * (`features.ts`), private messages and the webhook log — and then the tail:
+ * the shell and static serving, the task address, the stale-client 410, the
+ * wrong-prefix hint, the board's own not-found page and the bare 404. Moved
+ * whole and in order out of `createServer`'s `route()`; see
+ * `request-chain.ts` for why the order is behaviour.
+ *
+ * The prompt settings, the cross-board review queue, the voice page and API,
+ * the access page and the goal coach were here too, interleaved with these.
+ * They are answered by Hono now (`hono-families.ts`), which is tried above
+ * the whole chain below the gates; each claims paths nothing in the chain
+ * answers, so taking them out of this run reorders nothing that is left.
  *
  * The registered features sit where the Incoming Messages routes sat, which
- * was the first family moved behind them: below the voice API, above the
- * coach. Each family above and below claims a prefix nothing else answers,
- * so a registered family added there shadows nothing.
+ * was the first family moved behind them. Each family above and below claims
+ * a prefix nothing else answers, so a registered family added there shadows
+ * nothing.
  *
  * Always answers: the last line is the 404.
  */
-import { handleAccessRoutes } from './access.ts';
 import { handleBoardLinkRoutes } from './board-links.ts';
-import { handleCoachRoutes } from './coach.ts';
 import { handleLandingStreamRoute } from './landing-stream.ts';
 import { handleWebhookLogRoute } from './ops.ts';
 import { handlePrivateMessageRoutes } from './private-messages.ts';
-import { handlePromptRoutes } from './prompts.ts';
 import type { ChainRequest, RequestChainContext } from './request-chain-context.ts';
-import { handleReviewQueueRoutes } from './review-queue.ts';
 import { handleStaleClient } from './stale-client.ts';
 import { handleTaskPageRoutes } from './task-page.ts';
-import { handleVoiceApiRoutes } from './voice-api.ts';
-import { handleVoicePageRoutes } from './voice-page.ts';
 import { handleWorkspaceNotFound } from './workspace-not-found.ts';
 import { handleWrongPrefix } from './wrong-prefix.ts';
 
@@ -38,102 +37,23 @@ export async function serveTopLevelRoutes(
   rq: ChainRequest,
 ): Promise<Response> {
   const {
-    promptRoutesCtx,
     sse,
     j,
-    reviewQueueRoutesCtx,
-    voicePageRoutesCtx,
-    accessRoutesCtx,
-    voiceApiRoutesCtx,
-    requireSignInToWrite,
     policyFor,
     featureRoutes,
     privateMessageRoutesCtx,
-    coachRoutesCtx,
     opsRoutesCtx,
     serveShellRoutes,
     boardLinkRoutesCtx,
   } = ctx;
   const { req, url, pathname, gate, attribution, ownerProven } = rq;
   const { visitor, visitorHome, boardAgent } = gate;
-  const { authorFor, provenIdentityFor, browserProvedNobody } = attribution;
-
-  // --- REST: the prompt settings --- see ./routes/prompts.ts.
-  // Top-level rather than under a board: `/settings/prompts` is a page
-  // outside any board, and five of the seven prompts belong to the
-  // server rather than to one of them.
-  {
-    const handled = await handlePromptRoutes(promptRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      authorFor,
-    });
-    if (handled) return handled;
-  }
+  const { authorFor, provenIdentityFor } = attribution;
 
   // --- SSE: the workspaces list's change feed --- see
   // ./routes/landing-stream.ts. Top-level, like `/` it serves.
   {
     const handled = handleLandingStreamRoute({ sse, j }, { req, pathname, visitor });
-    if (handled) return handled;
-  }
-
-  // --- REST + page: the cross-board review queue --- see
-  // ./routes/review-queue.ts. Top-level for the prompts' reason: it is
-  // about every board, not one.
-  {
-    const handled = await handleReviewQueueRoutes(reviewQueueRoutesCtx, {
-      req,
-      pathname,
-      url,
-      visitor,
-    });
-    if (handled) return handled;
-  }
-
-  // --- Page + REST: the voice page --- see ./routes/voice-page.ts.
-  // Top-level for the review queue's reason; claims `/voice` and
-  // `/api/voice/agents` alone, which nothing above answers.
-  {
-    const handled = handleVoicePageRoutes(voicePageRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      ownerProven: () => ownerProven(),
-      anyoneProven: () => provenIdentityFor() !== null,
-      mustSignIn: () => requireSignInToWrite && browserProvedNobody(),
-    });
-    if (handled) return handled;
-  }
-
-  // --- Page + REST: the access page --- see ./routes/access.ts. Top-level
-  // for the review queue's reason; claims `/access` and `/api/access` alone.
-  {
-    const handled = handleAccessRoutes(accessRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      ownerProven: () => ownerProven(),
-      anyoneProven: () => provenIdentityFor() !== null,
-    });
-    if (handled) return handled;
-  }
-
-  // --- REST: the voice conversation API --- see ./routes/voice-api.ts.
-  // Claims `/v1/models`, `/v1/chat/completions` and `/api/voice/tokens`
-  // alone; nothing above answers them.
-  {
-    const handled = await handleVoiceApiRoutes(voiceApiRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      ownerProven: () => ownerProven(),
-      anyoneProven: () => provenIdentityFor() !== null,
-      mustSignIn: () => requireSignInToWrite && browserProvedNobody(),
-      requestOrigin: () => policyFor(req).requestOrigin,
-      viaTunnel: () => req.headers.has('cf-ray'),
-    });
     if (handled) return handled;
   }
 
@@ -164,20 +84,6 @@ export async function serveTopLevelRoutes(
       visitor,
       boardAgent,
       provenIdentityFor,
-    });
-    if (handled) return handled;
-  }
-
-  // --- REST: the goal coach --- see ./routes/coach.ts. Top-level for
-  // the inbox's reason: the goals are the owner's, not a board's.
-  // Claims `/coach/` alone, which nothing above answers.
-  {
-    const handled = await handleCoachRoutes(coachRoutesCtx, {
-      req,
-      pathname,
-      visitor,
-      ownerProven: () => ownerProven(),
-      requestOrigin: () => policyFor(req).requestOrigin,
     });
     if (handled) return handled;
   }

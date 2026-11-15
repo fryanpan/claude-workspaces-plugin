@@ -175,7 +175,8 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
-import { HONO_FAMILIES, createHonoFront } from './routes/hono-front.ts';
+import { honoFamilies } from './routes/hono-families.ts';
+import { createHonoFront } from './routes/hono-front.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
@@ -3495,7 +3496,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
         { shares, now: Date.now() },
       ),
-    honoFront: createHonoFront([...HONO_FAMILIES, ...(opts.honoFamilies ?? [])]),
+    honoFront: createHonoFront([
+      ...honoFamilies({
+        promptRoutesCtx,
+        reviewQueueRoutesCtx,
+        voicePageRoutesCtx,
+        voiceApiRoutesCtx,
+        accessRoutesCtx,
+        coachRoutesCtx,
+        requireSignInToWrite,
+        policyFor,
+      }),
+      ...(opts.honoFamilies ?? []),
+    ]),
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,
@@ -3545,15 +3558,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     handleArchiveRoutes,
     reviewFileRoutesCtx,
     meetingCalendarRoutesCtx,
-    promptRoutesCtx,
     sse,
-    reviewQueueRoutesCtx,
-    voicePageRoutesCtx,
-    accessRoutesCtx,
-    voiceApiRoutesCtx,
     featureRoutes: features.routes,
     privateMessageRoutesCtx,
-    coachRoutesCtx,
     serveShellRoutes,
   });
 
