@@ -10,9 +10,10 @@
  * real browser tabs is `scripts/app-kit-browser.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { kitManifest, tarballName } from '../../../packages/app-kit/scripts/pack.ts';
 import {
   type RunningApp,
   makeBuiltApp,
@@ -55,6 +56,26 @@ function page(url: string, cookie: string) {
 }
 
 describe('an app made by new-app', () => {
+  it('takes the collab core and the theme from the versioned kit package, not copies', async () => {
+    const made = (await Bun.file(join(appDir, 'package.json')).json()) as {
+      dependencies: Record<string, string>;
+    };
+    const { version } = kitManifest();
+    expect(made.dependencies['@claude-workspaces/app-kit']).toBe(
+      `file:./vendor/${tarballName(version)}`,
+    );
+    expect(made.dependencies['@claude-workspaces/core']).toBeUndefined();
+    expect(existsSync(join(appDir, 'vendor', tarballName(version)))).toBe(true);
+    expect(existsSync(join(appDir, 'src/collab'))).toBe(false);
+    // The installed package is the packed one: its manifest has lost the
+    // in-repo dependency the workspace copy carries.
+    const installed = (await Bun.file(
+      join(appDir, 'node_modules/@claude-workspaces/app-kit/package.json'),
+    ).json()) as { version: string; dependencies: Record<string, string> };
+    expect(installed.version).toBe(version);
+    expect(installed.dependencies['@claude-workspaces/core']).toBeUndefined();
+  });
+
   it('sends a signed-out visitor to sign-in, and a signed-in one to the app', async () => {
     const out = await fetch(`${app.base}/docs/harborlight`, { redirect: 'manual' });
     expect(out.status).toBe(303);
