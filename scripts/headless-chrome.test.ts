@@ -20,7 +20,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type Browser, launchChrome, stopBrowser } from './headless-chrome.ts';
+import { type Browser, launchChrome, recentLines, stopBrowser } from './headless-chrome.ts';
 import { profilesOfRun } from './ui-shot-lib.ts';
 
 const dirs: string[] = [];
@@ -136,4 +136,19 @@ describe('launchChrome', () => {
     },
     30_000,
   );
+});
+
+describe('recentLines', () => {
+  it('keeps short stderr whole', () => {
+    expect(recentLines('one\ntwo\n')).toBe('one\ntwo\n');
+  });
+
+  it('keeps only the newest lines of a long one, starting on a whole line', () => {
+    const text = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n');
+    const kept = recentLines(text);
+    expect(kept.length).toBeLessThanOrEqual(16_384);
+    expect(kept.endsWith('line 4999')).toBe(true);
+    expect(kept.split('\n')[0]).toMatch(/^line \d+$/);
+    expect(kept).not.toContain('line 0\n');
+  });
 });
