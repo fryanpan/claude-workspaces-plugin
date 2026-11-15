@@ -46,6 +46,7 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { bounded } from './lead-chat-meeting-page.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -95,6 +96,19 @@ export interface BurstRun {
 const step = (what: string): void => {
   process.stderr.write(`[lead-chat-voice-burst-driver] ${what}\n`);
 };
+
+/** A page's load event. `bounded` (lead-chat-meeting-page.ts) holds every
+ *  other CDP answer to 15s. Both exist because this driver once printed
+ *  "quiet at 430" and then nothing until its 280s deadline, on two branches
+ *  that changed nothing it reaches: an await with no limit, so the run named
+ *  neither the step nor what it waited on. */
+const LOAD_MS = 30_000;
+/** One request to the driver's own server. */
+const FETCH_MS = 15_000;
+
+/** The page's state, through a CDP answer that names itself if it never comes. */
+const evaluate = (cdp: Cdp, expression: string, what: string): Promise<unknown> =>
+  bounded(cdp.evaluate(expression), `read ${what}`);
 
 async function until<T>(
   what: string,
@@ -187,33 +201,45 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
     },
   );
   const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
-  await cdp.send('Page.enable');
-  await cdp.send('Runtime.enable');
-  await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width,
-    height,
-    deviceScaleFactor: 1,
-    mobile: width <= 1100,
-  });
+  await bounded(cdp.send('Page.enable'), 'Page.enable');
+  await bounded(cdp.send('Runtime.enable'), 'Runtime.enable');
+  await bounded(
+    cdp.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width <= 1100,
+    }),
+    'the page size',
+  );
   // A returning reader on a Voice first device: the first tap listens. Every
   // load is a fresh tab: a page unloading with voice on writes the key that
   // carries it on, so clearing it from the page loses that race on a slow run.
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `try { sessionStorage.clear(); localStorage.setItem('feedback-user-name', 'Alice'); localStorage.setItem('cw.lead-chat.mode', 'voice'); } catch {}`,
-  });
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: RECORD_PLAYBACK });
+  await bounded(
+    cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `try { sessionStorage.clear(); localStorage.setItem('feedback-user-name', 'Alice'); localStorage.setItem('cw.lead-chat.mode', 'voice'); } catch {}`,
+    }),
+    'the storage script',
+  );
+  await bounded(
+    cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: RECORD_PLAYBACK }),
+    'the playback recorder',
+  );
   return cdp;
 }
 
 async function tap(cdp: Cdp, at: XY): Promise<void> {
   for (const type of ['mousePressed', 'mouseReleased'] as const) {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type,
-      x: at.x,
-      y: at.y,
-      button: 'left',
-      clickCount: 1,
-    });
+    await bounded(
+      cdp.send('Input.dispatchMouseEvent', {
+        type,
+        x: at.x,
+        y: at.y,
+        button: 'left',
+        clickCount: 1,
+      }),
+      `tap ${type}`,
+    );
   }
 }
 
@@ -273,6 +299,7 @@ async function main(): Promise<void> {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(FETCH_MS),
       });
     const made = await post('/workspaces', { name: 'Harborlight', author: ALICE });
     if (!made.ok) throw new Error(`/workspaces: ${made.status} ${await made.text()}`);
@@ -300,22 +327,28 @@ async function main(): Promise<void> {
     ] as const) {
       const cdp = await openBrowser(width, height);
       const state = async () =>
-        (await cdp.evaluate(STATE)) as { listening: boolean; paneOpen: boolean };
+        (await evaluate(cdp, STATE, 'listening and the panel')) as {
+          listening: boolean;
+          paneOpen: boolean;
+        };
       for (const way of ['quiet', 'slow', 'talking'] as const) {
         step(`${way} at ${width}`);
         chunkGapMs = CHUNK_GAP_MS[way];
         const loaded = cdp.once('Page.loadEventFired');
-        await cdp.send('Page.navigate', { url: docUrl });
-        await loaded;
+        await bounded(cdp.send('Page.navigate', { url: docUrl }), 'Page.navigate');
+        await bounded(loaded, 'the page load', LOAD_MS);
         const button = await until(
           'the agent button',
-          async () => (await cdp.evaluate(BUTTON)) as XY | null,
+          async () => (await evaluate(cdp, BUTTON, 'the agent button')) as XY | null,
         );
         const before = opened.length;
         await tap(cdp, button);
         await until('listening', async () => ((await state()).listening ? true : null));
         await until('the listener opened', () => (opened.length > before ? true : null));
-        const bar = await until('the bar', async () => (await cdp.evaluate(BAR)) as XY | null);
+        const bar = await until(
+          'the bar',
+          async () => (await evaluate(cdp, BAR, 'the bar')) as XY | null,
+        );
         await tap(cdp, bar);
         await until('the panel open', async () => ((await state()).paneOpen ? true : null));
 
@@ -352,7 +385,11 @@ async function main(): Promise<void> {
           ears?.onTurn({ turn: 0, text: 'and while you are at it, thanks.', final: true });
         }
         const readChunks = async (): Promise<BurstChunk[]> =>
-          (await cdp.evaluate('JSON.parse(JSON.stringify(window.__said))')) as BurstChunk[];
+          (await evaluate(
+            cdp,
+            'JSON.parse(JSON.stringify(window.__said))',
+            'what played',
+          )) as BurstChunk[];
         await until(
           'all four answers to finish',
           async () => {
