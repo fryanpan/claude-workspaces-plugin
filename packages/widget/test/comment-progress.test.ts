@@ -47,6 +47,11 @@ function seeded() {
     context: { url: PAGE },
   };
   thread(ydoc, 't-one', anchor, T0, 'Should say 9:00');
+  return seededFrom(ydoc);
+}
+
+/** The comment view mounted over `ydoc`, as a page opening on it. */
+function seededFrom(ydoc: Y.Doc) {
   const el = widgetAt(ydoc, PAGE);
   el.shadow.innerHTML =
     '<div class="panel"><header class="panel-header"><div class="title">Feedback</div></header>' +
@@ -161,5 +166,95 @@ describe("an agent's mark in the comment view", () => {
     setStatus(ydoc, 't-one', 'resolved');
     renderThreadsInto(el);
     expect(pinOf(el, 't-one')).toBeUndefined();
+  });
+});
+
+describe('the check on a Done pin', () => {
+  const check = (el: ReturnType<typeof seeded>['el']) =>
+    pinOf(el, 't-one')?.querySelector<SVGPathElement>('.cw-check') ?? null;
+  const drawn = (el: ReturnType<typeof seeded>['el']) => {
+    const path = check(el);
+    return path ? getComputedStyle(path) : null;
+  };
+  /** Mark the thread at `ms` past T0 and render, as the doc's update does. */
+  const mark = (
+    el: ReturnType<typeof seeded>['el'],
+    ydoc: Y.Doc,
+    state: 'working' | 'done',
+    ms: number,
+  ) => {
+    vi.setSystemTime(T0 + ms);
+    setThreadProgress(ydoc, 't-one', state, AGENT, T0 + ms);
+    renderThreadsInto(el);
+  };
+
+  it('draws once when the pin turns Done, with the mock’s timing', () => {
+    const { el, ydoc } = seeded();
+    mark(el, ydoc, 'working', 1000);
+    // CONTROL: a working pin has no check.
+    expect(check(el)).toBeNull();
+    mark(el, ydoc, 'done', 2000);
+    const s = drawn(el);
+    expect(s?.animationName).toBe('cw-draw');
+    expect(s?.animationDuration).toBe('.55s');
+    expect(s?.animationDelay).toBe('.12s');
+    expect(s?.animationFillMode).toBe('forwards');
+  });
+
+  it('does not replay when the page renders again after the draw', () => {
+    const { el, ydoc } = seeded();
+    mark(el, ydoc, 'working', 1000);
+    mark(el, ydoc, 'done', 2000);
+    expect(drawn(el)?.animationName, 'CONTROL: it drew').toBe('cw-draw');
+    vi.setSystemTime(T0 + 5000);
+    renderThreadsInto(el);
+    expect(check(el), 'the check is still there').not.toBeNull();
+    expect(drawn(el)?.animationName).not.toBe('cw-draw');
+    expect(drawn(el)?.strokeDashoffset).toBe('0');
+  });
+
+  it('continues, rather than restarts, a draw a render lands in the middle of', () => {
+    const { el, ydoc } = seeded();
+    mark(el, ydoc, 'working', 1000);
+    mark(el, ydoc, 'done', 2000);
+    vi.setSystemTime(T0 + 2300);
+    renderThreadsInto(el);
+    expect(drawn(el)?.animationName).toBe('cw-draw');
+    // 300ms in: the .12s wait is behind it and 180ms of the stroke too.
+    expect(drawn(el)?.animationDelay).toBe('-180ms');
+  });
+
+  it('shows a pin already Done when the page opens drawn, without motion', () => {
+    const ydoc = new Y.Doc();
+    // Done before this page ever read the doc.
+    const anchor = {
+      ...createAnchor(document.getElementById('one') as HTMLElement),
+      context: { url: PAGE },
+    };
+    thread(ydoc, 't-one', anchor, T0, 'Should say 9:00');
+    setThreadProgress(ydoc, 't-one', 'done', AGENT, T0 + 2000);
+    const { el } = seededFrom(ydoc);
+    expect(check(el), 'the check is drawn').not.toBeNull();
+    expect(drawn(el)?.animationName).not.toBe('cw-draw');
+    expect(drawn(el)?.strokeDashoffset).toBe('0');
+  });
+
+  it('appears fully drawn, with no motion, under reduced motion', () => {
+    const settings = (
+      window as unknown as {
+        happyDOM: { settings: { device: { prefersReducedMotion: string } } };
+      }
+    ).happyDOM.settings.device;
+    const { el, ydoc } = seeded();
+    mark(el, ydoc, 'working', 1000);
+    settings.prefersReducedMotion = 'reduce';
+    try {
+      mark(el, ydoc, 'done', 2000);
+      expect(check(el), 'the check is drawn').not.toBeNull();
+      expect(drawn(el)?.animationName).toBe('none');
+      expect(drawn(el)?.strokeDashoffset).toBe('0');
+    } finally {
+      settings.prefersReducedMotion = 'no-preference';
+    }
   });
 });

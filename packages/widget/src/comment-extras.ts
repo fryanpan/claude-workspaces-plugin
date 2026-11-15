@@ -80,24 +80,55 @@ export function decorateProgress(pop: HTMLElement, t: Thread): void {
   }
 }
 
+/** When each thread's mark was last seen to change, per widget, so a Done
+ *  check draws on the transition and not on every rebuild of the pin. */
+const seen = new WeakMap<FeedbackWidgetEl, Map<string, { state: string; at: number | null }>>();
+
+/** The check's draw: .12s wait, then .55s (`.cw-draw`, `comment-view-css.ts`). */
+const DRAW_WAIT_MS = 120;
+const DRAW_MS = 670;
+
+const DOTS =
+  '<span class="cw-pg"><i class="cw-breathe"></i><i class="cw-breathe"></i><i class="cw-breathe"></i></span>';
+const check = (cls: string, delay: string) =>
+  `<span class="cw-pg"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="cw-check${cls}" pathLength="1" d="M4.2 8.4l2.5 2.5L11.9 5.6"${delay}/></svg></span>`;
+
 /** Each pin wears its thread's mark. The budgeted bundle draws the pins and
- *  knows only open and resolved; this runs after it, on every render. */
+ *  knows only open and resolved; this runs after it, on every render, and
+ *  every render builds every pin afresh.
+ *
+ *  Working: three breathing dots. Done: a white check, drawn once on the
+ *  transition this page saw, as the comment-states mock does (it keeps the
+ *  pin, so "a check that drew itself once stays drawn"). A pin already Done
+ *  when the page first reads it shows the check drawn, with no motion; a
+ *  rebuild during the draw continues it rather than restarting it. */
 export function markPins(el: FeedbackWidgetEl, rows: ThreadRow[]): void {
+  let marks = seen.get(el);
+  if (!marks) seen.set(el, (marks = new Map()));
+  const now = Date.now();
   for (const r of rows) {
     const p = r.thread.progress;
+    const state = p?.state ?? 'open';
+    const prev = marks.get(r.thread.id);
+    const at = state !== 'done' ? null : prev?.state === 'done' ? prev.at : prev ? now : null;
+    marks.set(r.thread.id, { state, at });
     if (!p) continue;
     const pin = el.pinLayer?.querySelector<HTMLElement>(
       `.cfw-pin[data-thread-id="${CSS.escape(r.thread.id)}"]`,
     );
     if (!pin) continue;
     pin.dataset.state = p.state;
-    // Working: the three breathing dots (`.cw-breathe`, `comment-view-css.ts`).
-    // The renderer rebuilds every pin, so a pin that stops working loses them.
-    if (p.state === 'working' && !pin.querySelector('.cw-pg')) {
-      pin.insertAdjacentHTML(
-        'beforeend',
-        '<span class="cw-pg"><i class="cw-breathe"></i><i class="cw-breathe"></i><i class="cw-breathe"></i></span>',
-      );
-    }
+    if (pin.querySelector('.cw-pg')) continue;
+    const since = at === null ? DRAW_MS : now - at;
+    const drawing = since < DRAW_MS;
+    pin.insertAdjacentHTML(
+      'beforeend',
+      p.state === 'working'
+        ? DOTS
+        : check(
+            drawing ? ' cw-draw' : '',
+            drawing && since ? ` style="animation-delay:${DRAW_WAIT_MS - since}ms"` : '',
+          ),
+    );
   }
 }
