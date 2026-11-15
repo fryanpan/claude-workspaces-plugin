@@ -39,11 +39,11 @@ import {
   scrollFraction,
   scrollToFraction,
 } from '../presence/page-scroll.ts';
-import type { BoardState } from './board-actions.ts';
+import { type BoardState, showToast } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
 import { ACTIVITY_REFRESH_EVENTS } from './board-presence-model.ts';
 import { startHomeClock } from './home-clock.ts';
-import { listenCollabCore, rereadCollabCore } from './presence-core-switch.ts';
+import { listenCollabCore, rereadCollabCore, stripToast } from './presence-core-switch.ts';
 
 /** The row shape `loadDiscussion` accepts — a task or a goal, both of which
  *  keep their comments in a body doc, so the id is always resolvable. */
@@ -251,8 +251,11 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   state.followedKey = follower.key();
   // The room may have answered before this ran; no later change would say so.
   follower.refresh();
-  stopOnOwnInput(window, follower, (target) =>
-    target instanceof Element ? target.closest('#board-people') !== null : false,
+  stopOnOwnInput(
+    window,
+    follower,
+    (target) => (target instanceof Element ? target.closest('#board-people') !== null : false),
+    () => stripToast('Stopped following', showToast),
   );
   let lastActivePush = 0;
   const touch = () => {

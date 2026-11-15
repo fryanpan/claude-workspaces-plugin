@@ -18,6 +18,7 @@ function fakeAwareness(
   return {
     clientID,
     getStates: () => new Map(states),
+    getLocalState: () => new Map(states).get(clientID) ?? null,
   } as unknown as FeedbackClient['awareness'];
 }
 
@@ -83,6 +84,38 @@ describe('createBoardChromeRegion', () => {
     chrome.renderPresenceRegion();
     expect(presenceData.value.followedKey).toBe('u-2');
     expect(presenceData.value.chips.length).toBeGreaterThan(0);
+  });
+
+  it('sorts the strip into who shares this tab and who is elsewhere, and names both', () => {
+    const tasks = { surface: 'board', path: '/workspaces/w-1/tasks' };
+    const chrome = createBoardChromeRegion({
+      state: boardState({
+        info: { id: 'w-1', name: 'Harborlight', goals: [] } as never,
+      }),
+      user: { name: 'Alice', color: '' },
+      el,
+      location: fakeLocation('https://board.test/workspaces/w-1/tasks'),
+      awareness: fakeAwareness([
+        [1, { user: { id: 'u-1', name: 'Alice' }, spot: tasks }],
+        [2, { user: { id: 'u-2', name: 'Bob' }, spot: { ...tasks, path: '/workspaces/w-1' } }],
+        [
+          3,
+          {
+            user: { id: 'u-3', name: 'Riverbend' },
+            spot: { surface: 'doc', docId: 'plan' },
+            pageTitle: 'Riverbend launch plan',
+          },
+        ],
+      ]),
+    });
+    chrome.renderPresenceRegion();
+    const { chips, page, app } = presenceData.value;
+    expect([page, app]).toEqual(['Tasks', 'Harborlight']);
+    expect(chips.map((c) => [c.label, c.self ?? false, c.here, c.line])).toEqual([
+      ['Alice (you)', true, undefined, undefined],
+      ['Bob', false, true, 'Here with you'],
+      ['Riverbend', false, false, 'On Riverbend launch plan'],
+    ]);
   });
 
   it('leaves the settings dot dark when nothing in the panel is asking', () => {

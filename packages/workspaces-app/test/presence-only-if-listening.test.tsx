@@ -129,6 +129,7 @@ describe('the strip on a board nobody reloaded', () => {
       awareness: {
         clientID: 1,
         getStates: () => new Map(),
+        getLocalState: () => null,
       } as never,
     });
     dispose.push(
@@ -141,7 +142,9 @@ describe('the strip on a board nobody reloaded', () => {
     return { state, chrome };
   }
 
-  const circles = () => [...el('board-people').querySelectorAll('.board-presence-circle')];
+  const circles = () => [
+    ...el('board-people').querySelectorAll('.board-presence-deck .board-presence-circle'),
+  ];
 
   it('the circle goes when the subscription does, with nothing remounted', async () => {
     // THE falsifiable one. Take a listening agent's stream away — which is
@@ -151,9 +154,7 @@ describe('the strip on a board nobody reloaded', () => {
     const { state, chrome } = board([attached(RIVERBEND, { listening: true })]);
     chrome.renderPresenceRegion();
     await tick();
-    expect(circles().map((c) => c.getAttribute('aria-label'))).toEqual([
-      expect.stringContaining(RIVERBEND),
-    ]);
+    expect(circles().map((c) => c.getAttribute('data-key'))).toEqual([`a-${RIVERBEND}`]);
     const host = el('board-people');
     const island = host.querySelector('[data-preact-island]');
 
@@ -203,9 +204,10 @@ describe('the strip on a board nobody reloaded', () => {
       const width = style.width;
       const height = style.height;
       expect(opacity === '' || opacity === '1', `opaque at ${viewport.width}px`).toBe(true);
-      // The convention's own size, unchanged by this ticket, at both tiers.
-      expect(width, `28px wide at ${viewport.width}px`).toBe('28px');
-      expect(height, `28px tall at ${viewport.width}px`).toBe('28px');
+      // An agent that has pointed nowhere is elsewhere in the workspace, so
+      // the deck draws it at its small size (design F), at both tiers.
+      expect(width, `20px wide at ${viewport.width}px`).toBe('20px');
+      expect(height, `20px tall at ${viewport.width}px`).toBe('20px');
     }
   });
 

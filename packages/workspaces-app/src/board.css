@@ -885,9 +885,25 @@ body.board-body {
 .board-presence-wa wa-avatar[shape="rounded"] {
   border-radius: 9px;
 }
-.board-presence-wa.board-presence-more wa-avatar {
-  background-color: var(--bg-panel);
-  color: var(--fg-muted);
+/* The deck and its rows on Web Awesome (styles.css draws the classic
+   ones): a white edge between overlapping avatars, 20px for anybody
+   elsewhere, 24px in a row of the list. */
+.board-presence-deck > .board-presence-wa:not(.board-following) wa-avatar {
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.board-presence-deck > .board-presence-wa.board-presence-away {
+  margin-left: -12px;
+}
+.board-presence-deck > .board-presence-wa.board-presence-away:first-child {
+  margin-left: 0;
+}
+.board-presence-deck > .board-presence-wa.board-presence-away wa-avatar {
+  --size: 20px;
+  font-size: 0;
+}
+.board-presence-row .board-presence-wa wa-avatar {
+  --size: 24px;
+  font-size: 9.5px;
 }
 .board-presence-wa.board-presence-unresponsive wa-avatar {
   border-color: var(--yellow);

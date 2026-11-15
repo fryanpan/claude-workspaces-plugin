@@ -14,11 +14,13 @@ import {
   PERSON_SPOT_FIELD,
   type PresenceSpot,
 } from '@claude-workspaces/core/workspace-presence';
+import { followingText } from '../board/presence-deck.tsx';
 import { mountPresenceIsland, presenceData } from '../board/presence-island.tsx';
 import { boardSocketUrl } from '../doc-path.ts';
 import { type AttentionHost, watchAttention } from './attention.ts';
 import { roomChips } from './follow-model.ts';
 import { type FollowStorage, type Follower, createFollower, stopOnOwnInput } from './follower.ts';
+import { PAGE_TITLE_FIELD, placeChips, spotLabel } from './presence-places.ts';
 
 export interface PagePresenceDeps {
   workspaceId: string;
@@ -40,6 +42,11 @@ export interface PagePresenceDeps {
   notify?: (text: string) => void;
   /** Where this tab's focus and visibility are read; the page's own. */
   attention?: AttentionHost;
+  /** The page's title, announced so other pages can say where this person
+   *  is ("On Riverbend launch plan"). */
+  title?: () => string | undefined;
+  /** The workspace's name, for the strip's second group. */
+  app?: () => string | undefined;
 }
 
 export interface PagePresence {
@@ -61,12 +68,14 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     announce(),
   );
   const announce = (): void => {
+    const title = deps.title?.()?.trim();
     awareness.setLocalState({
       user: { id: deps.user.id, name: deps.user.name, color: deps.user.color },
       surface: here.surface,
       ...(here.docId ? { docId: here.docId } : {}),
       [PERSON_SPOT_FIELD]: here,
       [ATTENDING_FIELD]: attention.attending(),
+      ...(title ? { [PAGE_TITLE_FIELD]: title } : {}),
       lastActive: Date.now(),
     });
   };
@@ -83,9 +92,20 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     onChange: () => paint(),
   });
   const paint = (): void => {
+    const states = awareness.getStates();
+    const title = deps.title?.()?.trim();
+    const titles = new Map(title && here.docId ? [[here.docId, title]] : []);
+    const app = deps.app?.()?.trim();
     presenceData.value = {
-      chips: roomChips(awareness.getStates(), awareness.clientID),
+      chips: placeChips(roomChips(states, awareness.clientID), {
+        states,
+        selfClientId: awareness.clientID,
+        mine: here,
+        titles,
+      }),
       followedKey: follower.key(),
+      page: spotLabel(here, titles),
+      ...(app ? { app } : {}),
     };
   };
   const { host } = deps;
@@ -100,12 +120,9 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
         onLongPress: (chip) => {
           const next = follower.key() === chip.key ? null : chip.key;
           follower.follow(next);
-          deps.notify?.(
-            next ? `Following ${chip.label} — long-press again to stop` : 'Stopped following',
-          );
+          deps.notify?.(next ? followingText(chip.label) : 'Stopped following');
         },
-        onOverflow: (hidden) =>
-          deps.notify?.(`Also here: ${hidden.map((c) => c.label).join(', ')}`),
+        onArrive: (chip) => deps.notify?.(followingText(chip.label)),
       },
       { compact: true },
     );
@@ -113,8 +130,11 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     paint();
     return off;
   }
-  stopOnOwnInput(deps.inputTarget, follower, (target) =>
-    target instanceof Element && host ? host.contains(target) : false,
+  stopOnOwnInput(
+    deps.inputTarget,
+    follower,
+    (target) => (target instanceof Element && host ? host.contains(target) : false),
+    () => deps.notify?.('Stopped following'),
   );
 
   let timer: ReturnType<typeof setTimeout> | null = null;

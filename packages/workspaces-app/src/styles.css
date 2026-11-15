@@ -2343,10 +2343,6 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-presence-circle.board-presence-agent {
   border-radius: 9px;
 }
-.board-presence-circle.board-presence-more {
-  background: var(--bg-panel);
-  color: var(--fg-muted);
-}
 /* Present but wedged: the process is up and on the wire, and the model has
    made no call for half an hour. Worth a ring — it is the fault a reader most
    wants to catch — and NOT worth a fade, because the session is there. */
@@ -2362,6 +2358,193 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-following {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+/* The deck and its list (design F, Bryan 2026-11-15; `presence-deck.tsx`).
+   Closed, the strip is one button: the circles overlap, full size for
+   whoever is on the reader's page and 20px for the rest of the workspace.
+   Open, a list drops below it in two groups and each circle slides to its
+   row; the deck's own circles fade out while it is open. */
+.board-presence-f {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.board-presence-deck {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 99px;
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.board-presence-deck > * {
+  margin-left: -10px;
+  transition: opacity 0.2s ease;
+  cursor: inherit;
+}
+.board-presence-deck > :first-child {
+  margin-left: 0;
+}
+.board-presence-deck > .board-presence-circle:not(.board-following) {
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.board-presence-deck > .board-presence-circle.board-presence-away {
+  width: 20px;
+  height: 20px;
+  margin-left: -12px;
+  font-size: 0;
+}
+.board-presence-deck > .board-presence-away:first-child {
+  margin-left: 0;
+}
+/* The followed circle sits over its neighbours, so its ring is never cut. */
+.board-presence-deck > .board-following {
+  position: relative;
+  z-index: 1;
+}
+.board-presence-f.is-open .board-presence-deck > *,
+.board-presence-f.is-closing .board-presence-deck > * {
+  opacity: 0;
+}
+/* The list's surface and words fade; its circles stay opaque so they can
+   slide from the deck. The surface is a ::before for that reason. */
+.board-presence-list {
+  position: fixed;
+  z-index: 1080;
+  isolation: isolate;
+  width: 296px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 6px;
+  color: var(--fg);
+  font: 13px / 1.3 var(--sans, system-ui);
+  text-align: left;
+}
+.board-presence-list::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-lg);
+}
+.board-presence-group {
+  display: block;
+  padding: 8px 8px 4px;
+  color: var(--fg-muted);
+  font: 600 11px / 1.2 var(--sans, system-ui);
+}
+.board-presence-group:first-child {
+  padding-top: 4px;
+}
+.board-presence-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-presence-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.board-presence-who:hover {
+  background: var(--bg-hover);
+}
+.board-presence-row .board-presence-circle {
+  width: 24px;
+  height: 24px;
+  font-size: 9.5px;
+}
+.board-presence-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.board-presence-row-text b {
+  font-weight: 650;
+}
+.board-presence-row-text small {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-presence-follow {
+  flex: none;
+  min-width: 64px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.board-presence-follow:hover {
+  background: var(--bg-hover);
+}
+.board-presence-only {
+  padding: 6px 8px 8px;
+  color: var(--fg-muted);
+}
+.board-presence-f.is-open .board-presence-list::before,
+.board-presence-f.is-open .board-presence-group,
+.board-presence-f.is-open .board-presence-row-text,
+.board-presence-f.is-open .board-presence-follow,
+.board-presence-f.is-open .board-presence-only {
+  animation: board-presence-in 0.32s ease both;
+}
+.board-presence-f.is-closing .board-presence-list::before,
+.board-presence-f.is-closing .board-presence-group,
+.board-presence-f.is-closing .board-presence-row-text,
+.board-presence-f.is-closing .board-presence-follow,
+.board-presence-f.is-closing .board-presence-only {
+  animation: board-presence-out 0.28s ease both;
+}
+@keyframes board-presence-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes board-presence-out {
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-presence-list *,
+  .board-presence-list::before {
+    animation: none !important;
+  }
+}
+/* At 1100px and below the list spans the window, 8px in from each side
+   (`placeList` sets left and right). */
+@media (max-width: 1100px) {
+  .board-presence-list {
+    width: auto;
+    max-width: none;
+  }
 }
 /* ================= TOAST ================= */
 

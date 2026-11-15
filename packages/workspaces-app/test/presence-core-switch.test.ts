@@ -103,7 +103,7 @@ describe('mountBoardPresence', () => {
     const board: string[] = [];
     const boardToast = (m: string) => board.push(m);
     dispose = mountBoardPresence(host, { onTap: vi.fn(), onLongPress: vi.fn() }, d.load);
-    stripToast('Following Alice — long-press again to stop', boardToast);
+    stripToast('Following Alice — tap the page to stop', boardToast);
 
     collabCoreActive.value = true;
     d.loads[0]?.(true);
@@ -114,7 +114,7 @@ describe('mountBoardPresence', () => {
     await tick();
     stripToast('Also here: Bob', boardToast);
 
-    expect(board).toEqual(['Following Alice — long-press again to stop', 'Also here: Bob']);
+    expect(board).toEqual(['Following Alice — tap the page to stop', 'Also here: Bob']);
     expect(d.toasts).toEqual(['Stopped following']);
   });
 
