@@ -425,6 +425,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // Whether comment and view are enforced on this board (D1 step 8). Off
     // the member allowlist, like the audience: no share visitor reaches it.
     ['trusted-local', '/workspaces/:ws/roles-mode', 'POST'],
+    // Whether the collab core serves this board's sockets (D1 step 5). Off
+    // the member allowlist, like the roles mode: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/collab-core', 'POST'],
   ]),
 
   ...family('routes/workspace-content.ts', [

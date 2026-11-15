@@ -15,6 +15,13 @@
  *   - The room comes from the connection, never a payload. An action's body
  *     that names a room, board or doc is refused (`request-guard.ts`).
  *
+ * A room's doc comes from one of two places. With `storage`, the core loads
+ * it, saves it on a debounce and destroys it when the room empties. With
+ * `docs`, the app hands over a doc it already holds and persists itself:
+ * the core syncs that doc in place and never saves or destroys it, because
+ * a second Y.Doc for the same id would diverge from the app's and the later
+ * save would win.
+ *
  * A `view` or `comment` connection receives the doc and can never change it:
  * its sync step 2 and update messages are dropped before they are read. An
  * action is an edit unless the app marks it read-only, and an edit action is
@@ -48,11 +55,22 @@ export type ActionHandler = (ctx: ActionContext, body: Record<string, unknown>) 
  *  copy of the doc, so nothing it does reaches the room. */
 export type ActionSpec = ActionHandler | { run: ActionHandler; readOnly: true };
 
+/** The app's own live docs, for an app that loads and saves them itself. */
+export interface RoomDocs {
+  /** The doc for a room, or null when the app has none (the connect is
+   *  refused with `no-doc`). Asked each time a room opens. */
+  open(roomId: string): Y.Doc | null;
+}
+
 export interface RoomHostOptions {
-  storage: CollabStorage;
+  /** Where the core loads and saves each room's doc. Give this or `docs`. */
+  storage?: CollabStorage;
+  /** The app's live docs, synced in place. Give this or `storage`. */
+  docs?: RoomDocs;
   /** Required: the app's answer to who may be in a room, and as what. */
   role: RoleFn;
-  /** How long after the last change a room is saved. Default 500 ms. */
+  /** How long after the last change a room is saved. Default 500 ms.
+   *  Unused with `docs`: the app saves its own docs. */
   saveDelayMs?: number;
   /** Server actions the app offers, by name. */
   actions?: Record<string, ActionSpec>;
@@ -68,6 +86,10 @@ export interface ConnectRequest {
   /** From the app's sign-in check. */
   principal: Principal;
   send: (bytes: Uint8Array) => void;
+  /** What this connection's edits name as their transaction origin, so the
+   *  app can tell who made a change. Defaults to an object of the core's.
+   *  Connections sharing an origin are not sent each other's edits. */
+  origin?: unknown;
   /** Called when `recheckRoles` finds this principal no longer has a role
    *  in the room; the app closes the socket. The core has already stopped
    *  serving it. */
@@ -86,13 +108,20 @@ export interface CollabConnection {
 
 export type ConnectResult =
   | { ok: true; connection: CollabConnection }
-  | { ok: false; error: 'bad-room' | 'no-role' };
+  | { ok: false; error: 'bad-room' | 'no-role' | 'no-doc' };
 
 export type ActionResult =
   | { ok: true; value: unknown }
   | {
       ok: false;
-      error: 'bad-room' | 'no-role' | 'read-only' | 'room-in-body' | 'unknown-action' | 'bad-body';
+      error:
+        | 'bad-room'
+        | 'no-role'
+        | 'no-doc'
+        | 'read-only'
+        | 'room-in-body'
+        | 'unknown-action'
+        | 'bad-body';
       message: string;
     };
 
@@ -120,9 +149,12 @@ interface Room {
   dirty: boolean;
   /** Actions still running in the room (an async handler's promise). */
   pending: number;
+  /** Stop listening to the doc. */
+  detach: () => void;
 }
 
 interface Conn {
+  origin: unknown;
   send: (bytes: Uint8Array) => void;
   recheck: () => void;
 }
@@ -141,17 +173,19 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
   if (typeof opts?.role !== 'function') {
     throw new TypeError('createRoomHost needs a role function: no room opens without one');
   }
-  if (!opts.storage || typeof opts.storage.read !== 'function') {
-    throw new TypeError('createRoomHost needs a storage');
+  const hasStorage = typeof opts.storage?.read === 'function';
+  const hasDocs = typeof opts.docs?.open === 'function';
+  if (hasStorage === hasDocs) {
+    throw new TypeError('createRoomHost needs a storage or docs, and not both');
   }
-  const { storage, role } = opts;
+  const { storage, docs, role } = opts;
   const saveDelayMs = opts.saveDelayMs ?? 500;
   const rooms = new Map<string, Room>();
 
   const save = (room: Room): void => {
     if (room.timer) clearTimeout(room.timer);
     room.timer = null;
-    if (!room.dirty) return;
+    if (!room.dirty || !storage) return;
     try {
       storage.write(room.id, Y.encodeStateAsUpdate(room.doc));
       room.dirty = false;
@@ -160,27 +194,46 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
     }
   };
 
-  const open = (id: string): Room => {
+  /** The room, opened if need be; null when the app holds no doc for it. */
+  const open = (id: string): Room | null => {
     const existing = rooms.get(id);
     if (existing) return existing;
-    const doc = new Y.Doc();
-    const saved = storage.read(id);
-    if (saved) Y.applyUpdate(doc, saved);
-    const room: Room = { id, doc, conns: new Set(), timer: null, dirty: false, pending: 0 };
-    doc.on('update', (update: Uint8Array, origin: unknown) => {
-      room.dirty = true;
-      if (room.timer) clearTimeout(room.timer);
-      room.timer = setTimeout(() => save(room), saveDelayMs);
+    let doc: Y.Doc;
+    if (docs) {
+      const held = docs.open(id);
+      if (!held) return null;
+      doc = held;
+    } else {
+      doc = new Y.Doc();
+      const saved = storage?.read(id);
+      if (saved) Y.applyUpdate(doc, saved);
+    }
+    const onUpdate = (update: Uint8Array, origin: unknown): void => {
+      if (storage) {
+        room.dirty = true;
+        if (room.timer) clearTimeout(room.timer);
+        room.timer = setTimeout(() => save(room), saveDelayMs);
+      }
       const frame = syncFrame((enc) => syncProtocol.writeUpdate(enc, update));
       for (const c of room.conns) {
-        if (c === origin) continue;
+        if (c.origin === origin) continue;
         try {
           c.send(frame);
         } catch {
           // A socket that died mid-send: its close() is on its way.
         }
       }
-    });
+    };
+    const room: Room = {
+      id,
+      doc,
+      conns: new Set(),
+      timer: null,
+      dirty: false,
+      pending: 0,
+      detach: () => doc.off('update', onUpdate),
+    };
+    doc.on('update', onUpdate);
     rooms.set(id, room);
     return room;
   };
@@ -189,7 +242,9 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
     if (room.conns.size > 0 || room.pending > 0) return;
     save(room);
     if (room.dirty) return; // a failed save keeps the room, and its changes
-    room.doc.destroy();
+    room.detach();
+    // The app's own doc is the app's to keep; only a doc the core loaded goes.
+    if (!docs) room.doc.destroy();
     rooms.delete(room.id);
   };
 
@@ -201,10 +256,12 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
       const granted = role(req.principal, req.roomId);
       if (granted === null) return { ok: false, error: 'no-role' };
       const room = open(req.roomId);
+      if (!room) return { ok: false, error: 'no-doc' };
       let current: CollabRole = granted;
       let writable = canEdit(granted);
       let closed = false;
       const conn: Conn = {
+        origin: null,
         send: req.send,
         recheck: () => {
           if (closed) return;
@@ -218,6 +275,7 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
           writable = canEdit(now);
         },
       };
+      conn.origin = req.origin ?? conn;
       room.conns.add(conn);
       req.send(syncFrame((enc) => syncProtocol.writeSyncStep1(enc, room.doc)));
       const connection: CollabConnection = {
@@ -239,7 +297,7 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
             }
             const enc = encoding.createEncoder();
             encoding.writeVarUint(enc, MSG_SYNC);
-            syncProtocol.readSyncMessage(dec, enc, room.doc, conn);
+            syncProtocol.readSyncMessage(dec, enc, room.doc, conn.origin);
             if (encoding.length(enc) > 1) req.send(encoding.toUint8Array(enc));
           } catch {
             // A truncated or garbled frame changes nothing; drop it.
@@ -289,6 +347,9 @@ export function createRoomHost(opts: RoomHostOptions): RoomHost {
         };
       }
       const room = open(roomId);
+      if (!room) {
+        return { ok: false, error: 'no-doc', message: 'This room has no doc.' };
+      }
       // A read-only action run by a reader gets a copy: nothing it does can
       // reach the room.
       const doc = canEdit(granted) ? room.doc : new Y.Doc();

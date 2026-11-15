@@ -132,13 +132,31 @@ action is an edit, refused for those roles, unless the app marks it
 read-only, when it runs on a copy of the doc. The
 server's `DocStateStore` fits its storage interface as it is, and
 `server/src/private-messages.ts` is the file-backed store behind its
-private-message interface. Workspaces does not run its rooms on it yet; that
-is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
+private-message interface. A room host can instead be handed the app's own
+live docs (`docs` in place of `storage`), which it syncs in place and never
+saves or destroys, for an app that already holds and persists its docs. The
+proof that it
 runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
 that imports only the core. `server/src/collab-rooms.ts` is the registry of
 room hosts the server runs; every revoke calls its `recheck` beside the
 sweep that closes the server's own sockets, so a core connection loses a
 revoked role on the same call.
+
+**Workspaces runs a board on the core when two switches say so** (D1 step
+5). `server/src/collab-core-switch.ts` holds the per-board setting
+(`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every
+board off) and the server-wide one (`CW_COLLAB_CORE`, read at boot, off
+unless `on`); a board takes the core only when both are on, so turning the
+server-wide one off returns every board to the current code on one restart.
+The board and doc socket upgrades read it at connect and stamp the socket
+`core`. `server/src/collab-core-path.ts` is one core room host over the doc
+store's live docs: for a `core` socket it sends sync step 1 and answers the
+sync frames, after `yjs-protocol.ts` has run the dead-state check and the
+write gate; presence, the access frame and the probe stay in
+`yjs-protocol.ts`, and the socket is still in its doc's `conns`, so the
+share sweeps and eviction holds see it. Both paths sync the same Y.Doc the
+doc store persists to the same `.ydoc`, so switching loses nothing.
+`server/test/collab-core-board.test.ts` drives both paths side by side.
 
 Presence and follow sit in the same folder. `presence.ts` is the server
 half: one entry per tab, a person shown once at their most recently active

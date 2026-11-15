@@ -63,6 +63,8 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { CollabCorePath } from './collab-core-path.ts';
+import { CollabCoreSwitch, parseCollabCoreDefault } from './collab-core-switch.ts';
 import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
@@ -380,6 +382,9 @@ export interface ServerHandle {
   shareLinks: ShareLinks;
   /** The core room hosts every revoke rechecks (`collab-rooms.ts`). */
   collabRooms: CollabRooms;
+  /** Which boards the collab core serves, and its room host over the doc
+   *  store's docs. Exposed so a test can read which path a socket took. */
+  collabCore: { switch: CollabCoreSwitch; path: CollabCorePath };
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -2124,6 +2129,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Board agent tokens (`at2`) and their revocation record. */
   /** The core room hosts every revoke rechecks (collab-rooms.ts). */
   const collabRooms = new CollabRooms();
+  /** Which boards' sockets the collab core serves, and the core's room host
+   *  over the doc store's live docs (D1 step 5). */
+  const collabCoreSwitch = new CollabCoreSwitch({
+    dataDir,
+    serverWide: opts.collabCore ?? parseCollabCoreDefault(process.env.CW_COLLAB_CORE),
+  });
+  const collabCorePath = new CollabCorePath({
+    getDoc: (id) => docStore.peek(id),
+    rooms: collabRooms,
+  });
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -2234,6 +2249,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
+    core: collabCorePath,
     onBoardRoomOpen: (workspaceId, awareness) => {
       agentSpots.restore(workspaceId, awareness);
       personPresence.attach(workspaceId, awareness);
@@ -2429,6 +2445,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     fileUnderBoardWorkspace,
     boardAccessOf,
     rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
+    usesCollabCore: (workspaceId) => collabCoreSwitch.usesCore(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -3317,6 +3334,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     collabRooms,
+    collabCoreSwitch,
     agentSpots,
     personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
@@ -3886,6 +3904,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     collabRooms,
     sweepDeadShares,
+    collabCore: { switch: collabCoreSwitch, path: collabCorePath },
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason

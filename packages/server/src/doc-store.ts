@@ -251,6 +251,13 @@ export type WsCtx = {
    * room sockets.
    */
   access?: SocketAccess;
+  /**
+   * The collab core serves this socket's sync frames (`collab-core-path.ts`),
+   * because its board was switched on when it connected
+   * (`collab-core-switch.ts`). Absent: the current code. Set on doc and board
+   * room sockets only, never a presence-only one.
+   */
+  core?: boolean;
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
