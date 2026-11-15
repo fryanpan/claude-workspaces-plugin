@@ -25,6 +25,7 @@ import {
   mountBoardMembers,
 } from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
+import { mountCollabCoreRow } from './collab-core-row.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
 import { mountReviewCriteria } from './review-criteria.ts';
@@ -211,6 +212,24 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   });
   showEstimates.paint(deps.estimatesShown());
 
+  // Whether this board's live editing runs on the collab core. Painted from
+  // the board record and its stream, like the strip it also picks, so a
+  // switch made on another page shows here (`collab-core-row.ts`).
+  const collabCore = mountCollabCoreRow({
+    toggle: document.getElementById('board-collab-core') as HTMLInputElement,
+    note: el('board-collab-core-note'),
+    canEdit: () => canEdit,
+    write: async (body) => {
+      const res = await send(
+        `/workspaces/${encodeURIComponent(workspaceId)}/collab-core`,
+        'POST',
+        body,
+      );
+      return res.ok ? (res.data ?? null) : null;
+    },
+    toast: showToast,
+  });
+
   // Who can reach this board, and at what level. Read on every open like the
   // two above, and for a sharper reason: the list is what a person checks
   // BEFORE deciding something is safe to put here, so a stale one is worse
@@ -276,6 +295,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     reviewCriteria.applyLevel();
     parallelismCap.applyLevel();
     showEstimates.applyLevel();
+    collabCore.applyLevel();
   }
   // Before anything is read, and before the panel is ever on screen.
   applyLevel();

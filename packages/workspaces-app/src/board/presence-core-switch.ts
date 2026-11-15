@@ -11,8 +11,9 @@
  *   - after the stream was down, by reading the record again, because a
  *     transient frame missed in a gap is not replayed.
  *
- * `active` is the board's own setting AND the server-wide `CW_COLLAB_CORE`,
- * so a server started with the core off draws today's strip everywhere.
+ * `active` is the board's own setting AND the server-wide one, so a server
+ * with the core off draws today's strip everywhere. The same reads paint the
+ * owner's switch on the settings page (`collab-core-row.ts`).
  *
  * Both strips read the same `presenceData` signal and take the same handlers,
  * so a switch keeps who is shown and who is followed; only the circles are
@@ -26,6 +27,18 @@ import { type PresenceHandlers, mountPresenceIsland } from './presence-island.ts
 
 /** True while this board's sockets take the collab core. */
 export const collabCoreActive = signal(false);
+
+/** True when the server's launch environment fixes the core off
+ *  (`CW_COLLAB_CORE`), so the owner's switch cannot turn it on. */
+export const collabCoreLockedOff = signal(false);
+
+/** Apply a board record or a `collab-core.changed` frame to both signals. */
+export function applyCollabCore(body: unknown): void {
+  collabCoreActive.value = collabCoreOf(body);
+  const b = (body ?? {}) as { collabCore?: { fixed?: unknown }; fixed?: unknown };
+  const fixed = b.collabCore && typeof b.collabCore === 'object' ? b.collabCore.fixed : b.fixed;
+  collabCoreLockedOff.value = fixed === 'off';
+}
 
 /** `collabCore.active` off a board record, or `active` off the frame. Anything
  *  else is false: today's strip is the safe reading. */
@@ -45,7 +58,7 @@ export async function rereadCollabCore(
   try {
     const res = await fetchImpl(`/workspaces/${encodeURIComponent(workspaceId)}?format=json`);
     if (!res.ok) return;
-    collabCoreActive.value = collabCoreOf(await res.json());
+    applyCollabCore(await res.json());
   } catch {
     // Offline: the stream's own reconnect will ask again.
   }
@@ -56,7 +69,7 @@ export function listenCollabCore(stream: EventTarget): void {
   stream.addEventListener(COLLAB_CORE_CHANGED, (ev) => {
     const data = (ev as MessageEvent).data;
     try {
-      collabCoreActive.value = collabCoreOf(typeof data === 'string' ? JSON.parse(data) : data);
+      applyCollabCore(typeof data === 'string' ? JSON.parse(data) : data);
     } catch {
       // A frame we cannot read changes nothing.
     }
