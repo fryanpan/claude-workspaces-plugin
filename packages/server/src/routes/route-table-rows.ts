@@ -108,6 +108,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
     ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
   ]),
+  // A board pushed from the Mac onto a project machine: above the host guard,
+  // its own gate, and claimed only where CW_BOARD_IMPORT_DIR is set.
+  ...family('routes/board-import.ts', [
+    ['board-import', '/api/board-import/:ws', 'GET PUT'],
+    ['board-import', '/api/board-import/:ws/print', 'POST'],
+  ]),
   // GitHub events for a board that holds no GitHub token: the key and the
   // list are set on this machine; the Mac's relay reads the list and pushes.
   ...family('routes/github-hub.ts', [

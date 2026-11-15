@@ -27,6 +27,7 @@ import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
 import type { AuthShareRoutesContext } from './auth-share.ts';
+import type { BoardImportRoutesContext } from './board-import.ts';
 import type { BoardLinkRoutesContext } from './board-links.ts';
 import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
 import type { BoardTokenRoutesContext } from './board-tokens.ts';
@@ -68,6 +69,7 @@ export interface RequestChainContext {
 
   // ── The gates, in chain order ──
   homeFeedCtx: HomeFeedRoutesContext;
+  boardImportCtx: BoardImportRoutesContext;
   githubHubCtx: GithubHubRoutesContext;
   admit: RequestAdmission['admit'];
   localOnlyGate: Parameters<typeof addressesLocalOnlySet>[1];

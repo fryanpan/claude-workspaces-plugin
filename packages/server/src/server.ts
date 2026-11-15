@@ -166,6 +166,7 @@ import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import { boardImportRoutesContext } from './routes/board-import.ts';
 import { type BoardSocketRootsRoutesContext } from './routes/board-socket-roots.ts';
 import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
 import { type ChatAuditRoutesContext } from './routes/chat-audit-routes.ts';
@@ -2411,6 +2412,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
   };
 
+  /** A board pushed from the Mac, on a project machine only — routes/board-import.ts. */
+  const boardImportCtx = boardImportRoutesContext(opts.boardImport, {
+    ...{ dataDir, verifier: staticAccessVerifier, j },
+    port: () => server.port ?? port,
+  });
+
   /** GitHub events for boards that hold no GitHub token — routes/github-hub.ts. */
   const githubHubCtx: GithubHubRoutesContext = {
     hub: new GithubHub(githubHubPath(dataDir), () => githubPushKeyKey(cookieKey())),
@@ -3484,6 +3491,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
     homeFeedCtx,
+    boardImportCtx,
     githubHubCtx,
     admit: opts.observeAdmission ? observedAdmit(admit, opts.observeAdmission) : admit,
     localOnlyGate,

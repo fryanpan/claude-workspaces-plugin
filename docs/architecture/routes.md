@@ -40,6 +40,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/auth/verify` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-session` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-token` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/board-import/:ws` | GET, PUT | `routes/board-import.ts` | board-import |  |
+| `/api/board-import/:ws/print` | POST | `routes/board-import.ts` | board-import |  |
 | `/api/board-sockets/:ws/roots` | GET, PUT | `routes/board-socket-roots.ts` | loopback-only |  |
 | `/api/board-tokens` | GET, POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/board-tokens/:id/revoke` | POST | `routes/board-tokens.ts` | loopback-only |  |
