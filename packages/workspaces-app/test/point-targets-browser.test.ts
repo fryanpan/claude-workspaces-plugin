@@ -59,8 +59,9 @@ describe.skipIf(CHROME === null)('pointing at any place', () => {
 
   it('lands the follower on the page, with the place on screen', () => {
     for (const s of result().steps) {
-      expect(s.address, `${s.width} ${s.what}`).toBe(s.expected);
-      expect(s.placed, `${s.width} ${s.what}`).toBe(true);
+      const said = `${s.width} ${s.what} after ${s.ms}ms, seen ${JSON.stringify(s.seen ?? null)}`;
+      expect(s.address, said).toBe(s.expected);
+      expect(s.placed, said).toBe(true);
     }
   }, 60_000);
 });
