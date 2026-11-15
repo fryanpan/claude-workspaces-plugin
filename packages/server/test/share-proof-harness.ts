@@ -70,7 +70,7 @@ export async function readJson<T>(res: Response): Promise<T> {
  */
 export async function startShareProofServer(
   name: string,
-  opts: { legacyMint?: boolean; leadPane?: LeadPaneDeps } = {},
+  opts: { legacyMint?: boolean; leadPane?: LeadPaneDeps; collabCore?: boolean } = {},
 ): Promise<ShareProofServer> {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
   const publicJwk = (await exportJWK(publicKey)) as JWK;
@@ -99,6 +99,7 @@ export async function startShareProofServer(
     ownerEmail: OWNER_EMAIL,
     share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
     ...(opts.leadPane ? { leadPane: opts.leadPane } : {}),
+    ...(opts.collabCore !== undefined ? { collabCore: opts.collabCore } : {}),
   });
   const base = `http://127.0.0.1:${handle.port}`;
   const req = (path: string, host: string, init: RequestInit = {}) =>

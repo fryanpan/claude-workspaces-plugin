@@ -298,7 +298,10 @@ async function main(): Promise<void> {
       await shoot(alice, shots, `strip-classic-${width}`);
 
       step(`switch on at ${width}`);
-      await post(`/workspaces/${ws}/collab-core`, { on: true });
+      // Switching on from loopback needs the owner's own proof
+      // (`owner-proof-widenings.test.ts`), and the route is not under test
+      // here: set the switch, which tells the open pages itself.
+      board.server.collabCore.switch.set(ws, true);
       await until('the Web Awesome strip', async () =>
         (await alice.evaluate(FACE('wa'))) ? true : null,
       );

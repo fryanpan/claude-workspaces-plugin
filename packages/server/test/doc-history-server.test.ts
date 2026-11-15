@@ -93,8 +93,11 @@ function page(base: string, ws: string, docId: string, name: string, cookie?: st
 
 async function board(base: string, name: string, on: boolean): Promise<string> {
   const ws = await seedBoard(base, { name });
-  const r = await post(base, `/workspaces/${ws}/collab-core`, { on });
-  expect(r.status).toBe(200);
+  // Switching on from loopback needs the owner's own proof
+  // (`owner-proof-widenings.test.ts`); the route is not under test here.
+  const handle = handles.find((h) => base.endsWith(`:${h.port}`));
+  if (!handle) throw new Error(`no server at ${base}`);
+  handle.collabCore.switch.set(ws, on);
   return ws;
 }
 
