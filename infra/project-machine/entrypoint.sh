@@ -73,6 +73,9 @@ RELEASE_CLI="$APP/infra/project-machine/release-cli.ts"
 # The public key baked into the image. Without it the machine never updates
 # itself and runs the image's app.
 RELEASE_KEY="$APP/infra/project-machine/release-signing-key.pub"
+# A board pushed from the Mac (board-import-store.ts): cw's, received by the
+# server and imported by the next boot, as cw, before the server starts.
+IMPORTS="$DATA_ROOT/board-imports"
 BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
@@ -99,20 +102,20 @@ fi
 # A volume from before this rule had /data owned by cw; this takes it back.
 chown root:root "$DATA_ROOT"
 chmod 0755 "$DATA_ROOT"
-for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT"; do
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT" "$IMPORTS"; do
   if [ -L "$d" ]; then
     echo "[machine] $d is a symlink; refusing to start" >&2
     exit 2
   fi
 done
-mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT"
+mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKETS" "$RELEASES" "$DEV_ROOT" "$IMPORTS"
 # Claude Code writes session transcripts to ~/.claude/projects. The home
 # directory is the image's and does not survive a restart, so that one
 # folder is a link onto the volume, where backup.ts snapshots it. The
 # rest of ~/.claude (credentials among it) stays off the volume and out
 # of every backup.
 ln -sfn "$TRANSCRIPTS" "$HOMES/cw/.claude/projects"
-chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude"
+chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$IMPORTS"
 chown -h lead:lead "$LEAD_ROOT"
 chown -h cw:cwboard "$SOCKETS"
 chown -h cwrelease:cwrelease "$RELEASES"
@@ -121,7 +124,7 @@ chown -h cwdev:cwdevsrc "$DEV_ROOT"
 # cannot read the server's data dir, which holds the board's tokens and keys,
 # except through the server. And the server cannot read the lead's folder, so
 # no doc is ever bound to a file the lead can write (docs/process/project-machine.md).
-chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT"
+chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT" "$IMPORTS"
 chmod 0710 "$SOCKETS"
 chmod 0755 "$RELEASES"
 chmod 2770 "$DEV_ROOT"
@@ -171,8 +174,20 @@ if [ -n "$LEAD_BOARD" ] && ! [[ $LEAD_BOARD =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
   LEAD_BOARD=""
 fi
 
+# A board the Mac pushed (machine:push-board) is imported here, as cw, with
+# the server stopped, so the server boots with it. The machine takes only
+# the board its lead leads. A refused import is recorded in the board's
+# status.json and the server starts anyway.
+(
+  only_env PATH CW_DATA_DIR
+  export CW_BOARD_IMPORT_DIR="$IMPORTS" CW_BOARD_IMPORT_BOARDS="$LEAD_BOARD"
+  run_as cw bun "$SERVER_APP/infra/project-machine/board-import-cli.ts" apply
+) || log "the board import step failed; starting the server anyway"
+rm -f "$IMPORTS/restart"
+
 (
   drop_secrets
+  export CW_BOARD_IMPORT_DIR="$IMPORTS" CW_BOARD_IMPORT_BOARDS="$LEAD_BOARD"
   export CW_BOARD_SOCKET_DIR="$SOCKETS" CW_BOARD_SOCKET_SHARED="$LEAD_BOARD" \
     CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_ALLOWED_UIDS="$CW_UID" \
     CW_LOOPBACK_EDGE_UIDS="$TUNNEL_UID"
@@ -505,6 +520,18 @@ if [ -f "$RELEASE_KEY" ]; then
 else
   log "no release key in the image: this machine does not update itself"
 fi
+
+# A pushed board is staged: restart, so the boot above imports it.
+(
+  while :; do
+    sleep 10
+    if [ -e "$IMPORTS/restart" ]; then
+      log "a pushed board is staged; restarting the machine to import it"
+      exit 0
+    fi
+  done
+) &
+pids+=($!)
 
 stop() { kill -TERM "${pids[@]}" 2>/dev/null || true; wait || true; }
 trap 'stop; exit 0' TERM INT
