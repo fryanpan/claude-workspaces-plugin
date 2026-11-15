@@ -739,6 +739,51 @@ The MCP child and the plugin's hooks then send both `cf-access-client-*`
 headers on their requests to that URL's origin, and to no other. The launcher
 uses the node relay, because the compiled relay cannot read Keychain.
 
+### Without the keeper: `machine:push-board`
+
+```bash
+bun run machine:push-board --board <id> --project <project> [--dry-run]
+    [--target-url https://<project host>] [--token "agent <project>"]
+    [--source-data-dir <dir>] [--source-url http://127.0.0.1:8787]
+```
+
+Run on the Mac. It takes the same steps as `machine:move-board`, in the same
+order, with the same checks. Only the transport is different: it uses no
+`fly ssh` and no keeper tap.
+
+1. The bundle goes over HTTPS to the project's own hostname, which the board
+   router sends to the project's machine. The request is
+   `PUT /api/board-import/<id>` (`packages/server/src/routes/board-import.ts`),
+   and it carries the project's existing Access service token. That is the
+   token named `agent <project>` in `access.local.json`, read from the
+   Keychain where `cf:sync-config` stored it. The push mints nothing.
+2. The machine checks the push the same way `machine:move-board` checks an
+   upload (`board-import-store.ts`, then `readBundle`). It stages the push
+   under `/data/board-imports/<id>/` and restarts.
+3. The boot imports the push as `cw`, before the server starts
+   (`board-import-cli.ts apply`, from `entrypoint.sh`).
+4. The Mac polls `GET /api/board-import/<id>` until the import is recorded.
+   It then compares fingerprints (`POST /api/board-import/<id>/print`) and
+   archives its own board, which is reversible.
+
+**What the machine accepts.**
+
+- **Only the board its lead leads.** `CW_LEAD_BOARD` becomes
+  `CW_BOARD_IMPORT_BOARDS`. A machine without a lead board accepts none.
+- **Only a request through the tunnel.** It must carry `cf-ray` and a stamp
+  signed for the Access application in front of the host. The stamp must name
+  no email and must carry a service token's `common_name`. Set
+  `CW_BOARD_IMPORT_CLIENT_ID` to also require one particular client id.
+- **Never a board it already holds or has already staged.** `importBoard` also
+  refuses to write over any file. So a second push or a second boot never
+  overwrites edits made on the machine after the move.
+- **Never the Mac paths a doc was bound to.** These are sent nowhere, and
+  `--sync-config` is not offered here.
+
+**Reading the result.** The status of each push is in
+`/data/board-imports/<id>/status.json`: `staged`, `importing`, `imported` or
+`refused`, with the reason.
+
 ## Bound files after the move
 
 On the Mac a doc can be bound to a `.md` in a repo, and the server keeps the
