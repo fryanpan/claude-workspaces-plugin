@@ -239,6 +239,13 @@ sees what it saw from the child, and the event stream opened in-process, so
 an agent the previous process was hosting is subscribed again before the
 first request after a restart.
 
+**Some MCP calls are typed against the server's routes.** `mcp/src/mounts-client.ts`
+builds Hono's `hc<MountsApi>` over the child's ordinary `http()` call, so
+the mount tools send what `server/src/routes/mounts-api.ts` declares. A
+field or route renamed there fails typecheck at the tool that sends it. The
+import from `server` is `import type` only, so no server code enters the
+bundle. The other route families still spell their paths by hand.
+
 **A session's MCP child is a relay to `/mcp`.** `.mcp.json` still names
 `bin/claude-workspaces-mcp.sh`. The launcher tries three children in order,
 and every step down is silent and safe:
