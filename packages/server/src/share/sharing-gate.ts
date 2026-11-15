@@ -69,6 +69,15 @@ interface SharingFile {
   lockedBoards?: string[];
 }
 
+/** What `status()` answers, and what `GET /api/share` carries as `sharing`. */
+export interface SharingStatus {
+  enabled: boolean;
+  locked: boolean;
+  closedBoards?: string[];
+  lockedBoards?: string[];
+  loadError?: string;
+}
+
 export interface SharingGateOptions {
   dataDir: string;
   /** True when CW_SHARING_DISABLED is set — off and not runtime-changeable. */
@@ -194,13 +203,7 @@ export class SharingGate {
   }
 
   /** Everything a status view needs, in one object. */
-  status(): {
-    enabled: boolean;
-    locked: boolean;
-    closedBoards?: string[];
-    lockedBoards?: string[];
-    loadError?: string;
-  } {
+  status(): SharingStatus {
     return {
       enabled: this.enabled,
       locked: this.envLocked,

@@ -3,11 +3,13 @@ export * from './webhooks.ts';
 export * from './sse.ts';
 export { createServer } from './server.ts';
 export type {
+  AgentNotesContract,
   AttachmentsContract,
   DocEditsContract,
   DocLifecycleContract,
   DocThreadsContract,
   MountsApi,
+  ShareContract,
   ThreadByFindBody,
   ThreadCreateBody,
 } from './server.ts';

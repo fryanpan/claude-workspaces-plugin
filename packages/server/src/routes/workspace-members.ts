@@ -57,6 +57,8 @@ import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
+import { sent } from './route-contract.ts';
+import type { AudienceBody, MemberRoleBody } from './share-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -148,7 +150,7 @@ export async function handleWorkspaceMembers(
     // throws a `URIError`, and an address this server has never heard of would
     // come back as a 500 rather than as the 404 it is.
     const email = safeDecodeSegment(roleMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<MemberRoleBody>(await safeJson(req));
     // Undefined rather than a fallback: anything that is not one of the four
     // words (or `member`, the old spelling of edit) is a 400 and never a
     // silent demotion.
@@ -274,7 +276,7 @@ export async function handleWorkspaceMembers(
   if (scope.rest === 'audience' && req.method === 'POST') {
     const denied = refuseVisitor();
     if (denied) return denied;
-    const body = await safeJson(req);
+    const body = sent<AudienceBody>(await safeJson(req));
     const parse = (raw: unknown): string[] | null => {
       if (raw === undefined) return [];
       const parsed = parseShareAudience(raw);

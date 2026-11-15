@@ -26,10 +26,12 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import {
+  agentNotesClient,
   attachmentsClient,
   docEditsClient,
   docLifecycleClient,
   docThreadsClient,
+  shareClient,
 } from '../server-client.ts';
 import { inactiveWatches } from '../sse-loop.ts';
 import { type ThreadCreateInput, threadCreateRequest } from '../thread-create.ts';
@@ -147,6 +149,8 @@ export async function handleDocsTool(
   const lifecycleApi = () => boardDocs().docs[':docId'];
   /** Attachment sets, the folder bind, and a board's delete. */
   const sets = () => attachmentsClient(http).workspaces;
+  /** The `/api/share` operator routes; a member's role and audience are under `board`. */
+  const shares = () => shareClient(http);
   const boardParam = () => ({ ws: encodeURIComponent(boardId()) });
   const setParam = (setId: string) => ({ ...boardParam(), setId: encodeURIComponent(setId) });
   /** One doc's edit and anchor routes, through the typed client. */
@@ -293,9 +297,14 @@ export async function handleDocsTool(
           `text is over ${STATUS_TEXT_MAX} chars — a status is a line to a few sentences; the full report is already on the Activity tab from your end-of-turn message`,
         );
       }
-      let path: string;
+      const note = { agent: AUTHOR.name, kind: 'status' as const, text: body, at: Date.now() };
+      const notes = agentNotesClient(http).workspaces[':ws'];
+      let sent: ReturnType<(typeof notes.agents)[':agent']['notes']['$post']>;
       if (taskId !== undefined && taskId !== '') {
-        path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
+        sent = notes.tasks[':taskId'].notes.$post({
+          param: { ...boardParam(), taskId: encodeURIComponent(taskId) },
+          json: note,
+        });
       } else {
         const given = typeof a.workspaceId === 'string' ? a.workspaceId.trim() : '';
         const ws = given !== '' ? given : DEFAULT_WORKSPACE_ID;
@@ -304,14 +313,12 @@ export async function handleDocsTool(
             'post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on',
           );
         }
-        path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
+        sent = notes.agents[':agent'].notes.$post({
+          param: { ws: encodeURIComponent(ws), agent: encodeURIComponent(AUTHOR.name) },
+          json: note,
+        });
       }
-      const res = (await http('POST', path, {
-        agent: AUTHOR.name,
-        kind: 'status',
-        text: body,
-        at: Date.now(),
-      })) as { taskId?: string; workspaceId?: string };
+      const res = await sent.then((r) => r.json());
       return ok({
         posted: true,
         ...(res.taskId !== undefined ? { taskId: res.taskId } : {}),
@@ -1090,15 +1097,18 @@ export async function handleDocsTool(
       // named keys here is what once turned an argument nobody honoured into
       // a share wider than the caller asked for; the server refuses or
       // honours each key by name instead.
-      const res = await http('POST', '/api/share/workspace', {
-        ...(a as Record<string, unknown>),
-        createdBy: AUTHOR.name,
-      });
+      const res = await shares()
+        .api.share.workspace.$post({
+          json: { ...(a as { workspaceId: string }), createdBy: AUTHOR.name },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'remove_share_member': {
       const { workspaceId, email } = a as { workspaceId: string; email: string };
-      const res = await http('POST', '/api/share/member/remove', { workspaceId, email });
+      const res = await shares()
+        .api.share.member.remove.$post({ json: { workspaceId, email } })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_share_member_role': {
@@ -1114,12 +1124,12 @@ export async function handleDocsTool(
         taskId?: string;
         why?: string;
       };
-      const res = await http('POST', `${board()}/members/${encodeURIComponent(email)}/role`, {
-        role,
-        ...(taskId !== undefined ? { taskId } : {}),
-        ...(why !== undefined ? { why } : {}),
-        author: AUTHOR,
-      });
+      const res = await shares()
+        .workspaces[':ws'].members[':email'].role.$post({
+          param: { ...boardParam(), email: encodeURIComponent(email) },
+          json: { role, taskId, why, author: AUTHOR },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_share_audience': {
@@ -1131,29 +1141,35 @@ export async function handleDocsTool(
         taskId?: string;
         why?: string;
       };
-      const res = await http('POST', `${board()}/audience`, {
-        ...(add !== undefined ? { add } : {}),
-        ...(remove !== undefined ? { remove } : {}),
-        ...(taskId !== undefined ? { taskId } : {}),
-        ...(why !== undefined ? { why } : {}),
-        author: AUTHOR,
-      });
+      const res = await shares()
+        .workspaces[':ws'].audience.$post({
+          param: boardParam(),
+          json: { add, remove, taskId, why, author: AUTHOR },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_share_ttl': {
       const { shareId, ttlSeconds } = a as { shareId: string; ttlSeconds: number };
-      const res = await http('POST', `/api/share/${encodeURIComponent(shareId)}/ttl`, {
-        ttlSeconds,
-      });
+      const res = await shares()
+        .api.share[':shareId'].ttl.$post({
+          param: { shareId: encodeURIComponent(shareId) },
+          json: { ttlSeconds },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'list_shares': {
-      const res = await http('GET', '/api/share');
+      const res = await shares()
+        .api.share.$get()
+        .then((r) => r.json());
       return ok(res);
     }
     case 'unshare': {
       const { shareId } = a as { shareId: string };
-      const res = await http('DELETE', `/api/share/${encodeURIComponent(shareId)}`);
+      const res = await shares()
+        .api.share[':shareId'].$delete({ param: { shareId: encodeURIComponent(shareId) } })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_sharing_enabled': {
@@ -1177,25 +1193,29 @@ export async function handleDocsTool(
       // object the POST returns, so a status check costs nothing and can't
       // change anything by accident.
       if (typeof enabled !== 'boolean') {
-        const res = (await http('GET', '/api/share')) as {
-          sharing?: { closedBoards?: string[] };
-        };
+        const res = await shares()
+          .api.share.$get()
+          .then((r) => r.json());
         if (typeof workspaceId !== 'string') return ok(res);
-        const closed = res.sharing?.closedBoards ?? [];
+        const closed = res.sharing.closedBoards ?? [];
         return ok({
           ...res,
           workspaceId,
           board: { workspaceId, enabled: !closed.includes(workspaceId) },
         });
       }
-      const res = await http('POST', '/api/share/enabled', {
-        enabled,
-        ...(workspaceId !== undefined ? { workspaceId } : {}),
-        ...(reason !== undefined ? { reason } : {}),
-        ...(taskId !== undefined ? { taskId } : {}),
-        ...(why !== undefined ? { why } : {}),
-        actor: { id: AUTHOR.id, name: AUTHOR.name },
-      });
+      const res = await shares()
+        .api.share.enabled.$post({
+          json: {
+            enabled,
+            workspaceId,
+            reason,
+            taskId,
+            why,
+            actor: { id: AUTHOR.id, name: AUTHOR.name },
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_board_sharing_lock': {
@@ -1216,23 +1236,27 @@ export async function handleDocsTool(
         return err('set_board_sharing_lock needs workspaceId: the board to lock or unlock.');
       }
       if (typeof locked !== 'boolean') {
-        const res = (await http('GET', '/api/share')) as {
-          sharing?: { lockedBoards?: string[] };
-        };
-        const lockedBoards = res.sharing?.lockedBoards ?? [];
+        const res = await shares()
+          .api.share.$get()
+          .then((r) => r.json());
+        const lockedBoards = res.sharing.lockedBoards ?? [];
         return ok({
           workspaceId,
           board: { workspaceId, locked: lockedBoards.includes(workspaceId) },
         });
       }
-      const res = await http('POST', '/api/share/lock', {
-        workspaceId,
-        locked,
-        ...(reason !== undefined ? { reason } : {}),
-        ...(taskId !== undefined ? { taskId } : {}),
-        ...(why !== undefined ? { why } : {}),
-        actor: { id: AUTHOR.id, name: AUTHOR.name },
-      });
+      const res = await shares()
+        .api.share.lock.$post({
+          json: {
+            workspaceId,
+            locked,
+            reason,
+            taskId,
+            why,
+            actor: { id: AUTHOR.id, name: AUTHOR.name },
+          },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
   }

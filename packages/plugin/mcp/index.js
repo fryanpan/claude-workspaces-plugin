@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.375";
+var version2 = "0.1.376";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20201,6 +20201,8 @@ var docThreadsClient = (http) => typedClient(http);
 var docEditsClient = (http) => typedClient(http);
 var docLifecycleClient = (http) => typedClient(http);
 var attachmentsClient = (http) => typedClient(http);
+var shareClient = (http) => typedClient(http);
+var agentNotesClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -20283,6 +20285,7 @@ async function handleDocsTool(name, a, ctx) {
   const boardDocs = () => docLifecycleClient(http).workspaces[":ws"];
   const lifecycleApi = () => boardDocs().docs[":docId"];
   const sets = () => attachmentsClient(http).workspaces;
+  const shares = () => shareClient(http);
   const boardParam = () => ({ ws: encodeURIComponent(boardId()) });
   const setParam = (setId) => ({ ...boardParam(), setId: encodeURIComponent(setId) });
   const editsApi = () => docEditsClient(http).workspaces[":ws"].docs[":docId"];
@@ -20368,23 +20371,26 @@ async function handleDocsTool(name, a, ctx) {
       if (body.length > STATUS_TEXT_MAX) {
         return err2(`text is over ${STATUS_TEXT_MAX} chars — a status is a line to a few sentences; the full report is already on the Activity tab from your end-of-turn message`);
       }
-      let path;
+      const note = { agent: AUTHOR.name, kind: "status", text: body, at: Date.now() };
+      const notes = agentNotesClient(http).workspaces[":ws"];
+      let sent;
       if (taskId !== undefined && taskId !== "") {
-        path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
+        sent = notes.tasks[":taskId"].notes.$post({
+          param: { ...boardParam(), taskId: encodeURIComponent(taskId) },
+          json: note
+        });
       } else {
         const given = typeof a.workspaceId === "string" ? a.workspaceId.trim() : "";
         const ws = given !== "" ? given : DEFAULT_WORKSPACE_ID;
         if (ws === "") {
           return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on");
         }
-        path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
+        sent = notes.agents[":agent"].notes.$post({
+          param: { ws: encodeURIComponent(ws), agent: encodeURIComponent(AUTHOR.name) },
+          json: note
+        });
       }
-      const res = await http("POST", path, {
-        agent: AUTHOR.name,
-        kind: "status",
-        text: body,
-        at: Date.now()
-      });
+      const res = await sent.then((r) => r.json());
       return ok2({
         posted: true,
         ...res.taskId !== undefined ? { taskId: res.taskId } : {},
@@ -20867,52 +20873,47 @@ async function handleDocsTool(name, a, ctx) {
       });
     }
     case "share_workspace": {
-      const res = await http("POST", "/api/share/workspace", {
-        ...a,
-        createdBy: AUTHOR.name
-      });
+      const res = await shares().api.share.workspace.$post({
+        json: { ...a, createdBy: AUTHOR.name }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "remove_share_member": {
       const { workspaceId, email: email2 } = a;
-      const res = await http("POST", "/api/share/member/remove", { workspaceId, email: email2 });
+      const res = await shares().api.share.member.remove.$post({ json: { workspaceId, email: email2 } }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_member_role": {
       const { email: email2, role, taskId, why } = a;
-      const res = await http("POST", `${board()}/members/${encodeURIComponent(email2)}/role`, {
-        role,
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        author: AUTHOR
-      });
+      const res = await shares().workspaces[":ws"].members[":email"].role.$post({
+        param: { ...boardParam(), email: encodeURIComponent(email2) },
+        json: { role, taskId, why, author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_audience": {
       const { add, remove, taskId, why } = a;
-      const res = await http("POST", `${board()}/audience`, {
-        ...add !== undefined ? { add } : {},
-        ...remove !== undefined ? { remove } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        author: AUTHOR
-      });
+      const res = await shares().workspaces[":ws"].audience.$post({
+        param: boardParam(),
+        json: { add, remove, taskId, why, author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_ttl": {
       const { shareId, ttlSeconds } = a;
-      const res = await http("POST", `/api/share/${encodeURIComponent(shareId)}/ttl`, {
-        ttlSeconds
-      });
+      const res = await shares().api.share[":shareId"].ttl.$post({
+        param: { shareId: encodeURIComponent(shareId) },
+        json: { ttlSeconds }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "list_shares": {
-      const res = await http("GET", "/api/share");
+      const res = await shares().api.share.$get().then((r) => r.json());
       return ok2(res);
     }
     case "unshare": {
       const { shareId } = a;
-      const res = await http("DELETE", `/api/share/${encodeURIComponent(shareId)}`);
+      const res = await shares().api.share[":shareId"].$delete({ param: { shareId: encodeURIComponent(shareId) } }).then((r) => r.json());
       return ok2(res);
     }
     case "set_sharing_enabled": {
@@ -20922,24 +20923,26 @@ async function handleDocsTool(name, a, ctx) {
       }
       const { enabled, workspaceId, reason, taskId, why } = a;
       if (typeof enabled !== "boolean") {
-        const res2 = await http("GET", "/api/share");
+        const res2 = await shares().api.share.$get().then((r) => r.json());
         if (typeof workspaceId !== "string")
           return ok2(res2);
-        const closed = res2.sharing?.closedBoards ?? [];
+        const closed = res2.sharing.closedBoards ?? [];
         return ok2({
           ...res2,
           workspaceId,
           board: { workspaceId, enabled: !closed.includes(workspaceId) }
         });
       }
-      const res = await http("POST", "/api/share/enabled", {
-        enabled,
-        ...workspaceId !== undefined ? { workspaceId } : {},
-        ...reason !== undefined ? { reason } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        actor: { id: AUTHOR.id, name: AUTHOR.name }
-      });
+      const res = await shares().api.share.enabled.$post({
+        json: {
+          enabled,
+          workspaceId,
+          reason,
+          taskId,
+          why,
+          actor: { id: AUTHOR.id, name: AUTHOR.name }
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_board_sharing_lock": {
@@ -20952,21 +20955,23 @@ async function handleDocsTool(name, a, ctx) {
         return err2("set_board_sharing_lock needs workspaceId: the board to lock or unlock.");
       }
       if (typeof locked !== "boolean") {
-        const res2 = await http("GET", "/api/share");
-        const lockedBoards = res2.sharing?.lockedBoards ?? [];
+        const res2 = await shares().api.share.$get().then((r) => r.json());
+        const lockedBoards = res2.sharing.lockedBoards ?? [];
         return ok2({
           workspaceId,
           board: { workspaceId, locked: lockedBoards.includes(workspaceId) }
         });
       }
-      const res = await http("POST", "/api/share/lock", {
-        workspaceId,
-        locked,
-        ...reason !== undefined ? { reason } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        actor: { id: AUTHOR.id, name: AUTHOR.name }
-      });
+      const res = await shares().api.share.lock.$post({
+        json: {
+          workspaceId,
+          locked,
+          reason,
+          taskId,
+          why,
+          actor: { id: AUTHOR.id, name: AUTHOR.name }
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
   }
