@@ -146,6 +146,12 @@ export interface ServerOptions {
    */
   requireSignInToWrite?: boolean;
   /**
+   * The collab core's server-wide setting (`collab-core-switch.ts`). A board
+   * whose own switch is on takes the core's path only while this is on. Off
+   * by default; unset reads `CW_COLLAB_CORE`.
+   */
+  collabCore?: boolean;
+  /**
    * How a component build reaches esm.sh (`component-cdn.ts`). Tests hand in
    * a fake so no build leaves the machine; absent, the real host.
    */

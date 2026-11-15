@@ -38,6 +38,7 @@ import type { WebSocketHandler } from 'bun';
 import type { Awareness } from 'y-protocols/awareness';
 import type { AppSocketLink } from './app-socket-link.ts';
 import type { AppVoiceRelay } from './app-voice/relay.ts';
+import type { CoreSync } from './collab-core-path.ts';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { SocketEditor } from './edit-sessions.ts';
 import type { MeetingRelay } from './meeting-protocol.ts';
@@ -63,6 +64,8 @@ export interface SocketHandlersContext {
   spokenRelay: SpokenReplyRelay;
   /** A mock's or app's own voice sessions, keyed by socket. */
   appVoiceRelay: AppVoiceRelay;
+  /** The collab core's sync, for sockets stamped `core` (`collab-core-path.ts`). */
+  core?: CoreSync;
   /** A board room opened: where its agents last pointed (`agent-spots.ts`). */
   onBoardRoomOpen?: (workspaceId: string, awareness: Awareness) => void;
 }
@@ -102,6 +105,8 @@ export type UpgradeData = {
   editor?: SocketEditor;
   /** The person's access on the board (`share/board-access.ts`). */
   access?: SocketAccess;
+  /** The collab core serves this socket's sync (`collab-core-switch.ts`). */
+  core?: boolean;
   /** Who peers see this socket's presence as (`presence-identity.ts`). */
   presenceUser?: PresenceStamp;
   /** A voice socket's proven speaker, and its mark when a mock relayed it —
@@ -190,7 +195,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (typed.data.docId.startsWith('ws:')) {
         ctx.onBoardRoomOpen?.(typed.data.docId.slice(3), doc.awareness);
       }
-      onOpen(doc, typed);
+      onOpen(doc, typed, ctx.core);
       docStore.notePageOpened(doc);
     },
     message(ws, message) {
@@ -270,7 +275,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         const buf = message as unknown as ArrayBufferView;
         data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
       }
-      onMessage(doc, typed, data);
+      onMessage(doc, typed, data, ctx.core);
     },
     close(ws, code, reason) {
       if (ws.data.kind === 'recall') {
@@ -307,7 +312,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         meetingRelay.onClose(ws, code, reason);
         return;
       }
-      onClose(ws as unknown as FeedbackWs);
+      onClose(ws as unknown as FeedbackWs, ctx.core);
       // While open, the connection itself holds the doc; the week-long
       // window counts from here (`doc-residency.ts`).
       docStore.notePersonLeft((ws as unknown as FeedbackWs).data.docId);

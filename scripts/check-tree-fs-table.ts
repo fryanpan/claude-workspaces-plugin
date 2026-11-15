@@ -63,6 +63,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/chat-audit.ts': 'not-in-inventory',
   'packages/server/src/client-release.ts': 'not-in-inventory',
   'packages/server/src/coach/setup.ts': 'not-in-inventory',
+  'packages/server/src/collab-core-switch.ts': 'data-dir',
   'packages/server/src/component-build.ts': 'tree-fs',
   // `<dataDir>/component-grants.json`, a path built from the data dir alone.
   'packages/server/src/component-grants.ts': 'data-dir',

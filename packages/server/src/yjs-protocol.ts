@@ -5,6 +5,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { clientStateIsDead, peekSyncFrame } from './board-sync-gate.ts';
+import type { CoreSync } from './collab-core-path.ts';
 import type { FeedbackWs, LiveDoc } from './doc-store.ts';
 import {
   type AwarenessEntry,
@@ -205,7 +206,8 @@ function ensureBroadcaster(doc: LiveDoc): void {
     syncProtocol.writeUpdate(enc, update);
     const payload = encoding.toUint8Array(enc);
     for (const peer of doc.conns) {
-      if (peer === origin || peer.data.presenceOnly) continue;
+      // A core socket hears the doc's changes from its room (`collab-core-path.ts`).
+      if (peer === origin || peer.data.presenceOnly || peer.data.core) continue;
       try {
         peer.sendBinary(payload, true);
       } catch (e) {
@@ -241,15 +243,24 @@ function ensureBroadcaster(doc: LiveDoc): void {
   });
 }
 
-export function onOpen(doc: LiveDoc, ws: FeedbackWs): void {
+/**
+ * `core` is the collab core's sync for sockets stamped `core`
+ * (`collab-core-path.ts`): it sends their sync step 1 and answers their sync
+ * frames. A core socket whose doc the core cannot open falls back to the
+ * current code for its life.
+ */
+export function onOpen(doc: LiveDoc, ws: FeedbackWs, core?: CoreSync): void {
   ensureBroadcaster(doc);
   doc.conns.add(ws);
   openSockets.set(ws, doc);
 
+  if (ws.data.core && !core?.open(ws, doc)) ws.data.core = false;
+
   // sync step 1 — ask the client for updates it has that we don't. A
   // presence-only socket is asked about an empty doc, so it never offers us
   // anything and is never told how far the board doc has got.
-  {
+  // A core socket was sent the core's, above.
+  if (!ws.data.core) {
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MSG_SYNC);
     syncProtocol.writeSyncStep1(enc, ws.data.presenceOnly ? EMPTY_DOC : doc.ydoc);
@@ -350,7 +361,7 @@ function sendReset(ws: FeedbackWs): void {
   }
 }
 
-export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void {
+export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array, core?: CoreSync): void {
   try {
     const dec = decoding.createDecoder(data);
     const kind = decoding.readVarUint(dec);
@@ -362,6 +373,19 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
           return;
         }
         if (refuseDeadState(doc, ws, data)) return;
+        if (ws.data.core && core) {
+          // The same write gate as below, then the core: it answers a read,
+          // drops a read-only socket's writes, and applies the rest.
+          if (
+            !ws.data.readOnly &&
+            refuseSocketWrite(ws, doc.docId, doc.ydoc, ws.data.access, data)
+          ) {
+            sendReset(ws);
+            return;
+          }
+          core.receive(ws, data);
+          return;
+        }
         encoding.writeVarUint(enc, MSG_SYNC);
         if (ws.data.readOnly) {
           // A socket that may read and may not write (`WsCtx.readOnly`).
@@ -444,6 +468,7 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array): void 
   }
 }
 
-export function onClose(ws: FeedbackWs): void {
+export function onClose(ws: FeedbackWs, core?: CoreSync): void {
   state(ws).cleanup?.();
+  if (ws.data.core) core?.close(ws);
 }

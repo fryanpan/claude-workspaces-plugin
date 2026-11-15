@@ -521,6 +521,7 @@
   "POST /workspaces/:ws/audience": "400 application/json error=bad_audience {error,hint} | by workspaces.ts:handleWorkspaceRoutes > workspace-members.ts:handleWorkspaceMembers",
   "POST /workspaces/:ws/calendar/events/:eventId/join": "503 application/json error=not_configured {error} | by meetings-calendar.ts:handleMeetingCalendarRoutes",
   "POST /workspaces/:ws/chat-audit": "400 application/json error=entries must be a non-empty array {error} | by chat-audit-routes.ts:handleChatAuditRoutes",
+  "POST /workspaces/:ws/collab-core": "400 application/json error=on must be true or false {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-members.ts:handleWorkspaceMembers",
   "POST /workspaces/:ws/comment-queue/:id/ack": "200 application/json {cleared,ok} | by workspaces.ts:handleWorkspaceAttachmentRoutes > workspace-attachments.ts:handleWorkspaceAttachments",
   "POST /workspaces/:ws/dispatches": "400 application/json error=bad-task-id {error} | by dispatch-and-notes.ts:handleDispatchAndNoteRoutes",
   "POST /workspaces/:ws/dispatches/:taskId/report": "400 application/json error=missing-pr-number {error,message} | by dispatch-and-notes.ts:handleDispatchAndNoteRoutes",

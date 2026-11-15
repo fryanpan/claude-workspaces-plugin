@@ -15,6 +15,7 @@
  *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
  *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
+ *   POST   /workspaces/<id>/collab-core          the collab core on or off (owner)
  *
  * The READ is a member's, deliberately: everything in a workspace is available
  * to everyone in it (`.claude/rules/workspace-board.md`), and a Regular User
@@ -52,7 +53,8 @@ export async function handleWorkspaceMembers(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { shareLinks, accessProposals, docStore, sse, collabRooms, j, safeJson } = ctx;
+  const { shareLinks, accessProposals, docStore, sse, collabRooms, collabCoreSwitch, j, safeJson } =
+    ctx;
   const { req, scope, accessEmail, roleFor, requireOwner, visitor } = rq;
   if (!scope) return undefined;
   const { workspaceId } = scope;
@@ -180,6 +182,31 @@ export async function handleWorkspaceMembers(
     shareLinks.setRolesMode(workspaceId, mode);
     console.error(`[roles] board ${workspaceId} roles mode set to ${mode}`);
     return j(200, { ok: true, workspaceId, rolesMode: mode });
+  }
+
+  // ── Serve this board's sockets with the collab core, or not ───────────
+  //
+  // Every board starts off (D1 step 5, `collab-core-switch.ts`). Read at
+  // connect, so a page takes the new path at its next reconnect; and only
+  // while the server-wide `CW_COLLAB_CORE` is on, which `active` reports.
+  if (scope.rest === 'collab-core' && req.method === 'POST') {
+    const denied = refuseVisitor();
+    if (denied) return denied;
+    const body = await safeJson(req);
+    if (typeof body?.on !== 'boolean') return j(400, { error: 'on must be true or false' });
+    try {
+      collabCoreSwitch.set(workspaceId, body.on);
+    } catch (err) {
+      console.error(`[collab-core] could not switch board ${workspaceId}:`, err);
+      return j(500, { error: 'could not save the setting' });
+    }
+    console.error(`[collab-core] board ${workspaceId} switched ${body.on ? 'on' : 'off'}`);
+    return j(200, {
+      ok: true,
+      workspaceId,
+      on: body.on,
+      active: collabCoreSwitch.usesCore(workspaceId),
+    });
   }
 
   // ── End one person's access ───────────────────────────────────────────

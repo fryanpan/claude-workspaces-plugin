@@ -198,6 +198,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/calendar/events/:eventId/join` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit` | GET, POST | `routes/chat-audit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit/:agent` | GET | `routes/chat-audit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/collab-core` | POST | `routes/workspace-members.ts` | trusted-local |  |
 | `/workspaces/:ws/comment-queue/:id/ack` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches` | GET, POST | `routes/dispatch-and-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches/:taskId` | DELETE | `routes/dispatch-and-notes.ts` | trusted-local |  |
