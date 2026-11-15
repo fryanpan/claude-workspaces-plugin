@@ -133,9 +133,13 @@ async function listen(board: Board, cdp: Cdp, since: number): Promise<boolean> {
     async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
   );
   let tapped = false;
+  // Decided on the page alone. Voice that comes back is listening on the
+  // page in the same render that shows the button; the server's listener
+  // opens later, over a socket, and on a loaded runner after 3s. Waiting on
+  // both tapped a button that was already listening, which turns voice off.
   const back = await until(
     'voice back by itself',
-    async () => ((await cdp.evaluate(LISTENING)) && board.opened.length > since ? true : null),
+    async () => ((await cdp.evaluate(LISTENING)) ? true : null),
     3000,
   ).catch(() => false);
   if (!back) {
