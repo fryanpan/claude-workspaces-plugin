@@ -13,6 +13,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
+import { attachmentsContract } from '../src/routes/attachments-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
@@ -50,6 +51,17 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
       'doc-edit-routes.ts:handleDocEditRoutes',
       'archive.ts:handleArchiveRoutes',
       'apps.ts:handleAppRoutes',
+    ],
+  },
+  {
+    name: 'attachments',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: attachmentsContract as unknown as Hono<any>,
+    servedBy: [
+      'workspaces-create-read.ts:handleWorkspaceCreateRead',
+      'archive.ts:handleArchiveRoutes',
+      'review-files.ts:handleReviewFileRoutes',
+      'workspace-delete.ts:handleWorkspaceDelete',
     ],
   },
 ];

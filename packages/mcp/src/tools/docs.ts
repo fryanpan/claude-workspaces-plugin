@@ -25,7 +25,12 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
-import { docEditsClient, docLifecycleClient, docThreadsClient } from '../server-client.ts';
+import {
+  attachmentsClient,
+  docEditsClient,
+  docLifecycleClient,
+  docThreadsClient,
+} from '../server-client.ts';
 import { inactiveWatches } from '../sse-loop.ts';
 import { type ThreadCreateInput, threadCreateRequest } from '../thread-create.ts';
 import type { RestoreState, WatchCoverage } from '../watch-coverage.ts';
@@ -140,6 +145,10 @@ export async function handleDocsTool(
   /** The board's docs collection, and one doc's lifecycle routes. */
   const boardDocs = () => docLifecycleClient(http).workspaces[':ws'];
   const lifecycleApi = () => boardDocs().docs[':docId'];
+  /** Attachment sets, the folder bind, and a board's delete. */
+  const sets = () => attachmentsClient(http).workspaces;
+  const boardParam = () => ({ ws: encodeURIComponent(boardId()) });
+  const setParam = (setId: string) => ({ ...boardParam(), setId: encodeURIComponent(setId) });
   /** One doc's edit and anchor routes, through the typed client. */
   const editsApi = () => docEditsClient(http).workspaces[':ws'].docs[':docId'];
   const docParam = (docId: string) => ({
@@ -527,34 +536,38 @@ export async function handleDocsTool(
         subscribe?: boolean;
         producedBy?: { agentId?: string; sessionId?: string };
       };
-      const res = (await http('POST', '/workspaces', {
-        folderPath,
-        owner: CWD,
-        // The SET's own id, re-used to refresh an existing attachment set.
-        // It used to be spelled `workspaceId` here, which is the word every
-        // other tool uses for the BOARD — two meanings on one name, on the
-        // one call that takes both. The board is `workspaceId` now, like
-        // everywhere else, and the set is `setId`, like delete_review's.
-        ...(setId ? { workspaceId: setId } : {}),
-        // Not a path: a folder bind MINTS the set, so it posts to the
-        // collection that fronts both stores. The board still has to be
-        // named, and `boardId()` is the same requirement the path form
-        // makes — one rule, two spellings of the same call.
-        hubWorkspaceId: boardId(),
-        ...(title ? { title } : {}),
-        ...(include ? { include } : {}),
-        ...(exclude ? { exclude } : {}),
-        ...(maxFiles !== undefined ? { maxFiles } : {}),
-        ...(producedBy ? { producedBy } : {}),
-        // Passed through unchecked: the server refuses anything but its two
-        // words, and a typo guessed into `workspace` here would be a folder
-        // shared that was meant to stay on the machine.
-        ...(privacy !== undefined ? { privacy } : {}),
-      })) as { ok?: boolean; files?: Array<{ docId: string }> };
+      const res = await sets()
+        .$post({
+          json: {
+            folderPath,
+            owner: CWD,
+            // The SET's own id, re-used to refresh an existing attachment set.
+            // It used to be spelled `workspaceId` here, which is the word every
+            // other tool uses for the BOARD — two meanings on one name, on the
+            // one call that takes both. The board is `workspaceId` now, like
+            // everywhere else, and the set is `setId`, like delete_review's.
+            workspaceId: setId || undefined,
+            // Not a path: a folder bind MINTS the set, so it posts to the
+            // collection that fronts both stores. The board still has to be
+            // named, and `boardId()` is the same requirement the path form
+            // makes — one rule, two spellings of the same call.
+            hubWorkspaceId: boardId(),
+            title: title || undefined,
+            include: include || undefined,
+            exclude: exclude || undefined,
+            maxFiles,
+            producedBy: producedBy || undefined,
+            // Passed through unchecked: the server refuses anything but its two
+            // words, and a typo guessed into `workspace` here would be a folder
+            // shared that was meant to stay on the machine.
+            privacy,
+          },
+        })
+        .then((r) => r.json());
       // One workspace-level stream covers every member doc (including
       // files the reviewer opens lazily later). Opt out with subscribe:false.
-      if (subscribe !== false && (res as { ok?: boolean; workspaceId?: string })?.workspaceId) {
-        await watchWorkspace((res as { workspaceId: string }).workspaceId);
+      if (subscribe !== false && 'workspaceId' in res && res.workspaceId) {
+        await watchWorkspace(res.workspaceId);
       }
       return ok(res);
     }
@@ -582,57 +595,62 @@ export async function handleDocsTool(
         subscribe?: boolean;
         producedBy?: { agentId?: string; sessionId?: string };
       };
-      const res = (await http('POST', `${board()}/attachments`, {
-        repo,
-        base,
-        ...(target ? { target } : {}),
-        owner: CWD,
-        ...(reviewId ? { reviewId } : {}),
-        ...(title ? { title } : {}),
-        ...(exclude ? { exclude } : {}),
-        ...(groups ? { groups } : {}),
-        ...(maxFiles !== undefined ? { maxFiles } : {}),
-        ...(producedBy ? { producedBy } : {}),
-      })) as { ok?: boolean; files?: Array<{ docId: string }> };
+      const res = await sets()
+        [':ws'].attachments.$post({
+          param: boardParam(),
+          json: {
+            repo,
+            base,
+            target: target || undefined,
+            owner: CWD,
+            reviewId: reviewId || undefined,
+            title: title || undefined,
+            exclude: exclude || undefined,
+            groups: groups || undefined,
+            maxFiles,
+            producedBy: producedBy || undefined,
+          },
+        })
+        .then((r) => r.json());
       // One workspace-level stream covers every member doc (including
       // files opened lazily from the all-files sidebar later). Opt out
       // with subscribe:false.
-      if (subscribe !== false && (res as { reviewId?: string })?.reviewId) {
-        await watchWorkspace((res as { reviewId: string }).reviewId);
+      if (subscribe !== false && res.reviewId) {
+        await watchWorkspace(res.reviewId);
       }
       return ok(res);
     }
     case 'delete_review':
     case 'delete_attachment_set': {
       const { setId, force, purge } = a as { setId: string; force?: boolean; purge?: boolean };
-      const params = [force ? 'force=true' : '', purge ? 'purge=true' : ''].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join('&')}` : '';
-      const res = await http('DELETE', `${board()}/attachments/${encodeURIComponent(setId)}${qs}`);
+      const res = await sets()
+        [':ws'].attachments[':setId'].$delete({
+          param: setParam(setId),
+          query: { force: force ? 'true' : undefined, purge: purge ? 'true' : undefined },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'archive_review':
     case 'archive_attachment_set': {
       const { setId, reason } = a as { setId: string; reason?: string };
-      const res = await http(
-        'POST',
-        `${board()}/attachments/${encodeURIComponent(setId)}/archive`,
-        {
-          author: AUTHOR,
-          ...(reason !== undefined ? { reason } : {}),
-        },
-      );
+      const res = await sets()
+        [':ws'].attachments[':setId'].archive.$post({
+          param: setParam(setId),
+          json: { author: AUTHOR, reason },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'unarchive_review':
     case 'unarchive_attachment_set': {
       const { setId } = a as { setId: string };
-      const res = await http(
-        'POST',
-        `${board()}/attachments/${encodeURIComponent(setId)}/unarchive`,
-        {
-          author: AUTHOR,
-        },
-      );
+      const res = await sets()
+        [':ws'].attachments[':setId'].unarchive.$post({
+          param: setParam(setId),
+          json: { author: AUTHOR },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'archive_doc': {
@@ -651,7 +669,9 @@ export async function handleDocsTool(
     }
     case 'list_archived_reviews':
     case 'list_archived_attachments': {
-      const res = await http('GET', `${board()}/attachments?archived=true`);
+      const res = await sets()
+        [':ws'].attachments.$get({ param: boardParam(), query: { archived: 'true' } })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'delete_workspace': {
@@ -660,13 +680,14 @@ export async function handleDocsTool(
         force?: boolean;
         purge?: boolean;
       };
-      const params = [force ? 'force=true' : '', purge ? 'purge=true' : ''].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join('&')}` : '';
-      // The one route that still fronts both stores, dispatching by id — a
-      // board here, a review if that is what the id turns out to be. See
-      // the compat note on it in the server's route table. `purge` only
-      // reaches the review branch; a board's delete is unchanged.
-      const res = await http('DELETE', `/workspaces/${encodeURIComponent(workspaceId)}${qs}`);
+      // `purge` reaches no reader: the review branch this route once had is
+      // gone, and a board's delete reads only `force`.
+      const res = await sets()
+        [':ws'].$delete({
+          param: { ws: encodeURIComponent(workspaceId) },
+          query: { force: force ? 'true' : undefined, purge: purge ? 'true' : undefined },
+        })
+        .then((r) => r.json());
       return ok(res);
     }
     // COMPAT, two generations deep: these two were `refresh_workspace` and
@@ -681,11 +702,9 @@ export async function handleDocsTool(
     case 'refresh_attachment_set': {
       const { setId, workspaceId } = a as { setId?: string; workspaceId?: string };
       const id = setId ?? workspaceId ?? '';
-      const res = await http(
-        'POST',
-        `${board()}/attachments/${encodeURIComponent(id)}/refresh`,
-        {},
-      );
+      const res = await sets()
+        [':ws'].attachments[':setId'].refresh.$post({ param: setParam(id), json: {} })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'set_workspace_groups':
@@ -697,9 +716,9 @@ export async function handleDocsTool(
         groups: Array<{ title: string; paths: string[]; details?: string }>;
       };
       const id = setId ?? workspaceId ?? '';
-      const res = await http('POST', `${board()}/attachments/${encodeURIComponent(id)}/groups`, {
-        groups,
-      });
+      const res = await sets()
+        [':ws'].attachments[':setId'].groups.$post({ param: setParam(id), json: { groups } })
+        .then((r) => r.json());
       return ok(res);
     }
     case 'find_and_replace': {
