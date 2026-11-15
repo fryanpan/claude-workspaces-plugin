@@ -3,7 +3,8 @@
  * (`lead-egress.ts`) with its proxy (`lead-proxy.ts`), and the memory
  * watchdog (`lead-memory.sh`), in a container built from the project
  * machine's own base image with the users the Dockerfile makes. What the
- * other tests cannot show: that the kernel enforces the owner-matched rules,
+ * other tests cannot show: that the kernel enforces the nftables table matched
+ * by `meta skuid`,
  * that the lead's real tools (Bun's fetch, `bun install`, git over HTTPS,
  * ssh through its ProxyCommand) get out through the proxy and nowhere else,
  * that /proc reads the way the watchdog expects, and that the kill lands.
@@ -34,7 +35,7 @@ if (!enabled)
 
 const IMAGE = 'cw-lead-limits-test:local';
 const DOCKERFILE = `FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14e08a5afcf4a1436cd89
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git iptables openssh-client \\
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git iptables nftables openssh-client \\
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \\
   && useradd --uid 10005 --create-home --shell /usr/sbin/nologin cwdev \\
   && useradd --uid 10007 --create-home --shell /usr/sbin/nologin cwproxy
@@ -45,6 +46,7 @@ COPY app /app
 const repoRoot = join(machineDir, '..', '..');
 const FILES = [
   'infra/project-machine/lead-egress.ts',
+  'infra/project-machine/lead-egress-nft.ts',
   'infra/project-machine/lead-egress-plan.ts',
   'infra/project-machine/lead-egress.allow',
   'infra/project-machine/lead-proxy.ts',
@@ -101,7 +103,9 @@ describe.skipIf(!enabled)("the lead's limits in a Linux container", () => {
     console.log(ran.stdout);
 
     expect(r.get('apply')).toBe('0');
-    expect(r.get('apply_line')).toMatch(/^uids 10004, 10005 reach loopback only/);
+    expect(r.get('apply_line')).toMatch(
+      /^uids 10004, 10005 reach loopback only, IPv4 and IPv6, by nft table inet cw_lead_egress;/,
+    );
     expect(r.get('probe')).toBe('0');
     expect(r.get('probe_line')).toContain('https://api.anthropic.com through the proxy answered');
     // POSITIVE CONTROL: root, outside the wall, reaches the address the lead cannot.
@@ -120,7 +124,8 @@ describe.skipIf(!enabled)("the lead's limits in a Linux container", () => {
     expect(r.get('lead_ssh_direct')).not.toContain('Permission denied (publickey)');
     expect(r.get('proxy_log')).toContain('refused example.com:443: it is not on lead-egress.allow');
     expect(r.get('refresh')).toBe('0');
-    expect(r.get('jumps')).toBe('2 jumps6=2');
+    // A second apply replaces the table: still one table, one skuid rule, no iptables chain.
+    expect(r.get('tables')).toBe('1 skuid=1 iptables=0');
 
     expect(r.get('oom')).toBe('1000');
     expect(r.get('oom_lowered')).toBe('no');

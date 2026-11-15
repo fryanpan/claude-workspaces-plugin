@@ -3,19 +3,24 @@
  * The lead's network wall on a project machine (`entrypoint.sh`).
  *
  *   bun lead-egress.ts apply   as root: load the loopback-only rules for IPv4
- *                              and IPv6 and read them back. Prints one line;
- *                              exit 1 and the reason when the wall is not in.
+ *                              and IPv6 and read them back: a native nftables
+ *                              table first (`meta skuid`, which Fly's kernel
+ *                              has), then iptables' owner match. Prints one
+ *                              line; exit 1 and the reason when the wall is
+ *                              not in.
  *   bun lead-egress.ts probe   as the lead: try what the wall must refuse,
  *                              and the one host it must allow through the
  *                              proxy (judgeProbe's codes).
  *
- * The rules and the list are `lead-egress-plan.ts`; the proxy that enforces
- * the list is `lead-proxy.ts`.
+ * The nftables table is `lead-egress-nft.ts`; the iptables rules and the list
+ * are `lead-egress-plan.ts`; the proxy that enforces the list is
+ * `lead-proxy.ts`.
  */
 import { promises as dns } from 'node:dns';
 import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
+import { NFT_FAMILY, NFT_TABLE, nftRuleset, nftTableProblem } from './lead-egress-nft.ts';
 import {
   CHAIN,
   type Family,
@@ -52,7 +57,10 @@ export const runCommand: Runner = (argv, stdin) => {
   }
 };
 
-/** Each family's tools, nft first, then legacy for a kernel without nf_tables. */
+/**
+ * The iptables fallback, for a kernel without nftables' skuid: each family's
+ * tools, iptables-nft first, then legacy for a kernel without nf_tables.
+ */
 const BACKENDS: Record<Family, readonly [restore: string, tool: string][]> = {
   4: [
     ['iptables-restore', 'iptables'],
@@ -66,7 +74,61 @@ const BACKENDS: Record<Family, readonly [restore: string, tool: string][]> = {
 
 const firstLine = (r: Ran) => (r.stderr || r.stdout).trim().split('\n')[0] || `exit ${r.status}`;
 
-/** Loads one family's chain and jumps, then reads them back. Returns why it failed, or null. */
+/**
+ * Loads the nftables table and reads it back. Returns why it failed, or null.
+ * A table that loaded but does not read back as the wall is deleted, so the
+ * iptables fallback is not judged alongside a half-right copy.
+ */
+export function applyNft(run: Runner, uids: readonly number[]): string | null {
+  const loaded = run(['nft', '-f', '-'], nftRuleset(uids));
+  if (loaded.status !== 0) return `nft -f: ${firstLine(loaded)}`;
+  const listing = run(['nft', 'list', 'table', NFT_FAMILY, NFT_TABLE]);
+  const problem =
+    listing.status !== 0
+      ? `nft list table ${NFT_FAMILY} ${NFT_TABLE}: ${firstLine(listing)}`
+      : nftTableProblem(listing.stdout, uids);
+  if (problem) run(['nft', 'delete', 'table', NFT_FAMILY, NFT_TABLE]);
+  return problem;
+}
+
+/** Sends each uid into the chain and reads it all back. Returns why it does not hold, or null. */
+function holdFamily(run: Runner, tool: string, family: Family, uids: readonly number[]) {
+  for (const uid of uids) {
+    const [chain, ...match] = jumpArgs(uid);
+    if (run([tool, '-C', chain as string, ...match]).status === 0) continue;
+    const added = run([tool, '-I', chain as string, '1', ...match]);
+    if (added.status !== 0) return `could not send uid ${uid} into ${CHAIN}: ${firstLine(added)}`;
+  }
+  const listing = run([tool, '-S', CHAIN]);
+  if (listing.status !== 0) return `-S ${CHAIN}: ${firstLine(listing)}`;
+  const problem = chainProblem(listing.stdout, family);
+  if (problem) return problem;
+  for (const uid of uids) {
+    const [chain, ...match] = jumpArgs(uid);
+    if (run([tool, '-C', chain as string, ...match]).status !== 0) {
+      return `uid ${uid}'s jump into ${CHAIN} is missing after it was added`;
+    }
+  }
+  return null;
+}
+
+/** Takes out what a failed backend loaded: the jumps, then the chain. Best effort. */
+function unloadFamily(run: Runner, tool: string, uids: readonly number[]): void {
+  for (const uid of uids) {
+    const [chain, ...match] = jumpArgs(uid);
+    for (let i = 0; i < 8 && run([tool, '-C', chain as string, ...match]).status === 0; i++) {
+      run([tool, '-D', chain as string, ...match]);
+    }
+  }
+  run([tool, '-F', CHAIN]);
+  run([tool, '-X', CHAIN]);
+}
+
+/**
+ * Loads one family's chain and jumps with the first backend that holds, then
+ * reads them back. A backend that fails at any step is unloaded and the next
+ * tried. Returns why none held, or null.
+ */
 export function applyFamily(run: Runner, family: Family, uids: readonly number[]): string | null {
   const errors: string[] = [];
   for (const [restore, tool] of BACKENDS[family]) {
@@ -75,24 +137,10 @@ export function applyFamily(run: Runner, family: Family, uids: readonly number[]
       errors.push(`${restore}: ${firstLine(loaded)}`);
       continue;
     }
-    for (const uid of uids) {
-      const [chain, ...match] = jumpArgs(uid);
-      if (run([tool, '-C', chain as string, ...match]).status === 0) continue;
-      const added = run([tool, '-I', chain as string, '1', ...match]);
-      if (added.status !== 0)
-        return `${tool}: could not send uid ${uid} into ${CHAIN}: ${firstLine(added)}`;
-    }
-    const listing = run([tool, '-S', CHAIN]);
-    if (listing.status !== 0) return `${tool} -S ${CHAIN}: ${firstLine(listing)}`;
-    const problem = chainProblem(listing.stdout, family);
-    if (problem) return problem;
-    for (const uid of uids) {
-      const [chain, ...match] = jumpArgs(uid);
-      if (run([tool, '-C', chain as string, ...match]).status !== 0) {
-        return `${tool}: uid ${uid}'s jump into ${CHAIN} is missing after it was added`;
-      }
-    }
-    return null;
+    const problem = holdFamily(run, tool, family, uids);
+    if (problem === null) return null;
+    errors.push(`${tool}: ${problem}`);
+    unloadFamily(run, tool, uids);
   }
   return `IPv${family} rules could not be loaded (${errors.join('; ')})`;
 }
@@ -113,13 +161,18 @@ export function apply(
   } catch (err) {
     return { ok: false, line: `lead-egress.allow: ${err instanceof Error ? err.message : err}` };
   }
-  for (const family of [4, 6] as const) {
-    const problem = applyFamily(run, family, uids);
-    if (problem) return { ok: false, line: problem };
+  const nft = applyNft(run, uids);
+  let by = `nft table ${NFT_FAMILY} ${NFT_TABLE}`;
+  if (nft !== null) {
+    for (const family of [4, 6] as const) {
+      const problem = applyFamily(run, family, uids);
+      if (problem) return { ok: false, line: `${nft}; ${problem}` };
+    }
+    by = `iptables chain ${CHAIN}, because ${nft}`;
   }
   return {
     ok: true,
-    line: `uids ${uids.join(', ')} reach loopback only, IPv4 and IPv6; out through ${PROXY_URL} to the ${hosts} hosts on lead-egress.allow`,
+    line: `uids ${uids.join(', ')} reach loopback only, IPv4 and IPv6, by ${by}; out through ${PROXY_URL} to the ${hosts} hosts on lead-egress.allow`,
   };
 }
 

@@ -50,11 +50,12 @@ FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14
 # and the lead and nobody else: the lead's board socket is that group's
 # (entrypoint.sh). `cwdevsrc` holds the lead and the dev server's user
 # (`cwdev`) and nobody else: the dev server's folder is that group's.
-# `iptables` (nft and legacy, IPv4 and IPv6) loads the lead's network wall
-# (lead-egress.ts). `cwproxy` runs the proxy that is the wall's one way out
+# `nftables` loads the lead's network wall (lead-egress.ts) as a native table
+# matched by `meta skuid`, which Fly's kernel has; `iptables` (nft and legacy,
+# IPv4 and IPv6) is the fallback for a kernel with the owner match instead. `cwproxy` runs the proxy that is the wall's one way out
 # (lead-proxy.ts); the wall does not hold it.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git iptables openssh-client tini tmux \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iptables nftables openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
