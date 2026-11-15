@@ -33,8 +33,8 @@ import { type HistoryAuthor, HistoryLog, type HistoryRecord, type HistoryStore }
 import { type ChangedPart, changesSince, seqAtTime, versionAt } from './replay.ts';
 import { applyVersion } from './restore.ts';
 
-/** Roots a restore leaves alone; see `restore.ts`. */
-const RESTORE_SKIPS: ReadonlySet<string> = new Set(['meta', 'threads']);
+/** Roots a restore leaves alone in every doc; see `restore.ts`. */
+const RESTORE_SKIPS: readonly string[] = ['meta', 'threads'];
 
 /** The transaction origin a restore writes under: agent-shaped, so the store
  *  treats it as authoring (revision bump, write-back) like an agent's edit. */
@@ -49,6 +49,9 @@ export interface DocHistoryOptions {
    *  walk of the board membership, and the answer is asked on every change.
    *  Default 1000; a switch flip reaches a doc within it. */
   scopeTtlMs?: number;
+  /** More roots a restore leaves alone in this doc: the ones another store
+   *  owns and reasserts, such as a board doc's projected tasks. */
+  ownedElsewhere?: (doc: LiveDoc) => readonly string[];
 }
 
 /** One record, without its bytes. */
@@ -76,7 +79,7 @@ export class DocHistory {
   /** Doc instances whose log is known to end at the doc's state. */
   private readonly inStep = new WeakSet<LiveDoc>();
   private readonly attached = new WeakSet<LiveDoc>();
-  private readonly scopes = new WeakMap<LiveDoc, { until: number; on: boolean }>();
+  private scopes = new WeakMap<LiveDoc, { until: number; on: boolean }>();
   /** Set for the length of a restore's transaction. */
   private restoring: { author: HistoryAuthor; restoredTo: number } | null = null;
 
@@ -122,7 +125,7 @@ export class DocHistory {
     doc: LiveDoc,
     seq: number,
     author: HistoryAuthor,
-  ): { seq: number | null; changed: string[]; refused: string[] } {
+  ): { seq: number | null; changed: string[]; refused: string[]; skipped: string[] } {
     if (!this.inScope(doc, true)) throw new Error(`${doc.docId} keeps no history`);
     const records = this.records(doc.docId);
     if (!Number.isInteger(seq) || seq < 0 || seq >= records.length) {
@@ -130,18 +133,24 @@ export class DocHistory {
     }
     const past = versionAt(records, seq);
     const before = this.logFor(doc.docId).length;
+    const skipped = [...RESTORE_SKIPS, ...(this.opts.ownedElsewhere?.(doc) ?? [])];
     let result = { changed: [] as string[], refused: [] as string[] };
     this.restoring = { author, restoredTo: seq };
     try {
       doc.ydoc.transact(() => {
-        result = applyVersion(doc.ydoc, past, RESTORE_SKIPS);
+        result = applyVersion(doc.ydoc, past, new Set(skipped));
       }, RESTORE_ORIGIN);
     } finally {
       this.restoring = null;
       past.destroy();
     }
     const log = this.logFor(doc.docId);
-    return { seq: log.length > before ? log.length - 1 : null, ...result };
+    return { seq: log.length > before ? log.length - 1 : null, ...result, skipped };
+  }
+
+  /** Forget every cached scope answer: a board's switch just changed. */
+  scopeChanged(): void {
+    this.scopes = new WeakMap();
   }
 
   /** Bytes of history stored for a doc. */

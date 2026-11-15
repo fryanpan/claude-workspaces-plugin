@@ -42,6 +42,7 @@ export class CollabCoreSwitch {
   readonly serverWide: boolean;
   private readonly path: string;
   private readonly boards: Set<string>;
+  private readonly listeners = new Set<() => void>();
 
   constructor(opts: CollabCoreSwitchOptions) {
     this.serverWide = opts.serverWide;
@@ -79,6 +80,13 @@ export class CollabCoreSwitch {
     replaceFile(this.path, `${JSON.stringify({ boards: [...next].sort() })}\n`, 0o600);
     if (on) this.boards.add(workspaceId);
     else this.boards.delete(workspaceId);
+    for (const fn of this.listeners) fn();
+  }
+
+  /** Be told after a board is switched on or off. Returns the unsubscribe. */
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 }
 

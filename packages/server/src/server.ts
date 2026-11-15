@@ -609,6 +609,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const docHistory = new DocHistory({
     store: new DiskHistoryStore(dataDir),
     inScope: (doc) => historyScope?.(doc) ?? false,
+    // A board doc's rows are the task store's projection, which reverts any
+    // other write to them (`task-projection.ts`), so a restore leaves them.
+    ownedElsewhere: (doc) => (doc.docId.startsWith('ws:') ? ['tasks', 'workspace'] : []),
   });
   const docStore: DocStore = new DocStore({
     dataDir,
@@ -2161,6 +2164,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     for (const ws of boardsForDoc(doc.docId)) if (collabCoreSwitch.usesCore(ws)) return true;
     return false;
   };
+  collabCoreSwitch.onChange(() => docHistory.scopeChanged());
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );

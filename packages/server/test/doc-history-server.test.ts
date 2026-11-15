@@ -251,6 +251,47 @@ describe('done-when 3: a restore is a recorded change, and the version it replac
   }, 30_000);
 });
 
+describe('done-when 3 and 4 on a board: a restore leaves the rows the task store owns', () => {
+  it('restores the board doc’s own state and keeps every task the store holds', async () => {
+    const dataDir = freshDir();
+    const { handle, base } = boot(dataDir, { collabCore: true, requireSignInToWrite: false });
+    const ws = await board(base, 'Harborlight', true);
+    const boardDoc = `ws:${ws}`;
+    const p = openPage(`${base.replace('http', 'ws')}/workspaces/${ws}/y`, base);
+    pages.push(p);
+    await p.ready;
+    const scratch = () => handle.docStore.peek(boardDoc)?.ydoc.getMap('harborlight-scratch');
+    p.ydoc.getMap('harborlight-scratch').set('note', 'first');
+    await waitFor(() => scratch()?.get('note') === 'first', { describe: 'first note' });
+    const target = await waitFor(() => {
+      const last = handle.docHistory.versions(boardDoc).at(-1);
+      return last?.author.kind === 'person' ? last.seq : null;
+    });
+    const filed = await post(base, `/workspaces/${ws}/tasks`, {
+      title: 'Riverbend ropes',
+      author: { id: 'known-person', name: 'Alice', kind: 'known', color: '#2e7dd7' },
+    });
+    expect(filed.status).toBe(200);
+    p.ydoc.getMap('harborlight-scratch').set('note', 'second');
+    await waitFor(() => scratch()?.get('note') === 'second', { describe: 'second note' });
+    // The task filed through REST is recorded as the request's change.
+    expect(handle.docHistory.versions(boardDoc).some((v) => v.seq > target)).toBe(true);
+
+    const live = handle.docStore.peek(boardDoc);
+    const result = handle.docHistory.restore(live!, target, { kind: 'person', name: 'Alice' });
+    expect(result.skipped).toEqual(expect.arrayContaining(['tasks', 'workspace']));
+    expect(result.changed).toContain('harborlight-scratch');
+    await waitFor(() => p.ydoc.getMap('harborlight-scratch').get('note') === 'first', {
+      describe: 'the restored note on the open page',
+    });
+    const titles = [...(live!.ydoc.getMap('tasks').values() as Iterable<{ title?: string }>)].map(
+      (t) => t.title,
+    );
+    expect(titles).toContain('Riverbend ropes');
+    expect(handle.docHistory.versions(boardDoc).at(-1)?.kind).toBe('restore');
+  }, 30_000);
+});
+
 describe('switching off loses nothing', () => {
   it('serves every recorded edit from the .ydoc with the core off, and history comes back on', async () => {
     const dataDir = freshDir();

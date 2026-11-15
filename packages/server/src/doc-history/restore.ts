@@ -11,8 +11,8 @@
  * is a record of its own (`recorder.ts`).
  *
  * Roots named in `skip` are left alone. The recorder skips `meta`, which the
- * server owns, and `threads`: a comment thread is a conversation about the
- * doc, not a version of it.
+ * server owns, `threads` (a comment thread is a conversation about the doc,
+ * not a version of it), and any root another store owns and reasserts.
  */
 import * as Y from 'yjs';
 import { type RootKind, type TypedRoot, rootKindOf, typedRoot } from './replay.ts';
