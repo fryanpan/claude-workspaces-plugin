@@ -1,5 +1,5 @@
 /**
- * Loaded by every `bun test` run (bunfig.toml [test].preload), BEFORE any test
+ * Loaded by every `bun test` run (through suite.preload.ts), BEFORE any test
  * file imports the server, which is the only moment this can be set: the doc
  * cadences are resolved once at `doc-store-timings.ts` module load.
  *

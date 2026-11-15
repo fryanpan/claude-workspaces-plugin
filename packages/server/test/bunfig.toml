@@ -1,0 +1,3 @@
+# Read by `bun test` started in packages/server/test. See suite.preload.ts.
+[test]
+preload = ["./suite.preload.ts"]
