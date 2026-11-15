@@ -69,6 +69,11 @@
  * gate. It is a bigger denominator than bun's, so the reported percentage
  * fell when it landed (server: 95.6% → 75.4%) and the floor moved with it in
  * the same commit. Nothing about the tests changed; the ruler did.
+ *
+ * A code line excludes interface and type-alias declarations (`codeLines`).
+ * They compile to nothing, so no test can make bun report them hit, and
+ * counting them charged each typed route contract its type lines as
+ * uncovered code. The floor rose in the same commit (server: 75.0% → 83.8%).
  */
 // `node:child_process`, not `Bun.spawnSync`: the colocated test runs under
 // vitest, where the `Bun` global does not exist and module load throws.
@@ -160,10 +165,35 @@ function normalize(p: string): string {
   return rel.split('\\').join('/');
 }
 
-/** Lines that could carry code: non-blank, not inside or opening a comment. */
+/** An `interface` or a `type` alias starts on this line. */
+const TYPE_DECLARATION =
+  /^(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:interface\s+[\w$]+|type\s+[\w$]+\s*(?:<.*>)?\s*=)/;
+
+/** How far `line` opens (positive) or closes (negative) `{}`, `()` and `[]`. */
+function bracketDelta(line: string): number {
+  let d = 0;
+  for (const c of line) {
+    if (c === '{' || c === '(' || c === '[') d++;
+    else if (c === '}' || c === ')' || c === ']') d--;
+  }
+  return d;
+}
+
+/**
+ * Lines that could carry code: non-blank, not inside or opening a comment,
+ * and not part of an `interface` or `type` alias declaration. A type-only
+ * line compiles to nothing, so bun never reports it hit; counting it charged
+ * every typed contract (`routes/*-contract.ts`) its type lines as uncovered
+ * code that no test could ever reach.
+ *
+ * An interface ends where its brackets close. An alias ends at the `;`
+ * that closes it, outside any bracket, which biome always writes.
+ */
 export function codeLines(text: string): number {
   let n = 0;
   let inBlock = false;
+  let inType: 'interface' | 'alias' | null = null;
+  let depth = 0;
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (inBlock) {
@@ -174,6 +204,19 @@ export function codeLines(text: string): number {
     if (line.startsWith('//')) continue;
     if (line.startsWith('/*')) {
       if (!line.includes('*/')) inBlock = true;
+      continue;
+    }
+    if (inType === null && TYPE_DECLARATION.test(line)) {
+      inType = /\binterface\s/.test(line.split('=')[0] ?? '') ? 'interface' : 'alias';
+      depth = 0;
+    }
+    if (inType !== null) {
+      const opened = depth > 0 || line.includes('{');
+      depth += bracketDelta(line);
+      const code = line.replace(/\s*\/\/.*$/, '');
+      const ended =
+        inType === 'interface' ? opened && depth <= 0 : depth <= 0 && code.endsWith(';');
+      if (ended) inType = null;
       continue;
     }
     n++;
