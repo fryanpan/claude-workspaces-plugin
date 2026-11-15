@@ -10,7 +10,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { makeBuiltApp, startApp } from '../../../scripts/app-kit-harness.ts';
+import { PASSWORD, makeBuiltApp, startApp } from '../../../scripts/app-kit-harness.ts';
 import { Cdp, launchChrome, pageSocketUrl, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
@@ -20,6 +20,10 @@ import {
 import { waitFor } from './wait-for.ts';
 
 export interface AppKitBrowserReading {
+  /** The heading the sign-up form led to. */
+  afterSignUp: string;
+  /** Where the mailed verification link led. */
+  afterVerify: string;
   /** Where the sign-in form sent the browser. */
   afterSignIn: string;
   /** Each tab's status line once its doc socket synced. */
@@ -34,6 +38,7 @@ export interface AppKitBrowserReading {
 }
 
 const TYPED = 'typed in tab one';
+const EMAIL = 'alice@example.com';
 
 const parent = mkdtempSync(join(tmpdir(), 'app-kit-browser-'));
 const app = await startApp(makeBuiltApp(parent), join(parent, 'data'));
@@ -69,6 +74,16 @@ async function open(cdp: Cdp, url: string): Promise<void> {
   await loaded;
 }
 
+/** Fill the page's form and submit it, as a person would; waits for the next page. */
+async function submit(cdp: Cdp, fields: Record<string, string>): Promise<void> {
+  await cdp.evaluate(
+    `for (const [k, v] of Object.entries(${JSON.stringify(fields)})) document.querySelector('input[name=' + k + ']').value = v`,
+  );
+  const loaded = cdp.once('Page.loadEventFired');
+  await cdp.evaluate(`document.querySelector('form.app-form').requestSubmit()`);
+  await loaded;
+}
+
 const status = (cdp: Cdp) =>
   poll(
     async () => String(await cdp.evaluate(`document.getElementById('status')?.textContent ?? ''`)),
@@ -84,11 +99,13 @@ try {
     `app-kit-browser-${process.pid}`,
   );
   const one = await tab(browser.port);
-  await open(one, `${app.base}/auth/sign-in`);
-  await one.evaluate(`document.querySelector('input[name=name]').value = 'Alice'`);
-  const signedIn = one.once('Page.loadEventFired');
-  await one.evaluate(`document.querySelector('form').requestSubmit()`);
-  await signedIn;
+  // Make an account on the app's form, open the mailed link, sign in.
+  await open(one, `${app.base}/auth/sign-up`);
+  await submit(one, { name: 'Alice', email: EMAIL, password: PASSWORD });
+  const afterSignUp = String(await one.evaluate(`document.querySelector('h1')?.textContent`));
+  await open(one, await app.mailLink('verify-email', EMAIL));
+  const afterVerify = String(await one.evaluate('location.pathname'));
+  await submit(one, { email: EMAIL, password: PASSWORD });
   const afterSignIn = String(await one.evaluate('location.pathname'));
 
   const doc = `${app.base}/docs/harborlight`;
@@ -114,6 +131,8 @@ try {
   const buttonDefined = Boolean(await one.evaluate(`!!customElements.get('wa-button')`));
 
   const reading: AppKitBrowserReading = {
+    afterSignUp,
+    afterVerify,
     afterSignIn,
     statuses,
     secondTabText,
