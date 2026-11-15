@@ -12,6 +12,8 @@ import { taskIdOfBodyDoc } from '../task-row.ts';
  */
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import { wantsJson } from '../workspace-path.ts';
+import type { ResolveReviewItemAnswer } from './review-items-contract.ts';
+import { answerAs } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -98,27 +100,34 @@ export async function handleWorkspaceHome(
       const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
       if (!comment?.review) return j(404, { error: 'unknown-review-item' });
       const workspaceId = resolveWorkspaceForDoc(docId);
-      return j(200, {
-        reviewItemId,
-        kind: 'doc-thread',
-        docId,
-        threadId,
-        commentId,
-        // `resolveWorkspaceForDoc` answers `null`, never `undefined`, so
-        // the test has to be against `null` — otherwise a doc no board
-        // holds ships `workspaceId: null` and `set_review_item_criteria`
-        // reads the key as present and PUTs `/workspaces/null/...`.
-        ...(workspaceId !== null ? { workspaceId } : {}),
-      });
+      return j(
+        200,
+        answerAs<ResolveReviewItemAnswer>({
+          reviewItemId,
+          kind: 'doc-thread',
+          docId,
+          threadId,
+          commentId,
+          // `resolveWorkspaceForDoc` answers `null`, never `undefined`, so
+          // it is turned into `undefined`, which the JSON drops — otherwise a
+          // doc no board holds ships `workspaceId: null` and
+          // `set_review_item_criteria` reads the key as present and PUTs
+          // `/workspaces/null/...`.
+          workspaceId: workspaceId ?? undefined,
+        }),
+      );
     }
     const found = taskStore.findReviewItem(reviewItemId);
     if (!found) return j(404, { error: 'unknown-review-item' });
-    return j(200, {
-      reviewItemId,
-      kind: 'task-item',
-      taskId: found.taskId,
-      workspaceId: found.workspaceId,
-    });
+    return j(
+      200,
+      answerAs<ResolveReviewItemAnswer>({
+        reviewItemId,
+        kind: 'task-item',
+        taskId: found.taskId,
+        workspaceId: found.workspaceId,
+      }),
+    );
   }
   /**
    * "I have SEEN this" — the browser's beacon, and the only door

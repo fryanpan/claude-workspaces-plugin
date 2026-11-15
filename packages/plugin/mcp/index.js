@@ -20205,6 +20205,8 @@ var shareClient = (http) => typedClient(http);
 var agentNotesClient = (http) => typedClient(http);
 var taskStateClient = (http) => typedClient(http);
 var taskContentClient = (http) => typedClient(http);
+var taskBoardClient = (http) => typedClient(http);
+var reviewItemsClient = (http) => typedClient(http);
 
 // packages/mcp/src/thread-create.ts
 function present2(body) {
@@ -21511,25 +21513,28 @@ function taskCreatedSummary(task, ignoredLinks, shapeGaps, placed) {
 }
 async function recordReviewAnswer(ctx, args) {
   const { http, AUTHOR } = ctx;
-  const { board, taskId, text, reviewItemId, answeredWith } = args;
+  const { ws, taskId, text, reviewItemId, answeredWith } = args;
+  const ticket = reviewItemsClient(http).workspaces[":ws"].tasks[":taskId"];
+  const param = { ws, taskId: encodeURIComponent(taskId) };
   if (reviewItemId === undefined) {
-    return await http("POST", `${board}/tasks/${encodeURIComponent(taskId)}/answer`, {
-      text,
-      ...answeredWith !== undefined ? { optionId: answeredWith } : {},
-      author: AUTHOR
-    });
+    return (await ticket.answer.$post({ param, json: { text, optionId: answeredWith, author: AUTHOR } })).json();
   }
-  return await http("POST", `${board}/tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/answer`, {
-    text,
-    ...answeredWith !== undefined ? { answeredWith } : {},
-    author: AUTHOR
-  });
+  return (await ticket["review-items"][":itemId"].answer.$post({
+    param: { ...param, itemId: encodeURIComponent(reviewItemId) },
+    json: { text, answeredWith, author: AUTHOR }
+  })).json();
 }
-async function resolveReviewItemId(ctx, board, reviewItemId) {
+async function resolveReviewItemId(ctx, ws, reviewItemId) {
   const thread = parseThreadReviewItemId(reviewItemId);
   if (thread)
     return { kind: "doc-thread", ...thread };
-  const res = await ctx.http("GET", `${board}/review-items/${encodeURIComponent(reviewItemId)}`);
+  const res = await (await reviewItemsClient(ctx.http).workspaces[":ws"]["review-items"][":itemId"].$get({
+    param: { ws, itemId: encodeURIComponent(reviewItemId) }
+  })).json();
+  if (res.kind === "doc-thread") {
+    const { docId, threadId, commentId } = res;
+    return { kind: "doc-thread", docId, threadId, commentId };
+  }
   return {
     kind: "task-item",
     taskId: res.taskId,
@@ -21547,11 +21552,17 @@ function heldResult(res) {
 }
 async function handleTaskTool(name, a, ctx) {
   const { http, ok: ok2, err: err2, AUTHOR, claimNoticeFor: claimNoticeFor2 } = ctx;
-  const board = () => boardPathOf(name, a);
   const threadsApi = () => docThreadsClient(http).workspaces[":ws"].docs[":docId"];
   const taskApi = () => taskStateClient(http).workspaces[":ws"].tasks[":taskId"];
   const contentApi = () => taskContentClient(http).workspaces[":ws"];
   const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const listsApi = () => taskBoardClient(http).workspaces[":ws"];
+  const wsParam = (workspaceId) => ({ ws: encodeURIComponent(workspaceId) });
+  const itemApi = () => reviewItemsClient(http).workspaces[":ws"].tasks[":taskId"];
+  const itemParam = (taskId, itemId) => ({
+    ...taskParam(taskId),
+    itemId: encodeURIComponent(itemId)
+  });
   const taskParam = (taskId) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     taskId: encodeURIComponent(taskId)
@@ -21629,44 +21640,42 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "next_tasks": {
       const { workspaceId, assignee, limit, includeBlocked, includeArchived, fields } = a;
-      const qs = new URLSearchParams;
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (limit !== undefined)
-        qs.set("limit", String(limit));
-      if (includeBlocked === true)
-        qs.set("includeBlocked", "true");
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const query = qs.size > 0 ? `?${qs.toString()}` : "";
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`);
+      const res = await (await listsApi().next.$get({
+        param: wsParam(workspaceId),
+        query: {
+          assignee,
+          limit: limit !== undefined ? String(limit) : undefined,
+          includeBlocked: includeBlocked === true ? "true" : undefined,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
+      const queueRows = res.tasks;
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
+        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, queueRows);
         if (missing.length > 0) {
-          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, res.tasks.length));
+          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, queueRows.length));
         }
       }
       return ok2({
         workspaceId,
         ...res.retired ? { retired: res.retired } : {},
         ...res.capacity ? { capacity: res.capacity } : {},
-        tasks: projectQueueRows(res.tasks, fields)
+        tasks: projectQueueRows(queueRows, fields)
       });
     }
     case "list_tasks": {
       const { workspaceId, goal, status, assignee, needs, fields, includeArchived, taskIds } = a;
-      const qs = new URLSearchParams({ format: "json" });
-      if (goal !== undefined)
-        qs.set("goal", goal);
-      if (status !== undefined)
-        qs.set("status", status);
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (needs !== undefined)
-        qs.set("needs", needs);
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`);
+      const res = await (await listsApi().tasks.$get({
+        param: wsParam(workspaceId),
+        query: {
+          format: "json",
+          goal,
+          status,
+          assignee,
+          needs,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
       let rows = res.tasks;
       if (taskIds !== undefined && taskIds.length > 0) {
         const wanted = new Set(taskIds);
@@ -21780,9 +21789,10 @@ async function handleTaskTool(name, a, ctx) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
       if (goalId !== undefined) {
-        const res2 = await http("POST", `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
-          author: AUTHOR
-        });
+        const res2 = await (await listsApi().goals[":goalId"].restore.$post({
+          param: { ...boardParam(), goalId: encodeURIComponent(goalId) },
+          json: { author: AUTHOR }
+        })).json();
         return ok2({
           goalId,
           title: res2.goal.title,
@@ -21872,33 +21882,32 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_goal_list": {
       const { workspaceId, goals, drop } = a;
-      const res = await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
-        goals,
-        ...drop !== undefined ? { drop } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.$put({
+        param: wsParam(workspaceId),
+        json: { goals, drop, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         changed: res.changed,
         created: res.created,
         movedToChores: res.movedToChores,
-        strandedDone: res.strandedDone,
-        ...res.bucketReview ? { bucketReview: res.bucketReview } : {}
+        strandedDone: res.strandedDone
       });
     }
     case "rename_goal": {
       const { workspaceId, goal, title, dueAt } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/rename`, {
-        goal,
-        title,
-        ...dueAt !== undefined ? { dueAt } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.rename.$post({
+        param: wsParam(workspaceId),
+        json: { goal, title, dueAt, author: AUTHOR }
+      })).json();
       return ok2({ workspaceId, goal: res.goal, changed: res.changed });
     }
     case "reorder_goals": {
       const { workspaceId, order } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/reorder`, { order, author: AUTHOR });
+      const res = await (await listsApi().goals.reorder.$post({
+        param: wsParam(workspaceId),
+        json: { order, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         order: res.order,
@@ -21907,13 +21916,13 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "add_review_item": {
       const { taskId, review } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/review-items`, {
-        review,
-        author: AUTHOR
-      });
+      const res = await (await itemApi()["review-items"].$post({
+        param: taskParam(taskId),
+        json: { review, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
-        reviewItemId: res.item?.id,
+        reviewItemId: res.item.id,
         ...res.url !== undefined ? { url: res.url } : {},
         ...res.reviewAdvice !== undefined ? { reviewAdvice: res.reviewAdvice } : {},
         ...heldResult(res)
@@ -21926,7 +21935,7 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? Pass its reviewItemId (from the queue row or the ticket), or taskId — alone for a ticket that is itself a decision, with reviewItemId for one of the items filed on it");
         }
-        const address = await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread") {
           await threadsApi().threads[":threadId"].answer.$post({
             param: threadParam(address.docId, address.threadId),
@@ -21948,7 +21957,7 @@ async function handleTaskTool(name, a, ctx) {
         effectiveTaskId = address.taskId;
       }
       const res = await recordReviewAnswer(ctx, {
-        board: board(),
+        ws: boardParam().ws,
         taskId: effectiveTaskId,
         text,
         ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -21975,14 +21984,6 @@ async function handleTaskTool(name, a, ctx) {
         revisedRange,
         lessSpecific
       } = a;
-      const patch = {
-        ...headline !== undefined ? { headline } : {},
-        ...detail !== undefined ? { detail } : {},
-        ...options !== undefined ? { options } : {},
-        ...revisedRange !== undefined ? { revisedRange } : {},
-        ...lessSpecific !== undefined ? { lessSpecific } : {},
-        author: AUTHOR
-      };
       if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
         if (taskId !== undefined || reviewItemId !== undefined) {
           return err2("two addresses in one call — pass taskId + reviewItemId for an item on a ticket, or docId + threadId + commentId for one raised on a doc thread, not both");
@@ -21995,7 +21996,15 @@ async function handleTaskTool(name, a, ctx) {
         }
         const docRes = await threadsApi().threads[":threadId"].revise.$post({
           param: threadParam(docId, threadId),
-          json: { ...patch, commentId }
+          json: {
+            headline,
+            detail,
+            options,
+            revisedRange,
+            lessSpecific,
+            author: AUTHOR,
+            commentId
+          }
         }).then((r) => r.json());
         return ok2({
           docId,
@@ -22011,14 +22020,22 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? A bare reviewItemId (from the queue row or the ticket), taskId (+ reviewItemId for one of the items filed on the ticket), or docId + threadId + commentId for one raised on a doc thread");
         }
-        const address = await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread") {
           if (reply !== undefined) {
             return err2("`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply");
           }
           const docRes = await threadsApi().threads[":threadId"].revise.$post({
             param: threadParam(address.docId, address.threadId),
-            json: { ...patch, commentId: address.commentId }
+            json: {
+              headline,
+              detail,
+              options,
+              revisedRange,
+              lessSpecific,
+              author: AUTHOR,
+              commentId: address.commentId
+            }
           }).then((r) => r.json());
           return ok2({
             reviewItemId,
@@ -22036,7 +22053,10 @@ async function handleTaskTool(name, a, ctx) {
         return err2("`reply` needs an item thread to land on, and a ticket's own decision has none — revise without `reply`, then point at the change with post_reply on the task");
       }
       const targetItemId = reviewItemId ?? "r-legacy";
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/review-items/${encodeURIComponent(targetItemId)}/revise`, { ...patch, ...reply !== undefined ? { reply } : {} });
+      const res = await (await itemApi()["review-items"][":itemId"].revise.$post({
+        param: itemParam(effectiveTaskId, targetItemId),
+        json: { headline, detail, options, revisedRange, lessSpecific, author: AUTHOR, reply }
+      })).json();
       return ok2({
         taskId: effectiveTaskId,
         ...reviewItemId !== undefined ? { reviewItemId } : { decision: true },
@@ -22050,11 +22070,10 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "withdraw_review_item": {
       const { reviewItemId, taskId, docId, threadId, commentId, reason, undo } = a;
-      const body = { author: AUTHOR, ...reason !== undefined ? { reason } : {} };
       const docWithdraw = async (address) => {
         await (undo ? threadsApi().threads[":threadId"].withdraw.undo : threadsApi().threads[":threadId"].withdraw).$post({
           param: threadParam(address.docId, address.threadId),
-          json: { ...body, commentId: address.commentId }
+          json: { author: AUTHOR, reason, commentId: address.commentId }
         }).then((r) => r.json());
         return ok2({
           ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -22066,10 +22085,14 @@ async function handleTaskTool(name, a, ctx) {
         if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
           return err2("two addresses in one call — pass reviewItemId alone (it carries its own address), or the docId + threadId + commentId triple, not both");
         }
-        const address = taskId !== undefined ? { kind: "task-item", taskId } : await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = taskId !== undefined ? { kind: "task-item", taskId } : await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread")
           return docWithdraw(address);
-        await http("POST", `${board()}/tasks/${encodeURIComponent(address.taskId)}/review-items/${encodeURIComponent(reviewItemId)}/withdraw${undo ? "/undo" : ""}`, body);
+        const item = itemApi()["review-items"][":itemId"];
+        await (undo ? item.withdraw.undo : item.withdraw).$post({
+          param: itemParam(address.taskId, reviewItemId),
+          json: { author: AUTHOR, reason }
+        }).then((r) => r.json());
         return ok2({ taskId: address.taskId, reviewItemId, withdrawn: undo !== true });
       }
       if (docId === undefined || threadId === undefined || commentId === undefined) {
@@ -22084,7 +22107,9 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? Pass its reviewItemId (from the queue row or the ticket), or taskId — alone for a ticket that is itself a decision, with reviewItemId for one of the items filed on it");
         }
-        const address = await http("GET", `${board()}/review-items/${encodeURIComponent(reviewItemId)}`);
+        const address = await (await reviewItemsClient(http).workspaces[":ws"]["review-items"][":itemId"].$get({
+          param: { ...boardParam(), itemId: encodeURIComponent(reviewItemId) }
+        })).json();
         if (address.kind === "doc-thread") {
           await threadsApi().threads[":threadId"].comments.$post({
             param: threadParam(address.docId, address.threadId),
@@ -22099,8 +22124,11 @@ async function handleTaskTool(name, a, ctx) {
         }
         effectiveTaskId = address.taskId;
       }
-      const path = reviewItemId === undefined ? `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/more-info` : `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/review-items/${encodeURIComponent(reviewItemId)}/more-info`;
-      const res = await http("POST", path, { question, author: AUTHOR });
+      const json = { question, author: AUTHOR };
+      const res = await (reviewItemId === undefined ? await itemApi()["more-info"].$post({ param: taskParam(effectiveTaskId), json }) : await itemApi()["review-items"][":itemId"]["more-info"].$post({
+        param: itemParam(effectiveTaskId, reviewItemId),
+        json
+      })).json();
       return ok2({
         taskId: effectiveTaskId,
         ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -22111,7 +22139,7 @@ async function handleTaskTool(name, a, ctx) {
     case "answer_decision": {
       const { taskId, text, optionId, reviewItemId } = a;
       const res = await recordReviewAnswer(ctx, {
-        board: board(),
+        ws: boardParam().ws,
         taskId,
         text,
         ...reviewItemId !== undefined ? { reviewItemId } : {},

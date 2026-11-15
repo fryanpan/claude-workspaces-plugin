@@ -25,8 +25,9 @@
  * the chain may have done something else.
  *
  * THE STATE each request meets. `:ws`, `:taskId` and `:docId` are a real
- * board, a task on it and a doc filed on it, and `:setId` a folder attachment
- * on it (built only for the rows that name one), so most rows reach their own
+ * board, a task on it and a doc filed on it, `:setId` a folder attachment
+ * on it, `:goalId` a goal band on it and `:itemId` a review item on the task
+ * (each built only for the rows that name one), so most rows reach their own
  * handler rather than the workspace scope's 404. Every other parameter is
  * `exampleFor`'s stand-in, which names nothing. Reads share one seed. Every
  * write (POST, PUT, DELETE) gets a board, task and doc of its own, so an
@@ -64,6 +65,10 @@ interface Seed {
   docId: string;
   /** A browsed folder attached to the board, for the rows that name one. */
   setId?: string;
+  /** A goal band on the board, for the rows that name one. */
+  goalId?: string;
+  /** A review item on the task, for the rows that name one. */
+  itemId?: string;
 }
 
 /**
@@ -74,6 +79,8 @@ interface Seed {
  */
 const READ_QUERY: Record<string, string> = {
   '/workspaces/:ws/attachments': '?archived=true',
+  // Without it the address is the board's Tasks tab, which the shell answers.
+  '/workspaces/:ws/tasks': '?format=json',
 };
 
 /** One request's answer, as one comparable line. */
@@ -112,6 +119,8 @@ function addressFor(pattern: string, seed: Seed): string {
     ':taskId': seed.taskId,
     ':docId': encodeURIComponent(seed.docId),
     ...(seed.setId ? { ':setId': encodeURIComponent(seed.setId) } : {}),
+    ...(seed.goalId ? { ':goalId': encodeURIComponent(seed.goalId) } : {}),
+    ...(seed.itemId ? { ':itemId': encodeURIComponent(seed.itemId) } : {}),
   };
   return exampleFor(pattern)
     .split('/')
@@ -127,17 +136,30 @@ describe('every route-table row is answered as recorded', () => {
   let spy: RouteHandlerSpy;
   const answers = new Map<string, string>();
 
-  const seed = async (withSet = false): Promise<Seed> => {
+  const seed = async (pattern: string): Promise<Seed> => {
     seeds += 1;
     // Seeds are built in parallel, so `seeds` moves on during the awaits.
     const n = seeds;
     const ws = handle.tasks.createWorkspace(`Riverbend ${n}`).id;
+    const actor = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' } as const;
     const filed = handle.tasks.createTask(ws, {
       title: 'Harborlight survey',
       assignee: 'human',
-      actor: { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' },
+      actor,
     });
     if (!filed.ok) throw new Error('seed: task create refused');
+    let goal: { goalId?: string; itemId?: string } = {};
+    if (pattern.includes(':goalId')) {
+      const added = handle.tasks.addGoal(ws, { title: 'Saltmarsh' }, { actor });
+      if (!added.ok) throw new Error('seed: goal add refused');
+      goal = { goalId: added.goal.id };
+    }
+    if (pattern.includes(':itemId')) {
+      const review = { shape: 'review', headline: 'Is the Riverbend timetable right?' };
+      const item = handle.tasks.addReviewItem(filed.task.id, review, { actor });
+      if (!item.ok) throw new Error('seed: review item refused');
+      goal = { ...goal, itemId: item.item.id };
+    }
     const file = join(dataDir, `saltmarsh-${n}.md`);
     writeFileSync(file, '# Saltmarsh\n\nBody.\n');
     const res = await fetch(`${base}/workspaces/${ws}/docs`, {
@@ -147,7 +169,7 @@ describe('every route-table row is answered as recorded', () => {
     });
     if (res.status !== 200) throw new Error(`seed: doc create → ${res.status}`);
     const { docId } = (await res.json()) as { docId: string };
-    if (!withSet) return { ws, taskId: filed.task.id, docId };
+    if (!pattern.includes(':setId')) return { ws, taskId: filed.task.id, docId, ...goal };
     const folder = join(dataDir, `riverbend-${n}`);
     mkdirSync(folder);
     writeFileSync(join(folder, 'notes.md'), '# Riverbend\n');
@@ -158,7 +180,7 @@ describe('every route-table row is answered as recorded', () => {
     });
     if (set.status !== 200) throw new Error(`seed: attachment → ${set.status}`);
     const { reviewId } = (await set.json()) as { reviewId: string };
-    return { ws, taskId: filed.task.id, docId, setId: reviewId };
+    return { ws, taskId: filed.task.id, docId, setId: reviewId, ...goal };
   };
 
   beforeAll(async () => {
@@ -199,7 +221,8 @@ describe('every route-table row is answered as recorded', () => {
     });
     base = `http://127.0.0.1:${handle.port}`;
 
-    const shared = await seed(true);
+    // The shared read seed carries every optional fixture.
+    const shared = await seed(':setId :goalId :itemId');
     // Every row's own methods, plus a HEAD beside every GET: Hono answers a
     // HEAD from a GET handler by itself, so a family that moves would start
     // answering HEAD where the chain did something else.
@@ -223,7 +246,7 @@ describe('every route-table row is answered as recorded', () => {
     const own: Seed[] = [];
     for (let i = 0; i < writes.length; i += SEED_BATCH) {
       const batch = writes.slice(i, i + SEED_BATCH);
-      own.push(...(await Promise.all(batch.map((r) => seed(r.e.pattern.includes(':setId'))))));
+      own.push(...(await Promise.all(batch.map((r) => seed(r.e.pattern)))));
     }
     let nextOwn = 0;
     for (const { e, method } of ordered) {
@@ -246,6 +269,8 @@ describe('every route-table row is answered as recorded', () => {
           .replaceAll(at.ws, ':ws')
           .replaceAll(at.taskId, ':taskId')
           .replaceAll(at.setId ?? ':setId', ':setId')
+          .replaceAll(at.goalId ?? ':goalId', ':goalId')
+          .replaceAll(at.itemId ?? ':itemId', ':itemId')
           .replaceAll(encodeURIComponent(at.docId), ':docId')
           .replaceAll(at.docId, ':docId');
       answers.set(key, await answerOf(res, method, normalize, spy.answeredBy()));

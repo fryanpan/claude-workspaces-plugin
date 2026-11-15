@@ -17,6 +17,8 @@ import {
   refuseOwnerOnlyWrite,
 } from '../share/board-role.ts';
 import { LEGACY_REVIEW_ITEM_ID, legacyDecisionItem } from '../tasks.ts';
+import type { DecisionAnswerBody, MoreInfoBody, TicketAnswer } from './review-items-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -59,7 +61,7 @@ export async function handleTaskAnswers(
       if (asksForSecret(decision?.review)) return j(400, SECRET_ANSWER_DENIAL);
       if (asksForGrant(decision?.review)) return j(400, GRANT_ANSWER_DENIAL);
     }
-    const body = await safeJson(req);
+    const body = sent<DecisionAnswerBody>(await safeJson(req));
     const text = body?.text;
     if (typeof text !== 'string' || text.length === 0) {
       return j(400, { error: 'text required' });
@@ -110,7 +112,7 @@ export async function handleTaskAnswers(
       }
       const asked = taskStore.requestMoreInfo(taskId, text, { actor: author });
       if (!asked.ok) return j(asked.error === 'not-found' ? 404 : 400, asked);
-      return j(200, { asked: true, task: asked.task });
+      return j(200, answerAs<TicketAnswer>({ asked: true, task: asked.task }));
     }
     const res = taskStore.answerDecision(taskId, text, {
       actor: author,
@@ -142,7 +144,7 @@ export async function handleTaskAnswers(
         ts: Date.now(),
       }),
     );
-    return j(200, res);
+    return j(200, answerAs<TicketAnswer>(res));
   }
   // Undo. Answering is a single click with no confirmation, so there has
   // to be a way back — and the way back is a SOFT delete: the store moves
@@ -180,14 +182,14 @@ export async function handleTaskAnswers(
       const denied = ownerOnlyDenial(taskId);
       if (denied) return denied;
     }
-    const body = await safeJson(req);
+    const body = sent<MoreInfoBody>(await safeJson(req));
     const question = typeof body?.question === 'string' ? body.question.trim() : '';
     if (question.length === 0) return j(400, { error: 'question required' });
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const res = taskStore.requestMoreInfo(taskId, question, { actor: author });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
-    return j(200, res);
+    return j(200, answerAs<TicketAnswer>(res));
   }
   return undefined;
 }
