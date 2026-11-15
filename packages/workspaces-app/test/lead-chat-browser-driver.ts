@@ -34,6 +34,7 @@ import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import { CHROME_LOG_ARGS, connectWatched, dumpRunning, onceWithin } from './chrome-stall.ts';
 import type { LeadChatRun, Rect, SurfaceRun, VoiceRun } from './lead-chat-browser-reading.ts';
+import { TAP_PROBE_INSTALL, TAP_PROBE_READ } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 
@@ -42,7 +43,7 @@ const step = (what: string): void => {
 };
 
 async function until<T>(
-  what: string | (() => string),
+  what: string | (() => string | Promise<string>),
   read: () => Promise<T | null> | T | null,
   ms = 20_000,
 ): Promise<T> {
@@ -52,7 +53,7 @@ async function until<T>(
     if (v !== null && v !== undefined) return v;
     await sleep(50);
   }
-  throw new Error(`never happened: ${typeof what === 'function' ? what() : what}`);
+  throw new Error(`never happened: ${typeof what === 'function' ? await what() : what}`);
 }
 
 /** Everything the page shows of the chat, read through its shadow roots. */
@@ -386,6 +387,7 @@ async function main(): Promise<void> {
       })()`);
       const stored = String(await cdp.evaluate(`localStorage.getItem('cw.lead-chat.mode')`));
       await go(cdp, surfaces[0]?.[1] ?? '');
+      await cdp.evaluate(TAP_PROBE_INSTALL);
       const v0 = (await cdp.evaluate(READ)) as Read;
       // Read before the tap: the question's listener may open before the bar is seen.
       const opensBefore = ears.opens;
@@ -425,13 +427,11 @@ async function main(): Promise<void> {
       // The bar, tapped where it is now, grows into the panel still listening.
       const barNow = answered.bar ?? out.bar;
       await tap(cdp, barNow as Rect);
-      let seen: Partial<Read> = {};
       const grown = await until(
-        () =>
-          `the panel open from the bar (tapped ${JSON.stringify(barNow)}; saw ${JSON.stringify(seen)})`,
+        async () =>
+          `the panel open from the bar (tapped ${JSON.stringify(barNow)}; saw ${JSON.stringify(await cdp.evaluate(READ))}; page ${String(await cdp.evaluate(TAP_PROBE_READ))})`,
         async () => {
           const r = (await cdp.evaluate(READ)) as Read;
-          seen = { expanded: r.expanded, bar: r.bar, pane: r.pane, listening: r.listening };
           return r.pane ? r : null;
         },
       );
