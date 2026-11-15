@@ -159,9 +159,13 @@ pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
 (`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every
-board off) and the server-wide one (`CW_COLLAB_CORE`, read at boot, off
-unless `on`); a board takes the core only when both are on, so turning the
-server-wide one off returns every board to the current code on one restart.
+board off) and the server-wide one (`collab-core-server.json`, set by the
+same route, off until set; `CW_COLLAB_CORE` fixes it when the environment
+sets it); a board takes the core only when both are on, so turning the
+server-wide one off returns every board to the current code for every socket
+opened afterwards. The owner moves a board with one tap on the settings
+page's Collab core row (`workspaces-app/src/board/collab-core-row.ts`), which
+sends both settings in one request.
 The board and doc socket upgrades read it at connect and stamp the socket
 `core`. `server/src/collab-core-path.ts` is one core room host over the doc
 store's live docs: for a `core` socket it sends sync step 1 and answers the
