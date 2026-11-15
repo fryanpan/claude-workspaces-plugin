@@ -384,6 +384,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/schedule` | POST | `routes/task-fields.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/title` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/transition` | POST | `routes/task-status-links.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/wait` | POST | `routes/task-fields.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/batch` | POST | `routes/tasks-batch.ts` | trusted-local |  |
 | `/workspaces/:ws/voice` | POST | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/voice-queue/:id/ack` | POST | `routes/workspace-attachments.ts` | trusted-local |  |

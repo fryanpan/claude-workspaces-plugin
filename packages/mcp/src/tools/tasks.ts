@@ -26,13 +26,13 @@
  * level; no tool's arguments, behaviour or reply changed here.
  */
 import { parseThreadReviewItemId } from '@claude-workspaces/core/review-item-id';
-import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-schedule';
+import { nextOccurrence } from '@claude-workspaces/core/task-schedule';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { HeldFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
-import { docThreadsClient } from '../server-client.ts';
+import { docThreadsClient, taskStateClient } from '../server-client.ts';
 import {
   LIST_TASK_FIELDS,
   NEXT_TASK_FIELDS,
@@ -224,6 +224,12 @@ export async function handleTaskTool(
   const board = (): string => boardPathOf(name, a);
   /** One doc's thread routes, through the typed client (`server-client.ts`). */
   const threadsApi = () => docThreadsClient(http).workspaces[':ws'].docs[':docId'];
+  /** One task's state routes, through the typed client. */
+  const taskApi = () => taskStateClient(http).workspaces[':ws'].tasks[':taskId'];
+  const taskParam = (taskId: string) => ({
+    ws: encodeURIComponent(boardIdOf(name, a)),
+    taskId: encodeURIComponent(taskId),
+  });
   const threadParam = (docId: string, threadId: string) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     docId: encodeURIComponent(docId),
@@ -531,12 +537,17 @@ export async function handleTaskTool(
       // cannot claim a task because the advisory read 500'd is strictly
       // worse off than one that claims it uninformed.
       const claimNotice = to === 'in-progress' ? await claimNoticeFor(taskId) : undefined;
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/transition`, {
-        to,
-        author: AUTHOR,
-        ...(note !== undefined ? { note } : {}),
-        ...(usage !== undefined ? { usage } : {}),
-      })) as { task: TaskPayload; blockers: unknown[] };
+      const res = await (
+        await taskApi().transition.$post({
+          param: taskParam(taskId),
+          json: {
+            to,
+            author: AUTHOR,
+            note,
+            usage,
+          },
+        })
+      ).json();
       return ok({
         taskId,
         status: res.task.status,
@@ -556,11 +567,16 @@ export async function handleTaskTool(
         assignee: string;
         assigneeKind?: 'person' | 'agent';
       };
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/assignee`, {
-        assignee,
-        ...(assigneeKind !== undefined ? { assigneeKind } : {}),
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed: boolean; ownerKind?: string };
+      const res = await (
+        await taskApi().assignee.$post({
+          param: taskParam(taskId),
+          json: {
+            assignee,
+            assigneeKind,
+            author: AUTHOR,
+          },
+        })
+      ).json();
       // `ownerKind` is what the BOARD now says this owner is — the answer
       // the caller actually wanted, and not the same as "the call didn't
       // error". `unknown` here means the row will draw as "not recorded":
@@ -578,10 +594,12 @@ export async function handleTaskTool(
       if (ids.length === 0 || ids.some((id) => typeof id !== 'string' || id === '')) {
         return err('blockedBy must be a task id, or an array of them');
       }
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/park`, {
-        blockedBy: ids,
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed: boolean; after: string[] };
+      const res = await (
+        await taskApi().park.$post({
+          param: taskParam(taskId),
+          json: { blockedBy: ids, author: AUTHOR },
+        })
+      ).json();
       // What the row waits on NOW, read off the store rather than echoed
       // back: naming a blocker the row already had is a no-op, and the
       // caller has to be able to see that nothing moved.
@@ -604,16 +622,15 @@ export async function handleTaskTool(
           'waitingOn is required: say what this task is waiting on, in words a reader understands — or pass clear: true to end the wait',
         );
       }
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/wait`, {
-        ...(clear === true
-          ? { clear: true }
-          : { what: waitingOn, ...(hours !== undefined ? { hours } : {}) }),
-        author: AUTHOR,
-      })) as {
-        task: TaskPayload;
-        changed?: boolean;
-        wait?: { what: string; since: number; until: number };
-      };
+      const res = await (
+        await taskApi().wait.$post({
+          param: taskParam(taskId),
+          json:
+            clear === true
+              ? { clear: true, author: AUTHOR }
+              : { what: waitingOn, hours, author: AUTHOR },
+        })
+      ).json();
       if (clear === true) return ok({ taskId, cleared: true, changed: res.changed ?? false });
       // The lapse time is echoed because it is the half the caller did not
       // choose: they said how long, the server said until when, and a wait
@@ -642,10 +659,12 @@ export async function handleTaskTool(
        for one job. */
     case 'archive_task': {
       const { taskId, reason } = a as { taskId: string; reason?: string };
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/archive`, {
-        ...(reason !== undefined ? { reason } : {}),
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed: boolean };
+      const res = await (
+        await taskApi().archive.$post({
+          param: taskParam(taskId),
+          json: { reason, author: AUTHOR },
+        })
+      ).json();
       // The STORED stamps back rather than an echo of what was sent:
       // `changed: false` is the honest answer to archiving a row that was
       // already archived, and reading it beats inferring anything from a
@@ -679,9 +698,9 @@ export async function handleTaskTool(
       if (taskId === undefined) {
         return err('pass taskId to restore one task, or goalId to restore a goal with its tasks');
       }
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed: boolean };
+      const res = await (
+        await taskApi().restore.$post({ param: taskParam(taskId), json: { author: AUTHOR } })
+      ).json();
       return ok({
         taskId,
         goal: res.task.goal,
@@ -780,12 +799,17 @@ export async function handleTaskTool(
         position?: number;
         batchId?: string;
       };
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/goal`, {
-        goal,
-        author: AUTHOR,
-        ...(position !== undefined ? { position } : {}),
-        ...(batchId !== undefined ? { batchId } : {}),
-      })) as { task: TaskPayload; changed: boolean };
+      const res = await (
+        await taskApi().goal.$post({
+          param: taskParam(taskId),
+          json: {
+            goal,
+            author: AUTHOR,
+            position,
+            batchId,
+          },
+        })
+      ).json();
       return ok({ taskId, goal: res.task.goal, order: res.task.order, changed: res.changed });
     }
     case 'set_goal_list': {
@@ -1248,11 +1272,12 @@ export async function handleTaskTool(
         after: string[];
         afterEnforce?: string[];
       };
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/after`, {
-        after,
-        ...(afterEnforce !== undefined ? { afterEnforce } : {}),
-        author: AUTHOR,
-      })) as { task: TaskPayload; changed: boolean };
+      const res = await (
+        await taskApi().after.$post({
+          param: taskParam(taskId),
+          json: { after, afterEnforce, author: AUTHOR },
+        })
+      ).json();
       return ok({
         taskId,
         changed: res.changed,
@@ -1278,14 +1303,19 @@ export async function handleTaskTool(
       if (rule === undefined) {
         return err('rule required — a rule object to set, or null to clear the schedule.');
       }
-      const res = (await http('POST', `${board()}/tasks/${encodeURIComponent(taskId)}/schedule`, {
-        rule,
-        ...(timezone !== undefined ? { timezone } : {}),
-        ...(until !== undefined ? { until } : {}),
-        ...(onMissed !== undefined ? { onMissed } : {}),
-        ...(output !== undefined ? { output } : {}),
-        author: AUTHOR,
-      })) as { task: TaskPayload & { schedule?: TaskSchedule } };
+      const res = await (
+        await taskApi().schedule.$post({
+          param: taskParam(taskId),
+          json: {
+            rule,
+            timezone,
+            until,
+            onMissed,
+            output,
+            author: AUTHOR,
+          },
+        })
+      ).json();
       const schedule = res.task.schedule ?? null;
       // What was armed, read back from the store, plus when it next fires —
       // so the caller can see the rule it meant rather than trusting a 200.

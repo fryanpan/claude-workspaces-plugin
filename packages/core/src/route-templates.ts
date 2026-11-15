@@ -2,9 +2,8 @@
  * Route templates, and the one function that turns a pathname into a span
  * name — `routePatternForSpan`.
  *
- * It lives beside `trace-privacy.ts` rather than inside it because the table
- * is the bulk of both files put together, and because the table is now a
- * CHECKED claim: `packages/server/test/span-route-names.test.ts` walks
+ * It lives beside `trace-privacy.ts` because the table is most of both files
+ * and is a CHECKED claim: `packages/server/test/span-route-names.test.ts` walks
  * `ROUTE_TABLE` — the server's own written-down set of every path it answers
  * — and fails on any route this file cannot name.
  *
@@ -132,6 +131,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'tasks', ':id', 'assignee'],
   ['workspaces', ':id', 'tasks', ':id', 'due'],
   ['workspaces', ':id', 'tasks', ':id', 'park'],
+  ['workspaces', ':id', 'tasks', ':id', 'wait'],
   ['workspaces', ':id', 'tasks', ':id', 'archive'],
   ['workspaces', ':id', 'tasks', ':id', 'restore'],
   ['workspaces', ':id', 'tasks', ':id', 'notes'],
