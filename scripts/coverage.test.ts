@@ -6,6 +6,7 @@
  * summing on fixed input, so the join between two different tools' lcov — the
  * part with no other check on it — has one.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   DENOMINATOR,
@@ -85,6 +86,35 @@ describe('codeLines — the stand-in for a file no tool ever loaded', () => {
   it('is zero for a file with nothing in it', () => {
     expect(codeLines('')).toBe(0);
     expect(codeLines('\n\n\n')).toBe(0);
+  });
+
+  describe('a type-only declaration compiles to nothing, so it is not counted', () => {
+    const fixture = readFileSync(
+      new URL('./fixtures/code-lines/type-only-block.ts', import.meta.url),
+      'utf8',
+    );
+    /** Lines 5-17 of the fixture are its interface and its two aliases. */
+    const lines = fixture.split('\n');
+    const declarations = lines.slice(4, 17).join('\n');
+    const rest = [...lines.slice(0, 4), ...lines.slice(17)].join('\n');
+
+    it('counts the fixture’s six code lines, and none of its declarations', () => {
+      expect(codeLines(fixture)).toBe(6);
+      expect(codeLines(declarations)).toBe(0);
+    });
+
+    it('counts the code around the declarations as it would without them', () => {
+      expect(codeLines(rest)).toBe(codeLines(fixture));
+    });
+
+    it('still counts a line that only names a type, in code', () => {
+      expect(codeLines("const kind = { type: 'markdown' };")).toBe(1);
+      expect(codeLines('const sized: Map<string, number> = new Map();')).toBe(1);
+    });
+
+    it('ends an alias with no brackets at its semicolon', () => {
+      expect(codeLines(['type Id = string;', 'const id: Id = "a";'].join('\n'))).toBe(1);
+    });
   });
 });
 
