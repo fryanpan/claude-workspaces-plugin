@@ -25,7 +25,7 @@ import {
   bootTestBoard,
   el,
   longPress,
-  resetBoardServer,
+  resetBoardServerWith,
   server,
   settle,
 } from './support/board-drive.ts';
@@ -35,7 +35,7 @@ const AGENT = 'agent-harborlight';
 /** Every route the boot reads, with the board record saying whether the
  *  collab core serves this board, and one listening agent on the roster. */
 function recordSays(active: boolean | undefined): void {
-  resetBoardServer(active === undefined ? {} : { collabCore: { active } });
+  resetBoardServerWith(active === undefined ? {} : { collabCore: { active } });
   server.on(`/workspaces/${WS}/agents`, {
     workspaceId: WS,
     attachments: [

@@ -51,12 +51,20 @@ installFakeBeacon();
  * Call it in `beforeEach`. Later `server.on` calls win over earlier ones, so a
  * test overrides one of these by naming it again.
  */
-export function resetBoardServer(record: Record<string, unknown> = {}): void {
+export function resetBoardServer(): void {
+  resetBoardServerWith({});
+}
+
+/**
+ * `resetBoardServer`, with `record` adding top-level fields to the board
+ * record, such as `collabCore`. A separate name because `resetBoardServer` is
+ * passed straight to `beforeEach`, which hands it the test context.
+ */
+export function resetBoardServerWith(record: Record<string, unknown>): void {
   server.reset();
   server.on('/api/auth/session', { authenticated: false, canWrite: true });
   // Routes match by prefix and the last match wins, so the record is set here,
   // first, or it would answer every `/workspaces/<id>/…` read below it.
-  // `record` adds top-level fields to it, such as `collabCore`.
   server.on(`/workspaces/${WS}`, {
     workspace: { id: WS, name: 'Kitchen rebuild', goals: [], createdAt: NOW },
     ...record,
