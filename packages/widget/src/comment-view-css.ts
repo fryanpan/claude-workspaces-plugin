@@ -89,9 +89,19 @@ export const PAGE_CSS = [
   // The steady ring on the pin being shown, until the next tap on the page.
   '.cfw-pin[data-hl]:after{content:"";position:absolute;left:5px;top:2px;width:34px;height:34px;box-sizing:border-box;border-radius:50%;border:3px solid #2e7dd7}',
   '.cfw-pin[data-hl]{opacity:1}',
-  // An agent's mark on the pin: half filled while it works, filled teal when
-  // done. White-and-green outline stays the resolved pin's.
-  `.cfw-pin[data-state=working]:before{background:linear-gradient(45deg,#fff 50%,${MARK} 50%)}`,
+  // An agent's mark on the pin. Working: three white dots in the pin that
+  // brighten and fade in turn on a slow 4.5s cycle ("Breathing", the owner's
+  // pick on the comment-states mock); with reduced motion they hold still.
+  // Done: filled teal. White-and-green outline stays the resolved pin's.
+  // Longhands, not the `animation` shorthand: the comment view's tests read
+  // these computed, and happy-dom does not expand the shorthand.
+  '.cw-pg{position:absolute;left:14px;top:11px;width:16px;height:16px;pointer-events:none}',
+  '.cw-breathe{position:absolute;top:6.65px;width:2.7px;height:2.7px;border-radius:50%;background:#fff;opacity:.35;animation-name:cw-breathe;animation-duration:4.5s;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-delay:0s}',
+  '.cw-breathe:nth-child(1){left:3.15px}',
+  '.cw-breathe:nth-child(2){left:6.65px;animation-delay:.75s}',
+  '.cw-breathe:nth-child(3){left:10.15px;animation-delay:1.5s}',
+  '@keyframes cw-breathe{0%,100%{opacity:.35}40%{opacity:1}}',
+  '@media (prefers-reduced-motion:reduce){.cw-breathe{animation-name:none;opacity:.85}}',
   `.cfw-pin[data-state=done]:before{background:${DONE}}`,
   `.cw-link-badge{position:fixed;width:20px;height:20px;border-radius:50%;background:${MARK};color:#fff;border:2px solid #fff;box-sizing:border-box;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;z-index:2147483646}`,
   // Wide, a mock in the board narrows beside the open view rather than
