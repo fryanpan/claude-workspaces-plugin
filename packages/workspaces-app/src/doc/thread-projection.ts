@@ -20,11 +20,13 @@
  * request. Nothing here reaches back into `mountReviewChrome`.
  */
 import {
+  PROGRESS_KEY,
   SUMMARY_PENDING_WINDOW_MS,
   type Thread,
   type User,
   readReviewPayload,
   readStoredSummary,
+  readThreadProgress,
   readVoiceNote,
   summaryPending,
 } from '@claude-workspaces/core';
@@ -175,6 +177,10 @@ export function createThreadProjection(deps: ThreadProjectionDeps): ThreadProjec
       // params" class in docs/process/learnings.md.
       const summary = readStoredSummary(threadMap.get('summary'));
       const pendingTsRaw = threadMap.get('summaryPendingTs');
+      // An agent's mark: working on it, or done. Only an open thread wears
+      // one, as on the widget's pins (`comment-extras.ts`).
+      const progress =
+        status === 'open' ? readThreadProgress(threadMap.get(PROGRESS_KEY)) : undefined;
       const t: Thread = {
         id,
         status,
@@ -185,6 +191,7 @@ export function createThreadProjection(deps: ThreadProjectionDeps): ThreadProjec
         comments,
         ...(summary ? { summary } : {}),
         ...(typeof pendingTsRaw === 'number' ? { summaryPendingTs: pendingTsRaw } : {}),
+        ...(progress ? { progress } : {}),
       };
       // "A summary is being generated" is a server-written fact, not a guess:
       // `summaryPendingTs` is stamped when a generation is QUEUED (gated

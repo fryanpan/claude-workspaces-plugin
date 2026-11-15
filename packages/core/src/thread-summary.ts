@@ -300,9 +300,17 @@ export function summaryKey(t: Thread): string {
  */
 export function threadRenderKey(t: Thread): string {
   const status = t.anchor.kind === 'orphan' ? 'orphan' : t.status;
-  return [t.id, status, t.commentCount, t.lastActivity, reviewStateKey(t), summaryKey(t)].join(
-    '\u0001',
-  );
+  // An agent's mark (`thread-progress.ts`) is set beside the comments, so
+  // it moves no count or clock either: without it a card never shows one.
+  return [
+    t.id,
+    status,
+    t.commentCount,
+    t.lastActivity,
+    reviewStateKey(t),
+    summaryKey(t),
+    t.progress?.state ?? '',
+  ].join('\u0001');
 }
 
 /**

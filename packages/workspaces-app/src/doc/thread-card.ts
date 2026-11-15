@@ -41,6 +41,7 @@ import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
 import { isFoldingTap, sizeThreadSlots, syncFaceVisibility } from '../thread-morph.ts';
 import type { ThreadPanelOpts } from '../threads.ts';
+import { markGlyph } from './thread-mark.ts';
 import { voiceFoot } from './voice-note-foot.ts';
 
 /**
@@ -199,6 +200,7 @@ function head(
   // spent two of a 260px row's slots on one fact.
   const glyph = span(`thread-glyph cw-ic cw-ic-${threadGlyph(kind)}`);
   glyph.setAttribute('aria-hidden', 'true');
+  markGlyph(glyph, t, t.status === 'open'); // an agent's mark rides the glyph
   head.appendChild(glyph);
 
   const author = t.comments[0]?.author ?? t.createdBy;

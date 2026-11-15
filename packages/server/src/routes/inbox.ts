@@ -57,6 +57,8 @@ import {
   MAX_ROWS_PER_POST,
 } from '../inbox/types.ts';
 import { DEDUPE_KEY, type ValidateContext, validateRow } from '../inbox/validate.ts';
+import type { InboxPostBody } from './inbox-contract.ts';
+import { sent } from './route-contract.ts';
 
 export interface InboxRoutesContext {
   store: InboxStore;
@@ -93,7 +95,9 @@ const MAX_POST_BYTES = 1_000_000;
 /** A reply's 4000 code points, each up to four bytes, JSON-escaped, and room over. */
 const MAX_REPLY_BYTES = 64_000;
 const PASS_ID = /^[A-Za-z0-9._:-]{1,64}$/;
-const POST_KEYS = new Set(['agentId', 'pass', 'rows', 'run', 'dismiss']);
+const POST_KEYS = new Set<string>(['agentId', 'pass', 'rows', 'run', 'dismiss'] satisfies Array<
+  keyof InboxPostBody
+>);
 const DISMISS_KEYS = new Set(['dedupeKey', 'reason']);
 const ROW_PATH = /^\/inbox\/rows\/(ib-[A-Za-z0-9]{12})\/(body|state|reply)$/;
 
@@ -143,7 +147,7 @@ async function handlePost(ctx: InboxRoutesContext, rq: InboxRouteRequest): Promi
   if (!Number.isFinite(length) || length > MAX_POST_BYTES) {
     return j(413, { error: 'too-large' });
   }
-  const body = await ctx.safeJson(req);
+  const body = sent<InboxPostBody>(await ctx.safeJson(req));
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return j(400, { error: 'body must be a JSON object' });
   }

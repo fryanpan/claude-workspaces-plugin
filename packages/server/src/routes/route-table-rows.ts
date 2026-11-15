@@ -644,6 +644,10 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/place', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/component-grants', 'POST'],
   ]),
+  ...family('routes/whiteboard-routes.ts', [
+    ['trusted-local', '/workspaces/:ws/whiteboards', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/whiteboard', 'GET POST'],
+  ]),
   ...family('routes/doc-metadata.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
   ]),

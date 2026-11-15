@@ -17,6 +17,7 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
+import { inboxClient } from '../server-client.ts';
 
 export interface InboxToolContext {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -38,14 +39,11 @@ export async function handleInboxTool(
       if (!Array.isArray(rows)) return ctx.err('rows must be a list');
       if (rows.length === 0 && run === undefined && dismiss === undefined)
         return ctx.err('rows must be a non-empty list unless run or dismiss is given');
-      const res = await ctx.http('POST', '/inbox/rows', {
-        agentId: ctx.AUTHOR.id,
-        pass,
-        rows,
-        ...(run !== undefined ? { run } : {}),
-        ...(dismiss !== undefined ? { dismiss } : {}),
+      // An absent run or dismiss is undefined, and JSON drops it.
+      const res = await inboxClient(ctx.http).inbox.rows.$post({
+        json: { agentId: ctx.AUTHOR.id, pass, rows, run, dismiss },
       });
-      return ctx.ok(res);
+      return ctx.ok(await res.json());
     }
     default:
       return undefined;

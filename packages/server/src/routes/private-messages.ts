@@ -27,6 +27,8 @@ import type { PersonAgentLinks } from '../person-agent-link.ts';
 import type { PrivateMessage, PrivateMessageStore } from '../private-messages.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
+import type { PrivateReplyAnswer, PrivateReplyBody } from './person-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 /** The longest message accepted, in characters. */
 export const MAX_PRIVATE_MESSAGE = 8000;
@@ -150,7 +152,7 @@ async function agentReply(
     text,
   });
   tellPerson(ctx, message);
-  return j(200, { ok: true, message });
+  return j(200, answerAs<PrivateReplyAnswer>({ ok: true, message }));
 }
 
 /** The frame both sides read. */
@@ -194,7 +196,8 @@ function tellPerson(ctx: PrivateMessageRoutesContext, message: PrivateMessage): 
 }
 
 async function textOf(ctx: PrivateMessageRoutesContext, req: Request): Promise<string | null> {
-  const body = await ctx.safeJson(req);
+  // The person's side sends the same `{ text }` as the agent's reply.
+  const body = sent<PrivateReplyBody>(await ctx.safeJson(req));
   const raw = body?.text;
   if (typeof raw !== 'string') return null;
   const text = raw.trim();
