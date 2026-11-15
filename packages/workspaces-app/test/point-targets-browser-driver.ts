@@ -77,8 +77,9 @@ const settingsScrolled = `(() => { const e = ${SETTINGS_SCROLLER}; return !!e &&
  *  the first sends the follower on three journeys, and the follow ends on
  *  whichever lands. */
 const RECORD_ADDRESS_WRITES = `(() => { const w = (window.__addressWrites = []); for (const k of ['pushState', 'replaceState']) { const f = history[k].bind(history); history[k] = (s, t, u) => { if (u != null) w.push(String(u)); return f(s, t, u); }; } })()`;
+/** Compared parsed, so the same address spelled another way still matches. */
 const onlyWrote = (path: string) =>
-  `(window.__addressWrites ?? []).every((u) => new URL(u, location.href).pathname + new URL(u, location.href).search === ${JSON.stringify(path)})`;
+  `(() => { const key = (u) => { const x = new URL(u, location.href); return decodeURIComponent(x.pathname) + '?' + [...x.searchParams].sort().join('&'); }; const want = key(${JSON.stringify(path)}); return (window.__addressWrites ?? []).every((u) => key(u) === want); })()`;
 
 async function main(): Promise<void> {
   deadline('point-targets-driver', 200_000);
