@@ -257,7 +257,7 @@ describe('read_chat_attachment, through the typed client', () => {
 });
 
 /** Compiled by `bun run typecheck`, never run. */
-export async function typeProbes(http: never): Promise<void> {
+async function typeProbes(http: never): Promise<void> {
   const ws = { ws: 'w-1' };
   const library = libraryFoldersClient(http).workspaces[':ws'].library;
   // @ts-expect-error -- a new folder's parent is `parentId`.
@@ -308,3 +308,4 @@ export async function typeProbes(http: never): Promise<void> {
   // @ts-expect-error -- the bytes are `data`.
   void got.bytes;
 }
+void typeProbes;
