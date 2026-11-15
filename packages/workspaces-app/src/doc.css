@@ -43,7 +43,7 @@
    window's less 14px (12px on a phone). The host stays in the row as a slot,
    kept while nobody is here, after the format and preview buttons and before
    comments and More; on a phone Aa moves after it. The slot widens by More's
-   width when More is hidden, so its left edge never moves under the deck. */
+   width and gap when More is hidden, so its left edge never moves under the deck. */
 #topbar .toolbar {
   position: relative;
 }
@@ -72,6 +72,14 @@
 @media (max-width: 1100px) {
   #toggle-format {
     order: 2;
+  }
+  /* A phone's deck draws at most three circles (styles.css), so the slot
+     gives the rest back to the doc's title. */
+  #doc-people {
+    width: 72px;
+  }
+  #doc-people:has(~ #doc-more[hidden]) {
+    width: 116px;
   }
   #doc-people .board-presence-f {
     right: 128px;

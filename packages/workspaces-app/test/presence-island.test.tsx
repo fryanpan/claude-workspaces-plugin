@@ -29,7 +29,7 @@ import {
   mountPresenceIsland,
   presenceData,
 } from '../src/board/presence-island.tsx';
-import { IPAD, installSheets, setViewport, styleOf } from './css-harness.ts';
+import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /** Component re-renders from a signal write are scheduled — settle them. */
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -395,6 +395,15 @@ describe('presence island — the deck and its list (design F)', () => {
     expect(deckCircles(host)).toHaveLength(4);
     await openList(host);
     expect(rowButtons(host)).toHaveLength(5);
+  });
+
+  it('shows three of those circles on a phone, so its slot stays narrow', () => {
+    const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) => person(n));
+    const { host } = mountPeople(chips);
+    const shown = () => deckCircles(host).filter((c) => styleOf(c).display !== 'none').length;
+    expect(shown()).toBe(4);
+    setViewport(PHONE);
+    expect(shown()).toBe(3);
   });
 
   it('closes on Escape and on a tap outside the strip', async () => {
