@@ -40,90 +40,22 @@ import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import type { MeetingBrowserRun, MeetingSizeRun, Rect } from './lead-chat-browser-reading.ts';
+import { bounded, go, read, tap, until } from './lead-chat-meeting-page.ts';
 
+/** The step under way, which the overall deadline names when it fires. */
+let current = 'starting';
 const step = (what: string): void => {
+  current = what;
   process.stderr.write(`[lead-chat-meeting-driver] ${what}\n`);
 };
-
-async function until<T>(
-  what: string,
-  read: () => Promise<T | null> | T | null,
-  ms = 20_000,
-): Promise<T> {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    const v = await read();
-    if (v !== null && v !== undefined) return v;
-    await sleep(25);
-  }
-  throw new Error(`never happened: ${what}`);
-}
-
-/** The chat's meeting as the page shows it, through its shadow roots. */
-const READ = `(() => {
-  const host = document.querySelector('[data-lead-chat="button"]');
-  const btn = host && host.shadowRoot && host.shadowRoot.querySelector('button');
-  const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
-  const q = (s) => sr && sr.querySelector(s);
-  // A tab behind another draws no frames, so the panel's grow animation stalls part-way; read the end state.
-  for (const a of q('.lc-pane')?.getAnimations?.() ?? []) a.finish();
-  const box = (el) => { if (!el || el.hidden) return null; const r = el.getBoundingClientRect(); return r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
-  const nav = document.querySelector('.cw-host-nav');
-  const frame = document.querySelector('iframe[data-cw-mock-frame]');
-  const b = btn && btn.getBoundingClientRect();
-  const hit = b ? document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) : null;
-  return {
-    button: box(btn),
-    buttonOnTop: !!hit && hit === host,
-    pane: box(q('.lc-pane')),
-    start: box(q('.lc-start')),
-    next: q('[data-wiz="next"]') && !q('[data-wiz="next"]').disabled ? box(q('[data-wiz="next"]')) : null,
-    go: box(q('[data-wiz="start"]')),
-    wizard: box(q('.lc-wiz')),
-    head: box(q('.lc-meet')),
-    headText: q('.lc-meet') && !q('.lc-meet').hidden ? q('.lc-meet').textContent : '',
-    end: box(q('.lc-end')),
-    tap: box(q('.lc-tap')),
-    notes: q('.lc-notes') && !q('.lc-notes').hidden ? q('.lc-notes').textContent : '',
-    notesBox: box(q('.lc-notes')),
-    composeBox: box(q('.lc-compose')),
-    bar: box(q('.lc-bar')),
-    barText: q('.lc-bar') && !q('.lc-bar').hidden ? q('.lc-bar').textContent : '',
-    nav: box(nav),
-    navLinks: nav ? [...nav.querySelectorAll('a')].map((a) => a.textContent) : [],
-    frame: box(frame),
-    viewport: { width: document.documentElement.clientWidth, height: innerHeight },
-  };
-})()`;
-
-interface Read {
-  button: Rect | null;
-  buttonOnTop: boolean;
-  pane: Rect | null;
-  start: Rect | null;
-  next: Rect | null;
-  go: Rect | null;
-  wizard: Rect | null;
-  head: Rect | null;
-  headText: string;
-  end: Rect | null;
-  tap: Rect | null;
-  notes: string;
-  notesBox: Rect | null;
-  composeBox: Rect | null;
-  bar: Rect | null;
-  barText: string;
-  nav: Rect | null;
-  navLinks: string[];
-  frame: Rect | null;
-  viewport: { width: number; height: number };
-}
 
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
 
 async function setup(cdp: Cdp, width: number, height: number): Promise<Cdp> {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  // A dialog holds the page's main thread, and every evaluate behind it.
+  cdp.on('Page.javascriptDialogOpening', (p) => step(`a dialog opened: ${JSON.stringify(p)}`));
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width,
     height,
@@ -162,28 +94,6 @@ async function openBrowser(width: number, height: number) {
   const target = (await res.json()) as { webSocketDebuggerUrl: string };
   const watcher = await setup(await Cdp.connect(target.webSocketDebuggerUrl), width, height);
   return { main, watcher, browser: b };
-}
-
-async function read(cdp: Cdp): Promise<Read> {
-  return (await cdp.evaluate(READ)) as Read;
-}
-
-async function go(cdp: Cdp, url: string): Promise<Read> {
-  const loaded = cdp.once('Page.loadEventFired');
-  await cdp.send('Page.navigate', { url });
-  await loaded;
-  return until('the agent button on the page', async () => {
-    const r = await read(cdp);
-    return r.button ? r : null;
-  });
-}
-
-async function tap(cdp: Cdp, r: Rect): Promise<void> {
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
-  }
 }
 
 async function shot(cdp: Cdp, dir: string | undefined, name: string): Promise<void> {
@@ -328,7 +238,7 @@ async function main(): Promise<void> {
         const notesDoc = snap.meeting?.meetingId ? snap.meeting.docId : null;
         if (!notesDoc) return null;
         try {
-          const path = String(await page.evaluate('location.pathname'));
+          const path = String(await bounded(page.evaluate('location.pathname'), 'the address'));
           return path === `/workspaces/${ws}/docs/${notesDoc}` ? { path, notesDoc } : null;
         } catch {
           return null; // between documents
@@ -427,8 +337,11 @@ async function main(): Promise<void> {
         });
       }
       step(`the watching tab closes its chat, then ends the meeting, at ${width}`);
-      await watcher.evaluate(
-        `document.querySelector('[data-lead-chat="layer"]').shadowRoot.querySelector('.lc-close').click()`,
+      await bounded(
+        watcher.evaluate(
+          `document.querySelector('[data-lead-chat="layer"]').shadowRoot.querySelector('.lc-close').click()`,
+        ),
+        'closing the watching tab’s chat',
       );
       const later = `The ferry leaves at ten, said at ${width}.`;
       ear.say?.(later);
@@ -486,7 +399,7 @@ async function main(): Promise<void> {
 }
 
 setTimeout(() => {
-  step('gave up after 230s');
+  process.stderr.write(`[lead-chat-meeting-driver] gave up after 230s, during: ${current}\n`);
   void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
     process.exit(3),
   );
