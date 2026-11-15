@@ -92,7 +92,7 @@ export const PAGE_CSS = [
   // An agent's mark on the pin. Working: three white dots in the pin that
   // brighten and fade in turn on a slow 4.5s cycle ("Breathing", the owner's
   // pick on the comment-states mock); with reduced motion they hold still.
-  // Done: filled teal. White-and-green outline stays the resolved pin's.
+  // White-and-green outline stays the resolved pin's.
   // Longhands, not the `animation` shorthand: the comment view's tests read
   // these computed, and happy-dom does not expand the shorthand.
   '.cw-pg{position:absolute;left:14px;top:11px;width:16px;height:16px;pointer-events:none}',
@@ -101,8 +101,14 @@ export const PAGE_CSS = [
   '.cw-breathe:nth-child(2){left:6.65px;animation-delay:.75s}',
   '.cw-breathe:nth-child(3){left:10.15px;animation-delay:1.5s}',
   '@keyframes cw-breathe{0%,100%{opacity:.35}40%{opacity:1}}',
-  '@media (prefers-reduced-motion:reduce){.cw-breathe{animation-name:none;opacity:.85}}',
   `.cfw-pin[data-state=done]:before{background:${DONE}}`,
+  // Done: a white check on the teal, drawn once (.12s wait, .55s stroke) on
+  // the transition; `markPins` leaves the class off a check already drawn.
+  '.cw-pg svg{display:block;width:16px;height:16px;overflow:visible}',
+  '.cw-check{stroke-dasharray:1;stroke-dashoffset:0}',
+  '.cw-draw{stroke-dashoffset:1;animation-name:cw-draw;animation-duration:.55s;animation-timing-function:cubic-bezier(.3,.6,.3,1);animation-delay:.12s;animation-fill-mode:forwards}',
+  '@keyframes cw-draw{to{stroke-dashoffset:0}}',
+  '@media (prefers-reduced-motion:reduce){.cw-breathe{animation-name:none;opacity:.85}.cw-draw{animation-name:none;stroke-dashoffset:0}}',
   `.cw-link-badge{position:fixed;width:20px;height:20px;border-radius:50%;background:${MARK};color:#fff;border:2px solid #fff;box-sizing:border-box;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;z-index:2147483646}`,
   // Wide, a mock in the board narrows beside the open view rather than
   // running under it.
