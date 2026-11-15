@@ -58,7 +58,10 @@ import { taskIdOfBodyDoc } from '../task-row.ts';
 import type {
   ThreadAnswerBody,
   ThreadAuthorBody,
+  ThreadByFindBody,
   ThreadCommentBody,
+  ThreadCreateAnswer,
+  ThreadCreateBody,
   ThreadEditCommentBody,
   ThreadInsertAfterBody,
   ThreadInsertBlocksAfterBody,
@@ -201,6 +204,24 @@ function reviewFromBody(
   const review = readReviewPayload(raw);
   if (!review) return { ok: false, error: reviewPayloadMessage(check) };
   return { ok: true, review, ...(advice ? { advice } : {}) };
+}
+
+/**
+ * A created thread's answer after `thread`, each field named so a rename in
+ * `ThreadCreateAnswer` fails here. An undefined value drops out of the JSON,
+ * as the conditional spreads this replaced did, so the bytes are unchanged.
+ */
+function createdFields(
+  advice: unknown,
+  handoff: string | null | undefined,
+  reviewItemId: string | undefined,
+): Pick<ThreadCreateAnswer, 'reviewAdvice' | 'threadUrl' | 'url' | 'reviewItemId'> {
+  return {
+    reviewAdvice: advice ? advice : undefined,
+    threadUrl: handoff ? handoff : undefined,
+    url: handoff ? handoff : undefined,
+    reviewItemId,
+  };
 }
 
 /**
@@ -921,7 +942,7 @@ export async function handleDocThreadRoutes(
     }
   }
   if (rest === 'threads' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<ThreadCreateBody>(await safeJson(req));
     const user = authorFor(body?.author);
     const pageEdits = pageEditsFromBody(body?.pageEdits);
     if (pageEdits === false) {
@@ -988,15 +1009,14 @@ export async function handleDocThreadRoutes(
       // review) — so the verdict is read back off the stored payload.
       const settledPrior = t ? (docStore.getThread(docId, t.id) ?? t) : null;
       return t && settledPrior
-        ? j(200, {
-            thread: settledPrior,
-            ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-            ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
-            ...(declaredItemId(docId, settledPrior) !== undefined
-              ? { reviewItemId: declaredItemId(docId, settledPrior) }
-              : {}),
-            ...heldFields(recordedThreadHold(docId, settledPrior, declared.review)),
-          })
+        ? j(
+            200,
+            answerAs<ThreadCreateAnswer>({
+              thread: settledPrior,
+              ...createdFields(declared.advice, handoff, declaredItemId(docId, settledPrior)),
+              ...heldFields(recordedThreadHold(docId, settledPrior, declared.review)),
+            }),
+          )
         : j(500, { error: 'could not create thread' });
     }
     // A thread on a PHRASE of a review item — the doc-style question
@@ -1116,22 +1136,21 @@ export async function handleDocThreadRoutes(
     const handoff = threadUrl(docId, Boolean(visitor));
     const settled = t ? (docStore.getThread(docId, t.id) ?? t) : null;
     return t && settled
-      ? j(200, {
-          thread: settled,
-          ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
-          ...(declaredItemId(docId, settled) !== undefined
-            ? { reviewItemId: declaredItemId(docId, settled) }
-            : {}),
-          // `gate` is undefined on a DEDUPLICATED request — it never
-          // ran the closure — so the hold is read back off the stored
-          // payload rather than dropped. See `recordedThreadHold`.
-          ...heldFields(gate ?? recordedThreadHold(docId, settled, declared.review)),
-        })
+      ? j(
+          200,
+          answerAs<ThreadCreateAnswer>({
+            thread: settled,
+            ...createdFields(declared.advice, handoff, declaredItemId(docId, settled)),
+            // `gate` is undefined on a DEDUPLICATED request — it never
+            // ran the closure — so the hold is read back off the stored
+            // payload rather than dropped. See `recordedThreadHold`.
+            ...heldFields(gate ?? recordedThreadHold(docId, settled, declared.review)),
+          }),
+        )
       : j(500, { error: 'could not create thread' });
   }
   if (rest === 'threads/by_find' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<ThreadByFindBody>(await safeJson(req));
     const author = authorFor(body?.author);
     const text = body?.text as string | undefined;
     const find = body?.find ? String(body.find) : '';
@@ -1161,7 +1180,9 @@ export async function handleDocThreadRoutes(
         find,
         path: body?.path,
         suggest: body?.suggest,
-        narrowed: ['contextBefore', 'contextAfter', 'occurrence'].some((k) => body?.[k] != null),
+        narrowed: (['contextBefore', 'contextAfter', 'occurrence'] as const).some(
+          (k) => body?.[k] != null,
+        ),
       });
       if (!plan.ok) return j(400, { error: plan.error });
       const pageSuggestion = plan.suggestion ? { pageSuggestion: plan.suggestion } : {};
@@ -1200,15 +1221,14 @@ export async function handleDocThreadRoutes(
     const findHandoff =
       docLink && found && isPageDoc(type) ? pageThreadLink(docLink, found) : docLink;
     return res.ok && found
-      ? j(200, {
-          thread: found,
-          ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(findHandoff ? { threadUrl: findHandoff, url: findHandoff } : {}),
-          ...(declaredItemId(docId, found) !== undefined
-            ? { reviewItemId: declaredItemId(docId, found) }
-            : {}),
-          ...heldFields(findGate),
-        })
+      ? j(
+          200,
+          answerAs<ThreadCreateAnswer>({
+            thread: found,
+            ...createdFields(declared.advice, findHandoff, declaredItemId(docId, found)),
+            ...heldFields(findGate),
+          }),
+        )
       : j(409, res);
   }
   return undefined;

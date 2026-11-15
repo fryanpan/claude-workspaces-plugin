@@ -13,6 +13,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
+import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
 
 const answers = JSON.parse(
@@ -31,6 +32,12 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
       'doc-resource.ts:handleDocResourceCore',
       'docs.ts:handleDocPromoteRoute',
     ],
+  },
+  {
+    name: 'doc edits',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: docEditsContract as unknown as Hono<any>,
+    servedBy: ['doc-edit-routes.ts:handleDocEditRoutes'],
   },
 ];
 

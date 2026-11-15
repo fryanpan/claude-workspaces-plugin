@@ -720,6 +720,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/find_and_replace', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/block_edits', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_block_at_anchor', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_blocks_in_range', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_section', 'POST'],
