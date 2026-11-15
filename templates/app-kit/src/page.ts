@@ -56,3 +56,53 @@ export function docPage(appName: string, who: Principal, docId: string): string 
     { page: 'doc', doc: docId },
   );
 }
+
+function authForm(action: string, fields: string, button: string, error?: string): string {
+  return `<form method="post" action="${action}" class="app-form">
+${error ? `<p class="app-error" role="alert">${esc(error)}</p>` : ''}${fields}
+<wa-button type="submit" variant="brand">${button}</wa-button>
+</form>`;
+}
+
+const emailField = (value = ''): string =>
+  `<label>Email <input name="email" type="email" autocomplete="email" required value="${esc(value)}"></label>`;
+
+/** `email` refills the field after a refused attempt. */
+export function signInPage(error?: string, email?: string): string {
+  return shell(
+    'Sign in',
+    `<h1>Sign in</h1>
+${authForm(
+  '/auth/sign-in',
+  `${emailField(email)}
+<label>Password <input name="password" type="password" autocomplete="current-password" required></label>`,
+  'Sign in',
+  error,
+)}
+<p class="app-quiet">New here? <a href="/auth/sign-up">Make an account</a>.</p>`,
+  );
+}
+
+export function signUpPage(error?: string): string {
+  return shell(
+    'Make an account',
+    `<h1>Make an account</h1>
+${authForm(
+  '/auth/sign-up',
+  `<label>Name <input name="name" autocomplete="name" required maxlength="80"></label>
+${emailField()}
+<label>Password <input name="password" type="password" autocomplete="new-password" required minlength="8"></label>`,
+  'Make account',
+  error,
+)}
+<p class="app-quiet">Have one? <a href="/auth/sign-in">Sign in</a>.</p>`,
+  );
+}
+
+export function checkEmailPage(email: string): string {
+  return shell(
+    'Check your email',
+    `<h1>Check your email</h1>
+<p>We sent a link to ${esc(email)}. Open it to finish making your account, then <a href="/auth/sign-in">sign in</a>.</p>`,
+  );
+}
