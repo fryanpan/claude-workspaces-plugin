@@ -21,7 +21,12 @@ import type { Hono } from 'hono';
  * `encodeURIComponent`, as the hand-spelled paths did.
  */
 import { hc } from 'hono/client';
-import type { DocEditsContract, DocThreadsContract, MountsApi } from '../../server/src/index.ts';
+import type {
+  DocEditsContract,
+  DocLifecycleContract,
+  DocThreadsContract,
+  MountsApi,
+} from '../../server/src/index.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
 type Http = (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -44,3 +49,4 @@ function typedClient<App extends Hono<any, any, any>>(http: Http) {
 export const mountsClient = (http: Http) => typedClient<MountsApi>(http);
 export const docThreadsClient = (http: Http) => typedClient<DocThreadsContract>(http);
 export const docEditsClient = (http: Http) => typedClient<DocEditsContract>(http);
+export const docLifecycleClient = (http: Http) => typedClient<DocLifecycleContract>(http);

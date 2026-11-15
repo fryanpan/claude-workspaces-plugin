@@ -319,6 +319,7 @@ export type { ServerOptions };
  */
 export type { MountsApi } from './routes/mounts-api.ts';
 export type { DocEditsContract } from './routes/doc-edits-contract.ts';
+export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
 export type {
   DocThreadsContract,
   ThreadByFindBody,
