@@ -3,7 +3,7 @@
  * styles, then the one script; the script reads what to do from `data-*`
  * attributes on <body>.
  */
-import type { Principal } from './collab/index.ts';
+import type { Principal } from '@claude-workspaces/app-kit/collab';
 
 const esc = (s: string): string =>
   s.replace(

@@ -3,33 +3,22 @@
  * `bun run new-app <dir>`: start a new app from the app kit.
  *
  * Copies `templates/app-kit` into `<dir>` and names it after the folder. The
- * made app stands alone: two template files that point back into this repo
- * are replaced by copies of what they point at.
- *
- *   src/collab/   the template re-exports `@claude-workspaces/core/collab`;
- *                 the app gets the core's own files. They import only yjs,
- *                 y-protocols and lib0 (`core/test/collab/collab-imports.test.ts`).
- *   src/theme.css the template imports the board's theme file; the app gets
- *                 a copy of it (`packages/workspaces-app/src/wa-theme.css`).
+ * made app gets the collab core and the shared theme as one versioned
+ * package, `@claude-workspaces/app-kit`: the generator packs it
+ * (`packages/app-kit/scripts/pack.ts`) into `<dir>/vendor/` and names that
+ * tarball in the app's `package.json`, so the app holds no copy of their
+ * source and depends on nothing in this repo.
  *
  * A relative `<dir>` is read from the repo root, wherever the command was
  * typed. Refuses a `<dir>` that exists and is not empty. Prints the next steps.
  */
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { basename, join, relative, resolve } from 'node:path';
+import { packKit } from '../packages/app-kit/scripts/pack.ts';
 
 export const REPO = resolve(import.meta.dirname, '..');
 export const TEMPLATE = join(REPO, 'templates/app-kit');
-const CORE_COLLAB = join(REPO, 'packages/core/src/collab');
-const THEME = join(REPO, 'packages/workspaces-app/src/wa-theme.css');
+const KIT = '@claude-workspaces/app-kit';
 
 /** npm's rule for a package name, lower case only: what `name` may be. */
 const APP_NAME = /^[a-z][a-z0-9-]{0,63}$/;
@@ -41,7 +30,7 @@ const SKIP = new Set(['node_modules', 'dist', 'data']);
  * `bun run` starts a root script in the repo root and passes on no trace of
  * where it was typed, so a relative `<dir>` is read from the repo root.
  */
-export function makeApp(dir: string): { dir: string; name: string } {
+export function makeApp(dir: string): { dir: string; name: string; kit: string } {
   const target = resolve(REPO, dir);
   const name = basename(target);
   if (!APP_NAME.test(name)) {
@@ -58,22 +47,17 @@ export function makeApp(dir: string): { dir: string; name: string } {
     filter: (src) => !SKIP.has(basename(src)) || src === TEMPLATE,
   });
 
-  const collab = join(target, 'src/collab');
-  rmSync(collab, { recursive: true, force: true });
-  cpSync(CORE_COLLAB, collab, {
-    recursive: true,
-    filter: (src) => !src.endsWith('.test.ts'),
-  });
-  cpSync(THEME, join(target, 'src/theme.css'));
+  const tarball = packKit(join(target, 'vendor'));
+  const kit = `file:./${relative(target, tarball)}`;
 
   const pkgPath = join(target, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
     name: string;
     dependencies: Record<string, string>;
   };
-  const { '@claude-workspaces/core': _repoOnly, ...dependencies } = pkg.dependencies;
+  const dependencies = { ...pkg.dependencies, [KIT]: kit };
   writeFileSync(pkgPath, `${JSON.stringify({ ...pkg, name, dependencies }, null, 2)}\n`);
-  return { dir: target, name };
+  return { dir: target, name, kit };
 }
 
 if (import.meta.main) {
@@ -86,7 +70,7 @@ if (import.meta.main) {
   }
   try {
     const made = makeApp(dir);
-    console.log(`made ${made.name} in ${made.dir}
+    console.log(`made ${made.name} in ${made.dir}, on ${KIT} ${made.kit}
 
   cd ${made.dir}
   bun install
