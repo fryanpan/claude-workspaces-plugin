@@ -15,7 +15,7 @@
  * every word typed after it went somewhere other than the reply.
  *
  * Two more edits per scenario: a paragraph lengthened between the pane's top
- * edge and the commented words, and a burst of four edits inside a second
+ * edge and the commented words, and a burst of four edits back to back
  * while the reader types. On b6139328e 5 of the 21 cases fail on the first:
  * the commented words moved 30px at 1180 for a reply, and 74px (new comment)
  * and 99px (reply) at 430, because the hold kept the topmost line still.
@@ -120,6 +120,22 @@ describe.skipIf(CHROME === null)('typing a comment while an agent edits the doc'
       });
     }
   }
+
+  // What the burst is for: the hold meets four remote edits and the
+  // reader's words with no settle between them. The page logs each edit and
+  // each word as it arrives, so this holds on any runner speed; a bound of
+  // one second on the driver's clock failed CI at 1038ms.
+  it('the burst reached the page whole, with no settle inside it', () => {
+    for (const width of [1180, 430]) {
+      for (const kind of ['new', 'reply'] as const) {
+        const log = scenario(width, kind).steps.find((st) => st.where === 'burst')?.burstLog ?? [];
+        const events = [0, 1, 2, 3].flatMap((i) => [`edit ${i}`, `word ${i}`]);
+        for (const e of events) expect(log, `${width} ${kind}: ${e}`).toContain(e);
+        const last = Math.max(...events.map((e) => log.indexOf(e)));
+        expect(log.slice(0, last), `${width} ${kind}: ${log.join(', ')}`).not.toContain('settle');
+      }
+    }
+  });
 
   it('ran every edit in every scenario', () => {
     expect(run?.scenarios.map((s) => `${s.width} ${s.kind} ${s.steps.length}`)).toEqual([
