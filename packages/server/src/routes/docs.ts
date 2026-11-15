@@ -90,6 +90,7 @@ import { handleDocFilesRoute } from './doc-files.ts';
 import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
+import type { ThreadPromoteBody } from './doc-threads-contract.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
 import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
@@ -98,6 +99,7 @@ import type {
   DocRouteRequest,
   DocRoutesContext,
 } from './docs-routes-context.ts';
+import { sent } from './route-contract.ts';
 import { handleWhiteboardRoutes } from './whiteboard-routes.ts';
 /** The anchor's display snippet, whichever anchor kind carries it — an
  *  orphan keeps its original's snippet. */
@@ -565,7 +567,7 @@ export async function handleDocPromoteRoute(
   if (promoteMatch && req.method === 'POST') {
     const docId = canonicalDocId(decodeURIComponent(promoteMatch[1] ?? ''));
     const threadId = decodeURIComponent(promoteMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<ThreadPromoteBody>(await safeJson(req));
     /**
      * THE PATH NAMES THE DESTINATION, and this is the clearest thing the
      * cutover fixes on the whole share surface.
