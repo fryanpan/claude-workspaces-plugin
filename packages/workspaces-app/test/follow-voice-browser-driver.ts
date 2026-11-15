@@ -96,6 +96,18 @@ const centre = (heading: string) => `(() => {
   return true;
 })()`;
 
+/** What the doc page shows when its scroll was never read: where the
+ *  heading is and how far each scrollable box above the editor has moved. */
+const SCROLL_STATE = `(() => {
+  const h = [...document.querySelectorAll('#editor h2')].find((e) => e.textContent.trim() === 'Tides');
+  const r = h && h.getBoundingClientRect();
+  const boxes = [];
+  for (let el = document.getElementById('editor'); el; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight + 1) boxes.push((el.id || el.className || el.localName) + ' ' + Math.round(el.scrollTop) + '/' + (el.scrollHeight - el.clientHeight));
+  }
+  return { path: location.pathname + location.search, editor: !!document.getElementById('editor'), heading: r ? Math.round(r.top) : null, boxes, visible: document.visibilityState };
+})()`;
+
 /** The voice sockets a tab opened, and the text frames each received. */
 interface Sockets {
   /** requestId → the order it was opened in. */
@@ -133,9 +145,13 @@ async function listen(board: Board, cdp: Cdp, since: number): Promise<boolean> {
     async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
   );
   let tapped = false;
+  // Decided on the page alone. Voice that comes back is listening on the
+  // page in the same render that shows the button; the server's listener
+  // opens later, over a socket, and on a loaded runner after 3s. Waiting on
+  // both tapped a button that was already listening, which turns voice off.
   const back = await until(
     'voice back by itself',
-    async () => ((await cdp.evaluate(LISTENING)) && board.opened.length > since ? true : null),
+    async () => ((await cdp.evaluate(LISTENING)) ? true : null),
     3000,
   ).catch(() => false);
   if (!back) {
@@ -208,14 +224,20 @@ async function main(): Promise<void> {
           // scroll made while the doc is still drawing can be undone by it,
           // so centre the heading again until the spot shows it held.
           let last = 0;
+          let centred: unknown = null;
+          const who = personIdOf(`first-person-voice${width}`);
           await until('the scroll read', async () => {
-            const spot = board.spotOf(personIdOf(`first-person-voice${width}`));
+            const spot = board.spotOf(who);
             if (spot?.docId === board.docId && (spot.scroll ?? 0) > 0.1) return true;
             if (Date.now() - last > 500) {
               last = Date.now();
-              await firstPerson.evaluate(centre('Tides'));
+              centred = await firstPerson.evaluate(centre('Tides'));
             }
             return null;
+          }).catch(async (e: Error) => {
+            const page = JSON.stringify(await firstPerson.evaluate(SCROLL_STATE));
+            const spot = JSON.stringify(board.spotOf(who));
+            throw new Error(`${e.message} (spot ${spot}; centred ${centred}; page ${page})`);
           });
         }
         if (where === 'mock section') {
