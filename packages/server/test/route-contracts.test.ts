@@ -18,6 +18,7 @@ import { attachmentsContract } from '../src/routes/attachments-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
+import { reviewItemsContract } from '../src/routes/review-items-contract.ts';
 import { queryOf } from '../src/routes/route-contract.ts';
 import { shareContract } from '../src/routes/share-contract.ts';
 import { taskBoardContract } from '../src/routes/task-board-contract.ts';
@@ -110,6 +111,18 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
       'workspace-next.ts:handleWorkspaceNext',
       'tasks-list-create.ts:handleTaskListCreate',
       'workspace-goals.ts:handleWorkspaceGoals',
+    ],
+  },
+  {
+    name: 'review items',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: reviewItemsContract as unknown as Hono<any>,
+    servedBy: [
+      'task-review-items.ts:handleTaskReviewItems',
+      'task-review-withdraw.ts:handleTaskReviewWithdraw',
+      'task-answers.ts:handleTaskAnswers',
+      'task-review-ask-back.ts:handleTaskReviewMoreInfo',
+      'workspace-home.ts:handleWorkspaceHome',
     ],
   },
 ];
