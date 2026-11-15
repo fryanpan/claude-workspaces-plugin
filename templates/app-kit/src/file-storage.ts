@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type CollabStorage, ROOM_ID } from './collab/index.ts';
+import { type CollabStorage, ROOM_ID } from '@claude-workspaces/app-kit/collab';
 
 export class FileCollabStorage implements CollabStorage {
   constructor(private readonly dir: string) {

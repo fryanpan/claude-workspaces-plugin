@@ -3,10 +3,13 @@
  * `bun run new-app` hands an agent.
  *
  * The made app gets no `bun install`: a test must not reach the registry.
- * Instead each dependency the app declares is linked, one by one, to the copy
- * the template's own workspace install holds. Only the declared ones, so an
- * import the made app forgot to declare, or one left pointing back into this
- * repo, fails to resolve here exactly as it would in a fresh repository.
+ * The app kit package is installed from the tarball the generator put in
+ * `vendor/`, unpacked where `bun install` would put it, so what runs is what
+ * was packed. Every other dependency the app declares is linked, one by one,
+ * to the copy the template's own workspace install holds. Only the declared
+ * ones, so an import the made app forgot to declare, or one left pointing
+ * back into this repo, fails to resolve here as it would in a fresh
+ * repository.
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, symlinkSync } from 'node:fs';
@@ -30,10 +33,17 @@ export function makeBuiltApp(parent: string, name = 'riverbend-notes'): string {
     dependencies: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
-  for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-    const link = join(dir, 'node_modules', dep);
-    mkdirSync(dirname(link), { recursive: true });
-    symlinkSync(join(TEMPLATE_MODULES, dep), link, 'dir');
+  for (const [dep, spec] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) {
+    const at = join(dir, 'node_modules', dep);
+    mkdirSync(dirname(at), { recursive: true });
+    if (spec.startsWith('file:') && spec.endsWith('.tgz')) {
+      mkdirSync(at);
+      run(
+        'tar',
+        ['-xzf', join(dir, spec.slice('file:'.length)), '-C', at, '--strip-components', '1'],
+        dir,
+      );
+    } else symlinkSync(join(TEMPLATE_MODULES, dep), at, 'dir');
   }
   run('bun', ['run', 'build'], dir);
   return dir;

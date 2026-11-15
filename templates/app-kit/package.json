@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@awesome.me/webawesome": "3.14.0",
-    "@claude-workspaces/core": "workspace:*",
+    "@claude-workspaces/app-kit": "workspace:*",
     "hono": "4.13.18",
     "lib0": "^0.2.117",
     "y-protocols": "^1.0.6",

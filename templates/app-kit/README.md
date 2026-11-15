@@ -22,11 +22,11 @@ across restarts.
 | `src/server.ts` | Starts the app. `PORT` (0 picks a free port), `HOST`, `DATA_DIR`, `APP_ENV`. |
 | `src/app.ts` | The Hono routes for pages and assets, and the doc socket at `/docs/<id>/ws`. `role` there says who may open which doc. |
 | `src/sign-in.ts` | The sign-in slot: `SignIn.principal(request)` says who sent a request. |
-| `src/collab/` | The collaboration core: rooms that sync a Yjs doc between pages. Copied from claude-workspaces; it imports only yjs, y-protocols and lib0. |
 | `src/file-storage.ts` | Saves each doc as `data/<id>.ydoc`. |
 | `src/page.ts` | The HTML for each page. |
 | `src/client/` | The page script: the Web Awesome components, the doc socket (`sync.ts`) and the textarea binding. |
-| `src/theme.css` | The shared theme file, copied from claude-workspaces. |
+| `src/theme.css` | Imports the shared theme from the app kit package. |
+| `vendor/` | The app kit package, `@claude-workspaces/app-kit`, as a tarball: the collaboration core (`@claude-workspaces/app-kit/collab`, rooms that sync a Yjs doc between pages) and the shared theme. |
 | `src/app.css` | The app's own styles, every value a `--wa-*` token. |
 
 ## Sign-in
@@ -47,3 +47,12 @@ its session is not part of this kit yet.
 `role` in `src/app.ts` gives every signed-in person edit on every doc. Change
 it to give owners, viewers or nobody: the core asks it on every connect, and
 a `view` socket receives the doc but its edits are dropped.
+
+## Updating the app kit
+
+The collaboration core and the theme come from one package,
+`@claude-workspaces/app-kit`, whose tarball sits in `vendor/`. To move to a
+newer one, pack it in the claude-workspaces repo with
+`bun run --cwd packages/app-kit pack <this app>/vendor`, change the
+`file:./vendor/…tgz` line in `package.json` to the new file name, and run
+`bun install`.
