@@ -1011,4 +1011,7 @@ export interface ServerOptions {
    * once per request — whichever router answers — counts these.
    */
   observeAdmission?: (pathname: string, admitted: boolean) => void;
+  /** Called once, when the first doc or board `/y/` socket opens. `bin.ts`
+   *  writes it into this start's record (`server-starts.ts`). */
+  onFirstClientSocket?: (at: number) => void;
 }
