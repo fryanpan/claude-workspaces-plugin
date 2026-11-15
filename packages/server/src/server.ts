@@ -2287,6 +2287,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenRelay,
     appVoiceRelay,
     core: collabCorePath,
+    onFirstClientSocket: opts.onFirstClientSocket,
     onBoardRoomOpen: (workspaceId, awareness) => {
       agentSpots.restore(workspaceId, awareness);
       personPresence.attach(workspaceId, awareness);

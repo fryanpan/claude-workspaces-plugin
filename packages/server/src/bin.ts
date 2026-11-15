@@ -18,7 +18,13 @@ import { storeSecret } from './secret-store.ts';
 import { captureServerError, flushServerSentry, initServerSentry } from './sentry.ts';
 import { resolveServerConfig } from './server-config.ts';
 import { createServerDeps } from './server-deps.ts';
-import { markServerServing, recordThisServerStart, serverStartsPath } from './server-starts.ts';
+import {
+  markFirstClientSocket,
+  markServerServing,
+  markServerShutdown,
+  recordThisServerStart,
+  serverStartsPath,
+} from './server-starts.ts';
 import { createServer } from './server.ts';
 import { defaultUserSettingsPath } from './settings-allow-file.ts';
 
@@ -262,6 +268,8 @@ while (!handle) {
   try {
     handle = createServer({
       port,
+      // The reconnect end of the restart gap `starts:report` prints.
+      onFirstClientSocket: (at) => markFirstClientSocket(serverStartsPath(dataDir), thisStart, at),
       ...(hostname ? { hostname } : {}),
       dataDir,
       widgetDistDir: widgetDist,
@@ -525,6 +533,8 @@ if (pluginRefresher) {
 // Graceful shutdown
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {
+    // The other end of that gap, before anything that could hang.
+    markServerShutdown(serverStartsPath(dataDir), thisStart, Date.now());
     console.log(`[feedback] shutting down (${sig})`);
     // Report whatever the current squelch window was still counting; nothing
     // else will ask for it once the process is gone.

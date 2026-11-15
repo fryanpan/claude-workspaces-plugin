@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { type DeployResult, deployLogPath } from '../src/deploy-log.ts';
 import { VERIFY_BOOT_TIMEOUT_MS } from '../src/deploy.ts';
 import { readServerStarts, serverStartsPath } from '../src/server-starts.ts';
+import { joinRoom } from './room-page.ts';
 import { waitFor } from './wait-for.ts';
+import { seedBoard } from './workspace-seed.ts';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -84,4 +86,63 @@ describe('bin.ts records its own start', () => {
       rmSync(dataDir, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it('writes both ends of the reconnect gap: the first page socket, then its own shutdown', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cw-starts-gap-'));
+    // Port 0, read back off the listening line: a fixed port can be held by
+    // another run on the same machine, and the server waits for it forever.
+    const child = spawn(
+      'bun',
+      [
+        'run',
+        join(repoRoot, 'packages', 'server', 'src', 'bin.ts'),
+        '--port',
+        '0',
+        '--data-dir',
+        dataDir,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, CW_SUMMARIES: '0' },
+      },
+    );
+    let stdout = '';
+    child.stdout?.on('data', (b: Buffer) => {
+      stdout += b.toString();
+    });
+    const exited = new Promise<void>((r) => child.once('exit', () => r()));
+    const file = serverStartsPath(dataDir);
+    try {
+      const port = await waitFor(() => stdout.match(/listening on :(\d+)/)?.[1], {
+        timeout: 20_000,
+        interval: 100,
+        describe: 'the listening line',
+      });
+      await waitFor(() => readServerStarts(file).at(-1)?.servingAt, {
+        describe: 'the boot to mark itself serving',
+      });
+      expect(readServerStarts(file).at(-1)?.firstClientSocketAt).toBeUndefined();
+
+      const base = `http://127.0.0.1:${port}`;
+      const ws = await seedBoard(base);
+      const page = joinRoom(`ws://127.0.0.1:${port}/workspaces/${ws}/y?type=workspace`, base);
+      await page.ready;
+      const reconnectAt = await waitFor(() => readServerStarts(file).at(-1)?.firstClientSocketAt, {
+        describe: 'the first page socket in the start record',
+      });
+      page.close();
+
+      child.kill('SIGTERM');
+      const shutdownAt = await waitFor(() => readServerStarts(file).at(-1)?.shutdownAt, {
+        timeout: 10_000,
+        describe: 'the shutdown written by the stopping process',
+      });
+      expect(shutdownAt).toBeGreaterThanOrEqual(reconnectAt);
+      await exited;
+    } finally {
+      child.kill('SIGKILL');
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  }, 40_000);
 });
