@@ -24,18 +24,22 @@
  * throw inside a Hono handler reaches the chain's Sentry span exactly as a
  * throw inside a chain handler does.
  *
- * MOVING A FAMILY: register it in `hono-families.ts`, and delete its call
- * from the chain in the same commit. The route-answer
+ * MOVING A FAMILY: register it in `hono-families.ts` — or, if it reads the
+ * workspace scope, in `hono-board-families.ts`, the second app built here —
+ * and delete its call from the chain in the same commit. The route-answer
  * snapshot (`test/route-answers.test.ts`) fails if any address in the route
  * table is answered differently afterwards — and the move has to keep the
  * family's position relative to the eight adjacencies `route-table.ts`
  * lists, because Hono is tried before every family still in the chain.
  */
 import { Hono } from 'hono';
-import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
+import type { HonoGateEnv } from '../hono-env.ts';
 
 /** Try the Hono app. Null means no family claimed the request. */
-export type HonoFront = (req: Request, env: HonoGateEnv) => Promise<Response | null>;
+export type HonoFront<E extends HonoGateEnv = HonoGateEnv> = (
+  req: Request,
+  env: E,
+) => Promise<Response | null>;
 
 /** Does this request ask to become a websocket? Those stay on Bun. */
 export function isWebSocketUpgrade(req: Request): boolean {
@@ -45,9 +49,16 @@ export function isWebSocketUpgrade(req: Request): boolean {
 /** The header that marks Hono's not-found answer. Never sent to a caller. */
 const MISS_HEADER = 'x-cw-hono-miss';
 
-/** Build the app from its families, once. */
-export function createHonoFront(families: readonly HonoFamily[]): HonoFront {
-  const app = new Hono<HonoAppEnv>();
+/**
+ * Build the app from its families, once. Two are built: the front, tried
+ * above the stream block with the gates' proof (`HonoAppEnv`), and the board
+ * app, tried below the workspace scope with the scope as well
+ * (`HonoBoardAppEnv`).
+ */
+export function createHonoFront<E extends HonoGateEnv = HonoGateEnv>(
+  families: readonly ((app: Hono<{ Bindings: E }>) => void)[],
+): HonoFront<E> {
+  const app = new Hono<{ Bindings: E }>();
   for (const family of families) family(app);
 
   // The not-found answer Hono builds is a marker, never a reply. It is

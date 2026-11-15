@@ -408,8 +408,8 @@ guard would say otherwise. What the table still cannot see is whether an
 reviewer's, and the routes that have it carry their own tests.
 
 Dispatch stays with the ordered chain on purpose, and the chain is
-`routes/request-chain.ts` with its two lower thirds, `request-chain-board.ts`
-and `request-chain-tail.ts` (shared shapes in `request-chain-context.ts`).
+`routes/request-chain.ts` with its tail, `request-chain-tail.ts` (shared
+shapes in `request-chain-context.ts`).
 `createServer` builds its context once and matches no route itself. Bun
 matches by specificity; this router's order is behaviour in eight documented
 places, among them the Recall status webhook immediately above the
@@ -434,8 +434,16 @@ connector, agent identity, board tokens, board-socket roots, the repo
 registry, the load reports, the workspaces list's stream and private
 messages. Recall's webhook must be tried before the `/recall/` websocket
 upgrade, and it is, because Hono is tried above the upgrade block. A family
-can move only if it takes no workspace scope and claims no path that anything above its old
-position answers, because Hono is tried above all of it. The shared types are the
+in that front app can move only if it takes no workspace scope and claims no
+path that anything above its old position answers, because Hono is tried
+above all of it. The families that read the scope are a second Hono app,
+`routes/hono-board-families.ts`, tried where the board run was: below the
+workspace scope, with the scope in `c.env` beside the gates' proof, and above
+the tail. It holds the whole run in the run's order — docs, apps, the
+board's own routes, tasks, goals, the promote, dispatches and notes,
+chat-audit, the Library, the doc move, agent attachments, archive, the board
+delete, a review's files, meetings, and the doc resource catch-all, which
+the meetings still precede. The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
 names one of them. `test/route-answers.test.ts` drives one request per
 route-table row, plus a HEAD beside every GET, and holds every answer to
