@@ -2,8 +2,8 @@
  * What a router below the gates is handed: the shared names of the Hono move
  * (milestone M12).
  *
- * `routes/request-chain-gates.ts` produces a `PassedGates`; the ordered chain
- * and the Hono app (`routes/hono-front.ts`) both read it. These types live
+ * `routes/request-chain-gates.ts` produces a `PassedGates`; the Hono apps
+ * below the gates (`routes/hono-front.ts`) read it as their env. These types live
  * outside `routes/` because `server-options.ts` names `HonoFamily` for the
  * `honoFamilies` option, and nothing outside `routes/` but `server.ts` may
  * import from there (`bun run check:imports`).
@@ -35,19 +35,38 @@ export type HonoFamily = (app: Hono<HonoAppEnv>) => void;
 
 /**
  * What the board app (`routes/hono-board-families.ts`) reads as `c.env`: the
- * gates' proof, plus what the chain resolved below them — the workspace
- * scope, and whether this request may mint an app's voice token.
+ * gates' proof, plus whether this request may mint an app's voice token.
  */
 export interface HonoBoardEnv extends HonoGateEnv {
+  mayMintAppVoice: () => boolean;
+}
+
+/**
+ * What the board app's first middleware resolves and every family after it
+ * reads as `c.var`: the workspace scope (`middleware/workspace-scope.ts`).
+ */
+export interface HonoBoardVars {
   /** Undefined for an address outside `/workspaces/<id>/…`. */
   scope: WorkspaceScope<BoardWorkspace> | undefined;
-  mayMintAppVoice: () => boolean;
 }
 
 /** The type parameter of the board app. */
 export interface HonoBoardAppEnv {
   Bindings: HonoBoardEnv;
+  Variables: HonoBoardVars;
 }
 
 /** One board family: registers its routes on the board app. */
 export type HonoBoardFamily = (app: Hono<HonoBoardAppEnv>) => void;
+
+/**
+ * The type parameter of the open app (`routes/hono-open-families.ts`), tried
+ * inside the gates above admission. Nothing has been proved yet, so its env
+ * is empty: each family there checks its own caller.
+ */
+export interface HonoOpenAppEnv {
+  Bindings: Record<never, never>;
+}
+
+/** One open family: registers its routes on the open app. */
+export type HonoOpenFamily = (app: Hono<HonoOpenAppEnv>) => void;

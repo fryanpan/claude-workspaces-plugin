@@ -10,7 +10,13 @@
  * in the rest of this suite.
  */
 import { describe, expect, it } from 'bun:test';
+import type { HonoOpenAppEnv } from '../src/hono-env.ts';
 import type { Admission } from '../src/request-admission.ts';
+import { createHonoFront } from '../src/routes/hono-front.ts';
+import {
+  type HonoOpenFamiliesContext,
+  honoOpenFamilies,
+} from '../src/routes/hono-open-families.ts';
 import type { RequestChainContext } from '../src/routes/request-chain-context.ts';
 import { createRequestChain } from '../src/routes/request-chain.ts';
 
@@ -51,8 +57,16 @@ const chain = (admit: (req: Request) => Admission) => {
     isValidDocId: (s: string) => /^[a-z0-9-]{1,40}$/.test(s),
     j,
     requestAddress: () => '127.0.0.1',
-    homeFeedCtx: { j },
-    githubHubCtx: { j },
+    // The real open app, as `server.ts` builds it. None of the addresses
+    // below is one of its families', so each falls through to admission.
+    honoOpenFront: createHonoFront<HonoOpenAppEnv>(
+      honoOpenFamilies({
+        homeFeedCtx: { j, peerAddress: () => '192.0.2.7' },
+        boardImportCtx: undefined,
+        githubHubCtx: { j },
+      } as unknown as HonoOpenFamiliesContext),
+      { upgrades: 'enter' },
+    ),
     admit: async (req: Request) => {
       seen.admitted.push(new URL(req.url).pathname);
       return admit(req);
@@ -104,6 +118,18 @@ describe('createRequestChain', () => {
     expect(seen.admitted).toEqual(['/workspaces/w-1/docs/plan-a']);
     expect(seen.cors).toEqual(['/workspaces/w-1/docs/plan-a']);
     expect(seen.refreshed).toEqual(['/workspaces/w-1/docs/plan-a']);
+  });
+
+  it('answers an open family above admission, with its own caller check', async () => {
+    // The home feed is the open app's: a caller that is neither loopback nor
+    // the configured service token is refused by the family itself, and
+    // admission never sees the request.
+    const { handle, seen } = chain(refused);
+    const res = await handle(new Request('http://localhost/workspaces/w-1/home-feed'));
+    expect(res?.status).toBe(403);
+    expect(await res?.json()).toEqual({ error: 'forbidden' });
+    expect(seen.admitted).toEqual([]);
+    expect(seen.cors).toEqual(['/workspaces/w-1/home-feed']);
   });
 
   it('prewarms every segment that could name a doc before routing', async () => {

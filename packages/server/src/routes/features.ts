@@ -9,9 +9,8 @@
  * Two of the three answer through Hono (`hono-families.ts`): Incoming
  * Messages (`/inbox/`) and the keeper holds (`/api/keeper/holds`). Git push
  * claims `/workspaces/<board>/git/`, below the workspace scope resolver, so
- * it stays on the chain at the features' old position in
- * `request-chain-tail.ts`, below the workspaces list's stream and above the
- * private messages.
+ * it is the first family of the tail on the board app
+ * (`hono-tail-families.ts`), after the board families and before the shell.
  *
  * List order is stop order. A family that must answer before some other
  * route, or be built before something else reads it, does not belong here:

@@ -408,8 +408,9 @@ guard would say otherwise. What the table still cannot see is whether an
 reviewer's, and the routes that have it carry their own tests.
 
 Dispatch stays with the ordered chain on purpose, and the chain is
-`routes/request-chain.ts` with its tail, `request-chain-tail.ts` (shared
-shapes in `request-chain-context.ts`).
+`routes/request-chain.ts` (shared shapes in `request-chain-context.ts`); since
+M12 it holds no route family itself, only the order in which the three Hono
+apps and the upgrade-and-stream run are tried.
 `createServer` builds its context once and matches no route itself. Bun
 matches by specificity; this router's order is behaviour in eight documented
 places, among them the Recall status webhook immediately above the
@@ -418,32 +419,42 @@ resource catch-all. So every mounted entry's handler is the same front door an
 unmatched address reaches through `fetch`, and the table is the registry
 rather than the router.
 
-**Hono, below the gates (M12).** Route families are moving onto Hono one
-family per PR. The gates — the preflight, the cross-origin write gates, the
-home feed and GitHub hub, admission, the local-only gate, attribution and the
-two sign-in gates — are `routes/request-chain-gates.ts`, and they run once per
-request, above both routers. Below them the chain tries the Hono app
-(`routes/hono-front.ts`) first, handing it what the gates proved as `c.env`;
-an address no Hono family claims falls through to the rest of the chain
-unchanged, and a websocket upgrade never enters Hono. The families Hono
-answers are registered in `routes/hono-families.ts`: so far sign-in and
-share (`auth-share.ts`), ops, mounts, prompts, the cross-board review queue,
-voice (page and API), access, Incoming Messages, the keeper holds, the
-coach, the voice agent's LLM call, Recall's status webhook, the hosted MCP
-connector, agent identity, board tokens, board-socket roots, the repo
-registry, the load reports, the workspaces list's stream and private
-messages. Recall's webhook must be tried before the `/recall/` websocket
-upgrade, and it is, because Hono is tried above the upgrade block. A family
-in that front app can move only if it takes no workspace scope and claims no
-path that anything above its old position answers, because Hono is tried
-above all of it. The families that read the scope are a second Hono app,
-`routes/hono-board-families.ts`, tried where the board run was: below the
-workspace scope, with the scope in `c.env` beside the gates' proof, and above
-the tail. It holds the whole run in the run's order — docs, apps, the
-board's own routes, tasks, goals, the promote, dispatches and notes,
-chat-audit, the Library, the doc move, agent attachments, archive, the board
-delete, a review's files, meetings, and the doc resource catch-all, which
-the meetings still precede. The shared types are the
+**Hono, below the gates (M12).** Every route family now answers through one
+of three Hono apps (`routes/hono-front.ts` builds each), each tried from the
+line its families used to hold, so the chain's order is unchanged. The gates —
+the preflight, the cross-origin write gates, admission, the local-only gate,
+attribution and the two sign-in gates — are `routes/request-chain-gates.ts`,
+and they run once per request.
+
+- **The open app** (`routes/hono-open-families.ts`) is tried inside the gates,
+  above admission: the home feed, the board import and the GitHub hub, whose
+  callers name nobody and which check their own caller. Its env is empty.
+- **The front app** (`routes/hono-families.ts`) is tried below the gates with
+  what they proved as `c.env`: sign-in and share (`auth-share.ts`), ops,
+  mounts, prompts, the cross-board review queue, voice (page and API), access,
+  Incoming Messages, the keeper holds, the coach, the voice agent's LLM call,
+  Recall's status webhook, the hosted MCP connector, agent identity, board
+  tokens, board-socket roots, the repo registry, the load reports, the
+  workspaces list's stream and private messages. It is tried above the
+  upgrade block, so Recall's webhook still precedes the `/recall/` upgrade,
+  and a websocket upgrade never enters it.
+- **The upgrade-and-stream run** (`routes/upgrade-stream.ts`) stays a direct
+  call. A socket `server.upgrade` took over has no `Response` to return, and
+  a Hono handler must return one; the three SSE openers in that run share its
+  per-request socket judgements, so they stay with it.
+- **The board app** is tried below that run. Its first middleware is the
+  workspace scope, which puts the resolved scope in `c.var` or answers with
+  its refusal; then the board families (`routes/hono-board-families.ts`) in
+  the old board run's order — docs, apps, the board's own routes, tasks,
+  goals, the promote, dispatches and notes, chat-audit, the Library, the doc
+  move, agent attachments, archive, the board delete, a review's files,
+  meetings, and the doc resource catch-all, which the meetings still precede;
+  then the tail (`routes/hono-tail-families.ts`) in its order — the git-push
+  feature, shell and static serving, the task address, board links, the
+  stale-client 410, the wrong-prefix hint and the board's not-found page. An
+  address none of them claims gets the chain's bare 404.
+
+The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
 names one of them. `test/route-answers.test.ts` drives one request per
 route-table row, plus a HEAD beside every GET, and holds every answer to

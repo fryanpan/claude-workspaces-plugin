@@ -45,7 +45,7 @@
  * cancels the dropped body first, so a HEAD on an event stream does not leave
  * a subscriber open.
  */
-import type { Context, Hono, Next } from 'hono';
+import type { Context, Env, Hono, Next } from 'hono';
 import type { FeatureRoutes } from '../feature-module.ts';
 import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
 import { HOLDS_PATH } from '../keeper/keeper-announce.ts';
@@ -124,8 +124,8 @@ export interface HonoFamiliesContext {
 }
 
 /** The per-request values the chain used to pass, read off `c.env`. */
-export function chainValues<E extends HonoGateEnv>(
-  c: Context<{ Bindings: E }>,
+export function chainValues<A extends { Bindings: HonoGateEnv }>(
+  c: Context<A>,
   ctx: Pick<HonoFamiliesContext, 'requireSignInToWrite' | 'policyFor'>,
 ) {
   const req = c.req.raw;
@@ -151,7 +151,7 @@ export function chainValues<E extends HonoGateEnv>(
 }
 
 type Answer = Response | null | undefined;
-type ChainValues = ReturnType<typeof chainValues<HonoGateEnv>>;
+type ChainValues = ReturnType<typeof chainValues<HonoAppEnv>>;
 
 /**
  * Register one family's handler on every pattern in `patterns`, handing it
@@ -161,17 +161,14 @@ type ChainValues = ReturnType<typeof chainValues<HonoGateEnv>>;
  * `/access`), and Hono runs every match in turn; a request is tried once per
  * family, so a handler that declined is not asked again.
  */
-export function claimWith<E extends HonoGateEnv, V>(
-  app: Hono<{ Bindings: E }>,
-  values: (c: Context<{ Bindings: E }>) => V,
+export function claimWith<A extends Env, V>(
+  app: Hono<A>,
+  values: (c: Context<A>) => V,
   patterns: readonly string[],
   answer: (v: V) => Answer | Promise<Answer>,
 ): void {
   const tried = new WeakSet<Request>();
-  const middleware = async (
-    c: Context<{ Bindings: E }>,
-    next: Next,
-  ): Promise<Response | undefined> => {
+  const middleware = async (c: Context<A>, next: Next): Promise<Response | undefined> => {
     if (tried.has(c.req.raw)) {
       await next();
       return undefined;

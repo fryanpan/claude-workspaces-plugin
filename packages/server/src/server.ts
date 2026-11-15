@@ -91,7 +91,7 @@ import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
-import type { HonoBoardEnv } from './hono-env.ts';
+import type { HonoBoardAppEnv, HonoOpenAppEnv } from './hono-env.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
@@ -181,6 +181,8 @@ import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
 import { honoBoardFamilies } from './routes/hono-board-families.ts';
 import { honoFamilies } from './routes/hono-families.ts';
 import { createHonoFront } from './routes/hono-front.ts';
+import { honoOpenFamilies } from './routes/hono-open-families.ts';
+import { honoTailFamilies } from './routes/hono-tail-families.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
@@ -3502,9 +3504,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
-    homeFeedCtx,
-    boardImportCtx,
-    githubHubCtx,
+    honoOpenFront: createHonoFront<HonoOpenAppEnv>(
+      honoOpenFamilies({ homeFeedCtx, boardImportCtx, githubHubCtx }),
+      { upgrades: 'enter' },
+    ),
     admit: opts.observeAdmission ? observedAdmit(admit, opts.observeAdmission) : admit,
     localOnlyGate,
     attributeRequest,
@@ -3552,48 +3555,58 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ...(opts.honoFamilies ?? []),
     ]),
     serveUpgradeAndStreamRoutes,
-    taskStore,
     workspacesOfMember,
-    boardLinkRoutesCtx: {
-      workspacesOfMember,
-      findReviewItem: (id) => taskStore.findReviewItem(id),
-      parseThreadReviewItemId,
-      docPagePath: (docId, workspaceId) => {
-        const meta = docStore.peekMeta(docId);
-        const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
-        if (!url) return undefined;
-        const u = new URL(url);
-        return `${u.pathname}${u.search}`;
-      },
-      // The docs listing's own reading of "on this board" (`routes/docs.ts`).
-      linkCandidates: (workspaceId) => {
-        const index = boardIndexForListing();
-        return docStore
-          .list()
-          .filter(
-            (m) => m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
-          )
-          .map(linkCandidateOf);
-      },
-    },
-    honoBoardFront: createHonoFront<HonoBoardEnv>(
-      honoBoardFamilies({
-        docRoutesCtx,
-        appRoutesCtx,
-        workspaceRoutesCtx,
-        taskRoutesCtx,
-        chatAuditRoutesCtx,
-        libraryRoutesCtx,
-        docMoveRoutesCtx,
-        handleArchiveRoutes,
-        reviewFileRoutesCtx,
-        meetingCalendarRoutesCtx,
-        requireSignInToWrite,
-        policyFor,
-      }),
+    honoBoardFront: createHonoFront<HonoBoardAppEnv>(
+      [
+        ...honoBoardFamilies({
+          docRoutesCtx,
+          appRoutesCtx,
+          workspaceRoutesCtx,
+          taskRoutesCtx,
+          chatAuditRoutesCtx,
+          libraryRoutesCtx,
+          docMoveRoutesCtx,
+          handleArchiveRoutes,
+          reviewFileRoutesCtx,
+          meetingCalendarRoutesCtx,
+          workspaceRecord: (id) => taskStore.getWorkspace(id),
+          workspacesOfMember,
+          j,
+          requireSignInToWrite,
+          policyFor,
+        }),
+        ...honoTailFamilies({
+          featureRoutes: features.routes,
+          serveShellRoutes,
+          requireSignInToWrite,
+          policyFor,
+          boardLinkRoutesCtx: {
+            workspacesOfMember,
+            findReviewItem: (id) => taskStore.findReviewItem(id),
+            parseThreadReviewItemId,
+            docPagePath: (docId, workspaceId) => {
+              const meta = docStore.peekMeta(docId);
+              const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
+              if (!url) return undefined;
+              const u = new URL(url);
+              return `${u.pathname}${u.search}`;
+            },
+            // The docs listing's own reading of "on this board" (`routes/docs.ts`).
+            linkCandidates: (workspaceId) => {
+              const index = boardIndexForListing();
+              return docStore
+                .list()
+                .filter(
+                  (m) =>
+                    m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
+                )
+                .map(linkCandidateOf);
+            },
+          },
+        }),
+      ],
+      { upgrades: 'enter' },
     ),
-    featureRoutes: features.routes,
-    serveShellRoutes,
   });
 
   const server = Bun.serve<UpgradeData>({

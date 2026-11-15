@@ -6,14 +6,20 @@
  * door (the bad-path refusal, the hydration prewarm, the Sentry span,
  * compression, CORS and the slow-request line), then the gates
  * (`request-chain-gates.ts`: the CORS preflight, the cross-origin write gate,
- * the home feed and the GitHub hub, admission, the local-only gate,
- * attribution and the two sign-in gates), then the Hono app
- * (`hono-front.ts`, with the families in `hono-families.ts`), then the
- * sign-in and share routes, the two vendor
- * callbacks, the upgrades and streams, and the workspace scope — and then the
- * two halves below them: the board families, a second Hono app
- * (`hono-board-families.ts`), and the top-level families with the tail
- * (`request-chain-tail.ts`).
+ * the open Hono app with the home feed, the board import and the GitHub hub
+ * (`hono-open-families.ts`), admission, the local-only gate, attribution and
+ * the two sign-in gates), then the front Hono app (`hono-front.ts`, with the
+ * families in `hono-families.ts`), then the upgrades and streams
+ * (`upgrade-stream.ts`), and then the board Hono app: the workspace scope,
+ * the board families (`hono-board-families.ts`) and the tail
+ * (`hono-tail-families.ts`). The bare 404 is the last line.
+ *
+ * The upgrades and streams are the one run still called from here rather
+ * than registered on Hono. A socket that `server.upgrade` took over has no
+ * `Response` to return, and a Hono handler must return one; the three SSE
+ * openers in that run share its per-request socket judgements (the
+ * cross-origin cookie rule, the off-box view, the doc-membership parser), so
+ * they stay with it rather than being split out of a security-surface file.
  *
  * The order is behaviour. Every comment below that says a position is
  * load-bearing says so about the order of these calls, which is why they
@@ -32,14 +38,10 @@ import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
 import { setRequestAuthor } from '../event-origin.ts';
 import { refusedWriteLine } from '../middleware/refused-write-log.ts';
-import { type WorkspaceScope, resolveWorkspaceScope } from '../middleware/workspace-scope.ts';
 import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
-import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
-import type { BoardWorkspace } from '../tasks.ts';
 import type { RequestChainContext } from './request-chain-context.ts';
 import { createRequestGates } from './request-chain-gates.ts';
-import { serveTopLevelRoutes } from './request-chain-tail.ts';
 
 /**
  * The handler `Bun.serve` dispatches every request to, through the
@@ -56,11 +58,8 @@ export function createRequestChain(
     slowRequestMs,
     policyFor,
     isValidDocId,
-    j,
     requireSignInToWrite,
     serveUpgradeAndStreamRoutes,
-    taskStore,
-    workspacesOfMember,
   } = ctx;
   const runGates = createRequestGates(ctx);
 
@@ -222,65 +221,14 @@ export function createRequestChain(
         return settled.response;
       }
 
-      // ── The workspace scope ── see middleware/workspace-scope.ts.
-      //
-      // ONE resolver for every canonical `/workspaces/<id>/…` request, run
-      // once here rather than at the top of each handler. It answers two
-      // questions and refuses on either: does this board exist, and does the
-      // row named under it belong to it. That second question only became
-      // askable when the board went into the path — `/api/goals/<id>` named
-      // a row and left the server to find its board, so "a goal on somebody
-      // else's board" was not a shape a request could have.
-      //
-      // Placed BELOW the stream block, because a websocket upgrade and an
-      // SSE open are taken over rather than answered, and ABOVE every REST
-      // handler, because the whole point is that no handler resolves a board
-      // for itself. Whether the CALLER may reach the board is not asked here
-      // — `shareScopeAllows` in the host guard has already answered it, and
-      // a second copy of that rule is the thing this file exists to remove.
-      //
-      // `pass` means the path is not its business: not under `/workspaces/`,
-      // or one of the board's HTML pages, which the shell at the tail of the
-      // chain serves with its own not-found.
-      //
-      // What it hands DOWN is the other half. `scope` travels on every
-      // resource route's request and is what those routes match against —
-      // see `matchRest`. A handler with no scope has no remainder to match,
-      // so "the workspace was resolved" stops being something each route
-      // remembers to check and becomes the condition of it answering at
-      // all.
-      let scope: WorkspaceScope<BoardWorkspace> | undefined;
-      {
-        const scoped = resolveWorkspaceScope(
-          {
-            workspaceRecord: (id: string) => taskStore.getWorkspace(id),
-            workspacesOfMember,
-            j,
-            // A browser asked for a page; answer it with one — naming the
-            // board it can go back to, which is the whole difference between
-            // a dead end and a wrong turn. Unless the BOARD is what is
-            // missing, in which case there is nowhere on it to go and the
-            // board's own not-found page is the honest answer: offering to
-            // open a board that does not exist is a second dead end.
-            notFoundPage: (address) =>
-              new Response(
-                address.boardExists
-                  ? renderBoardMemberNotFound(address.workspaceId, askedAddress(url))
-                  : renderBoardNotFound(address.workspaceId, askedAddress(url)),
-                { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
-              ),
-          },
-          { pathname, method: req.method, url, accept: req.headers.get('accept') },
-        );
-        if (scoped.kind === 'refused') return scoped.response;
-        if (scoped.kind === 'scope') scope = scoped.scope;
-      }
-
-      // ── Below the scope ── the board families, then the top-level
-      // families and the tail. The board families are the second Hono app
-      // (`hono-board-families.ts`), tried here with the scope beside the
-      // gates' proof, in the order the board run used to try them; null
-      // means none claimed the address. The tail always answers.
+      // ── Below the stream block ── the board app (`hono-board-families.ts`
+      // then `hono-tail-families.ts`). Its first middleware is the workspace
+      // scope, which sat right here: below the stream block, because a
+      // websocket upgrade and an SSE open are taken over rather than
+      // answered, and above every REST handler, because no handler resolves
+      // a board for itself. Then the board families in the order the board
+      // run tried them, then the tail in its order. Null means nothing there
+      // claimed the address, which is the bare 404 the chain always ended on.
       const mayMintAppVoice = (): boolean =>
         mayMintAppVoiceFor({
           visitor: visitor !== null,
@@ -293,12 +241,9 @@ export function createRequestChain(
         gate,
         attribution,
         ownerProven,
-        scope,
         mayMintAppVoice,
       });
-      if (boarded) return boarded;
-      const rq = { req, url, pathname, scope, gate, attribution, ownerProven, mayMintAppVoice };
-      return await serveTopLevelRoutes(ctx, rq);
+      return boarded ?? new Response('not found', { status: 404 });
     }
   };
 }
