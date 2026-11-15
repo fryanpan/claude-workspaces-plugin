@@ -98,8 +98,8 @@ describe('the file poll while one bound file’s stat is pending', () => {
       decorateDocMeta: (m) => ({ ...m, reviewUrl: `http://test/review/${m.docId}` }),
     });
     for (const [id, path] of [
-      ['d-harbor', harbor],
-      ['d-river', river],
+      ['d-pharb', harbor],
+      ['d-priv', river],
     ] as const) {
       docStore.getOrCreate(id, { type: 'markdown', sourceUrl: path });
       expect(docStore.attachFile(id, path).ok).toBe(true);
@@ -124,7 +124,7 @@ describe('the file poll while one bound file’s stat is pending', () => {
     seam = holdStatsOf(harbor);
     seam.release(); // nothing held: every stat answers at once
     writeFileSync(river, doc('Riverbend saved from an editor.'));
-    await untilLive('d-river', 'Riverbend saved from an editor.');
+    await untilLive('d-priv', 'Riverbend saved from an editor.');
     // The seam saw the poll's stats, so the edit came through the async path.
     expect(seam.otherCalls()).toBeGreaterThan(0);
   });
@@ -156,7 +156,7 @@ describe('the file poll while one bound file’s stat is pending', () => {
         },
         { describe: 'two more sweeps, or the held file’s deadline' },
       );
-      await untilLive('d-river', 'Riverbend edited meanwhile.');
+      await untilLive('d-priv', 'Riverbend edited meanwhile.');
     } finally {
       spinning = false;
     }
@@ -170,13 +170,13 @@ describe('the file poll while one bound file’s stat is pending', () => {
     // refused at the gate and still issue no second stat.
     expect(seam.maxPending()).toBe(1);
     expect(seam.calls()).toBe(1);
-    expect(liveText('d-harbor')).not.toContain('edited while its disk was slow');
+    expect(liveText('d-pharb')).not.toContain('edited while its disk was slow');
 
     seam.release();
     // If the hold outlasted the deadline the path sits in quarantine; lift it
     // so the next tick re-stats rather than waiting out the backoff.
     boundFiles.reset();
-    await untilLive('d-harbor', 'Harborlight edited while its disk was slow.');
+    await untilLive('d-pharb', 'Harborlight edited while its disk was slow.');
   });
 
   it('names the doc, never the path, when a stat is slow', async () => {
@@ -189,7 +189,7 @@ describe('the file poll while one bound file’s stat is pending', () => {
       // per window across every doc, and a loaded runner stats a healthy
       // file in more than SLOW_POLL_STAT_MS: Riverbend's line then takes the
       // window and Harborlight's is only counted, so no wait can find it.
-      expect(docStore.evictDoc('d-river')).toBe(true);
+      expect(docStore.evictDoc('d-priv')).toBe(true);
       seam = holdStatsOf(harbor);
       writeFileSync(harbor, doc('Harborlight after a slow stat.'));
       await waitFor(() => seam?.calls() === 1, { describe: 'the poll to stat the held file' });
@@ -197,7 +197,7 @@ describe('the file poll while one bound file’s stat is pending', () => {
       await new Promise((r) => setTimeout(r, SLOW_POLL_STAT_MS * 2));
       seam.release();
       const line = await waitFor(
-        () => lines.find((l) => l.startsWith('[file-poll] d-harbor: stat took')),
+        () => lines.find((l) => l.startsWith('[file-poll] d-pharb: stat took')),
         { describe: 'the slow-stat line' },
       );
       expect(line).not.toContain(root);
@@ -206,7 +206,7 @@ describe('the file poll while one bound file’s stat is pending', () => {
       // Counted for this doc only: the window is per DocStore, and a store
       // another test file left polling in this process logs its own slow
       // stats into the same console (CI logged `d1` lines here).
-      expect(lines.filter((l) => l.startsWith('[file-poll] d-harbor:'))).toHaveLength(1);
+      expect(lines.filter((l) => l.startsWith('[file-poll] d-pharb:'))).toHaveLength(1);
       expect(lines.filter((l) => l.includes(root))).toEqual([]);
     } finally {
       errors.mockRestore();

@@ -83,7 +83,7 @@ async function boot(dataDir: string): Promise<Server> {
   child.stdout?.on('data', (b: Buffer) => {
     stdout += b.toString();
   });
-  const port = await waitFor(() => stdout.match(/listening on :(\d+)/)?.[1], {
+  const port = await waitFor(() => stdout.match(/listening on :(\d+)\r?\n/)?.[1], {
     timeout: 30_000,
     interval: 100,
     describe: 'the server to say where it listens',
