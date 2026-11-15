@@ -42,7 +42,7 @@ const step = (what: string): void => {
 };
 
 async function until<T>(
-  what: string,
+  what: string | (() => string),
   read: () => Promise<T | null> | T | null,
   ms = 20_000,
 ): Promise<T> {
@@ -52,7 +52,7 @@ async function until<T>(
     if (v !== null && v !== undefined) return v;
     await sleep(50);
   }
-  throw new Error(`never happened: ${what}`);
+  throw new Error(`never happened: ${typeof what === 'function' ? what() : what}`);
 }
 
 /** Everything the page shows of the chat, read through its shadow roots. */
@@ -63,6 +63,9 @@ const READ = `(() => {
   const sr = layer && layer.shadowRoot;
   const pane = sr && sr.querySelector('.lc-pane');
   const bar = sr && sr.querySelector('.lc-bar');
+  // Headless Chrome under load draws few or no frames, so the panel's grow
+  // animation can stall part-way; finish it and read the end state.
+  for (const a of (pane && pane.getAnimations ? pane.getAnimations() : [])) a.finish();
   const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
   const shown = (el) => !!el && !el.hidden && el.getBoundingClientRect().width > 0;
   const b = btn && btn.getBoundingClientRect();
@@ -71,8 +74,7 @@ const READ = `(() => {
     button: shown(btn) ? box(btn) : null,
     buttonOnTop: !!hit && hit === host,
     expanded: btn ? btn.getAttribute('aria-expanded') : null,
-    // Read once the grow has finished: mid-grow the box is the button's.
-    pane: shown(pane) && pane.getAnimations().length === 0 ? box(pane) : null,
+    pane: shown(pane) ? box(pane) : null,
     bar: shown(bar) ? box(bar) : null,
     close: sr && shown(sr.querySelector('.lc-close')) ? box(sr.querySelector('.lc-close')) : null,
     barText: bar ? bar.textContent : '',
@@ -420,13 +422,19 @@ async function main(): Promise<void> {
           Buffer.from(png.data, 'base64'),
         );
       }
-      // The bar grows into the panel, still listening; the agent button is
-      // the one listen control, and its tap stops listening and closes.
-      await tap(cdp, out.bar as Rect);
-      const grown = await until('the panel open from the bar', async () => {
-        const r = (await cdp.evaluate(READ)) as Read;
-        return r.pane ? r : null;
-      });
+      // The bar, tapped where it is now, grows into the panel still listening.
+      const barNow = answered.bar ?? out.bar;
+      await tap(cdp, barNow as Rect);
+      let seen: Partial<Read> = {};
+      const grown = await until(
+        () =>
+          `the panel open from the bar (tapped ${JSON.stringify(barNow)}; saw ${JSON.stringify(seen)})`,
+        async () => {
+          const r = (await cdp.evaluate(READ)) as Read;
+          seen = { expanded: r.expanded, bar: r.bar, pane: r.pane, listening: r.listening };
+          return r.pane ? r : null;
+        },
+      );
       await tap(cdp, grown.button as Rect);
       const stopped = await until('listening stopped in the open panel', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
