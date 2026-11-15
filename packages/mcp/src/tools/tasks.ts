@@ -32,7 +32,12 @@ import type { HeldFields } from '../../../server/src/index.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
-import { docThreadsClient, taskContentClient, taskStateClient } from '../server-client.ts';
+import {
+  docThreadsClient,
+  taskBoardClient,
+  taskContentClient,
+  taskStateClient,
+} from '../server-client.ts';
 import {
   LIST_TASK_FIELDS,
   NEXT_TASK_FIELDS,
@@ -229,6 +234,9 @@ export async function handleTaskTool(
   /** The board's content routes: new rows, done-when, links. */
   const contentApi = () => taskContentClient(http).workspaces[':ws'];
   const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  /** The board's lists and goal bands: the queue, the task list, the goals. */
+  const listsApi = () => taskBoardClient(http).workspaces[':ws'];
+  const wsParam = (workspaceId: string) => ({ ws: encodeURIComponent(workspaceId) });
   const taskParam = (taskId: string) => ({
     ws: encodeURIComponent(boardIdOf(name, a)),
     taskId: encodeURIComponent(taskId),
@@ -371,20 +379,20 @@ export async function handleTaskTool(
         includeArchived?: boolean;
         fields?: string[];
       };
-      const qs = new URLSearchParams();
-      if (assignee !== undefined) qs.set('assignee', assignee);
-      if (limit !== undefined) qs.set('limit', String(limit));
-      if (includeBlocked === true) qs.set('includeBlocked', 'true');
-      if (includeArchived === true) qs.set('includeArchived', 'true');
-      const query = qs.size > 0 ? `?${qs.toString()}` : '';
-      const res = (await http(
-        'GET',
-        `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`,
-      )) as {
-        tasks: Array<Record<string, unknown>>;
-        capacity?: { cap: number; inUse: number; free: number; heldForCapacity?: number };
-        retired?: { since: number; reason?: string; notice: string };
-      };
+      const res = await (
+        await listsApi().next.$get({
+          param: wsParam(workspaceId),
+          query: {
+            assignee,
+            limit: limit !== undefined ? String(limit) : undefined,
+            includeBlocked: includeBlocked === true ? 'true' : undefined,
+            includeArchived: includeArchived === true ? 'true' : undefined,
+          },
+        })
+      ).json();
+      // A queue row is an interface, so it carries no index signature; the
+      // projection reads it by name.
+      const queueRows = res.tasks as unknown as Array<Record<string, unknown>>;
       // A `fields` entry this verb cannot answer is an ERROR, never a
       // silently thinner row. Until this check existed `next_tasks` accepted
       // `fields` without declaring it and ignored it completely, so the
@@ -398,10 +406,10 @@ export async function handleTaskTool(
       // still there on the next call; the other order hands back a queue
       // shaped differently from the one that was asked for.
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
+        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, queueRows);
         if (missing.length > 0) {
           return err(
-            unknownFieldsMessage('next_tasks', missing, NEXT_TASK_FIELDS, res.tasks.length),
+            unknownFieldsMessage('next_tasks', missing, NEXT_TASK_FIELDS, queueRows.length),
           );
         }
       }
@@ -427,7 +435,7 @@ export async function handleTaskTool(
         workspaceId,
         ...(res.retired ? { retired: res.retired } : {}),
         ...(res.capacity ? { capacity: res.capacity } : {}),
-        tasks: projectQueueRows(res.tasks, fields),
+        tasks: projectQueueRows(queueRows, fields),
       });
     }
     case 'list_tasks': {
@@ -446,16 +454,19 @@ export async function handleTaskTool(
       // board's Tasks TAB, which is the same address in a browser now that
       // the `/api` prefix is gone. Set unconditionally rather than folded
       // into the optional filters: without it this read answers an HTML shell.
-      const qs = new URLSearchParams({ format: 'json' });
-      if (goal !== undefined) qs.set('goal', goal);
-      if (status !== undefined) qs.set('status', status);
-      if (assignee !== undefined) qs.set('assignee', assignee);
-      if (needs !== undefined) qs.set('needs', needs);
-      if (includeArchived === true) qs.set('includeArchived', 'true');
-      const res = (await http(
-        'GET',
-        `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`,
-      )) as { tasks: TaskPayload[] };
+      const res = await (
+        await listsApi().tasks.$get({
+          param: wsParam(workspaceId),
+          query: {
+            format: 'json',
+            goal,
+            status,
+            assignee,
+            needs,
+            includeArchived: includeArchived === true ? 'true' : undefined,
+          },
+        })
+      ).json();
       // NAMED ROWS — the read that makes the queue's small default usable.
       //
       // `next_tasks` now hands back a picker's row with no body, on the
@@ -674,9 +685,12 @@ export async function handleTaskTool(
         // Its own route, because a goal's restore cascades: the server brings
         // back exactly the tasks the goal's archive stamped, and leaves a task
         // somebody archived on its own before that where they put it.
-        const res = (await http('POST', `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
-          author: AUTHOR,
-        })) as { goal: { title?: string }; changed: boolean; taskIds: string[] };
+        const res = await (
+          await listsApi().goals[':goalId'].restore.$post({
+            param: { ...boardParam(), goalId: encodeURIComponent(goalId) },
+            json: { author: AUTHOR },
+          })
+        ).json();
         return ok({
           goalId,
           title: res.goal.title,
@@ -809,23 +823,12 @@ export async function handleTaskTool(
         goals: unknown[];
         drop?: string[];
       };
-      const res = (await http('PUT', `/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
-        goals,
-        ...(drop !== undefined ? { drop } : {}),
-        author: AUTHOR,
-      })) as {
-        changed: boolean;
-        created: Array<{ id: string; title: string }>;
-        movedToChores: string[];
-        strandedDone: string[];
-        bucketReview?: {
-          requested: boolean;
-          queued: boolean;
-          taskIds: string[];
-          newBands: Array<{ id: string; title: string }>;
-          batchId?: string;
-        };
-      };
+      const res = await (
+        await listsApi().goals.$put({
+          param: wsParam(workspaceId),
+          json: { goals, drop, author: AUTHOR },
+        })
+      ).json();
       return ok({
         workspaceId,
         changed: res.changed,
@@ -837,11 +840,6 @@ export async function handleTaskTool(
         // Reported so the caller sees the half that used to be silent —
         // done tasks left pointing at an id the list no longer has.
         strandedDone: res.strandedDone,
-        // Adding a band asks the LEAD to re-look at the unknown-goal
-        // bucket: `taskIds` is that bucket, `requested` says it reached
-        // them live, `queued` says it is waiting for their next attach.
-        // Nothing was placed — the ask is to look.
-        ...(res.bucketReview ? { bucketReview: res.bucketReview } : {}),
       });
     }
     case 'rename_goal': {
@@ -851,16 +849,12 @@ export async function handleTaskTool(
         title: string;
         dueAt?: number | null;
       };
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/goals/rename`,
-        {
-          goal,
-          title,
-          ...(dueAt !== undefined ? { dueAt } : {}),
-          author: AUTHOR,
-        },
-      )) as { changed: boolean; goal: { id: string; title: string; dueAt?: number } };
+      const res = await (
+        await listsApi().goals.rename.$post({
+          param: wsParam(workspaceId),
+          json: { goal, title, dueAt, author: AUTHOR },
+        })
+      ).json();
       return ok({ workspaceId, goal: res.goal, changed: res.changed });
     }
     case 'reorder_goals': {
@@ -868,11 +862,12 @@ export async function handleTaskTool(
         workspaceId: string;
         order: string[];
       };
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/goals/reorder`,
-        { order, author: AUTHOR },
-      )) as { changed: boolean; order: string[] };
+      const res = await (
+        await listsApi().goals.reorder.$post({
+          param: wsParam(workspaceId),
+          json: { order, author: AUTHOR },
+        })
+      ).json();
       return ok({
         workspaceId,
         order: res.order,
