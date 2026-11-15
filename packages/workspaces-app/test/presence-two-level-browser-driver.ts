@@ -72,6 +72,14 @@ export interface Round {
    *  lead elsewhere. */
   deckOnBoard: Box;
   deckOnDoc: Box;
+  /** The lead's circle on the board and on the doc. */
+  leadOnBoard: Face;
+  leadOnDoc: Face;
+}
+
+export interface Face {
+  fill: string;
+  initials: string;
 }
 
 export interface Box {
@@ -142,6 +150,13 @@ const boxOf = (selector: string) => `(() => {
   return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
 })()`;
 const DECK_BOX = boxOf('.board-presence-deck');
+
+/** The lead's circle in the deck: its fill and its initials. */
+const LEAD_FACE = `(() => {
+  const c = document.querySelector('.board-presence-deck .board-presence-agent');
+  if (!c) return null;
+  return { fill: getComputedStyle(c).backgroundColor, initials: c.textContent.trim() };
+})()`;
 
 /** The open card: whose, the where-line, and its buttons' words. */
 const READ_CARD = `(() => {
@@ -274,6 +289,7 @@ async function main(): Promise<void> {
       const hereRows = await readList(alice);
       // Bob here and the lead elsewhere: the same deck the doc draws below.
       const deckOnBoard = (await alice.evaluate(DECK_BOX)) as Box;
+      const leadOnBoard = (await alice.evaluate(LEAD_FACE)) as Face;
 
       step(`Alice follows Bob from his card at ${width}`);
       const card = await openCard(alice, bobKey);
@@ -305,6 +321,7 @@ async function main(): Promise<void> {
         async () => (await alice.evaluate(READ_BAR)) as Bar | null,
       );
       const deckOnDoc = (await alice.evaluate(DECK_BOX)) as Box;
+      const leadOnDoc = (await alice.evaluate(LEAD_FACE)) as Face;
       const docRows = await readList(alice);
 
       step(`Alice taps Stop on the bar at ${width}`);
@@ -374,6 +391,8 @@ async function main(): Promise<void> {
         went: { card: goCard, address: wentAddress },
         deckOnBoard,
         deckOnDoc,
+        leadOnBoard,
+        leadOnDoc,
       });
       await closePerson(alice);
       await closePerson(bob);

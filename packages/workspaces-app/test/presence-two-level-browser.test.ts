@@ -129,6 +129,16 @@ describe.skipIf(CHROME === null)('the two-level presence strip, in a browser', (
     }
   }, 60_000);
 
+  it('paints the lead the same colour, with the same initials, on the board and on a doc', () => {
+    for (const width of [1180, 430]) {
+      const { leadOnBoard, leadOnDoc } = round(width);
+      // CONTROL: the circle was read, and is filled.
+      expect(leadOnBoard.fill, `at ${width}`).toMatch(/^rgb\(/);
+      expect(leadOnDoc, `at ${width}`).toEqual(leadOnBoard);
+      expect(leadOnBoard.initials).toBe('H');
+    }
+  }, 60_000);
+
   it('draws the deck at the same place and size on the board and on a doc', () => {
     for (const width of [1180, 430]) {
       const { deckOnBoard, deckOnDoc } = round(width);
