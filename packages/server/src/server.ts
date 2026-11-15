@@ -11,6 +11,7 @@ import {
   parseThreadReviewItemId,
   pendingDeclaration,
 } from '@claude-workspaces/core';
+import { COLLAB_CORE_CHANGED } from '@claude-workspaces/core/workspace-presence';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
 import {
@@ -2167,6 +2168,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return false;
   };
   collabCoreSwitch.onChange(() => docHistory.scopeChanged());
+  // The board's open pages pick their presence strip from this, so they hear
+  // a switch at once, whoever made it. Pages only: no agent acts on which
+  // strip a page draws, and each frame costs a session a turn.
+  collabCoreSwitch.onChange((workspaceId) => {
+    const active = collabCoreSwitch.usesCore(workspaceId);
+    const frame = { event: COLLAB_CORE_CHANGED, workspaceId, active };
+    sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
+  });
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
