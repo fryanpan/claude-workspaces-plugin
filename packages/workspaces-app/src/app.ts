@@ -188,6 +188,19 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       }
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad.mounted(ctx);
+      // The round comment buttons, on a markdown doc of this board's, once
+      // its text is up. Never the page's content, so not in its first load.
+      if (board && ctx.docType === 'markdown' && !ctx.navDocId) {
+        void import('./doc/doc-comment-buttons.ts').then(({ mountCommentButtons }) =>
+          mountCommentButtons({
+            doc: document,
+            workspaceId: board,
+            docId: ctx.docId,
+            search: location.search,
+            scope: ctx.scope,
+          }),
+        );
+      }
       // A follow that brought this doc here shows its spot now the doc is up.
       presence?.follower.refresh();
       void joinPresence();
