@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 /**
- * `bun run deploy:staging [app] [--region <r>] [--url <u>] [--dry-run]`:
+ * `bun run deploy:staging [app] [--region <r>] [--url <u>] [--started-at <ms>] [--dry-run]`:
  * put this app on Fly at https://<app>.fly.dev and wait until it answers.
  *
  *   app        default `<package name>-staging`
  *   --region   where the app, its volume and its machine go; default sjc
  *   --url      the address to wait on; default https://<app>.fly.dev/health
+ *   --started-at  when the timed run began, in epoch ms; default now. The
+ *              app-kit-staging workflow passes the time before `new-app`.
  *   --dry-run  print the `fly` commands, run none, read no credential
  *
  * Steps: make the Fly app if the org has none by that name, make its data
@@ -16,12 +18,16 @@
  * Credentials: FLY_API_TOKEN and FLY_ORG from the environment. On a Mac,
  * either one that is missing is read from the Keychain entries
  * `fly-org-token` and `fly-org-slug`, stored the way the claude-workspaces
- * repo stores them (`packages/core/src/secret-name.ts`). The token goes into
- * the `fly` child's environment and nowhere else: never an argument, a log
- * line or a file.
+ * repo stores them (`packages/core/src/secret-name.ts`). With no org from
+ * either, the org is the one `fly orgs list` returns, when the token reaches
+ * exactly one. The token goes into the `fly` child's environment and nowhere
+ * else: never an argument, a log line or a file. In the claude-workspaces
+ * repo the token lives in CI, so deploys run from the `app-kit-staging`
+ * workflow (.github/workflows/app-kit-staging.yml).
  */
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -43,6 +49,8 @@ export interface Options {
   region: string;
   url: string;
   dryRun: boolean;
+  /** Epoch ms the timed run began; undefined means when this command began. */
+  startedAt?: number;
 }
 
 export function parseArgs(argv: string[], pkgName: string): Options {
@@ -50,17 +58,23 @@ export function parseArgs(argv: string[], pkgName: string): Options {
   let region = 'sjc';
   let url: string | undefined;
   let dryRun = false;
+  let startedAt: number | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] as string;
     if (arg === '--dry-run') dryRun = true;
     else if (arg === '--region') region = argv[++i] ?? '';
     else if (arg === '--url') url = argv[++i] ?? '';
-    else if (arg.startsWith('--')) throw new Error(`unknown option ${arg}`);
+    else if (arg === '--started-at') {
+      startedAt = Number(argv[++i]);
+      if (!Number.isSafeInteger(startedAt) || startedAt <= 0) {
+        throw new Error('--started-at takes epoch milliseconds');
+      }
+    } else if (arg.startsWith('--')) throw new Error(`unknown option ${arg}`);
     else app = arg;
   }
   if (!APP_NAME.test(app)) throw new Error(`not a Fly app name: ${JSON.stringify(app)}`);
   if (!REGION.test(region)) throw new Error(`not a Fly region: ${JSON.stringify(region)}`);
-  return { app, region, url: url || `https://${app}.fly.dev/health`, dryRun };
+  return { app, region, url: url || `https://${app}.fly.dev/health`, dryRun, startedAt };
 }
 
 /** A Keychain entry as the repo stores it: base64 under one account. */
@@ -76,8 +90,12 @@ export function keychainRead(name: string, security = 'security'): string {
 
 export interface Credentials {
   token: string;
-  org: string;
+  /** Undefined when neither FLY_ORG nor the Keychain names one: see `resolveOrg`. */
+  org?: string;
 }
+
+const WHERE_DEPLOYS_RUN =
+  'set FLY_API_TOKEN, or deploy from the app-kit-staging workflow in the claude-workspaces repo';
 
 /** FLY_API_TOKEN and FLY_ORG, each from the Keychain on a Mac when unset. */
 export function credentials(
@@ -85,14 +103,48 @@ export function credentials(
   platform: string = process.platform,
   security?: string,
 ): Credentials {
-  const fromKeychain = (entry: string, variable: string): string => {
-    if (platform !== 'darwin') throw new Error(`set ${variable}`);
-    return keychainRead(entry, security);
-  };
-  return {
-    token: env.FLY_API_TOKEN?.trim() || fromKeychain('fly-org-token', 'FLY_API_TOKEN'),
-    org: env.FLY_ORG?.trim() || fromKeychain('fly-org-slug', 'FLY_ORG'),
-  };
+  const envToken = env.FLY_API_TOKEN?.trim();
+  const envOrg = env.FLY_ORG?.trim();
+  if (platform !== 'darwin') {
+    if (!envToken) throw new Error(WHERE_DEPLOYS_RUN);
+    return { token: envToken, org: envOrg || undefined };
+  }
+  let token = envToken;
+  if (!token) {
+    try {
+      token = keychainRead('fly-org-token', security);
+    } catch (err) {
+      throw new Error(`${(err as Error).message}: ${WHERE_DEPLOYS_RUN}`);
+    }
+  }
+  let org = envOrg;
+  if (!org) {
+    try {
+      org = keychainRead('fly-org-slug', security);
+    } catch {
+      org = undefined;
+    }
+  }
+  return { token, org: org || undefined };
+}
+
+/** The org slugs in `fly orgs list --json`: a slug-to-name map, or rows with a slug. */
+function orgSlugs(json: string): string[] {
+  const parsed = JSON.parse(json || '{}') as unknown;
+  if (Array.isArray(parsed)) {
+    return parsed.map((row: Record<string, unknown>) => String(row.Slug ?? row.slug ?? ''));
+  }
+  return Object.keys(parsed as Record<string, unknown>);
+}
+
+/** `org` when given, else the one org the token reaches; refuses zero or several. */
+export function resolveOrg(fly: Fly, org: string | undefined): string {
+  if (org) return org;
+  const slugs = orgSlugs(ok(fly, ['orgs', 'list', '--json'])).filter(Boolean);
+  if (slugs.length === 1) return slugs[0] as string;
+  throw new Error(
+    `FLY_ORG is not set and the token reaches ${slugs.length} Fly orgs; set FLY_ORG to one of them`,
+  );
 }
 
 export interface FlyResult {
@@ -152,9 +204,10 @@ function names(json: string): string[] {
 
 export interface Deps {
   fly: Fly;
-  org: string;
+  /** Undefined: the one org the token reaches (`resolveOrg`). */
+  org?: string;
   log: (line: string) => void;
-  /** When the command started, for the elapsed time it prints. */
+  /** When the command started; `opts.startedAt` wins when given. */
   startedAt: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -165,10 +218,11 @@ export async function deployStaging(opts: Options, deps: Deps): Promise<void> {
   const { fly, log } = deps;
   const { app, region } = opts;
   const origin = `https://${app}.fly.dev`;
+  const org = resolveOrg(fly, deps.org);
 
-  if (!names(ok(fly, ['apps', 'list', '--org', deps.org, '--json'])).includes(app)) {
+  if (!names(ok(fly, ['apps', 'list', '--org', org, '--json'])).includes(app)) {
     log(`making Fly app ${app}`);
-    ok(fly, ['apps', 'create', app, '--org', deps.org]);
+    ok(fly, ['apps', 'create', app, '--org', org]);
   }
   if (JSON.parse(ok(fly, ['volumes', 'list', '--app', app, '--json']) || '[]').length === 0) {
     ok(fly, [
@@ -227,10 +281,12 @@ export async function deployStaging(opts: Options, deps: Deps): Promise<void> {
     if (now() > deadline) throw new Error(`${opts.url} still answers ${status || 'nothing'}`);
     await sleep(POLL_EVERY_MS);
   }
-  const s = Math.round((now() - deps.startedAt) / 1000);
-  log(
-    `${origin} answers 200, ${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s after the command started`,
-  );
+  const s = Math.round((now() - (opts.startedAt ?? deps.startedAt)) / 1000);
+  const line = `${origin} answers 200, ${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s after the command started`;
+  log(line);
+  // In a GitHub Actions run, the elapsed time also goes on the run's page.
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (summary) appendFileSync(summary, `${line}\n`);
 }
 
 if (import.meta.main) {

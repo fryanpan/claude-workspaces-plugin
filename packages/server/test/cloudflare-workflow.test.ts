@@ -40,6 +40,7 @@ const load = (name: string) =>
   Bun.YAML.parse(readFileSync(join(WORKFLOWS, name), 'utf8')) as Workflow;
 const wf = load('cloudflare.yml');
 const fly = load('fly.yml');
+const appKit = load('app-kit-staging.yml');
 
 type Ctx = Record<string, string>;
 
@@ -220,10 +221,31 @@ describe('fly.yml', () => {
     );
     expect(steps.find((st) => st.run?.includes('bun install'))?.env).toBeUndefined();
     // A secret spelled inside a script would reach the log's command echo.
-    for (const w of [fly, wf]) {
+    for (const w of [fly, wf, appKit]) {
       for (const job of Object.values(w.jobs)) {
         for (const st of job.steps ?? []) expect(st.run ?? '').not.toContain('secrets.');
       }
     }
+  });
+});
+
+describe('app-kit-staging.yml', () => {
+  it('deploys on a dispatch on main, in cloudflare-prod, and on nothing else', () => {
+    expect(Object.keys(appKit.on)).toEqual(['workflow_dispatch']);
+    expect(runs('deploy', event('workflow_dispatch', MAIN), appKit)).toBe(true);
+    expect(runs('deploy', event('workflow_dispatch', 'refs/heads/riverbend'), appKit)).toBe(false);
+    expect(appKit.jobs.deploy?.environment).toBe('cloudflare-prod');
+  });
+
+  it('hands the Fly token to the deploy step alone, and the clock starts before new-app', () => {
+    const steps = appKit.jobs.deploy?.steps ?? [];
+    const values = (env?: Record<string, string>) => Object.values(env ?? {}).join(' ');
+    expect(values(appKit.jobs.deploy?.env)).not.toMatch(/secrets\./);
+    const holders = steps.filter((st) => /secrets\./.test(values(st.env)));
+    expect(holders.map((st) => st.name)).toEqual(['Deploy to staging and wait for a 200']);
+    const at = (name: string) => steps.findIndex((st) => st.name === name);
+    expect(at('Start the clock')).toBeGreaterThanOrEqual(0);
+    expect(at('Start the clock')).toBeLessThan(at('Make the app'));
+    expect(holders[0]?.run).toContain('--started-at "$STARTED_AT"');
   });
 });

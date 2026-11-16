@@ -26,6 +26,7 @@ const FAKE_TOKEN = 'stub-token-riverbend';
 let parent: string;
 let appDir: string;
 let bin: string;
+let emptyKeychainBin: string;
 
 /** A stand-in for `fly`: logs each call's arguments, its stdin and whether
  *  it saw the token, and answers each list from STUB_<KIND>. */
@@ -36,6 +37,7 @@ case "$1 $2" in
   "apps list") echo "\${STUB_APPS:-[]}" ;;
   "volumes list") echo "\${STUB_VOLUMES:-[]}" ;;
   "secrets list") echo "\${STUB_SECRETS:-[]}" ;;
+  "orgs list") echo "\${STUB_ORGS:-[]}" ;;
   "secrets import") cat >> "$STUB_DIR/fly-stdin" ;;
 esac
 exit 0
@@ -57,9 +59,21 @@ beforeAll(() => {
   for (const [name, body] of [
     ['fly', FLY_STUB],
     ['security', SECURITY_STUB],
+    // A Keychain with no such entry: `security` exits 44.
+    ['security-empty', '#!/bin/sh\nexit 44\n'],
   ] as const) {
     writeFileSync(join(bin, name), body);
     chmodSync(join(bin, name), 0o755);
+  }
+  // The same fly, with a Keychain that holds nothing: a Mac whose org is not stored.
+  emptyKeychainBin = join(parent, 'bin-empty-keychain');
+  mkdirSync(emptyKeychainBin);
+  for (const [name, body] of [
+    ['fly', FLY_STUB],
+    ['security', '#!/bin/sh\nexit 44\n'],
+  ] as const) {
+    writeFileSync(join(emptyKeychainBin, name), body);
+    chmodSync(join(emptyKeychainBin, name), 0o755);
   }
 }, 120_000);
 
@@ -268,5 +282,70 @@ describe('credentials', () => {
       org: 'o',
     });
     expect(() => credentials({ FLY_ORG: 'o' }, 'linux')).toThrow('set FLY_API_TOKEN');
+    // CI: a token and no org is not an error here; the org is resolved from fly.
+    expect(credentials({ FLY_API_TOKEN: 't' }, 'linux')).toEqual({ token: 't', org: undefined });
+  });
+
+  it('on a Mac with no Keychain entry, says deploys run from the workflow', () => {
+    expect(() => credentials({}, 'darwin', join(bin, 'security-empty'))).toThrow(
+      /no entry fly-org-token.*app-kit-staging workflow/,
+    );
+    expect(credentials({ FLY_API_TOKEN: 't' }, 'darwin', join(bin, 'security-empty'))).toEqual({
+      token: 't',
+      org: undefined,
+    });
+  });
+});
+
+describe('deploy:staging with no org named', () => {
+  const run = (orgs: string, dir: string, url: string, extra: string[] = [], env = {}) =>
+    deploy(['--url', url, ...extra], dir, {
+      FLY_API_TOKEN: FAKE_TOKEN,
+      STUB_ORGS: orgs,
+      PATH: `${emptyKeychainBin}:${process.env.PATH}`,
+      ...env,
+    });
+
+  it('deploys into the one org the token reaches, and times from --started-at', async () => {
+    const dir = stubDir();
+    const probe = health(0);
+    const summary = join(dir, 'summary.md');
+    try {
+      // The timed run began 125s before this command did (new-app, bun install).
+      const startedAt = String(Date.now() - 125_000);
+      const r = await run(
+        '{"harborlight":"Harborlight"}',
+        dir,
+        probe.url,
+        ['--started-at', startedAt],
+        {
+          GITHUB_STEP_SUMMARY: summary,
+        },
+      );
+      expect(r.status).toBe(0);
+      const calls = read(dir, 'fly-args').trim().split('\n');
+      expect(calls[0]).toBe('orgs list --json');
+      expect(calls).toContain('apps create riverbend-notes-staging --org harborlight');
+      expect(r.out).toMatch(/answers 200, 2m\d\ds after the command started/);
+      expect(read(dir, 'summary.md')).toMatch(/answers 200, 2m\d\ds after/);
+    } finally {
+      probe.stop();
+    }
+  }, 30_000);
+
+  it('refuses when the token reaches several orgs, or none, and makes nothing', async () => {
+    for (const orgs of ['{"harborlight":"Harborlight","saltmarsh":"Saltmarsh"}', '{}']) {
+      const dir = stubDir();
+      const r = await run(orgs, dir, 'http://127.0.0.1:9/health');
+      expect(r.status).toBe(1);
+      expect(r.out).toContain('set FLY_ORG');
+      expect(read(dir, 'fly-args').trim()).toBe('orgs list --json');
+    }
+  });
+
+  it('refuses a --started-at that is not epoch milliseconds', async () => {
+    const r = await deploy(['--dry-run', '--started-at', 'yesterday'], stubDir());
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('--started-at takes epoch milliseconds');
   });
 });
