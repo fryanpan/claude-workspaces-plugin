@@ -1,4 +1,3 @@
-import { presenceIdentity } from '../board/board-presence-model.ts';
 /**
  * The colour each person and agent wears in the presence strip: its deck
  * circle, its row in the list, its card and the follow bar.
@@ -23,6 +22,7 @@ import { presenceIdentity } from '../board/board-presence-model.ts';
  * an agent's label changes from its id to the name it points under, and its
  * colour must not change with it.
  */
+import { presenceIdentity } from '../board/board-presence-model.ts';
 import { type RoomStates, agentSpotsFromStates, peopleFromStates } from './follow-model.ts';
 
 /** Far apart in hue, and each at least 4.5:1 against white initials. */
