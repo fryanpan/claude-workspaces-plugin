@@ -41,6 +41,7 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { FORGET_TAB } from './lead-chat-fresh-tab.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -345,7 +346,7 @@ async function main(): Promise<void> {
         step(`${how}, ${link} link, at ${width}`);
         // A fresh tab state for each case: nothing kept from the last one.
         for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
+          if (i === 1) await cdp.evaluate(FORGET_TAB);
           const loaded = cdp.once('Page.loadEventFired');
           await cdp.send('Page.navigate', { url: homeUrl });
           await loaded;

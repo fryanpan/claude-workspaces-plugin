@@ -45,6 +45,7 @@ import {
   dumpRunning,
   onceWithin,
 } from './chrome-stall.ts';
+import { FORGET_TAB } from './lead-chat-fresh-tab.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -365,7 +366,7 @@ async function main(): Promise<void> {
       for (const [link, gesture] of plans) {
         step(`${link} by ${gesture} at ${width}`);
         for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
+          if (i === 1) await cdp.evaluate(FORGET_TAB);
           const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
           await cdp.send('Page.navigate', { url: homeUrl });
           await loaded;
