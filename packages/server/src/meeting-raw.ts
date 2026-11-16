@@ -144,6 +144,15 @@ export interface MeetingJsonSegment {
    * against the clock has to know where the silence it will not find is.
    */
   gaps?: MeetingGap[];
+  /**
+   * The recording had settled no turn and lost no capture when it was last
+   * flushed, so the transcript file holds no block for it yet. A meeting the
+   * lead chat starts ends its first leg within a second (the page moves to
+   * the notes doc), and writing that leg's block then put "no settled turns"
+   * at the head of a meeting whose later legs held every word. The next
+   * flush that finds something to say writes the whole segment instead.
+   */
+  noTurnsYet?: true;
 }
 
 /**
@@ -631,7 +640,7 @@ export function flushRawSegments(args: {
     updatedAt: 0,
     segments: [],
   };
-  const written = new Set(json.segments.map((s) => s.meetingId));
+  const written = new Set(json.segments.filter((s) => !s.noTurnsYet).map((s) => s.meetingId));
   const records: MeetingRecord[] = listMeetings(dataDir, docId);
   let appended = '';
   records.forEach((record, i) => {
@@ -727,25 +736,30 @@ export function flushRawSegments(args: {
       return;
     }
     const n = record.segment ?? i + 1;
+    // A leg that resumed counts only its own bytes; the files hold them all.
     const audio =
-      args.ended?.meetingId === record.meetingId
+      args.ended?.meetingId === record.meetingId && args.ended.resumedFrom === undefined
         ? args.ended.audio
         : audioOnDisk(dir, n, record.sampleRate);
     const source: MeetingSource = parseMeetingSource(record.source) ?? 'mic';
-    appended += formatRawSegment({
-      n,
-      startedAt: record.startedAt,
-      endedAt: record.endedAt,
-      engine: record.engine,
-      mode: record.mode,
-      source,
-      audio,
-      turns: readTranscript(dataDir, docId, record.meetingId),
-      ...(record.gaps && record.gaps.length > 0 ? { gaps: record.gaps } : {}),
-      names: record.speakers ?? {},
-      ...(record.participant !== undefined ? { participant: record.participant } : {}),
-    });
-    json.segments.push({
+    const turns = readTranscript(dataDir, docId, record.meetingId);
+    const noTurnsYet = turns.length === 0 && (record.gaps ?? []).length === 0;
+    if (!noTurnsYet) {
+      appended += formatRawSegment({
+        n,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        engine: record.engine,
+        mode: record.mode,
+        source,
+        audio,
+        turns,
+        ...(record.gaps && record.gaps.length > 0 ? { gaps: record.gaps } : {}),
+        names: record.speakers ?? {},
+        ...(record.participant !== undefined ? { participant: record.participant } : {}),
+      });
+    }
+    const entry: MeetingJsonSegment = {
       n,
       meetingId: record.meetingId,
       startedAt: record.startedAt,
@@ -756,8 +770,13 @@ export function flushRawSegments(args: {
       ...(record.participant !== undefined ? { participant: record.participant } : {}),
       audio,
       ...(record.gaps && record.gaps.length > 0 ? { gaps: record.gaps } : {}),
-    });
-    written.add(record.meetingId);
+      ...(noTurnsYet ? { noTurnsYet: true as const } : {}),
+    };
+    // In place over the entry an earlier flush left with no turns yet.
+    const pendingAt = json.segments.findIndex((sg) => sg.meetingId === record.meetingId);
+    if (pendingAt >= 0) json.segments[pendingAt] = entry;
+    else json.segments.push(entry);
+    if (!noTurnsYet) written.add(record.meetingId);
   });
   if (appended) {
     mkdirSync(dir, { recursive: true });

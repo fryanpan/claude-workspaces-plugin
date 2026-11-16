@@ -338,7 +338,7 @@ function wordlessItems(
 
 /** Whether any text under this block carries an unanswered suggestion mark —
  *  the offered words of a proposal, or the strike on what it would replace. */
-function holdsASuggestion(block: Y.XmlElement): boolean {
+export function holdsASuggestion(block: Y.XmlElement): boolean {
   const stack: Array<Y.XmlElement | Y.XmlText> = [block];
   while (stack.length > 0) {
     const node = stack.pop();

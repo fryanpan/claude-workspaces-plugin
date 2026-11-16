@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.384";
+var version2 = "0.1.385";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -20171,6 +20171,9 @@ var leadChatFilesClient = (http) => typedClient(http);
 var workspaceBoardClient = (http) => typedClient(http);
 var workspaceAgentsClient = (http) => typedClient(http);
 var dispatchesClient = (http) => typedClient(http);
+var docFileClient = (http) => typedClient(http);
+var leadMeetingClient = (http) => typedClient(http);
+var agentMachineClient = (http) => typedClient(http);
 
 // packages/mcp/src/tools/components.ts
 var str = (v) => typeof v === "string" ? v : "";
@@ -22492,6 +22495,12 @@ async function handleWorkspaceTool(name, a, ctx) {
   const onBoard = () => workspaceBoardClient(http).workspaces[":ws"];
   const roster = () => workspaceAgentsClient(http).workspaces[":ws"];
   const lanes = () => dispatchesClient(http).workspaces[":ws"];
+  const doc2 = () => docFileClient(http).workspaces[":ws"].docs[":docId"];
+  const docOf = (workspaceId, docId) => ({
+    ...wsOf(workspaceId),
+    docId: encodeURIComponent(docId)
+  });
+  const repos = () => agentMachineClient(http).api.repos;
   switch (name) {
     case "create_workspace": {
       const {
@@ -22742,24 +22751,27 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "set_github_subscriptions": {
       const { workspaceId, subscriptions } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/github-subscriptions`, {
-        subscriptions
-      }));
+      const res = await onBoard()["github-subscriptions"].$put({
+        param: wsOf(workspaceId),
+        json: { subscriptions }
+      });
+      return ok2(await res.json());
     }
     case "set_board_embeds": {
       const { workspaceId, embeds } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/embeds`, { embeds }));
+      const res = await onBoard().embeds.$put({ param: wsOf(workspaceId), json: { embeds } });
+      return ok2(await res.json());
     }
     case "register_worktree": {
       const { path } = a;
-      return ok2(await http("POST", "/api/repos/checkouts", { path }));
+      return ok2(await (await repos().checkouts.$post({ json: { path } })).json());
     }
     case "list_worktrees": {
-      return ok2(await http("GET", "/api/repos"));
+      return ok2(await (await repos().$get()).json());
     }
     case "unregister_worktree": {
       const { path } = a;
-      return ok2(await http("DELETE", "/api/repos/checkouts", { path }));
+      return ok2(await (await repos().checkouts.$delete({ json: { path } })).json());
     }
     case "mount_folder": {
       const { path, privacy } = a;
@@ -22822,21 +22834,28 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "set_doc_title": {
       const { workspaceId, docId, title } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`, { title }));
+      const res = await doc2().title.$put({ param: docOf(workspaceId, docId), json: { title } });
+      return ok2(await res.json());
     }
     case "get_doc_metadata":
     case "set_doc_metadata": {
       const { workspaceId, docId, fields } = a;
-      const path = `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/metadata`;
-      return ok2(name === "get_doc_metadata" ? await http("GET", path) : await http("PUT", path, { fields: fields ?? {} }));
+      const param = docOf(workspaceId, docId);
+      const res = name === "get_doc_metadata" ? await doc2().metadata.$get({ param }) : await doc2().metadata.$put({ param, json: { fields: fields ?? {} } });
+      return ok2(await res.json());
     }
     case "move_doc_to_project": {
       const { workspaceId, docId, relPath } = a;
-      return ok2(await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move`, { relPath }));
+      const res = await doc2().move.$post({ param: docOf(workspaceId, docId), json: { relPath } });
+      return ok2(await res.json());
     }
     case "move_doc_file": {
       const { workspaceId, docId, path, mode } = a;
-      return ok2(await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move-file`, { path, mode }));
+      const res = await doc2()["move-file"].$post({
+        param: docOf(workspaceId, docId),
+        json: { path, mode }
+      });
+      return ok2(await res.json());
     }
     case "leave_workspace": {
       const { workspaceId } = a;
@@ -22895,11 +22914,10 @@ async function handleWorkspaceTool(name, a, ctx) {
         return err2("workspaceId is required");
       const place = placeOf(a);
       try {
-        const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
-          agentId: AUTHOR.id,
-          agentName: AUTHOR.name,
-          ...place
-        });
+        const res = await (await personClient(http).workspaces[":ws"].point.$post({
+          param: wsOf(workspaceId),
+          json: { agentId: AUTHOR.id, agentName: AUTHOR.name, ...place }
+        })).json();
         return ok2({
           pointed: true,
           spot: res.spot,
@@ -22920,7 +22938,10 @@ async function handleWorkspaceTool(name, a, ctx) {
       if (words === "")
         return err2("text is empty — say the line");
       try {
-        const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`, { agentId: AUTHOR.id, text: words });
+        const res = await (await leadMeetingClient(http).workspaces[":ws"]["lead-chat"].meeting.say.$post({
+          param: wsOf(workspaceId),
+          json: { agentId: AUTHOR.id, text: words }
+        })).json();
         if (res.said === false) {
           return ok2({ said: false, reason: res.lapsed ?? "lapsed", note: res.hint ?? "" });
         }
@@ -22939,7 +22960,14 @@ async function handleWorkspaceTool(name, a, ctx) {
     case "coach_moment": {
       const { goal, matched, observed, line } = a;
       try {
-        const r = await http("POST", "/coach/moments", { goal, matched, observed, line });
+        const r = await (await agentMachineClient(http).coach.moments.$post({
+          json: {
+            goal,
+            matched,
+            observed,
+            line
+          }
+        })).json();
         return ok2({ raised: true, id: r.id });
       } catch (e) {
         const m = String(e).match(/→ (409|422): (.*)$/s);
@@ -22967,31 +22995,33 @@ async function handleWorkspaceTool(name, a, ctx) {
       if (goal !== undefined && goal !== null && typeof goal !== "string") {
         return err2("goal is a plan goal id, urgent, not-this-week or drop, or null");
       }
-      const body = {
-        agentId: AUTHOR.id,
-        key,
-        ...rank !== undefined ? { rank } : {},
-        ...goal !== undefined ? { goal } : {}
-      };
       try {
-        const res = await http("POST", "/api/review-queue/rank", body);
+        const sent = await agentMachineClient(http).api["review-queue"].rank.$post({
+          json: {
+            agentId: AUTHOR.id,
+            key,
+            rank,
+            goal
+          }
+        });
+        const res = await sent.json();
         return ok2({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
         if (!m)
           throw e;
-        const body2 = (() => {
+        const body = (() => {
           try {
             return JSON.parse(m[2] ?? "");
           } catch {
             return {};
           }
         })();
-        return ok2({ ranked: false, reason: body2.error ?? "refused", message: body2.message });
+        return ok2({ ranked: false, reason: body.error ?? "refused", message: body.message });
       }
     }
     case "request_plugin_refresh": {
-      return ok2(await http("POST", "/api/plugin/refresh"));
+      return ok2(await (await agentMachineClient(http).api.plugin.refresh.$post()).json());
     }
     case "list_attachments":
     case "list_agents": {
