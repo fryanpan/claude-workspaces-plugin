@@ -3,9 +3,9 @@
  * Pack `@claude-workspaces/app-kit` into a tarball an app outside this repo
  * can install: `bun run --cwd packages/app-kit pack [outDir]`.
  *
- * `src/auth/` is this package's own and is packed as it is. Its two other
- * source files point back into this repo, so the packed
- * copy replaces them with what they point at:
+ * The folders in `OWN_FOLDERS` are this package's own and are packed as
+ * they are. Its two other source paths point back into this repo, so the
+ * packed copy replaces them with what they point at:
  *
  *   src/collab/   becomes the files of `packages/core/src/collab/`, which
  *                 import only yjs, y-protocols and lib0
@@ -22,6 +22,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const PKG_ROOT = resolve(import.meta.dirname, '..');
+/** The folders under `src/` that are this package's own, packed as they are. */
+export const OWN_FOLDERS = ['auth', 'client', 'do'];
 const REPO = resolve(PKG_ROOT, '../..');
 
 interface Manifest {
@@ -29,6 +31,7 @@ interface Manifest {
   version: string;
   dependencies: Record<string, string>;
   scripts?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 }
 
 export function kitManifest(): Manifest {
@@ -44,7 +47,7 @@ export function tarballName(version: string): string {
 export function packKit(outDir: string): string {
   const stage = mkdtempSync(join(tmpdir(), 'app-kit-pack-'));
   try {
-    const { scripts: _inRepo, ...manifest } = kitManifest();
+    const { scripts: _inRepo, devDependencies: _devOnly, ...manifest } = kitManifest();
     const { '@claude-workspaces/core': _repoOnly, ...dependencies } = manifest.dependencies;
     writeFileSync(
       join(stage, 'package.json'),
@@ -52,8 +55,13 @@ export function packKit(outDir: string): string {
     );
     cpSync(join(PKG_ROOT, 'README.md'), join(stage, 'README.md'));
     cpSync(join(REPO, 'LICENSE'), join(stage, 'LICENSE'));
-    // Files that live in this package (src/auth/) go as they are.
-    cpSync(join(PKG_ROOT, 'src/auth'), join(stage, 'src/auth'), { recursive: true });
+    // Folders that live in this package go as they are.
+    for (const own of OWN_FOLDERS) {
+      cpSync(join(PKG_ROOT, 'src', own), join(stage, 'src', own), {
+        recursive: true,
+        filter: (src) => !src.endsWith('.test.ts'),
+      });
+    }
     cpSync(join(REPO, 'packages/core/src/collab'), join(stage, 'src/collab'), {
       recursive: true,
       filter: (src) => !src.endsWith('.test.ts'),
