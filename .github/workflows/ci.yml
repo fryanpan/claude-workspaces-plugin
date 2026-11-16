@@ -63,8 +63,14 @@ name: CI
 #      chunk per file (scripts/test-server.ts): 76 MB per shard became about
 #      1.6 MB, which `coverage` parsed in 6.5s on every run.
 #   3. The duration table is the median of five runs, refreshed for the two
-#      shard kinds, and the server suite is three shards: server (1) was the
-#      slowest job in 5 of the 22 runs.
+#      shard kinds.
+#
+# The server suite stays at two shards. Three were tried, and they moved
+# server line coverage by 118 lines in page-nudges.ts with the same tests:
+# bun's coverage of a file depends on which test files share its process
+# (page-nudges-live.test.ts alone reports 8 lines, beside board-lock.test.ts
+# 130), and a third shard regroups every chunk. Main flips the same way when
+# an added test file shifts the chunks.
 #
 # WHAT DID NOT CHANGE. Every gate that ran before runs now — `bun run
 # verify:parity` is the enforcement, and it reads EVERY job in this file
@@ -369,10 +375,8 @@ jobs:
   # two cores' worth of CPU.
   #
   # One runner was enough at 412 files. At 1,300 the eight processes were busy
-  # end to end (933s of chunk time inside 120s), so it went to two runners,
+  # end to end (933s of chunk time inside 120s), so it is two runners now,
   # each taking every other file of the same interleaved list (`--shard`).
-  # Two ran 65-70s of tests each and were the slowest job in 5 of 22 runs, so
-  # it is three now, each taking every third file.
   server:
     runs-on: ubuntu-latest
     permissions:
@@ -381,7 +385,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add a shard here and the `ci` job's expected lcov count below too.
-        shard: [1, 2, 3]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -460,8 +464,8 @@ jobs:
           cat .lcov/lcov-server-*/lcov.info > .coverage/server/lcov.info
           client=$(ls -d .lcov/lcov-client-* | wc -l)
           server=$(ls -d .lcov/lcov-server-* | wc -l)
-          if [ "$client" -ne 19 ] || [ "$server" -ne 3 ]; then
-            echo "::error::merged $client client and $server server lcov file(s), expected 19 (5 unit + 14 browser) and 3 — the coverage number would be measured from part of the suite."
+          if [ "$client" -ne 19 ] || [ "$server" -ne 2 ]; then
+            echo "::error::merged $client client and $server server lcov file(s), expected 19 (5 unit + 14 browser) and 2 — the coverage number would be measured from part of the suite."
             exit 1
           fi
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
