@@ -4,6 +4,13 @@ import type { Env } from './env.ts';
 export type { Mail, MailKind, Mailer } from '@claude-workspaces/app-kit/auth';
 export { composeMail } from '@claude-workspaces/app-kit/auth';
 
+/** What the mailer needs of fetch; tests pass their own. */
+export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
+
+// The global fetch called through a wrapper, never as a detached reference,
+// which the Workers runtime can refuse as an illegal invocation.
+const globalFetch: Fetcher = (url, init) => fetch(url, init);
+
 /** Resend's send endpoint (resend.com/docs/api-reference/emails/send-email). */
 export const RESEND_SEND_URL = 'https://api.resend.com/emails';
 
@@ -17,7 +24,7 @@ export const RESEND_SEND_URL = 'https://api.resend.com/emails';
  *
  * To use another provider, replace the Resend branch.
  */
-export function mailerFromEnv(env: Env, fetcher: typeof fetch = fetch): Mailer {
+export function mailerFromEnv(env: Env, fetcher: Fetcher = globalFetch): Mailer {
   if (env.MAIL_TRANSPORT === 'log') {
     return {
       async send(mail) {
@@ -36,7 +43,7 @@ export function mailerFromEnv(env: Env, fetcher: typeof fetch = fetch): Mailer {
 }
 
 /** Sends each mail as plain text through Resend. A refusal throws, naming the status only. */
-export function resendMailer(key: string, from: string, fetcher: typeof fetch = fetch): Mailer {
+export function resendMailer(key: string, from: string, fetcher: Fetcher = globalFetch): Mailer {
   return {
     async send(mail: Mail) {
       const res = await fetcher(RESEND_SEND_URL, {
