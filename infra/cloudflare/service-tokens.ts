@@ -31,19 +31,26 @@ export interface TokenServices {
   secret: string;
 }
 
-/** The Keychain services a token's client id and secret are stored under. */
-export function tokenServices(cloudflareName: string): TokenServices {
+/** A token's name as a service-name word: `agent moi` -> `agent-moi`. */
+export function tokenSlug(cloudflareName: string): string {
   const slug = cloudflareName
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (!slug)
     throw new Error(`the service token name "${cloudflareName}" names no Keychain service`);
+  return slug;
+}
+
+/** The Keychain services a token's client id and secret are stored under. */
+export function tokenServices(cloudflareName: string): TokenServices {
+  const slug = tokenSlug(cloudflareName);
   return { clientId: `cw-${slug}-access-client-id`, secret: `cw-${slug}-access-secret` };
 }
 
-const CLIENT_ID = /^[A-Za-z0-9._-]{1,256}\.access$/;
-const SECRET = /^[A-Za-z0-9]{16,256}$/;
+/** The shapes Cloudflare gives an Access client id and secret. */
+export const CLIENT_ID = /^[A-Za-z0-9._-]{1,256}\.access$/;
+export const SECRET = /^[A-Za-z0-9]{16,256}$/;
 const SERVICE = /^[A-Za-z0-9._-]{1,128}$/;
 const ACCOUNT = 'claude-workspaces';
 
@@ -143,6 +150,26 @@ export function keychainHasService(service: string, bin = 'security'): boolean {
 }
 
 /**
+ * The line `security -i` reads on stdin to store one value, after checking
+ * the service name and the value's shape. Throws naming the service, never
+ * the value.
+ */
+export function keychainAddLine(
+  service: string,
+  value: string,
+  kind: 'id' | 'secret',
+  replace: boolean,
+): string {
+  if (!SERVICE.test(service)) throw new Error(`${service} is not a Keychain service name`);
+  if (!(kind === 'id' ? CLIENT_ID : SECRET).test(value)) {
+    throw new Error(
+      `the value for ${service} is not shaped like an Access ${kind === 'id' ? 'client id' : 'secret'}`,
+    );
+  }
+  return `add-generic-password${replace ? ' -U' : ''} -a ${ACCOUNT} -s ${service} -w "${value}"\n`;
+}
+
+/**
  * Add one item, refusing to replace an existing one unless `replace` (`-U`,
  * for a rotated secret). The value is checked against the shape Cloudflare
  * gives it, so it cannot break out of the quoted `-w` argument of the line
@@ -155,17 +182,12 @@ export function keychainAdd(
   bin = 'security',
   replace = false,
 ): void {
-  if (!SERVICE.test(service)) throw new Error(`${service} is not a Keychain service name`);
-  if (!(kind === 'id' ? CLIENT_ID : SECRET).test(value)) {
-    throw new Error(
-      `the value for ${service} is not shaped like an Access ${kind === 'id' ? 'client id' : 'secret'}`,
-    );
-  }
+  const line = keychainAddLine(service, value, kind, replace);
   if (!replace && keychainHasService(service, bin)) {
     throw new Error(`the Keychain already holds ${service}`);
   }
   const r = spawnSync(bin, ['-i'], {
-    input: `add-generic-password${replace ? ' -U' : ''} -a ${ACCOUNT} -s ${service} -w "${value}"\n`,
+    input: line,
     stdio: ['pipe', 'ignore', 'ignore'],
     env: process.env,
   });

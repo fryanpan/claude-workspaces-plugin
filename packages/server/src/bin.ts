@@ -12,6 +12,7 @@ import { homeRemotesFromEnv } from './home-remotes.ts';
 import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
 import * as bind from './port-bind.ts';
+import { isProjectServer } from './project-profile.ts';
 import { lanHostnames, tailscaleHost } from './public-host.ts';
 import { reservedPortError } from './reserved-ports.ts';
 import { storeSecret } from './secret-store.ts';
@@ -27,6 +28,7 @@ import {
 } from './server-starts.ts';
 import { createServer } from './server.ts';
 import { defaultUserSettingsPath } from './settings-allow-file.ts';
+import { startTokenDrop } from './token-drop/token-drop-start.ts';
 
 // Before anything else, because it only governs opens that come after it and
 // the first bound-file read is not far behind. Under launchd the default is
@@ -530,6 +532,13 @@ if (pluginRefresher) {
   );
 }
 
+// A token CI rotated arrives sealed in the state bucket; prod alone takes it
+// into the Keychain (token-drop/token-drop-start.ts), so staging never writes it.
+const tokenDrop =
+  deployer && process.platform === 'darwin' && !isProjectServer(process.env)
+    ? startTokenDrop({ dataDir, env: process.env, log: (l) => console.log(`[token-drop] ${l}`) })
+    : null;
+
 // Graceful shutdown
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {
@@ -543,6 +552,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     // on a process that is on its way out.
     summarizer.dispose();
     if (pluginRefreshTimer) clearInterval(pluginRefreshTimer);
+    tokenDrop?.stop();
     await handle.stop();
     await flushServerSentry();
     // Non-zero after a deploy asked for a restart, so the supervisor exits

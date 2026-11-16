@@ -1,0 +1,70 @@
+# Rotate one Access service token's secret, with no passkey tap and no step
+# for a person (docs/process/keeper.md, "Rotating a service token in CI").
+#
+#   dispatch  on main only. Any other branch rotates nothing.
+#
+# infra/cloudflare/ci-rotate-token.ts rotates the named token (the old secret
+# keeps working for 24 hours), masks the new pair, seals it to the Mac's
+# public key (infra/cloudflare/token-drop.pub) and writes the sealed object
+# to the state bucket. Prod on the Mac takes it into the Keychain within 15
+# minutes. It refuses a token rotated under 24 hours ago unless `force`.
+#
+# Secrets, in the `cloudflare-prod` environment (deployments from main only),
+# on the one step that needs them; `bun install` and the setup actions never
+# see them:
+#   CLOUDFLARE_API_TOKEN                     the deploy token; it holds
+#                                            Access: Service Tokens Write
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   the state bucket's write key
+#                                            (optional: ci-credentials.ts
+#                                            derives it from the token)
+# The repo and its logs are public: nothing here prints a value, and the
+# sealed object opens only with the private key in the Mac's Keychain.
+
+name: rotate-token
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: The service token's name in Cloudflare
+        required: true
+        default: agent moi
+      force:
+        description: Rotate even if the last rotation was under 24 hours ago
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  rotate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: cloudflare-prod
+    concurrency:
+      group: rotate-token
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Rotate and seal
+        # The inputs reach the script as environment variables, never as
+        # text spliced into the shell line.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+          TOKEN_NAME: ${{ inputs.name }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -- "$TOKEN_NAME"
+          if [ "$FORCE" = true ]; then set -- "$@" --force; fi
+          bun infra/cloudflare/ci-credentials.ts --account-id -- bun infra/cloudflare/ci-rotate-token.ts "$@"
