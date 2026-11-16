@@ -73,6 +73,7 @@ import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
+import { FileDirectMessageStore } from './direct-messages.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
 import { confirmGrantFolder } from './doc-components-agent.ts';
@@ -3423,6 +3424,26 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    directMessages: {
+      store: new FileDirectMessageStore(dataDir),
+      // Every active person this board admits, the owner included.
+      peopleOn: (boardId) =>
+        identities
+          .list()
+          .filter(
+            (rec) =>
+              rec.kind === 'person' &&
+              rec.status === 'active' &&
+              !rec.mergedInto &&
+              personAccessOn(boardId, rec) !== null,
+          )
+          .map((rec) => ({ id: rec.id, name: rec.displayName })),
+      leadAgentOf: (personId) => personAgentLinks.leadAgentOf(personId),
+      agentName: (agentId) => identities.get(agentId)?.displayName ?? agentId,
+      sse,
+      j,
+      safeJson,
+    },
     collabRooms,
     collabCoreSwitch,
     agentSpots,

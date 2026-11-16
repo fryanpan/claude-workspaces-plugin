@@ -689,6 +689,11 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // (`routes/upgrade-stream.ts`). Every comment on it is on a board that
   // person is a member of (`addressees.ts`).
   'me/events:stream': ['GET'],
+  // One person's direct messages with another person on this board
+  // (`routes/direct-messages.ts`). The route answers only for the person the
+  // request proved, and only about people this same board admits, so a
+  // member reaches nobody here they could not already see in its audience.
+  'me/dm': ['GET', 'POST'],
 };
 
 /** The per-task verbs, under `/workspaces/<id>/tasks/<taskId>/`. See BOARD_MEMBER_ROUTES. */
