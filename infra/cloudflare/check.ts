@@ -2,7 +2,8 @@
 /**
  * `bun run check:cloudflare-tf`: the Terraform config is formatted, every
  * root is valid, prod plans what `deploys/prod/tests/plan.tftest.hcl` says
- * against a mock provider, and `ci-secrets/tests/apply.tftest.hcl` and each
+ * against a mock provider, and `ci-secrets/tests/apply.tftest.hcl`,
+ * `app-secrets/tests/apply.tftest.hcl` and each
  * app root's tests (`apps/<name>/tests/`) pass. A member
  * of `bun run verify`, a step of CI's `gates` job, and the first step of
  * `.github/workflows/cloudflare.yml`.
@@ -16,7 +17,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { APP_DIRS, CI_SECRETS_DIR, ENVS, TF_DIR, envDir } from './terraform.ts';
+import { APP_DIRS, APP_SECRETS_DIR, CI_SECRETS_DIR, ENVS, TF_DIR, envDir } from './terraform.ts';
 
 function run(cwd: string, args: string[], dataDir: string): void {
   const env = {
@@ -58,6 +59,14 @@ run(
 );
 run(CI_SECRETS_DIR, ['validate', '-no-color'], checkData('ci-secrets'));
 run(CI_SECRETS_DIR, ['test', '-no-color'], checkData('ci-secrets'));
+// Apps' secrets (`app-secrets/`): GitHub alone, local state, a mock provider.
+run(
+  APP_SECRETS_DIR,
+  ['init', '-backend=false', '-input=false', '-lockfile=readonly'],
+  checkData('app-secrets'),
+);
+run(APP_SECRETS_DIR, ['validate', '-no-color'], checkData('app-secrets'));
+run(APP_SECRETS_DIR, ['test', '-no-color'], checkData('app-secrets'));
 // Each app's own root (`apps/<name>/`): applied by its own workflow.
 for (const [name, dir] of Object.entries(APP_DIRS)) {
   run(dir, ['init', '-backend=false', '-input=false', '-lockfile=readonly'], checkData(name));

@@ -99,11 +99,10 @@ same way:
 2. Add the new root to `APP_DIRS` in `infra/cloudflare/terraform.ts`, so
    `bun run check:cloudflare-tf` validates and tests it.
 3. Copy `.github/workflows/signin-test.yml`, and give the app its own Google
-   OAuth client: add its id and secret to `cf:ci-secrets`
-   (`KEYCHAIN_VALUES` in `infra/cloudflare/ci-secrets.ts`, a variable and an
-   environment secret in `infra/cloudflare/ci-secrets/`). Its redirect URI
+   OAuth client: add its id and secret as two rows of `APP_SECRETS` in
+   `infra/cloudflare/app-secrets.ts`. Its redirect URI
    is `https://<hostname>/api/auth/callback/google`.
-4. Run `bun run cf:ci-secrets apply`, then dispatch the workflow on main.
+4. Run `bun run cf:app-secrets apply`, then dispatch the workflow on main.
    The deploy makes the database, the Turnstile widget, the custom domain,
    the Resend domain and its DNS records, a send-only mail key and the
    session secret, then runs the smoke test against the live app.
