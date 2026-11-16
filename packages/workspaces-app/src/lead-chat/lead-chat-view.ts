@@ -22,6 +22,13 @@
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { hydrateLinkTitles, staleLinkReviewMarks } from '../link-titles.ts';
+import {
+  CHANNEL_STYLES,
+  type ChannelKind,
+  type ChannelPicker,
+  type PickerModel,
+  createChannelPicker,
+} from './lead-chat-channels.ts';
 import { COMPOSER_STYLES } from './lead-chat-composer-styles.ts';
 import {
   type Composer,
@@ -91,6 +98,9 @@ export interface LeadChatViewModel {
    *  their way. */
   more?: boolean;
   loadingOlder?: boolean;
+  /** The channel shown and the picker's list (`lead-chat-channels.ts`);
+   *  absent is the board's chat with its lead, with no picker. */
+  channel?: { kind: ChannelKind; sub: string; empty?: string; picker: PickerModel };
 }
 
 export interface LeadChatView {
@@ -107,6 +117,8 @@ export interface LeadChatView {
   meeting: MeetingView;
   /** The layer's shadow root, which the meeting wizard draws into. */
   root: ShadowRoot;
+  /** The heading's channel picker. */
+  picker: ChannelPicker;
   render(m: LeadChatViewModel): void;
   /** The open list is scrolled to its top, or too short to scroll. */
   nearTop(): boolean;
@@ -161,7 +173,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   layer.dataset.leadChat = 'layer';
   const root = layer.attachShadow({ mode: 'open' });
   const style = make(doc, 'style');
-  style.textContent = LAYER_STYLES + STATUS_MARK_STYLES + MEETING_STYLES + COMPOSER_STYLES;
+  style.textContent =
+    LAYER_STYLES + STATUS_MARK_STYLES + MEETING_STYLES + COMPOSER_STYLES + CHANNEL_STYLES;
 
   const bar = make(doc, 'button', 'lc-bar');
   bar.type = 'button';
@@ -176,9 +189,10 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   pane.setAttribute('aria-label', 'Your agents');
   const head = make(doc, 'header', 'lc-head');
   const title = make(doc, 'div', 'lc-title');
-  const h2 = make(doc, 'h2', '', 'Chat with Lead Agent');
+  // The heading is the channel's name, and a tap on it picks another.
+  const picker = createChannelPicker(doc);
   const who = make(doc, 'p');
-  title.append(h2, who);
+  title.append(picker.button, who);
   const close = make(doc, 'button', 'lc-icon lc-close');
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
@@ -210,7 +224,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
   // The meeting's notes are one line just above the typing box.
-  pane.append(grip, head, list, meeting.notes, status, compose.root, readonly, ...compose.overlays);
+  pane.append(grip, head, picker.menu, list, meeting.notes, status, compose.root, readonly);
+  pane.append(...compose.overlays);
   root.append(style, bar, pane);
   doc.body.append(layer);
 
@@ -262,7 +277,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     const target = e.composedPath()[0] as Element | undefined;
     const item = target?.closest?.('.board-nav-item');
     const link = target?.closest?.('.lc-list a[href]:not([target])');
-    if (link || (item && !item.closest('.board-nav-dock'))) {
+    // The dock's agent button and the board's Messages item open the chat.
+    const opener = item?.closest('.board-nav-dock, [data-lead-chat-toggle]');
+    if (link || (item && !opener)) {
       pane.dispatchEvent(new Event(LEAVE_EVENT));
     }
   };
@@ -282,7 +299,8 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   });
 
   const renderWorkingToggle = (m: LeadChatViewModel): void => {
-    tools.hidden = !m.messages.some(isWorkingRow);
+    tools.hidden = !!m.channel && m.channel.kind !== 'general';
+    tools.hidden ||= !m.messages.some(isWorkingRow);
     tools.setAttribute('aria-pressed', String(dock.showWorking()));
   };
 
@@ -297,9 +315,11 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     // change without moving the messages under it.
     if (m.messages.length > 0) rows.push(['history', make(doc, 'p', 'lc-history', historyLine(m))]);
     if (m.messages.length === 0) {
-      const empty = m.lead
-        ? `Ask ${m.lead.name} anything about this board. It sees the page you are on.`
-        : 'This board has no lead yet. Set one in Settings, and it reads what you write here.';
+      const empty = m.channel?.empty
+        ? m.channel.empty
+        : m.lead
+          ? `Ask ${m.lead.name} anything about this board. It sees the page you are on.`
+          : 'This board has no lead yet. Set one in Settings, and it reads what you write here.';
       rows.push(['empty', make(doc, 'p', 'lc-empty', empty)]);
     }
     const ctx = {
@@ -315,6 +335,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     };
     for (const msg of m.messages) {
       const item = drawMessage(ctx, msg);
+      // Another person's line, beside the agent's warm tone and your blue.
+      if (item && m.channel?.kind === 'person' && msg.role === 'agent')
+        item.classList.add('lc-person');
       if (item) rows.push([`m:${msg.id}`, item]);
     }
     patchRows(list, rows, drawnRows);
@@ -370,6 +393,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     start,
     meeting,
     root,
+    picker,
     refreshTaskLinks() {
       // Every board link here is marked waiting before the one lookup: a doc
       // link carries no ring and can still gain or lose its review mark.
@@ -401,10 +425,31 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       bar.hidden = m.open || !(m.barOut || meetingOn);
       pane.hidden = !m.open;
       drawBarLines(barText, m);
-      who.textContent = m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '';
+      who.textContent =
+        m.channel?.sub ?? (m.lead ? m.lead.name : m.loaded ? 'No lead on this board' : '');
+      pane.dataset.channel = !m.channel || m.channel.kind === 'general' ? 'general' : 'dm';
+      const to =
+        pane.dataset.channel === 'dm' && m.lead ? `Message ${m.lead.name}` : 'Message lead agent';
+      compose.field.placeholder = to;
+      compose.field.setAttribute('aria-label', to);
+      picker.render(
+        m.channel?.picker ?? {
+          channels: [
+            {
+              id: 'general',
+              kind: 'general',
+              name: 'Chat with Lead Agent',
+              sub: '',
+              unread: false,
+            },
+          ],
+          current: 'general',
+          menuOpen: false,
+        },
+      );
       drawStatus(status, m);
       title.hidden = meetingOn;
-      start.hidden = meetingOn || !m.canTalk || !m.loaded;
+      start.hidden = meetingOn || !m.canTalk || !m.loaded || pane.dataset.channel === 'dm';
       const mm = m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false };
       meeting.render(mm);
       drawNoteLine(meeting.line, newestLine(mm));

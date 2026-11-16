@@ -51,6 +51,7 @@ import { mountBoardIsland } from './board-island.tsx';
 import { mountBoardIslands } from './board-islands.ts';
 import { wireBoardLive } from './board-live-wiring.ts';
 import { postLoadReport } from './board-load-report.ts';
+import { wireMessagesNav } from './board-messages-nav.ts';
 import {
   type BoardTask,
   type BoardWorkspaceInfo,
@@ -947,6 +948,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     getContext: () =>
       voiceBoardContext(state.detailTaskId, null, state.detailThreadId, state.reviewItems),
   });
+  wireMessagesNav(el('board-nav-messages'), leadChat);
 
   // Gmail-style row shortcuts — the handler lives in board-shortcuts.ts so a
   // test can call it directly with a state of its own, rather than booting a
