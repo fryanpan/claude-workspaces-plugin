@@ -70,8 +70,12 @@ the whole command took. Give another app name as the first argument, and
 
 It needs `fly` on the PATH and reads `FLY_API_TOKEN` and `FLY_ORG` from the
 environment. On a Mac, an unset one is read from the Keychain entries
-`fly-org-token` and `fly-org-slug`. The token goes only into the `fly`
-process's environment.
+`fly-org-token` and `fly-org-slug`. With no org from either, it uses the one
+org the token reaches, and refuses if there are several. The token goes only
+into the `fly` process's environment. In the claude-workspaces repo the token
+is held by CI: run the `app-kit-staging` workflow on main, which makes a fresh
+app and deploys it, and reports the time from `new-app` to the first 200 on
+the run's summary.
 
 The machine (`fly.toml`, built from `Dockerfile`) is the smallest shared CPU
 with 256 MB. It stops when idle and starts on the next request, so the first
