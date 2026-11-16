@@ -13,8 +13,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { parseLcov } from './coverage.ts';
 import {
   SUITE_DIR,
+  compactLcov,
   discover,
   filterArgs,
   interleave,
@@ -211,6 +213,29 @@ describe('mergeLcov', () => {
     const merged = readFileSync(join(out, 'lcov.info'), 'utf8');
     expect(merged).toContain('packages/server/src/f0.ts');
     expect(merged).toContain('packages/server/src/f1.ts');
+  });
+
+  it('writes one record per file, each line at its highest count across chunks', () => {
+    // Every chunk reports every file it loaded, so concatenation repeated each
+    // file once per chunk: 58,341 records for 1,155 files on one CI shard.
+    const chunks = [
+      'TN:\nSF:packages/server/src/a.ts\nFN:1,f\nDA:1,0\nDA:2,3\nLF:2\nLH:1\nend_of_record\n' +
+        'SF:packages/server/src/b.ts\nDA:5,1\nend_of_record\n',
+      'TN:\nSF:packages/server/src/a.ts\nDA:1,2\nDA:2,0\nDA:7,0\nend_of_record\n',
+    ];
+    const compact = compactLcov(chunks);
+    expect(compact.match(/^SF:/gm)).toHaveLength(2);
+    expect(compact).toBe(
+      'SF:packages/server/src/a.ts\nDA:1,2\nDA:2,3\nDA:7,0\nLF:3\nLH:2\nend_of_record\n' +
+        'SF:packages/server/src/b.ts\nDA:5,1\nLF:1\nLH:1\nend_of_record\n',
+    );
+    // What the coverage gate reads from it is what it read from the chunks.
+    expect(parseLcov(compact)).toEqual(parseLcov(chunks.join('')));
+  });
+
+  it('is empty when no chunk reported anything', () => {
+    expect(compactLcov([])).toBe('');
+    expect(compactLcov(['TN:\n'])).toBe('');
   });
 
   it('counts only the chunks that actually produced one', () => {
