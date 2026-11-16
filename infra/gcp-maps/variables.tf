@@ -18,3 +18,9 @@ variable "display_name" {
   type        = string
   default     = "workspaces maps (browser)"
 }
+
+variable "key_file" {
+  description = "Where to write the key for the server on this machine to read at boot. The server reads this path unless CW_GOOGLE_MAPS_KEY or CW_GOOGLE_MAPS_KEY_FILE says otherwise (packages/server/src/google-maps-key.ts)."
+  type        = string
+  default     = "~/Library/Application Support/claude-workspaces/google-maps-key"
+}

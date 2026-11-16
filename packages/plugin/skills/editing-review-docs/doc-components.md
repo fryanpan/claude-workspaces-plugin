@@ -72,7 +72,8 @@ The list and each provider's terms are in
 `packages/core/src/map-basemaps.ts` in the claude-workspaces repo.
 
 **A map draws on Google Maps when the server holds a key.** The server reads
-a Maps JavaScript API browser key from `CW_GOOGLE_MAPS_KEY` and hands it only
+a Maps JavaScript API browser key at boot, from `CW_GOOGLE_MAPS_KEY` or the
+file `infra/gcp-maps` writes, and hands it only
 to a doc with a `<StreetMap>` on Google: one that names no `basemap`, or
 names `basemap="google"` as a quoted string. Never put a key in a doc. On a
 server with no key, a map that names no basemap draws on OpenStreetMap; one

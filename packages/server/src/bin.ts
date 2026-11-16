@@ -8,6 +8,7 @@ import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
 import { shutdownExitCode } from './deploy-restart.ts';
+import { resolveGoogleMapsKey } from './google-maps-key.ts';
 import { homeRemotesFromEnv } from './home-remotes.ts';
 import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
@@ -71,8 +72,9 @@ const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
 const homeRemotesConfig = homeRemotesFromEnv(process.env);
 const homeFeedClientId = process.env.CW_HOME_FEED_CLIENT_ID?.trim() || undefined;
 // A browser key, restricted by Google to the board's site; sent only to a doc
-// that draws a Google map (routes/doc-map-key.ts).
-const googleMapsKey = process.env.CW_GOOGLE_MAPS_KEY?.trim() || undefined;
+// that draws a Google map (routes/doc-map-key.ts). From CW_GOOGLE_MAPS_KEY, or
+// the file infra/gcp-maps writes (google-maps-key.ts).
+const googleMapsKey = resolveGoogleMapsKey();
 // A project machine's pushed-board import (routes/board-import.ts); unset off one.
 const boardImportDir = process.env.CW_BOARD_IMPORT_DIR?.trim() || undefined;
 const boardImportClientId = process.env.CW_BOARD_IMPORT_CLIENT_ID?.trim() || undefined;

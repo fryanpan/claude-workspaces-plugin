@@ -2921,10 +2921,12 @@ The files route serves a `src` file only when a `<StreetMap>` in the doc's
 live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
 `google` is the one keyed basemap and the default for a tag that names
 none: `mdx-street-map.ts` asks `routes/doc-map-key.ts` for the key, which the
-server (`CW_GOOGLE_MAPS_KEY`) answers only while the doc's live content draws
+server answers only while the doc's live content draws
 on that basemap (`doc-file-scope.ts` `mapBasemapsNamed`), and draws on
 OpenStreetMap when it gets none, with a line saying why if the tag named
-Google itself. `map-google.ts`, in the same chunk, loads
+Google itself. The server reads that key once at boot in `google-maps-key.ts`,
+from `CW_GOOGLE_MAPS_KEY` or else the mode-600 file `infra/gcp-maps` writes
+under prod's boot-disk root. `map-google.ts`, in the same chunk, loads
 Google's Maps JavaScript API with that key and puts its tiles under the
 Leaflet layers through GoogleMutant, which reads the global `L` that
 `leaflet-global.ts` sets.

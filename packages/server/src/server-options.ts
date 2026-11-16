@@ -683,7 +683,7 @@ export interface ServerOptions {
    */
   homeFeedClientId?: string;
   /**
-   * The Google Maps JavaScript API browser key (`CW_GOOGLE_MAPS_KEY`), handed
+   * The Google Maps JavaScript API browser key (`google-maps-key.ts`), handed
    * only to a doc page whose content draws a `<StreetMap>` on Google, which a
    * tag with no `basemap` does (`routes/doc-map-key.ts`). Absent, such a map
    * draws on OpenStreetMap. Never logged.
