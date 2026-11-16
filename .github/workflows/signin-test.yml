@@ -8,8 +8,9 @@
 # mail DNS records), the Worker's secrets, the D1 migrations, the Worker, and
 # the smoke test against the live app (infra/signin-test/deploy.ts).
 #
-# Secrets, in the `cloudflare-prod` environment (deployments from main only),
-# all written by `bun run cf:ci-secrets apply`:
+# Secrets, in the `cloudflare-prod` environment (deployments from main only).
+# The deploy token and state key are CI's (infra/cloudflare/README.md, "CI's
+# credentials"); the other three are written by `bun run cf:app-secrets apply`:
 #   CLOUDFLARE_API_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   the deploy token and state key
 #   RESEND_API_KEY                                                 full access: the domain and the app's send-only key
 #   SIGNIN_TEST_GOOGLE_CLIENT_ID, SIGNIN_TEST_GOOGLE_CLIENT_SECRET the app's Google OAuth client

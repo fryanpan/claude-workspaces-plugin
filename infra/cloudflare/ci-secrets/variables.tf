@@ -83,26 +83,3 @@ variable "fly_api_token" {
   default     = null
   sensitive   = true
 }
-
-# signin-test.yml's three. `cf:ci-secrets` reads each from the Keychain
-# (account claude-workspaces) when its environment variable is unset.
-variable "resend_api_key" {
-  description = "A full-access Resend key, written to RESEND_API_KEY in the environment when set; null deletes an earlier apply's copy. signin-test.yml makes the sending domain and each app's send-only key with it."
-  type        = string
-  default     = null
-  sensitive   = true
-}
-
-variable "signin_test_google_client_id" {
-  description = "The sign-in test app's Google OAuth client id, written to SIGNIN_TEST_GOOGLE_CLIENT_ID in the environment when set; null deletes an earlier apply's copy."
-  type        = string
-  default     = null
-  sensitive   = true
-}
-
-variable "signin_test_google_client_secret" {
-  description = "The same client's secret, written to SIGNIN_TEST_GOOGLE_CLIENT_SECRET in the environment when set; null deletes an earlier apply's copy."
-  type        = string
-  default     = null
-  sensitive   = true
-}

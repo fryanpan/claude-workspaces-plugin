@@ -146,38 +146,6 @@ run "configs_and_the_fly_token_are_written_when_given" {
   }
 }
 
-run "the_signin_test_values_are_written_when_given" {
-  command = apply
-
-  variables {
-    resend_api_key                   = "fixture-resend-saltmarsh"
-    signin_test_google_client_id     = "fixture-client-harborlight"
-    signin_test_google_client_secret = "fixture-secret-riverbend"
-  }
-
-  assert {
-    condition = output.environment_secrets == tolist([
-      "CLOUDFLARE_API_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-      "RESEND_API_KEY", "SIGNIN_TEST_GOOGLE_CLIENT_ID", "SIGNIN_TEST_GOOGLE_CLIENT_SECRET",
-    ])
-    error_message = "the three go to the environment, beside the deploy credentials"
-  }
-
-  assert {
-    condition = (
-      github_actions_environment_secret.deploy["RESEND_API_KEY"].value == "fixture-resend-saltmarsh" &&
-      github_actions_environment_secret.deploy["SIGNIN_TEST_GOOGLE_CLIENT_ID"].value == "fixture-client-harborlight" &&
-      github_actions_environment_secret.deploy["SIGNIN_TEST_GOOGLE_CLIENT_SECRET"].value == "fixture-secret-riverbend"
-    )
-    error_message = "each secret holds its own variable's value"
-  }
-
-  assert {
-    condition     = length(output.repository_secrets) == 0
-    error_message = "none of the three is a repository secret, which a pull request could read"
-  }
-}
-
 run "a_permission_cloudflare_does_not_list_stops_the_token" {
   command = plan
 

@@ -4,7 +4,7 @@ The sign-in template (`templates/signin`) deployed for real at
 https://signin-test.fryanpan.com, so a person can sign in by password, magic
 link or Google, and so CI proves after every deploy that each one works.
 Everything is made from CI; nobody runs a step by hand after the one-time
-`cf:ci-secrets apply`.
+`cf:app-secrets apply`.
 
 ## What it is
 
@@ -22,13 +22,15 @@ Everything is made from CI; nobody runs a step by hand after the one-time
 
 ## Putting it live
 
-1. Once, on the Mac: `CLOUDFLARE_API_TOKEN=… GITHUB_TOKEN=… bun run cf:ci-secrets apply`
-   (`infra/cloudflare/README.md`, "CI's credentials"). It reads
+1. Once, on the Mac: `GITHUB_TOKEN=… bun run cf:app-secrets apply`
+   (`infra/cloudflare/README.md`, "Apps' secrets"). It reads
    `resend-api-key`, `signin-test-google-client-id` and
-   `signin-test-google-client-secret` from the Keychain and writes them to
-   `cloudflare-prod` as `RESEND_API_KEY`, `SIGNIN_TEST_GOOGLE_CLIENT_ID` and
-   `SIGNIN_TEST_GOOGLE_CLIENT_SECRET`. The same apply adds D1 Write and
-   Turnstile Sites Write to the deploy token.
+   `signin-test-google-client-secret` from the Keychain, plain or as the
+   board's secret card, and writes them to `cloudflare-prod` as
+   `RESEND_API_KEY`, `SIGNIN_TEST_GOOGLE_CLIENT_ID` and
+   `SIGNIN_TEST_GOOGLE_CLIENT_SECRET`. The deploy token must already hold D1
+   Write and Turnstile Sites Write (`CF_APPLY_PERMISSIONS` in
+   `packages/server/src/keeper/keeper-setup-ci.ts`).
 2. Dispatch `signin-test` on main: `gh workflow run signin-test.yml --ref main`.
 
 The run (`deploy.ts`):

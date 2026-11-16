@@ -13,6 +13,7 @@ bun run cf:sync-config       # sends the gitignored configs to CI and starts an 
 bun run cf:rotate-token NAME # a new secret for one service token; one passkey tap
 bun run cf:ci-secrets plan    # CI's deploy token and GitHub secrets: what would change
 bun run cf:ci-secrets apply   # make the token and write the secrets ("CI's credentials" below)
+bun run cf:app-secrets apply  # apps' secrets in cloudflare-prod; a GitHub token alone ("Apps' secrets" below)
 ```
 
 `bun run cf:apply` only prints where applies run now, and changes nothing.
@@ -29,6 +30,7 @@ bun run cf:ci-secrets apply   # make the token and write the secrets ("CI's cred
 | `deploys/prod` | Prod's root, and `imports.tf`, which adopts what already exists |
 | `deploys/staging` | Staging's root: the same modules, no imports. Validated on every run, never applied yet |
 | `ci-secrets` | CI's deploy token, and the GitHub Actions secrets that carry it. Local state, applied by hand ("CI's credentials") |
+| `app-secrets` | The secrets apps' workflows read from `cloudflare-prod` (the GitHub provider alone). Local state, applied by hand ("Apps' secrets") |
 | `apps/signin-test` | One app's own root: the sign-in test app's D1, Turnstile widget, custom domain and mail DNS records. Applied by its own workflow ("An app's own root") |
 
 The layout is HashiCorp's standard module structure. Each module has
@@ -220,7 +222,6 @@ install` never sees them.
 | `R2_SECRET_ACCESS_KEY` | `cloudflare-prod` | the SHA-256 of the token's value |
 | `FLY_API_TOKEN` | `cloudflare-prod` | `FLY_API_TOKEN` from the runner's environment, when set |
 | `CW_SECRET_CW_BOARD_OWNER_EMAIL` | `cloudflare-prod` | `CW_OWNER_EMAIL` from the runner's environment, when set; `fly.yml` hands it to `machine:deploy` as the Keychain's `cw-board-owner-email` |
-| `RESEND_API_KEY`, `SIGNIN_TEST_GOOGLE_CLIENT_ID`, `SIGNIN_TEST_GOOGLE_CLIENT_SECRET` | `cloudflare-prod` | each from the runner's environment when set, else from the Keychain item `resend-api-key`, `signin-test-google-client-id` or `signin-test-google-client-secret` (account `claude-workspaces`) |
 | `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | repository | the three gitignored configs, each when present |
 
 The token gets the apply permissions below plus Workers R2 Storage Bucket
@@ -257,6 +258,49 @@ that secret, after which the workflows skip their deploys rather than fail.
 The token also refuses to be made unless `cloudflare-prod` allows
 deployments from `main` alone (the check the keeper makes), and an apply that
 finds the token with no value in its state stops before writing anything.
+
+The deploy token and R2 pair in `cloudflare-prod` today were written by the
+keeper's `CI credentials` step (`packages/server/src/keeper/keeper-setup-ci.ts`),
+not by this root, which needs a token with Account API Tokens Edit that
+nobody on the Mac holds. Apps' secrets are therefore a root of their own.
+
+## Apps' secrets
+
+`app-secrets/` writes the secrets an app's workflow reads from
+`cloudflare-prod`, through the GitHub provider alone. It needs only
+`GITHUB_TOKEN`, a classic token with `repo` scope: no Cloudflare token, and
+nothing in it can change or delete the deploy token, the R2 pair or
+`FLY_API_TOKEN`.
+
+| Secret | Read by | Value, the first found |
+| --- | --- | --- |
+| `RESEND_API_KEY` | `signin-test.yml` | `$RESEND_API_KEY`; the Keychain item `resend-api-key`; the secret card `resend-api-key` |
+| `SIGNIN_TEST_GOOGLE_CLIENT_ID` | `signin-test.yml` | `$SIGNIN_TEST_GOOGLE_CLIENT_ID`; `signin-test-google-client-id`; its card |
+| `SIGNIN_TEST_GOOGLE_CLIENT_SECRET` | `signin-test.yml` | `$SIGNIN_TEST_GOOGLE_CLIENT_SECRET`; `signin-test-google-client-secret`; its card |
+
+A Keychain item is account `claude-workspaces`, stored plain. A secret card is
+what the board stores when a person saves a value through a review item's
+secret field: base64, under `claude-workspaces-secret.<name>`, same account
+(`packages/core/src/secret-name.ts`). The wrapper decodes it. A new app adds
+its rows to `APP_SECRETS` in `app-secrets.ts`; the root needs no change.
+
+```bash
+GITHUB_TOKEN=… bun run cf:app-secrets plan    # what would change, and where each value was found
+GITHUB_TOKEN=… bun run cf:app-secrets apply
+```
+
+Each value reaches terraform in its environment only, as `TF_VAR_secrets`
+(JSON); the run prints resource addresses and verbs, and for each secret the
+place it was found, never a value. The root has no output that carries a
+value. The state holds the values, so like `ci-secrets/` it is local, in
+`~/.local/state/claude-workspaces/app-secrets/` (mode 700, files 600), or
+under `$CW_TF_WORK_DIR`, and the saved plan is removed when the run ends.
+
+A secret the run cannot find is left out of the plan, which deletes a copy an
+earlier apply wrote, so **an apply whose plan deletes anything is refused**
+unless `--drop` is given. A secret is refused unless `cloudflare-prod` allows
+deployments from `main` alone, as above, and an empty value or a lower-case
+name fails the variable's validation.
 
 ## State
 
@@ -304,6 +348,8 @@ new app gets its sign-in live):
   missing and passes its records in as a variable. A record outside the mail
   subdomain fails the variable's validation, so the zone's own mail records
   are never touched.
+- **What it reads from `cloudflare-prod`:** the deploy token, the R2 pair,
+  and the app's own secrets, which `cf:app-secrets` writes ("Apps' secrets").
 - **What its state holds:** the Turnstile widget's secret, because the
   provider reads it back. That secret lets its holder check a Turnstile token
   for that widget, not pass one. Prod's state still holds no credential.
@@ -323,10 +369,12 @@ the signed releases `.github/workflows/server-release.yml` publishes.
 which plans the root and each module from a fixture against a mock provider
 (no token, no state, no network call beyond the provider download), and
 `ci-secrets/tests/apply.tftest.hcl`, which applies the CI credentials root
-against mock Cloudflare and GitHub providers, and each app root's
-`tests/plan.tftest.hcl`.
+against mock Cloudflare and GitHub providers,
+`app-secrets/tests/apply.tftest.hcl`, which applies the apps' secrets root
+against a mock GitHub provider, and each app root's `tests/plan.tftest.hcl`.
 In `packages/server/test`: `cloudflare-ci-secrets.test.ts` checks what
-`cf:ci-secrets` hands terraform and prints; `cloudflare-ci-credentials.test.ts`
+`cf:ci-secrets` hands terraform and prints; `cloudflare-app-secrets.test.ts`
+the same for `cf:app-secrets`, and the order it looks for each value in; `cloudflare-ci-credentials.test.ts`
 the R2 key and account id CI's steps take from the token; `cloudflare-tf-discover.test.ts` runs the adoption
 and the refusals against a fake account; `cloudflare-tf-service-tokens.test.ts`
 a missing token through plan and CI apply; `cloudflare-tf-wrapper.test.ts` the
