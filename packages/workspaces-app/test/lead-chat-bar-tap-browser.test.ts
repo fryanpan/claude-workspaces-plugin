@@ -22,7 +22,7 @@ describe.skipIf(CHROME === null)('the lead chat bar in headless Chrome', () => {
     () => {
       const r = spawnSync(
         'bun',
-        [join(import.meta.dirname, 'lead-chat-bar-tap-browser-driver.ts')],
+        [join(import.meta.dirname, 'lead-chat-bar-tap-browser-driver.ts'), CHROME ?? ''],
         {
           encoding: 'utf8',
           timeout: BROWSER_CASE_MS - 10_000,

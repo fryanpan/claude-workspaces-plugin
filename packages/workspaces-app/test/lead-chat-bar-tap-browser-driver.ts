@@ -5,7 +5,8 @@
  *
  * Run by `lead-chat-bar-tap-browser.test.ts`; a separate Bun process because
  * the page is bundled by `Bun.build` and served by `Bun.serve`, and vitest
- * runs under node. The redraw goes in between the press and the release, the
+ * runs under node. The Chrome to launch is the first argument, the one the
+ * suite chose. The redraw goes in between the press and the release, the
  * way a transcript update lands under a finger on an iPad.
  */
 import { join } from 'node:path';
@@ -89,7 +90,7 @@ let cdp: Cdp | undefined;
 const out: BarTapCase[] = [];
 try {
   browser = await launchChrome(
-    resolveChromeBin(undefined),
+    resolveChromeBin(process.argv[2] || undefined),
     (profile) => chromeLaunchArgs({ width: 1180, height: 820 }, profile),
     STARTUP_TIMEOUT_MS,
     `${resolveRunId()}bartap`,

@@ -86,10 +86,12 @@ describe('the bar', () => {
     drawBarLines(box, model({ listening: true, heard: 'the' }));
     const clip = box.querySelector('.lc-tail-clip');
     const words = box.querySelector('.lc-tail-text');
+    const label = box.querySelector('.lc-tail-label');
     clip?.classList.add('lc-cut');
     drawBarLines(box, model({ listening: true, heard: 'the ferry task' }));
     expect(box.querySelector('.lc-tail-clip')).toBe(clip);
     expect(box.querySelector('.lc-tail-text')).toBe(words);
+    expect(box.querySelector('.lc-tail-label')).toBe(label);
     expect(words?.textContent).toBe('the ferry task');
   });
 });
