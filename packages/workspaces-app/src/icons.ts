@@ -58,6 +58,7 @@ export const NAV_ICONS = {
   tasks: BOARD_NAV_ICONS.tasks,
   activity: BOARD_NAV_ICONS.activity,
   library: BOARD_NAV_ICONS.library,
+  messages: `<svg ${SVG} ${SVG_ENDS}><path d="M4 5.5h16v10H9l-5 4z"/></svg>`,
   collapse: `<svg ${SVG} ${SVG_ENDS}><polyline points="14 6 8 12 14 18"/></svg>`,
   expand: `<svg ${SVG} ${SVG_ENDS}><polyline points="10 6 16 12 10 18"/></svg>`,
   share: `<svg ${SVG} ${SVG_ENDS}><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.3 10.8 7.4-4.3M8.3 13.2l7.4 4.3"/></svg>`,
