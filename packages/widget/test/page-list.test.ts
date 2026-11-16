@@ -58,6 +58,34 @@ const rows = (el: FeedbackWidgetEl, section: string): string[] =>
 /** The spot is scrolled to a frame after the thread opens. */
 const frame = () => new Promise((r) => requestAnimationFrame(r));
 
+describe('a dimmed pin with the page list mounted', () => {
+  it('opens its thread in the list and leaves the page where it is', () => {
+    const el = seeded();
+    const pin = pinOf(el, 't-view');
+    expect(pin?.hasAttribute('data-dim')).toBe(true);
+    pin?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(location.pathname + location.search).toBe(`${PAGE}?all=1`);
+    expect(el.activeThread).toBe('t-view');
+    const pop = el.shadow.querySelector('.thread[data-thread-id="t-view"] .thread-popover');
+    expect(pop?.textContent).toContain('Made with stations shown');
+
+    // Its one way back to the state it was made in: that query, exactly as it
+    // was written, and which thread to show there.
+    const show = pop?.querySelector<HTMLButtonElement>('.actions .goto');
+    expect(show?.textContent).toBe('Show where this was made');
+    show?.click();
+    expect(location.pathname + location.search).toBe(`${PAGE}?o=ss&cw-goto=t-view`);
+  });
+
+  it('offers no way elsewhere on a thread made in this very state', () => {
+    const el = seeded();
+    pinOf(el, 't-new')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const pop = el.shadow.querySelector('.thread[data-thread-id="t-new"] .thread-popover');
+    expect(pop?.textContent).toContain('Newest here');
+    expect(pop?.querySelector('.goto')).toBeNull();
+  });
+});
+
 describe('the page list', () => {
   it("lists this page's threads newest first, and other pages' after them", () => {
     const el = seeded();

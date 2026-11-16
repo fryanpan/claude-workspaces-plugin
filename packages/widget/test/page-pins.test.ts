@@ -38,7 +38,7 @@ function pageAt(url: string): HTMLElement {
 }
 
 describe('a pin on a page whose address carries its controls', () => {
-  it('stands, dimmed, when only the query differs, and its tap restores that query', () => {
+  it('stands, dimmed, when only the query differs, and its tap opens the thread', () => {
     const h = pageAt('/case/harborlight/?all=1');
     const ydoc = new Y.Doc();
     const at = (url: string) => ({ ...createAnchor(h), context: { url } });
@@ -56,11 +56,12 @@ describe('a pin on a page whose address carries its controls', () => {
     expect(pinOf(el, 't-away')).toBeUndefined();
     expect(pins(el)).toHaveLength(2);
 
+    // "Tapping on done icons reloads the page": a tap opens the thread where
+    // the reader is, and the page stays as it was. The way back to the state
+    // it was made in is the page list's (`page-list.test.ts`).
     pinOf(el, 't-view')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    // That query, exactly as it was written, and which thread to show there.
-    expect(location.pathname + location.search).toBe(
-      '/case/harborlight/?top=5&o=ss%2Cwb&cw-goto=t-view',
-    );
+    expect(location.pathname + location.search).toBe('/case/harborlight/?all=1');
+    expect(el.shadow.querySelector('.thread-popover')?.textContent).toContain('Say which pier');
   });
 
   it('keeps a view-keyed thread off a page in another view, as before', () => {
