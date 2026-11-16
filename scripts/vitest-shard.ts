@@ -12,7 +12,7 @@
  * slowest shard of 122s for the hash at ten shards and 72s for this one.
  *
  * WHERE THE TIMES COME FROM. `scripts/vitest-durations.json`, written by
- * `bun run scripts/vitest-durations.ts <run-id>` from a CI run's own logs.
+ * `bun run scripts/vitest-durations.ts <run-id>...` from CI runs' own logs.
  * A committed table, not a cache: every shard of a run must compute the SAME
  * split, or a file runs twice or not at all, and only a file in the commit is
  * guaranteed to be the same for all of them. A stale table can make the split
