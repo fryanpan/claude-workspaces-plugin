@@ -1,5 +1,5 @@
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
-import type { Thread } from '@claude-workspaces/core/types';
+import type { AnchorContext, Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc } from '@claude-workspaces/core/ui-shared';
 import { markPins, withExtras } from './comment-extras.ts';
 import { seenStore } from './comment-seen-store.ts';
@@ -151,13 +151,14 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     },
     true,
   );
-  // A pin opens its thread here rather than in a popover beside it. A dimmed
-  // pin still goes to the state it was made in.
+  // A pin opens its thread here rather than in a popover beside it, a dimmed
+  // one too. A tap never loads the page ("Tapping on done icons reloads the
+  // page"); the opened thread offers that as its own action.
   document.addEventListener(
     'click',
     (ev) => {
       const pin = (ev.target as Element | null)?.closest?.('.cfw-pin') as HTMLElement | null;
-      const t = pin && !pin.hasAttribute('data-dim') && threads.get(pin.dataset.threadId ?? '');
+      const t = pin && threads.get(pin.dataset.threadId ?? '');
       if (!t) return;
       ev.stopPropagation();
       if (!isOpen()) toggle(true);
@@ -400,6 +401,7 @@ export function mountPageList(el: FeedbackWidgetEl): void {
         slot.appendChild(pop);
         decorateLinked(pop, active);
         wirePopover(pop, active);
+        offerItsState(pop, active, cur);
         const ta = pop.querySelector('textarea');
         if (ta && draft) {
           ta.value = draft.v;
@@ -411,6 +413,18 @@ export function mountPageList(el: FeedbackWidgetEl): void {
       }
     }
     tellHost();
+  }
+
+  /** A thread made in another state of this page: one plain action that
+   *  loads that state. Asked for, never done by the tap that opened it. */
+  function offerItsState(pop: HTMLElement, t: Thread, cur: AnchorContext): void {
+    const url = contextOf(t)?.url;
+    if (!url || contextMatches(contextOf(t), cur)) return;
+    const b = document.createElement('button');
+    b.className = 'goto';
+    b.textContent = 'Show where this was made';
+    b.addEventListener('click', () => goTo(url, t.id));
+    pop.querySelector('.actions')?.append(b);
   }
 
   /** The popover closes itself after a reply or a resolve; in the view the
