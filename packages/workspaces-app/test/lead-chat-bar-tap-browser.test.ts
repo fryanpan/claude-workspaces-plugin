@@ -30,8 +30,12 @@ describe.skipIf(CHROME === null)('the lead chat bar in headless Chrome', () => {
       );
       expect(r.status, r.stderr).toBe(0);
       const cases = JSON.parse(r.stdout) as BarTapCase[];
-      expect(cases.map((k) => k.name)).toHaveLength(3);
+      expect(cases.map((k) => k.name)).toHaveLength(4);
       for (const k of cases) expect({ [k.name]: k.clicks }).toEqual({ [k.name]: 1 });
+      // The long case presses the cut words themselves, not the label.
+      const long = cases.at(-1);
+      expect(long?.cut).toBe(true);
+      expect(long?.pressed).toBe('lc-tail-text');
     },
     BROWSER_CASE_MS,
   );

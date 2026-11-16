@@ -27,14 +27,42 @@ import {
 export interface BarTapCase {
   name: string;
   clicks: number;
+  /** Whether the heard words were cut when pressed: the long case must be. */
+  cut: boolean;
+  /** The class of the element under the press. */
+  pressed: string;
 }
 
-/** What is on the bar at the press, and what it is redrawn to before the release. */
-const CASES: Array<{ name: string; before: object; after: object }> = [
-  { name: 'Listening… redrawn unchanged', before: {}, after: {} },
-  { name: 'Listening… to the first heard word', before: {}, after: { heard: 'the' } },
-  { name: 'heard words growing', before: { heard: 'the' }, after: { heard: 'the ferry task' } },
+const LONG = 'the ferry task that Riverbend filed on Tuesday about the harbour timetable';
+
+/**
+ * What is on the bar at the press, what it is redrawn to before the release,
+ * and what the finger is on: the row's start (its label), or the heard words
+ * themselves, which are cut at the left when longer than the bar.
+ */
+const CASES: Array<{ name: string; before: object; after: object; on: 'label' | 'words' }> = [
+  { name: 'Listening… redrawn unchanged', before: {}, after: {}, on: 'label' },
+  { name: 'Listening… to the first heard word', before: {}, after: { heard: 'the' }, on: 'label' },
+  {
+    name: 'heard words growing',
+    before: { heard: 'the' },
+    after: { heard: 'the ferry task' },
+    on: 'label',
+  },
+  {
+    name: 'cut heard words growing, tapped on the words',
+    before: { heard: LONG },
+    after: { heard: `${LONG} and the ferry` },
+    on: 'words',
+  },
 ];
+
+/** The point to press: 20px into the row, or 20px in from the clip's right edge. */
+const pointOf = (on: 'label' | 'words') => `(() => {
+  const words = ${on === 'words'};
+  const r = document.querySelector(words ? '.lc-tail-clip' : '.lc-bar-line').getBoundingClientRect();
+  return { x: words ? r.right - 20 : r.left + 20, y: r.top + r.height / 2, cut: !!document.querySelector('.lc-cut') };
+})()`;
 
 const built = await Bun.build({
   entrypoints: [join(import.meta.dir, 'lead-chat-bar-tap-page.ts')],
@@ -81,10 +109,14 @@ try {
   }
   for (const k of CASES) {
     await c.evaluate(`window.cwBar.draw(${JSON.stringify(k.before)})`);
-    const at = (await c.evaluate(`(() => {
-      const r = document.querySelector('.lc-bar-line').getBoundingClientRect();
-      return { x: r.left + 20, y: r.top + r.height / 2 };
-    })()`)) as { x: number; y: number };
+    const { cut, ...at } = (await c.evaluate(pointOf(k.on))) as {
+      x: number;
+      y: number;
+      cut: boolean;
+    };
+    const pressed = (await c.evaluate(
+      `document.elementFromPoint(${at.x}, ${at.y})?.className ?? ''`,
+    )) as string;
     const before = (await c.evaluate('window.cwBar.clicks()')) as number;
     const mouse = (type: string) =>
       c.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
@@ -93,7 +125,7 @@ try {
     await mouse('mouseReleased');
     // The click is dispatched with the release; one evaluate after it reads it.
     const clicks = ((await c.evaluate('window.cwBar.clicks()')) as number) - before;
-    out.push({ name: k.name, clicks });
+    out.push({ name: k.name, clicks, cut, pressed });
   }
 } finally {
   cdp?.close();

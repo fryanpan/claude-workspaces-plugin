@@ -1,10 +1,11 @@
 /**
  * The lead chat's bar, built for a real browser: a button holding the rows
- * `drawBarLines` draws, with a count of the clicks it took.
+ * `drawBarLines` draws, in the shipped bar styles, with a count of the clicks it took.
  *
  * `lead-chat-bar-tap-browser-driver.ts` bundles this and redraws the rows
  * between a press and its release, as a transcript update does on the page.
  */
+import { LAYER_STYLES } from '../src/lead-chat/lead-chat-styles.ts';
 import { drawBarLines } from '../src/lead-chat/lead-chat-tail.ts';
 import type { LeadChatViewModel } from '../src/lead-chat/lead-chat-view.ts';
 
@@ -14,9 +15,14 @@ declare global {
   }
 }
 
+// The shipped styles, so heard words longer than the bar are cut as they are
+// on the page.
+const style = document.createElement('style');
+style.textContent = LAYER_STYLES;
+document.head.append(style);
 const bar = document.createElement('button');
 bar.className = 'lc-bar';
-bar.style.cssText = 'display:block;width:400px;padding:12px;font:16px sans-serif;text-align:left';
+bar.style.cssText = 'top:20px;left:20px;width:300px;height:48px';
 const lines = document.createElement('span');
 lines.className = 'lc-bar-lines';
 bar.append(lines);

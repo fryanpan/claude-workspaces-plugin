@@ -64,11 +64,12 @@ export function drawBarLines(box: HTMLElement, m: LeadChatViewModel): void {
       row.replaceChildren(label);
     }
     label.textContent = `${line.who}: `;
-    label.classList.toggle('lc-tail-label', !!line.live);
+    if (line.live) label.className = 'lc-tail-label';
+    else label.removeAttribute('class');
     const rest = label.nextSibling;
     let keep: ChildNode;
     if (line.live) {
-      let clip = rest instanceof Element && rest.className === 'lc-tail-clip' ? rest : null;
+      let clip = rest instanceof Element && rest.classList.contains('lc-tail-clip') ? rest : null;
       let words = clip?.firstElementChild;
       if (!clip || !words) {
         clip = doc.createElement('span');

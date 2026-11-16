@@ -80,4 +80,16 @@ describe('the bar', () => {
     expect(box.children).toHaveLength(1);
     expect(box.children[0]).toBe(first);
   });
+
+  it('keeps the clip of a live line across redraws, cut or not', () => {
+    const box = row();
+    drawBarLines(box, model({ listening: true, heard: 'the' }));
+    const clip = box.querySelector('.lc-tail-clip');
+    const words = box.querySelector('.lc-tail-text');
+    clip?.classList.add('lc-cut');
+    drawBarLines(box, model({ listening: true, heard: 'the ferry task' }));
+    expect(box.querySelector('.lc-tail-clip')).toBe(clip);
+    expect(box.querySelector('.lc-tail-text')).toBe(words);
+    expect(words?.textContent).toBe('the ferry task');
+  });
 });
