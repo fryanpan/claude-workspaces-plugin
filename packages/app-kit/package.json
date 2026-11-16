@@ -12,6 +12,7 @@
     "./client/text-binding": "./src/client/text-binding.ts",
     "./collab": "./src/collab/index.ts",
     "./do": "./src/do/index.ts",
+    "./markdown-file": "./src/markdown-file/index.ts",
     "./theme.css": "./src/theme.css"
   },
   "files": [

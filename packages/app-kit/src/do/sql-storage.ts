@@ -33,3 +33,52 @@ export function sqlCollabStorage(sql: SqlLike): CollabStorage {
     },
   };
 }
+
+const KV_TABLE = 'cw_collab_kv';
+
+/** A synchronous key-value store over `ctx.storage.sql`, one namespace per
+ *  caller: `markdownFileRoom`'s `state` in a Durable Object. */
+export function sqlKeyValue(
+  sql: SqlLike,
+  namespace: string,
+): { read(key: string): string | null; write(key: string, value: string): void } {
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS ${KV_TABLE} (ns TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY (ns, k))`,
+  );
+  return {
+    read(key) {
+      const row = sql
+        .exec(`SELECT v FROM ${KV_TABLE} WHERE ns = ? AND k = ?`, namespace, key)
+        .toArray()[0];
+      return typeof row?.v === 'string' ? row.v : null;
+    },
+    write(key, value) {
+      sql.exec(
+        `INSERT INTO ${KV_TABLE} (ns, k, v) VALUES (?, ?, ?)
+         ON CONFLICT(ns, k) DO UPDATE SET v = excluded.v`,
+        namespace,
+        key,
+        value,
+      );
+    },
+  };
+}
+
+/** The slice of `DurableObjectStorage` an alarm needs. */
+export interface AlarmStorage {
+  setAlarm(scheduledTime: number): unknown;
+}
+
+/**
+ * A debounce that survives eviction: each call moves the Durable Object's
+ * one alarm to `ms` from now, and the object's `alarm()` handler does the
+ * work (`markdownFileRoom`'s `flush`). An evicted object is woken for it.
+ */
+export function alarmSchedule(
+  storage: AlarmStorage,
+  now: () => number = Date.now,
+): (ms: number) => void {
+  return (ms) => {
+    void storage.setAlarm(now() + ms);
+  };
+}
