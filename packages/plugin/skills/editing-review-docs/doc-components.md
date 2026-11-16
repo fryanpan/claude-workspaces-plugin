@@ -54,7 +54,7 @@ points coloured by category, and a legend under the map.
 | `center`, `zoom` | `[lat, lng]` and 1–20. Leave both out and the map fits its data and rings. |
 | `height` | Pixels, 160–1,200; 480 by default. |
 | `legend` | `{false}` hides the legend. |
-| `basemap` | `"osm"` (default, OpenStreetMap), `"carto-light"` (CARTO Positron, paler, so coloured points stand out), or `"google"` (Google's roadmap; see below). Write it as a quoted string. |
+| `basemap` | `"google"` (the default: Google's roadmap; see below), `"osm"` (OpenStreetMap), or `"carto-light"` (CARTO Positron, paler, so coloured points stand out). Write it as a quoted string. |
 | `title`, `subtitle`, `note` | Words drawn around the map. |
 
 `lng` may be written `lon` or `longitude`, and `lat` may be `latitude`.
@@ -71,11 +71,13 @@ never by URL, and the map loads tiles from that provider's origins alone.
 The list and each provider's terms are in
 `packages/core/src/map-basemaps.ts` in the claude-workspaces repo.
 
-**`basemap="google"` draws on Google Maps when the server holds a key.** The
-server reads a Maps JavaScript API browser key from `CW_GOOGLE_MAPS_KEY` and
-hands it only to a doc whose tag names `basemap="google"` as a quoted string.
-Never put a key in a doc. On a server with no key, the map draws on
-OpenStreetMap and a line under it says so; the same happens if Google
-refuses the key or its script does not load. Markers, rings, points, popups
-and the legend are the same on every basemap. Google bills each map load, so
-use it where the reader needs Google's map, and `osm` otherwise.
+**A map draws on Google Maps when the server holds a key.** The server reads
+a Maps JavaScript API browser key from `CW_GOOGLE_MAPS_KEY` and hands it only
+to a doc with a `<StreetMap>` on Google: one that names no `basemap`, or
+names `basemap="google"` as a quoted string. Never put a key in a doc. On a
+server with no key, a map that names no basemap draws on OpenStreetMap; one
+that names `"google"` does too, and a line under it says so. That line also
+appears if Google refuses the key or its script does not load. Markers,
+rings, points, popups and the legend are the same on every basemap. Google
+bills each map load; write `basemap="osm"` for a map that does not need
+Google's.
