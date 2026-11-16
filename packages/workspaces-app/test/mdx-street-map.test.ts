@@ -1,5 +1,5 @@
 import { prose } from '@claude-workspaces/core';
-import type { Basemap } from '@claude-workspaces/core/map-basemaps';
+import { type Basemap, DEFAULT_BASEMAP } from '@claude-workspaces/core/map-basemaps';
 import type { MapSpec } from '@claude-workspaces/core/map-spec';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
@@ -158,10 +158,12 @@ describe('a StreetMap block on the doc page', () => {
     });
     mount('<StreetMap src="data/reports.json" rings={[150]} />');
     await vi.waitFor(() => expect(drawnSpecs).toHaveLength(1));
-    expect(asked).toEqual(['/workspaces/w-harbor/docs/d-reports/files/data/reports.json']);
+    expect(asked[0]).toBe('/workspaces/w-harbor/docs/d-reports/files/data/reports.json');
     expect(drawnSpecs[0]?.markers[0]?.popup).toBe('Saltmarsh hall');
-    // The file supplies data, never the basemap.
-    expect(drawnSpecs[0]?.basemap).toBe('osm');
+    // The file supplies data, never the basemap: the tag named none, so the
+    // map takes the default.
+    expect(drawnSpecs[0]?.basemap).toBe(DEFAULT_BASEMAP);
+    expect(drawnSpecs[0]?.basemapNamed).toBe(false);
     expect(legend()).toEqual(['Noise', '150 ft']);
   });
 
@@ -233,6 +235,25 @@ describe('a StreetMap block on the doc page', () => {
       expect(notice()?.textContent).toBe(
         "Google Maps refused this server's key, so this map is drawn on OpenStreetMap.",
       );
+    });
+
+    it('draws a map that names no basemap on Google when the server holds a key', async () => {
+      const asked = serve(200, { key: 'fixture-maps-key-Riverbend' });
+      mount('<StreetMap markers={[{ lat: 37.77, lng: -122.42 }]} />');
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1));
+      expect(asked).toEqual(['/workspaces/w-harbor/docs/d-reports/map-key/google']);
+      expect(drawnOn[0]?.keyed?.key).toBe('fixture-maps-key-Riverbend');
+      expect(view()?.querySelector<HTMLElement>('.mdx-map')?.dataset.basemap).toBe('google');
+      expect(notice()?.hidden).toBe(true);
+    });
+
+    it('draws a map that names no basemap on OpenStreetMap, quietly, with no key', async () => {
+      serve(404, { error: 'none', reason: 'no-key' });
+      mount('<StreetMap markers={[{ lat: 37.77, lng: -122.42 }]} />');
+      await vi.waitFor(() => expect(drawnOn).toHaveLength(1));
+      expect(drawnOn[0]?.base.label).toBe('OpenStreetMap');
+      expect(view()?.querySelector<HTMLElement>('.mdx-map')?.dataset.basemap).toBe('osm');
+      expect(notice()?.hidden).toBe(true);
     });
 
     it('asks for no key for a map on a keyless basemap', async () => {

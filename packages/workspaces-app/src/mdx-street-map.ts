@@ -273,7 +273,9 @@ function draw(
       start(base, spec.basemap, { key: got.key, fallback: instead, fellBack });
     } else {
       start(instead, insteadName);
-      fellBack(got.reason);
+      // A map that took the default basemap draws on the fallback quietly
+      // when the server holds no key: nobody asked for Google.
+      if (spec.basemapNamed) fellBack(got.reason);
     }
   });
 }

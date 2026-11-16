@@ -9,10 +9,11 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  *
  * Answers `{ key }` only when the basemap is one `core/map-basemaps.ts` says
  * needs a key, the server holds that key, and a `<StreetMap>` in the doc's
- * CURRENT content names that basemap in a literal `basemap="…"`. Every other
+ * CURRENT content draws on it: names it in a literal `basemap="…"`, or names
+ * no basemap and so takes the default (`DEFAULT_BASEMAP`, Google). Every other
  * request is a 404 whose `reason` the page reads to say why it fell back:
  * `not-named` (no map in this doc asks for it) or `no-key` (this server has
- * none). A doc that stops naming the basemap stops getting the key on the
+ * none). A doc that stops drawing on the basemap stops getting the key on the
  * next read, because the check runs on every request against live content.
  *
  * The key is a Google Maps JavaScript API browser key: Google restricts it to

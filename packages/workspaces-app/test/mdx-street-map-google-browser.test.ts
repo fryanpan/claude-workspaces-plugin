@@ -1,10 +1,11 @@
 /**
- * A `<StreetMap basemap="google">` on the real doc page draws on Google's map
+ * A `<StreetMap>` that names `basemap="google"`, or names no basemap and takes
+ * that default, draws on Google's map on the real doc page
  * with the key the server handed that doc, keeps its markers, rings and
  * Google's credit, and asks Google for nothing it does not list; a doc whose
  * map is on OpenStreetMap asks neither the server for the key nor Google for
- * anything; and on a server with no key the Google map draws on
- * OpenStreetMap and says so. Google's script and tiles are stubbed with a
+ * anything; and on a server with no key the map draws on OpenStreetMap,
+ * saying so only when the doc named Google. Google's script and tiles are stubbed with a
  * fake key, by `mdx-street-map-google-browser-driver.ts`.
  */
 import { spawnSync } from 'node:child_process';
@@ -59,7 +60,16 @@ describe.skipIf(CHROME === null)('a StreetMap on the google basemap', () => {
   it(
     'asks Google only for what its basemap lists, and nowhere else',
     () => {
-      for (const page of [r.wide, r.narrow, r.plain, r.keyless, r.refused, r.unloaded]) {
+      for (const page of [
+        r.wide,
+        r.narrow,
+        r.plain,
+        r.bareKeyed,
+        r.bareKeyless,
+        r.keyless,
+        r.refused,
+        r.unloaded,
+      ]) {
         expect(page.strayRequests).toEqual([]);
       }
       expect(r.wide.googleRequests).toBeGreaterThan(1);
@@ -76,6 +86,33 @@ describe.skipIf(CHROME === null)('a StreetMap on the google basemap', () => {
       expect(r.plain.googleRequests).toBe(0);
       expect(r.plain.googleScriptTag).toBe(false);
       expect(r.plain.googleGlobal).toBe(false);
+    },
+    CASE_MS,
+  );
+
+  it(
+    'draws a map that names no basemap on Google where the server holds a key',
+    () => {
+      expect(r.bareKeyed.basemap).toBe('google');
+      expect(r.bareKeyed.scriptKeys).toEqual([FAKE_KEY]);
+      expect(r.bareKeyed.keyRequests).toBe(1);
+      expect(r.bareKeyed.googleTiles).toBeGreaterThan(0);
+      expect(r.bareKeyed.markerPaths).toBe(12);
+      expect(r.bareKeyed.corners).toContain(GOOGLE_CREDIT);
+      expect(r.bareKeyed.notice).toBeNull();
+    },
+    CASE_MS,
+  );
+
+  it(
+    'draws a map that names no basemap on OpenStreetMap, without a notice, with no key',
+    () => {
+      expect(r.bareKeyless.basemap).toBe('osm');
+      expect(r.bareKeyless.osmTiles).toBeGreaterThan(0);
+      expect(r.bareKeyless.googleRequests).toBe(0);
+      expect(r.bareKeyless.googleScriptTag).toBe(false);
+      expect(r.bareKeyless.markerPaths).toBe(12);
+      expect(r.bareKeyless.notice).toBeNull();
     },
     CASE_MS,
   );

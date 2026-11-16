@@ -1403,9 +1403,9 @@ function docSubrouteAllowed(sub: string, method: string): boolean {
    */
   if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
   /**
-   * The key a `<StreetMap basemap="google">` in the doc draws with
+   * The key a `<StreetMap>` on Google in the doc draws with
    * (`routes/doc-map-key.ts`), answered only while the doc's live content
-   * names that basemap. A read, on a doc already inside the shared board:
+   * draws on that basemap. A read, on a doc already inside the shared board:
    * the map is part of what the doc displays, and the key is a browser key
    * Google restricts to the board's site.
    */

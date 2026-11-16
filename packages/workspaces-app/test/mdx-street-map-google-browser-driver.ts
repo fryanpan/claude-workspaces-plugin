@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * A `<StreetMap basemap="google">` on the real doc page, in headless Chromium
- * against two real servers, one holding a fake Maps key and one holding none,
- * and a `<StreetMap>` on OpenStreetMap beside it on the keyed server.
+ * against real servers, one holding a fake Maps key and one holding none,
+ * a `<StreetMap>` on OpenStreetMap beside it, and one that names no basemap
+ * and so takes the default, Google, on both.
  *
  * No request leaves the machine. Google's Maps script is answered with the
  * stand-in in `fake-google-maps.ts`, its tiles and OpenStreetMap's with a grey
@@ -76,6 +77,9 @@ export interface GoogleMapReading {
   narrow: PageReading;
   /** The keyed server, a doc whose map is on OpenStreetMap. */
   plain: PageReading;
+  /** A doc whose map names no basemap, on the keyed server and the keyless. */
+  bareKeyed: PageReading;
+  bareKeyless: PageReading;
   /** The server with no key, the Google doc. */
   keyless: PageReading;
   /** A server whose key Google refuses, and one whose Google script never
@@ -103,8 +107,8 @@ const MARKERS = Array.from({ length: 12 }, (_, i) => ({
   lng: -122.44 + Math.floor(i / 4) * 0.005,
   popup: `${['Harborlight', 'Riverbend', 'Saltmarsh'][i % 3]} hall ${i + 1}`,
 }));
-const tag = (basemap: string) =>
-  `<StreetMap title="Halls" basemap="${basemap}" rings={[150]} markers={${JSON.stringify(MARKERS)}} />`;
+const tag = (basemap?: string) =>
+  `<StreetMap title="Halls"${basemap ? ` basemap="${basemap}"` : ''} rings={[150]} markers={${JSON.stringify(MARKERS)}} />`;
 
 /** Ready once the map has drawn and a tile has loaded; null until then. */
 const READ_PAGE = `(() => {
@@ -159,6 +163,7 @@ async function main(): Promise<void> {
       mkdirSync(join(repo, name));
       writeFileSync(join(repo, name, 'google.mdx'), `# Riverbend halls\n\n${tag('google')}\n`);
       writeFileSync(join(repo, name, 'plain.mdx'), `# Saltmarsh halls\n\n${tag('osm')}\n`);
+      writeFileSync(join(repo, name, 'bare.mdx'), `# Harborlight halls\n\n${tag()}\n`);
       const handle = createServer({
         port: 0,
         dataDir: join(dir, `data-${name}`),
@@ -195,6 +200,7 @@ async function main(): Promise<void> {
         base,
         google: `${base}/workspaces/${ws}/docs/${await doc('google')}`,
         plain: `${base}/workspaces/${ws}/docs/${await doc('plain')}`,
+        bare: `${base}/workspaces/${ws}/docs/${await doc('bare')}`,
       };
     };
     const keyed = await serve('keyed', FAKE_KEY);
@@ -295,6 +301,8 @@ async function main(): Promise<void> {
       wide: await open(keyed.google, 1180, 820),
       narrow: await open(keyed.google, 430, 932),
       plain: await open(keyed.plain, 1180, 820),
+      bareKeyed: await open(keyed.bare, 1180, 820),
+      bareKeyless: await open(keyless.bare, 1180, 820),
       keyless: await open(keyless.google, 1180, 820),
       refused: await open(refused.google, 1180, 820),
       unloaded: await open(unloaded.google, 1180, 820),

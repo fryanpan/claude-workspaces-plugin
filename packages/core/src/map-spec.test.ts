@@ -39,6 +39,9 @@ describe('a StreetMap tag read into a spec', () => {
     ]);
     expect(spec.legend).toBe(true);
     expect(spec.basemap).toBe(DEFAULT_BASEMAP);
+    expect(spec.basemapNamed).toBe(false);
+    const named = readMapSpec({ basemap: 'osm', markers: [{ lat: 1, lng: 2 }] });
+    expect(named.ok && named.spec.basemapNamed).toBe(true);
   });
 
   it('takes the author’s colours and order, and ignores a colour that is not hex', () => {
@@ -146,14 +149,20 @@ describe('the files a doc’s StreetMap tags name', () => {
         '<StreetMap markers={[{ lat: 1, lng: 2, popup: "a > b" }]} basemap="osm" />',
       ]),
     ).toEqual(['google', 'carto-light', 'osm']);
-    expect(mapBasemapNames(['<StreetMap src="a.json" />'])).toEqual([]);
+    // A tag that names no basemap draws on the default, so it may have its key;
+    // one that names it in an expression is not read, and asks for nothing.
+    expect(mapBasemapNames(['<StreetMap src="a.json" />'])).toEqual([DEFAULT_BASEMAP]);
+    expect(mapBasemapNames(['<StreetMap basemap={"osm"} />'])).toEqual([]);
+    expect(mapBasemapNames(['<StreetMap basemapStyle="dark" />'])).toEqual([DEFAULT_BASEMAP]);
+    expect(mapBasemapNames(['<PlotChart src="a.json" />'])).toEqual([]);
   });
 });
 
 describe('the basemap seam', () => {
-  it('names one keyless default, and every entry lists the origins it loads from', () => {
+  it('defaults to Google with a keyless fallback, and every entry lists its origins', () => {
     const base = basemapOf(DEFAULT_BASEMAP);
-    expect(base?.key).toBeUndefined();
+    expect(DEFAULT_BASEMAP).toBe('google');
+    expect(basemapOf(base?.fallback ?? '')?.key).toBeUndefined();
     for (const b of Object.values(BASEMAPS)) {
       expect(b.origins.length).toBeGreaterThan(0);
       const first = b.script ?? b.tiles.replace(/\{[a-z]\}/g, 'a');

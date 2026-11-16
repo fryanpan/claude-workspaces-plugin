@@ -244,7 +244,10 @@ async function main(): Promise<void> {
     });
 
     // Every request to another origin stops here.
-    const tileOrigins = BASEMAPS[DEFAULT_BASEMAP]?.origins ?? [];
+    // The tags name no basemap, so they take the default, Google; this
+    // server holds no Maps key, so they draw on its fallback.
+    const fallback = BASEMAPS[DEFAULT_BASEMAP]?.fallback ?? '';
+    const tileOrigins = BASEMAPS[fallback]?.origins ?? [];
     const tile = Buffer.from(tinyPng(232, 256, 256)).toString('base64');
     let tileRequests = 0;
     const strayRequests: string[] = [];

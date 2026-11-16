@@ -9,7 +9,7 @@
  * needs a key names it in `key`; the key itself is never written here or in a
  * doc. The server holds it and hands it only to a page whose doc draws a map
  * on that basemap (`routes/doc-map-key.ts`); with no key set, the map draws
- * on `fallback` and says so.
+ * on `fallback`, and says so when the doc named the keyed basemap itself.
  *
  * Terms, read 13 Nov 2026:
  *  - `osm`: the OpenStreetMap Foundation's standard tiles. Free and keyless,
@@ -95,8 +95,10 @@ export const BASEMAPS: Readonly<Record<string, Basemap>> = Object.freeze({
   },
 });
 
-/** The basemap a tag with no `basemap` prop draws on. */
-export const DEFAULT_BASEMAP = 'osm';
+/** The basemap a tag with no `basemap` prop draws on: Google, the owner's
+ *  choice, on a server that holds its key, and its `fallback` (OpenStreetMap)
+ *  without a word on one that does not. */
+export const DEFAULT_BASEMAP = 'google';
 
 export function basemapOf(name: string): Basemap | undefined {
   return Object.hasOwn(BASEMAPS, name) ? BASEMAPS[name] : undefined;

@@ -1,8 +1,8 @@
 /**
  * The Google Maps key reaches a doc page only through
  * `GET …/docs/<id>/map-key/google`, and only for a doc whose live content
- * draws a `<StreetMap basemap="google">`: not for a doc whose maps use
- * another basemap, not for a doc with no map, not once the tag stops naming
+ * draws a map on Google, by `basemap="google"` or by naming no basemap at
+ * all: not for a doc whose maps all name another basemap, not for a doc with no map, not once the tag stops naming
  * Google, and not from a server that holds no key. The key is a fake one, and
  * no request leaves the machine. Each refusal sits beside a served control.
  */
@@ -25,7 +25,12 @@ const OSM_DOC = `# Riverbend reports
 
 <StreetMap basemap="osm" markers={[{ lat: 37.78, lng: -122.41, label: "Riverbend" }]} />
 
-<StreetMap title="basemap=google" markers={[{ lat: 37.78, lng: -122.41 }]} />
+<StreetMap title="basemap=google" basemap='carto-light' markers={[{ lat: 37.78, lng: -122.41 }]} />
+`;
+/** A map that names no basemap draws on the default, Google. */
+const BARE_DOC = `# Saltmarsh reports
+
+<StreetMap markers={[{ lat: 37.79, lng: -122.4, label: "Saltmarsh" }]} />
 `;
 const PLAIN_DOC = '# Saltmarsh\n\nNo map here, though the word basemap="google" is.\n';
 
@@ -55,7 +60,7 @@ describe('GET …/docs/<id>/map-key/<basemap>', () => {
     });
     const base = `http://127.0.0.1:${handle.port}`;
     const ws = await seedBoard(base, { name: 'Harborlight' });
-    for (const docId of ['gmap', 'osm', 'plain']) {
+    for (const docId of ['gmap', 'osm', 'plain', 'bare']) {
       const r = await fetch(`${base}/workspaces/${ws}/docs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -89,6 +94,7 @@ describe('GET …/docs/<id>/map-key/<basemap>', () => {
       writeFileSync(join(repo, dir, 'gmap.mdx'), GOOGLE_DOC);
       writeFileSync(join(repo, dir, 'osm.mdx'), OSM_DOC);
       writeFileSync(join(repo, dir, 'plain.md'), PLAIN_DOC);
+      writeFileSync(join(repo, dir, 'bare.mdx'), BARE_DOC);
     }
     keyed = await open(FAKE_KEY, 'keyed');
     keyless = await open(undefined, 'keyless');
@@ -110,6 +116,13 @@ describe('GET …/docs/<id>/map-key/<basemap>', () => {
     expect(r.headers.get('cache-control')).toBe('no-store');
     expect(r.headers.get('x-content-type-options')).toBe('nosniff');
     expect(r.headers.get('cross-origin-resource-policy')).toBe('same-origin');
+  });
+
+  it('hands the key to a doc whose map names no basemap, since it draws on Google', async () => {
+    const r = await key(keyed, 'bare');
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ key: FAKE_KEY });
+    expect((await key(keyless, 'bare')).status).toBe(404);
   });
 
   it('refuses a doc whose maps use another basemap, or that has no map', async () => {
