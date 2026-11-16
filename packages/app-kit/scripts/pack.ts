@@ -27,7 +27,7 @@ import { buildClient } from './build-client.ts';
 
 const PKG_ROOT = resolve(import.meta.dirname, '..');
 /** The folders under `src/` that are this package's own, packed as they are. */
-export const OWN_FOLDERS = ['auth', 'client', 'do', 'markdown-file'];
+export const OWN_FOLDERS = ['agent', 'auth', 'client', 'do', 'markdown-file'];
 const REPO = resolve(PKG_ROOT, '../..');
 
 interface Manifest {

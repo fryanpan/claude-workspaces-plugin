@@ -6,9 +6,11 @@
  * real async round trip out of the doc's object.
  *
  * `user` and `role` query parameters stand in for the Worker's own sign-in
- * and room-access check.
+ * and room-access check. `POST /docs/<doc>/agent?session=<id>` stands in
+ * for the app's tool dispatch running an `edit_document` call.
  */
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
+import { agentPrincipal, editDocAction } from '../../src/agent/index.ts';
 import type { CollabRole } from '../../src/collab/index.ts';
 import {
   type DurableRoom,
@@ -41,7 +43,7 @@ interface DocState {
   };
 }
 
-const DOC_PATH = /^\/docs\/([A-Za-z0-9_-]+)\/(ws|refresh|text|instance)$/;
+const DOC_PATH = /^\/docs\/([A-Za-z0-9_-]+)\/(ws|refresh|text|instance|agent)$/;
 const FILE_PATH = /^\/files\/([A-Za-z0-9_-]+)$/;
 const ROLES = new Set(['owner', 'edit', 'comment', 'view']);
 /** Long enough that a test can evict the object inside it; an app uses
@@ -94,7 +96,11 @@ export class DocFile {
         schedule: alarmSchedule(state.storage),
         debounceMs: DEBOUNCE_MS,
       });
-      this.room = createDurableRoom({ ctx: state, docs: this.file.docs });
+      this.room = createDurableRoom({
+        ctx: state,
+        docs: this.file.docs,
+        actions: { editDoc: editDocAction() },
+      });
     });
   }
 
@@ -112,6 +118,12 @@ export class DocFile {
     if (verb === 'refresh') {
       await this.file.refresh();
       return new Response(this.file.text());
+    }
+    if (verb === 'agent') {
+      const agent = agentPrincipal(url.searchParams.get('session') ?? '');
+      this.room.grant(agent, 'edit');
+      const res = this.room.action(docId, agent, 'editDoc', await req.json());
+      return Response.json(res.ok ? res.value : res);
     }
     const user = url.searchParams.get('user') ?? '';
     const role = url.searchParams.get('role') ?? '';
