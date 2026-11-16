@@ -35,14 +35,28 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 describe('the packed kit', () => {
   it('holds a file for every export the manifest names', () => {
     const manifest = JSON.parse(readFromTarball('package.json')) as {
-      exports: Record<string, string>;
+      exports: Record<string, string | Record<string, string>>;
     };
     const missing = Object.values(manifest.exports)
+      .flatMap((t) => (typeof t === 'string' ? [t] : Object.values(t)))
       .map((p) => p.replace(/^\.\//, ''))
       .filter((p) => !listing.includes(p));
     expect(missing).toEqual([]);
     expect(listing).toContain('dist/cw-collab.js');
     expect(listing).toContain('dist/cw-collab.mjs');
+  });
+
+  it('ships compiled JavaScript and declarations, with no TypeScript source', () => {
+    expect(listing.filter((p) => p.endsWith('.ts') && !p.endsWith('.d.ts'))).toEqual([]);
+    expect(listing).toContain('lib/do/index.js');
+    expect(listing).toContain('lib/do/index.d.ts');
+    // Relative imports name the compiled files, in the code and its types.
+    expect(readFromTarball('lib/markdown-file/markdown-file.js')).toMatch(
+      /from ["']\.\.\/text\/splice\.js["']/,
+    );
+    expect(readFromTarball('lib/markdown-file/index.d.ts')).toMatch(
+      /from ["']\.\/markdown-file\.js["']/,
+    );
   });
 
   it('carries no tests and no dev-only dependencies', () => {

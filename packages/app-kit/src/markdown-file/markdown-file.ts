@@ -21,7 +21,7 @@ import * as Y from 'yjs';
  * that overlaps them loses to them, and `onConflict` is told, with both
  * versions, so nothing is lost without the app hearing of it.
  */
-import { splice } from '../client/text-binding.ts';
+import { splice } from '../text/splice.ts';
 import type { RoomDocs } from '../collab/index.ts';
 
 /** A synchronous key-value store that survives the app's process. */
