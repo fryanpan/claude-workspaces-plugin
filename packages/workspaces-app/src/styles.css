@@ -2463,6 +2463,7 @@ body.composer-open #editor > .ProseMirror ::selection {
   display: contents;
 }
 .board-presence-deck {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -2500,11 +2501,19 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-presence-deck > .board-presence-away:first-child {
   margin-left: 0;
 }
-/* The first names of whoever leads the deck, beside it on a wide screen. */
+/* The first names of whoever leads the deck, to its left on a wide screen.
+   Out of the deck's own box, so the circles sit where they sit on a doc
+   (which has no room for the names, doc.css) and nothing moves as the names
+   change; still inside the button, so a tap on them opens the list. */
 .board-presence-deck > .board-presence-names {
+  position: absolute;
+  top: 50%;
+  right: 100%;
   max-width: 160px;
-  margin-left: 8px;
+  margin: 0;
+  padding-right: 4px;
   overflow: hidden;
+  transform: translateY(-50%);
   color: var(--fg-muted);
   font-size: 13px;
   text-overflow: ellipsis;

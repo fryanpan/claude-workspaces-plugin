@@ -89,7 +89,7 @@ export function usePress(onTap: () => void, onHold: () => void) {
 /** How many names the deck spells out beside its circles on a wide screen. */
 const NAMED = 2;
 
-/** The words beside the deck: the first names of whoever leads it, and how
+/** The words to the left of the deck: the first names of whoever leads it, and how
  *  many more there are. "Bob, Saltmarsh +2". The list names everyone. */
 export function deckNames(chips: PresenceChip[]): string {
   const names = chips.slice(0, NAMED).map((c) => c.label.trim().split(/\s+/)[0] ?? c.label);
