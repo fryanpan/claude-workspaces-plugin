@@ -40,6 +40,8 @@ import {
   parseGithubSubscriptions,
 } from '../github-hub.ts';
 import { type HomeFeedRoutesContext, homeFeedCallerAllowed } from './home-feed.ts';
+import { sent } from './route-contract.ts';
+import type { GithubSubscriptionsBody } from './workspace-board-contract.ts';
 
 const LOCAL_SUBSCRIPTIONS = /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/github-subscriptions$/;
 const RELAY_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/github\/(subscriptions|events)$/;
@@ -85,7 +87,9 @@ export async function handleGithubHubRoute(
       return j(200, { workspaceId: boardId, subscriptions: ctx.hub.subscriptions(boardId) });
     }
     if (req.method !== 'PUT') return j(405, { error: 'method-not-allowed' });
-    const parsed = parseGithubSubscriptions((await ctx.safeJson(req))?.subscriptions);
+    const parsed = parseGithubSubscriptions(
+      sent<GithubSubscriptionsBody>(await ctx.safeJson(req))?.subscriptions,
+    );
     if (typeof parsed === 'string') return j(400, { error: parsed });
     return j(200, {
       workspaceId: boardId,

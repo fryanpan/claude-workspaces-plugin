@@ -62,6 +62,8 @@ import {
 } from '../coach/types.ts';
 import type { CoachWiring } from '../coach/wiring.ts';
 import { currentEventOrigin } from '../event-origin.ts';
+import type { CoachMomentAnswer, CoachMomentBody } from './agent-machine-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 export interface CoachRoutesContext {
   wiring: CoachWiring;
@@ -233,12 +235,12 @@ export async function handleCoachRoutes(
     const notLocal = ctx.refuseNonLocal(req);
     if (notLocal) return j(notLocal.status, notLocal.body);
     if (tooLarge(req)) return j(413, { error: 'too-large' });
-    const raised = coach.raise(await ctx.safeJson(req));
+    const raised = coach.raise(sent<CoachMomentBody>(await ctx.safeJson(req)));
     if (!raised.ok) {
       const status = raised.error === 'bad-moment' ? 422 : 409;
       return j(status, { error: raised.error, message: raised.message });
     }
-    return j(200, { id: raised.id });
+    return j(200, answerAs<CoachMomentAnswer>({ id: raised.id }));
   }
 
   // Every board and doc page sends where he is, whoever is reading it, and

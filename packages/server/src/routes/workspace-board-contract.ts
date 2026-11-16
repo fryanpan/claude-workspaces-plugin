@@ -1,16 +1,18 @@
 /**
  * The contract for the routes the MCP calls about a board itself
  * (`route-contract.ts` says what a contract is): its record, name, archive
- * state, settings and parallelism cap, filing a doc onto it, and the related
- * work it already holds. `workspace-settings.ts`, `workspace-content.ts`,
- * `workspace-related.ts` and `workspaces-create-read.ts` serve them.
+ * state, settings and parallelism cap, filing a doc onto it, the related
+ * work it already holds, its GitHub subscriptions and its embeds.
+ * `workspace-settings.ts`, `workspace-content.ts`, `workspace-related.ts`,
+ * `workspaces-create-read.ts`, `github-hub.ts` and `workspace-embeds.ts`
+ * serve them.
  *
  * Each answer declares only the fields a tool reads, so it is a floor on the
  * answer rather than its whole shape. `author` is resolved by `authorFor`, so
  * it is `unknown` here.
  */
 import { Hono } from 'hono';
-import { answers, json, query } from './route-contract.ts';
+import { answers, contractOnly, json, query } from './route-contract.ts';
 
 export interface RetiredBody {
   retired: boolean;
@@ -38,6 +40,14 @@ export interface ParallelismCapBody {
 }
 export interface AttachDocBody {
   docId: string;
+}
+/** Checked whole by `parseGithubSubscriptions`. */
+export interface GithubSubscriptionsBody {
+  subscriptions: unknown;
+}
+/** Checked whole by `parseBoardEmbeds`. */
+export interface BoardEmbedsBody {
+  embeds: unknown;
 }
 export type BoardReadQuery = { format: 'json' };
 export type RelatedWorkQuery = { q: string; docId?: string; limit?: string };
@@ -104,6 +114,8 @@ export const workspaceBoardContract = new Hono()
   .put(`${BOARD}/settings`, json<BoardSettingsBody>(), answers<BoardSettingsAnswer>())
   .put(`${BOARD}/parallelism-cap`, json<ParallelismCapBody>(), answers<ParallelismCapAnswer>())
   .post(`${BOARD}/docs:attach`, json<AttachDocBody>(), answers<AttachDocAnswer>())
-  .get(`${BOARD}/related-work`, query<RelatedWorkQuery>(), answers<RelatedWorkAnswer>());
+  .get(`${BOARD}/related-work`, query<RelatedWorkQuery>(), answers<RelatedWorkAnswer>())
+  .put(`${BOARD}/github-subscriptions`, json<GithubSubscriptionsBody>(), contractOnly)
+  .put(`${BOARD}/embeds`, json<BoardEmbedsBody>(), contractOnly);
 
 export type WorkspaceBoardContract = typeof workspaceBoardContract;

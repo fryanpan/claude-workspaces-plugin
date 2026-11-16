@@ -34,6 +34,8 @@ import type {
   PersonWatchAnswer,
   PersonWatchBody,
   PlaceFields,
+  PointAnswer,
+  PointBody,
 } from './person-contract.ts';
 import { type Sent, answerAs, sent } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
@@ -149,7 +151,8 @@ export async function handleWorkspacePoint(
   } catch {
     return ctx.j(400, { error: 'bad board id' });
   }
-  const body: Sent<PersonShowBody & PersonWatchBody> = sent(await ctx.safeJson(req)) ?? {};
+  const body: Sent<PersonShowBody & PersonWatchBody & PointBody> =
+    sent(await ctx.safeJson(req)) ?? {};
   const agentId = typeof body.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
   // Hearing where the owner is and moving the tab they are reading are new
@@ -182,5 +185,5 @@ export async function handleWorkspacePoint(
     return ctx.j(200, answerAs<PersonShowAnswer>({ ok: true, spot: built.spot }));
   }
   ctx.agentSpots.pointOn(workspaceId, agentId, { ...built.spot, name });
-  return ctx.j(200, { ok: true, spot: built.spot });
+  return ctx.j(200, answerAs<PointAnswer>({ ok: true, spot: built.spot }));
 }
