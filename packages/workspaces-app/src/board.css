@@ -926,6 +926,9 @@ body.board-body {
   --size: 20px;
   font-size: 8px;
 }
+.board-presence-deck > .board-presence-wa.board-presence-away wa-avatar[shape="rounded"] {
+  border-radius: 5px;
+}
 .board-presence-row .board-presence-wa wa-avatar,
 .board-follow-bar .board-presence-wa wa-avatar {
   --size: 24px;

@@ -2498,6 +2498,11 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-presence-deck > .board-presence-away {
   margin-left: -4px;
 }
+/* 9px on a 20px square reads as a circle, so a small agent loses the
+   corners that tell it from a person. */
+.board-presence-deck > .board-presence-circle.board-presence-agent.board-presence-away {
+  border-radius: 5px;
+}
 .board-presence-deck > .board-presence-away:first-child {
   margin-left: 0;
 }

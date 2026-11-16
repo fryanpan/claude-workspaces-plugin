@@ -41,6 +41,8 @@ export interface FaceRead {
    *  neighbour covers its letters. */
   onTop: boolean;
   radius: string;
+  /** The circle's drawn width in px. */
+  size: number;
 }
 
 export interface FacesRound {
@@ -73,6 +75,7 @@ const READ_DECK = `(() => [...document.querySelectorAll('.board-presence-deck [d
       letterPx: Number.parseFloat(s.fontSize),
       onTop: !!hit && (hit === c || c.contains(hit)),
       radius: s.borderRadius,
+      size: r.width,
     };
   }))()`;
 

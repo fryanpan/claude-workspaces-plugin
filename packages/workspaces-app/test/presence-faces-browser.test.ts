@@ -77,8 +77,13 @@ describe.skipIf(CHROME === null)('the presence deck’s faces, in a browser', ()
     }, 60_000);
 
     it(`draws an agent as a rounded square and a person as a circle at ${width}`, () => {
-      const shape = (f: FaceRead) => f.radius === '50%';
-      for (const f of round(width).deck) expect(shape(f), f.key).toBe(f.kind === 'person');
+      // A corner a quarter of the side or less reads as a square at 20px;
+      // 9px on 20px read as a circle in the first round of this fix.
+      const square = (f: FaceRead) => Number.parseFloat(f.radius) <= f.size * 0.3;
+      for (const f of round(width).deck) {
+        if (f.kind === 'person') expect(f.radius, f.key).toBe('50%');
+        else expect(square(f), `${f.key}: ${f.radius} on ${f.size}px`).toBe(true);
+      }
     }, 60_000);
 
     it(`gives a participant one colour in the deck, the list and on a doc at ${width}`, () => {
