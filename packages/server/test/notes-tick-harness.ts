@@ -31,9 +31,9 @@ import {
   beginNotesSession,
 } from '../src/meeting-notes.ts';
 import { notesTopicHashes } from '../src/notes-heading-level.ts';
-import { RECAP_ACTIONS_HEADING } from '../src/notes-recap-shape.ts';
 import { type NotesTimingLog, createNotesTimingLog } from '../src/notes-timing.ts';
-import { headingsOf, noteLines, oneDocStore, sectionBody } from './notes-doc-helpers.ts';
+import { headingsOf, oneDocStore } from './notes-doc-helpers.ts';
+import { meetingNoteLines, meetingNotes } from './notes-meeting-sections.ts';
 import { waitFor } from './wait-for.ts';
 
 /**
@@ -406,7 +406,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     return {
       tick,
       markdown: markdown(),
-      notes: meetingNotes(ydoc),
+      notes: meetingNotes(ydoc, SCRIPT_TOPIC),
       headings: headings(),
       ...(seen?.input ? { input: seen.input } : {}),
       composed: seen?.composed ?? [],
@@ -421,7 +421,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     timing: () => timing,
     ydoc,
     markdown,
-    notes: () => meetingNotes(ydoc),
+    notes: () => meetingNotes(ydoc, SCRIPT_TOPIC),
     headings,
     countHeadings: (text) => headings().filter((h) => h === text).length,
     say(...utterances) {
@@ -494,20 +494,5 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
   return harness;
 }
 
-/** The lines the notes section currently holds — the unit a test counts when
- *  it wants to know whether a note appeared twice. */
-export function notesItems(ydoc: Y.Doc): string[] {
-  return [...noteLines(ydoc, RECAP_ACTIONS_HEADING), ...noteLines(ydoc, SCRIPT_TOPIC)];
-}
-
-/**
- * The meeting's notes: the script's topic, and the decisions and follow-ups
- * the stop gathers out of it into a section of their own
- * (`notes-recap-shape.ts`). A note moved there at the stop is still a note
- * the meeting kept.
- */
-export function meetingNotes(ydoc: Y.Doc): string {
-  return [sectionBody(ydoc, RECAP_ACTIONS_HEADING), sectionBody(ydoc, SCRIPT_TOPIC)]
-    .filter((s) => s.length > 0)
-    .join('\n\n');
-}
+/** The meeting's notes one per line (`notes-meeting-sections.ts`). */
+export const notesItems = (ydoc: Y.Doc): string[] => meetingNoteLines(ydoc, SCRIPT_TOPIC);
