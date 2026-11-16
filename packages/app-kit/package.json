@@ -11,16 +11,16 @@
     "./client/sync": "./src/client/sync.ts",
     "./client/text-binding": "./src/client/text-binding.ts",
     "./collab": "./src/collab/index.ts",
+    "./cw-collab.js": "./dist/cw-collab.js",
+    "./cw-collab.mjs": "./dist/cw-collab.mjs",
     "./do": "./src/do/index.ts",
     "./markdown-file": "./src/markdown-file/index.ts",
     "./theme.css": "./src/theme.css"
   },
-  "files": [
-    "src",
-    "README.md"
-  ],
+  "files": ["src", "dist/cw-collab.js", "dist/cw-collab.mjs", "README.md"],
   "scripts": {
-    "pack": "bun run scripts/pack.ts"
+    "pack": "bun run scripts/pack.ts",
+    "build:client": "bun run scripts/build-client.ts"
   },
   "dependencies": {
     "@awesome.me/webawesome": "3.14.0",

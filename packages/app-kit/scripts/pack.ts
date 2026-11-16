@@ -12,6 +12,9 @@
  *                 (`core/test/collab/collab-imports.test.ts` holds that)
  *   src/theme.css becomes a copy of `packages/workspaces-app/src/wa-theme.css`
  *
+ * It also builds the page client into `dist/cw-collab.js` and
+ * `dist/cw-collab.mjs` (`scripts/build-client.ts`), for a page with no bundler.
+ *
  * and its `package.json` loses the in-repo `@claude-workspaces/core`
  * dependency and its scripts. The version is the one in `package.json`;
  * the tarball is `claude-workspaces-app-kit-<version>.tgz`.
@@ -20,6 +23,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { buildClient } from './build-client.ts';
 
 const PKG_ROOT = resolve(import.meta.dirname, '..');
 /** The folders under `src/` that are this package's own, packed as they are. */
@@ -67,6 +71,7 @@ export function packKit(outDir: string): string {
       filter: (src) => !src.endsWith('.test.ts'),
     });
     cpSync(join(REPO, 'packages/workspaces-app/src/wa-theme.css'), join(stage, 'src/theme.css'));
+    buildClient(join(stage, 'dist'));
 
     mkdirSync(outDir, { recursive: true });
     const out = resolve(outDir);
