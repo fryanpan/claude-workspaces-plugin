@@ -226,7 +226,28 @@ async function openCard(cdp: Cdp, key: string): Promise<Card> {
   await tapOn(cdp, '.board-presence-deck');
   await until('the list open', async () => (await cdp.evaluate(READ_LIST)) as Row[]);
   await tapOn(cdp, `.board-presence-row[data-key="${key}"] .board-presence-who`);
-  return until('the card open', async () => (await cdp.evaluate(READ_CARD)) as Card | null);
+  return until('the card open', async () => (await cdp.evaluate(READ_CARD)) as Card | null).catch(
+    async (e) => {
+      // What the page held when no card came: the list, its row for `key`,
+      // whether a card exists at all, and where focus went. A failed read
+      // must not hide the timeout it is explaining.
+      step(
+        JSON.stringify(
+          await cdp
+            .evaluate(`({
+            list: !!document.querySelector('.board-presence-list'),
+            row: !!document.querySelector('.board-presence-row[data-key=${JSON.stringify(key)}]'),
+            keys: [...document.querySelectorAll('.board-presence-row')].map((r) => r.dataset.key),
+            card: document.querySelector('.board-presence-card')?.outerHTML.slice(0, 200) ?? null,
+            active: document.activeElement?.className,
+            at: location.pathname,
+          })`)
+            .catch((read: unknown) => `dump failed: ${String(read)}`),
+        ),
+      );
+      throw e;
+    },
+  );
 }
 
 /** How long, from now, until `read` answers within `LIVE_MS`. */
