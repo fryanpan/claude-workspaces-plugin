@@ -37,6 +37,62 @@ export function pageScroller(doc: Document, roots: readonly string[]): Element |
   return top && top.scrollHeight - top.clientHeight > 1 ? top : null;
 }
 
+/** The scroller of the first of `roots` showing, or null while it has no
+ *  room yet. Unlike `pageScroller` it never falls through to a root behind
+ *  it, so a caller can wait for the page in front to be drawn. The
+ *  document's scroller when no root shows. */
+export function shownScroller(doc: Document, roots: readonly string[]): Element | null {
+  const win = doc.defaultView;
+  if (!win) return null;
+  for (const selector of roots) {
+    const root = doc.querySelector(selector);
+    if (root && root.getClientRects().length > 0) return scrollerIn(root, win);
+  }
+  const top = doc.scrollingElement;
+  return top && top.scrollHeight - top.clientHeight > 1 ? top : null;
+}
+
+/** How long a followed scroll waits for the page it names to be drawn. */
+export const SCROLL_ARRIVAL_MS = 3_000;
+
+/**
+ * Take the page a fraction of the way down once the page in front has room
+ * to scroll. A follow often lands while the page it opened is still being
+ * drawn (a board's settings fills in as its data arrives), and a fraction of
+ * no room is the top: applied then, the follower stayed at the top while the
+ * person they followed was further down. So this waits, frame by frame, for
+ * the first of `roots` showing to have room, and when the wait runs out
+ * scrolls whatever `pageScroller` finds. Answers the way to stop waiting.
+ */
+export function scrollToFractionWhenDrawn(
+  doc: Document,
+  roots: readonly string[],
+  fraction: number,
+  ms = SCROLL_ARRIVAL_MS,
+): () => void {
+  const win = doc.defaultView;
+  if (!win) return () => {};
+  const until = win.performance.now() + ms;
+  let stopped = false;
+  const attempt = (): void => {
+    if (stopped) return;
+    const el = shownScroller(doc, roots);
+    if (el) {
+      scrollToFraction(el, fraction);
+      return;
+    }
+    if (win.performance.now() > until) {
+      scrollToFraction(pageScroller(doc, roots), fraction);
+      return;
+    }
+    win.requestAnimationFrame(attempt);
+  };
+  win.requestAnimationFrame(attempt);
+  return () => {
+    stopped = true;
+  };
+}
+
 /** How far down `el` is, or undefined when it has no room to scroll. */
 export function scrollFraction(el: Element | null): number | undefined {
   if (!el) return undefined;

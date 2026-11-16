@@ -2005,6 +2005,15 @@ untagged note the fold cannot account for is unfolded rather than guessed at. Li
 document directly, and like the tidy it reads no transcript and composes
 nothing.
 
+`notes-recap-shape.ts` and `notes-recap-apply.ts` join the same family in
+the same after-the-write position, once, at a meeting's stop. The first is
+pure: it reads the section's markdown and the meeting's spoken sentences and
+returns the section with decisions and follow-ups first, each point once and
+under the heading of its subject, and no deeper than two levels. The second
+writes that into the doc directly, like the tidy, and only when every block
+in the section is still the note-taker's and none carries a comment or a
+suggestion. Neither composes anything or calls a model.
+
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a
 second note-taking path — it reuses `NotesComposer`, the shared
