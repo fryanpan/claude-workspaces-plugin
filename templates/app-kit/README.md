@@ -32,6 +32,7 @@ across restarts.
 | `src/theme.css` | Imports the shared theme from the app kit package. |
 | `vendor/` | The app kit package, `@claude-workspaces/app-kit`, as a tarball: the collaboration core (`@claude-workspaces/app-kit/collab`, rooms that sync a Yjs doc between pages), the shared theme, and the shared password sign-in rules (`@claude-workspaces/app-kit/auth`). |
 | `src/app.css` | The app's own styles, every value a `--wa-*` token. |
+| `Dockerfile`, `fly.toml`, `scripts/deploy-staging.ts` | The staging machine and the command that deploys it (below). |
 
 ## Sign-in
 
@@ -51,6 +52,32 @@ per address, in memory) and form pages.
 Before `APP_ENV=production`, wire a mail provider in `src/mail.ts`:
 `server.ts` refuses to start while mail only prints to the terminal. Password
 reset mails go out, but the kit has no page to set the new password yet.
+
+## Staging
+
+```bash
+bun install                      # once, so bun.lock exists for the image
+bun run deploy:staging           # https://<app name>-staging.fly.dev
+bun run deploy:staging --dry-run # print the fly commands; run none
+```
+
+It makes the Fly app and its 1 GB data volume if they are missing, sets
+`AUTH_SECRET` as a Fly secret on the first deploy (generated, never shown),
+deploys with `APP_URL` set to the app's `fly.dev` origin and
+`APP_ENV=staging`, then waits for `/health` to answer 200 and prints how long
+the whole command took. Give another app name as the first argument, and
+`--region` for somewhere other than `sjc`.
+
+It needs `fly` on the PATH and reads `FLY_API_TOKEN` and `FLY_ORG` from the
+environment. On a Mac, an unset one is read from the Keychain entries
+`fly-org-token` and `fly-org-slug`. The token goes only into the `fly`
+process's environment.
+
+The machine (`fly.toml`, built from `Dockerfile`) is the smallest shared CPU
+with 256 MB. It stops when idle and starts on the next request, so the first
+page after a quiet spell takes a few seconds. Docs and accounts live on the
+volume at `/data`. Mail prints to the machine's log: read a verification link
+with `fly logs --app <app>`.
 
 ## Who may open a doc
 
