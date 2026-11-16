@@ -45,7 +45,7 @@
  * chunk reports every file it loaded: CI's shard of ~50 chunks wrote 58,341
  * records for 1,155 files, a 76 MB lcov per shard. That was uploaded,
  * downloaded and parsed on the path every CI verdict waits for. Merged, it is
- * about 1 MB and parses to the same numbers.
+ * about 1.6 MB and parses to the same numbers.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
