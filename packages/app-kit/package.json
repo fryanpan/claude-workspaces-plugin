@@ -1,6 +1,6 @@
 {
   "name": "@claude-workspaces/app-kit",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "The collab core, its Durable Object adapter, a page's client, the shared Web Awesome theme and the shared password sign-in options, for apps made with `bun run new-app` and for Worker apps.",
   "license": "MIT",
   "type": "module",

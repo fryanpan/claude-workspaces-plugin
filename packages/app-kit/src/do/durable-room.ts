@@ -14,7 +14,8 @@ import type * as Y from 'yjs';
  * The adapter never authenticates. The Worker checks the person's session and
  * their access to the room before it forwards the upgrade, and hands the
  * grant to `accept`. `revoke` takes a person's access away from every open
- * socket at once.
+ * socket at once, and `closeRoom` ends every socket in one room with a code
+ * the page reads (4400 to 4499: the doc is gone, do not reconnect).
  *
  * Types are structural, so this file imports nothing from the Workers
  * runtime and runs (and is tested) anywhere.
@@ -80,6 +81,12 @@ export interface DurableRoom<WS extends HibernatingSocket> {
   /** Take `principalId`'s access away: every socket of theirs is dropped
    *  and closed with 1008. Returns how many sockets were closed. */
   revoke(principalId: string): number;
+  /** Close every socket in `roomId` with `code` and `reason`, and drop its
+   *  connection. A code from 4400 to 4499 tells the kit's page client the
+   *  doc is gone for good, so it does not reconnect (for example 4410 when
+   *  the doc's file was deleted). `code` must be 1000 or 3000 to 4999, and
+   *  `reason` at most 123 bytes. Returns how many sockets were closed. */
+  closeRoom(roomId: string, code: number, reason?: string): number;
   /** A standing role for a principal that holds no socket, such as the
    *  agent. Kept in memory: grant it again in the constructor. */
   grant(principal: Principal, role: CollabRole): void;
@@ -123,6 +130,8 @@ export function createDurableRoom<WS extends HibernatingSocket>(
   const standing = new Map<string, CollabRole>();
   const revoked = new Set<string>();
   const conns = new Map<WS, CollabConnection>();
+  /** The room each connected socket is in. */
+  const roomOf = new Map<WS, string>();
   let reader: ((doc: Y.Doc) => unknown) | null = null;
 
   const host = createRoomHost({
@@ -155,6 +164,7 @@ export function createDurableRoom<WS extends HibernatingSocket>(
       send: (bytes) => ws.send(bytes),
       onRevoked: () => {
         conns.delete(ws);
+        roomOf.delete(ws);
         try {
           ws.close(1008, 'revoked');
         } catch {
@@ -164,6 +174,7 @@ export function createDurableRoom<WS extends HibernatingSocket>(
     });
     if (!res.ok) return { ok: false, error: res.error };
     conns.set(ws, res.connection);
+    roomOf.set(ws, grant.roomId);
     return { ok: true };
   };
 
@@ -205,7 +216,31 @@ export function createDurableRoom<WS extends HibernatingSocket>(
     close(ws) {
       const conn = conns.get(ws);
       conns.delete(ws);
+      roomOf.delete(ws);
       conn?.close();
+    },
+    closeRoom(roomId, code, reason = '') {
+      if (code !== 1000 && !(Number.isInteger(code) && code >= 3000 && code <= 4999)) {
+        throw new RangeError(`close code ${code} is not 1000 or 3000 to 4999`);
+      }
+      if (new TextEncoder().encode(reason).length > 123) {
+        throw new RangeError('close reason is longer than 123 bytes');
+      }
+      let closed = 0;
+      for (const [ws, room] of [...roomOf]) {
+        if (room !== roomId) continue;
+        const conn = conns.get(ws);
+        conns.delete(ws);
+        roomOf.delete(ws);
+        conn?.close();
+        try {
+          ws.close(code, reason);
+        } catch {
+          // Already closing.
+        }
+        closed++;
+      }
+      return closed;
     },
     revoke(principalId) {
       const before = conns.size;

@@ -69,6 +69,11 @@ export class DocRoom {
 - `room.revoke(principalId)` closes that principal's sockets and refuses its
   actions; `room.grant(principal, role)` lets a principal with no socket (an
   agent, the server) run actions.
+- `room.closeRoom(roomId, code, reason)` closes every socket in a room. A
+  code from 4400 to 4499 tells the page the doc is gone for good, so it does
+  not reconnect: close with 4410 when the doc's file is deleted, so a page
+  left open never pushes its old state into a room made later for a new
+  file at the same address.
 - With `storage`, the doc is saved to the object's SQLite inside the message
   that changed it; nothing waits on a timer.
 
@@ -95,12 +100,19 @@ schedule })` holds the doc for a file kept elsewhere (Dropbox, R2):
   it succeeds.
 - A failed save is retried after a delay that doubles with each failure
   in a row: `debounceMs`, then twice that, up to 5 minutes. Pass
-  `retryDelayMs: (failures) => ms` to choose another.
+  `retryDelayMs: (failures) => ms` to choose another; the default is
+  exported as `defaultRetryDelayMs(failures, debounceMs)` for one that wraps
+  it.
 - When the file is gone, have `load` or `save` throw `FileMissingError`
   (or pass `isMissing(err)` to recognise the app's own error).
-  `onMissing(err)` is called once and saving stops; edits still go to
-  `state`, and `file.missing()` says so. To put the file back, write
-  `file.text()` to it and call `file.refresh()`.
+  Saving stops; edits still go to `state`, and `file.missing()` says so.
+  `onMissing(err)` is called once per disappearance: not again on each
+  `refresh()` while the file stays gone, and again if it comes back and
+  goes again. That it was called is stored in `state` only once it
+  settles, so if it rejects (the error goes to `onSaveError`) or the object
+  is evicted first, the next read that finds the file gone calls it again.
+  To put the file back, write `file.text()` to it and call
+  `file.refresh()`.
 
 **An agent's edits.** The app's tool dispatch runs an edit as the agent
 session that asked for it:
@@ -138,6 +150,11 @@ stream of writes less than 2s apart postpones the push until it stops.
 </script>
 ```
 
+The handle reconnects whenever the socket drops, with one exception: a close
+code from 4400 to 4499 means the doc is gone, so it stops, `sync.status()`
+becomes `'closed'`, and `sync.closedBy()` gives `{ code, reason }`. Pass
+`onClose: ({ code, reason }) => false` to stop on any other code too.
+
 The browser sends the page's cookies on the socket. A token the page holds
 can go as a subprotocol (`connectDoc(url, { protocols: [token] })`; the
 Worker's 101 response must name it back in `Sec-WebSocket-Protocol` or the
@@ -162,6 +179,13 @@ and moves to a new version by replacing the tarball and that line.
   back off (`retryDelayMs`) and a missing file is reported once
   (`FileMissingError`, `onMissing`) instead of retried forever; Web Awesome
   is an optional peer dependency.
+- 0.3.2: a page stops reconnecting after a close code from 4400 to 4499
+  (`closedBy()`, status `'closed'`), and `onClose` returning `false` stops
+  it after any other; `createDurableRoom` gains `closeRoom(roomId, code,
+  reason)`; `SyncStatus` gains `'closed'`, so a map keyed on it needs
+  that key; `defaultRetryDelayMs` is exported; `onMissing` is called once
+  per disappearance and again if the object went away, or it rejected,
+  before it settled.
 
 ## Testing this package
 
