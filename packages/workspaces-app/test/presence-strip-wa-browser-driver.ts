@@ -275,13 +275,55 @@ async function longPress(cdp: Cdp, key: string, ring = true): Promise<void> {
   );
   const mouse = (type: 'mouseMoved' | 'mousePressed' | 'mouseReleased') =>
     cdp.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
-  await mouse('mouseMoved');
-  await mouse('mousePressed');
-  await until(ring ? 'the follow ring' : 'the ring gone', async () =>
-    (await cdp.evaluate(`!!document.querySelector('#board-people .board-following')`)) === ring
-      ? true
-      : null,
-  );
+  // Which pointer events reached the row, so a hold that never follows
+  // says whether the press was lost, left early, or the row was replaced.
+  await cdp.evaluate(`(() => {
+    const seen = (window.__holdSeen = []);
+    const b = document.querySelector(${JSON.stringify(row)});
+    for (const t of ['pointerdown', 'pointerup', 'pointerleave', 'pointercancel']) {
+      b?.addEventListener(t, () => seen.push(t + '@' + Math.round(performance.now())));
+    }
+    window.__holdRow = b;
+  })()`);
+  // Chrome on a loaded machine can drop a CDP press the page never sees
+  // (#1691, #1700; here the row logged a pointerleave and no pointerdown).
+  // Press again only then, at most twice: a press the page saw is never
+  // repeated, so a hold that arrived and did not follow still fails.
+  for (let tries = 0; ; tries++) {
+    await mouse('mouseMoved');
+    await mouse('mousePressed');
+    const pressed = await until(
+      'the row pressed',
+      async () =>
+        (await cdp.evaluate(`window.__holdSeen.some((e) => e.startsWith('pointerdown'))`))
+          ? true
+          : null,
+      1000,
+    ).catch(() => false);
+    if (pressed || tries === 2) break;
+    step(`the press on ${key} never reached the page; pressing again`);
+    await mouse('mouseReleased');
+  }
+  try {
+    await until(ring ? 'the follow ring' : 'the ring gone', async () =>
+      (await cdp.evaluate(`!!document.querySelector('#board-people .board-following')`)) === ring
+        ? true
+        : null,
+    );
+  } catch (err) {
+    const state = await cdp
+      .evaluate(`JSON.stringify({
+        seen: window.__holdSeen,
+        rowStillMounted: !!window.__holdRow?.isConnected,
+        listOpen: !!document.querySelector('#board-people .board-presence-list'),
+        at: ${JSON.stringify(at)},
+        rowNow: (() => { const e = document.querySelector(${JSON.stringify(row)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+        hit: document.elementFromPoint(${at.x}, ${at.y})?.className ?? null,
+      })`)
+      .catch(() => 'unreadable');
+    step(`hold on ${key} did not ${ring ? 'follow' : 'stop'}: ${state}`);
+    throw err;
+  }
   await mouse('mouseReleased');
   // Move off the strip, so hovering does not open the list again.
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 400 });
@@ -300,101 +342,122 @@ async function shoot(cdp: Cdp, dir: string | undefined, name: string): Promise<v
   writeFileSync(join(dir, `${name}.png`), Buffer.from(shot.data, 'base64'));
 }
 
+type Board = Awaited<ReturnType<typeof bootBoard>>;
+
+/**
+ * One size, start to end, in a function of its own rather than the body of
+ * `main`'s loop over sizes. Bun 1.3.10's optimising JIT (DFG) can keep
+ * reading the FIRST pass's page inside a closure made in the second pass of
+ * that loop, so the `until` callbacks at 430 evaluated in the 1180 browser,
+ * already closed, and the run gave up at its 150s deadline ("switch on at
+ * 430", CI run 43812632969 on main). A scope a call creates is a new scope
+ * each call. The same cause and fix as `lead-chat-meeting-browser-driver.ts`.
+ */
+async function stripAt(
+  board: Board,
+  width: number,
+  height: number,
+  shots: string | undefined,
+): Promise<{ readings: Reading[]; bobKey: string }> {
+  const { base, ws, post } = board;
+  const readings: Reading[] = [];
+  await post(`/workspaces/${ws}/collab-core`, { on: false });
+  step(`people at ${width}`);
+  const alice = await openPerson(width, height, {
+    anonId: `alice-${width}`,
+    name: 'Alice',
+    signIn: true,
+    ws,
+  });
+  const bob = await openPerson(width, height, {
+    anonId: `bob-${width}`,
+    name: 'Bob',
+    signIn: true,
+    ws,
+  });
+  const bobKey = `p-${personIdOf(`bob-${width}`)}`;
+  await navigate(bob, `${base}/workspaces/${ws}`);
+  await navigate(alice, `${base}/workspaces/${ws}`);
+  const bobHere = `!!document.querySelector('#board-people .board-presence-deck [data-key="${bobKey}"]')`;
+  await until('Bob in the strip', async () => ((await alice.evaluate(bobHere)) ? true : null));
+  await until('the lead in the strip', async () =>
+    (await alice.evaluate(`!!document.querySelector('#board-people .board-presence-agent')`))
+      ? true
+      : null,
+  );
+  // Following raises no toast (the bar says it); stopping does. So read
+  // the deck while following, then stop and read the toast.
+  await longPress(alice, bobKey);
+  const classicCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
+  await shoot(alice, shots, `strip-classic-${width}`);
+  await longPress(alice, bobKey, false);
+  await until('the board toast', async () =>
+    (await alice.evaluate(
+      `document.getElementById('board-toast')?.classList.contains('hidden') === false`,
+    ))
+      ? true
+      : null,
+  );
+  readings.push(await read(alice, width, 'classic', classicCircles));
+
+  step(`switch on at ${width}`);
+  // Switching on from loopback needs the owner's own proof
+  // (`owner-proof-widenings.test.ts`), and the route is not under test
+  // here: set the switch, which tells the open pages itself.
+  board.server.collabCore.switch.set(ws, true);
+  await until('the Web Awesome strip', async () =>
+    (await alice.evaluate(FACE('wa'))) ? true : null,
+  );
+  // Follow Bob and stop, so the stop toast shows from the Web Awesome
+  // side. First let the classic phase's toast time out, so a board toast
+  // showing below is one these presses raised.
+  await until('the board toast gone', async () =>
+    (await alice.evaluate(`document.getElementById('board-toast')?.classList.contains('hidden')`))
+      ? true
+      : null,
+  );
+  await longPress(alice, bobKey);
+  const waCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
+  await shoot(alice, shots, `strip-webawesome-${width}`);
+  await longPress(alice, bobKey, false);
+  await until('the Web Awesome toast', async () =>
+    (await alice.evaluate(`!!document.querySelector('wa-toast.board-wa-toast wa-toast-item')`))
+      ? true
+      : null,
+  );
+  readings.push(await read(alice, width, 'wa', waCircles));
+  // Follow again, so the readings below have Bob followed as the two
+  // above did.
+  await longPress(alice, bobKey);
+  // The theme file arrives after the strip mounts, so the strip has to be
+  // right without it: read it again with the theme switched off, as a
+  // reader on a slow link sees it first.
+  await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = true`);
+  readings.push(await read(alice, width, 'wa-unthemed'));
+  await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = false`);
+
+  step(`switch off at ${width}`);
+  await post(`/workspaces/${ws}/collab-core`, { on: false });
+  await until('today’s strip again', async () =>
+    (await alice.evaluate(FACE('classic'))) ? true : null,
+  );
+  readings.push(await read(alice, width, 'classic-again'));
+  await closePerson(alice);
+  await closePerson(bob);
+  return { readings, bobKey };
+}
+
 async function main(): Promise<void> {
   deadline('wa-strip-driver', 150_000);
   const shots = process.env.WA_STRIP_SHOTS;
   const board = await bootBoard('wa-strip', { collabCore: true });
-  const { base, ws, post } = board;
   const readings: Reading[] = [];
   const bobKeys: Record<number, string> = {};
   try {
     for (const [width, height] of SIZES) {
-      await post(`/workspaces/${ws}/collab-core`, { on: false });
-      step(`people at ${width}`);
-      const alice = await openPerson(width, height, {
-        anonId: `alice-${width}`,
-        name: 'Alice',
-        signIn: true,
-        ws,
-      });
-      const bob = await openPerson(width, height, {
-        anonId: `bob-${width}`,
-        name: 'Bob',
-        signIn: true,
-        ws,
-      });
-      const bobKey = `p-${personIdOf(`bob-${width}`)}`;
-      bobKeys[width] = bobKey;
-      await navigate(bob, `${base}/workspaces/${ws}`);
-      await navigate(alice, `${base}/workspaces/${ws}`);
-      const bobHere = `!!document.querySelector('#board-people .board-presence-deck [data-key="${bobKey}"]')`;
-      await until('Bob in the strip', async () => ((await alice.evaluate(bobHere)) ? true : null));
-      await until('the lead in the strip', async () =>
-        (await alice.evaluate(`!!document.querySelector('#board-people .board-presence-agent')`))
-          ? true
-          : null,
-      );
-      // Following raises no toast (the bar says it); stopping does. So read
-      // the deck while following, then stop and read the toast.
-      await longPress(alice, bobKey);
-      const classicCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
-      await shoot(alice, shots, `strip-classic-${width}`);
-      await longPress(alice, bobKey, false);
-      await until('the board toast', async () =>
-        (await alice.evaluate(
-          `document.getElementById('board-toast')?.classList.contains('hidden') === false`,
-        ))
-          ? true
-          : null,
-      );
-      readings.push(await read(alice, width, 'classic', classicCircles));
-
-      step(`switch on at ${width}`);
-      // Switching on from loopback needs the owner's own proof
-      // (`owner-proof-widenings.test.ts`), and the route is not under test
-      // here: set the switch, which tells the open pages itself.
-      board.server.collabCore.switch.set(ws, true);
-      await until('the Web Awesome strip', async () =>
-        (await alice.evaluate(FACE('wa'))) ? true : null,
-      );
-      // Follow Bob and stop, so the stop toast shows from the Web Awesome
-      // side. First let the classic phase's toast time out, so a board toast
-      // showing below is one these presses raised.
-      await until('the board toast gone', async () =>
-        (await alice.evaluate(
-          `document.getElementById('board-toast')?.classList.contains('hidden')`,
-        ))
-          ? true
-          : null,
-      );
-      await longPress(alice, bobKey);
-      const waCircles = (await alice.evaluate(READ_STRIP)) as Circle[];
-      await shoot(alice, shots, `strip-webawesome-${width}`);
-      await longPress(alice, bobKey, false);
-      await until('the Web Awesome toast', async () =>
-        (await alice.evaluate(`!!document.querySelector('wa-toast.board-wa-toast wa-toast-item')`))
-          ? true
-          : null,
-      );
-      readings.push(await read(alice, width, 'wa', waCircles));
-      // Follow again, so the readings below have Bob followed as the two
-      // above did.
-      await longPress(alice, bobKey);
-      // The theme file arrives after the strip mounts, so the strip has to be
-      // right without it: read it again with the theme switched off, as a
-      // reader on a slow link sees it first.
-      await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = true`);
-      readings.push(await read(alice, width, 'wa-unthemed'));
-      await alice.evaluate(`document.querySelector('link[data-wa-theme]').disabled = false`);
-
-      step(`switch off at ${width}`);
-      await post(`/workspaces/${ws}/collab-core`, { on: false });
-      await until('today’s strip again', async () =>
-        (await alice.evaluate(FACE('classic'))) ? true : null,
-      );
-      readings.push(await read(alice, width, 'classic-again'));
-      await closePerson(alice);
-      await closePerson(bob);
+      const at = await stripAt(board, width, height, shots);
+      readings.push(...at.readings);
+      bobKeys[width] = at.bobKey;
     }
   } finally {
     board.lead.close();

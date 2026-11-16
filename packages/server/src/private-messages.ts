@@ -50,11 +50,14 @@ function part(id: string): string {
 export class FilePrivateMessageStore implements PrivateMessageStore {
   private readonly dir: string;
 
+  /** `folder` keeps another kind of pair log apart from this one: the
+   *  direct messages between two people use `direct-messages`. */
   constructor(
     dataDir: string,
     private readonly now: () => number = Date.now,
+    folder = 'private-messages',
   ) {
-    this.dir = join(dataDir, 'private-messages');
+    this.dir = join(dataDir, folder);
   }
 
   append(message: NewPrivateMessage): PrivateMessage {

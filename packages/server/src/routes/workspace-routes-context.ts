@@ -36,6 +36,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
 import type { VoiceRouter } from '../voice.ts';
+import type { DirectMessageRoutesContext } from './direct-messages.ts';
 import type { ParallelismCapView } from './task-routes-context.ts';
 
 /**
@@ -82,6 +83,8 @@ export interface WorkspaceRoutesContext {
    *  made a person wait. */
   spokenRelay: SpokenReplyRelay;
   spokenTimings: SpokenTimings;
+  /** The one-to-one messages between the board's people (`direct-messages.ts`). */
+  directMessages: DirectMessageRoutesContext;
   /** The board's chat with its lead: the log, and the answers it waits on. */
   leadChat: LeadChat;
   /** The photos and files people sent the board's lead. */

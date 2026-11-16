@@ -22,8 +22,10 @@ limits.
    and `database_name` too.
 4. Replace the other `REPLACE_ME` values in `wrangler.jsonc`, and set the
    three secrets with `wrangler secret put` (see the config table below).
-5. Wire a mail provider in `src/mail.ts`. Until you do, a deployed Worker
-   refuses to send mail instead of dropping it silently.
+5. Give it a way to send mail: set `MAIL_FROM` and the secret
+   `RESEND_API_KEY` to send through [Resend](https://resend.com), or replace
+   the Resend branch in `src/mail.ts` with your provider. Until one is set,
+   a deployed Worker refuses to send mail instead of dropping it silently.
 6. Apply the migrations with `wrangler d1 migrations apply DB --remote`.
 7. Make the first admin (see below).
 
@@ -44,6 +46,8 @@ nothing to Cloudflare.
 | `GOOGLE_CLIENT_SECRET` | secret | From the same OAuth client. |
 | `TURNSTILE_SITE_KEY` | var | Public. The sign-in page's Turnstile widget uses it. |
 | `TURNSTILE_SECRET_KEY` | secret | The Worker checks each Turnstile token with it. |
+| `MAIL_FROM` | var, optional | The sender, such as `Sign-in <signin@mail.example.com>`. Its domain must be verified in Resend. |
+| `RESEND_API_KEY` | secret, optional | A Resend key that can send from `MAIL_FROM`'s domain. Make it send-only. |
 | `MAIL_TRANSPORT` | var, optional | Set to `log` for local runs only. |
 
 Secrets never go in `wrangler.jsonc` or in git. `.dev.vars` is gitignored.
@@ -81,6 +85,28 @@ A refused request gets a 429 with a `Retry-After` header. Refused attempts
 are not counted, so hammering a locked address does not extend its lockout.
 `src/rate-limit.ts` explains why the check and the write are one statement:
 D1 has no interactive transactions.
+
+## Putting it live
+
+The sign-in test app in this repo is this template deployed for real, from
+CI, with no manual step: `infra/signin-test/README.md` describes it. It adds
+a sign-in page and nothing else to the Worker. To put another app live the
+same way:
+
+1. Copy `infra/signin-test/` and `infra/cloudflare/apps/signin-test/` under
+   the new app's name, and change `APP` in `deploy.ts` (name, hostname,
+   mail subdomain, sender).
+2. Add the new root to `APP_DIRS` in `infra/cloudflare/terraform.ts`, so
+   `bun run check:cloudflare-tf` validates and tests it.
+3. Copy `.github/workflows/signin-test.yml`, and give the app its own Google
+   OAuth client: add its id and secret to `cf:ci-secrets`
+   (`KEYCHAIN_VALUES` in `infra/cloudflare/ci-secrets.ts`, a variable and an
+   environment secret in `infra/cloudflare/ci-secrets/`). Its redirect URI
+   is `https://<hostname>/api/auth/callback/google`.
+4. Run `bun run cf:ci-secrets apply`, then dispatch the workflow on main.
+   The deploy makes the database, the Turnstile widget, the custom domain,
+   the Resend domain and its DNS records, a send-only mail key and the
+   session secret, then runs the smoke test against the live app.
 
 ## Linking sign-in methods
 
@@ -146,9 +172,9 @@ Nothing in the tests calls Cloudflare, Google or a mail service.
 
 ## Deliberately left out
 
-- **A mail provider.** Wire yours in `src/mail.ts`.
 - **Sign-in pages.** This is the API. Build the pages in your app with the
-  Better Auth client and the Turnstile widget.
+  Better Auth client and the Turnstile widget. The sign-in test app's page,
+  `infra/signin-test/src/page.ts`, is a one-file example with no build step.
 - **Passkeys, two-factor, organisations and other Better Auth plugins.** Add
   them in `src/auth.ts`, then write a migration as described above.
 - **Better Auth's in-Worker migration route.** Tables come from Wrangler

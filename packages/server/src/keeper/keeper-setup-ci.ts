@@ -56,6 +56,9 @@ export const CF_APPLY_PERMISSIONS: readonly Need[] = [
   need('Access: Organizations, Identity Providers, and Groups Read', 'account'),
   need('Cloudflare Tunnel Write', 'account'),
   need('Workers Scripts Write', 'account'),
+  // signin-test.yml: the app's D1 database and Turnstile widget.
+  need('D1 Write', 'account'),
+  need('Turnstile Sites Write', 'account'),
   need('Zone Read', 'zone'),
   need('DNS Write', 'zone'),
   need('SSL and Certificates Read', 'zone'),
