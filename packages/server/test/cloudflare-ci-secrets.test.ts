@@ -5,7 +5,15 @@
  * makes is `infra/cloudflare/ci-secrets/tests/apply.tftest.hcl`.
  */
 import { describe, expect, it } from 'bun:test';
-import { type CiSecretsIo, USAGE, ciSecrets } from '../../../infra/cloudflare/ci-secrets.ts';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  type CiSecretsIo,
+  USAGE,
+  ciSecrets,
+  readKeychain,
+} from '../../../infra/cloudflare/ci-secrets.ts';
 import { CONFIG_PATHS } from '../../../infra/cloudflare/vars.ts';
 import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 
@@ -30,13 +38,15 @@ interface Run {
   calls: Array<{ args: string[]; env: Record<string, string> }>;
   printed: () => string;
   removed: string[];
+  asked: string[];
 }
 
 function fake(
   env: Record<string, string | undefined>,
-  opts: { configs?: boolean; fail?: string; show?: string } = {},
+  opts: { configs?: boolean; fail?: string; show?: string; keychain?: Record<string, string> } = {},
 ): Run {
   const calls: Run['calls'] = [];
+  const asked: string[] = [];
   const removed: string[] = [];
   let text = '';
   const configs: Record<string, string> = opts.configs
@@ -55,6 +65,10 @@ function fake(
     env,
     read: (rel) => configs[rel] ?? null,
     api: () => api,
+    keychain: (service) => {
+      asked.push(service);
+      return opts.keychain?.[service] ?? null;
+    },
     stateDir: '/fixture/state/ci-secrets',
     dataDir: '/fixture/state/ci-secrets-data',
     terraform: (args, e) => {
@@ -73,7 +87,7 @@ function fake(
       text += s;
     },
   };
-  return { io, calls, printed: () => text, removed };
+  return { io, calls, printed: () => text, removed, asked };
 }
 
 const BOTH = { CLOUDFLARE_API_TOKEN: CF_TOKEN, GITHUB_TOKEN: GH_TOKEN };
@@ -183,6 +197,58 @@ describe('cf:ci-secrets', () => {
     const dropped = fake(BOTH, { show });
     expect(await ciSecrets(['apply', '--drop'], dropped.io)).toBe(0);
     expect(dropped.calls.map((c) => c.args[0])).toContain('apply');
+  });
+
+  const KEYCHAIN = {
+    'resend-api-key': 'fixture-resend-Saltmarsh',
+    'signin-test-google-client-id': 'fixture-client-Harborlight',
+    'signin-test-google-client-secret': 'fixture-secret-Riverbend',
+  };
+
+  it("hands signin-test's three Keychain values to terraform's environment only", async () => {
+    const r = fake(BOTH, { keychain: KEYCHAIN });
+    expect(await ciSecrets(['plan'], r.io)).toBe(0);
+    const env = r.calls[0]?.env ?? {};
+    expect(env.TF_VAR_resend_api_key).toBe(KEYCHAIN['resend-api-key']);
+    expect(env.TF_VAR_signin_test_google_client_id).toBe(KEYCHAIN['signin-test-google-client-id']);
+    expect(env.TF_VAR_signin_test_google_client_secret).toBe(
+      KEYCHAIN['signin-test-google-client-secret'],
+    );
+    const args = r.calls.flatMap((c) => c.args).join(' ');
+    for (const v of Object.values(KEYCHAIN)) {
+      expect(args).not.toContain(v);
+      expect(r.printed()).not.toContain(v);
+    }
+  });
+
+  it('takes a value from the environment over the Keychain, and does not ask for it', async () => {
+    const r = fake({ ...BOTH, RESEND_API_KEY: 'fixture-env-Alice' }, { keychain: KEYCHAIN });
+    await ciSecrets(['plan'], r.io);
+    expect(r.calls[0]?.env.TF_VAR_resend_api_key).toBe('fixture-env-Alice');
+    expect(r.asked).toEqual(['signin-test-google-client-id', 'signin-test-google-client-secret']);
+  });
+
+  it('names a missing Keychain value and leaves its variable unset', async () => {
+    const r = fake(BOTH);
+    await ciSecrets(['plan'], r.io);
+    expect(Object.keys(r.calls[0]?.env ?? {}).filter((k) => /resend|signin/.test(k))).toEqual([]);
+    expect(r.printed()).toContain('no RESEND_API_KEY and no Keychain item resend-api-key');
+  });
+
+  it('reads the Keychain with the service name as the only varying argument', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-secrets-keychain-'));
+    const bin = join(dir, 'security');
+    writeFileSync(
+      bin,
+      `#!/bin/sh\necho "$@" > "${dir}/args"\n[ "$5" = resend-api-key ] || exit 44\nprintf 'fixture-Bob\\n'\n`,
+    );
+    chmodSync(bin, 0o755);
+    expect(readKeychain('resend-api-key', bin, 'darwin')).toBe('fixture-Bob');
+    expect(readFileSync(join(dir, 'args'), 'utf8').trim()).toBe(
+      'find-generic-password -a claude-workspaces -s resend-api-key -w',
+    );
+    expect(readKeychain('signin-test-google-client-id', bin, 'darwin')).toBeNull();
+    expect(readKeychain('resend-api-key', bin, 'linux')).toBeNull();
   });
 
   it('rejects an unknown flag', async () => {

@@ -36,6 +36,8 @@ variables {
     { id = "g-org", name = "Access: Organizations, Identity Providers, and Groups Read", scopes = ["com.cloudflare.api.account"] },
     { id = "g-tun", name = "Cloudflare Tunnel Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-wrk", name = "Workers Scripts Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-d1", name = "D1 Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-ts", name = "Turnstile Sites Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-zone", name = "Zone Read", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-dns", name = "DNS Write", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-ssl", name = "SSL and Certificates Read", scopes = ["com.cloudflare.api.account.zone"] },
@@ -56,7 +58,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
 
   assert {
     condition = jsonencode([for p in cloudflare_account_token.ci_deploy.policies : sort([for g in p.permission_groups : g.id])]) == jsonencode([
-      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk"]),
+      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk", "g-d1", "g-ts"]),
       sort(["g-zone", "g-dns", "g-ssl", "g-rts"]),
       ["g-r2"],
     ])
@@ -141,6 +143,38 @@ run "configs_and_the_fly_token_are_written_when_given" {
   assert {
     condition     = github_actions_environment_secret.deploy["CW_SECRET_CW_BOARD_OWNER_EMAIL"].value == "alice@harborlight.test"
     error_message = "the owner's address goes to the environment under the name machine:deploy reads"
+  }
+}
+
+run "the_signin_test_values_are_written_when_given" {
+  command = apply
+
+  variables {
+    resend_api_key                   = "fixture-resend-saltmarsh"
+    signin_test_google_client_id     = "fixture-client-harborlight"
+    signin_test_google_client_secret = "fixture-secret-riverbend"
+  }
+
+  assert {
+    condition = output.environment_secrets == tolist([
+      "CLOUDFLARE_API_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+      "RESEND_API_KEY", "SIGNIN_TEST_GOOGLE_CLIENT_ID", "SIGNIN_TEST_GOOGLE_CLIENT_SECRET",
+    ])
+    error_message = "the three go to the environment, beside the deploy credentials"
+  }
+
+  assert {
+    condition = (
+      github_actions_environment_secret.deploy["RESEND_API_KEY"].value == "fixture-resend-saltmarsh" &&
+      github_actions_environment_secret.deploy["SIGNIN_TEST_GOOGLE_CLIENT_ID"].value == "fixture-client-harborlight" &&
+      github_actions_environment_secret.deploy["SIGNIN_TEST_GOOGLE_CLIENT_SECRET"].value == "fixture-secret-riverbend"
+    )
+    error_message = "each secret holds its own variable's value"
+  }
+
+  assert {
+    condition     = length(output.repository_secrets) == 0
+    error_message = "none of the three is a repository secret, which a pull request could read"
   }
 }
 
