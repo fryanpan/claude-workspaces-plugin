@@ -108,6 +108,14 @@ describe('an app made by new-app', () => {
     expect(css).toContain('--wa-color-blue-50');
   });
 
+  it('answers the health check its fly.toml names, signed out', async () => {
+    const toml = Bun.TOML.parse(await Bun.file(join(appDir, 'fly.toml')).text()) as {
+      http_service: { checks: Array<{ path: string }> };
+    };
+    const path = toml.http_service.checks[0]?.path ?? '';
+    expect((await fetch(`${app.base}${path}`, { redirect: 'manual' })).status).toBe(200);
+  });
+
   it('serves only the files its build wrote', async () => {
     expect((await fetch(`${app.base}/assets/main.js`)).status).toBe(200);
     expect((await fetch(`${app.base}/assets/..%2Fpackage.json`)).status).toBe(404);

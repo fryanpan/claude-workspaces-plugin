@@ -1,0 +1,45 @@
+# The app's staging machine on Fly. `bun run new-app` names it
+# `<app name>-staging`; `bun run deploy:staging <name>` deploys under another
+# name without editing this file.
+#
+# Set by deploy:staging, not here:
+#   AUTH_SECRET   a Fly secret, made once on the first deploy and never shown
+#   APP_URL       https://<app>.fly.dev, passed to `fly deploy --env`
+
+app = "app-kit-template-staging"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8080"
+  DATA_DIR = "/data"
+  # Not `production`: mail prints to the log (src/mail.ts), which is enough
+  # to verify an account on staging.
+  APP_ENV = "staging"
+
+# Docs, accounts and sessions survive a restart and a deploy.
+[mounts]
+  source = "app_data"
+  destination = "/data"
+
+# The machine stops when nobody is using it and starts on the next request.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
