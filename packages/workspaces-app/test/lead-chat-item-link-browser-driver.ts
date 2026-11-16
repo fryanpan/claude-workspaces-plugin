@@ -37,6 +37,7 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { FORGET_TAB } from './lead-chat-fresh-tab.ts';
 import { tapPointDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
@@ -230,7 +231,7 @@ async function main(): Promise<void> {
       for (const order of ['item-first', 'voice-first'] as const) {
         step(`${order} at ${width}`);
         for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
+          if (i === 1) await cdp.evaluate(FORGET_TAB);
           const loaded = cdp.once('Page.loadEventFired');
           await cdp.send('Page.navigate', { url: homeUrl });
           await loaded;

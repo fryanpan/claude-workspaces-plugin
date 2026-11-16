@@ -38,6 +38,7 @@ import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/sr
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import { CHROME_LOG_ARGS, connectWatched, dumpRunning } from './chrome-stall.ts';
+import { FORGET_TAB } from './lead-chat-fresh-tab.ts';
 import { TAP_PROBE_INSTALL, TAP_PROBE_READ, tapPointDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
@@ -283,7 +284,7 @@ async function main(): Promise<void> {
       for (const way of ['open', 'closed', 'left'] as const) {
         step(`${way} at ${width}`);
         for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
+          if (i === 1) await cdp.evaluate(FORGET_TAB);
           await load();
         }
         await voiceOn();
