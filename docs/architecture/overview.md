@@ -165,6 +165,20 @@ verification and session rules have one source. `server/test/app-kit.test.ts` ma
 builds and runs an app outside the repo and syncs a doc between two of its
 pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
 
+**A Cloudflare Worker app hosts the same core in its own Durable Objects**
+(kit 0.3.0). `packages/app-kit/src/do/` wraps the room host for the
+hibernation API: each socket's grant rides in its attachment, so a woken
+instance re-attaches every socket with its role, and the doc saves to the
+object's SQLite inside the message that changed it. `src/markdown-file/`
+holds a doc whose record is a file the app loads and saves itself, with the
+save debounce on the object's alarm so an eviction cannot drop it.
+`src/agent/` names an agent session as a principal (`agent:<sessionId>`) and
+gives the app's tool dispatch two edits, `editDoc` and `setTile`.
+`src/client/` is the page side (moved out of the template, which re-exports
+it), and `scripts/build-client.ts` prebuilds it as `cw-collab.js` for a page
+with no bundler. The tests in `packages/app-kit/test/` run real Workers in a
+local workerd through Miniflare, hibernation included.
+
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
 (`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every

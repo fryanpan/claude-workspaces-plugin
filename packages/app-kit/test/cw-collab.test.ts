@@ -50,6 +50,7 @@ function runAsScript(): Record<string, unknown> {
   };
   page.window = page;
   const context = createContext(page);
+  // audit: not-source — the built script is executed here, not matched as text.
   new Script(readFileSync(built.iife, 'utf8'), { filename: 'cw-collab.js' }).runInContext(context);
   return page;
 }
