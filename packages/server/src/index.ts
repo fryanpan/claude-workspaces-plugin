@@ -4,6 +4,7 @@ export * from './sse.ts';
 export { createServer } from './server.ts';
 export type {
   AgentMachineContract,
+  AttachAgentAnswer,
   AgentNotesContract,
   AttachmentsContract,
   DocEditsContract,
@@ -17,6 +18,7 @@ export type {
   LeadMeetingContract,
   LibraryFoldersContract,
   MountsApi,
+  NextAnswer,
   PersonContract,
   PlaceFields,
   ReviewItemsContract,

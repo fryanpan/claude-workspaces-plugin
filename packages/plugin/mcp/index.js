@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.385";
+var version2 = "0.1.386";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14160,6 +14160,323 @@ function claimWarning(row, selfAgentId, now) {
   return `[claim] ${namedRow(row)} ${held}. Do not start this task blind — message that session over claude-hive, agree who has it, and take a different task if they do. Nothing here refuses you: two sessions on one task is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
 }
 
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/utils.js
+var mergePath = (base, path) => {
+  base = base.replace(/\/+$/, "");
+  base = base + "/";
+  path = path.replace(/^\/+/, "");
+  return base + path;
+};
+var replaceUrlParam = (urlString, params) => {
+  for (const [k, v] of Object.entries(params)) {
+    const reg = new RegExp("/:" + k + "(?:{[^/]+})?\\??(?=/|$)");
+    urlString = urlString.replace(reg, () => v ? `/${v}` : "");
+  }
+  return urlString;
+};
+var buildSearchParams = (query) => {
+  const searchParams = new URLSearchParams;
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined)
+      continue;
+    if (Array.isArray(v))
+      for (const v2 of v) {
+        if (v2 === undefined)
+          continue;
+        searchParams.append(k, v2);
+      }
+    else
+      searchParams.set(k, v);
+  }
+  return searchParams;
+};
+var replaceUrlProtocol = (urlString, protocol) => {
+  switch (protocol) {
+    case "ws":
+      return urlString.replace(/^http/, "ws");
+    case "http":
+      return urlString.replace(/^ws/, "http");
+  }
+};
+var removeIndexString = (urlString) => {
+  if (/^https?:\/\/[^\/]+?\/index(?=\?|$)/.test(urlString))
+    return urlString.replace(/\/index(?=\?|$)/, "/");
+  return urlString.replace(/\/index(?=\?|$)/, "");
+};
+function isObject2(item) {
+  return typeof item === "object" && item !== null && !Array.isArray(item);
+}
+function deepMerge(target, source) {
+  if (!isObject2(target) && !isObject2(source))
+    return source;
+  const merged = { ...target };
+  for (const key in source) {
+    const value = source[key];
+    if (isObject2(merged[key]) && isObject2(value))
+      merged[key] = deepMerge(merged[key], value);
+    else
+      merged[key] = value;
+  }
+  return merged;
+}
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/utils/cookie.js
+var validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
+var _serialize = (name, value, opt = {}) => {
+  if (!validCookieNameRegEx.test(name))
+    throw new Error("Invalid cookie name");
+  let cookie = `${name}=${value}`;
+  if (/^__secure-/i.test(name) && !opt.secure)
+    throw new Error("__Secure- Cookie must have Secure attributes");
+  if (/^__host-/i.test(name)) {
+    if (!opt.secure)
+      throw new Error("__Host- Cookie must have Secure attributes");
+    if (opt.path !== "/")
+      throw new Error('__Host- Cookie must have Path attributes with "/"');
+    if (opt.domain)
+      throw new Error("__Host- Cookie must not have Domain attributes");
+  }
+  for (const key of [
+    "domain",
+    "path",
+    "sameSite",
+    "priority"
+  ])
+    if (opt[key] && /[;\r\n]/.test(opt[key]))
+      throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
+  if (opt && typeof opt.maxAge === "number" && opt.maxAge >= 0) {
+    if (opt.maxAge > 34560000)
+      throw new Error("Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration.");
+    cookie += `; Max-Age=${opt.maxAge | 0}`;
+  }
+  if (opt.domain && opt.prefix !== "host")
+    cookie += `; Domain=${opt.domain}`;
+  if (opt.path)
+    cookie += `; Path=${opt.path}`;
+  if (opt.expires) {
+    if (opt.expires.getTime() - Date.now() > 34560000000)
+      throw new Error("Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future.");
+    cookie += `; Expires=${opt.expires.toUTCString()}`;
+  }
+  if (opt.httpOnly)
+    cookie += "; HttpOnly";
+  if (opt.secure)
+    cookie += "; Secure";
+  if (opt.sameSite)
+    cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
+  if (opt.priority)
+    cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
+  if (opt.partitioned) {
+    if (!opt.secure)
+      throw new Error("Partitioned Cookie must have Secure attributes");
+    cookie += "; Partitioned";
+  }
+  return cookie;
+};
+var serialize = (name, value, opt) => {
+  value = encodeURIComponent(value);
+  return _serialize(name, value, opt);
+};
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/client.js
+var createProxy = (callback, path) => {
+  return new Proxy(() => {}, {
+    get(_obj, key) {
+      if (typeof key !== "string" || key === "then")
+        return;
+      return createProxy(callback, [...path, key]);
+    },
+    apply(_1, _2, args) {
+      return callback({
+        path,
+        args
+      });
+    }
+  });
+};
+var appendQueryParams = (url, searchParams) => {
+  const queryString = searchParams.toString();
+  return queryString ? `${url}?${queryString}` : url;
+};
+var ClientRequestImpl = class {
+  url;
+  method;
+  buildSearchParams;
+  queryParams = undefined;
+  pathParams = {};
+  rBody;
+  cType = undefined;
+  constructor(url, method, options) {
+    this.url = url;
+    this.method = method;
+    this.buildSearchParams = options.buildSearchParams;
+  }
+  fetch = async (args, opt) => {
+    if (args) {
+      if (args.query)
+        this.queryParams = this.buildSearchParams(args.query);
+      if (args.form) {
+        const form = new FormData;
+        for (const [k, v] of Object.entries(args.form)) {
+          if (v === undefined)
+            continue;
+          if (Array.isArray(v))
+            for (const v2 of v) {
+              if (v2 === undefined)
+                continue;
+              form.append(k, v2);
+            }
+          else
+            form.append(k, v);
+        }
+        this.rBody = form;
+      }
+      if (args.json !== undefined) {
+        this.rBody = JSON.stringify(args.json);
+        this.cType = "application/json";
+      }
+      if (args.param)
+        this.pathParams = args.param;
+    }
+    let methodUpperCase = this.method.toUpperCase();
+    const headerValues = {
+      ...args?.header,
+      ...typeof opt?.headers === "function" ? await opt.headers() : opt?.headers
+    };
+    if (args?.cookie) {
+      const cookies = [];
+      for (const [key, value] of Object.entries(args.cookie)) {
+        if (value === undefined)
+          continue;
+        cookies.push(serialize(key, value));
+      }
+      if (cookies.length > 0)
+        headerValues["Cookie"] = cookies.join("; ");
+    }
+    if (this.cType)
+      headerValues["Content-Type"] = this.cType;
+    const headers = new Headers;
+    for (const [key, value] of Object.entries(headerValues))
+      if (value !== undefined)
+        headers.set(key, value);
+    let url = this.url;
+    url = removeIndexString(url);
+    url = replaceUrlParam(url, this.pathParams);
+    if (this.queryParams)
+      url = appendQueryParams(url, this.queryParams);
+    methodUpperCase = this.method.toUpperCase();
+    const setBody = !(methodUpperCase === "GET" || methodUpperCase === "HEAD");
+    return (opt?.fetch || fetch)(url, {
+      body: setBody ? this.rBody : undefined,
+      method: methodUpperCase,
+      headers,
+      ...opt?.init
+    });
+  };
+};
+var hc = (baseUrl, options) => createProxy(function proxyCallback(opts) {
+  const buildSearchParamsOption = options?.buildSearchParams ?? buildSearchParams;
+  const parts = [...opts.path];
+  const lastParts = parts.slice(-3).reverse();
+  if (lastParts[0] === "toString") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback.toString();
+  }
+  if (lastParts[0] === "valueOf") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback;
+  }
+  let method = "";
+  if (/^\$/.test(lastParts[0])) {
+    const last = parts.pop();
+    if (last)
+      method = last.replace(/^\$/, "");
+  }
+  const path = parts.join("/");
+  const url = mergePath(baseUrl, path);
+  if (method === "url" || method === "path") {
+    let result = removeIndexString(url);
+    if (opts.args[0]) {
+      if (opts.args[0].param)
+        result = replaceUrlParam(result, opts.args[0].param);
+      if (opts.args[0].query)
+        result = appendQueryParams(result, buildSearchParamsOption(opts.args[0].query));
+    }
+    if (method === "url")
+      return new URL(result);
+    return result.slice(baseUrl.replace(/\/+$/, "").length).replace(/^\/?/, "/");
+  }
+  if (method === "ws") {
+    const normalizedUrl = removeIndexString(url);
+    const webSocketUrl = replaceUrlProtocol(opts.args[0]?.param ? replaceUrlParam(normalizedUrl, opts.args[0].param) : normalizedUrl, "ws");
+    const targetUrl = new URL(webSocketUrl);
+    const queryParams = opts.args[0]?.query;
+    if (queryParams)
+      buildSearchParamsOption(queryParams).forEach((value, key) => {
+        targetUrl.searchParams.append(key, value);
+      });
+    const establishWebSocket = (...args) => {
+      if (options?.webSocket !== undefined && typeof options.webSocket === "function")
+        return options.webSocket(...args);
+      return new WebSocket(...args);
+    };
+    return establishWebSocket(targetUrl.toString());
+  }
+  const req = new ClientRequestImpl(url, method, { buildSearchParams: buildSearchParamsOption });
+  if (method) {
+    options ??= {};
+    const reqOptions = { ...opts.args[1] };
+    const baseHeaders = options.headers;
+    const reqHeaders = reqOptions.headers;
+    if (baseHeaders && reqHeaders)
+      reqOptions.headers = async () => ({
+        ...typeof baseHeaders === "function" ? await baseHeaders() : baseHeaders,
+        ...typeof reqHeaders === "function" ? await reqHeaders() : reqHeaders
+      });
+    const args = deepMerge(options, reqOptions);
+    return req.fetch(opts.args[0], args);
+  }
+  return req;
+}, []);
+
+// packages/mcp/src/server-client.ts
+var PLACEHOLDER_ORIGIN = "http://claude-workspaces.invalid";
+function typedClient(http) {
+  return hc(PLACEHOLDER_ORIGIN, {
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      const data = await http(init?.method ?? "GET", `${url.pathname}${url.search}`, body);
+      return Response.json(data);
+    }
+  });
+}
+var mountsClient = (http) => typedClient(http);
+var docThreadsClient = (http) => typedClient(http);
+var docEditsClient = (http) => typedClient(http);
+var docLifecycleClient = (http) => typedClient(http);
+var attachmentsClient = (http) => typedClient(http);
+var shareClient = (http) => typedClient(http);
+var agentNotesClient = (http) => typedClient(http);
+var taskStateClient = (http) => typedClient(http);
+var taskContentClient = (http) => typedClient(http);
+var taskBoardClient = (http) => typedClient(http);
+var reviewItemsClient = (http) => typedClient(http);
+var libraryFoldersClient = (http) => typedClient(http);
+var docComponentsClient = (http) => typedClient(http);
+var personClient = (http) => typedClient(http);
+var whiteboardClient = (http) => typedClient(http);
+var inboxClient = (http) => typedClient(http);
+var leadChatFilesClient = (http) => typedClient(http);
+var workspaceBoardClient = (http) => typedClient(http);
+var workspaceAgentsClient = (http) => typedClient(http);
+var dispatchesClient = (http) => typedClient(http);
+var docFileClient = (http) => typedClient(http);
+var leadMeetingClient = (http) => typedClient(http);
+var agentMachineClient = (http) => typedClient(http);
+
 // packages/mcp/src/attachments.ts
 function now(deps) {
   return (deps.now ?? Date.now)();
@@ -14178,14 +14495,23 @@ function markAttached(deps, workspaceId) {
 async function sendDueHeartbeats(deps) {
   for (const workspaceId of deps.keepalive.due()) {
     try {
-      await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(deps.author.id)}/heartbeat`, { toolCallAt: now(deps) });
+      await workspaceAgentsClient(deps.http).workspaces[":ws"].agents[":agentId"].heartbeat.$post({
+        param: {
+          ws: encodeURIComponent(workspaceId),
+          agentId: encodeURIComponent(deps.author.id)
+        },
+        json: { toolCallAt: now(deps) }
+      });
     } catch {}
   }
 }
 async function claimNoticeFor(deps, taskId) {
   for (const workspaceId of deps.keepalive.boards()) {
     try {
-      const res = await deps.http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/next?includeBlocked=true`);
+      const res = await (await taskBoardClient(deps.http).workspaces[":ws"].next.$get({
+        param: { ws: encodeURIComponent(workspaceId) },
+        query: { includeBlocked: "true" }
+      })).json();
       const row = res.tasks?.find((t) => t?.id === taskId);
       if (row)
         return claimWarning(row, deps.author.id, now(deps));
@@ -15536,7 +15862,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   });
   if (event === "voice.request" && typeof p.queueId === "string" && p.workspaceId) {
     try {
-      await deps.http("POST", `/workspaces/${encodeURIComponent(p.workspaceId)}/voice-queue/${encodeURIComponent(p.queueId)}/ack`, {});
+      await workspaceAgentsClient(deps.http).workspaces[":ws"]["voice-queue"][":id"].ack.$post({ param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.queueId) } }, { init: { body: "{}" } });
     } catch {}
   }
 }
@@ -15860,7 +16186,9 @@ async function ackCommentRow(deps, payload) {
   if (typeof p?.commentQueueId !== "string" || typeof p?.workspaceId !== "string")
     return;
   try {
-    await deps.http("POST", `/workspaces/${encodeURIComponent(p.workspaceId)}/comment-queue/${encodeURIComponent(p.commentQueueId)}/ack`, {});
+    await workspaceAgentsClient(deps.http).workspaces[":ws"]["comment-queue"][":id"].ack.$post({
+      param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.commentQueueId) }
+    }, { init: { body: "{}" } });
   } catch {}
 }
 
@@ -19858,323 +20186,6 @@ function boardPathOf(toolName, args) {
   return `/workspaces/${encodeURIComponent(boardIdOf(toolName, args))}`;
 }
 
-// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/utils.js
-var mergePath = (base, path) => {
-  base = base.replace(/\/+$/, "");
-  base = base + "/";
-  path = path.replace(/^\/+/, "");
-  return base + path;
-};
-var replaceUrlParam = (urlString, params) => {
-  for (const [k, v] of Object.entries(params)) {
-    const reg = new RegExp("/:" + k + "(?:{[^/]+})?\\??(?=/|$)");
-    urlString = urlString.replace(reg, () => v ? `/${v}` : "");
-  }
-  return urlString;
-};
-var buildSearchParams = (query) => {
-  const searchParams = new URLSearchParams;
-  for (const [k, v] of Object.entries(query)) {
-    if (v === undefined)
-      continue;
-    if (Array.isArray(v))
-      for (const v2 of v) {
-        if (v2 === undefined)
-          continue;
-        searchParams.append(k, v2);
-      }
-    else
-      searchParams.set(k, v);
-  }
-  return searchParams;
-};
-var replaceUrlProtocol = (urlString, protocol) => {
-  switch (protocol) {
-    case "ws":
-      return urlString.replace(/^http/, "ws");
-    case "http":
-      return urlString.replace(/^ws/, "http");
-  }
-};
-var removeIndexString = (urlString) => {
-  if (/^https?:\/\/[^\/]+?\/index(?=\?|$)/.test(urlString))
-    return urlString.replace(/\/index(?=\?|$)/, "/");
-  return urlString.replace(/\/index(?=\?|$)/, "");
-};
-function isObject2(item) {
-  return typeof item === "object" && item !== null && !Array.isArray(item);
-}
-function deepMerge(target, source) {
-  if (!isObject2(target) && !isObject2(source))
-    return source;
-  const merged = { ...target };
-  for (const key in source) {
-    const value = source[key];
-    if (isObject2(merged[key]) && isObject2(value))
-      merged[key] = deepMerge(merged[key], value);
-    else
-      merged[key] = value;
-  }
-  return merged;
-}
-
-// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/utils/cookie.js
-var validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
-var _serialize = (name, value, opt = {}) => {
-  if (!validCookieNameRegEx.test(name))
-    throw new Error("Invalid cookie name");
-  let cookie = `${name}=${value}`;
-  if (/^__secure-/i.test(name) && !opt.secure)
-    throw new Error("__Secure- Cookie must have Secure attributes");
-  if (/^__host-/i.test(name)) {
-    if (!opt.secure)
-      throw new Error("__Host- Cookie must have Secure attributes");
-    if (opt.path !== "/")
-      throw new Error('__Host- Cookie must have Path attributes with "/"');
-    if (opt.domain)
-      throw new Error("__Host- Cookie must not have Domain attributes");
-  }
-  for (const key of [
-    "domain",
-    "path",
-    "sameSite",
-    "priority"
-  ])
-    if (opt[key] && /[;\r\n]/.test(opt[key]))
-      throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
-  if (opt && typeof opt.maxAge === "number" && opt.maxAge >= 0) {
-    if (opt.maxAge > 34560000)
-      throw new Error("Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration.");
-    cookie += `; Max-Age=${opt.maxAge | 0}`;
-  }
-  if (opt.domain && opt.prefix !== "host")
-    cookie += `; Domain=${opt.domain}`;
-  if (opt.path)
-    cookie += `; Path=${opt.path}`;
-  if (opt.expires) {
-    if (opt.expires.getTime() - Date.now() > 34560000000)
-      throw new Error("Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future.");
-    cookie += `; Expires=${opt.expires.toUTCString()}`;
-  }
-  if (opt.httpOnly)
-    cookie += "; HttpOnly";
-  if (opt.secure)
-    cookie += "; Secure";
-  if (opt.sameSite)
-    cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
-  if (opt.priority)
-    cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
-  if (opt.partitioned) {
-    if (!opt.secure)
-      throw new Error("Partitioned Cookie must have Secure attributes");
-    cookie += "; Partitioned";
-  }
-  return cookie;
-};
-var serialize = (name, value, opt) => {
-  value = encodeURIComponent(value);
-  return _serialize(name, value, opt);
-};
-
-// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/client.js
-var createProxy = (callback, path) => {
-  return new Proxy(() => {}, {
-    get(_obj, key) {
-      if (typeof key !== "string" || key === "then")
-        return;
-      return createProxy(callback, [...path, key]);
-    },
-    apply(_1, _2, args) {
-      return callback({
-        path,
-        args
-      });
-    }
-  });
-};
-var appendQueryParams = (url, searchParams) => {
-  const queryString = searchParams.toString();
-  return queryString ? `${url}?${queryString}` : url;
-};
-var ClientRequestImpl = class {
-  url;
-  method;
-  buildSearchParams;
-  queryParams = undefined;
-  pathParams = {};
-  rBody;
-  cType = undefined;
-  constructor(url, method, options) {
-    this.url = url;
-    this.method = method;
-    this.buildSearchParams = options.buildSearchParams;
-  }
-  fetch = async (args, opt) => {
-    if (args) {
-      if (args.query)
-        this.queryParams = this.buildSearchParams(args.query);
-      if (args.form) {
-        const form = new FormData;
-        for (const [k, v] of Object.entries(args.form)) {
-          if (v === undefined)
-            continue;
-          if (Array.isArray(v))
-            for (const v2 of v) {
-              if (v2 === undefined)
-                continue;
-              form.append(k, v2);
-            }
-          else
-            form.append(k, v);
-        }
-        this.rBody = form;
-      }
-      if (args.json !== undefined) {
-        this.rBody = JSON.stringify(args.json);
-        this.cType = "application/json";
-      }
-      if (args.param)
-        this.pathParams = args.param;
-    }
-    let methodUpperCase = this.method.toUpperCase();
-    const headerValues = {
-      ...args?.header,
-      ...typeof opt?.headers === "function" ? await opt.headers() : opt?.headers
-    };
-    if (args?.cookie) {
-      const cookies = [];
-      for (const [key, value] of Object.entries(args.cookie)) {
-        if (value === undefined)
-          continue;
-        cookies.push(serialize(key, value));
-      }
-      if (cookies.length > 0)
-        headerValues["Cookie"] = cookies.join("; ");
-    }
-    if (this.cType)
-      headerValues["Content-Type"] = this.cType;
-    const headers = new Headers;
-    for (const [key, value] of Object.entries(headerValues))
-      if (value !== undefined)
-        headers.set(key, value);
-    let url = this.url;
-    url = removeIndexString(url);
-    url = replaceUrlParam(url, this.pathParams);
-    if (this.queryParams)
-      url = appendQueryParams(url, this.queryParams);
-    methodUpperCase = this.method.toUpperCase();
-    const setBody = !(methodUpperCase === "GET" || methodUpperCase === "HEAD");
-    return (opt?.fetch || fetch)(url, {
-      body: setBody ? this.rBody : undefined,
-      method: methodUpperCase,
-      headers,
-      ...opt?.init
-    });
-  };
-};
-var hc = (baseUrl, options) => createProxy(function proxyCallback(opts) {
-  const buildSearchParamsOption = options?.buildSearchParams ?? buildSearchParams;
-  const parts = [...opts.path];
-  const lastParts = parts.slice(-3).reverse();
-  if (lastParts[0] === "toString") {
-    if (lastParts[1] === "name")
-      return lastParts[2] || "";
-    return proxyCallback.toString();
-  }
-  if (lastParts[0] === "valueOf") {
-    if (lastParts[1] === "name")
-      return lastParts[2] || "";
-    return proxyCallback;
-  }
-  let method = "";
-  if (/^\$/.test(lastParts[0])) {
-    const last = parts.pop();
-    if (last)
-      method = last.replace(/^\$/, "");
-  }
-  const path = parts.join("/");
-  const url = mergePath(baseUrl, path);
-  if (method === "url" || method === "path") {
-    let result = removeIndexString(url);
-    if (opts.args[0]) {
-      if (opts.args[0].param)
-        result = replaceUrlParam(result, opts.args[0].param);
-      if (opts.args[0].query)
-        result = appendQueryParams(result, buildSearchParamsOption(opts.args[0].query));
-    }
-    if (method === "url")
-      return new URL(result);
-    return result.slice(baseUrl.replace(/\/+$/, "").length).replace(/^\/?/, "/");
-  }
-  if (method === "ws") {
-    const normalizedUrl = removeIndexString(url);
-    const webSocketUrl = replaceUrlProtocol(opts.args[0]?.param ? replaceUrlParam(normalizedUrl, opts.args[0].param) : normalizedUrl, "ws");
-    const targetUrl = new URL(webSocketUrl);
-    const queryParams = opts.args[0]?.query;
-    if (queryParams)
-      buildSearchParamsOption(queryParams).forEach((value, key) => {
-        targetUrl.searchParams.append(key, value);
-      });
-    const establishWebSocket = (...args) => {
-      if (options?.webSocket !== undefined && typeof options.webSocket === "function")
-        return options.webSocket(...args);
-      return new WebSocket(...args);
-    };
-    return establishWebSocket(targetUrl.toString());
-  }
-  const req = new ClientRequestImpl(url, method, { buildSearchParams: buildSearchParamsOption });
-  if (method) {
-    options ??= {};
-    const reqOptions = { ...opts.args[1] };
-    const baseHeaders = options.headers;
-    const reqHeaders = reqOptions.headers;
-    if (baseHeaders && reqHeaders)
-      reqOptions.headers = async () => ({
-        ...typeof baseHeaders === "function" ? await baseHeaders() : baseHeaders,
-        ...typeof reqHeaders === "function" ? await reqHeaders() : reqHeaders
-      });
-    const args = deepMerge(options, reqOptions);
-    return req.fetch(opts.args[0], args);
-  }
-  return req;
-}, []);
-
-// packages/mcp/src/server-client.ts
-var PLACEHOLDER_ORIGIN = "http://claude-workspaces.invalid";
-function typedClient(http) {
-  return hc(PLACEHOLDER_ORIGIN, {
-    fetch: async (input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-      const data = await http(init?.method ?? "GET", `${url.pathname}${url.search}`, body);
-      return Response.json(data);
-    }
-  });
-}
-var mountsClient = (http) => typedClient(http);
-var docThreadsClient = (http) => typedClient(http);
-var docEditsClient = (http) => typedClient(http);
-var docLifecycleClient = (http) => typedClient(http);
-var attachmentsClient = (http) => typedClient(http);
-var shareClient = (http) => typedClient(http);
-var agentNotesClient = (http) => typedClient(http);
-var taskStateClient = (http) => typedClient(http);
-var taskContentClient = (http) => typedClient(http);
-var taskBoardClient = (http) => typedClient(http);
-var reviewItemsClient = (http) => typedClient(http);
-var libraryFoldersClient = (http) => typedClient(http);
-var docComponentsClient = (http) => typedClient(http);
-var personClient = (http) => typedClient(http);
-var whiteboardClient = (http) => typedClient(http);
-var inboxClient = (http) => typedClient(http);
-var leadChatFilesClient = (http) => typedClient(http);
-var workspaceBoardClient = (http) => typedClient(http);
-var workspaceAgentsClient = (http) => typedClient(http);
-var dispatchesClient = (http) => typedClient(http);
-var docFileClient = (http) => typedClient(http);
-var leadMeetingClient = (http) => typedClient(http);
-var agentMachineClient = (http) => typedClient(http);
-
 // packages/mcp/src/tools/components.ts
 var str = (v) => typeof v === "string" ? v : "";
 async function handleComponentTool(name, a, ctx) {
@@ -22312,7 +22323,8 @@ async function declareWorkspaceLead(args, deps) {
   const named = typeof args.leadAgentId === "string" ? args.leadAgentId.trim() : "";
   const declaring = named.length === 0 || named === deps.self.id;
   const leadAgentId = declaring ? deps.self.id : named;
-  const path = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  const param = { ws: encodeURIComponent(workspaceId) };
+  const roster = () => workspaceAgentsClient(deps.http).workspaces[":ws"];
   if (declaring && deps.identityIsShared === true) {
     return {
       isError: true,
@@ -22323,20 +22335,22 @@ async function declareWorkspaceLead(args, deps) {
   let attached;
   let subscription = { open: false, persisted: false };
   if (declaring) {
-    attached = await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-      agentId: deps.self.id,
-      agentName: deps.self.name,
-      runtime: deps.runtime,
-      pluginVersion: deps.pluginVersion,
-      processId: deps.processId
-    });
+    attached = await (await roster().agents.$post({
+      param,
+      json: {
+        agentId: deps.self.id,
+        agentName: deps.self.name,
+        runtime: deps.runtime,
+        pluginVersion: deps.pluginVersion,
+        processId: deps.processId
+      }
+    })).json();
     subscription = await deps.watchWorkspace(workspaceId);
   }
-  const res = await deps.http("PUT", `${path}/lead`, {
-    leadAgentId,
-    author: deps.self,
-    ...args.takeover === true ? { takeover: true } : {}
-  });
+  const res = await (await workspaceBoardClient(deps.http).workspaces[":ws"].lead.$put({
+    param,
+    json: { leadAgentId, author: deps.self, takeover: args.takeover === true ? true : undefined }
+  })).json();
   const settledLead = res.workspace?.leadAgentId ?? leadAgentId;
   const seat = {
     workspaceId,
@@ -22352,7 +22366,7 @@ async function declareWorkspaceLead(args, deps) {
     if (typeof q?.id !== "string")
       continue;
     try {
-      await deps.http("POST", `${path}/comment-queue/${encodeURIComponent(q.id)}/ack`, {});
+      await roster()["comment-queue"][":id"].ack.$post({ param: { ...param, id: encodeURIComponent(q.id) } }, { init: { body: "{}" } });
     } catch {}
   }
   const warnings = [];
@@ -23103,8 +23117,13 @@ function restoreNoticeContent(opts) {
 }
 
 // packages/mcp/src/watch-registry.ts
-function watchesPath(deps) {
-  return `/api/agents/${encodeURIComponent(deps.author.id)}/watches`;
+function watchesRoute(http, agentId) {
+  const route = personClient(http).api.agents[":agentId"].watches;
+  const param = { agentId: encodeURIComponent(agentId) };
+  return {
+    read: async () => (await route.$get({ param })).json(),
+    change: (json) => route.$post({ param, json })
+  };
 }
 function createWatchRegistry(deps) {
   const state = { coverage: undefined, lastPersistError: undefined };
@@ -23119,7 +23138,6 @@ function createWatchRegistry(deps) {
     },
     watchPersistenceMode: () => watchPersistenceMode(deps),
     lastPersistError: () => state.lastPersistError,
-    watchesPath: () => watchesPath(deps),
     streamMode: () => usesMux(deps) ? "multiplexed" : "per-key"
   };
 }
@@ -23131,7 +23149,8 @@ async function refreshCoverage(deps, state) {
   if (deps.identityIsShared)
     return;
   try {
-    state.coverage = parseCoverage(await deps.http("GET", watchesPath(deps))) ?? state.coverage;
+    const read = await watchesRoute(deps.http, deps.author.id).read();
+    state.coverage = parseCoverage(read) ?? state.coverage;
   } catch {}
   return state.coverage;
 }
@@ -23142,7 +23161,11 @@ async function persistWatchChange(deps, state, change) {
   if (deps.identityIsShared)
     return false;
   try {
-    await deps.http("POST", watchesPath(deps), { ...change, name: deps.author.name });
+    await watchesRoute(deps.http, deps.author.id).change({
+      add: change.add,
+      remove: change.remove,
+      name: deps.author.name
+    });
     state.lastPersistError = undefined;
     return true;
   } catch (err2) {
@@ -23282,7 +23305,7 @@ async function ensureWatchesRestored(deps, rt) {
   rt.inFlight = (async () => {
     const attempts = rt.state.attempts + 1;
     try {
-      const res = await deps.http("GET", deps.registry.watchesPath());
+      const res = await watchesRoute(deps.http, deps.author.id).read();
       deps.registry.setCoverage(parseCoverage(res));
       const keys = (res.watches ?? []).map((w) => w.key);
       const restored = [];
@@ -23298,13 +23321,18 @@ async function ensureWatchesRestored(deps, rt) {
       const reattached = [];
       for (const workspaceId of boardsToReattach(deps.registry.coverage())) {
         try {
-          const attachRes = await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-            agentId: deps.author.id,
-            agentName: deps.author.name,
-            runtime: "claude-code-local",
-            pluginVersion: deps.pluginVersion,
-            processId: deps.processId
-          });
+          const board = workspaceAgentsClient(deps.http).workspaces[":ws"];
+          const ws = encodeURIComponent(workspaceId);
+          const attachRes = await (await board.agents.$post({
+            param: { ws },
+            json: {
+              agentId: deps.author.id,
+              agentName: deps.author.name,
+              runtime: "claude-code-local",
+              pluginVersion: deps.pluginVersion,
+              processId: deps.processId
+            }
+          })).json();
           deps.markAttached(workspaceId);
           reattached.push(workspaceId);
           deps.deferredEmits.emitOutsideToolCall(() => deliverAttachBacklog(workspaceId, attachRes, {
@@ -23314,7 +23342,7 @@ async function ensureWatchesRestored(deps, rt) {
               }
             },
             ackComment: async (rowId) => {
-              await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/comment-queue/${encodeURIComponent(rowId)}/ack`, {});
+              await board["comment-queue"][":id"].ack.$post({ param: { ws, id: encodeURIComponent(rowId) } }, { init: { body: "{}" } });
             }
           }));
         } catch {}

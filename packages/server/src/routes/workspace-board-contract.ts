@@ -2,7 +2,7 @@
  * The contract for the routes the MCP calls about a board itself
  * (`route-contract.ts` says what a contract is): its record, name, archive
  * state, settings and parallelism cap, filing a doc onto it, the related
- * work it already holds, its GitHub subscriptions and its embeds.
+ * work it already holds, its GitHub subscriptions, its embeds and its lead.
  * `workspace-settings.ts`, `workspace-content.ts`, `workspace-related.ts`,
  * `workspaces-create-read.ts`, `github-hub.ts` and `workspace-embeds.ts`
  * serve them.
@@ -12,6 +12,7 @@
  * it is `unknown` here.
  */
 import { Hono } from 'hono';
+import type { SetLeadAgentResult } from '../tasks.ts';
 import { answers, contractOnly, json, query } from './route-contract.ts';
 
 export interface RetiredBody {
@@ -48,6 +49,12 @@ export interface GithubSubscriptionsBody {
 /** Checked whole by `parseBoardEmbeds`. */
 export interface BoardEmbedsBody {
   embeds: unknown;
+}
+/** `takeover` displaces a live lead; without it a held seat is declined. */
+export interface SetLeadBody {
+  leadAgentId: string;
+  author?: unknown;
+  takeover?: boolean;
 }
 export type BoardReadQuery = { format: 'json' };
 export type RelatedWorkQuery = { q: string; docId?: string; limit?: string };
@@ -100,6 +107,7 @@ export interface BoardReadAnswer {
   };
   retired?: RetiredNotice;
 }
+export type SetLeadAnswer = Extract<SetLeadAgentResult, { ok: true }>;
 export interface RelatedWorkAnswer {
   considered: number;
   matches: unknown[];
@@ -116,6 +124,7 @@ export const workspaceBoardContract = new Hono()
   .post(`${BOARD}/docs:attach`, json<AttachDocBody>(), answers<AttachDocAnswer>())
   .get(`${BOARD}/related-work`, query<RelatedWorkQuery>(), answers<RelatedWorkAnswer>())
   .put(`${BOARD}/github-subscriptions`, json<GithubSubscriptionsBody>(), contractOnly)
-  .put(`${BOARD}/embeds`, json<BoardEmbedsBody>(), contractOnly);
+  .put(`${BOARD}/embeds`, json<BoardEmbedsBody>(), contractOnly)
+  .put(`${BOARD}/lead`, json<SetLeadBody>(), answers<SetLeadAnswer>());
 
 export type WorkspaceBoardContract = typeof workspaceBoardContract;

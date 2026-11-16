@@ -18,10 +18,11 @@
  * client, the registry, the deferred emitter, the notification sink and the
  * clock — so the whole restore, including its backoff, is drivable.
  */
-import { type BacklogCommentRow, deliverAttachBacklog } from './attach-backlog.ts';
+import { deliverAttachBacklog } from './attach-backlog.ts';
 import { reconnectDelayMs } from './backoff.ts';
 import type { ChannelNotification } from './channel-messages.ts';
 import type { DeferredEmitter } from './deferred-emit.ts';
+import { workspaceAgentsClient } from './server-client.ts';
 import type { Watcher } from './sse-loop.ts';
 import {
   type RestoreState,
@@ -29,7 +30,7 @@ import {
   parseCoverage,
   restoreNoticeContent,
 } from './watch-coverage.ts';
-import type { WatchRegistry } from './watch-registry.ts';
+import { type WatchRegistry, watchesRoute } from './watch-registry.ts';
 
 export interface WatchRestoreDeps {
   /** The REST call to the feedback server; throws on a non-2xx. */
@@ -117,10 +118,7 @@ async function ensureWatchesRestored(deps: WatchRestoreDeps, rt: RestoreRuntime)
   rt.inFlight = (async () => {
     const attempts = rt.state.attempts + 1;
     try {
-      const res = (await deps.http('GET', deps.registry.watchesPath())) as {
-        watches?: Array<{ key: string }>;
-        pruned?: string[];
-      };
+      const res = await watchesRoute(deps.http, deps.author.id).read();
       deps.registry.setCoverage(parseCoverage(res));
       const keys = (res.watches ?? []).map((w) => w.key);
       const restored: string[] = [];
@@ -143,20 +141,20 @@ async function ensureWatchesRestored(deps: WatchRestoreDeps, rt: RestoreRuntime)
       const reattached: string[] = [];
       for (const workspaceId of boardsToReattach(deps.registry.coverage())) {
         try {
-          const attachRes = (await deps.http(
-            'POST',
-            `/workspaces/${encodeURIComponent(workspaceId)}/agents`,
-            {
-              agentId: deps.author.id,
-              agentName: deps.author.name,
-              runtime: 'claude-code-local',
-              pluginVersion: deps.pluginVersion,
-              processId: deps.processId,
-            },
-          )) as {
-            queuedComments?: BacklogCommentRow[];
-            queuedVoice?: Array<{ transcript?: unknown }>;
-          };
+          const board = workspaceAgentsClient(deps.http).workspaces[':ws'];
+          const ws = encodeURIComponent(workspaceId);
+          const attachRes = await (
+            await board.agents.$post({
+              param: { ws },
+              json: {
+                agentId: deps.author.id,
+                agentName: deps.author.name,
+                runtime: 'claude-code-local',
+                pluginVersion: deps.pluginVersion,
+                processId: deps.processId,
+              },
+            })
+          ).json();
           deps.markAttached(workspaceId);
           reattached.push(workspaceId);
           // This POST is the fourth attach site, and the only one whose
@@ -182,10 +180,10 @@ async function ensureWatchesRestored(deps: WatchRestoreDeps, rt: RestoreRuntime)
                 }
               },
               ackComment: async (rowId) => {
-                await deps.http(
-                  'POST',
-                  `/workspaces/${encodeURIComponent(workspaceId)}/comment-queue/${encodeURIComponent(rowId)}/ack`,
-                  {},
+                await board['comment-queue'][':id'].ack.$post(
+                  { param: { ws, id: encodeURIComponent(rowId) } },
+                  // The receipt has always carried an empty JSON body.
+                  { init: { body: '{}' } },
                 );
               },
             }),

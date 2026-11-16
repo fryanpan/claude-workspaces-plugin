@@ -323,7 +323,7 @@ export type { AttachmentsContract } from './routes/attachments-contract.ts';
 export type { ShareContract } from './routes/share-contract.ts';
 export type { TaskStateContract } from './routes/task-state-contract.ts';
 export type { TaskContentContract } from './routes/task-content-contract.ts';
-export type { TaskBoardContract } from './routes/task-board-contract.ts';
+export type { NextAnswer, TaskBoardContract } from './routes/task-board-contract.ts';
 export type { ReviewItemsContract } from './routes/review-items-contract.ts';
 export type { LibraryFoldersContract } from './routes/library-folders-contract.ts';
 export type { DocComponentsContract } from './routes/doc-components-contract.ts';
@@ -332,7 +332,10 @@ export type { WhiteboardContract } from './routes/whiteboard-contract.ts';
 export type { InboxContract } from './routes/inbox-contract.ts';
 export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts';
 export type { WorkspaceBoardContract } from './routes/workspace-board-contract.ts';
-export type { WorkspaceAgentsContract } from './routes/workspace-agents-contract.ts';
+export type {
+  AttachAgentAnswer,
+  WorkspaceAgentsContract,
+} from './routes/workspace-agents-contract.ts';
 export type { DispatchesContract } from './routes/dispatches-contract.ts';
 export type { DocFileContract } from './routes/doc-file-contract.ts';
 export type { LeadMeetingContract } from './routes/lead-meeting-contract.ts';

@@ -13,6 +13,7 @@
  * reassured about the half that worked.
  */
 import type { MuxLoop } from './mux-loop.ts';
+import { personClient } from './server-client.ts';
 import type { Watcher } from './sse-loop.ts';
 import { type WatchCoverage, parseCoverage } from './watch-coverage.ts';
 
@@ -68,13 +69,16 @@ export interface WatchRegistry {
   setCoverage(next: WatchCoverage | undefined): void;
   watchPersistenceMode(): 'server' | 'session-only';
   lastPersistError(): string | undefined;
-  /** The route the set lives at, shared with the restore path. */
-  watchesPath(): string;
 }
 
-/** The route this identity's watch set lives at. */
-function watchesPath(deps: WatchRegistryDeps): string {
-  return `/api/agents/${encodeURIComponent(deps.author.id)}/watches`;
+/** The route this identity's watch set lives at, through the typed client. */
+export function watchesRoute(http: WatchRegistryDeps['http'], agentId: string) {
+  const route = personClient(http).api.agents[':agentId'].watches;
+  const param = { agentId: encodeURIComponent(agentId) };
+  return {
+    read: async () => (await route.$get({ param })).json(),
+    change: (json: Parameters<typeof route.$post>[0]['json']) => route.$post({ param, json }),
+  };
 }
 
 /** Bind the registry to one process's dependencies. */
@@ -91,7 +95,6 @@ export function createWatchRegistry(deps: WatchRegistryDeps): WatchRegistry {
     },
     watchPersistenceMode: () => watchPersistenceMode(deps),
     lastPersistError: () => state.lastPersistError,
-    watchesPath: () => watchesPath(deps),
     streamMode: () => (usesMux(deps) ? 'multiplexed' : 'per-key'),
   };
 }
@@ -146,7 +149,8 @@ async function refreshCoverage(
 ): Promise<WatchCoverage | undefined> {
   if (deps.identityIsShared) return undefined;
   try {
-    state.coverage = parseCoverage(await deps.http('GET', watchesPath(deps))) ?? state.coverage;
+    const read = await watchesRoute(deps.http, deps.author.id).read();
+    state.coverage = parseCoverage(read) ?? state.coverage;
   } catch {
     // Leave the previous coverage as it was; `list_watched_docs` omits the field
     // entirely when it is undefined.
@@ -166,7 +170,13 @@ async function persistWatchChange(
 ): Promise<boolean> {
   if (deps.identityIsShared) return false;
   try {
-    await deps.http('POST', watchesPath(deps), { ...change, name: deps.author.name });
+    // Each field by name, not spread: a spread is never checked for a
+    // renamed key. An absent list is undefined, which JSON drops.
+    await watchesRoute(deps.http, deps.author.id).change({
+      add: change.add,
+      remove: change.remove,
+      name: deps.author.name,
+    });
     state.lastPersistError = undefined;
     return true;
   } catch (err) {
