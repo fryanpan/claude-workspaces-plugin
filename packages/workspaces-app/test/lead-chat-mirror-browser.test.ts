@@ -119,8 +119,8 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
     'keeps every bottom tab in place at %i when the chat opens',
     (at) => {
       const f = result().widths.find((w) => w.width === at)?.full;
-      // CONTROL: the four pages and the agent button were all read.
-      expect(f?.tabsClosed).toHaveLength(5);
+      // CONTROL: the four pages, Messages and the agent button were all read.
+      expect(f?.tabsClosed).toHaveLength(6);
       expect(f?.tabsOpen).toEqual(f?.tabsClosed);
     },
     60_000,
