@@ -100,6 +100,8 @@ export default defineConfig({
             // Starter apps copied into new repos (templates/signin). Each runs
             // its own Worker code in node against a local workerd D1.
             'templates/*/test/**/*.test.ts',
+            // The sign-in test app (infra/signin-test), the template made live.
+            'infra/signin-test/test/**/*.test.ts',
           ],
           exclude: [
             ...EXCLUDE,
