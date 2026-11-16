@@ -117,6 +117,11 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/git-push/run.ts': 'not-in-inventory',
   'packages/server/src/github-hub.ts': 'not-in-inventory',
   'packages/server/src/github-relay/relay-config.ts': 'not-in-inventory',
+  // One fixed file under prod's own root, `~/Library/Application Support/
+  // claude-workspaces/google-maps-key` (beside prod's checkout), or the path
+  // the operator's `CW_GOOGLE_MAPS_KEY_FILE` names; read once at boot, never
+  // a path a doc or a lead supplies.
+  'packages/server/src/google-maps-key.ts': 'owner-checkout',
   'packages/server/src/google-oauth.ts': 'not-in-inventory',
   'packages/server/src/home-brief.ts': 'not-in-inventory',
   'packages/server/src/home-remotes.ts': 'not-in-inventory',
