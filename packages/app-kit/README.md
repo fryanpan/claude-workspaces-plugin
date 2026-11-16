@@ -80,7 +80,10 @@ schedule })` holds the doc for a file kept elsewhere (Dropbox, R2):
   just before hibernation still reaches the file.
 - `file.refresh()` reads the file again. An outside edit is applied as one
   splice, so readers' cursors stay put. If it overlaps unsaved local edits,
-  the local text is kept and `onConflict` is told.
+  the local text is kept, the next save overwrites the file with it, and
+  `onConflict({ base, remote, local })` is the only place the outside
+  edit survives: write `remote` somewhere (a conflict copy beside the
+  file) so it is not lost.
 
 **An agent's edits.** The app's tool dispatch runs an edit as the agent
 session that asked for it:

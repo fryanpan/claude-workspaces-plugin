@@ -53,6 +53,8 @@ export interface MarkdownFileOptions {
   debounceMs?: number;
   /** The doc's text field. Default `body`. */
   field?: string;
+  /** An outside edit overlapped unsaved local edits. The local text wins
+   *  and the next save overwrites the file: keep `remote` here or lose it. */
   onConflict?: (conflict: FileConflict) => void;
   onSaveError?: (err: unknown) => void;
 }
