@@ -63,6 +63,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/chat-audit.ts': 'not-in-inventory',
   'packages/server/src/client-release.ts': 'not-in-inventory',
   'packages/server/src/coach/setup.ts': 'not-in-inventory',
+  'packages/server/src/collab-core-switch.ts': 'data-dir',
   'packages/server/src/component-build.ts': 'tree-fs',
   // `<dataDir>/component-grants.json`, a path built from the data dir alone.
   'packages/server/src/component-grants.ts': 'data-dir',
@@ -96,6 +97,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/doc-move.ts': 'never-covered',
   'packages/server/src/doc-origin-repo.ts': 'refused-when-covered',
   'packages/server/src/doc-store-workspaces.ts': 'tree-fs',
+  // `<dataDir>/_history/<docId>.yhist`, a path built from the data dir alone.
+  'packages/server/src/doc-history/log.ts': 'data-dir',
   'packages/server/src/doc-state/disk.ts': 'data-dir',
   'packages/server/src/doc-store.ts': 'tree-fs',
   'packages/server/src/file-binding.ts': 'tree-fs',
@@ -198,7 +201,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/routes/git-push.ts': 'not-in-inventory',
   'packages/server/src/routes/meetings-calendar.ts': 'not-in-inventory',
   'packages/server/src/routes/mount-file.ts': 'refused-when-covered',
-  'packages/server/src/routes/mounts.ts': 'refused-when-covered',
+  'packages/server/src/routes/mounts-api.ts': 'refused-when-covered',
   'packages/server/src/routes/review-raw.ts': 'tree-fs',
   'packages/server/src/routes/shell-static.ts': 'tree-fs',
   'packages/server/src/routes/workspace-content.ts': 'tree-fs',

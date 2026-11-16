@@ -33,6 +33,9 @@ import {
   resolveAssignee,
 } from '../task-owner.ts';
 import { isRetired, retiredRefusal } from '../tasks.ts';
+import { sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
+import type { AttachDocAnswer, AttachDocBody } from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -75,8 +78,8 @@ export async function handleWorkspaceContent(
    */
   if (restIs(scope, 'docs:attach') && req.method === 'POST') {
     const workspaceId = scope?.workspaceId ?? '';
-    const body = await safeJson(req);
-    const addressed = body?.docId as string | undefined;
+    const body = sent<AttachDocBody>(await safeJson(req));
+    const addressed = body?.docId;
     if (!addressed || typeof addressed !== 'string') return j(400, { error: 'docId required' });
     // The link target must exist: either a live doc, or a REVIEW id (a
     // diff review / folder bind, attached as one unit). Only the first
@@ -141,11 +144,11 @@ export async function handleWorkspaceContent(
       : attachedMeta
         ? withReviewUrl(attachedMeta, workspaceId).reviewUrl
         : `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(docId)}`;
-    return j(200, {
-      ok: true,
+    const attached: AttachDocAnswer = {
       workspace: taskStore.getWorkspace(workspaceId),
       ...(url ? { url } : {}),
-    });
+    };
+    return j(200, { ok: true, ...attached });
   }
   // import_tasks_markdown (§3.10 / §3.12 commit 10): ingest a
   // hand-maintained tracker (group headings + status tables). The
@@ -162,7 +165,7 @@ export async function handleWorkspaceContent(
     // resolved it once above every handler, so the lookup and the 404 that
     // stood further down are DELETED rather than left dormant.
     const { workspaceId, board: workspace } = scope;
-    const body = await safeJson(req);
+    const body = sent<T.ImportTasksBody>(await safeJson(req));
     const path = body?.path;
     if (typeof path !== 'string' || path.length === 0) {
       return j(400, { error: 'path required' });

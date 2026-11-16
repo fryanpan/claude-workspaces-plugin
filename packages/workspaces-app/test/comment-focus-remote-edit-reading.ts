@@ -30,7 +30,8 @@ export interface FocusReading {
 export interface EditStep {
   /** Where the edit landed relative to the commented words: `between` is a
    *  paragraph lengthened between the top of the screen and them, and
-   *  `burst` is four edits fired inside a second while the reader types. */
+   *  `burst` is four edits sent back to back, a word typed after each, with
+   *  no settle in between. */
   where: 'above' | 'below' | 'inside' | 'between' | 'burst';
   before: FocusReading;
   /** The edit is on the page and the page has settled; nothing typed yet. */
@@ -39,6 +40,10 @@ export interface EditStep {
   after: FocusReading;
   /** The words the reader had typed by the time of `after`. */
   typed: string;
+  /** The burst only: what the page saw, in order. `edit <n>` when the n-th
+   *  edit's words reached the doc, `word <n>` when the n-th burst words were
+   *  all in the box, `settle` when the driver let the page settle. */
+  burstLog?: string[];
 }
 
 export interface FocusScenario {

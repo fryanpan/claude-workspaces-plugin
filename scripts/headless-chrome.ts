@@ -209,6 +209,19 @@ function reapOnce(): void {
  * does — waiting longer on the same process is the fix that already failed
  * once. A Chrome that EXITS is still a failure at once.
  */
+/** How much of Chrome's stderr a launch keeps for its error message. The
+ *  listener lives as long as the browser, and a browser launched with
+ *  `--enable-logging=stderr` writes all run. */
+const STDERR_KEEP = 16_384;
+
+/** The last `STDERR_KEEP` characters of `text`, from a line start. */
+export function recentLines(text: string): string {
+  if (text.length <= STDERR_KEEP) return text;
+  const tail = text.slice(-STDERR_KEEP);
+  const nl = tail.indexOf('\n');
+  return nl >= 0 ? tail.slice(nl + 1) : tail;
+}
+
 export async function launchChrome(
   bin: string,
   args: (profile: string) => string[],
@@ -247,7 +260,7 @@ async function launchLoop(
     onSpawn(browser);
     stderr = '';
     proc.stderr?.on('data', (d) => {
-      stderr += String(d);
+      stderr = recentLines(stderr + String(d));
     });
     const portFile = join(profile, 'DevToolsActivePort');
     const deadline = Date.now() + timeoutMs;

@@ -11,6 +11,7 @@ import {
   parseThreadReviewItemId,
   pendingDeclaration,
 } from '@claude-workspaces/core';
+import { COLLAB_CORE_CHANGED } from '@claude-workspaces/core/workspace-presence';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
 import {
@@ -63,6 +64,8 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { CollabCorePath } from './collab-core-path.ts';
+import { CollabCoreSwitch, collabCoreView, parseCollabCoreEnv } from './collab-core-switch.ts';
 import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
@@ -70,10 +73,13 @@ import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
+import { FileDirectMessageStore } from './direct-messages.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
 import { confirmGrantFolder } from './doc-components-agent.ts';
-import { DocStore } from './doc-store.ts';
+import { DiskHistoryStore } from './doc-history/log.ts';
+import { DocHistory } from './doc-history/recorder.ts';
+import { DocStore, type LiveDoc } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
@@ -86,6 +92,7 @@ import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
+import type { HonoBoardAppEnv, HonoOpenAppEnv } from './hono-env.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
@@ -162,6 +169,7 @@ import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import { boardImportRoutesContext } from './routes/board-import.ts';
 import { type BoardSocketRootsRoutesContext } from './routes/board-socket-roots.ts';
 import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
 import { type ChatAuditRoutesContext } from './routes/chat-audit-routes.ts';
@@ -171,7 +179,12 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
-import { HONO_FAMILIES, createHonoFront } from './routes/hono-front.ts';
+import { createHonoApp } from './routes/hono-app.ts';
+import { honoBoardFamilies } from './routes/hono-board-families.ts';
+import { honoFamilies } from './routes/hono-families.ts';
+import { createHonoFront } from './routes/hono-front.ts';
+import { honoOpenFamilies } from './routes/hono-open-families.ts';
+import { honoTailFamilies } from './routes/hono-tail-families.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
@@ -180,7 +193,6 @@ import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
-import { createRequestChain } from './routes/request-chain.ts';
 import { type ReviewFileRoutesContext } from './routes/review-files.ts';
 import { type ReviewQueueRoutesContext } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
@@ -302,6 +314,43 @@ export {
 export type { ServerOptions };
 
 /**
+ * The typed routes another package's client reads. Re-exported here because
+ * only this module may import out of `routes/`, and the MCP child's
+ * `hc<MountsApi>` needs the type (never the code) of the app that answers.
+ */
+export type { MountsApi } from './routes/mounts-api.ts';
+export type { AgentNotesContract } from './routes/agent-notes-contract.ts';
+export type { AttachmentsContract } from './routes/attachments-contract.ts';
+export type { ShareContract } from './routes/share-contract.ts';
+export type { TaskStateContract } from './routes/task-state-contract.ts';
+export type { TaskContentContract } from './routes/task-content-contract.ts';
+export type { NextAnswer, TaskBoardContract } from './routes/task-board-contract.ts';
+export type { ReviewItemsContract } from './routes/review-items-contract.ts';
+export type { LibraryFoldersContract } from './routes/library-folders-contract.ts';
+export type { DocComponentsContract } from './routes/doc-components-contract.ts';
+export type { PersonContract, PlaceFields } from './routes/person-contract.ts';
+export type { WhiteboardContract } from './routes/whiteboard-contract.ts';
+export type { InboxContract } from './routes/inbox-contract.ts';
+export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts';
+export type { WorkspaceBoardContract } from './routes/workspace-board-contract.ts';
+export type {
+  AttachAgentAnswer,
+  WorkspaceAgentsContract,
+} from './routes/workspace-agents-contract.ts';
+export type { DispatchesContract } from './routes/dispatches-contract.ts';
+export type { DocFileContract } from './routes/doc-file-contract.ts';
+export type { LeadMeetingContract } from './routes/lead-meeting-contract.ts';
+export type { AgentMachineContract } from './routes/agent-machine-contract.ts';
+export type { DocEditsContract } from './routes/doc-edits-contract.ts';
+export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
+export type {
+  DocThreadsContract,
+  ScopedEditFields,
+  ThreadByFindBody,
+  ThreadCreateBody,
+} from './routes/doc-threads-contract.ts';
+
+/**
  * `revisedRange` off a request body: the offsets into the NEW detail that a
  * caller says changed.
  *
@@ -380,6 +429,12 @@ export interface ServerHandle {
   shareLinks: ShareLinks;
   /** The core room hosts every revoke rechecks (`collab-rooms.ts`). */
   collabRooms: CollabRooms;
+  /** Which boards the collab core serves, and its room host over the doc
+   *  store's docs. Exposed so a test can read which path a socket took. */
+  collabCore: { switch: CollabCoreSwitch; path: CollabCorePath };
+  /** History for the docs of boards on the core (`doc-history/recorder.ts`).
+   *  Exposed so a test can read and restore versions; no route serves it. */
+  docHistory: DocHistory;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -592,8 +647,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // membership, both built further down. Until then only the owner is trusted.
   let commentTrustFor: CommentTrustFor | null = null;
   let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
+  // Built before the store so it attaches to every doc the store wires. Which
+  // docs it records is late-bound: the core switch and the board membership
+  // are built further down. Until then it records nothing.
+  let historyScope: ((doc: LiveDoc) => boolean) | null = null;
+  const docHistory = new DocHistory({
+    store: new DiskHistoryStore(dataDir),
+    inScope: (doc) => historyScope?.(doc) ?? false,
+    // A board doc's rows are the task store's projection, which reverts any
+    // other write to them (`task-projection.ts`), so a restore leaves them.
+    ownedElsewhere: (doc) => (doc.docId.startsWith('ws:') ? ['tasks', 'workspace'] : []),
+  });
   const docStore: DocStore = new DocStore({
     dataDir,
+    onDocWired: (doc) => docHistory.attach(doc),
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,
@@ -2124,6 +2191,38 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Board agent tokens (`at2`) and their revocation record. */
   /** The core room hosts every revoke rechecks (collab-rooms.ts). */
   const collabRooms = new CollabRooms();
+  /** Which boards' sockets the collab core serves, and the core's room host
+   *  over the doc store's live docs (D1 step 5). */
+  const collabCoreSwitch = new CollabCoreSwitch({
+    dataDir,
+    // Set, the environment fixes the server-wide setting; unset, the owner's
+    // runtime switch in the data folder decides (`collab-core-switch.ts`).
+    fixed: opts.collabCore ?? parseCollabCoreEnv(process.env.CW_COLLAB_CORE),
+  });
+  const collabCorePath = new CollabCorePath({
+    getDoc: (id) => docStore.peek(id),
+    rooms: collabRooms,
+  });
+  // History rides the board's core switch: a board doc by its own id, any
+  // other doc by the boards it sits on.
+  historyScope = (doc) => {
+    if (!collabCoreSwitch.serverWide || !collabCoreSwitch.anyBoardOn()) return false;
+    if (doc.docId.startsWith('ws:')) return collabCoreSwitch.usesCore(doc.docId.slice(3));
+    for (const ws of boardsForDoc(doc.docId)) if (collabCoreSwitch.usesCore(ws)) return true;
+    return false;
+  };
+  collabCoreSwitch.onChange(() => docHistory.scopeChanged());
+  // The board's open pages pick their presence strip from this, so they hear
+  // a switch at once, whoever made it. Pages only: no agent acts on which
+  // strip a page draws, and each frame costs a session a turn.
+  collabCoreSwitch.onChange((workspaceId) => {
+    const frame = {
+      event: COLLAB_CORE_CHANGED,
+      workspaceId,
+      ...collabCoreView(collabCoreSwitch, workspaceId),
+    };
+    sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
+  });
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -2234,6 +2333,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
+    core: collabCorePath,
+    onFirstClientSocket: opts.onFirstClientSocket,
     onBoardRoomOpen: (workspaceId, awareness) => {
       agentSpots.restore(workspaceId, awareness);
       personPresence.attach(workspaceId, awareness);
@@ -2368,6 +2469,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
   };
 
+  /** A board pushed from the Mac, on a project machine only — routes/board-import.ts. */
+  const boardImportCtx = boardImportRoutesContext(opts.boardImport, {
+    ...{ dataDir, verifier: staticAccessVerifier, j },
+    port: () => server.port ?? port,
+  });
+
   /** GitHub events for boards that hold no GitHub token — routes/github-hub.ts. */
   const githubHubCtx: GithubHubRoutesContext = {
     hub: new GithubHub(githubHubPath(dataDir), () => githubPushKeyKey(cookieKey())),
@@ -2429,6 +2536,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     fileUnderBoardWorkspace,
     boardAccessOf,
     rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
+    usesCollabCore: (workspaceId) => collabCoreSwitch.usesCore(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -3317,7 +3425,28 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    directMessages: {
+      store: new FileDirectMessageStore(dataDir),
+      // Every active person this board admits, the owner included.
+      peopleOn: (boardId) =>
+        identities
+          .list()
+          .filter(
+            (rec) =>
+              rec.kind === 'person' &&
+              rec.status === 'active' &&
+              !rec.mergedInto &&
+              personAccessOn(boardId, rec) !== null,
+          )
+          .map((rec) => ({ id: rec.id, name: rec.displayName })),
+      leadAgentOf: (personId) => personAgentLinks.leadAgentOf(personId),
+      agentName: (agentId) => identities.get(agentId)?.displayName ?? agentId,
+      sse,
+      j,
+      safeJson,
+    },
     collabRooms,
+    collabCoreSwitch,
     agentSpots,
     personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
@@ -3418,8 +3547,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several
-    // early returns and a hoisted inner `route` declaration that a wrapping
-    // try/finally would move out of function scope. This wrapper is the one
+    // early returns. This wrapper is the one
     // place every request passes through exactly once — the route table and
     // the fallback both call it — so one `finally` cannot leak an entry, not
     // even for an upgrade that answers `undefined`.
@@ -3427,10 +3555,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return withEventOrigin(origin, () => handleRequest(req)).finally(settled);
   }
 
-  // The ordered chain every request runs — see routes/request-chain.ts. Built
+  // The router every request runs — see routes/hono-app.ts. Built
   // last, from every route family's context above; it reads nothing per
   // request but the request.
-  const handleRequest = createRequestChain({
+  const handleRequest = createHonoApp({
     docStore,
     applyCors,
     refreshSession,
@@ -3439,8 +3567,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
-    homeFeedCtx,
-    githubHubCtx,
+    honoOpenFront: createHonoFront<HonoOpenAppEnv>(
+      honoOpenFamilies({ homeFeedCtx, boardImportCtx, githubHubCtx }),
+      { upgrades: 'enter' },
+    ),
     admit: opts.observeAdmission ? observedAdmit(admit, opts.observeAdmission) : admit,
     localOnlyGate,
     attributeRequest,
@@ -3452,66 +3582,94 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
         { shares, now: Date.now() },
       ),
-    honoFront: createHonoFront([...HONO_FAMILIES, ...(opts.honoFamilies ?? [])]),
-    authShareRoutesCtx,
-    voiceAgentLlmRoutesCtx,
-    recallWebhookRoutesCtx,
+    honoFront: createHonoFront([
+      ...honoFamilies({
+        authShareRoutesCtx,
+        opsRoutesCtx,
+        mountRoutesCtx,
+        inboxRoutes: features.inboxRoutes,
+        keeperHoldsRoutes: features.keeperHoldsRoutes,
+        promptRoutesCtx,
+        reviewQueueRoutesCtx,
+        voicePageRoutesCtx,
+        voiceApiRoutesCtx,
+        accessRoutesCtx,
+        coachRoutesCtx,
+        voiceAgentLlmRoutesCtx,
+        recallWebhookRoutesCtx,
+        mcpConnectorCtx: {
+          host: connectorHost,
+          j,
+          requestAddress: (req) => server.requestIP(req)?.address,
+          agentTokenKey: agentTokenKeyFor,
+          // Forward reference: the board sockets are opened below.
+          boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
+        },
+        agentIdentityRoutesCtx,
+        boardTokenRoutesCtx,
+        boardSocketRootsRoutesCtx,
+        repoRoutesCtx,
+        loadReportRoutesCtx,
+        landingStreamCtx: { sse, j },
+        privateMessageRoutesCtx,
+        requireSignInToWrite,
+        policyFor,
+      }),
+      ...(opts.honoFamilies ?? []),
+    ]),
     serveUpgradeAndStreamRoutes,
-    taskStore,
     workspacesOfMember,
-    boardLinkRoutesCtx: {
-      workspacesOfMember,
-      findReviewItem: (id) => taskStore.findReviewItem(id),
-      parseThreadReviewItemId,
-      docPagePath: (docId, workspaceId) => {
-        const meta = docStore.peekMeta(docId);
-        const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
-        if (!url) return undefined;
-        const u = new URL(url);
-        return `${u.pathname}${u.search}`;
-      },
-      // The docs listing's own reading of "on this board" (`routes/docs.ts`).
-      linkCandidates: (workspaceId) => {
-        const index = boardIndexForListing();
-        return docStore
-          .list()
-          .filter(
-            (m) => m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
-          )
-          .map(linkCandidateOf);
-      },
-    },
-    opsRoutesCtx,
-    docRoutesCtx,
-    appRoutesCtx,
-    workspaceRoutesCtx,
-    taskRoutesCtx,
-    connectorHost,
-    // Forward reference: the board sockets are opened below.
-    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    agentTokenKeyFor,
-    agentIdentityRoutesCtx,
-    boardTokenRoutesCtx,
-    boardSocketRootsRoutesCtx,
-    chatAuditRoutesCtx,
-    repoRoutesCtx,
-    loadReportRoutesCtx,
-    mountRoutesCtx,
-    libraryRoutesCtx,
-    docMoveRoutesCtx,
-    handleArchiveRoutes,
-    reviewFileRoutesCtx,
-    meetingCalendarRoutesCtx,
-    promptRoutesCtx,
-    sse,
-    reviewQueueRoutesCtx,
-    voicePageRoutesCtx,
-    accessRoutesCtx,
-    voiceApiRoutesCtx,
-    featureRoutes: features.routes,
-    privateMessageRoutesCtx,
-    coachRoutesCtx,
-    serveShellRoutes,
+    honoBoardFront: createHonoFront<HonoBoardAppEnv>(
+      [
+        ...honoBoardFamilies({
+          docRoutesCtx,
+          appRoutesCtx,
+          workspaceRoutesCtx,
+          taskRoutesCtx,
+          chatAuditRoutesCtx,
+          libraryRoutesCtx,
+          docMoveRoutesCtx,
+          handleArchiveRoutes,
+          reviewFileRoutesCtx,
+          meetingCalendarRoutesCtx,
+          workspaceRecord: (id) => taskStore.getWorkspace(id),
+          workspacesOfMember,
+          j,
+          requireSignInToWrite,
+          policyFor,
+        }),
+        ...honoTailFamilies({
+          featureRoutes: features.routes,
+          serveShellRoutes,
+          requireSignInToWrite,
+          policyFor,
+          boardLinkRoutesCtx: {
+            workspacesOfMember,
+            findReviewItem: (id) => taskStore.findReviewItem(id),
+            parseThreadReviewItemId,
+            docPagePath: (docId, workspaceId) => {
+              const meta = docStore.peekMeta(docId);
+              const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
+              if (!url) return undefined;
+              const u = new URL(url);
+              return `${u.pathname}${u.search}`;
+            },
+            // The docs listing's own reading of "on this board" (`routes/docs.ts`).
+            linkCandidates: (workspaceId) => {
+              const index = boardIndexForListing();
+              return docStore
+                .list()
+                .filter(
+                  (m) =>
+                    m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
+                )
+                .map(linkCandidateOf);
+            },
+          },
+        }),
+      ],
+      { upgrades: 'enter' },
+    ),
   });
 
   const server = Bun.serve<UpgradeData>({
@@ -3887,6 +4045,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     collabRooms,
     sweepDeadShares,
+    collabCore: { switch: collabCoreSwitch, path: collabCorePath },
+    docHistory,
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason

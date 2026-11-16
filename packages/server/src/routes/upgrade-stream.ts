@@ -132,6 +132,9 @@ export interface UpgradeStreamContext {
   boardAccessOf: (workspaceId: string, email: string | null, isVisitor: boolean) => AccessRole;
   /** Whether a board's narrow roles are enforced, read per frame. */
   rolesModeOf: (workspaceId: string) => RolesMode;
+  /** Whether a socket opened now on this board takes the collab core's
+   *  path (`collab-core-switch.ts`). Read once, at the upgrade. */
+  usesCollabCore?: (workspaceId: string) => boolean;
   /**
    * Which boards hold this member — THE SAME function
    * `middleware/workspace-scope.ts` runs for every REST route, injected here
@@ -289,6 +292,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     fileUnderBoardWorkspace,
     boardAccessOf,
     rolesModeOf,
+    usesCollabCore = () => false,
     workspacesOfMember,
     j,
     requestAddress,
@@ -661,6 +665,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),
             ...(roomReadOnly ? { readOnly: true } : {}),
             ...(presenceOnly ? { presenceOnly: true } : {}),
+            // A presence-only socket syncs no content, so it has no sync to move.
+            ...(!presenceOnly && usesCollabCore(boardRoom.workspaceId) ? { core: true } : {}),
             access: socketAccess(boardRoom.workspaceId),
             presenceUser: presenceUser(roomReadOnly),
             ...(socketOwnerProven()
@@ -721,7 +727,11 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // writable doc afterwards — see `widgetDoorGrant` on the admission.
         const readOnly = !mayCreate || widgetDoorGrant !== null;
         if (!docStore.get(docId)) {
-          if (type === 'mockup') {
+          // An archived id is not free. A doc page's comment widget names
+          // `type=mockup` too, and when the archive closes its socket it
+          // reconnects: creating here filed an empty mock under the archived
+          // id, on the board, in place of the doc "Put it back" restores.
+          if (type === 'mockup' && !docStore.isArchivedDoc(docId)) {
             // Nothing to read yet, so refusing here gates no read: the doc
             // this socket would have created does not exist for anybody.
             if (!mayCreate) return j(401, signInRequiredBody());
@@ -759,6 +769,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             ...(readOnly ? { readOnly: true } : {}),
             ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
             ...(editor ? { editor } : {}),
+            ...(usesCollabCore(workspaceId) ? { core: true } : {}),
             access: socketAccess(workspaceId),
             presenceUser: presenceUser(readOnly),
           },

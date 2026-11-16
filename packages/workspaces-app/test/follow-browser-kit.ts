@@ -92,6 +92,8 @@ export interface Board {
   opened: TranscriptionOpenOpts[];
   lead: Awaited<ReturnType<typeof agentStream>>;
   post: (path: string, payload: unknown) => Promise<Record<string, unknown>>;
+  /** The server itself, for a setting no loopback route may widen. */
+  server: ServerHandle;
   /** The agent's pointer, as `point_at` sends it. */
   point: (place: Record<string, unknown>) => Promise<void>;
   /** Where the server's presence room has a person (`anon-<id>`), or null. */
@@ -226,6 +228,7 @@ export async function bootBoard(
     return null;
   };
   return {
+    server,
     base,
     ws,
     taskId,

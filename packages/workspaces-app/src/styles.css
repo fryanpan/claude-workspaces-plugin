@@ -1079,6 +1079,94 @@ body.threads-resizing {
 .cw-ic-done {
   background-image: var(--ic-done);
 }
+/* An agent's mark on the card's glyph (doc/thread-mark.ts), the same two
+   marks the widget draws on an app's pins (widget comment-view-css.ts, same
+   motion and colours): the glyph becomes a disc, purple with three white dots
+   that brighten and fade in turn on a 4.5s cycle while an agent works, teal
+   with a white check that draws itself once when it is done. Here, not in
+   doc.css, because the board renders this card too. The disc keeps the
+   glyph's box, so the card does not move when a mark arrives. Positions are
+   the widget's 16px layout in percent. Longhands, as there, so tests can
+   read them computed. */
+.thread-glyph.thread-mark {
+  background: #5b3f8f;
+  border-radius: 50%;
+}
+.thread-glyph.thread-mark[data-mark="done"] {
+  background: #0a7b83;
+}
+.thread-mark .cw-pg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.thread-mark .cw-pg svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.thread-mark .cw-breathe {
+  position: absolute;
+  top: 41.5%;
+  width: 16.9%;
+  height: 16.9%;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.35;
+  animation-name: cw-breathe;
+  animation-duration: 4.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-delay: 0s;
+}
+.thread-mark .cw-breathe:nth-child(1) {
+  left: 19.7%;
+}
+.thread-mark .cw-breathe:nth-child(2) {
+  left: 41.5%;
+  animation-delay: 0.75s;
+}
+.thread-mark .cw-breathe:nth-child(3) {
+  left: 63.4%;
+  animation-delay: 1.5s;
+}
+@keyframes cw-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.thread-mark .cw-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.thread-mark .cw-draw {
+  stroke-dashoffset: 1;
+  animation-name: cw-draw;
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.3, 0.6, 0.3, 1);
+  animation-delay: 0.12s;
+  animation-fill-mode: forwards;
+}
+@keyframes cw-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-mark .cw-breathe {
+    animation-name: none;
+    opacity: 0.85;
+  }
+  .thread-mark .cw-draw {
+    animation-name: none;
+    stroke-dashoffset: 0;
+  }
+}
 /* No red "new" dot or ring on a card that changed since the reader last
    looked: calm by default (owner, 2026-09-13), no badges. */
 /* The folded face of a declared thread answers in place, and the field IS how
@@ -2343,10 +2431,6 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-presence-circle.board-presence-agent {
   border-radius: 9px;
 }
-.board-presence-circle.board-presence-more {
-  background: var(--bg-panel);
-  color: var(--fg-muted);
-}
 /* Present but wedged: the process is up and on the wire, and the model has
    made no call for half an hour. Worth a ring — it is the fault a reader most
    wants to catch — and NOT worth a fade, because the session is there. */
@@ -2362,6 +2446,398 @@ body.composer-open #editor > .ProseMirror ::selection {
 .board-following {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+/* The deck and its list (design F, Bryan 2026-11-15; `presence-deck.tsx`).
+   Closed, the strip is one button: the circles overlap, full size for
+   whoever is on the reader's page and 20px for the rest of the workspace.
+   Open, a list drops below it in two groups and each circle slides to its
+   row; the deck's own circles fade out while it is open. */
+.board-presence-f {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+/* The card and the bar sit beside the deck's wrapper (`presence-deck.tsx`);
+   both are fixed, so their holder takes no room in the strip. */
+.board-presence-floats {
+  display: contents;
+}
+.board-presence-deck {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 99px;
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* Circles overlap by 6px, and a small one by 2px, so every circle's
+   initials stay in sight: the wider overlap this replaced hid all but an 8px
+   sliver of each small circle, and with it the letters (Bryan, 2026-11-15:
+   "no user or agent name indicators"). */
+.board-presence-deck > * {
+  margin-left: -6px;
+  transition: opacity 0.2s ease;
+  cursor: inherit;
+}
+.board-presence-deck > :first-child {
+  margin-left: 0;
+}
+.board-presence-deck > .board-presence-circle:not(.board-following) {
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.board-presence-deck > .board-presence-circle.board-presence-away {
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+}
+.board-presence-deck > .board-presence-away {
+  margin-left: -2px;
+}
+/* 9px on a 20px square reads as a circle, so a small agent loses the
+   corners that tell it from a person. */
+.board-presence-deck > .board-presence-circle.board-presence-agent.board-presence-away {
+  border-radius: 5px;
+}
+.board-presence-deck > .board-presence-away:first-child {
+  margin-left: 0;
+}
+/* The first names of whoever leads the deck, to its left on a wide screen.
+   Out of the deck's own box, so the circles sit where they sit on a doc
+   (which has no room for the names, doc.css) and nothing moves as the names
+   change; still inside the button, so a tap on them opens the list. */
+.board-presence-deck > .board-presence-names {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  max-width: 160px;
+  margin: 0;
+  padding-right: 4px;
+  overflow: hidden;
+  transform: translateY(-50%);
+  color: var(--fg-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+/* The last mark when not everybody fits: how many more the list names. The
+   size of a small circle, in the quiet colour, so it reads as a count and
+   not as a person. */
+.board-presence-deck > .board-presence-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  margin-left: -2px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+.board-presence-deck > .board-presence-more-narrow {
+  display: none;
+}
+/* A phone's deck holds three marks (`deckFit`), so its slot can stay narrow
+   beside the page title; the list still names everyone, and the followed
+   person is drawn first, so never the one dropped. */
+@media (max-width: 1100px) {
+  .board-presence-deck > .board-presence-drop-narrow,
+  .board-presence-deck > .board-presence-more-wide,
+  .board-presence-deck > .board-presence-names {
+    display: none;
+  }
+  .board-presence-deck > .board-presence-more-narrow {
+    display: inline-flex;
+  }
+}
+/* The followed circle sits over its neighbours, so its ring is never cut. */
+.board-presence-deck > .board-following {
+  position: relative;
+  z-index: 1;
+}
+.board-presence-f.is-open .board-presence-deck > *,
+.board-presence-f.is-closing .board-presence-deck > * {
+  opacity: 0;
+}
+/* The list's surface and words fade; its circles stay opaque so they can
+   slide from the deck. The surface is a ::before for that reason. */
+.board-presence-list {
+  position: fixed;
+  z-index: 1080;
+  isolation: isolate;
+  width: 296px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 6px;
+  color: var(--fg);
+  font: 13px / 1.3 var(--sans, system-ui);
+  text-align: left;
+}
+.board-presence-list::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-lg);
+}
+.board-presence-group {
+  display: block;
+  padding: 8px 8px 4px;
+  color: var(--fg-muted);
+  font: 600 11px / 1.2 var(--sans, system-ui);
+}
+.board-presence-group:first-child {
+  padding-top: 4px;
+}
+.board-presence-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-presence-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.board-presence-who:hover {
+  background: var(--bg-hover);
+}
+.board-presence-row .board-presence-circle {
+  width: 24px;
+  height: 24px;
+  font-size: 9.5px;
+}
+.board-presence-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.board-presence-row-text b {
+  font-weight: 650;
+}
+.board-presence-row-text small {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-presence-follow {
+  flex: none;
+  min-width: 64px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.board-presence-follow:hover {
+  background: var(--bg-hover);
+}
+.board-presence-only {
+  padding: 6px 8px 8px;
+  color: var(--fg-muted);
+}
+.board-presence-f.is-open .board-presence-list::before,
+.board-presence-f.is-open .board-presence-group,
+.board-presence-f.is-open .board-presence-row-text,
+.board-presence-f.is-open .board-presence-follow,
+.board-presence-f.is-open .board-presence-only {
+  animation: board-presence-in 0.32s ease both;
+}
+.board-presence-f.is-closing .board-presence-list::before,
+.board-presence-f.is-closing .board-presence-group,
+.board-presence-f.is-closing .board-presence-row-text,
+.board-presence-f.is-closing .board-presence-follow,
+.board-presence-f.is-closing .board-presence-only {
+  animation: board-presence-out 0.28s ease both;
+}
+@keyframes board-presence-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes board-presence-out {
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-presence-list *,
+  .board-presence-list::before {
+    animation: none !important;
+  }
+}
+/* At 1100px and below the list spans the window, 8px in from each side
+   (`placeList` sets left and right). */
+@media (max-width: 1100px) {
+  .board-presence-list {
+    width: auto;
+    max-width: none;
+  }
+}
+/* The card a tap on a row opens (`presence-card.tsx`): who, where, and the
+   two things the reader can do. Hung under the deck on a wide screen; a
+   bottom sheet at 1100px and below, clear of the bottom bar. */
+.board-presence-card {
+  position: fixed;
+  z-index: 1100;
+  width: 268px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--bg-panel, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  font: 14px / 1.4 var(--sans, system-ui);
+  text-align: left;
+}
+.board-presence-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.board-presence-card-head > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+.board-presence-card-name {
+  font-weight: 650;
+}
+.board-presence-card-kind {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.board-presence-card-where {
+  margin: 8px 0 12px;
+}
+.board-presence-card-tag {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.board-presence-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.board-presence-act {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.board-presence-act:hover {
+  background: var(--bg-hover);
+}
+.board-presence-act-primary,
+.board-presence-act-primary:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.board-presence-card-hint {
+  margin: 10px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+/* Following: a steady bar over the page, so starting or stopping a follow
+   moves nothing on it. Above the toast on a wide screen; under the header on
+   a phone, where the bottom belongs to the nav bar. */
+.board-follow-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 6px 6px 6px 10px;
+  background: var(--bg-panel, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 22px;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  font: 14px / 1.3 var(--sans, system-ui);
+  text-align: left;
+}
+.board-follow-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.board-follow-text b {
+  font-weight: 650;
+}
+.board-follow-text small {
+  color: var(--fg-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.board-follow-bar .board-presence-circle {
+  width: 24px;
+  height: 24px;
+  font-size: 9.5px;
+}
+.board-presence-card .board-presence-circle,
+.board-follow-bar .board-presence-circle {
+  cursor: default;
+}
+.board-follow-bar .board-presence-act {
+  min-height: 32px;
+  border-radius: 99px;
+}
+@media (max-width: 1100px) {
+  .board-presence-card {
+    left: 8px;
+    right: 8px;
+    bottom: calc(132px + var(--safe-bottom));
+    width: auto;
+  }
+  .board-follow-bar {
+    top: calc(56px + var(--safe-top, 0px));
+    bottom: auto;
+  }
 }
 /* ================= TOAST ================= */
 

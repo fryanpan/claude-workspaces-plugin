@@ -149,6 +149,15 @@ after an outage — the next four minutes are silence either way.
 first-bind grace has to cover — the two client builds finish *before* the
 child is spawned, so they are outside it.
 
+Two more fields bound the gap a restart opens for the people on the board,
+which is not the 75s budget either. The stopping process writes `shutdownAt`
+onto its own record as the first step of its SIGTERM handler; the next one
+writes `firstClientSocketAt` when its first `/y/` doc or board socket opens
+(audio, voice, app and Recall sockets do not count, and agents watch over
+SSE, so they never open one). `bun run starts:report --last N` prints each
+start's shutdown → listening and shutdown → first reconnect, with the median
+and the longest. A start after a crash has no gap: nothing wrote a shutdown.
+
 Over the **171 boots that served**, out of 174 in prod's record from
 2026-09-11 to 2026-09-17:
 

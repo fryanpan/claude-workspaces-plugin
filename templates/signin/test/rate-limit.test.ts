@@ -152,7 +152,10 @@ describe('per-IP limit: 20 per minute from CF-Connecting-IP', () => {
       password: PASSWORD,
     });
     expect(again.status).not.toBe(429);
-  });
+    // 23 sign-ins, each hashing a password: about 1s here, and past vitest's
+    // 5s default on a loaded CI shard (five timeouts on 14 Nov). A timed-out
+    // case keeps running and its clock advances break the next case.
+  }, 30_000);
 
   it('keeps the count in the database, so a second app instance sees it', async () => {
     h.clock.advance(15 * MINUTE);

@@ -52,11 +52,11 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · socket-write-gate · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · doc-history/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · direct-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · supervisor-stop.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · spend-alarm.ts · page-loads.ts"]
   end
@@ -83,8 +83,8 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. | No business logic the server does not also enforce. |
-| `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract. Every tool, and the plumbing that attaches, heartbeats, acks a queued row, restores watches and declares a lead, sends through it, so a renamed server field fails typecheck there. Two things stay raw on purpose: `http-client.ts` and `server-client.ts` themselves, because they are the transport `hc` sends through, and `read_doc_outline`'s GET, which waits on its route-table row (its read mints block ids). Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
 **A traced request is named by its route, and the table of routes is
@@ -132,13 +132,104 @@ action is an edit, refused for those roles, unless the app marks it
 read-only, when it runs on a copy of the doc. The
 server's `DocStateStore` fits its storage interface as it is, and
 `server/src/private-messages.ts` is the file-backed store behind its
-private-message interface. Workspaces does not run its rooms on it yet; that
-is step 5 of the D1 plan, so no board's behaviour changes. The proof that it
+private-message interface. A room host can instead be handed the app's own
+live docs (`docs` in place of `storage`), which it syncs in place and never
+saves or destroys, for an app that already holds and persists its docs. The
+proof that it
 runs without Workspaces is `server/test/collab-test-app.test.ts`, a Bun app
 that imports only the core. `server/src/collab-rooms.ts` is the registry of
 room hosts the server runs; every revoke calls its `recheck` beside the
 sweep that closes the server's own sockets, so a core connection loses a
 revoked role on the same call.
+
+**A new app starts from the app kit.** `bun run new-app <dir>`
+(`scripts/new-app.ts`) copies `templates/app-kit` into `<dir>` and names it
+after the folder: a Bun server with Hono routes, a doc socket the core's
+room host syncs, a sign-in slot, and pages drawn in the board's Web Awesome
+theme. The core and the theme reach the app as one versioned package,
+`packages/app-kit` (`@claude-workspaces/app-kit`, exporting `./collab` and
+`./theme.css`). In this repo its two files re-export `core/src/collab/` and
+`@import` `workspaces-app/src/wa-theme.css`; `packages/app-kit/scripts/pack.ts`
+packs a tarball whose copies of those files are the real ones, and the
+generator puts that tarball in the app's `vendor/` and names it as a
+`file:` dependency, so the made app holds no copy of their source and
+depends on nothing here. A tarball rather than GitHub Packages (which needs
+a token even to install) or a git dependency (which cannot name one
+package inside this monorepo). Sign-in is a typed slot
+(`SignIn.principal(request)`) filled by password sign-in on Better Auth over
+bun:sqlite (`templates/app-kit/src/password-sign-in.ts`). Its rules are
+`passwordAuthOptions` (`packages/app-kit/src/auth/password.ts`, exported as
+`@claude-workspaces/app-kit/auth`), which `templates/signin`, the Cloudflare
+Worker on D1, spreads into its own Better Auth config too, so hashing,
+verification and session rules have one source. `server/test/app-kit.test.ts` makes,
+builds and runs an app outside the repo and syncs a doc between two of its
+pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
+
+**A Cloudflare Worker app hosts the same core in its own Durable Objects**
+(kit 0.3.0). `packages/app-kit/src/do/` wraps the room host for the
+hibernation API: each socket's grant rides in its attachment, so a woken
+instance re-attaches every socket with its role, and the doc saves to the
+object's SQLite inside the message that changed it. `src/markdown-file/`
+holds a doc whose record is a file the app loads and saves itself, with the
+save debounce on the object's alarm so an eviction cannot drop it.
+`src/agent/` names an agent session as a principal (`agent:<sessionId>`) and
+gives the app's tool dispatch two edits, `editDoc` and `setTile`.
+`src/client/` is the page side (moved out of the template, which re-exports
+it), and `scripts/build-client.ts` prebuilds it as `cw-collab.js` for a page
+with no bundler. `src/text/` holds `splice`, which the page, the file merge
+and the agent's edit share; it imports nothing, so the server half pulls in
+no DOM code. Since 0.3.1 the tarball ships compiled `.js` and `.d.ts`
+(`scripts/compile-lib.ts`), so an outside app needs no
+`allowImportingTsExtensions`, and Web Awesome is an optional peer that only
+`./theme.css` needs. The tests in `packages/app-kit/test/` run real Workers in a
+local workerd through Miniflare, hibernation included; `outside-app.test.ts`
+installs the tarball beside a Worker app with a plain tsconfig and checks its
+typecheck and server bundle.
+
+**Workspaces runs a board on the core when two switches say so** (D1 step
+5). `server/src/collab-core-switch.ts` holds the per-board setting
+(`collab-core-boards.json`, set by `POST /workspaces/<id>/collab-core`, every
+board off) and the server-wide one (`collab-core-server.json`, set by the
+same route, off until set; `CW_COLLAB_CORE` fixes it when the environment
+sets it); a board takes the core only when both are on, so turning the
+server-wide one off returns every board to the current code for every socket
+opened afterwards. The owner moves a board with one tap on the settings
+page's Collab core row (`workspaces-app/src/board/collab-core-row.ts`), which
+sends both settings in one request.
+The board and doc socket upgrades read it at connect and stamp the socket
+`core`. `server/src/collab-core-path.ts` is one core room host over the doc
+store's live docs: for a `core` socket it sends sync step 1 and answers the
+sync frames, after `yjs-protocol.ts` has run the dead-state check and the
+write gate; presence, the access frame and the probe stay in
+`yjs-protocol.ts`, and the socket is still in its doc's `conns`, so the
+share sweeps and eviction holds see it. Both paths sync the same Y.Doc the
+doc store persists to the same `.ydoc`, so switching loses nothing.
+`server/test/collab-core-board.test.ts` drives both paths side by side.
+
+**A board on the core draws its presence strip from Web Awesome** (D1 step
+10). The board record (`GET /workspaces/<id>?format=json`) carries
+`collabCore.active`, and the switch sends the board's open pages a page-only
+`collab-core.changed` frame, so `workspaces-app/src/board/presence-core-switch.ts`
+swaps the strip on an open page and re-reads the record after a stream gap.
+`presence-island-wa.tsx` is an `import()` chunk: `<wa-avatar>` faces inside
+the strip's own buttons (`presence-island.tsx` takes the face as an option,
+so press, follow and clamp are shared), and it links the Web Awesome theme
+file `workspaces-app/src/wa-theme.css`, built to `/app/wa-theme.css` by
+`scripts/build-wa-theme.ts`. A board on the current code fetches neither.
+
+**A board on the core keeps history** (D1 step 12). `server/src/doc-history/`
+records every saved change to a doc of a board on the core, with who made it:
+the identity a socket's upgrade proved, or the identity the request being
+answered proved (`event-origin.ts` carries it below the route), never a name
+a page sends. `log.ts` is one append-only file per doc,
+`_history/<docId>.yhist`, beside the `.ydoc` and never instead of it, so the
+current code reads nothing new and switching a board off loses nothing.
+`replay.ts` reads a doc as it was after any record and names who changed
+each part since; `restore.ts` puts a past version back as one forward edit,
+which `recorder.ts` records as a change of its own. `recorder.ts` attaches to
+every doc the store wires (`DocStore`'s `onDocWired`) and records nothing
+for a board on the current code. No route serves it yet; `ServerHandle`'s
+`docHistory` is the server function.
 
 Presence and follow sit in the same folder. `presence.ts` is the server
 half: one entry per tab, a person shown once at their most recently active
@@ -364,9 +455,10 @@ guard would say otherwise. What the table still cannot see is whether an
 `owner-in-handler` route really carries its refusal — that one is the
 reviewer's, and the routes that have it carry their own tests.
 
-Dispatch stays with the ordered chain on purpose, and the chain is
-`routes/request-chain.ts` with its two lower thirds, `request-chain-board.ts`
-and `request-chain-tail.ts` (shared shapes in `request-chain-context.ts`).
+Dispatch is one ordered Hono router on purpose: `routes/hono-app.ts`
+(shared shapes in `hono-app-context.ts`). Since M12 it holds no route family
+itself, only the order in which the gates, the three Hono apps and the
+upgrade-and-stream run are tried, each as a middleware on `*`.
 `createServer` builds its context once and matches no route itself. Bun
 matches by specificity; this router's order is behaviour in eight documented
 places, among them the Recall status webhook immediately above the
@@ -375,14 +467,123 @@ resource catch-all. So every mounted entry's handler is the same front door an
 unmatched address reaches through `fetch`, and the table is the registry
 rather than the router.
 
-**Hono, below the gates (M12).** Route families are moving onto Hono one
-family per PR. The gates — the preflight, the cross-origin write gates, the
-home feed and GitHub hub, admission, the local-only gate, attribution and the
-two sign-in gates — are `routes/request-chain-gates.ts`, and they run once per
-request, above both routers. Below them the chain tries the Hono app
-(`routes/hono-front.ts`) first, handing it what the gates proved as `c.env`;
-an address no Hono family claims falls through to the rest of the chain
-unchanged, and a websocket upgrade never enters Hono. The shared types are the
+**Hono, below the gates (M12).** Every route family now answers through one
+of three Hono apps (`routes/hono-front.ts` builds each), each called from the
+router's middleware at the position its families held in the old
+hand-ordered chain, so the order is unchanged. The gates — the preflight, the
+cross-origin write gates, admission, the local-only gate, attribution and the
+two sign-in gates — are the router's first middleware
+(`routes/hono-gates.ts`), and they run once per request. The front door
+around the router — the bad-path refusal, the Sentry span, conditional GETs,
+compression, the session refresh, CORS and the slow log — stays a plain
+function in `hono-app.ts`: those rewrite the finished `Response`, and Hono's
+`c.res` setter copies the old response's headers onto the new one, which would
+put a stale `content-length` on a compressed body.
+
+- **The open app** (`routes/hono-open-families.ts`) is tried inside the gates,
+  above admission: the home feed, the board import and the GitHub hub, whose
+  callers name nobody and which check their own caller. Its env is empty.
+- **The front app** (`routes/hono-families.ts`) is tried below the gates with
+  what they proved as `c.env`: sign-in and share (`auth-share.ts`), ops,
+  mounts, prompts, the cross-board review queue, voice (page and API), access,
+  Incoming Messages, the keeper holds, the coach, the voice agent's LLM call,
+  Recall's status webhook, the hosted MCP connector, agent identity, board
+  tokens, board-socket roots, the repo registry, the load reports, the
+  workspaces list's stream and private messages. It is tried above the
+  upgrade block, so Recall's webhook still precedes the `/recall/` upgrade,
+  and a websocket upgrade never enters it.
+- **The upgrade-and-stream run** (`routes/upgrade-stream.ts`) is a router
+  middleware. When it upgrades a socket, the middleware returns an empty
+  `Response`, the router marks the request, and the front door hands Bun
+  `undefined` as `fetch` did before. `test/hono-upgrade-probe.test.ts` reads
+  the raw bytes on the connection and proves Bun writes exactly one status
+  line, the 101, whether the upgrade happens at once or after an await, and
+  whatever the handler returns afterwards. The
+  three SSE openers in that run share its per-request socket judgements, so
+  they stay with it.
+- **The board app** is tried below that run. Its first middleware is the
+  workspace scope, which puts the resolved scope in `c.var` or answers with
+  its refusal; then the board families (`routes/hono-board-families.ts`) in
+  the old board run's order — docs, apps, the board's own routes, tasks,
+  goals, the promote, dispatches and notes, chat-audit, the Library, the doc
+  move, agent attachments, archive, the board delete, a review's files,
+  meetings, and the doc resource catch-all, which the meetings still precede;
+  then the tail (`routes/hono-tail-families.ts`) in its order — the git-push
+  feature, shell and static serving, the task address, board links, the
+  stale-client 410, the wrong-prefix hint and the board's not-found page. An
+  address none of them claims gets the chain's bare 404.
+
+**Converting a family so the MCP calls it typed.** There are two ways, and
+a family takes the second unless its handler is small.
+
+- **A serving app.** The mounts family (PR 1661) moved its handler bodies
+  into a chained Hono app, `routes/mounts-api.ts`, behind the family's
+  existing `claimWith` line and `offBox` gate. Its `notFound` answers the
+  old 405, and `mounts.ts` refuses HEAD before the app, because Hono would
+  answer HEAD with the GET handler. This is right for a family of a few
+  hundred lines.
+- **A contract.** A family whose handler is long keeps serving as it does,
+  and a contract declares the routes the MCP calls
+  (`routes/route-contract.ts`; the doc threads' is
+  `routes/doc-threads-contract.ts`, the doc edits' `doc-edits-contract.ts`,
+  a doc's lifecycle `doc-lifecycle-contract.ts`, attachment sets'
+  `attachments-contract.ts`, sharing `share-contract.ts`, an agent's
+  status notes `agent-notes-contract.ts`, one task's status and fields
+  `task-state-contract.ts`, filing tasks and their done-when lists and links
+  `task-content-contract.ts`, the queue, the task list and the goal bands
+  `task-board-contract.ts`, a ticket's review items
+  `review-items-contract.ts`).
+  The steps:
+  1. In `routes/<family>-contract.ts`, export one interface per body and a
+     chained `new Hono()` declaring each route with `json<Body>()` or
+     `query<Q>()` and the handler `contractOnly`, which never runs. Use the
+     path the route-answers fixture uses, parameter names included.
+  2. In each handler branch, read the body as
+     `sent<Body>(await safeJson(req))`. A field the branch reads that the
+     interface does not declare is now a type error, so the interface has
+     to match what the server reads.
+  3. Where an MCP tool reads a field of the answer, declare the answer type
+     and give that route `answers<Answer>()` instead of `contractOnly`. The
+     branch builds its JSON as `answerAs<Answer>({...})`, naming each field
+     the tool reads as a property rather than spreading it in, because a
+     spread escapes TypeScript's excess-property check (`JSON.stringify` drops
+     an `undefined` one, so the bytes do not change). Delete the tool's
+     `as {...}` cast so it reads the typed answer. A route whose answer no
+     tool reads stays untyped; the PR body lists them.
+  4. Add the contract to `CONTRACTS` in `test/route-contracts.test.ts`, with
+     the handlers that may answer it. A declared route whose row in
+     `fixtures/route-answers.json` is missing, or answered by another
+     handler, fails there. A route with no row is missing from
+     `ROUTE_TABLE` too (`block_edits` was): add its row in
+     `route-table-rows.ts` with the gate `route-table.test.ts` confirms, run
+     `bun run routes:table`, and regenerate the fixture, whose diff must be
+     that one new row. Then run `get-routes-change-nothing.test.ts`: a new
+     GET row is called there too, and a GET that writes fails it. `GET
+     …/docs/:docId/outline` does (`readOutline` mints missing block ids),
+     which is why it has no row yet. A row whose answer is the scope's 404
+     (`workspace-scope.ts`) names no family: its parameter is a stand-in the
+     seed never made. `route-answers.test.ts` seeds a board, task and doc
+     for every row, and a folder attachment for rows naming `:setId`; a
+     parameter it does not seed yet needs a real one there first, and a read
+     that only answers with a query needs its `READ_QUERY` entry.
+
+Either way, re-export the type from `server.ts` and `server/src/index.ts`,
+add a client to `mcp/src/server-client.ts` (`import type` only), and switch
+each tool's call site to `client.workspaces[':ws']….$post({ param, json })`,
+passing each parameter through `encodeURIComponent`, because `hc` does not
+encode them. Name each optional body field rather than spreading
+`...(x !== undefined ? { x } : {})`: the spread escapes the excess-property
+check, and the JSON body drops an `undefined` field anyway. Prove it with a vitest case that records each tool's method,
+path and body against the old spelling (the existing tool tests must pass
+unchanged), `@ts-expect-error` probes for an unknown field, a missing field,
+a missing route and a wrong method, at least one probe per family on a
+request field and one on an answer field, and three mutations: rename a
+body field and an answer field and see both the server handler and the MCP
+fail typecheck, and misspell a declared path and see
+`route-contracts.test.ts` fail. No existing row of `route-answers.json`
+may change. Report `build:mcp`'s bundle size before and after.
+
+The shared types are the
 top-level `hono-env.ts`, outside `routes/` only because `server-options.ts`
 names one of them. `test/route-answers.test.ts` drives one request per
 route-table row, plus a HEAD beside every GET, and holds every answer to
@@ -818,7 +1019,7 @@ board's origin with the reader's cookie. Nothing inside the page is rewritten,
 so the site builds its links under the prefix. The page's query reaches the dev
 server byte for byte minus the frame flag, and the host page hands its
 fragment to the frame. Every answer at an app's address carries
-`Cloudflare-CDN-Cache-Control: no-store`, stamped last in `request-chain.ts`,
+`Cloudflare-CDN-Cache-Control: no-store`, stamped last in `routes/hono-app.ts`,
 so the edge keeps no copy of an app's files, whatever the dev server said. What this does not carry
 behind a sign-in is in [security.md](security.md).
 
@@ -1295,6 +1496,19 @@ reaches the lead as a request. The server writes the speech watch
 (`core/src/page-speech.ts`, a new top-level core module) into every mock, app
 and doc-file frame, and `lead-chat/page-speech.ts` reads what the frames
 post; the reasons are in [app-voice](app-voice.md).
+
+**Messages (M10).** The board's Messages item opens that same chat, and the
+chat's heading is a channel picker (`lead-chat/lead-chat-channels.ts`, wired
+by `lead-chat-channel-wiring.ts`). `#general` is the board's lead chat as
+above. The reader's own lead agent (`/api/me/messages`) and each other person
+on the board are one-to-one channels, read by `lead-chat/dm-client.ts` over
+the reader's own person stream. Person-to-person messages are
+`server/src/direct-messages.ts` (a new top-level module: one log per pair
+under `direct-messages/`, the private-message store's format) behind
+`routes/direct-messages.ts` at `/workspaces/<ws>/me/dm`, which only a proven
+person on the board reaches; a send is framed `direct.message` to the two
+people's own streams and to no agent. The shapes are
+`core/src/direct-messages.ts` (a new top-level core module).
 
 **Tab titles.** Every page's browser tab starts with its workspace's name,
 then the page's own name (`Harborlight · tides.md · Workspaces`), so several
@@ -1824,6 +2038,15 @@ voice can hand every note its own tag back, and a group that has gained an
 untagged note the fold cannot account for is unfolded rather than guessed at. Like the tidy, it writes the
 document directly, and like the tidy it reads no transcript and composes
 nothing.
+
+`notes-recap-shape.ts` and `notes-recap-apply.ts` join the same family in
+the same after-the-write position, once, at a meeting's stop. The first is
+pure: it reads the section's markdown and the meeting's spoken sentences and
+returns the section with decisions and follow-ups first, each point once and
+under the heading of its subject, and no deeper than two levels. The second
+writes that into the doc directly, like the tidy, and only when every block
+in the section is still the note-taker's and none carries a comment or a
+suggestion. Neither composes anything or calls a model.
 
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a

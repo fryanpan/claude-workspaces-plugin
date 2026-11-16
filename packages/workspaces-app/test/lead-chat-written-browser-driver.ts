@@ -26,13 +26,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { type Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -43,6 +37,9 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { CHROME_LOG_ARGS, connectWatched, dumpRunning } from './chrome-stall.ts';
+import { FORGET_TAB } from './lead-chat-fresh-tab.ts';
+import { TAP_PROBE_INSTALL, TAP_PROBE_READ, tapPointDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -75,7 +72,7 @@ const step = (what: string): void => {
 };
 
 async function until<T>(
-  what: string,
+  what: string | (() => Promise<string>),
   read: () => Promise<T | null> | T | null,
   ms = 20_000,
 ): Promise<T> {
@@ -85,7 +82,7 @@ async function until<T>(
     if (v !== null && v !== undefined) return v;
     await sleep(25);
   }
-  throw new Error(`never happened: ${what}`);
+  throw new Error(`never happened: ${typeof what === 'function' ? await what() : what}`);
 }
 
 const BUTTON = `(() => {
@@ -107,6 +104,9 @@ const STATE = `(() => {
     listening: !!b && b.dataset.listening === 'true',
     barOut: shown(sr && sr.querySelector('.lc-bar')),
     paneOpen: shown(pane) && settled,
+    // What the chat says about itself, for a failure: a voice that stopped names why here.
+    said: [sr && sr.querySelector('.lc-bar'), sr && sr.querySelector('.lc-status')].map((el) => (el && el.textContent) || '').join(' | '),
+    visible: document.visibilityState,
   };
 })()`;
 
@@ -152,6 +152,7 @@ async function openBrowser(width: number, height: number): Promise<{ cdp: Cdp; p
         '--use-fake-device-for-media-stream',
         '--mute-audio',
         '--autoplay-policy=no-user-gesture-required',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-written-${width}-${process.pid}`,
@@ -159,7 +160,7 @@ async function openBrowser(width: number, height: number): Promise<{ cdp: Cdp; p
       browsers.push(started);
     },
   );
-  const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
+  const cdp = await connectWatched(b, `page at ${width}`, step);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -257,6 +258,7 @@ async function main(): Promise<void> {
         const loaded = cdp.once('Page.loadEventFired');
         await cdp.send('Page.navigate', { url: homeUrl });
         await loaded;
+        await cdp.evaluate(TAP_PROBE_INSTALL);
       };
       const state = async () =>
         (await cdp.evaluate(STATE)) as { listening: boolean; barOut: boolean; paneOpen: boolean };
@@ -265,20 +267,24 @@ async function main(): Promise<void> {
       /** Voice on from the agent button: the bar comes out, listening. */
       const voiceOn = async (): Promise<void> => {
         const before = opened.length;
-        await tap(cdp, await button());
-        await until('listening', async () => ((await state()).listening ? true : null));
+        await tapPointDelivered(cdp, await button(), step);
+        await until(
+          async () =>
+            `listening (saw ${JSON.stringify(await cdp.evaluate(STATE))}; page ${String(await cdp.evaluate(TAP_PROBE_READ))})`,
+          async () => ((await state()).listening ? true : null),
+        );
         await until('the listener opened', () => (opened.length > before ? true : null));
       };
       const openPanel = async (): Promise<void> => {
         const bar = await until('the bar', async () => (await cdp.evaluate(BAR)) as XY | null);
-        await tap(cdp, bar);
+        await tapPointDelivered(cdp, bar, step);
         await until('the panel open', async () => ((await state()).paneOpen ? true : null));
       };
 
       for (const way of ['open', 'closed', 'left'] as const) {
         step(`${way} at ${width}`);
         for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate('sessionStorage.clear()');
+          if (i === 1) await cdp.evaluate(FORGET_TAB);
           await load();
         }
         await voiceOn();
@@ -317,7 +323,7 @@ async function main(): Promise<void> {
             async () => ((await state()).barOut ? true : null),
             6000,
           ).catch(() => false);
-          if (!back) await tap(cdp, await button());
+          if (!back) await tapPointDelivered(cdp, await button(), step);
           await until('the bar', async () => ((await state()).barOut ? true : null));
           await openPanel();
         }
@@ -363,6 +369,9 @@ async function main(): Promise<void> {
     }
     const run: WrittenRun = { docPath, cases };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(step);
+    throw e;
   } finally {
     lead?.close();
     for (const b of browsers) await stopBrowser(b.proc, b.profile);

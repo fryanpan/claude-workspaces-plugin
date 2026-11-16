@@ -19,6 +19,7 @@ import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
+import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 import { waitFor } from './wait-for.ts';
@@ -110,9 +111,25 @@ describe('board roles over the real server', () => {
     expect(redeemed.status).toBe(302);
   };
 
+  /** The owner's own browser: Access proves the owner, the page says
+   *  same-origin. A widening from loopback alone is refused
+   *  (`owner-proof-widenings.test.ts`). */
+  const postOwner = async (path: string, body: unknown) =>
+    req(path, OWNER_HOST, {
+      method: 'POST',
+      headers: {
+        ...CF_RAY,
+        'x-forwarded-proto': 'https',
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+        origin: `https://${OWNER_HOST}`,
+        'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify(body),
+    });
   const setRole = (email: string, role: string) =>
-    postLocal(`/workspaces/${board}/members/${encodeURIComponent(email)}/role`, { role });
-  const setMode = (mode: string) => postLocal(`/workspaces/${board}/roles-mode`, { mode });
+    postOwner(`/workspaces/${board}/members/${encodeURIComponent(email)}/role`, { role });
+  const setMode = (mode: string) => postOwner(`/workspaces/${board}/roles-mode`, { mode });
 
   const open = async (headers: Record<string, string>, path = `docs/${docId}/y`) => {
     const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/workspaces/${board}/${path}`, {
@@ -167,6 +184,44 @@ describe('board roles over the real server', () => {
     });
   };
 
+  /**
+   * Sync `page` the way `core/ws-client.ts` does: send our step 1, answer
+   * every sync frame with `readSyncMessage` in arrival order, and send back
+   * whatever it writes — the step 2 answering the server's step 1 included.
+   */
+  const runSyncAsPage = async (c: Conn, page: Y.Doc) => {
+    const ask = encoding.createEncoder();
+    encoding.writeVarUint(ask, MSG_SYNC);
+    syncProtocol.writeSyncStep1(ask, page);
+    c.ws.send(encoding.toUint8Array(ask));
+    let read = 0;
+    let answered = false;
+    let synced = false;
+    await waitFor(
+      () => {
+        for (; read < c.frames.length; read++) {
+          const dec = decoding.createDecoder(c.frames[read] as Uint8Array);
+          if (decoding.readVarUint(dec) !== MSG_SYNC) continue;
+          const enc = encoding.createEncoder();
+          encoding.writeVarUint(enc, MSG_SYNC);
+          const type = syncProtocol.readSyncMessage(dec, enc, page, 'server');
+          if (encoding.length(enc) > 1) c.ws.send(encoding.toUint8Array(enc));
+          if (type === syncProtocol.messageYjsSyncStep1) answered = true;
+          if (type === syncProtocol.messageYjsSyncStep2) synced = true;
+        }
+        return answered && synced;
+      },
+      { describe: 'the page’s sync handshake' },
+    );
+    const probes = c.frames.filter((f) => kindOf(f) === MSG_PROBE).length;
+    const probe = encoding.createEncoder();
+    encoding.writeVarUint(probe, MSG_PROBE);
+    c.ws.send(encoding.toUint8Array(probe));
+    await waitFor(() => c.frames.filter((f) => kindOf(f) === MSG_PROBE).length > probes, {
+      describe: 'the probe echo',
+    });
+  };
+
   const live = () => {
     const doc = handle.docStore.get(docId);
     if (!doc) throw new Error('doc not live');
@@ -183,6 +238,7 @@ describe('board roles over the real server', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
     });
     base = `http://127.0.0.1:${handle.port}`;
@@ -205,6 +261,7 @@ describe('board roles over the real server', () => {
   afterAll(async () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
+    resetOwnerIdentities();
   });
 
   it('tells each socket its role at connect, and the API sets all four', async () => {
@@ -314,6 +371,51 @@ describe('board roles over the real server', () => {
       expect(live().getMap('threads').size).toBe(before + 1);
       owner.ws.close();
     } finally {
+      await setMode('report-only');
+    }
+  });
+
+  it('enforce: a page reconnecting to a doc with a resolved comment is not refused', async () => {
+    // Every would-refuse event prod logged before this fix. Resolving a
+    // comment overwrites its status, a delete under `threads`; Yjs re-sends
+    // the doc's whole delete set in the step 2 a page answers the server's
+    // step 1 with, so each reconnect read as a threads write.
+    const posted = await postLocal(`/workspaces/${board}/docs/${docId}/threads`, {
+      anchor: { kind: 'orphan' },
+      text: 'Riverbend wants this checked.',
+      author: { id: 'agent:harborlight', name: 'Harborlight', kind: 'agent' },
+    });
+    expect(posted.status, await posted.clone().text()).toBeLessThan(300);
+    const { thread } = (await posted.json()) as { thread: { id: string } };
+    const resolved = await postLocal(
+      `/workspaces/${board}/docs/${docId}/threads/${thread.id}/resolve`,
+      { author: { id: 'agent:harborlight', name: 'Harborlight', kind: 'agent' } },
+    );
+    expect(resolved.status, await resolved.clone().text()).toBe(200);
+    const viewer = 'saltmarsh-viewer@harborlight.example';
+    await join_(viewer);
+    expect((await setRole(viewer, 'view')).status).toBe(200);
+    expect(await (await setMode('enforce')).json()).toMatchObject({ rolesMode: 'enforce' });
+    const warn = spyOn(console, 'warn');
+    try {
+      for (const connect of [asOwner, () => asMember(viewer)]) {
+        // The page's doc, carried across the reconnect as a tab keeps it.
+        const page = new Y.Doc();
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const c = await connect();
+          await accessFrame(c);
+          await runSyncAsPage(c, page);
+          expect(c.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
+          c.ws.close();
+          await c.closed;
+        }
+        const t = (page.getMap('threads').get(thread.id) as Y.Map<unknown>).get('status');
+        expect(t).toBe('resolved');
+      }
+      const lines = warn.mock.calls.map((args) => String(args[0]));
+      expect(lines.filter((l) => l.includes('[roles]'))).toEqual([]);
+    } finally {
+      warn.mockRestore();
       await setMode('report-only');
     }
   });

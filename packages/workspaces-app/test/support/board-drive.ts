@@ -52,10 +52,22 @@ installFakeBeacon();
  * test overrides one of these by naming it again.
  */
 export function resetBoardServer(): void {
+  resetBoardServerWith({});
+}
+
+/**
+ * `resetBoardServer`, with `record` adding top-level fields to the board
+ * record, such as `collabCore`. A separate name because `resetBoardServer` is
+ * passed straight to `beforeEach`, which hands it the test context.
+ */
+export function resetBoardServerWith(record: Record<string, unknown>): void {
   server.reset();
   server.on('/api/auth/session', { authenticated: false, canWrite: true });
+  // Routes match by prefix and the last match wins, so the record is set here,
+  // first, or it would answer every `/workspaces/<id>/…` read below it.
   server.on(`/workspaces/${WS}`, {
     workspace: { id: WS, name: 'Kitchen rebuild', goals: [], createdAt: NOW },
+    ...record,
   });
   server.on(`/workspaces/${WS}/agents`, { agents: [] });
   server.on(`/workspaces/${WS}/review-items`, { items: [] });

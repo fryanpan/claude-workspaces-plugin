@@ -37,6 +37,61 @@
    Appending at the end is what starts that up again. */
 /* ================= MAIN LAYOUT ================= */
 
+/* Where the presence deck sits (design F, Bryan 2026-11-15): 104px in from
+   the window's right edge on a wide screen and 140px on a phone, the same as
+   on the board (board.css, PRESENCE STRIP). The toolbar's right edge is the
+   window's less 14px (12px on a phone). The host is a slot in the row, after
+   the format and preview buttons and before comments and More; on a phone Aa
+   moves after it. The slot widens by More's width and gap when More is
+   hidden, so its left edge never moves under the deck.
+   Empty, the slot takes no room (Bryan, 2026-11-15: "a weird gap in the
+   icons on the top right"). Somebody arriving is news, so the controls LEFT
+   of the slot move over once to make room; comments, More and the deck,
+   which is placed against the toolbar, hold their place. */
+#topbar .toolbar {
+  position: relative;
+}
+#doc-people {
+  order: 1;
+  flex: none;
+  width: 96px;
+}
+#doc-people:has(~ #doc-more[hidden]) {
+  width: 140px;
+}
+#toggle-threads,
+#doc-more {
+  order: 2;
+}
+#doc-people .board-presence-f {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 90px;
+}
+/* The doc's toolbar has no room for the names beside the deck (styles.css,
+   PRESENCE CIRCLES): they would push its circles under the buttons to its
+   left. Hovering or tapping the deck lists everyone by name. */
+#doc-people .board-presence-names {
+  display: none;
+}
+@media (max-width: 1100px) {
+  #toggle-format {
+    order: 2;
+  }
+  /* A phone's deck draws at most three circles (styles.css), so the slot
+     gives the rest back to the doc's title. */
+  #doc-people {
+    width: 72px;
+  }
+  #doc-people:has(~ #doc-more[hidden]) {
+    width: 116px;
+  }
+  #doc-people .board-presence-f {
+    right: 128px;
+  }
+}
+
 #main {
   position: relative;
   display: grid;
@@ -2612,6 +2667,19 @@ body:has(.doc-floats.is-floating > .plan-float:not([hidden])) {
 }
 .thread .voice-foot .voice-undo {
   margin-left: auto;
+}
+
+/* ================= THE CORNER BUTTONS (doc/doc-comment-buttons.ts) =================
+   The comment widget's round buttons in the bottom-right corner. Inside its
+   shadow root they stand at the top of the page (z 2147483647), which on a
+   doc put them over the phone's comment composer and its Send button, the
+   comment sheet and the full-screen thread. A stacking context on the host
+   keeps them above the doc and its comment pill (800) and below each of those
+   (950 and up), so an overlay covers them the way it covers the doc and
+   nothing moves or hides as it opens. */
+claude-feedback-widget {
+  position: relative;
+  z-index: 930;
 }
 
 /* ================= THE AGENT'S CURSOR (doc/agent-focus.ts) =================

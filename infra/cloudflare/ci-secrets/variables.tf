@@ -70,6 +70,13 @@ variable "share_link_config" {
   sensitive   = true
 }
 
+variable "owner_email" {
+  description = "The board owner's address for fly.yml, written to CW_SECRET_CW_BOARD_OWNER_EMAIL in the environment when set (machine:deploy reads it as the Keychain's cw-board-owner-email); null deletes an earlier apply's copy."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
 variable "fly_api_token" {
   description = "A Fly deploy token for fly.yml, written to FLY_API_TOKEN in the environment when set; null deletes an earlier apply's copy. Fly has no maintained provider, so Terraform cannot make it."
   type        = string

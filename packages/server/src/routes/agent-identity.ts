@@ -38,6 +38,13 @@ import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import type { PersonAgentLinks } from '../person-agent-link.ts';
 import type { TaskStore } from '../tasks.ts';
+import type {
+  ConfirmPersonAnswer,
+  ConfirmPersonBody,
+  WatchesAnswer,
+  WatchesBody,
+} from './person-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 /** The long-lived collaborators these two routes need. */
 export interface AgentIdentityRoutesContext {
@@ -210,7 +217,7 @@ export async function handleAgentIdentityRoutes(
       });
       if (!allowed.ok) return j(allowed.status, allowed.body);
     }
-    const body = await safeJson(req);
+    const body = sent<ConfirmPersonBody>(await safeJson(req));
     let personId: string | null = null;
     if (typeof body?.email === 'string') {
       personId = identities.byEmail(body.email)?.id ?? null;
@@ -222,7 +229,7 @@ export async function handleAgentIdentityRoutes(
     }
     const result = ctx.personAgentLinks.confirmPerson(agentId, personId);
     if (!result.ok) return j(400, { error: result.error });
-    return j(200, { ok: true, state: result.state });
+    return j(200, answerAs<ConfirmPersonAnswer>({ ok: true, state: result.state }));
   }
 
   // --- REST: durable agent watches ---
@@ -269,16 +276,19 @@ export async function handleAgentIdentityRoutes(
       // bundle built before it ignores it and behaves exactly as it did
       // — which matters here specifically because this is the restore
       // path every respawned child calls before it can do anything else.
-      return j(200, {
-        ...listed,
-        coverage: watchCoverageFor(
-          agentId,
-          listed.watches.map((w) => w.key),
-        ),
-      });
+      return j(
+        200,
+        answerAs<WatchesAnswer>({
+          ...listed,
+          coverage: watchCoverageFor(
+            agentId,
+            listed.watches.map((w) => w.key),
+          ),
+        }),
+      );
     }
     if (req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<WatchesBody>(await safeJson(req));
       const rawAdd = Array.isArray(body?.add) ? (body?.add as unknown[]) : [];
       const rawRemove = Array.isArray(body?.remove) ? (body?.remove as unknown[]) : [];
       const badKey = [...rawAdd, ...rawRemove].find((k) => !isValidWatchKey(k));

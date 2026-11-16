@@ -57,6 +57,8 @@ import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
 import { BOARD_LOCK_PATH, handleBoardLock } from './board-lock.ts';
 import { handleProfile } from './person-profile.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type * as Contract from './share-contract.ts';
 import { handleShareSwitch, provedOwner } from './share-switch.ts';
 
 /**
@@ -649,23 +651,26 @@ export async function handleAuthShareRoutes(
     // can disagree and the difference is the point: a redemption says somebody
     // came through this link, and a membership says they can still get in. Eject
     // someone and the redemption stays on the record while the membership goes.
-    return j(200, {
-      shares: shares ? shares.listForApi() : [],
-      // A live link carries the URL the mint returned; a revoked or expired
-      // one does not, because that door no longer opens.
-      links: shareLinks
-        .listForApi()
-        .map((l) =>
-          shareLinkBaseHost && l.state === 'live'
-            ? { ...l, url: shareLinkUrl(shareLinkBaseHost, l.linkId) }
-            : l,
-        ),
-      members: shareLinks.allMembers(),
-      // Who each board admits at all (`board-audience.ts`). A link only
-      // invites inside its board's audience.
-      audiences: shareLinks.allAudiences(),
-      sharing: sharingGate.status(),
-    });
+    return j(
+      200,
+      answerAs<Contract.ShareListAnswer>({
+        shares: shares ? shares.listForApi() : [],
+        // A live link carries the URL the mint returned; a revoked or expired
+        // one does not, because that door no longer opens.
+        links: shareLinks
+          .listForApi()
+          .map((l) =>
+            shareLinkBaseHost && l.state === 'live'
+              ? { ...l, url: shareLinkUrl(shareLinkBaseHost, l.linkId) }
+              : l,
+          ),
+        members: shareLinks.allMembers(),
+        // Who each board admits at all (`board-audience.ts`). A link only
+        // invites inside its board's audience.
+        audiences: shareLinks.allAudiences(),
+        sharing: sharingGate.status(),
+      }),
+    );
   }
   // The never-shareable lock: loopback-only, see routes/board-lock.ts. Not
   // keyed on sharing being configured — a lock taken before the first share
@@ -960,7 +965,7 @@ export async function handleAuthShareRoutes(
   if (ttlMatch && req.method === 'POST') {
     if (!shares) return j(404, { error: 'sharing not enabled' });
     const shareId = decodeURIComponent(ttlMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<Contract.ShareTtlBody>(await safeJson(req));
     if (body?.ttlSeconds === undefined && body?.ttl === undefined) {
       return j(400, { error: 'ttlSeconds required' });
     }
@@ -1003,7 +1008,7 @@ export async function handleAuthShareRoutes(
   // is no shim for the old one — Bryan waived compatibility shims for
   // prototype-phase surfaces (2026-08-18).
   if (pathname === '/api/share/workspace' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<Contract.ShareWorkspaceBody>(await safeJson(req));
     const workspaceId = (body?.workspaceId as string) ?? '';
     if (!workspaceId) return j(400, { error: 'workspaceId required' });
     // A `docId` in the body is an OLDER BUNDLE asking for a single-doc share.
@@ -1180,7 +1185,7 @@ export async function handleAuthShareRoutes(
   // The membership is now stamped on both, so both can be found and hung up,
   // and the reply says how many were.
   if (pathname === '/api/share/member/remove' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<Contract.RemoveMemberBody>(await safeJson(req));
     const workspaceId = (body?.workspaceId as string) ?? '';
     const email = (body?.email as string) ?? '';
     if (!workspaceId || typeof workspaceId !== 'string') {

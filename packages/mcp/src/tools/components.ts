@@ -4,7 +4,8 @@
  * addresses the call and signs the writes with the session's author.
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { boardPathOf } from '../board-path.ts';
+import { boardIdOf } from '../board-path.ts';
+import { docComponentsClient } from '../server-client.ts';
 
 export interface ComponentToolContext {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -20,46 +21,66 @@ export async function handleComponentTool(
   a: Record<string, unknown>,
   ctx: ComponentToolContext,
 ): Promise<CallToolResult | undefined> {
+  const api = () => docComponentsClient(ctx.http).workspaces[':ws'].docs[':docId'];
   const doc = () => {
     const docId = str(a.docId);
     if (docId === '') throw new Error(`${name} needs a docId`);
-    return `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}`;
+    return { ws: encodeURIComponent(boardIdOf(name, a)), docId: encodeURIComponent(docId) };
   };
   const state = () => {
     const id = str(a.componentId);
     if (id === '') throw new Error(`${name} needs a componentId: the tag's id prop`);
-    return `${doc()}/agent-components/${encodeURIComponent(id)}/state`;
+    return { ...doc(), id: encodeURIComponent(id) };
   };
+  const stateApi = () => api()['agent-components'][':id'].state;
   switch (name) {
     case 'list_components':
-      return ctx.ok(await ctx.http('GET', `${doc()}/agent-components`));
+      return ctx.ok(await (await api()['agent-components'].$get({ param: doc() })).json());
     case 'get_component_state': {
       const path = str(a.path);
-      const q = path ? `?path=${encodeURIComponent(path)}` : '';
-      return ctx.ok(await ctx.http('GET', `${state()}${q}`));
+      return ctx.ok(
+        await (await stateApi().$get({ param: state(), query: path ? { path } : {} })).json(),
+      );
     }
     case 'set_component_state':
       return ctx.ok(
-        await ctx.http('POST', state(), { ops: a.ops, author: ctx.suggestionAuthor() }),
+        await (
+          await stateApi().$post({
+            param: state(),
+            json: { ops: a.ops, author: ctx.suggestionAuthor() },
+          })
+        ).json(),
       );
     case 'place_component':
+      // An absent `name` or `headingId` is undefined here, and JSON drops
+      // an undefined key, so neither reaches the wire.
       return ctx.ok(
-        await ctx.http('POST', `${doc()}/agent-components/place`, {
-          importPath: a.importPath,
-          ...(a.name !== undefined ? { name: a.name } : {}),
-          props: a.props,
-          ...(a.headingId !== undefined ? { headingId: a.headingId } : {}),
-          author: ctx.suggestionAuthor(),
-        }),
+        await (
+          await api()['agent-components'].place.$post({
+            param: doc(),
+            json: {
+              importPath: a.importPath,
+              name: a.name,
+              props: a.props,
+              headingId: a.headingId,
+              author: ctx.suggestionAuthor(),
+            },
+          })
+        ).json(),
       );
     case 'request_component_grant':
       return ctx.ok(
-        await ctx.http('POST', `${doc()}/component-grants`, {
-          folder: a.folder,
-          taskId: a.taskId,
-          why: a.why,
-          author: ctx.suggestionAuthor(),
-        }),
+        await (
+          await api()['component-grants'].$post({
+            param: doc(),
+            json: {
+              folder: a.folder,
+              taskId: a.taskId,
+              why: a.why,
+              author: ctx.suggestionAuthor(),
+            },
+          })
+        ).json(),
       );
     default:
       return undefined;

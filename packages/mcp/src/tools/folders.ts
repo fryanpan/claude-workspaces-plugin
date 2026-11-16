@@ -4,7 +4,8 @@
  * only addresses the call.
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { boardPathOf } from '../board-path.ts';
+import { boardIdOf } from '../board-path.ts';
+import { libraryFoldersClient } from '../server-client.ts';
 
 export interface FolderToolContext {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -21,38 +22,50 @@ export async function handleFolderTool(
   a: Record<string, unknown>,
   ctx: FolderToolContext,
 ): Promise<CallToolResult | undefined> {
-  const folder = (verb: string) => {
+  const library = () => libraryFoldersClient(ctx.http).workspaces[':ws'].library;
+  const ws = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const folder = () => {
     const id = idOf(a.folderId);
     if (id === '') throw new Error(`${name} needs a folderId`);
-    return `${boardPathOf(name, a)}/library/folders/${encodeURIComponent(id)}/${verb}`;
+    return { param: { ...ws(), folderId: encodeURIComponent(id) } };
   };
+  const one = () => library().folders[':folderId'];
   switch (name) {
     case 'list_folders':
-      return ctx.ok(await ctx.http('GET', `${boardPathOf(name, a)}/library/folders`));
+      return ctx.ok(await (await library().folders.$get({ param: ws() })).json());
     case 'create_folder':
       return ctx.ok(
-        await ctx.http('POST', `${boardPathOf(name, a)}/library/folders`, {
-          name: a.name,
-          parentId: orNull(a.parentId),
-        }),
+        await (
+          await library().folders.$post({
+            param: ws(),
+            json: { name: a.name as string, parentId: orNull(a.parentId) },
+          })
+        ).json(),
       );
     case 'rename_folder':
-      return ctx.ok(await ctx.http('POST', folder('rename'), { name: a.name }));
+      return ctx.ok(
+        await (await one().rename.$post({ ...folder(), json: { name: a.name as string } })).json(),
+      );
     case 'move_folder':
-      return ctx.ok(await ctx.http('POST', folder('move'), { parentId: orNull(a.parentId) }));
+      return ctx.ok(
+        await (
+          await one().move.$post({ ...folder(), json: { parentId: orNull(a.parentId) } })
+        ).json(),
+      );
     case 'archive_folder':
-      return ctx.ok(await ctx.http('POST', folder('archive')));
+      return ctx.ok(await (await one().archive.$post(folder())).json());
     case 'unarchive_folder':
-      return ctx.ok(await ctx.http('POST', folder('unarchive')));
+      return ctx.ok(await (await one().unarchive.$post(folder())).json());
     case 'move_doc_to_folder': {
       const docId = idOf(a.docId);
       if (docId === '') return ctx.err('move_doc_to_folder needs a docId');
       return ctx.ok(
-        await ctx.http(
-          'PUT',
-          `${boardPathOf(name, a)}/library/docs/${encodeURIComponent(docId)}/folder`,
-          { folderId: orNull(a.folderId) },
-        ),
+        await (
+          await library().docs[':docId'].folder.$put({
+            param: { ...ws(), docId: encodeURIComponent(docId) },
+            json: { folderId: orNull(a.folderId) },
+          })
+        ).json(),
       );
     }
     default:

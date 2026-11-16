@@ -89,6 +89,19 @@ export function setPageWorkspace(next: PageWorkspace | null): void {
   apply();
 }
 
+/** The name of the board this page is filed on, as the router last set it
+ *  or a rename moved it; undefined before the router has named one. */
+export function pageWorkspaceName(): string | undefined {
+  return workspace?.name || undefined;
+}
+
+/** The page's own name as its tab shows it (a doc's title, or a file's name,
+ *  never its path), or undefined before the page has named itself. */
+export function pageOwnTitle(): string | undefined {
+  const own = parts.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+  return own.length > 0 ? own.join(' · ') : undefined;
+}
+
 /** The page's own name, after the workspace's: `tabTitle`'s parts. */
 export function setPageTitle(...next: Array<string | null | undefined>): void {
   parts = next;

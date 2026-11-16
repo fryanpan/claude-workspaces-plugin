@@ -36,6 +36,8 @@ variables {
     { id = "g-org", name = "Access: Organizations, Identity Providers, and Groups Read", scopes = ["com.cloudflare.api.account"] },
     { id = "g-tun", name = "Cloudflare Tunnel Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-wrk", name = "Workers Scripts Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-d1", name = "D1 Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-ts", name = "Turnstile Sites Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-zone", name = "Zone Read", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-dns", name = "DNS Write", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-ssl", name = "SSL and Certificates Read", scopes = ["com.cloudflare.api.account.zone"] },
@@ -56,7 +58,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
 
   assert {
     condition = jsonencode([for p in cloudflare_account_token.ci_deploy.policies : sort([for g in p.permission_groups : g.id])]) == jsonencode([
-      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk"]),
+      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk", "g-d1", "g-ts"]),
       sort(["g-zone", "g-dns", "g-ssl", "g-rts"]),
       ["g-r2"],
     ])
@@ -103,7 +105,7 @@ run "the_r2_key_is_derived_from_the_token" {
 
   assert {
     condition     = output.environment_secrets == tolist(["CLOUDFLARE_API_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"])
-    error_message = "no Fly token given, so no FLY_API_TOKEN is written"
+    error_message = "no Fly token or owner address given, so neither is written"
   }
 
   assert {
@@ -120,6 +122,7 @@ run "configs_and_the_fly_token_are_written_when_given" {
     access_config     = "{\"projects\":{}}"
     share_link_config = "name = \"share-link-gate\""
     fly_api_token     = "fixture-fly-riverbend"
+    owner_email       = "alice@harborlight.test"
   }
 
   assert {
@@ -135,6 +138,11 @@ run "configs_and_the_fly_token_are_written_when_given" {
   assert {
     condition     = github_actions_environment_secret.deploy["FLY_API_TOKEN"].value == "fixture-fly-riverbend"
     error_message = "the Fly token goes to the environment"
+  }
+
+  assert {
+    condition     = github_actions_environment_secret.deploy["CW_SECRET_CW_BOARD_OWNER_EMAIL"].value == "alice@harborlight.test"
+    error_message = "the owner's address goes to the environment under the name machine:deploy reads"
   }
 }
 

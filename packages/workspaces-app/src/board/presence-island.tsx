@@ -1,10 +1,10 @@
 /**
- * The presence strip as a Preact island — who is here (the top-right circle
- * cluster) and the drift notices in the settings panel, both of which the
+ * The presence strip as a Preact island — who is here (the top-right deck,
+ * `presence-deck.tsx`) and the drift notices in the settings panel, both of which the
  * vanilla `renderPresence` used to build by wiping its container and
  * rebuilding every node.
  *
- * This is the pane the migration was actually about. A presence circle is a
+ * This is the pane the migration was actually about. A presence row is a
  * live control with a 550ms long-press on it, and the strip repaints on every
  * awareness update, every SSE agent refresh and a 30s tick — so a repaint
  * routinely landed in the middle of a press. Rebuilding the node mid-press
@@ -28,38 +28,37 @@
  */
 import { signal } from '@preact/signals';
 import { type ComponentChildren, Fragment, render } from 'preact';
-import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect } from 'preact/hooks';
+import { soloColour } from '../presence/presence-colours.ts';
+import { type DriftNotice, type PresenceChip, initialsOf } from './board-presence-model.ts';
 import {
-  type DriftNotice,
-  type PresenceChip,
-  initialsOf,
-  presenceHue,
-} from './board-presence-model.ts';
+  PresenceDeck,
+  type PresenceFace,
+  type PresenceHandlers,
+  usePress,
+} from './presence-deck.tsx';
 
-export interface PresenceHandlers {
-  /** Tap a chip to jump to where they are. */
-  onTap: (chip: PresenceChip) => void;
-  /** Long-press to follow — your view navigates when theirs does. */
-  onLongPress: (chip: PresenceChip) => void;
-  /** Tap the "+N" overflow circle — hand back the people it stands for, so
-   *  the caller can name them (a title attribute alone is unreachable from a
-   *  touch screen). */
-  onOverflow?: (hidden: PresenceChip[]) => void;
-}
+export type { PresenceFace, PresenceHandlers } from './presence-deck.tsx';
+export { LONG_PRESS_MS } from './presence-deck.tsx';
 
-/** How long a press must be held before it follows rather than jumps.
- *  Exported so a driven test holds the press the board's own threshold asks
- *  for, rather than a number copied out of here that can drift from it. */
-export const LONG_PRESS_MS = 550;
+/** The colour a chip wears: the one its page gave it, or its own slot. */
+export const chipColour = (chip: Pick<PresenceChip, 'key' | 'color'>): string =>
+  chip.color ?? soloColour(chip.key);
 
-/** Compact mode caps the strip at this many circles; past it the last slot
- *  becomes a "+N" that names the rest. Chosen so the cluster's worst case
- *  (4 × 28px + gaps ≈ 124px) still leaves the workspace name room at 430px. */
-const MAX_CIRCLES = 4;
+/** Today's circle: a filled span with the initials in it. */
+export const CLASSIC_FACE: PresenceFace = {
+  base: 'board-presence-circle',
+  style: (chip) => ({ background: chipColour(chip) }),
+  circle: (chip) => <span class="board-presence-initials">{initialsOf(chip.label)}</span>,
+};
 
 export interface PresenceData {
   chips: PresenceChip[];
   followedKey: string | null;
+  /** The reader's page, as the strip's list heads its first group. */
+  page?: string;
+  /** The workspace's name, as the list heads its second group. */
+  app?: string;
 }
 
 /** Who is here. The one write target the vanilla loader has for the strip. */
@@ -75,85 +74,31 @@ export const presenceData = signal<PresenceData>({ chips: [], followedKey: null 
 export const driftData = signal<ReadonlyArray<DriftNotice | null | undefined>>([]);
 
 /**
- * One person or agent. A button with a press gesture on it, which is why it
- * is a component and not inline JSX: the press state has to live somewhere
- * that survives a re-render, and a ref inside the row does exactly that while
- * the row keeps its node.
+ * One person or agent in the long form: the name and the surface spelled
+ * out. A component rather than inline JSX because the press state has to live
+ * somewhere that survives a re-render.
  */
-function PresenceButton(props: {
+function PresenceChipButton(props: {
   chip: PresenceChip;
-  compact: boolean;
   followed: boolean;
   handlers: PresenceHandlers;
 }) {
-  const { chip, compact, followed, handlers } = props;
-  // A long-press follows; a tap jumps. The press has TWO endings —
-  // pointercancel is the common one on mobile — and both must disarm the
-  // timer or one scroll wedges the strip.
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longFired = useRef(false);
-  const disarm = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  // A press outliving its row would follow somebody who has left the strip.
-  // Only reachable on a real removal now that the row is keyed, but a timer
-  // with nothing left to act on is still a timer to clear.
-  useEffect(() => disarm, []);
-
-  const base = compact ? 'board-presence-circle' : 'board-presence-chip';
+  const { chip, followed, handlers } = props;
+  const press = usePress(
+    () => handlers.onTap(chip),
+    () => handlers.onLongPress(chip),
+  );
   return (
     <button
       type="button"
-      class={`${base} board-presence-${chip.kind}${chip.state ? ` board-presence-${chip.state}` : ''}${
+      class={`board-presence-chip board-presence-${chip.kind}${chip.state ? ` board-presence-${chip.state}` : ''}${
         followed ? ' board-following' : ''
       }`}
       title={followed ? `${chip.title} · following — long-press to stop` : chip.title}
-      // The circle drops the visible name, so it must be announced — the
-      // title alone is read weakly or not at all depending on the reader.
-      // The long-form chip shows the name, so it needs no second copy.
-      aria-label={compact ? chip.title : undefined}
-      style={compact ? { background: `hsl(${presenceHue(chip.label)}, 45%, 45%)` } : undefined}
-      onPointerDown={() => {
-        longFired.current = false;
-        disarm();
-        timer.current = setTimeout(() => {
-          longFired.current = true;
-          handlers.onLongPress(chip);
-        }, LONG_PRESS_MS);
-      }}
-      onPointerUp={disarm}
-      onPointerCancel={disarm}
-      onPointerLeave={disarm}
-      onClick={() => {
-        if (!longFired.current) handlers.onTap(chip);
-      }}
+      {...press}
     >
-      {compact ? (
-        <span class="board-presence-initials">{initialsOf(chip.label)}</span>
-      ) : (
-        <Fragment>
-          <span class="board-presence-name">{chip.label}</span>
-          <span class="board-presence-where">{chip.where}</span>
-        </Fragment>
-      )}
-    </button>
-  );
-}
-
-/** The "+N" circle. Its names have to reach a touch screen, where a title
- *  attribute never shows — hence the callback as well as the tooltip. */
-function OverflowCircle(props: { hidden: PresenceChip[]; handlers: PresenceHandlers }) {
-  const names = props.hidden.map((c) => c.label).join(', ');
-  return (
-    <button
-      type="button"
-      class="board-presence-circle board-presence-more"
-      title={names}
-      aria-label={`${props.hidden.length} more: ${names}`}
-      onClick={() => props.handlers.onOverflow?.(props.hidden)}
-    >
-      {`+${props.hidden.length}`}
+      <span class="board-presence-name">{chip.label}</span>
+      <span class="board-presence-where">{chip.where}</span>
     </button>
   );
 }
@@ -175,26 +120,33 @@ function PresenceStrip(props: {
   host: HTMLElement;
   handlers: PresenceHandlers;
   compact: boolean;
+  face: PresenceFace;
 }) {
-  const { chips, followedKey } = presenceData.value;
-  useHostVisibility(props.host, chips.length === 0);
-  // Clamp BEFORE the map, so the overflow circle replaces the fourth chip
-  // rather than following it — the cap is a footprint, not a count.
-  const overflowing = props.compact && chips.length > MAX_CIRCLES;
-  const visible = overflowing ? chips.slice(0, MAX_CIRCLES - 1) : chips;
-  const hidden = overflowing ? chips.slice(MAX_CIRCLES - 1) : [];
+  const { chips, followedKey, page, app } = presenceData.value;
+  // The reader is never drawn, so a strip of only the reader is empty.
+  useHostVisibility(props.host, !chips.some((c) => !c.self));
+  if (props.compact) {
+    return (
+      <PresenceDeck
+        chips={chips}
+        followedKey={followedKey}
+        page={page}
+        app={app}
+        handlers={props.handlers}
+        face={props.face}
+      />
+    );
+  }
   return (
     <Fragment>
-      {visible.map((chip) => (
-        <PresenceButton
+      {chips.map((chip) => (
+        <PresenceChipButton
           key={chip.key}
           chip={chip}
-          compact={props.compact}
           followed={followedKey === chip.key}
           handlers={props.handlers}
         />
       ))}
-      {hidden.length > 0 && <OverflowCircle hidden={hidden} handlers={props.handlers} />}
     </Fragment>
   );
 }
@@ -249,19 +201,23 @@ function mountInto(host: HTMLElement, name: string, tree: ComponentChildren): ()
 
 /**
  * Who is here, into a wrapper appended to `host`. `compact` is the top-right
- * cluster's circles (Bryan, 2026-08-18: "show smaller circle profile buttons
- * for each active user instead of the long form"); the long form is the
- * original chip with the name and the surface spelled out.
+ * deck that opens into the two-group list (design F, Bryan 2026-11-15); the
+ * long form is the original chip with the name and the surface spelled out.
  */
 export function mountPresenceIsland(
   host: HTMLElement,
   handlers: PresenceHandlers,
-  opts: { compact?: boolean } = {},
+  opts: { compact?: boolean; face?: PresenceFace } = {},
 ): () => void {
   return mountInto(
     host,
     'presence',
-    <PresenceStrip host={host} handlers={handlers} compact={opts.compact ?? false} />,
+    <PresenceStrip
+      host={host}
+      handlers={handlers}
+      compact={opts.compact ?? false}
+      face={opts.face ?? CLASSIC_FACE}
+    />,
   );
 }
 

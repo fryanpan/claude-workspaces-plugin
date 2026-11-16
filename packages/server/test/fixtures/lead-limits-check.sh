@@ -34,7 +34,7 @@ echo "lead_ssh_direct=$(lead timeout 20 ssh "${ssh_opts[@]}" git@github.com 2>&1
 echo "proxy_log=$(tr '\n' ' ' </tmp/proxy)"
 
 bun $D/lead-egress.ts apply >/dev/null 2>&1; echo "refresh=$?"
-echo "jumps=$(iptables -S OUTPUT | grep -c CW-LEAD-EGRESS) jumps6=$(ip6tables -S OUTPUT | grep -c CW-LEAD-EGRESS)"
+echo "tables=$(nft list tables | grep -c cw_lead_egress) skuid=$(nft list table inet cw_lead_egress | grep -c skuid) iptables=$(iptables -S OUTPUT | grep -c CW-LEAD-EGRESS)"
 
 # Memory: the lead raises its oom_score_adj floor only through root, and the
 # watchdog kills a lead process that grows past a 48 MiB cap.

@@ -1,5 +1,10 @@
 import { readLinkedItem } from '@claude-workspaces/core/linked-item';
-import { PROGRESS_KEY, readThreadProgress } from '@claude-workspaces/core/thread-progress';
+import {
+  PROGRESS_KEY,
+  createProgressClock,
+  progressMarkHtml,
+  readThreadProgress,
+} from '@claude-workspaces/core/thread-progress';
 import type { LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc, formatTime } from '@claude-workspaces/core/ui-shared';
 import type * as Y from 'yjs';
@@ -17,7 +22,9 @@ import type { FeedbackWidgetEl } from './widget.ts';
  * The owner asked for the mark after an agent's resolve took a comment off
  * his open page at once: "It's a little sudden, and then it feels like it's
  * getting lost." So the agent marks it, the comment stays, and he resolves.
- * Calm: a steady word and a steady pin, nothing that moves or pulses.
+ * Calm: a steady word on the card. The pin of a comment being worked on
+ * breathes, slowly — the one motion, chosen by the owner on the
+ * comment-states mock — and holds still under reduced motion.
  */
 
 const LABEL = { working: 'In progress', done: 'Done' } as const;
@@ -78,15 +85,33 @@ export function decorateProgress(pop: HTMLElement, t: Thread): void {
   }
 }
 
+/** Each widget's clock: when it saw each thread's mark change, so a Done
+ *  check draws on the transition and not on every rebuild of the pin. */
+const clocks = new WeakMap<FeedbackWidgetEl, ReturnType<typeof createProgressClock>>();
+
 /** Each pin wears its thread's mark. The budgeted bundle draws the pins and
- *  knows only open and resolved; this runs after it, on every render. */
+ *  knows only open and resolved; this runs after it, on every render, and
+ *  every render builds every pin afresh.
+ *
+ *  Working: three breathing dots. Done: a white check, drawn once on the
+ *  transition this page saw, as the comment-states mock does (it keeps the
+ *  pin, so "a check that drew itself once stays drawn"). A pin already Done
+ *  when the page first reads it shows the check drawn, with no motion; a
+ *  rebuild during the draw continues it rather than restarting it. */
 export function markPins(el: FeedbackWidgetEl, rows: ThreadRow[]): void {
+  let clock = clocks.get(el);
+  if (!clock) clocks.set(el, (clock = createProgressClock()));
+  const now = Date.now();
   for (const r of rows) {
     const p = r.thread.progress;
+    const sinceDone = clock(r.thread.id, p?.state ?? 'open', now);
     if (!p) continue;
     const pin = el.pinLayer?.querySelector<HTMLElement>(
       `.cfw-pin[data-thread-id="${CSS.escape(r.thread.id)}"]`,
     );
-    if (pin) pin.dataset.state = p.state;
+    if (!pin) continue;
+    pin.dataset.state = p.state;
+    if (pin.querySelector('.cw-pg')) continue;
+    pin.insertAdjacentHTML('beforeend', progressMarkHtml(p.state, sinceDone));
   }
 }

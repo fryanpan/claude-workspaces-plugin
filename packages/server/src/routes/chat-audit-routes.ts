@@ -19,6 +19,8 @@ import { isSharedAgentName, localDay } from '../chat-audit.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest, restIs } from '../middleware/workspace-scope.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import type { ChatAuditBody } from './dispatches-contract.ts';
+import { sent } from './route-contract.ts';
 
 /** The long-lived collaborators these routes need, built once per server. */
 export interface ChatAuditRoutesContext {
@@ -72,7 +74,7 @@ export async function handleChatAuditRoutes(
       return j(200, { day: localDay(Date.now()), rows: chatAudit.latestPerAgent() });
     }
     if (req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ChatAuditBody>(await safeJson(req));
       try {
         const res = chatAudit.publish({
           day: typeof body?.day === 'string' ? body.day : undefined,

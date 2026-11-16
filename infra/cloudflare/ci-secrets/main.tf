@@ -31,6 +31,9 @@ locals {
       "Access: Organizations, Identity Providers, and Groups Read",
       "Cloudflare Tunnel Write",
       "Workers Scripts Write",
+      # signin-test.yml: the app's D1 database and its Turnstile widget.
+      "D1 Write",
+      "Turnstile Sites Write",
     ]
     zone = [
       "Zone Read",
@@ -128,6 +131,9 @@ locals {
       R2_SECRET_ACCESS_KEY = local.r2_secret_access_key
     },
     nonsensitive(var.fly_api_token != null) ? { FLY_API_TOKEN = var.fly_api_token } : {},
+    # infra/project-machine/mac-ops.ts secretEnvName("cw-board-owner-email").
+    nonsensitive(var.owner_email != null) ? { CW_SECRET_CW_BOARD_OWNER_EMAIL = var.owner_email } : {},
+    # Apps' secrets (signin-test.yml's three) are `../app-secrets/`'s.
   )
 
   # Names only, so the set can key for_each; the values stay sensitive.

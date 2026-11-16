@@ -251,6 +251,13 @@ export type WsCtx = {
    * room sockets.
    */
   access?: SocketAccess;
+  /**
+   * The collab core serves this socket's sync frames (`collab-core-path.ts`),
+   * because its board was switched on when it connected
+   * (`collab-core-switch.ts`). Absent: the current code. Set on doc and board
+   * room sockets only, never a presence-only one.
+   */
+  core?: boolean;
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
@@ -482,6 +489,10 @@ export interface DocStoreConfig {
   /** How long a doc's body must go unedited before an author's edit session
    *  is written (`edit-sessions.ts`). Injectable for tests; 60s otherwise. */
   editSessionIdleMs?: number;
+  /** Called once for each live doc as its events are wired, after the
+   *  store's own listeners: where the doc history attaches
+   *  (`doc-history/recorder.ts`). */
+  onDocWired?: (doc: LiveDoc) => void;
 }
 
 /** How long a doc must go quiet before an authoring burst commits one
@@ -2246,6 +2257,7 @@ export class DocStore {
     this.docs.set(docId, doc);
     this.hydratedAt.set(docId, this.now());
     this.fanout.wireEvents(doc);
+    this.cfg.onDocWired?.(doc);
     // A person's keystroke hands the block back: the block-authorship model
     // only means anything if "still marked the agent's" also means "no person
     // has touched it since". Prose docs only — a flat doc has no addressable
@@ -3349,6 +3361,12 @@ export class DocStore {
     | { ok: false; error: 'not-found' | 'board-owned' | 'archive-collision' | 'move-failed' }
     | { ok: false; error: 'review-member'; setId: string } {
     return this.workspaces.archiveDoc(docId, opts);
+  }
+
+  /** Whether `docId` is parked in the archive: its id is taken until it is
+   *  put back, so nothing may create a fresh doc under it. */
+  isArchivedDoc(docId: string): boolean {
+    return this.state.has(docId, 'archive');
   }
 
   unarchiveDoc(

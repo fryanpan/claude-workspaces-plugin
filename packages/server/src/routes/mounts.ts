@@ -1,23 +1,18 @@
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import {
-  MEETING_RETENTIONS,
-  applyMeetingGitignore,
-  parseMeetingRetention,
-} from '../meeting-home.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
-import type { ProjectPrivacy } from '../mount-registry-file.ts';
-import { isMountableRelPath } from '../mount-scan.ts';
-import type { MountStore } from '../mount-store.ts';
 import { serveMountedFile } from './mount-file.ts';
 import { type MountRouteRequest, type MountRoutesContext } from './mount-routes-context.ts';
+import { type MountsApi, mountsApi } from './mounts-api.ts';
 
 export type { MountRoutesContext, MountRouteRequest };
 
 /**
  * Mounted project folders over HTTP: the lead's mount table, and the address
  * every file in it answers at.
+ *
+ * The table's routes are a typed Hono app in `mounts-api.ts`, which the MCP
+ * child calls through Hono's client; this entry point runs the gate below
+ * and hands the request to it.
  *
  * **Two families with two different gates**, and the split is the whole
  * security story of this feature.
@@ -67,39 +62,6 @@ function offBox(ctx: MountRoutesContext, rq: MountRouteRequest): Response | null
 }
 
 /**
- * Validate a caller-supplied host path.
- *
- * A string, absolute, and free of NUL. Whether it is inside a repo, and
- * whether it is a directory, are the store's answers rather than this one's:
- * both need the filesystem.
- */
-function readPath(body: Record<string, unknown> | null, field = 'path'): string | null {
-  const raw = body?.[field];
-  if (typeof raw !== 'string') return null;
-  const path = raw.trim();
-  if (path === '' || !path.startsWith('/') || path.includes('\u0000')) return null;
-  return path;
-}
-
-const PRIVACY_ERROR = "privacy must be 'workspace' or 'local-only'";
-
-/**
- * A caller-supplied privacy value: the value, `null` when the field is absent,
- * or `'bad'` when it is present and is neither of the two.
- *
- * Absent and wrong are kept apart so that `POST /api/mounts` can treat "no
- * opinion" as today's behaviour while still refusing a typo. Guessing
- * `workspace` from an unrecognised string is the one wrong direction — the
- * only reason to write in this field at all is to restrict.
- */
-function readPrivacy(body: Record<string, unknown> | null): ProjectPrivacy | null | 'bad' {
-  const raw = body?.privacy;
-  if (raw === undefined) return null;
-  if (raw === 'workspace' || raw === 'local-only') return raw;
-  return 'bad';
-}
-
-/**
  * The mount routes. `undefined` means none matched and the chain continues.
  */
 export async function handleMountRoutes(
@@ -110,275 +72,22 @@ export async function handleMountRoutes(
   if (pathname === '/mounts' || pathname.startsWith('/mounts/')) return serveMountedFile(ctx, rq);
   if (pathname !== '/api/mounts' && !pathname.startsWith('/api/mounts/')) return undefined;
 
-  const { mounts, j, safeJson } = ctx;
-  const { req, url } = rq;
+  const { req } = rq;
   const refused = offBox(ctx, rq);
   if (refused) return refused;
+  // Hono answers a HEAD by running the GET handler; this table has always
+  // refused one, as it refuses every method it does not take.
+  if (req.method === 'HEAD') return ctx.j(405, { error: 'method not allowed' });
+  return apiFor(ctx).fetch(req);
+}
 
-  // --- The table, read whole ---
-  if (pathname === '/api/mounts' && req.method === 'GET') {
-    const path = url.searchParams.get('path');
-    const only = path ? mounts.locate(path)?.repoKey : undefined;
-    if (path && !only) return j(400, { error: 'not-a-repo', path });
-    const projects = mounts.registry.listProjects().filter((p) => !only || p.repoKey === only);
-    return j(200, {
-      projects: projects.map((p) => {
-        // One walk per project, not one per mount: the counts below are all
-        // slices of the same listing, and that listing is what says which
-        // files are there NOW — the table also holds every address the
-        // project has ever handed out, and those are not rows to report.
-        const listing = mounts.reconcile(p.repoKey);
-        return {
-          repoKey: p.repoKey,
-          root: mounts.rootFor(p.repoKey),
-          privacy: p.privacy,
-          conventionsPath: p.conventionsPath,
-          truncated: listing.truncated,
-          mounts: p.mounts.map((m) => ({
-            mountId: m.mountId,
-            relPath: m.relPath,
-            addedAt: m.addedAt,
-            removedAt: m.removedAt,
-            checkoutRoot: m.checkoutRoot,
-            // Both, because they answer different questions: `privacy` is
-            // what this mount was set to (absent when nobody set it), and
-            // `effectivePrivacy` is what it is actually served against once
-            // the project's answer is folded in.
-            privacy: m.privacy,
-            effectivePrivacy: mounts.mountPrivacyOf(p.repoKey, m.mountId),
-            fileCount:
-              m.removedAt === undefined
-                ? listing.files.filter((f) => f.mountId === m.mountId).length
-                : 0,
-          })),
-        };
-      }),
-    });
+/** The typed routes (`mounts-api.ts`), built once per server's context. */
+const apis = new WeakMap<MountRoutesContext, MountsApi>();
+function apiFor(ctx: MountRoutesContext): MountsApi {
+  let api = apis.get(ctx);
+  if (!api) {
+    api = mountsApi(ctx);
+    apis.set(ctx, api);
   }
-
-  // --- One mount's files, paged ---
-  if (pathname === '/api/mounts/files' && req.method === 'GET') {
-    const path = url.searchParams.get('path');
-    if (!path) return j(400, { error: 'path is required' });
-    const at = mounts.locate(path);
-    if (!at) return j(400, { error: 'not-a-repo', path });
-    const mountId = url.searchParams.get('mountId') ?? undefined;
-    const after = url.searchParams.get('after') ?? undefined;
-    const limitRaw = Number(url.searchParams.get('limit') ?? '200');
-    const limit = Number.isFinite(limitRaw) ? limitRaw : 200;
-    const opts: Parameters<MountStore['listFiles']>[1] = { limit };
-    if (mountId !== undefined) opts.mountId = mountId;
-    if (after !== undefined) opts.after = after;
-    const res = mounts.listFiles(at.repoKey, opts);
-    return j(200, { repoKey: at.repoKey, ...res });
-  }
-
-  // --- Mount a folder ---
-  if (pathname === '/api/mounts' && req.method === 'POST') {
-    const body = await safeJson(req);
-    const path = readPath(body);
-    if (!path) return j(400, { error: 'path must be an absolute filesystem path to a folder' });
-    // Read BEFORE the mount, so a bad value refuses the whole call rather
-    // than leaving a folder mounted at the project's setting while the caller
-    // was told it failed — a mount is exactly the moment a narrower answer is
-    // known, and half of it landing is the wrong half.
-    const wanted = readPrivacy(body);
-    if (wanted === 'bad') return j(400, { error: PRIVACY_ERROR });
-    const res = mounts.mount(path);
-    if (!res.ok) {
-      return j(400, {
-        error: res.error,
-        hint:
-          res.error === 'not-a-repo'
-            ? 'a mount is a folder inside a git checkout — the repo is what gives its files a durable address'
-            : res.error === 'refused-path'
-              ? 'dot-directories are never mounted: every file under one is refused at serve time, so the mount would hold nothing'
-              : 'that path is not a directory',
-      });
-    }
-    if (wanted !== null) {
-      mounts.setMountPrivacy(res.project.repoKey, res.mount.mountId, wanted);
-    }
-    const listing = mounts.reconcile(res.project.repoKey, true);
-    return j(200, {
-      ok: true,
-      mountId: res.mount.mountId,
-      repoKey: res.project.repoKey,
-      relPath: res.mount.relPath,
-      created: res.created,
-      privacy: mounts.privacyOf(res.project.repoKey),
-      mountPrivacy: mounts.mountPrivacyOf(res.project.repoKey, res.mount.mountId),
-      fileCount: listing.files.filter((f) => f.mountId === res.mount.mountId).length,
-      // A capped walk is said out loud: the count is a floor, not a total.
-      truncated: listing.truncated,
-    });
-  }
-
-  // --- Retire a mount ---
-  //
-  // Soft, and it is the only removal there is. Nothing under the folder is
-  // touched, no address is dropped, and re-mounting the same folder revives
-  // the same row: retention is the project's, and workspaces deletes nothing
-  // it did not create.
-  if (pathname === '/api/mounts' && req.method === 'DELETE') {
-    const body = await safeJson(req);
-    const path = readPath(body);
-    const mountId = typeof body?.mountId === 'string' ? body.mountId : null;
-    if (!path || !mountId) {
-      return j(400, { error: 'path (absolute) and mountId are both required' });
-    }
-    const at = mounts.locate(path);
-    if (!at) return j(400, { error: 'not-a-repo', path });
-    if (!mounts.unmount(at.repoKey, mountId)) {
-      return j(404, { error: 'no-such-mount', mountId });
-    }
-    return j(200, { ok: true, repoKey: at.repoKey, mountId, filesLeftOnDisk: true });
-  }
-
-  // --- Privacy: the whole project, or one of its mounts ---
-  //
-  // One route for both, because it is one decision asked at two scopes, and a
-  // second route would be a second place for the combining rule to be got
-  // wrong. Naming a `mountId` is what says which scope was meant.
-  if (pathname === '/api/mounts/privacy' && req.method === 'PUT') {
-    const body = await safeJson(req);
-    const path = readPath(body);
-    const privacy = readPrivacy(body);
-    const mountId = body?.mountId;
-    if (!path) return j(400, { error: 'path must be an absolute filesystem path' });
-    if (privacy === null || privacy === 'bad') return j(400, { error: PRIVACY_ERROR });
-    if (mountId !== undefined && typeof mountId !== 'string') {
-      return j(400, { error: 'mountId must be a string' });
-    }
-    const at = mounts.locate(path);
-    if (!at) return j(400, { error: 'not-a-repo', path });
-    if (typeof mountId === 'string') {
-      const mount = mounts.setMountPrivacy(at.repoKey, mountId, privacy);
-      if (!mount) return j(404, { error: 'no-such-mount', mountId });
-      return j(200, {
-        ok: true,
-        repoKey: at.repoKey,
-        mountId: mount.mountId,
-        privacy: mount.privacy,
-        // What it is actually served against — which is the project's answer
-        // when that one is narrower, and saying so is the difference between
-        // a caller believing it opened a folder and knowing it did not.
-        effectivePrivacy: mounts.mountPrivacyOf(at.repoKey, mount.mountId),
-      });
-    }
-    const project = mounts.setPrivacy(at.repoKey, privacy);
-    return j(200, { ok: true, repoKey: project.repoKey, privacy: project.privacy });
-  }
-
-  // --- The conventions index ---
-  if (pathname === '/api/mounts/conventions') {
-    if (req.method === 'GET') {
-      const path = rq.url.searchParams.get('path');
-      if (!path) return j(400, { error: 'path is required' });
-      const at = mounts.locate(path);
-      if (!at) return j(400, { error: 'not-a-repo', path });
-      const found = mounts.conventions(at.repoKey);
-      return j(200, { repoKey: at.repoKey, ...found });
-    }
-    if (req.method === 'PUT') {
-      const body = await safeJson(req);
-      const path = readPath(body);
-      const relPath = typeof body?.conventionsPath === 'string' ? body.conventionsPath.trim() : '';
-      if (!path) return j(400, { error: 'path must be an absolute filesystem path' });
-      // The same shape a mount takes: repo-relative, no escape, no dotdir.
-      // It is read back to the caller, so a `..` here would be an arbitrary
-      // file read wearing a settings write's clothes.
-      if (!isMountableRelPath(relPath) || relPath.endsWith('/')) {
-        return j(400, {
-          error:
-            'conventionsPath must be a repo-relative file path with no .. and no dot-directory',
-        });
-      }
-      const at = mounts.locate(path);
-      if (!at) return j(400, { error: 'not-a-repo', path });
-      const project = mounts.setConventionsPath(at.repoKey, relPath);
-      return j(200, {
-        ok: true,
-        repoKey: project.repoKey,
-        conventionsPath: project.conventionsPath,
-      });
-    }
-  }
-
-  // --- Where this project's meetings file, and what it keeps ---
-  //
-  // One PUT for all three, because they are one decision: a project saying
-  // "meetings go in docs/meetings, keep the words, keep them out of git" is
-  // answering a single question, and three routes would let a caller land
-  // half of it. `retention` and `gitignore` are optional only so a caller
-  // moving the folder need not restate a choice it already made.
-  if (pathname === '/api/mounts/meetings' && req.method === 'PUT') {
-    const body = await safeJson(req);
-    const path = readPath(body);
-    const relPath = typeof body?.meetingsPath === 'string' ? body.meetingsPath.trim() : '';
-    if (!path) return j(400, { error: 'path must be an absolute filesystem path' });
-    // The shape a mount takes, and for the same reason: this becomes a
-    // directory this server WRITES into, so a `..` here is an arbitrary
-    // write wearing a settings write's clothes.
-    if (!isMountableRelPath(relPath) || relPath.endsWith('/')) {
-      return j(400, {
-        error: 'meetingsPath must be a repo-relative folder with no .. and no dot-directory',
-      });
-    }
-    const at = mounts.locate(path);
-    if (!at) return j(400, { error: 'not-a-repo', path });
-    const current = mounts.meetingsOf(at.repoKey);
-    const retention =
-      body?.retention === undefined
-        ? (current?.retention ?? 'transcripts-and-audio')
-        : parseMeetingRetention(body.retention);
-    if (retention === null) {
-      return j(400, { error: `retention must be one of ${MEETING_RETENTIONS.join(', ')}` });
-    }
-    const gitignore =
-      body?.gitignore === undefined ? (current?.gitignore ?? false) : body.gitignore === true;
-    const folderAbs = join(at.checkoutRoot, relPath);
-    /**
-     * The folder is made and mounted BEFORE the choice is stored, and the
-     * order is the whole correctness of this route.
-     *
-     * The folder is created here rather than at the first meeting because
-     * mounting refuses a path that is not a directory, and a home with no
-     * address would have the Library listing meetings it cannot open. But a
-     * refused request must also leave the project exactly as it was: storing
-     * first meant a 400 still moved every future meeting to a folder that
-     * could not be written — a rejected settings call changing behaviour,
-     * which is worse than the failure it was reporting.
-     */
-    if (mounts.refuses(folderAbs)) {
-      return j(400, { error: 'meetings folder could not be mounted', mountError: 'refused-path' });
-    }
-    try {
-      mkdirSync(folderAbs, { recursive: true });
-    } catch (err) {
-      return j(400, { error: 'meetings folder could not be created', detail: String(err) });
-    }
-    const mounted = mounts.mount(folderAbs);
-    if (!mounted.ok)
-      return j(400, { error: 'meetings folder could not be mounted', mountError: mounted.error });
-    const project = mounts.setMeetings(at.repoKey, { relPath, retention, gitignore });
-    const gitignoreResult = applyMeetingGitignore(folderAbs, gitignore);
-    return j(200, {
-      ok: true,
-      repoKey: project.repoKey,
-      meetings: project.meetings,
-      mountId: mounted.mount.mountId,
-      gitignoreResult,
-    });
-  }
-
-  if (pathname === '/api/mounts/meetings' && req.method === 'GET') {
-    const path = url.searchParams.get('path');
-    if (!path) return j(400, { error: 'path is required' });
-    const at = mounts.locate(path);
-    if (!at) return j(400, { error: 'not-a-repo', path });
-    return j(200, { repoKey: at.repoKey, meetings: mounts.meetingsOf(at.repoKey) ?? null });
-  }
-
-  return j(405, { error: 'method not allowed' });
+  return api;
 }

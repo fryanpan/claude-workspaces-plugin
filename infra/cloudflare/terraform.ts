@@ -22,6 +22,10 @@ export const envDir = (env: TfEnv): string => join(TF_DIR, 'deploys', env);
 export const stateDir = (env: TfEnv): string => join(TF_DIR, 'state', env);
 /** CI's credentials: a root of its own, with local state (`ci-secrets.ts`). */
 export const CI_SECRETS_DIR = join(TF_DIR, 'ci-secrets');
+/** Apps' secrets in `cloudflare-prod`: GitHub alone, local state (`app-secrets.ts`). */
+export const APP_SECRETS_DIR = join(TF_DIR, 'app-secrets');
+/** Roots of single apps, each applied by its own workflow (`apps/<name>/`). */
+export const APP_DIRS = { 'signin-test': join(TF_DIR, 'apps', 'signin-test') } as const;
 
 export interface TfResult {
   status: number;
@@ -32,7 +36,11 @@ export interface TfResult {
 export function lockDownState(dir: string): void {
   if (!existsSync(dir)) return;
   chmodSync(dir, 0o700);
-  for (const f of readdirSync(dir)) chmodSync(join(dir, f), 0o600);
+  // A subdirectory (a TF_DATA_DIR set inside the work dir) keeps its search
+  // bit: at 0600 the next terraform call cannot open what init wrote there.
+  for (const f of readdirSync(dir, { withFileTypes: true })) {
+    chmodSync(join(dir, f.name), f.isDirectory() ? 0o700 : 0o600);
+  }
 }
 
 /**

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.22",
+    "@claude-workspaces/app-kit": "workspace:*",
     "better-auth": "1.7.22",
     "hono": "4.13.18"
   },

@@ -108,6 +108,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
     ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
   ]),
+  // A board pushed from the Mac onto a project machine: above the host guard,
+  // its own gate, and claimed only where CW_BOARD_IMPORT_DIR is set.
+  ...family('routes/board-import.ts', [
+    ['board-import', '/api/board-import/:ws', 'GET PUT'],
+    ['board-import', '/api/board-import/:ws/print', 'POST'],
+  ]),
   // GitHub events for a board that holds no GitHub token: the key and the
   // list are set on this machine; the Mac's relay reads the list and pushes.
   ...family('routes/github-hub.ts', [
@@ -379,9 +385,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/voice', 'POST'],
     ['trusted-local', '/workspaces/:ws/voice/timings', 'GET'],
   ]),
+  ...family('routes/direct-messages.ts', [['share-scope', '/workspaces/:ws/me/dm', 'GET POST']]),
   ...family('routes/workspace-lead-chat.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/lead-chat/meeting', 'POST'],
+    ['trusted-local', '/workspaces/:ws/lead-chat/meeting/say', 'POST'],
   ]),
   ...family('routes/workspace-lead-chat-files.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat/files', 'POST'],
@@ -425,6 +433,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // Whether comment and view are enforced on this board (D1 step 8). Off
     // the member allowlist, like the audience: no share visitor reaches it.
     ['trusted-local', '/workspaces/:ws/roles-mode', 'POST'],
+    // Whether the collab core serves this board's sockets (D1 step 5). Off
+    // the member allowlist, like the roles mode: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/collab-core', 'POST'],
   ]),
 
   ...family('routes/workspace-content.ts', [
@@ -497,6 +508,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // `refuseOwnerOnlyWrite` besides, which is what fails closed if the
     // allowlist ever gains the prefix.
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets', 'POST'],
+  ]),
+  ...family('routes/task-review-withdraw.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo', 'POST'],
   ]),
@@ -518,6 +531,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/task-grants.ts', [
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/grant', 'POST'],
   ]),
+  ...family('routes/task-done-when.ts', [
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/report', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/:lineId/check', 'POST'],
+  ]),
   ...family('routes/task-fields.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/after', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/title', 'POST'],
@@ -525,6 +543,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/assignee', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/due', 'POST'],
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/schedule', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/wait', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/park', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/archive', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/restore', 'POST'],
@@ -627,6 +646,10 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/place', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/component-grants', 'POST'],
   ]),
+  ...family('routes/whiteboard-routes.ts', [
+    ['trusted-local', '/workspaces/:ws/whiteboards', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/whiteboard', 'GET POST'],
+  ]),
   ...family('routes/doc-metadata.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
   ]),
@@ -711,6 +734,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/find_and_replace', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/block_edits', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_block_at_anchor', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_blocks_in_range', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_section', 'POST'],

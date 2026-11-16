@@ -1,14 +1,18 @@
 #!/usr/bin/env bun
 /**
- * Rewrite `scripts/vitest-durations.json` from one CI run's client shards.
+ * Rewrite `scripts/vitest-durations.json` from CI runs' client shards.
  *
- *   bun run scripts/vitest-durations.ts <run-id>
+ *   bun run scripts/vitest-durations.ts <run-id> [<run-id> ...]
  *
- * Reads every `client (N)` job's log with `gh` (read only), takes the
- * per-file time vitest prints for each file, and writes the table
- * `scripts/vitest-shard.ts` balances shards with. Refuses a run whose client
- * jobs did not all succeed: a failed or cancelled shard's files would be
- * missing or short, and the next split would be balanced on the wrong numbers.
+ * Reads every `client (N)` and `client-browser (N)` job's log with `gh`
+ * (read only), takes the per-file time vitest prints for each file, and
+ * writes the table `scripts/vitest-shard.ts` balances shards with. Given
+ * several runs, each file's row is its median across them: one run's times
+ * carry that run's neighbours and that runner's speed, and a browser file
+ * varied by up to a third between runs of the same commit. Refuses a run
+ * whose client jobs did not all succeed: a failed or cancelled shard's files
+ * would be missing or short, and the next split would be balanced on the
+ * wrong numbers.
  *
  * When to run it: when the client shards' durations in a CI run have drifted
  * apart again. A stale table never drops a test; it only makes the split
@@ -72,16 +76,20 @@ export function buildTable(
   };
 }
 
+/** Each file's median across runs; a file seen in only some runs is the median of those. */
+export function mergeRuns(runs: readonly Record<string, number>[]): Record<string, number> {
+  const all: Record<string, number[]> = {};
+  for (const run of runs) for (const [key, s] of Object.entries(run)) (all[key] ??= []).push(s);
+  const out: Record<string, number> = {};
+  for (const [key, values] of Object.entries(all)) out[key] = Math.round(median(values) * 10) / 10;
+  return out;
+}
+
 function gh(args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 }
 
-function main(): void {
-  const run = process.argv[2];
-  if (!run || !/^\d+$/.test(run)) {
-    console.error('usage: bun run scripts/vitest-durations.ts <run-id>');
-    process.exit(2);
-  }
+function readRun(run: string): Record<string, number> {
   const jobs = JSON.parse(
     gh(['api', `repos/{owner}/{repo}/actions/runs/${run}/jobs?per_page=100`, '--jq', '.jobs']),
   ) as { id: number; name: string; conclusion: string | null }[];
@@ -96,16 +104,26 @@ function main(): void {
   const seconds: Record<string, number> = {};
   for (const job of client)
     Object.assign(seconds, parseDurations(gh(['run', 'view', '--job', String(job.id), '--log'])));
+  return seconds;
+}
+
+function main(): void {
+  const runs = process.argv.slice(2);
+  if (runs.length === 0 || runs.some((run) => !/^\d+$/.test(run))) {
+    console.error('usage: bun run scripts/vitest-durations.ts <run-id> [<run-id> ...]');
+    process.exit(2);
+  }
+  const seconds = mergeRuns(runs.map(readRun));
   const root = join(import.meta.dirname, '..');
   const table = buildTable(seconds, (key) =>
     callsBrowserGate(join(root, key.slice(key.indexOf(':') + 1))),
   );
   writeFileSync(
     DURATIONS_FILE,
-    `${JSON.stringify({ source: { run: Number(run) }, ...table }, null, 2)}\n`,
+    `${JSON.stringify({ source: { runs: runs.map(Number) }, ...table }, null, 2)}\n`,
   );
   console.log(
-    `wrote ${Object.keys(table.seconds).length} file(s) from ${client.length} client job(s) of run ${run}; ` +
+    `wrote ${Object.keys(table.seconds).length} file(s) from ${runs.length} run(s); ` +
       `unmeasured browser ${table.unmeasured.browser}s, other ${table.unmeasured.other}s.`,
   );
 }

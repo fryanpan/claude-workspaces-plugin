@@ -18,6 +18,7 @@ import { wireKeyboardInset } from './keyboard-inset.ts';
 import { libraryIdOf, recordLibraryView } from './library-view.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
+import { pageOwnTitle, pageWorkspaceName } from './page-tab-title.ts';
 import {
   dropEarlyRedline,
   dropEarlyRedlineOnFailure,
@@ -188,6 +189,20 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       }
       await mountSurface(ctx);
       if (!paintsFirst) reportLoad.mounted(ctx);
+      // The round comment buttons, on a markdown doc of this board's, once
+      // its text is up. Never the page's content, so not in its first load.
+      if (board && ctx.docType === 'markdown' && !ctx.navDocId) {
+        void import('./doc/doc-comment-buttons.ts').then(({ mountCommentButtons }) =>
+          mountCommentButtons({
+            doc: document,
+            workspaceId: board,
+            docId: ctx.docId,
+            ydoc: ctx.client.ydoc,
+            search: location.search,
+            scope: ctx.scope,
+          }),
+        );
+      }
       // A follow that brought this doc here shows its spot now the doc is up.
       presence?.follower.refresh();
       void joinPresence();
@@ -236,6 +251,10 @@ async function joinDocPagePresence(
     storage: sessionStorage,
     inputTarget: env.window,
     notify: showToast,
+    // The tab's name for the doc, never the crumb: the crumb can be a path
+    // on this machine, which is not workspace content.
+    title: pageOwnTitle,
+    app: pageWorkspaceName,
   });
   docSpot.onDocSpotMove((spot, heading) => {
     const current = docIdFromPathOrNull(location.pathname);

@@ -18,15 +18,26 @@ export interface DocSpotHandle {
 let handle: DocSpotHandle | null = null;
 let onMove: ((spot: DocPlace, heading: string | undefined) => void) | null = null;
 
+/** The last move made before the page's presence listened. Presence is its
+ *  own chunk and joins after the doc can already scroll, so a scroll that
+ *  settled first was dropped, and the person's spot stayed at the top of the
+ *  doc until they scrolled again. */
+let unheard: { spot: DocPlace; heading: string | undefined } | null = null;
+
 /** The page's presence listens here for its person's moves, and the section
- *  heading on screen with each. */
+ *  heading on screen with each. A move made before it listened is passed on
+ *  at once. */
 export function onDocSpotMove(cb: (spot: DocPlace, heading: string | undefined) => void): void {
   onMove = cb;
+  const move = unheard;
+  unheard = null;
+  if (move) cb(move.spot, move.heading);
 }
 
 /** A surface tells the page its person moved. */
 export function docSpotMoved(spot: DocPlace, heading: string | undefined): void {
-  onMove?.(spot, heading);
+  if (onMove) onMove(spot, heading);
+  else unheard = { spot, heading };
 }
 
 /** A spot asked for before its doc mounted: a page that loaded to show it. */

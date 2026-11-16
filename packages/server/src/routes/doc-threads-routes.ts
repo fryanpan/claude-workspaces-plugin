@@ -55,6 +55,23 @@ import { PERSON_PROOF_REQUIRED, unprovenPersonAnswer } from '../review-items/ans
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { taskIdOfBodyDoc } from '../task-row.ts';
+import type {
+  ThreadAnswerBody,
+  ThreadAuthorBody,
+  ThreadByFindBody,
+  ThreadCommentBody,
+  ThreadCreateAnswer,
+  ThreadCreateBody,
+  ThreadEditCommentBody,
+  ThreadInsertAfterBody,
+  ThreadInsertBlocksAfterBody,
+  ThreadProgressBody,
+  ThreadReviseAnswer,
+  ThreadReviseBody,
+  ThreadRewriteRegionBody,
+  ThreadSummaryBody,
+  ThreadWithdrawBody,
+} from './doc-threads-contract.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
@@ -65,6 +82,7 @@ import {
   scopedEditGuard,
   withSyncError,
 } from './docs-routes-context.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 /**
  * The id of the item a write just raised — the STANDING declaration on the
@@ -186,6 +204,24 @@ function reviewFromBody(
   const review = readReviewPayload(raw);
   if (!review) return { ok: false, error: reviewPayloadMessage(check) };
   return { ok: true, review, ...(advice ? { advice } : {}) };
+}
+
+/**
+ * A created thread's answer after `thread`, each field named so a rename in
+ * `ThreadCreateAnswer` fails here. An undefined value drops out of the JSON,
+ * as the conditional spreads this replaced did, so the bytes are unchanged.
+ */
+function createdFields(
+  advice: unknown,
+  handoff: string | null | undefined,
+  reviewItemId: string | undefined,
+): Pick<ThreadCreateAnswer, 'reviewAdvice' | 'threadUrl' | 'url' | 'reviewItemId'> {
+  return {
+    reviewAdvice: advice ? advice : undefined,
+    threadUrl: handoff ? handoff : undefined,
+    url: handoff ? handoff : undefined,
+    reviewItemId,
+  };
 }
 
 /**
@@ -314,7 +350,7 @@ export async function handleDocThreadRoutes(
         : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/comments' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadCommentBody>(await safeJson(req));
       const user = authorFor(body?.author);
       const text = body?.text as string | undefined;
       if (!user || !text) return j(400, { error: 'author + text required' });
@@ -463,7 +499,7 @@ export async function handleDocThreadRoutes(
     // option those words came from. A person who types their own
     // answer sends no id and is not answering any less.
     if (threadRest === '/answer' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadAnswerBody>(await safeJson(req));
       const user = authorFor(body?.author);
       const text = body?.text as string | undefined;
       const commentId = body?.commentId as string | undefined;
@@ -560,7 +596,7 @@ export async function handleDocThreadRoutes(
     // words are kept on the comment's edit trail, so this destroys
     // nothing — see `setCommentText`.
     if (threadRest === '/edit-comment' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadEditCommentBody>(await safeJson(req));
       const user = authorFor(body?.author);
       const commentId = body?.commentId as string | undefined;
       const text = body?.text;
@@ -602,7 +638,7 @@ export async function handleDocThreadRoutes(
     // and the one `setCommentReview` already mutates by. Nothing was
     // minted for this route.
     if (threadRest === '/revise' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadReviseBody>(await safeJson(req));
       const user = authorFor(body?.author);
       const commentId = body?.commentId as string | undefined;
       if (!user || !commentId) return j(400, { error: 'author + commentId required' });
@@ -668,12 +704,17 @@ export async function handleDocThreadRoutes(
         docLink && itemBoard
           ? new URL(reviewItemPath(itemBoard, itemKey), docLink).href
           : undefined;
-      return j(200, {
-        thread: docStore.getThread(docId, threadId) ?? res.thread,
-        review: gate.review,
-        ...(url !== undefined ? { url } : {}),
-        ...heldFields(gate),
-      });
+      return j(
+        200,
+        answerAs<ThreadReviseAnswer>({
+          thread: docStore.getThread(docId, threadId) ?? res.thread,
+          review: gate.review,
+          // Named, not spread, so a field renamed in the answer type fails
+          // here; JSON drops an undefined one, as the spread did.
+          url,
+          ...heldFields(gate),
+        }),
+      );
     }
     // Taking the ASK back — the asker's exit, as opposed to /answer
     // (the reader's) and /revise (a correction that keeps asking).
@@ -689,7 +730,7 @@ export async function handleDocThreadRoutes(
     // review item is FOR — so the door they get is /answer.
     if ((threadRest === '/withdraw' || threadRest === '/withdraw/undo') && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
-      const body = await safeJson(req);
+      const body = sent<ThreadWithdrawBody>(await safeJson(req));
       const user = authorFor(body?.author);
       const commentId = body?.commentId as string | undefined;
       if (!user || !commentId) return j(400, { error: 'author + commentId required' });
@@ -767,7 +808,7 @@ export async function handleDocThreadRoutes(
       // `needsCall`; an agent that polls this route was the one caller
       // that could bill on every retry. `force` is the deliberate
       // "that line is wrong, do it again" escape hatch.
-      const force = (await safeJson(req))?.force === true;
+      const force = sent<ThreadSummaryBody>(await safeJson(req))?.force === true;
       if (!force && !needsCall(t, t.summary)) {
         return j(200, { thread: t, summary: t.summary, cached: true });
       }
@@ -788,7 +829,7 @@ export async function handleDocThreadRoutes(
       return updated ? j(200, { thread: updated, summary }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/resolve' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadAuthorBody>(await safeJson(req));
       const author = authorFor(body?.author);
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
       // Resolve is a thread change, so it schedules a summary — and a
@@ -800,7 +841,7 @@ export async function handleDocThreadRoutes(
       // An agent's mark on a person's comment (`thread-progress.ts`). Not a
       // share visitor's to set: the mark speaks for whoever is doing the work.
       if (visitor) return j(403, { error: 'not available to share visitors' });
-      const body = await safeJson(req);
+      const body = sent<ThreadProgressBody>(await safeJson(req));
       const state = body?.state;
       if (state !== 'working' && state !== 'done' && state !== 'open') {
         return j(400, { error: "state must be 'working', 'done' or 'open'" });
@@ -814,7 +855,7 @@ export async function handleDocThreadRoutes(
       return j(200, { thread: t });
     }
     if (threadRest === '/reopen' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadAuthorBody>(await safeJson(req));
       const author = authorFor(body?.author);
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
       const t = docStore.reopen(docId, threadId, author, { generate: !visitor, ...viaOpt });
@@ -850,7 +891,7 @@ export async function handleDocThreadRoutes(
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/rewrite_region' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadRewriteRegionBody>(await safeJson(req));
       const replacement = String(body?.replacement ?? '');
       const parseInlineMarks = body?.parseInlineMarks === true;
       if (body?.suggest === true) {
@@ -872,7 +913,7 @@ export async function handleDocThreadRoutes(
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (threadRest === '/insert_after' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadInsertAfterBody>(await safeJson(req));
       const text = body?.text;
       // A body with no text used to insert nothing and answer ok — a peer's
       // paragraph vanished twice that way. Name the field, and its sibling.
@@ -888,7 +929,7 @@ export async function handleDocThreadRoutes(
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (threadRest === '/insert_blocks_after' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<ThreadInsertBlocksAfterBody>(await safeJson(req));
       const markdown = String(body?.markdown ?? '');
       const placement = parsePlacement(body?.placement);
       if (placement === PLACEMENT_INVALID) {
@@ -901,7 +942,7 @@ export async function handleDocThreadRoutes(
     }
   }
   if (rest === 'threads' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<ThreadCreateBody>(await safeJson(req));
     const user = authorFor(body?.author);
     const pageEdits = pageEditsFromBody(body?.pageEdits);
     if (pageEdits === false) {
@@ -968,15 +1009,14 @@ export async function handleDocThreadRoutes(
       // review) — so the verdict is read back off the stored payload.
       const settledPrior = t ? (docStore.getThread(docId, t.id) ?? t) : null;
       return t && settledPrior
-        ? j(200, {
-            thread: settledPrior,
-            ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-            ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
-            ...(declaredItemId(docId, settledPrior) !== undefined
-              ? { reviewItemId: declaredItemId(docId, settledPrior) }
-              : {}),
-            ...heldFields(recordedThreadHold(docId, settledPrior, declared.review)),
-          })
+        ? j(
+            200,
+            answerAs<ThreadCreateAnswer>({
+              thread: settledPrior,
+              ...createdFields(declared.advice, handoff, declaredItemId(docId, settledPrior)),
+              ...heldFields(recordedThreadHold(docId, settledPrior, declared.review)),
+            }),
+          )
         : j(500, { error: 'could not create thread' });
     }
     // A thread on a PHRASE of a review item — the doc-style question
@@ -1096,22 +1136,21 @@ export async function handleDocThreadRoutes(
     const handoff = threadUrl(docId, Boolean(visitor));
     const settled = t ? (docStore.getThread(docId, t.id) ?? t) : null;
     return t && settled
-      ? j(200, {
-          thread: settled,
-          ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
-          ...(declaredItemId(docId, settled) !== undefined
-            ? { reviewItemId: declaredItemId(docId, settled) }
-            : {}),
-          // `gate` is undefined on a DEDUPLICATED request — it never
-          // ran the closure — so the hold is read back off the stored
-          // payload rather than dropped. See `recordedThreadHold`.
-          ...heldFields(gate ?? recordedThreadHold(docId, settled, declared.review)),
-        })
+      ? j(
+          200,
+          answerAs<ThreadCreateAnswer>({
+            thread: settled,
+            ...createdFields(declared.advice, handoff, declaredItemId(docId, settled)),
+            // `gate` is undefined on a DEDUPLICATED request — it never
+            // ran the closure — so the hold is read back off the stored
+            // payload rather than dropped. See `recordedThreadHold`.
+            ...heldFields(gate ?? recordedThreadHold(docId, settled, declared.review)),
+          }),
+        )
       : j(500, { error: 'could not create thread' });
   }
   if (rest === 'threads/by_find' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<ThreadByFindBody>(await safeJson(req));
     const author = authorFor(body?.author);
     const text = body?.text as string | undefined;
     const find = body?.find ? String(body.find) : '';
@@ -1141,7 +1180,9 @@ export async function handleDocThreadRoutes(
         find,
         path: body?.path,
         suggest: body?.suggest,
-        narrowed: ['contextBefore', 'contextAfter', 'occurrence'].some((k) => body?.[k] != null),
+        narrowed: (['contextBefore', 'contextAfter', 'occurrence'] as const).some(
+          (k) => body?.[k] != null,
+        ),
       });
       if (!plan.ok) return j(400, { error: plan.error });
       const pageSuggestion = plan.suggestion ? { pageSuggestion: plan.suggestion } : {};
@@ -1180,15 +1221,14 @@ export async function handleDocThreadRoutes(
     const findHandoff =
       docLink && found && isPageDoc(type) ? pageThreadLink(docLink, found) : docLink;
     return res.ok && found
-      ? j(200, {
-          thread: found,
-          ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(findHandoff ? { threadUrl: findHandoff, url: findHandoff } : {}),
-          ...(declaredItemId(docId, found) !== undefined
-            ? { reviewItemId: declaredItemId(docId, found) }
-            : {}),
-          ...heldFields(findGate),
-        })
+      ? j(
+          200,
+          answerAs<ThreadCreateAnswer>({
+            thread: found,
+            ...createdFields(declared.advice, findHandoff, declaredItemId(docId, found)),
+            ...heldFields(findGate),
+          }),
+        )
       : j(409, res);
   }
   return undefined;

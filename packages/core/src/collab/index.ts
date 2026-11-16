@@ -6,8 +6,9 @@
  *
  * Nothing in this folder imports anything outside it but `yjs`,
  * `y-protocols` and `lib0` (`collab-imports.test.ts` holds that), so another
- * app can take it without Workspaces. Workspaces itself does not run on it
- * yet: it moves onto the core in step 5 of the D1 plan.
+ * app can take it without Workspaces. Workspaces runs a board's sockets on
+ * it when that board and the server are both switched on
+ * (`packages/server/src/collab-core-switch.ts`).
  */
 export * from './follow.ts';
 export * from './presence.ts';

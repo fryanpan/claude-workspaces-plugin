@@ -2,9 +2,7 @@ import { scheduleOutputField } from '@claude-workspaces/core/schedule-output';
 import { parseSchedule } from '@claude-workspaces/core/schedule-parse';
 /**
  * The fields of a row that are edited one at a time, plus its soft delete.
- *
- * Lifted verbatim out of `createServer`'s request closure; the handlers
- * read their collaborators off `TaskRoutesContext` instead of the scope.
+ * `task-state-contract.ts` types the bodies and answers the MCP relies on.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { parkNoteText } from '../park-note.ts';
@@ -25,8 +23,10 @@ import {
   clearExternalWait,
   setExternalWait,
 } from '../task-wait.ts';
+import { answerAs, sent } from './route-contract.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 import { markPersonRelease } from './task-routes-context.ts';
+import type * as C from './task-state-contract.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleTaskFields(
@@ -54,7 +54,7 @@ export async function handleTaskFields(
   const taskAfterMatch = matchRest(scope, /^tasks\/([^/]+)\/after$/);
   if (taskAfterMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskAfterMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.AfterBody>(await safeJson(req));
     if (!Array.isArray(body?.after)) return j(400, { error: 'after must be an array' });
     if (body?.afterEnforce !== undefined && !Array.isArray(body.afterEnforce)) {
       return j(400, { error: 'afterEnforce must be an array' });
@@ -88,7 +88,7 @@ export async function handleTaskFields(
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     released();
     taskProjection.refreshTask(res.task);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   // In-place task title edit (§3.9: tap the title, Enter commits) —
   // and rewrite_task's title-only path. Emits an attributed
@@ -98,7 +98,7 @@ export async function handleTaskFields(
   const taskTitleMatch = matchRest(scope, /^tasks\/([^/]+)\/title$/);
   if (taskTitleMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskTitleMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TitleBody>(await safeJson(req));
     const title = typeof body?.title === 'string' ? body.title.trim() : '';
     if (title.length === 0) return j(400, { error: 'title required' });
     const author = authorFor(body?.author);
@@ -112,7 +112,7 @@ export async function handleTaskFields(
     taskProjection.refreshTask(res.task);
     // A decision ticket's headline just moved — see `regateDecisionWords`.
     if (res.changed) await regateDecisionWords(taskId, author);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   // update_task_body: replace a task's description after creation.
   // The body is a live `task:<id>` live doc, so this goes THROUGH that
@@ -127,7 +127,7 @@ export async function handleTaskFields(
   const taskBodyMatch = matchRest(scope, /^tasks\/([^/]+)\/body$/);
   if (taskBodyMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskBodyMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TaskBodyBody>(await safeJson(req));
     const markdown = typeof body?.markdown === 'string' ? body.markdown : '';
     // Optional: shaping retitles and rewrites in ONE act, so a clipped
     // capture title is not left behind by the pass that fixed its body.
@@ -152,10 +152,7 @@ export async function handleTaskFields(
     // `rewrite_task` uses to fix a held decision.
     await regateDecisionWords(taskId, author);
     const rewritten = taskStore.getTask(taskId);
-    return j(200, {
-      ok: true,
-      task: rewritten,
-    });
+    return j(200, answerAs<C.TaskBodyAnswer>({ ok: true, task: rewritten }));
   }
   // assign_task (§3.6 task.assigned): hand a task between the human and
   // the agent (or a named identity). Status is untouched — a hand-off
@@ -164,7 +161,7 @@ export async function handleTaskFields(
   const taskAssigneeMatch = matchRest(scope, /^tasks\/([^/]+)\/assignee$/);
   if (taskAssigneeMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskAssigneeMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.AssigneeBody>(await safeJson(req));
     const assignee = resolveAssignee(body?.assignee, undefined);
     // The create routes gate this; without the same gate here a board
     // could be walked back to the generic owner one hand-over at a time.
@@ -200,15 +197,14 @@ export async function handleTaskFields(
     });
     if (!res.ok) return j(404, res);
     released();
-    // A no-op emits nothing, so nothing would refresh the board doc —
-    // harmless here (nothing changed) but the changed path is covered
-    // by the task.assigned event's own projection hook.
+    // A no-op emits nothing, so refresh by hand; a change is refreshed by
+    // the task.assigned event's own projection hook.
     if (!res.changed) taskProjection.refreshTask(res.task);
     // Echo what the board now says this owner IS. Without it the caller
     // learns only that the call didn't error — which is exactly what a
     // declaration that silently failed to land also reports.
     const ownerKind = taskProjection.ownerKindReader(res.task.workspaceId)(res.task);
-    return j(200, { ...res, ownerKind });
+    return j(200, answerAs<C.AssigneeAnswer>({ ...res, ownerKind }));
   }
   // Set / move / clear a due date (§3.6 task.due_set). `dueAt` was
   // writable only at creation, so the detail panel rendered a date
@@ -251,7 +247,7 @@ export async function handleTaskFields(
   const taskScheduleMatch = matchRest(scope, /^tasks\/([^/]+)\/schedule$/);
   if (taskScheduleMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskScheduleMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.ScheduleBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     // `rule: null` clears. Same strictness as `/due`, for the same reason:
@@ -261,7 +257,7 @@ export async function handleTaskFields(
       const cleared = setTaskSchedule(taskStore, taskId, null);
       if (!cleared.ok) return j(404, cleared);
       taskProjection.ensureWorkspace(cleared.task.workspaceId);
-      return j(200, cleared);
+      return j(200, answerAs<C.ScheduleAnswer>(cleared));
     }
     const parsed = parseSchedule(body);
     if (!parsed.ok) return j(400, { error: parsed.error });
@@ -280,7 +276,7 @@ export async function handleTaskFields(
     });
     if (!res.ok) return j(404, res);
     taskProjection.ensureWorkspace(res.task.workspaceId);
-    return j(200, res);
+    return j(200, answerAs<C.ScheduleAnswer>(res));
   }
   // Declare, renew or clear what a row is waiting on when the board cannot
   // see the thing (`task-wait.ts` holds the design and every number). The
@@ -289,14 +285,15 @@ export async function handleTaskFields(
   const taskWaitMatch = matchRest(scope, /^tasks\/([^/]+)\/wait$/);
   if (taskWaitMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskWaitMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.WaitBody>(await safeJson(req));
+    const waited = (answer: C.WaitAnswer) => j(200, answer);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     if (body?.clear === true) {
       const cleared = clearExternalWait(taskStore, taskId);
       if (!cleared.ok) return j(404, cleared);
       taskProjection.refreshTask(cleared.task);
-      return j(200, { ok: true, task: cleared.task, changed: cleared.changed });
+      return waited({ ok: true, task: cleared.task, changed: cleared.changed });
     }
     // Refused rather than defaulted: a caller that sent an `hours` we cannot
     // read meant a duration, and giving them the default would leave them
@@ -323,7 +320,7 @@ export async function handleTaskFields(
       });
     }
     taskProjection.refreshTask(res.task);
-    return j(200, { ok: true, task: res.task, wait: res.wait });
+    return waited({ ok: true, task: res.task, wait: res.wait });
   }
   // Block a row on another ticket — and, on its old payload, park it.
   //
@@ -358,7 +355,8 @@ export async function handleTaskFields(
   const taskParkMatch = matchRest(scope, /^tasks\/([^/]+)\/park$/);
   if (taskParkMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskParkMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.ParkBody>(await safeJson(req));
+    const parked = (answer: C.ParkAnswer) => j(200, answer);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const task = taskStore.getTask(taskId);
@@ -390,7 +388,7 @@ export async function handleTaskFields(
       // edge change), so the projection is refreshed by hand — the same
       // contract the dependencies route above keeps.
       taskProjection.refreshTask(res.task);
-      return j(200, {
+      return parked({
         ok: true,
         task: res.task,
         changed: res.changed,
@@ -411,7 +409,7 @@ export async function handleTaskFields(
       });
     }
     if (present && raw === null) {
-      return j(200, {
+      return parked({
         ok: true,
         task,
         changed: false,
@@ -452,7 +450,7 @@ export async function handleTaskFields(
       { generate: false },
     );
     if (!changed) taskProjection.refreshTask(task);
-    return j(200, {
+    return parked({
       ok: true,
       task: taskStore.getTask(taskId) ?? task,
       changed,
@@ -471,7 +469,7 @@ export async function handleTaskFields(
   const taskArchiveMatch = matchRest(scope, /^tasks\/([^/]+)\/archive$/);
   if (taskArchiveMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskArchiveMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.ArchiveTaskBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const released = markPersonRelease(ctx, author, taskId);
@@ -482,18 +480,18 @@ export async function handleTaskFields(
     if (!res.ok) return j(404, res);
     released();
     if (!res.changed) taskProjection.refreshTask(res.task);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   const taskRestoreMatch = matchRest(scope, /^tasks\/([^/]+)\/restore$/);
   if (taskRestoreMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskRestoreMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.RestoreTaskBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const res = taskStore.unarchiveTask(taskId, { actor: author });
     if (!res.ok) return j(404, res);
     if (!res.changed) taskProjection.refreshTask(res.task);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   return undefined;
 }

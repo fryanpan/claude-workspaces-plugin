@@ -18,6 +18,14 @@
  *   markServerServing   — once the port is bound and documents hydrated:
  *                         when, and the pending deploy this boot confirmed
  *
+ * and two more facts that bound the gap a deploy opens for the people on the
+ * board (`reconnectGaps`):
+ *
+ *   shutdownAt          — written by the OLD process onto its own record, as
+ *                         the first step of its SIGTERM/SIGINT handler
+ *   firstClientSocketAt — written by the NEW process when the first doc or
+ *                         board editing socket (`/y/`) opens after boot
+ *
  * A start with no second step never served — a crash before the port. The
  * cause is decided by the record alone (`classifyStart`), and
  * `summarizeStarts` turns a window of them into "N starts, M explained by
@@ -50,6 +58,13 @@ export interface ServerStart {
   /** The `ranAt` of the pending deploy this boot confirmed — the join key
    *  into `deploy-log.json`. */
   deployRanAt?: number;
+  /** When this process began its graceful shutdown. Absent: it crashed, was
+   *  killed outright, or is still running. */
+  shutdownAt?: number;
+  /** When the first `/y/` editing socket (a doc or a board page) opened on
+   *  this process. Audio, voice, app and Recall sockets do not count, and
+   *  agents never open one — the MCP watches over SSE. */
+  firstClientSocketAt?: number;
 }
 
 export type StartCause = 'deploy' | 'watchdog' | 'host-reboot' | 'unexplained';
@@ -136,19 +151,50 @@ export function recordServerStart(
   return record;
 }
 
+/** Add facts to this process's own record. No record (pruned, or a file
+ *  somebody replaced) writes nothing. */
+function amendServerStart(
+  file: string,
+  start: Pick<ServerStart, 'startedAt' | 'pid'>,
+  facts: Partial<ServerStart>,
+  /** Leave a record that already holds this fact alone — the first wins. */
+  keepFirst?: keyof ServerStart,
+): void {
+  const entries = readServerStarts(file);
+  const mine = entries.filter((e) => e.startedAt === start.startedAt && e.pid === start.pid).at(-1);
+  if (!mine || (keepFirst && mine[keepFirst] !== undefined)) return;
+  writeServerStarts(
+    file,
+    entries.map((e) => (e === mine ? { ...e, ...facts } : e)),
+  );
+}
+
 /** The second step: this boot is serving, and maybe confirmed a deploy. */
 export function markServerServing(
   file: string,
   start: Pick<ServerStart, 'startedAt' | 'pid'>,
   facts: { servingAt: number; deployRanAt?: number },
 ): void {
-  const entries = readServerStarts(file);
-  const mine = entries.filter((e) => e.startedAt === start.startedAt && e.pid === start.pid).at(-1);
-  if (!mine) return;
-  writeServerStarts(
-    file,
-    entries.map((e) => (e === mine ? { ...e, ...facts } : e)),
-  );
+  amendServerStart(file, start, facts);
+}
+
+/** This process has begun shutting down. Synchronous, so it lands before
+ *  the handler's first await; a second signal does not move it later. */
+export function markServerShutdown(
+  file: string,
+  start: Pick<ServerStart, 'startedAt' | 'pid'>,
+  shutdownAt: number,
+): void {
+  amendServerStart(file, start, { shutdownAt }, 'shutdownAt');
+}
+
+/** The first client socket of this process opened. */
+export function markFirstClientSocket(
+  file: string,
+  start: Pick<ServerStart, 'startedAt' | 'pid'>,
+  firstClientSocketAt: number,
+): void {
+  amendServerStart(file, start, { firstClientSocketAt }, 'firstClientSocketAt');
 }
 
 /** This process's start, recorded with the facts only it can gather. */
@@ -253,5 +299,105 @@ export function formatStartsReport(s: StartsSummary, file: string): string {
       lines.push(`  ${iso(r.startedAt)}  pid ${r.pid}  ${served}`);
     }
   }
+  return lines.join('\n');
+}
+
+/**
+ * How long the people on the board were cut off by one restart: from the
+ * moment the previous process began shutting down to the first page that
+ * reconnected to this one, and to this one listening. A start whose previous
+ * record has no `shutdownAt` (a crash, a SIGKILL) has no gap — there is no
+ * honest start for it. `toListening` can exist without `toReconnect`: a
+ * restart nobody had a page open across.
+ */
+export interface ReconnectGap {
+  startedAt: number;
+  pid: number;
+  cause: StartCause;
+  shutdownAt: number;
+  /** shutdown begin → `servingAt`. */
+  toListeningMs?: number;
+  /** shutdown begin → `firstClientSocketAt`. */
+  toReconnectMs?: number;
+}
+
+export interface GapStats {
+  count: number;
+  medianMs: number | null;
+  longestMs: number | null;
+}
+
+export interface ReconnectGapSummary {
+  /** How many of the most recent starts were looked at. */
+  last: number;
+  gaps: ReconnectGap[];
+  toListening: GapStats;
+  toReconnect: GapStats;
+}
+
+function stats(values: number[]): GapStats {
+  if (!values.length) return { count: 0, medianMs: null, longestMs: null };
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2
+      ? (sorted[mid] as number)
+      : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+  return { count: sorted.length, medianMs: median, longestMs: sorted.at(-1) as number };
+}
+
+/** The gaps over the last `last` starts on record, oldest first. Each start
+ *  is paired with the record immediately before it, so pass every record,
+ *  not a window of them. */
+export function reconnectGaps(starts: ServerStart[], last: number): ReconnectGapSummary {
+  const from = Math.max(1, starts.length - last);
+  const gaps: ReconnectGap[] = [];
+  for (let i = from; i < starts.length; i++) {
+    const prev = starts[i - 1] as ServerStart;
+    const s = starts[i] as ServerStart;
+    if (prev.shutdownAt === undefined) continue;
+    gaps.push({
+      startedAt: s.startedAt,
+      pid: s.pid,
+      cause: classifyStart(s),
+      shutdownAt: prev.shutdownAt,
+      ...(s.servingAt !== undefined ? { toListeningMs: s.servingAt - prev.shutdownAt } : {}),
+      ...(s.firstClientSocketAt !== undefined
+        ? { toReconnectMs: s.firstClientSocketAt - prev.shutdownAt }
+        : {}),
+    });
+  }
+  const pick = (k: 'toListeningMs' | 'toReconnectMs') =>
+    gaps.flatMap((g) => (g[k] === undefined ? [] : [g[k]]));
+  return {
+    last: Math.min(last, starts.length),
+    gaps,
+    toListening: stats(pick('toListeningMs')),
+    toReconnect: stats(pick('toReconnectMs')),
+  };
+}
+
+const secs = (ms: number | null | undefined) =>
+  ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(1)}s`;
+
+/** The gap section of the report, as plain lines. */
+export function formatReconnectGaps(g: ReconnectGapSummary): string {
+  const lines = [
+    `reconnect gap over the last ${g.last} starts (shutdown begin → first page socket; ` +
+      'not the 75s health-check budget):',
+  ];
+  if (!g.gaps.length) {
+    lines.push('  none recorded — no start in that range follows a recorded shutdown');
+    return lines.join('\n');
+  }
+  for (const r of g.gaps) {
+    lines.push(
+      `  ${iso(r.startedAt)}  pid ${r.pid}  ${r.cause}  ` +
+        `to listening ${secs(r.toListeningMs)}  to first reconnect ${secs(r.toReconnectMs)}`,
+    );
+  }
+  const line = (name: string, s: GapStats) =>
+    `  ${name}: median ${secs(s.medianMs)}, longest ${secs(s.longestMs)} (of ${s.count})`;
+  lines.push(line('to first reconnect', g.toReconnect), line('to listening', g.toListening));
   return lines.join('\n');
 }

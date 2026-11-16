@@ -25,6 +25,8 @@ const MAX_OUTPUT = 16 * 1024 * 1024;
 export const FLY_TIMEOUT_MS = 30 * 60_000;
 const CF_API = 'https://api.cloudflare.com/client/v4';
 const GITHUB_API = 'https://api.github.com';
+/** How long one GitHub call may take, body included, before it is abandoned. */
+export const GITHUB_TIMEOUT_MS = 30_000;
 
 export function runFly(
   flyBin: string,
@@ -118,6 +120,8 @@ export function keeperExecutors(opts: {
   fetch: GuardedFetch;
   /** Without it the keeper answers every Terraform request with an error. */
   terraform?: TerraformSetup;
+  /** Overrides `GITHUB_TIMEOUT_MS`; tests shorten it. */
+  githubTimeoutMs?: number;
 }): Executors {
   /** One Terraform run at a time: two would share the work folder. */
   let tfLane: Promise<unknown> = Promise.resolve();
@@ -168,6 +172,8 @@ export function keeperExecutors(opts: {
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        // A hung call would hold the push-key run, whose reads come one after another.
+        signal: AbortSignal.timeout(opts.githubTimeoutMs ?? GITHUB_TIMEOUT_MS),
       });
       return {
         status: res.status,

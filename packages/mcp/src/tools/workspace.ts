@@ -25,10 +25,21 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
-import { boardIdOf, boardPathOf } from '../board-path.ts';
+import { boardIdOf } from '../board-path.ts';
 import { declareWorkspaceLead } from '../declare-lead.ts';
 import { sayRefusal } from '../meeting-feed-line.ts';
 import { parseCapArg } from '../parallelism-cap.ts';
+import {
+  agentMachineClient,
+  attachmentsClient,
+  dispatchesClient,
+  docFileClient,
+  leadMeetingClient,
+  mountsClient,
+  personClient,
+  workspaceAgentsClient,
+  workspaceBoardClient,
+} from '../server-client.ts';
 import { readChatAttachment } from './chat-attachment.ts';
 import { placeOf, refusalOf } from './person.ts';
 
@@ -72,11 +83,13 @@ async function setBoardRetired(
   reason?: string,
 ): Promise<Record<string, unknown>> {
   const { http, AUTHOR } = ctx;
-  const res = (await http('PUT', `/workspaces/${encodeURIComponent(workspaceId)}/retired`, {
-    retired,
-    ...(retired && reason !== undefined ? { reason } : {}),
-    author: AUTHOR,
-  })) as { changed: boolean; workspace: { name: string; retiredAt?: number } };
+  const res = await (
+    await workspaceBoardClient(http).workspaces[':ws'].retired.$put({
+      param: { ws: encodeURIComponent(workspaceId) },
+      // A reason only rides an archive; undefined is dropped by JSON.
+      json: { retired, reason: retired ? reason : undefined, author: AUTHOR },
+    })
+  ).json();
   return {
     workspaceId,
     name: res.workspace.name,
@@ -108,8 +121,19 @@ export async function handleWorkspaceTool(
     unwatchDoc,
     watchWorkspace,
   } = ctx;
+  /** Typed-client path params: every id is encoded, as the hand-spelled paths did. */
+  const wsOf = (workspaceId: string) => ({ ws: encodeURIComponent(workspaceId) });
   /** The board this call is addressed under — see board-path.ts. */
-  const board = (): string => boardPathOf(name, a);
+  const here = () => wsOf(boardIdOf(name, a));
+  const onBoard = () => workspaceBoardClient(http).workspaces[':ws'];
+  const roster = () => workspaceAgentsClient(http).workspaces[':ws'];
+  const lanes = () => dispatchesClient(http).workspaces[':ws'];
+  const doc = () => docFileClient(http).workspaces[':ws'].docs[':docId'];
+  const docOf = (workspaceId: string, docId: string) => ({
+    ...wsOf(workspaceId),
+    docId: encodeURIComponent(docId),
+  });
+  const repos = () => agentMachineClient(http).api.repos;
   switch (name) {
     // ── Workspace board tools (plan §3.10). Results are TRIMMED per the
     // edit-interface conventions: an edit returns ids + status, not the
@@ -125,15 +149,19 @@ export async function handleWorkspaceTool(
         leadAgentId?: string;
         subscribe?: boolean;
       };
-      const res = (await http('POST', '/workspaces', {
-        name: wsName,
-        // The creating agent leads the board unless it says otherwise. A
-        // board with no lead has nobody to address its asks to.
-        leadAgentId: leadAgentId ?? AUTHOR.id,
-      })) as {
-        workspace: { id: string; name: string; leadAgentId?: string };
-        url?: string;
-      };
+      const made = await (
+        await attachmentsClient(http).workspaces.$post({
+          json: {
+            name: wsName,
+            // The creating agent leads the board unless it says otherwise. A
+            // board with no lead has nobody to address its asks to.
+            leadAgentId: leadAgentId ?? AUTHOR.id,
+          },
+        })
+      ).json();
+      // A body with `name` and no `folderPath` is a board, never a folder bind.
+      if (!('workspace' in made)) return err('the server did not return a board');
+      const res = made;
       if (subscribe !== false && res.workspace?.id) {
         await watchWorkspace(res.workspace.id);
       }
@@ -141,19 +169,17 @@ export async function handleWorkspaceTool(
         workspaceId: res.workspace.id,
         name: res.workspace.name,
         leadAgentId: res.workspace.leadAgentId,
-        ...(res.url !== undefined ? { url: res.url } : {}),
+        url: res.url,
       });
     }
     case 'rename_workspace': {
       const { workspaceId, name: nextName } = a as { workspaceId: string; name: string };
-      const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
-        name: nextName,
-        author: AUTHOR,
-      })) as {
-        changed: boolean;
-        workspace: { name: string };
-        sameName?: Array<{ workspaceId: string; name: string }>;
-      };
+      const res = await (
+        await onBoard().rename.$post({
+          param: wsOf(workspaceId),
+          json: { name: nextName, author: AUTHOR },
+        })
+      ).json();
       return ok({
         workspaceId,
         name: res.workspace.name,
@@ -221,16 +247,17 @@ export async function handleWorkspaceTool(
       // spell: `get_workspace` names the board an item is on.
       const { criteria } = a as { criteria?: string };
       const effectiveWorkspaceId = boardIdOf(name, a);
-      const res = (await http(
-        'PUT',
-        `/workspaces/${encodeURIComponent(effectiveWorkspaceId)}/settings`,
-        {
-          // `null` is the route's spelling of "back to the default"; an
-          // omitted or blank string means the same thing to the caller.
-          reviewItemCriteria: criteria !== undefined && criteria.trim() !== '' ? criteria : null,
-          author: AUTHOR,
-        },
-      )) as { reviewItemCriteria: { value: string; isDefault: boolean } };
+      const res = await (
+        await onBoard().settings.$put({
+          param: wsOf(effectiveWorkspaceId),
+          json: {
+            // `null` is the route's spelling of "back to the default"; an
+            // omitted or blank string means the same thing to the caller.
+            reviewItemCriteria: criteria !== undefined && criteria.trim() !== '' ? criteria : null,
+            author: AUTHOR,
+          },
+        })
+      ).json();
       return ok({
         workspaceId: effectiveWorkspaceId,
         criteria: res.reviewItemCriteria.value,
@@ -244,13 +271,9 @@ export async function handleWorkspaceTool(
       // a notes home, derives a path and makes a NEW empty doc under the name
       // of the one the caller meant to file. See attach-doc-route.test.ts.
       const { workspaceId, docId } = a as { workspaceId: string; docId: string };
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/docs:attach`,
-        {
-          docId,
-        },
-      )) as { workspace?: { docIds?: string[] }; url?: string };
+      const res = await (
+        await onBoard()['docs:attach'].$post({ param: wsOf(workspaceId), json: { docId } })
+      ).json();
       return ok({
         ok: true,
         workspaceId,
@@ -262,31 +285,9 @@ export async function handleWorkspaceTool(
       const { workspaceId } = a as { workspaceId: string };
       // `?format=json`: `/workspaces/<id>` is the board's PAGE as well as its
       // record now that the `/api` prefix is gone.
-      const res = (await http(
-        'GET',
-        `/workspaces/${encodeURIComponent(workspaceId)}?format=json`,
-      )) as {
-        workspace: {
-          id: string;
-          name: string;
-          leadAgentId?: string;
-          reviewItemCriteria?: string;
-        };
-        goalSummary: unknown[];
-        parallelismCap?: {
-          value: number;
-          isDefault: boolean;
-          inUse: number;
-          free: number;
-          lastChange?: {
-            actor: { id: string; name: string; kind?: string };
-            ts: number;
-            from: number;
-            to: number;
-          };
-        };
-        retired?: { since: number; reason?: string; notice: string };
-      };
+      const res = await (
+        await onBoard().$get({ param: wsOf(workspaceId), query: { format: 'json' } })
+      ).json();
       return ok({
         workspaceId: res.workspace.id,
         name: res.workspace.name,
@@ -329,13 +330,16 @@ export async function handleWorkspaceTool(
       if (typeof text !== 'string' || text.trim().length === 0) {
         return err('text is required: the plan request in the words it was asked in.');
       }
-      const params = new URLSearchParams({ q: text });
-      if (typeof docId === 'string' && docId.length > 0) params.set('docId', docId);
-      if (typeof limit === 'number' && Number.isFinite(limit)) params.set('limit', String(limit));
-      const res = (await http(
-        'GET',
-        `/workspaces/${encodeURIComponent(workspaceId)}/related-work?${params.toString()}`,
-      )) as { considered: number; matches: unknown[] };
+      const res = await (
+        await onBoard()['related-work'].$get({
+          param: wsOf(workspaceId),
+          query: {
+            q: text,
+            docId: typeof docId === 'string' && docId.length > 0 ? docId : undefined,
+            limit: typeof limit === 'number' && Number.isFinite(limit) ? String(limit) : undefined,
+          },
+        })
+      ).json();
       return ok({
         workspaceId,
         considered: res.considered,
@@ -357,61 +361,28 @@ export async function handleWorkspaceTool(
         capabilities?: string[];
         subscribe?: boolean;
       };
-      const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-        agentId: agentId ?? AUTHOR.id,
-        // Only when attaching as ITSELF: the roster row for somebody
-        // else's id must not be named after this session.
-        ...(agentId === undefined || agentId === AUTHOR.id ? { agentName: AUTHOR.name } : {}),
-        runtime: runtime ?? 'claude-code-local',
-        ...(capabilities !== undefined ? { capabilities } : {}),
-        // What this session can actually DO is decided by the bundle it
-        // loaded at launch, not by what its machine's cache holds now.
-        // Reporting it is what lets the board say a merge never arrived.
-        pluginVersion: PLUGIN_VERSION,
-        // Same-process re-attaches must not re-hand rows still in
-        // flight to this very process — see PROCESS_ID.
-        processId: PROCESS_ID,
-      })) as {
-        attachment?: { agentId?: string };
-        gating?: unknown;
-        untriaged?: string[];
-        queuedVoice?: Array<{ transcript: string; ts: number; applied?: string }>;
-        queuedComments?: Array<{
-          id: string;
-          docId: string;
-          threadId?: string;
-          event: string;
-          author?: { id?: string; name?: string };
-          text: string;
-          ts: number;
-        }>;
-        lead?: boolean;
-        retired?: { since: number; reason?: string; notice: string };
-        leadNameConflicts?: {
-          boards: Array<{ workspaceId: string; name: string }>;
-          notice: string;
-        };
-        seat?: {
-          leadAgentId?: string;
-          live: boolean;
-          stale: boolean;
-          unattached?: boolean;
-          notice?: string;
-        };
-        seatTakenFrom?: string;
-        watching?: number;
-        notes?: string[];
-        sentry?: {
-          projects: Array<{ slug: string; raises: string }>;
-          remedy: string;
-        };
-        mounts?: {
-          project: string | null;
-          count: number;
-          folders?: string[];
-          note: string;
-        };
-      };
+      const self = agentId === undefined || agentId === AUTHOR.id;
+      const res = await (
+        await roster().agents.$post({
+          param: wsOf(workspaceId),
+          json: {
+            agentId: agentId ?? AUTHOR.id,
+            // Only when attaching as ITSELF: the roster row for somebody
+            // else's id must not be named after this session. Undefined is
+            // dropped by JSON.
+            agentName: self ? AUTHOR.name : undefined,
+            runtime: runtime ?? 'claude-code-local',
+            capabilities,
+            // What this session can actually DO is decided by the bundle it
+            // loaded at launch, not by what its machine's cache holds now.
+            // Reporting it is what lets the board say a merge never arrived.
+            pluginVersion: PLUGIN_VERSION,
+            // Same-process re-attaches must not re-hand rows still in
+            // flight to this very process — see PROCESS_ID.
+            processId: PROCESS_ID,
+          },
+        })
+      ).json();
       // Only when this session attached as ITSELF: the keepalive proves
       // THIS process is alive, and refreshing somebody else's attachment
       // from here would assert liveness for an agent that may be gone.
@@ -425,10 +396,10 @@ export async function handleWorkspaceTool(
       for (const q of res.queuedComments ?? []) {
         if (typeof q?.id !== 'string') continue;
         try {
-          await http(
-            'POST',
-            `/workspaces/${encodeURIComponent(workspaceId)}/comment-queue/${encodeURIComponent(q.id)}/ack`,
-            {},
+          await roster()['comment-queue'][':id'].ack.$post(
+            { param: { ...wsOf(workspaceId), id: encodeURIComponent(q.id) } },
+            // The receipt has always carried an empty JSON body.
+            { init: { body: '{}' } },
           );
         } catch {
           // Left on the queue on purpose — redelivered after the grace.
@@ -513,20 +484,24 @@ export async function handleWorkspaceTool(
         agentId?: string;
         toolCallAt?: number;
       };
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentId ?? AUTHOR.id)}/heartbeat`,
+      await roster().agents[':agentId'].heartbeat.$post({
+        param: { ...wsOf(workspaceId), agentId: encodeURIComponent(agentId ?? AUTHOR.id) },
         // The heartbeat call is itself a tool call — stamp the work clock
         // too unless the caller reports an explicit (earlier) time.
-        { toolCallAt: toolCallAt ?? Date.now() },
-      )) as { attachment?: { state?: string } };
+        json: { toolCallAt: toolCallAt ?? Date.now() },
+      });
       if (agentId === undefined || agentId === AUTHOR.id) markAttached(workspaceId);
-      return ok({ workspaceId, agentId: agentId ?? AUTHOR.id, state: res.attachment?.state });
+      // No `state`: the answer's attachment has never carried one, so the
+      // field this reply used to name was always undefined.
+      return ok({ workspaceId, agentId: agentId ?? AUTHOR.id });
     }
     case 'get_unfiled_ask_count': {
       const { agent } = a as { agent?: string };
       const who = agent?.trim() || AUTHOR.name;
-      return ok(await http('GET', `${board()}/chat-audit/${encodeURIComponent(who)}`));
+      const res = await lanes()['chat-audit'][':agent'].$get({
+        param: { ...here(), agent: encodeURIComponent(who) },
+      });
+      return ok(await res.json());
     }
     case 'publish_chat_audit': {
       const { day, entries } = a as {
@@ -539,13 +514,12 @@ export async function handleWorkspaceTool(
           note?: string;
         }>;
       };
-      return ok(
-        await http('POST', `${board()}/chat-audit`, {
-          ...(day !== undefined ? { day } : {}),
-          auditor: AUTHOR.name,
-          entries,
-        }),
-      );
+      const res = await lanes()['chat-audit'].$post({
+        param: here(),
+        // An absent day is undefined, and JSON drops it.
+        json: { day, auditor: AUTHOR.name, entries },
+      });
+      return ok(await res.json());
     }
     case 'register_dispatch': {
       const { taskId, worktreePath, reason } = a as {
@@ -557,20 +531,24 @@ export async function handleWorkspaceTool(
       // writes off this call (`dispatch.requested`): who asked for the lane,
       // and why this row now. Neither changes what the dispatch DOES — the
       // server ignores both when deciding whether a slot is free.
-      return ok(
-        await http('POST', `${board()}/dispatches`, {
+      const res = await lanes().dispatches.$post({
+        param: here(),
+        json: {
           taskId,
           worktreePath,
           author: AUTHOR,
-          ...(typeof reason === 'string' && reason.trim().length > 0
-            ? { reason: reason.trim() }
-            : {}),
-        }),
-      );
+          reason:
+            typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : undefined,
+        },
+      });
+      return ok(await res.json());
     }
     case 'close_dispatch': {
       const { taskId } = a as { taskId: string };
-      return ok(await http('DELETE', `${board()}/dispatches/${encodeURIComponent(taskId)}`));
+      const res = await lanes().dispatches[':taskId'].$delete({
+        param: { ...here(), taskId: encodeURIComponent(taskId) },
+      });
+      return ok(await res.json());
     }
     case 'report_dispatch': {
       const { taskId, prNumber, headCommit, checks, doneWhen } = a as {
@@ -586,16 +564,11 @@ export async function handleWorkspaceTool(
       // must hear the same refusal, in the same words, as one on this bundle.
       // `agentName` is this session's own name so the wake can say who
       // reported without the caller having to pass itself.
-      return ok(
-        await http('POST', `${board()}/dispatches/${encodeURIComponent(taskId)}/report`, {
-          prNumber,
-          headCommit,
-          checks,
-          doneWhen,
-          agentName: AUTHOR.name,
-          author: AUTHOR,
-        }),
-      );
+      const res = await lanes().dispatches[':taskId'].report.$post({
+        param: { ...here(), taskId: encodeURIComponent(taskId) },
+        json: { prNumber, headCommit, checks, doneWhen, agentName: AUTHOR.name, author: AUTHOR },
+      });
+      return ok(await res.json());
     }
     case 'set_parallelism_cap': {
       const { workspaceId, cap: rawCap } = a as { workspaceId: string; cap: unknown };
@@ -607,19 +580,12 @@ export async function handleWorkspaceTool(
       // The same PUT the board's panel and Team Lead's REST calls use, so
       // the change is recorded through the one store method with THIS
       // agent as the actor — `author: AUTHOR`, as every write tool sends.
-      const res = (await http(
-        'PUT',
-        `/workspaces/${encodeURIComponent(workspaceId)}/parallelism-cap`,
-        { cap: parsed.cap, author: AUTHOR },
-      )) as {
-        cap: number;
-        isDefault: boolean;
-        default: number;
-        inUse: number;
-        free: number;
-        holders: Array<{ taskId: string; title?: string; agentName?: string }>;
-        lastChange?: { actor: unknown; ts: number; from: number; to: number };
-      };
+      const res = await (
+        await onBoard()['parallelism-cap'].$put({
+          param: wsOf(workspaceId),
+          json: { cap: parsed.cap, author: AUTHOR },
+        })
+      ).json();
       return ok({
         workspaceId,
         cap: res.cap,
@@ -634,18 +600,17 @@ export async function handleWorkspaceTool(
     case 'set_github_subscriptions': {
       const { workspaceId, subscriptions } = a as { workspaceId: string; subscriptions: unknown };
       // The route checks the list and answers a 400 naming what is wrong.
-      return ok(
-        await http('PUT', `/workspaces/${encodeURIComponent(workspaceId)}/github-subscriptions`, {
-          subscriptions,
-        }),
-      );
+      const res = await onBoard()['github-subscriptions'].$put({
+        param: wsOf(workspaceId),
+        json: { subscriptions },
+      });
+      return ok(await res.json());
     }
     case 'set_board_embeds': {
       const { workspaceId, embeds } = a as { workspaceId: string; embeds: unknown };
       // The route checks the mapping's shape and answers a 400 naming it.
-      return ok(
-        await http('PUT', `/workspaces/${encodeURIComponent(workspaceId)}/embeds`, { embeds }),
-      );
+      const res = await onBoard().embeds.$put({ param: wsOf(workspaceId), json: { embeds } });
+      return ok(await res.json());
     }
     // --- The repo registry: this machine's checkouts of a project ---
     //
@@ -656,14 +621,14 @@ export async function handleWorkspaceTool(
     // loopback-only for that reason.
     case 'register_worktree': {
       const { path } = a as { path: string };
-      return ok(await http('POST', '/api/repos/checkouts', { path }));
+      return ok(await (await repos().checkouts.$post({ json: { path } })).json());
     }
     case 'list_worktrees': {
-      return ok(await http('GET', '/api/repos'));
+      return ok(await (await repos().$get()).json());
     }
     case 'unregister_worktree': {
       const { path } = a as { path: string };
-      return ok(await http('DELETE', '/api/repos/checkouts', { path }));
+      return ok(await (await repos().checkouts.$delete({ json: { path } })).json());
     }
     // --- Mounted project folders: this project's attachment storage ---
     //
@@ -672,9 +637,10 @@ export async function handleWorkspaceTool(
     // the routes behind them are loopback-only.
     case 'mount_folder': {
       const { path, privacy } = a as { path: string; privacy?: string };
-      return ok(
-        await http('POST', '/api/mounts', { path, ...(privacy === undefined ? {} : { privacy }) }),
-      );
+      const res = await mountsClient(http).api.mounts.$post({
+        json: { path, ...(privacy === undefined ? {} : { privacy }) },
+      });
+      return ok(await res.json());
     }
     case 'list_mounts': {
       const { path, mountId, after, limit } = a as {
@@ -683,38 +649,46 @@ export async function handleWorkspaceTool(
         after?: string;
         limit?: number;
       };
-      const q = new URLSearchParams();
-      if (path !== undefined) q.set('path', path);
-      if (mountId !== undefined) q.set('mountId', mountId);
-      if (after !== undefined) q.set('after', after);
-      if (limit !== undefined) q.set('limit', String(limit));
-      const qs = q.toString();
+      const mounts = mountsClient(http).api.mounts;
       // One mount's FILES, or the whole table — two answers, and which one
       // the caller wanted is said by naming a mount.
-      const route = mountId === undefined ? '/api/mounts' : '/api/mounts/files';
-      return ok(await http('GET', qs === '' ? route : `${route}?${qs}`));
+      if (mountId === undefined) {
+        return ok(await (await mounts.$get({ query: { path } })).json());
+      }
+      const res = await mounts.files.$get({
+        query: {
+          // The route answers 400 without a path; the server says so, not this.
+          path: path as string,
+          mountId,
+          after,
+          limit: limit === undefined ? undefined : String(limit),
+        },
+      });
+      return ok(await res.json());
     }
     case 'unmount_folder': {
       const { path, mountId } = a as { path: string; mountId: string };
-      return ok(await http('DELETE', '/api/mounts', { path, mountId }));
+      const res = await mountsClient(http).api.mounts.$delete({ json: { path, mountId } });
+      return ok(await res.json());
     }
     case 'set_project_privacy': {
       const { path, privacy, mountId } = a as { path: string; privacy: string; mountId?: string };
-      return ok(
-        await http('PUT', '/api/mounts/privacy', {
-          path,
-          privacy,
-          ...(mountId === undefined ? {} : { mountId }),
-        }),
-      );
+      const res = await mountsClient(http).api.mounts.privacy.$put({
+        json: { path, privacy, ...(mountId === undefined ? {} : { mountId }) },
+      });
+      return ok(await res.json());
     }
     case 'set_project_conventions': {
       const { path, conventionsPath } = a as { path: string; conventionsPath: string };
-      return ok(await http('PUT', '/api/mounts/conventions', { path, conventionsPath }));
+      const res = await mountsClient(http).api.mounts.conventions.$put({
+        json: { path, conventionsPath },
+      });
+      return ok(await res.json());
     }
     case 'read_project_conventions': {
       const { path } = a as { path: string };
-      return ok(await http('GET', `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+      const res = await mountsClient(http).api.mounts.conventions.$get({ query: { path } });
+      return ok(await res.json());
     }
     case 'set_project_meetings': {
       const { path, meetingsPath, retention, gitignore } = a as {
@@ -723,14 +697,15 @@ export async function handleWorkspaceTool(
         retention?: string;
         gitignore?: boolean;
       };
-      return ok(
-        await http('PUT', '/api/mounts/meetings', {
+      const res = await mountsClient(http).api.mounts.meetings.$put({
+        json: {
           path,
           meetingsPath,
-          ...(retention !== undefined ? { retention } : {}),
-          ...(gitignore !== undefined ? { gitignore } : {}),
-        }),
-      );
+          retention,
+          gitignore,
+        },
+      });
+      return ok(await res.json());
     }
     case 'set_doc_title': {
       const { workspaceId, docId, title } = a as {
@@ -738,13 +713,8 @@ export async function handleWorkspaceTool(
         docId: string;
         title: string;
       };
-      return ok(
-        await http(
-          'PUT',
-          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`,
-          { title },
-        ),
-      );
+      const res = await doc().title.$put({ param: docOf(workspaceId, docId), json: { title } });
+      return ok(await res.json());
     }
     case 'get_doc_metadata':
     case 'set_doc_metadata': {
@@ -753,12 +723,12 @@ export async function handleWorkspaceTool(
         docId: string;
         fields?: Record<string, unknown>;
       };
-      const path = `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/metadata`;
-      return ok(
+      const param = docOf(workspaceId, docId);
+      const res =
         name === 'get_doc_metadata'
-          ? await http('GET', path)
-          : await http('PUT', path, { fields: fields ?? {} }),
-      );
+          ? await doc().metadata.$get({ param })
+          : await doc().metadata.$put({ param, json: { fields: fields ?? {} } });
+      return ok(await res.json());
     }
     case 'move_doc_to_project': {
       const { workspaceId, docId, relPath } = a as {
@@ -766,13 +736,8 @@ export async function handleWorkspaceTool(
         docId: string;
         relPath: string;
       };
-      return ok(
-        await http(
-          'POST',
-          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move`,
-          { relPath },
-        ),
-      );
+      const res = await doc().move.$post({ param: docOf(workspaceId, docId), json: { relPath } });
+      return ok(await res.json());
     }
     case 'move_doc_file': {
       const { workspaceId, docId, path, mode } = a as {
@@ -781,13 +746,11 @@ export async function handleWorkspaceTool(
         path: string;
         mode: string;
       };
-      return ok(
-        await http(
-          'POST',
-          `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move-file`,
-          { path, mode },
-        ),
-      );
+      const res = await doc()['move-file'].$post({
+        param: docOf(workspaceId, docId),
+        json: { path, mode },
+      });
+      return ok(await res.json());
     }
     // Leaving is the server's DELETE plus this process's own half: the board's
     // stream and its keepalive. The server drops the board's watch key with
@@ -801,10 +764,9 @@ export async function handleWorkspaceTool(
       }
       let detached = true;
       try {
-        await http(
-          'DELETE',
-          `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(AUTHOR.id)}`,
-        );
+        await roster().agents[':agentId'].$delete({
+          param: { ...wsOf(workspaceId), agentId: encodeURIComponent(AUTHOR.id) },
+        });
       } catch (e) {
         if (!(e instanceof Error) || !e.message.includes(' → 404:')) throw e;
         detached = false;
@@ -837,16 +799,18 @@ export async function handleWorkspaceTool(
       const kept = typeof minute === 'string' ? minute.trim() : '';
       if (!workspaceId || !queueId) return err('workspaceId and queueId are required');
       if (words === '') return err('text is empty — say the answer');
-      const res = (await http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/voice-queue/${encodeURIComponent(queueId)}/answer`,
-        {
-          agentId: AUTHOR.id,
-          text: words,
-          ...(full ? { written: full } : {}),
-          ...(kept ? { minute: kept } : {}),
-        },
-      )) as { delivered?: boolean };
+      const res = await (
+        await roster()['voice-queue'][':id'].answer.$post({
+          param: { ...wsOf(workspaceId), id: encodeURIComponent(queueId) },
+          // An empty written or minute is sent as undefined, which JSON drops.
+          json: {
+            agentId: AUTHOR.id,
+            text: words,
+            written: full || undefined,
+            minute: kept || undefined,
+          },
+        })
+      ).json();
       return ok({
         delivered: res.delivered === true,
         ...(res.delivered === true
@@ -862,11 +826,12 @@ export async function handleWorkspaceTool(
       if (!workspaceId) return err('workspaceId is required');
       const place = placeOf(a);
       try {
-        const res = (await http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
-          agentId: AUTHOR.id,
-          agentName: AUTHOR.name,
-          ...place,
-        })) as { spot?: unknown };
+        const res = await (
+          await personClient(http).workspaces[':ws'].point.$post({
+            param: wsOf(workspaceId),
+            json: { agentId: AUTHOR.id, agentName: AUTHOR.name, ...place },
+          })
+        ).json();
         return ok({
           pointed: true,
           spot: res.spot,
@@ -887,11 +852,12 @@ export async function handleWorkspaceTool(
       if (!workspaceId) return err('workspaceId is required');
       if (words === '') return err('text is empty — say the line');
       try {
-        const res = (await http(
-          'POST',
-          `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`,
-          { agentId: AUTHOR.id, text: words },
-        )) as { played?: boolean; said?: boolean; lapsed?: string; hint?: string };
+        const res = await (
+          await leadMeetingClient(http).workspaces[':ws']['lead-chat'].meeting.say.$post({
+            param: wsOf(workspaceId),
+            json: { agentId: AUTHOR.id, text: words },
+          })
+        ).json();
         // Held until the speaker finished, then dropped: the room moved on.
         if (res.said === false) {
           return ok({ said: false, reason: res.lapsed ?? 'lapsed', note: res.hint ?? '' });
@@ -912,9 +878,17 @@ export async function handleWorkspaceTool(
     case 'coach_moment': {
       const { goal, matched, observed, line } = a as Record<string, unknown>;
       try {
-        const r = (await http('POST', '/coach/moments', { goal, matched, observed, line })) as {
-          id?: string;
-        };
+        // Sent unchecked, each field by name: the server's `checkMoment` judges them.
+        const r = await (
+          await agentMachineClient(http).coach.moments.$post({
+            json: {
+              goal: goal as number,
+              matched: matched as string,
+              observed: observed as string,
+              line: line as string,
+            },
+          })
+        ).json();
         return ok({ raised: true, id: r.id });
       } catch (e) {
         // The server's refusal names its reason; hand it back as an answer.
@@ -943,14 +917,17 @@ export async function handleWorkspaceTool(
       if (goal !== undefined && goal !== null && typeof goal !== 'string') {
         return err('goal is a plan goal id, urgent, not-this-week or drop, or null');
       }
-      const body = {
-        agentId: AUTHOR.id,
-        key,
-        ...(rank !== undefined ? { rank } : {}),
-        ...(goal !== undefined ? { goal } : {}),
-      };
       try {
-        const res = (await http('POST', '/api/review-queue/rank', body)) as Record<string, unknown>;
+        const sent = await agentMachineClient(http).api['review-queue'].rank.$post({
+          // Checked above; a field left out is undefined, which JSON drops.
+          json: {
+            agentId: AUTHOR.id,
+            key,
+            rank: rank as number | null | undefined,
+            goal: goal as string | null | undefined,
+          },
+        });
+        const res = (await sent.json()) as Record<string, unknown>;
         return ok({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
@@ -968,7 +945,7 @@ export async function handleWorkspaceTool(
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.
-      return ok(await http('POST', '/api/plugin/refresh'));
+      return ok(await (await agentMachineClient(http).api.plugin.refresh.$post()).json());
     }
     // COMPAT: `list_attachments` is the name this tool had before the agent
     // roster moved off `attachments` — the noun the glossary spends on docs,
@@ -977,8 +954,8 @@ export async function handleWorkspaceTool(
     case 'list_attachments':
     case 'list_agents': {
       const { workspaceId } = a as { workspaceId: string };
-      const res = await http('GET', `/workspaces/${encodeURIComponent(workspaceId)}/agents`);
-      return ok(res);
+      const res = await roster().agents.$get({ param: wsOf(workspaceId) });
+      return ok(await res.json());
     }
   }
   return undefined;

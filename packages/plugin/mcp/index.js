@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.370";
+var version2 = "0.1.387";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -14160,6 +14160,323 @@ function claimWarning(row, selfAgentId, now) {
   return `[claim] ${namedRow(row)} ${held}. Do not start this task blind — message that session over claude-hive, agree who has it, and take a different task if they do. Nothing here refuses you: two sessions on one task is sometimes right, but it has to be a decision rather than a collision neither side can see.`;
 }
 
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/utils.js
+var mergePath = (base, path) => {
+  base = base.replace(/\/+$/, "");
+  base = base + "/";
+  path = path.replace(/^\/+/, "");
+  return base + path;
+};
+var replaceUrlParam = (urlString, params) => {
+  for (const [k, v] of Object.entries(params)) {
+    const reg = new RegExp("/:" + k + "(?:{[^/]+})?\\??(?=/|$)");
+    urlString = urlString.replace(reg, () => v ? `/${v}` : "");
+  }
+  return urlString;
+};
+var buildSearchParams = (query) => {
+  const searchParams = new URLSearchParams;
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined)
+      continue;
+    if (Array.isArray(v))
+      for (const v2 of v) {
+        if (v2 === undefined)
+          continue;
+        searchParams.append(k, v2);
+      }
+    else
+      searchParams.set(k, v);
+  }
+  return searchParams;
+};
+var replaceUrlProtocol = (urlString, protocol) => {
+  switch (protocol) {
+    case "ws":
+      return urlString.replace(/^http/, "ws");
+    case "http":
+      return urlString.replace(/^ws/, "http");
+  }
+};
+var removeIndexString = (urlString) => {
+  if (/^https?:\/\/[^\/]+?\/index(?=\?|$)/.test(urlString))
+    return urlString.replace(/\/index(?=\?|$)/, "/");
+  return urlString.replace(/\/index(?=\?|$)/, "");
+};
+function isObject2(item) {
+  return typeof item === "object" && item !== null && !Array.isArray(item);
+}
+function deepMerge(target, source) {
+  if (!isObject2(target) && !isObject2(source))
+    return source;
+  const merged = { ...target };
+  for (const key in source) {
+    const value = source[key];
+    if (isObject2(merged[key]) && isObject2(value))
+      merged[key] = deepMerge(merged[key], value);
+    else
+      merged[key] = value;
+  }
+  return merged;
+}
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/utils/cookie.js
+var validCookieNameRegEx = /^[\w!#$%&'*.^`|~+-]+$/;
+var _serialize = (name, value, opt = {}) => {
+  if (!validCookieNameRegEx.test(name))
+    throw new Error("Invalid cookie name");
+  let cookie = `${name}=${value}`;
+  if (/^__secure-/i.test(name) && !opt.secure)
+    throw new Error("__Secure- Cookie must have Secure attributes");
+  if (/^__host-/i.test(name)) {
+    if (!opt.secure)
+      throw new Error("__Host- Cookie must have Secure attributes");
+    if (opt.path !== "/")
+      throw new Error('__Host- Cookie must have Path attributes with "/"');
+    if (opt.domain)
+      throw new Error("__Host- Cookie must not have Domain attributes");
+  }
+  for (const key of [
+    "domain",
+    "path",
+    "sameSite",
+    "priority"
+  ])
+    if (opt[key] && /[;\r\n]/.test(opt[key]))
+      throw new Error(`${key} must not contain ";", "\\r", or "\\n"`);
+  if (opt && typeof opt.maxAge === "number" && opt.maxAge >= 0) {
+    if (opt.maxAge > 34560000)
+      throw new Error("Cookies Max-Age SHOULD NOT be greater than 400 days (34560000 seconds) in duration.");
+    cookie += `; Max-Age=${opt.maxAge | 0}`;
+  }
+  if (opt.domain && opt.prefix !== "host")
+    cookie += `; Domain=${opt.domain}`;
+  if (opt.path)
+    cookie += `; Path=${opt.path}`;
+  if (opt.expires) {
+    if (opt.expires.getTime() - Date.now() > 34560000000)
+      throw new Error("Cookies Expires SHOULD NOT be greater than 400 days (34560000 seconds) in the future.");
+    cookie += `; Expires=${opt.expires.toUTCString()}`;
+  }
+  if (opt.httpOnly)
+    cookie += "; HttpOnly";
+  if (opt.secure)
+    cookie += "; Secure";
+  if (opt.sameSite)
+    cookie += `; SameSite=${opt.sameSite.charAt(0).toUpperCase() + opt.sameSite.slice(1)}`;
+  if (opt.priority)
+    cookie += `; Priority=${opt.priority.charAt(0).toUpperCase() + opt.priority.slice(1)}`;
+  if (opt.partitioned) {
+    if (!opt.secure)
+      throw new Error("Partitioned Cookie must have Secure attributes");
+    cookie += "; Partitioned";
+  }
+  return cookie;
+};
+var serialize = (name, value, opt) => {
+  value = encodeURIComponent(value);
+  return _serialize(name, value, opt);
+};
+
+// node_modules/.bun/hono@4.13.18/node_modules/hono/dist/client/client.js
+var createProxy = (callback, path) => {
+  return new Proxy(() => {}, {
+    get(_obj, key) {
+      if (typeof key !== "string" || key === "then")
+        return;
+      return createProxy(callback, [...path, key]);
+    },
+    apply(_1, _2, args) {
+      return callback({
+        path,
+        args
+      });
+    }
+  });
+};
+var appendQueryParams = (url, searchParams) => {
+  const queryString = searchParams.toString();
+  return queryString ? `${url}?${queryString}` : url;
+};
+var ClientRequestImpl = class {
+  url;
+  method;
+  buildSearchParams;
+  queryParams = undefined;
+  pathParams = {};
+  rBody;
+  cType = undefined;
+  constructor(url, method, options) {
+    this.url = url;
+    this.method = method;
+    this.buildSearchParams = options.buildSearchParams;
+  }
+  fetch = async (args, opt) => {
+    if (args) {
+      if (args.query)
+        this.queryParams = this.buildSearchParams(args.query);
+      if (args.form) {
+        const form = new FormData;
+        for (const [k, v] of Object.entries(args.form)) {
+          if (v === undefined)
+            continue;
+          if (Array.isArray(v))
+            for (const v2 of v) {
+              if (v2 === undefined)
+                continue;
+              form.append(k, v2);
+            }
+          else
+            form.append(k, v);
+        }
+        this.rBody = form;
+      }
+      if (args.json !== undefined) {
+        this.rBody = JSON.stringify(args.json);
+        this.cType = "application/json";
+      }
+      if (args.param)
+        this.pathParams = args.param;
+    }
+    let methodUpperCase = this.method.toUpperCase();
+    const headerValues = {
+      ...args?.header,
+      ...typeof opt?.headers === "function" ? await opt.headers() : opt?.headers
+    };
+    if (args?.cookie) {
+      const cookies = [];
+      for (const [key, value] of Object.entries(args.cookie)) {
+        if (value === undefined)
+          continue;
+        cookies.push(serialize(key, value));
+      }
+      if (cookies.length > 0)
+        headerValues["Cookie"] = cookies.join("; ");
+    }
+    if (this.cType)
+      headerValues["Content-Type"] = this.cType;
+    const headers = new Headers;
+    for (const [key, value] of Object.entries(headerValues))
+      if (value !== undefined)
+        headers.set(key, value);
+    let url = this.url;
+    url = removeIndexString(url);
+    url = replaceUrlParam(url, this.pathParams);
+    if (this.queryParams)
+      url = appendQueryParams(url, this.queryParams);
+    methodUpperCase = this.method.toUpperCase();
+    const setBody = !(methodUpperCase === "GET" || methodUpperCase === "HEAD");
+    return (opt?.fetch || fetch)(url, {
+      body: setBody ? this.rBody : undefined,
+      method: methodUpperCase,
+      headers,
+      ...opt?.init
+    });
+  };
+};
+var hc = (baseUrl, options) => createProxy(function proxyCallback(opts) {
+  const buildSearchParamsOption = options?.buildSearchParams ?? buildSearchParams;
+  const parts = [...opts.path];
+  const lastParts = parts.slice(-3).reverse();
+  if (lastParts[0] === "toString") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback.toString();
+  }
+  if (lastParts[0] === "valueOf") {
+    if (lastParts[1] === "name")
+      return lastParts[2] || "";
+    return proxyCallback;
+  }
+  let method = "";
+  if (/^\$/.test(lastParts[0])) {
+    const last = parts.pop();
+    if (last)
+      method = last.replace(/^\$/, "");
+  }
+  const path = parts.join("/");
+  const url = mergePath(baseUrl, path);
+  if (method === "url" || method === "path") {
+    let result = removeIndexString(url);
+    if (opts.args[0]) {
+      if (opts.args[0].param)
+        result = replaceUrlParam(result, opts.args[0].param);
+      if (opts.args[0].query)
+        result = appendQueryParams(result, buildSearchParamsOption(opts.args[0].query));
+    }
+    if (method === "url")
+      return new URL(result);
+    return result.slice(baseUrl.replace(/\/+$/, "").length).replace(/^\/?/, "/");
+  }
+  if (method === "ws") {
+    const normalizedUrl = removeIndexString(url);
+    const webSocketUrl = replaceUrlProtocol(opts.args[0]?.param ? replaceUrlParam(normalizedUrl, opts.args[0].param) : normalizedUrl, "ws");
+    const targetUrl = new URL(webSocketUrl);
+    const queryParams = opts.args[0]?.query;
+    if (queryParams)
+      buildSearchParamsOption(queryParams).forEach((value, key) => {
+        targetUrl.searchParams.append(key, value);
+      });
+    const establishWebSocket = (...args) => {
+      if (options?.webSocket !== undefined && typeof options.webSocket === "function")
+        return options.webSocket(...args);
+      return new WebSocket(...args);
+    };
+    return establishWebSocket(targetUrl.toString());
+  }
+  const req = new ClientRequestImpl(url, method, { buildSearchParams: buildSearchParamsOption });
+  if (method) {
+    options ??= {};
+    const reqOptions = { ...opts.args[1] };
+    const baseHeaders = options.headers;
+    const reqHeaders = reqOptions.headers;
+    if (baseHeaders && reqHeaders)
+      reqOptions.headers = async () => ({
+        ...typeof baseHeaders === "function" ? await baseHeaders() : baseHeaders,
+        ...typeof reqHeaders === "function" ? await reqHeaders() : reqHeaders
+      });
+    const args = deepMerge(options, reqOptions);
+    return req.fetch(opts.args[0], args);
+  }
+  return req;
+}, []);
+
+// packages/mcp/src/server-client.ts
+var PLACEHOLDER_ORIGIN = "http://claude-workspaces.invalid";
+function typedClient(http) {
+  return hc(PLACEHOLDER_ORIGIN, {
+    fetch: async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      const data = await http(init?.method ?? "GET", `${url.pathname}${url.search}`, body);
+      return Response.json(data);
+    }
+  });
+}
+var mountsClient = (http) => typedClient(http);
+var docThreadsClient = (http) => typedClient(http);
+var docEditsClient = (http) => typedClient(http);
+var docLifecycleClient = (http) => typedClient(http);
+var attachmentsClient = (http) => typedClient(http);
+var shareClient = (http) => typedClient(http);
+var agentNotesClient = (http) => typedClient(http);
+var taskStateClient = (http) => typedClient(http);
+var taskContentClient = (http) => typedClient(http);
+var taskBoardClient = (http) => typedClient(http);
+var reviewItemsClient = (http) => typedClient(http);
+var libraryFoldersClient = (http) => typedClient(http);
+var docComponentsClient = (http) => typedClient(http);
+var personClient = (http) => typedClient(http);
+var whiteboardClient = (http) => typedClient(http);
+var inboxClient = (http) => typedClient(http);
+var leadChatFilesClient = (http) => typedClient(http);
+var workspaceBoardClient = (http) => typedClient(http);
+var workspaceAgentsClient = (http) => typedClient(http);
+var dispatchesClient = (http) => typedClient(http);
+var docFileClient = (http) => typedClient(http);
+var leadMeetingClient = (http) => typedClient(http);
+var agentMachineClient = (http) => typedClient(http);
+
 // packages/mcp/src/attachments.ts
 function now(deps) {
   return (deps.now ?? Date.now)();
@@ -14178,14 +14495,23 @@ function markAttached(deps, workspaceId) {
 async function sendDueHeartbeats(deps) {
   for (const workspaceId of deps.keepalive.due()) {
     try {
-      await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(deps.author.id)}/heartbeat`, { toolCallAt: now(deps) });
+      await workspaceAgentsClient(deps.http).workspaces[":ws"].agents[":agentId"].heartbeat.$post({
+        param: {
+          ws: encodeURIComponent(workspaceId),
+          agentId: encodeURIComponent(deps.author.id)
+        },
+        json: { toolCallAt: now(deps) }
+      });
     } catch {}
   }
 }
 async function claimNoticeFor(deps, taskId) {
   for (const workspaceId of deps.keepalive.boards()) {
     try {
-      const res = await deps.http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/next?includeBlocked=true`);
+      const res = await (await taskBoardClient(deps.http).workspaces[":ws"].next.$get({
+        param: { ws: encodeURIComponent(workspaceId) },
+        query: { includeBlocked: "true" }
+      })).json();
       const row = res.tasks?.find((t) => t?.id === taskId);
       if (row)
         return claimWarning(row, deps.author.id, now(deps));
@@ -15536,7 +15862,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   });
   if (event === "voice.request" && typeof p.queueId === "string" && p.workspaceId) {
     try {
-      await deps.http("POST", `/workspaces/${encodeURIComponent(p.workspaceId)}/voice-queue/${encodeURIComponent(p.queueId)}/ack`, {});
+      await workspaceAgentsClient(deps.http).workspaces[":ws"]["voice-queue"][":id"].ack.$post({ param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.queueId) } }, { init: { body: "{}" } });
     } catch {}
   }
 }
@@ -15860,7 +16186,9 @@ async function ackCommentRow(deps, payload) {
   if (typeof p?.commentQueueId !== "string" || typeof p?.workspaceId !== "string")
     return;
   try {
-    await deps.http("POST", `/workspaces/${encodeURIComponent(p.workspaceId)}/comment-queue/${encodeURIComponent(p.commentQueueId)}/ack`, {});
+    await workspaceAgentsClient(deps.http).workspaces[":ws"]["comment-queue"][":id"].ack.$post({
+      param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.commentQueueId) }
+    }, { init: { body: "{}" } });
   } catch {}
 }
 
@@ -18274,7 +18602,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_share_member_role",
-      description: "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer.",
+      description: "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer. Any other change that lets them do more (a comment or view member moved to 'member', which is edit) needs the owner's own proof from the board's page; without it the call gets a 403 `owner-proof-required` and nothing changes.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19861,77 +20189,92 @@ function boardPathOf(toolName, args) {
 // packages/mcp/src/tools/components.ts
 var str = (v) => typeof v === "string" ? v : "";
 async function handleComponentTool(name, a, ctx) {
+  const api2 = () => docComponentsClient(ctx.http).workspaces[":ws"].docs[":docId"];
   const doc2 = () => {
     const docId = str(a.docId);
     if (docId === "")
       throw new Error(`${name} needs a docId`);
-    return `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}`;
+    return { ws: encodeURIComponent(boardIdOf(name, a)), docId: encodeURIComponent(docId) };
   };
   const state = () => {
     const id = str(a.componentId);
     if (id === "")
       throw new Error(`${name} needs a componentId: the tag's id prop`);
-    return `${doc2()}/agent-components/${encodeURIComponent(id)}/state`;
+    return { ...doc2(), id: encodeURIComponent(id) };
   };
+  const stateApi = () => api2()["agent-components"][":id"].state;
   switch (name) {
     case "list_components":
-      return ctx.ok(await ctx.http("GET", `${doc2()}/agent-components`));
+      return ctx.ok(await (await api2()["agent-components"].$get({ param: doc2() })).json());
     case "get_component_state": {
       const path = str(a.path);
-      const q = path ? `?path=${encodeURIComponent(path)}` : "";
-      return ctx.ok(await ctx.http("GET", `${state()}${q}`));
+      return ctx.ok(await (await stateApi().$get({ param: state(), query: path ? { path } : {} })).json());
     }
     case "set_component_state":
-      return ctx.ok(await ctx.http("POST", state(), { ops: a.ops, author: ctx.suggestionAuthor() }));
+      return ctx.ok(await (await stateApi().$post({
+        param: state(),
+        json: { ops: a.ops, author: ctx.suggestionAuthor() }
+      })).json());
     case "place_component":
-      return ctx.ok(await ctx.http("POST", `${doc2()}/agent-components/place`, {
-        importPath: a.importPath,
-        ...a.name !== undefined ? { name: a.name } : {},
-        props: a.props,
-        ...a.headingId !== undefined ? { headingId: a.headingId } : {},
-        author: ctx.suggestionAuthor()
-      }));
+      return ctx.ok(await (await api2()["agent-components"].place.$post({
+        param: doc2(),
+        json: {
+          importPath: a.importPath,
+          name: a.name,
+          props: a.props,
+          headingId: a.headingId,
+          author: ctx.suggestionAuthor()
+        }
+      })).json());
     case "request_component_grant":
-      return ctx.ok(await ctx.http("POST", `${doc2()}/component-grants`, {
-        folder: a.folder,
-        taskId: a.taskId,
-        why: a.why,
-        author: ctx.suggestionAuthor()
-      }));
+      return ctx.ok(await (await api2()["component-grants"].$post({
+        param: doc2(),
+        json: {
+          folder: a.folder,
+          taskId: a.taskId,
+          why: a.why,
+          author: ctx.suggestionAuthor()
+        }
+      })).json());
     default:
       return;
   }
 }
 
 // packages/mcp/src/thread-create.ts
+function present2(body) {
+  return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
+}
 function threadCreateRequest(input, author, board) {
   const doc2 = encodeURIComponent(input.docId);
   if (input.find === undefined) {
     return {
+      by: "subject",
       path: `${board}/docs/${doc2}/threads`,
-      body: {
+      body: present2({
         author,
         text: input.text,
         anchor: { kind: "subject" },
-        ...input.review !== undefined ? { review: input.review } : {},
-        ...input.to !== undefined ? { to: input.to } : {}
-      }
+        review: input.review,
+        to: input.to
+      })
     };
   }
   return {
+    by: "find",
     path: `${board}/docs/${doc2}/threads/by_find`,
-    body: {
+    body: present2({
       author,
       text: input.text,
       find: input.find,
-      ...input.contextBefore !== undefined ? { contextBefore: input.contextBefore } : {},
-      ...input.contextAfter !== undefined ? { contextAfter: input.contextAfter } : {},
-      ...input.occurrence !== undefined ? { occurrence: input.occurrence } : {},
-      ...input.path !== undefined ? { path: input.path } : {},
-      ...input.suggest !== undefined ? { suggest: input.suggest } : {},
-      ...input.review !== undefined ? { review: input.review } : {},
-      ...input.to !== undefined ? { to: input.to } : {}
-    }
+      contextBefore: input.contextBefore,
+      contextAfter: input.contextAfter,
+      occurrence: input.occurrence,
+      path: input.path,
+      suggest: input.suggest,
+      review: input.review,
+      to: input.to
+    })
   };
 }
 
@@ -19941,8 +20284,7 @@ var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason", "taskId", "why
 async function watchCreated(watchDoc, a, res) {
   if (a.subscribe === false)
     return;
-  const made = res?.docId;
-  const docId = typeof made === "string" && made !== "" ? made : a.docId;
+  const docId = res.docId !== undefined && res.docId !== "" ? res.docId : a.docId;
   if (typeof docId === "string" && docId !== "")
     await watchDoc(docId);
 }
@@ -19971,57 +20313,93 @@ async function handleDocsTool(name, a, ctx) {
   } = ctx;
   const boardId = () => boardIdOf(name, a);
   const board = () => boardPathOf(name, a);
-  const scoped = () => ({
-    author: AUTHOR,
-    ...a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}
+  const threadsApi = () => docThreadsClient(http).workspaces[":ws"].docs[":docId"];
+  const threadParam = (docId, threadId) => ({
+    ws: encodeURIComponent(boardId()),
+    docId: encodeURIComponent(docId),
+    threadId: encodeURIComponent(threadId)
   });
+  const boardDocs = () => docLifecycleClient(http).workspaces[":ws"];
+  const lifecycleApi = () => boardDocs().docs[":docId"];
+  const sets = () => attachmentsClient(http).workspaces;
+  const shares = () => shareClient(http);
+  const boardParam = () => ({ ws: encodeURIComponent(boardId()) });
+  const setParam = (setId) => ({ ...boardParam(), setId: encodeURIComponent(setId) });
+  const editsApi = () => docEditsClient(http).workspaces[":ws"].docs[":docId"];
+  const docParam = (docId) => ({
+    ws: encodeURIComponent(boardId()),
+    docId: encodeURIComponent(docId)
+  });
+  const anchorParam = (docId, anchorId) => ({
+    ...docParam(docId),
+    anchorId: encodeURIComponent(anchorId)
+  });
+  const suggestionParam = (docId, sid) => ({
+    ...docParam(docId),
+    sid: encodeURIComponent(sid)
+  });
+  const scoped = () => {
+    const fields = { author: AUTHOR };
+    if (a.confirmOverwriteHumanEdits === true)
+      fields.confirmOverwriteHumanEdits = true;
+    return fields;
+  };
   switch (name) {
     case "list_docs": {
       const { kind, query, sourcePrefix, limit, cursor, full } = a;
-      const params = new URLSearchParams;
-      if (kind)
-        params.set("kind", kind);
-      if (query)
-        params.set("query", query);
-      if (sourcePrefix)
-        params.set("sourcePrefix", sourcePrefix);
-      params.set("limit", String(typeof limit === "number" && limit > 0 ? Math.min(Math.floor(limit), 500) : 50));
-      if (cursor)
-        params.set("cursor", cursor);
-      if (full)
-        params.set("full", "1");
-      const res = await http("GET", `${board()}/docs?${params.toString()}`);
+      const res = await boardDocs().docs.$get({
+        param: { ws: encodeURIComponent(boardId()) },
+        query: {
+          kind: kind || undefined,
+          query: query || undefined,
+          sourcePrefix: sourcePrefix || undefined,
+          limit: String(typeof limit === "number" && limit > 0 ? Math.min(Math.floor(limit), 500) : 50),
+          cursor: cursor || undefined,
+          full: full ? "1" : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "list_threads": {
       const { docId, status } = a;
-      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/threads${qs}`);
+      const res = await threadsApi().threads.$get({
+        param: { ws: encodeURIComponent(boardId()), docId: encodeURIComponent(docId) },
+        query: status ? { status } : {}
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "get_thread": {
       const { docId, threadId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}`);
+      const res = await threadsApi().threads[":threadId"].$get({ param: threadParam(docId, threadId) }).then((r) => r.json());
       return ok2(res);
     }
     case "post_reply": {
       const { docId, threadId, text, review, to } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, {
-        author: AUTHOR,
-        text,
-        ...review !== undefined ? { review } : {},
-        ...to !== undefined ? { to } : {}
-      });
+      const res = await threadsApi().threads[":threadId"].comments.$post({
+        param: threadParam(docId, threadId),
+        json: {
+          author: AUTHOR,
+          text,
+          review,
+          to
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "link_review_item": {
       const { docId, threadId, item, text } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/linked-items`, { author: AUTHOR, item, ...text !== undefined ? { text } : {} });
+      const res = await threadsApi().threads[":threadId"]["linked-items"].$post({
+        param: threadParam(docId, threadId),
+        json: { author: AUTHOR, item, text }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "edit_comment": {
       const { docId, threadId, commentId, text, reason } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/edit-comment`, { author: AUTHOR, commentId, text, ...reason !== undefined ? { reason } : {} });
+      const res = await threadsApi().threads[":threadId"]["edit-comment"].$post({
+        param: threadParam(docId, threadId),
+        json: { author: AUTHOR, commentId, text, reason }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "post_status": {
@@ -20032,23 +20410,26 @@ async function handleDocsTool(name, a, ctx) {
       if (body.length > STATUS_TEXT_MAX) {
         return err2(`text is over ${STATUS_TEXT_MAX} chars — a status is a line to a few sentences; the full report is already on the Activity tab from your end-of-turn message`);
       }
-      let path;
+      const note = { agent: AUTHOR.name, kind: "status", text: body, at: Date.now() };
+      const notes = agentNotesClient(http).workspaces[":ws"];
+      let sent;
       if (taskId !== undefined && taskId !== "") {
-        path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
+        sent = notes.tasks[":taskId"].notes.$post({
+          param: { ...boardParam(), taskId: encodeURIComponent(taskId) },
+          json: note
+        });
       } else {
         const given = typeof a.workspaceId === "string" ? a.workspaceId.trim() : "";
         const ws = given !== "" ? given : DEFAULT_WORKSPACE_ID;
         if (ws === "") {
           return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on");
         }
-        path = `/workspaces/${encodeURIComponent(ws)}/agents/${encodeURIComponent(AUTHOR.name)}/notes`;
+        sent = notes.agents[":agent"].notes.$post({
+          param: { ws: encodeURIComponent(ws), agent: encodeURIComponent(AUTHOR.name) },
+          json: note
+        });
       }
-      const res = await http("POST", path, {
-        agent: AUTHOR.name,
-        kind: "status",
-        text: body,
-        at: Date.now()
-      });
+      const res = await sent.then((r) => r.json());
       return ok2({
         posted: true,
         ...res.taskId !== undefined ? { taskId: res.taskId } : {},
@@ -20059,13 +20440,15 @@ async function handleDocsTool(name, a, ctx) {
       });
     }
     case "create_thread": {
-      const { path, body } = threadCreateRequest(a, AUTHOR, board());
-      const res = await http("POST", path, body);
-      return ok2(res);
+      const input = a;
+      const req = threadCreateRequest(input, AUTHOR, board());
+      const param = docParam(input.docId);
+      const res = req.by === "find" ? await threadsApi().threads.by_find.$post({ param, json: req.body }) : await threadsApi().threads.$post({ param, json: req.body });
+      return ok2(await res.json());
     }
     case "resolve_thread": {
       const { docId, threadId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/resolve`);
+      const res = await threadsApi().threads[":threadId"].resolve.$post({ param: threadParam(docId, threadId) }).then((r) => r.json());
       return ok2(res);
     }
     case "set_thread_progress": {
@@ -20073,87 +20456,104 @@ async function handleDocsTool(name, a, ctx) {
       if (state !== "working" && state !== "done" && state !== "open") {
         return err2("state must be 'working', 'done' or 'open'");
       }
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/progress`, { state, author: AUTHOR });
+      const res = await threadsApi().threads[":threadId"].progress.$post({
+        param: threadParam(docId, threadId),
+        json: { state, author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "summarize_thread": {
       const { docId, threadId, force } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/summary`, force ? { force: true } : undefined);
+      const res = await threadsApi().threads[":threadId"].summary.$post({
+        param: threadParam(docId, threadId),
+        json: force ? { force: true } : {}
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "reopen_thread": {
       const { docId, threadId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/reopen`);
+      const res = await threadsApi().threads[":threadId"].reopen.$post({ param: threadParam(docId, threadId) }).then((r) => r.json());
       return ok2(res);
     }
     case "get_doc": {
       const { docId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/content?reader=${encodeURIComponent(AUTHOR.id)}`);
+      const res = await lifecycleApi().content.$get({ param: docParam(docId), query: { reader: AUTHOR.id } }).then((r) => r.json());
       return ok2(res);
     }
     case "doc_status": {
       const { docId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/status`);
+      const res = await lifecycleApi().status.$get({ param: docParam(docId) }).then((r) => r.json());
       return ok2(res);
     }
     case "create_review_doc":
     case "attach_markdown": {
       const { docId, path, title, setId, producedBy } = a;
-      const res = await http("POST", `${board()}/docs`, {
-        docId,
-        type: "markdown",
-        sourceUrl: path,
-        owner: CWD,
-        ...title ? { title } : {},
-        ...setId ? { setId } : {},
-        ...producedBy ? { producedBy } : {}
-      });
+      const res = await boardDocs().docs.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          type: "markdown",
+          sourceUrl: path,
+          owner: CWD,
+          title: title || undefined,
+          setId: setId || undefined,
+          producedBy: producedBy || undefined
+        }
+      }).then((r) => r.json());
       await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "set_doc_content": {
       const { docId, markdown, confirmOverwriteHumanEdits } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/content`, {
-        markdown,
-        author: AUTHOR,
-        ...confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}
-      });
+      const res = await lifecycleApi().content.$post({
+        param: docParam(docId),
+        json: {
+          markdown,
+          author: AUTHOR,
+          confirmOverwriteHumanEdits: confirmOverwriteHumanEdits === true ? true : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "reparse_from_disk": {
       const { docId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/reparse_from_disk`);
+      const res = await lifecycleApi().reparse_from_disk.$post({ param: docParam(docId) }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_doc": {
       const { docId, force } = a;
-      const qs = force ? "?force=true" : "";
-      const res = await http("DELETE", `${board()}/docs/${encodeURIComponent(docId)}${qs}`);
+      const res = await lifecycleApi().$delete({ param: docParam(docId), query: { force: force ? "true" : undefined } }).then((r) => r.json());
       return ok2(res);
     }
     case "bind_mock":
     case "attach_mockup": {
       const { docId, sourceHtmlPath, title } = a;
-      const res = await http("POST", `${board()}/docs`, {
-        docId,
-        type: "mockup",
-        owner: CWD,
-        ...sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {},
-        ...title ? { title } : {}
-      });
+      const res = await boardDocs().docs.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          type: "mockup",
+          owner: CWD,
+          sourceUrl: sourceHtmlPath || undefined,
+          title: title || undefined
+        }
+      }).then((r) => r.json());
       await watchCreated(watchDoc, a, res);
       return ok2(res);
     }
     case "attach_app": {
       const { docId, origin, title, servesPrefix } = a;
-      const res = await http("POST", `${board()}/apps`, {
-        docId,
-        origin,
-        owner: CWD,
-        producedBy: { agentId: AUTHOR.id },
-        ...title ? { title } : {},
-        ...typeof servesPrefix === "boolean" ? { servesPrefix } : {}
-      });
+      const res = await boardDocs().apps.$post({
+        param: { ws: encodeURIComponent(boardId()) },
+        json: {
+          docId,
+          origin,
+          owner: CWD,
+          producedBy: { agentId: AUTHOR.id },
+          title: title || undefined,
+          servesPrefix: typeof servesPrefix === "boolean" ? servesPrefix : undefined
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "bind_folder":
@@ -20169,19 +20569,21 @@ async function handleDocsTool(name, a, ctx) {
         producedBy,
         privacy
       } = a;
-      const res = await http("POST", "/workspaces", {
-        folderPath,
-        owner: CWD,
-        ...setId ? { workspaceId: setId } : {},
-        hubWorkspaceId: boardId(),
-        ...title ? { title } : {},
-        ...include ? { include } : {},
-        ...exclude ? { exclude } : {},
-        ...maxFiles !== undefined ? { maxFiles } : {},
-        ...producedBy ? { producedBy } : {},
-        ...privacy !== undefined ? { privacy } : {}
-      });
-      if (subscribe !== false && res?.workspaceId) {
+      const res = await sets().$post({
+        json: {
+          folderPath,
+          owner: CWD,
+          workspaceId: setId || undefined,
+          hubWorkspaceId: boardId(),
+          title: title || undefined,
+          include: include || undefined,
+          exclude: exclude || undefined,
+          maxFiles,
+          producedBy: producedBy || undefined,
+          privacy
+        }
+      }).then((r) => r.json());
+      if (subscribe !== false && "workspaceId" in res && res.workspaceId) {
         await watchWorkspace(res.workspaceId);
       }
       return ok2(res);
@@ -20199,19 +20601,22 @@ async function handleDocsTool(name, a, ctx) {
         subscribe,
         producedBy
       } = a;
-      const res = await http("POST", `${board()}/attachments`, {
-        repo,
-        base,
-        ...target ? { target } : {},
-        owner: CWD,
-        ...reviewId ? { reviewId } : {},
-        ...title ? { title } : {},
-        ...exclude ? { exclude } : {},
-        ...groups ? { groups } : {},
-        ...maxFiles !== undefined ? { maxFiles } : {},
-        ...producedBy ? { producedBy } : {}
-      });
-      if (subscribe !== false && res?.reviewId) {
+      const res = await sets()[":ws"].attachments.$post({
+        param: boardParam(),
+        json: {
+          repo,
+          base,
+          target: target || undefined,
+          owner: CWD,
+          reviewId: reviewId || undefined,
+          title: title || undefined,
+          exclude: exclude || undefined,
+          groups: groups || undefined,
+          maxFiles,
+          producedBy: producedBy || undefined
+        }
+      }).then((r) => r.json());
+      if (subscribe !== false && res.reviewId) {
         await watchWorkspace(res.reviewId);
       }
       return ok2(res);
@@ -20219,53 +20624,51 @@ async function handleDocsTool(name, a, ctx) {
     case "delete_review":
     case "delete_attachment_set": {
       const { setId, force, purge } = a;
-      const params = [force ? "force=true" : "", purge ? "purge=true" : ""].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      const res = await http("DELETE", `${board()}/attachments/${encodeURIComponent(setId)}${qs}`);
+      const res = await sets()[":ws"].attachments[":setId"].$delete({
+        param: setParam(setId),
+        query: { force: force ? "true" : undefined, purge: purge ? "true" : undefined }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "archive_review":
     case "archive_attachment_set": {
       const { setId, reason } = a;
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/archive`, {
-        author: AUTHOR,
-        ...reason !== undefined ? { reason } : {}
-      });
+      const res = await sets()[":ws"].attachments[":setId"].archive.$post({
+        param: setParam(setId),
+        json: { author: AUTHOR, reason }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "unarchive_review":
     case "unarchive_attachment_set": {
       const { setId } = a;
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(setId)}/unarchive`, {
-        author: AUTHOR
-      });
+      const res = await sets()[":ws"].attachments[":setId"].unarchive.$post({
+        param: setParam(setId),
+        json: { author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "archive_doc": {
       const { docId, reason } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/archive`, {
-        author: AUTHOR,
-        ...reason !== undefined ? { reason } : {}
-      });
+      const res = await lifecycleApi().archive.$post({ param: docParam(docId), json: { author: AUTHOR, reason } }).then((r) => r.json());
       return ok2(res);
     }
     case "unarchive_doc": {
       const { docId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/unarchive`, {
-        author: AUTHOR
-      });
+      const res = await lifecycleApi().unarchive.$post({ param: docParam(docId), json: { author: AUTHOR } }).then((r) => r.json());
       return ok2(res);
     }
     case "list_archived_reviews":
     case "list_archived_attachments": {
-      const res = await http("GET", `${board()}/attachments?archived=true`);
+      const res = await sets()[":ws"].attachments.$get({ param: boardParam(), query: { archived: "true" } }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_workspace": {
       const { workspaceId, force, purge } = a;
-      const params = [force ? "force=true" : "", purge ? "purge=true" : ""].filter(Boolean);
-      const qs = params.length > 0 ? `?${params.join("&")}` : "";
-      const res = await http("DELETE", `/workspaces/${encodeURIComponent(workspaceId)}${qs}`);
+      const res = await sets()[":ws"].$delete({
+        param: { ws: encodeURIComponent(workspaceId) },
+        query: { force: force ? "true" : undefined, purge: purge ? "true" : undefined }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "refresh_workspace":
@@ -20273,7 +20676,7 @@ async function handleDocsTool(name, a, ctx) {
     case "refresh_attachment_set": {
       const { setId, workspaceId } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/refresh`, {});
+      const res = await sets()[":ws"].attachments[":setId"].refresh.$post({ param: setParam(id), json: {} }).then((r) => r.json());
       return ok2(res);
     }
     case "set_workspace_groups":
@@ -20281,9 +20684,7 @@ async function handleDocsTool(name, a, ctx) {
     case "set_attachment_groups": {
       const { setId, workspaceId, groups } = a;
       const id = setId ?? workspaceId ?? "";
-      const res = await http("POST", `${board()}/attachments/${encodeURIComponent(id)}/groups`, {
-        groups
-      });
+      const res = await sets()[":ws"].attachments[":setId"].groups.$post({ param: setParam(id), json: { groups } }).then((r) => r.json());
       return ok2(res);
     }
     case "find_and_replace": {
@@ -20298,47 +20699,54 @@ async function handleDocsTool(name, a, ctx) {
         parseInlineMarks,
         suggest
       } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/find_and_replace`, {
-        ...scoped(),
-        find,
-        replace,
-        ...contextBefore !== undefined ? { contextBefore } : {},
-        ...contextAfter !== undefined ? { contextAfter } : {},
-        ...occurrence !== undefined ? { occurrence } : {},
-        ...replaceAll === true ? { replaceAll: true } : {},
-        ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
-        ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
-      });
+      const res = await editsApi().find_and_replace.$post({
+        param: docParam(docId),
+        json: {
+          ...scoped(),
+          find,
+          replace,
+          contextBefore,
+          contextAfter,
+          occurrence,
+          replaceAll: replaceAll === true ? true : undefined,
+          parseInlineMarks: typeof parseInlineMarks === "boolean" ? parseInlineMarks : undefined,
+          suggest: suggest === true ? true : undefined,
+          ...suggest === true ? { author: suggestionAuthor() } : {}
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "rewrite_thread_region": {
       const { docId, threadId, replacement, parseInlineMarks, suggest } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`, {
-        ...scoped(),
-        replacement,
-        ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
-        ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
-      });
+      const res = await threadsApi().threads[":threadId"].rewrite_region.$post({
+        param: threadParam(docId, threadId),
+        json: {
+          ...scoped(),
+          replacement,
+          ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
+          ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "list_suggestions": {
       const { docId } = a;
-      const res = await http("GET", `${board()}/docs/${encodeURIComponent(docId)}/suggestions`);
+      const res = await editsApi().suggestions.$get({ param: docParam(docId) }).then((r) => r.json());
       return ok2(res);
     }
     case "accept_suggestion": {
       const { docId, sid } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/suggestions/${encodeURIComponent(sid)}/accept`);
+      const res = await editsApi().suggestions[":sid"].accept.$post({ param: suggestionParam(docId, sid) }).then((r) => r.json());
       return ok2(res);
     }
     case "reject_suggestion": {
       const { docId, sid } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/suggestions/${encodeURIComponent(sid)}/reject`);
+      const res = await editsApi().suggestions[":sid"].reject.$post({ param: suggestionParam(docId, sid) }).then((r) => r.json());
       return ok2(res);
     }
     case "resolve_all_suggestions": {
       const { docId, action, authorId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/suggestions/resolve_all`, { action, ...authorId !== undefined ? { authorId } : {} });
+      const res = await editsApi().suggestions.resolve_all.$post({ param: docParam(docId), json: { action, authorId } }).then((r) => r.json());
       return ok2(res);
     }
     case "insert_after_thread": {
@@ -20346,28 +20754,34 @@ async function handleDocsTool(name, a, ctx) {
       if (typeof text !== "string" || text.length === 0) {
         return err2(markdown !== undefined ? "insert_after_thread takes `text`, not `markdown` — nothing was inserted. For a new paragraph or section use insert_blocks_after_thread, whose field is `markdown`." : "insert_after_thread needs a non-empty `text` — nothing was inserted.");
       }
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`, { ...scoped(), text });
+      const res = await threadsApi().threads[":threadId"].insert_after.$post({
+        param: threadParam(docId, threadId),
+        json: { ...scoped(), text }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "insert_blocks_after_thread": {
       const { docId, threadId, markdown, placement } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_blocks_after`, { ...scoped(), markdown, ...placement !== undefined ? { placement } : {} });
+      const res = await threadsApi().threads[":threadId"].insert_blocks_after.$post({
+        param: threadParam(docId, threadId),
+        json: { ...scoped(), markdown, placement }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "create_anchor": {
       const { docId, find, contextBefore, contextAfter, occurrence, label } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors`, {
-        find,
-        ...contextBefore !== undefined ? { contextBefore } : {},
-        ...contextAfter !== undefined ? { contextAfter } : {},
-        ...occurrence !== undefined ? { occurrence } : {},
-        ...label !== undefined ? { label } : {}
-      });
+      const res = await editsApi().agent_anchors.$post({
+        param: docParam(docId),
+        json: { find, contextBefore, contextAfter, occurrence, label }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "edit_at_anchor": {
       const { docId, anchorId, op } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`, { ...scoped(), ...op });
+      const res = await editsApi().agent_anchors[":anchorId"].edit.$post({
+        param: anchorParam(docId, anchorId),
+        json: { ...scoped(), kind: op.kind, text: op.text }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "read_doc_outline": {
@@ -20383,37 +20797,45 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "apply_block_edits": {
       const { docId, edits } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits,
-        author: suggestionAuthor()
-      });
+      const res = await editsApi().block_edits.$post({
+        param: docParam(docId),
+        json: {
+          edits,
+          author: suggestionAuthor()
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "insert_blocks_under_heading": {
       const { docId, headingId, markdown } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/block_edits`, {
-        edits: [{ op: "insert_under_heading", headingId, markdown }],
-        author: suggestionAuthor()
-      });
+      const res = await editsApi().block_edits.$post({
+        param: docParam(docId),
+        json: {
+          edits: [{ op: "insert_under_heading", headingId, markdown }],
+          author: suggestionAuthor()
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "insert_blocks_at_anchor": {
       const { docId, anchorId, markdown, placement } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/insert_blocks`, { ...scoped(), markdown, ...placement !== undefined ? { placement } : {} });
+      const res = await editsApi().agent_anchors[":anchorId"].insert_blocks.$post({
+        param: anchorParam(docId, anchorId),
+        json: { ...scoped(), markdown, placement }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_anchor": {
       const { docId, anchorId } = a;
-      const res = await http("DELETE", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}`);
+      const res = await editsApi().agent_anchors[":anchorId"].$delete({ param: anchorParam(docId, anchorId) }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_block_at_anchor": {
       const { docId, threadId, anchorId } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_block_at_anchor`, {
-        ...scoped(),
-        ...threadId !== undefined ? { threadId } : {},
-        ...anchorId !== undefined ? { anchorId } : {}
-      });
+      const res = await editsApi().delete_block_at_anchor.$post({
+        param: docParam(docId),
+        json: { ...scoped(), threadId, anchorId }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_blocks_in_range": {
@@ -20426,25 +20848,26 @@ async function handleDocsTool(name, a, ctx) {
         startOccurrence,
         endOccurrence
       } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_blocks_in_range`, {
-        ...scoped(),
-        startFind,
-        endFind,
-        ...contextBefore !== undefined ? { contextBefore } : {},
-        ...contextAfter !== undefined ? { contextAfter } : {},
-        ...startOccurrence !== undefined ? { startOccurrence } : {},
-        ...endOccurrence !== undefined ? { endOccurrence } : {}
-      });
+      const res = await editsApi().delete_blocks_in_range.$post({
+        param: docParam(docId),
+        json: {
+          ...scoped(),
+          startFind,
+          endFind,
+          contextBefore,
+          contextAfter,
+          startOccurrence,
+          endOccurrence
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "delete_section": {
       const { docId, heading, level, occurrence } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_section`, {
-        ...scoped(),
-        heading,
-        ...level !== undefined ? { level } : {},
-        ...occurrence !== undefined ? { occurrence } : {}
-      });
+      const res = await editsApi().delete_section.$post({
+        param: docParam(docId),
+        json: { ...scoped(), heading, level, occurrence }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "observe_url": {
@@ -20489,52 +20912,47 @@ async function handleDocsTool(name, a, ctx) {
       });
     }
     case "share_workspace": {
-      const res = await http("POST", "/api/share/workspace", {
-        ...a,
-        createdBy: AUTHOR.name
-      });
+      const res = await shares().api.share.workspace.$post({
+        json: { ...a, createdBy: AUTHOR.name }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "remove_share_member": {
       const { workspaceId, email: email2 } = a;
-      const res = await http("POST", "/api/share/member/remove", { workspaceId, email: email2 });
+      const res = await shares().api.share.member.remove.$post({ json: { workspaceId, email: email2 } }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_member_role": {
       const { email: email2, role, taskId, why } = a;
-      const res = await http("POST", `${board()}/members/${encodeURIComponent(email2)}/role`, {
-        role,
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        author: AUTHOR
-      });
+      const res = await shares().workspaces[":ws"].members[":email"].role.$post({
+        param: { ...boardParam(), email: encodeURIComponent(email2) },
+        json: { role, taskId, why, author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_audience": {
       const { add, remove, taskId, why } = a;
-      const res = await http("POST", `${board()}/audience`, {
-        ...add !== undefined ? { add } : {},
-        ...remove !== undefined ? { remove } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        author: AUTHOR
-      });
+      const res = await shares().workspaces[":ws"].audience.$post({
+        param: boardParam(),
+        json: { add, remove, taskId, why, author: AUTHOR }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_share_ttl": {
       const { shareId, ttlSeconds } = a;
-      const res = await http("POST", `/api/share/${encodeURIComponent(shareId)}/ttl`, {
-        ttlSeconds
-      });
+      const res = await shares().api.share[":shareId"].ttl.$post({
+        param: { shareId: encodeURIComponent(shareId) },
+        json: { ttlSeconds }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "list_shares": {
-      const res = await http("GET", "/api/share");
+      const res = await shares().api.share.$get().then((r) => r.json());
       return ok2(res);
     }
     case "unshare": {
       const { shareId } = a;
-      const res = await http("DELETE", `/api/share/${encodeURIComponent(shareId)}`);
+      const res = await shares().api.share[":shareId"].$delete({ param: { shareId: encodeURIComponent(shareId) } }).then((r) => r.json());
       return ok2(res);
     }
     case "set_sharing_enabled": {
@@ -20544,24 +20962,26 @@ async function handleDocsTool(name, a, ctx) {
       }
       const { enabled, workspaceId, reason, taskId, why } = a;
       if (typeof enabled !== "boolean") {
-        const res2 = await http("GET", "/api/share");
+        const res2 = await shares().api.share.$get().then((r) => r.json());
         if (typeof workspaceId !== "string")
           return ok2(res2);
-        const closed = res2.sharing?.closedBoards ?? [];
+        const closed = res2.sharing.closedBoards ?? [];
         return ok2({
           ...res2,
           workspaceId,
           board: { workspaceId, enabled: !closed.includes(workspaceId) }
         });
       }
-      const res = await http("POST", "/api/share/enabled", {
-        enabled,
-        ...workspaceId !== undefined ? { workspaceId } : {},
-        ...reason !== undefined ? { reason } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        actor: { id: AUTHOR.id, name: AUTHOR.name }
-      });
+      const res = await shares().api.share.enabled.$post({
+        json: {
+          enabled,
+          workspaceId,
+          reason,
+          taskId,
+          why,
+          actor: { id: AUTHOR.id, name: AUTHOR.name }
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
     case "set_board_sharing_lock": {
@@ -20574,21 +20994,23 @@ async function handleDocsTool(name, a, ctx) {
         return err2("set_board_sharing_lock needs workspaceId: the board to lock or unlock.");
       }
       if (typeof locked !== "boolean") {
-        const res2 = await http("GET", "/api/share");
-        const lockedBoards = res2.sharing?.lockedBoards ?? [];
+        const res2 = await shares().api.share.$get().then((r) => r.json());
+        const lockedBoards = res2.sharing.lockedBoards ?? [];
         return ok2({
           workspaceId,
           board: { workspaceId, locked: lockedBoards.includes(workspaceId) }
         });
       }
-      const res = await http("POST", "/api/share/lock", {
-        workspaceId,
-        locked,
-        ...reason !== undefined ? { reason } : {},
-        ...taskId !== undefined ? { taskId } : {},
-        ...why !== undefined ? { why } : {},
-        actor: { id: AUTHOR.id, name: AUTHOR.name }
-      });
+      const res = await shares().api.share.lock.$post({
+        json: {
+          workspaceId,
+          locked,
+          reason,
+          taskId,
+          why,
+          actor: { id: AUTHOR.id, name: AUTHOR.name }
+        }
+      }).then((r) => r.json());
       return ok2(res);
     }
   }
@@ -20599,33 +21021,39 @@ async function handleDocsTool(name, a, ctx) {
 var idOf2 = (v) => typeof v === "string" ? v : "";
 var orNull = (v) => typeof v === "string" && v !== "" ? v : null;
 async function handleFolderTool(name, a, ctx) {
-  const folder = (verb) => {
+  const library = () => libraryFoldersClient(ctx.http).workspaces[":ws"].library;
+  const ws = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const folder = () => {
     const id = idOf2(a.folderId);
     if (id === "")
       throw new Error(`${name} needs a folderId`);
-    return `${boardPathOf(name, a)}/library/folders/${encodeURIComponent(id)}/${verb}`;
+    return { param: { ...ws(), folderId: encodeURIComponent(id) } };
   };
+  const one = () => library().folders[":folderId"];
   switch (name) {
     case "list_folders":
-      return ctx.ok(await ctx.http("GET", `${boardPathOf(name, a)}/library/folders`));
+      return ctx.ok(await (await library().folders.$get({ param: ws() })).json());
     case "create_folder":
-      return ctx.ok(await ctx.http("POST", `${boardPathOf(name, a)}/library/folders`, {
-        name: a.name,
-        parentId: orNull(a.parentId)
-      }));
+      return ctx.ok(await (await library().folders.$post({
+        param: ws(),
+        json: { name: a.name, parentId: orNull(a.parentId) }
+      })).json());
     case "rename_folder":
-      return ctx.ok(await ctx.http("POST", folder("rename"), { name: a.name }));
+      return ctx.ok(await (await one().rename.$post({ ...folder(), json: { name: a.name } })).json());
     case "move_folder":
-      return ctx.ok(await ctx.http("POST", folder("move"), { parentId: orNull(a.parentId) }));
+      return ctx.ok(await (await one().move.$post({ ...folder(), json: { parentId: orNull(a.parentId) } })).json());
     case "archive_folder":
-      return ctx.ok(await ctx.http("POST", folder("archive")));
+      return ctx.ok(await (await one().archive.$post(folder())).json());
     case "unarchive_folder":
-      return ctx.ok(await ctx.http("POST", folder("unarchive")));
+      return ctx.ok(await (await one().unarchive.$post(folder())).json());
     case "move_doc_to_folder": {
       const docId = idOf2(a.docId);
       if (docId === "")
         return ctx.err("move_doc_to_folder needs a docId");
-      return ctx.ok(await ctx.http("PUT", `${boardPathOf(name, a)}/library/docs/${encodeURIComponent(docId)}/folder`, { folderId: orNull(a.folderId) }));
+      return ctx.ok(await (await library().docs[":docId"].folder.$put({
+        param: { ...ws(), docId: encodeURIComponent(docId) },
+        json: { folderId: orNull(a.folderId) }
+      })).json());
     }
     default:
       return;
@@ -20644,14 +21072,10 @@ async function handleInboxTool(name, a, ctx) {
         return ctx.err("rows must be a list");
       if (rows.length === 0 && run === undefined && dismiss === undefined)
         return ctx.err("rows must be a non-empty list unless run or dismiss is given");
-      const res = await ctx.http("POST", "/inbox/rows", {
-        agentId: ctx.AUTHOR.id,
-        pass,
-        rows,
-        ...run !== undefined ? { run } : {},
-        ...dismiss !== undefined ? { dismiss } : {}
+      const res = await inboxClient(ctx.http).inbox.rows.$post({
+        json: { agentId: ctx.AUTHOR.id, pass, rows, run, dismiss }
       });
-      return ctx.ok(res);
+      return ctx.ok(await res.json());
     }
     default:
       return;
@@ -20659,16 +21083,27 @@ async function handleInboxTool(name, a, ctx) {
 }
 
 // packages/mcp/src/tools/person.ts
+var TEXT_PLACE = [
+  "path",
+  "docId",
+  "taskId",
+  "goalId",
+  "threadId",
+  "blockId",
+  "quote"
+];
+var NUMBER_PLACE = ["scroll", "x", "y"];
 function placeOf(a) {
   const place = {};
-  for (const k of ["path", "docId", "taskId", "goalId", "threadId", "blockId", "quote"]) {
+  for (const k of TEXT_PLACE) {
     const v = a[k];
     if (typeof v === "string" && v.trim())
       place[k] = v.trim();
   }
-  for (const k of ["scroll", "x", "y"]) {
-    if (typeof a[k] === "number")
-      place[k] = a[k];
+  for (const k of NUMBER_PLACE) {
+    const v = a[k];
+    if (typeof v === "number")
+      place[k] = v;
   }
   return place;
 }
@@ -20693,12 +21128,15 @@ async function handlePersonTool(name, a, ctx) {
   const workspaceId = typeof a.workspaceId === "string" ? a.workspaceId : "";
   if (!workspaceId)
     return ctx.err("workspaceId is required");
-  const base = `/workspaces/${encodeURIComponent(workspaceId)}/person`;
-  const who = { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name };
+  const person = personClient(ctx.http).workspaces[":ws"].person;
+  const param = { ws: encodeURIComponent(workspaceId) };
   if (name === "watch_person") {
     const on = a.on !== false;
     try {
-      const res = await ctx.http("POST", `${base}/watch`, { ...who, on });
+      const res = await (await person.watch.$post({
+        param,
+        json: { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name, on }
+      })).json();
       return ctx.ok({ watching: on, landing: res.landing ?? null });
     } catch (e) {
       const refused = refusalOf(e, [400, 403, 404]);
@@ -20708,7 +21146,10 @@ async function handlePersonTool(name, a, ctx) {
     }
   }
   try {
-    const res = await ctx.http("POST", `${base}/show`, { ...who, ...placeOf(a) });
+    const res = await (await person.show.$post({
+      param,
+      json: { agentId: ctx.AUTHOR.id, agentName: ctx.AUTHOR.name, ...placeOf(a) }
+    })).json();
     return ctx.ok({ shown: true, spot: res.spot });
   } catch (e) {
     const refused = refusalOf(e, [400, 403, 404, 409]);
@@ -20721,13 +21162,16 @@ async function handlePersonTool(name, a, ctx) {
     });
   }
 }
+var agentParam = (ctx) => ({ agentId: encodeURIComponent(ctx.AUTHOR.id) });
 async function confirmPerson(a, ctx) {
   if (a.email !== null && (typeof a.email !== "string" || !a.email.trim())) {
     return ctx.err("email is required (or null to clear)");
   }
-  const body = a.email === null ? { personId: null } : { email: String(a.email).trim() };
   try {
-    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/person`, body);
+    const res = await (await personClient(ctx.http).api.agents[":agentId"].person.$post({
+      param: agentParam(ctx),
+      json: a.email === null ? { personId: null } : { email: String(a.email).trim() }
+    })).json();
     return ctx.ok({ ok: true, state: res.state ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
@@ -20742,7 +21186,10 @@ async function replyPrivate(a, ctx) {
   if (!personId || !text)
     return ctx.err("personId and text are required");
   try {
-    const res = await ctx.http("POST", `/api/agents/${encodeURIComponent(ctx.AUTHOR.id)}/messages/${encodeURIComponent(personId)}`, { text });
+    const res = await (await personClient(ctx.http).api.agents[":agentId"].messages[":personId"].$post({
+      param: { ...agentParam(ctx), personId: encodeURIComponent(personId) },
+      json: { text }
+    })).json();
     return ctx.ok({ ok: true, messageId: res.message?.id ?? null });
   } catch (e) {
     const refused = refusalOf(e, [400, 401, 403]);
@@ -21126,25 +21573,28 @@ function taskCreatedSummary(task, ignoredLinks, shapeGaps, placed) {
 }
 async function recordReviewAnswer(ctx, args) {
   const { http, AUTHOR } = ctx;
-  const { board, taskId, text, reviewItemId, answeredWith } = args;
+  const { ws, taskId, text, reviewItemId, answeredWith } = args;
+  const ticket = reviewItemsClient(http).workspaces[":ws"].tasks[":taskId"];
+  const param = { ws, taskId: encodeURIComponent(taskId) };
   if (reviewItemId === undefined) {
-    return await http("POST", `${board}/tasks/${encodeURIComponent(taskId)}/answer`, {
-      text,
-      ...answeredWith !== undefined ? { optionId: answeredWith } : {},
-      author: AUTHOR
-    });
+    return (await ticket.answer.$post({ param, json: { text, optionId: answeredWith, author: AUTHOR } })).json();
   }
-  return await http("POST", `${board}/tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/answer`, {
-    text,
-    ...answeredWith !== undefined ? { answeredWith } : {},
-    author: AUTHOR
-  });
+  return (await ticket["review-items"][":itemId"].answer.$post({
+    param: { ...param, itemId: encodeURIComponent(reviewItemId) },
+    json: { text, answeredWith, author: AUTHOR }
+  })).json();
 }
-async function resolveReviewItemId(ctx, board, reviewItemId) {
+async function resolveReviewItemId(ctx, ws, reviewItemId) {
   const thread = parseThreadReviewItemId(reviewItemId);
   if (thread)
     return { kind: "doc-thread", ...thread };
-  const res = await ctx.http("GET", `${board}/review-items/${encodeURIComponent(reviewItemId)}`);
+  const res = await (await reviewItemsClient(ctx.http).workspaces[":ws"]["review-items"][":itemId"].$get({
+    param: { ws, itemId: encodeURIComponent(reviewItemId) }
+  })).json();
+  if (res.kind === "doc-thread") {
+    const { docId, threadId, commentId } = res;
+    return { kind: "doc-thread", docId, threadId, commentId };
+  }
   return {
     kind: "task-item",
     taskId: res.taskId,
@@ -21162,11 +21612,33 @@ function heldResult(res) {
 }
 async function handleTaskTool(name, a, ctx) {
   const { http, ok: ok2, err: err2, AUTHOR, claimNoticeFor: claimNoticeFor2 } = ctx;
-  const board = () => boardPathOf(name, a);
+  const threadsApi = () => docThreadsClient(http).workspaces[":ws"].docs[":docId"];
+  const taskApi = () => taskStateClient(http).workspaces[":ws"].tasks[":taskId"];
+  const contentApi = () => taskContentClient(http).workspaces[":ws"];
+  const boardParam = () => ({ ws: encodeURIComponent(boardIdOf(name, a)) });
+  const listsApi = () => taskBoardClient(http).workspaces[":ws"];
+  const wsParam = (workspaceId) => ({ ws: encodeURIComponent(workspaceId) });
+  const itemApi = () => reviewItemsClient(http).workspaces[":ws"].tasks[":taskId"];
+  const itemParam = (taskId, itemId) => ({
+    ...taskParam(taskId),
+    itemId: encodeURIComponent(itemId)
+  });
+  const taskParam = (taskId) => ({
+    ws: encodeURIComponent(boardIdOf(name, a)),
+    taskId: encodeURIComponent(taskId)
+  });
+  const threadParam = (docId, threadId) => ({
+    ws: encodeURIComponent(boardIdOf(name, a)),
+    docId: encodeURIComponent(docId),
+    threadId: encodeURIComponent(threadId)
+  });
   switch (name) {
     case "create_tasks": {
       const { workspaceId, tasks, sourceDoc } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/tasks/batch`, { tasks, author: AUTHOR, ...sourceDoc !== undefined ? { sourceDoc } : {} });
+      const res = await (await contentApi().tasks.batch.$post({
+        param: { ws: encodeURIComponent(workspaceId) },
+        json: { tasks, author: AUTHOR, sourceDoc }
+      })).json();
       const gapsFor = (taskId) => res.shapeGaps?.find((g) => g.taskId === taskId)?.gaps ?? undefined;
       const adviceFor = (taskId) => res.reviewAdvice?.find((r) => r.taskId === taskId)?.advice ?? undefined;
       const visibilityFor = (taskId) => res.visibility?.find((v) => v.taskId === taskId)?.note ?? undefined;
@@ -21204,18 +21676,21 @@ async function handleTaskTool(name, a, ctx) {
         dueAt,
         links
       } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/promote`, {
-        workspaceId,
-        ...title !== undefined ? { title } : {},
-        ...body !== undefined ? { body } : {},
-        ...assignee !== undefined ? { assignee } : {},
-        ...assigneeKind !== undefined ? { assigneeKind } : {},
-        ...needs !== undefined ? { needs } : {},
-        ...goal !== undefined ? { goal } : {},
-        ...dueAt !== undefined ? { dueAt } : {},
-        ...links !== undefined ? { links } : {},
-        author: AUTHOR
-      });
+      const res = await threadsApi().threads[":threadId"].promote.$post({
+        param: threadParam(docId, threadId),
+        json: {
+          workspaceId,
+          title,
+          body,
+          assignee,
+          assigneeKind,
+          needs,
+          goal,
+          dueAt,
+          links,
+          author: AUTHOR
+        }
+      }).then((r) => r.json());
       return ok2({
         ...taskCreatedSummary(res.url !== undefined ? { ...res.task, url: res.url } : res.task, res.ignoredLinks, undefined, res.placement?.placed),
         ...res.placement?.goals !== undefined ? { goals: res.placement.goals } : {},
@@ -21225,44 +21700,42 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "next_tasks": {
       const { workspaceId, assignee, limit, includeBlocked, includeArchived, fields } = a;
-      const qs = new URLSearchParams;
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (limit !== undefined)
-        qs.set("limit", String(limit));
-      if (includeBlocked === true)
-        qs.set("includeBlocked", "true");
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const query = qs.size > 0 ? `?${qs.toString()}` : "";
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`);
+      const res = await (await listsApi().next.$get({
+        param: wsParam(workspaceId),
+        query: {
+          assignee,
+          limit: limit !== undefined ? String(limit) : undefined,
+          includeBlocked: includeBlocked === true ? "true" : undefined,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
+      const queueRows = res.tasks;
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
+        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, queueRows);
         if (missing.length > 0) {
-          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, res.tasks.length));
+          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, queueRows.length));
         }
       }
       return ok2({
         workspaceId,
         ...res.retired ? { retired: res.retired } : {},
         ...res.capacity ? { capacity: res.capacity } : {},
-        tasks: projectQueueRows(res.tasks, fields)
+        tasks: projectQueueRows(queueRows, fields)
       });
     }
     case "list_tasks": {
       const { workspaceId, goal, status, assignee, needs, fields, includeArchived, taskIds } = a;
-      const qs = new URLSearchParams({ format: "json" });
-      if (goal !== undefined)
-        qs.set("goal", goal);
-      if (status !== undefined)
-        qs.set("status", status);
-      if (assignee !== undefined)
-        qs.set("assignee", assignee);
-      if (needs !== undefined)
-        qs.set("needs", needs);
-      if (includeArchived === true)
-        qs.set("includeArchived", "true");
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`);
+      const res = await (await listsApi().tasks.$get({
+        param: wsParam(workspaceId),
+        query: {
+          format: "json",
+          goal,
+          status,
+          assignee,
+          needs,
+          includeArchived: includeArchived === true ? "true" : undefined
+        }
+      })).json();
       let rows = res.tasks;
       if (taskIds !== undefined && taskIds.length > 0) {
         const wanted = new Set(taskIds);
@@ -21288,12 +21761,15 @@ async function handleTaskTool(name, a, ctx) {
     case "task_transition": {
       const { taskId, to, note, usage } = a;
       const claimNotice = to === "in-progress" ? await claimNoticeFor2(taskId) : undefined;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/transition`, {
-        to,
-        author: AUTHOR,
-        ...note !== undefined ? { note } : {},
-        ...usage !== undefined ? { usage } : {}
-      });
+      const res = await (await taskApi().transition.$post({
+        param: taskParam(taskId),
+        json: {
+          to,
+          author: AUTHOR,
+          note,
+          usage
+        }
+      })).json();
       return ok2({
         taskId,
         status: res.task.status,
@@ -21303,11 +21779,14 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "assign_task": {
       const { taskId, assignee, assigneeKind } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/assignee`, {
-        assignee,
-        ...assigneeKind !== undefined ? { assigneeKind } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().assignee.$post({
+        param: taskParam(taskId),
+        json: {
+          assignee,
+          assigneeKind,
+          author: AUTHOR
+        }
+      })).json();
       return ok2({
         taskId,
         assignee: res.task.assignee,
@@ -21321,10 +21800,10 @@ async function handleTaskTool(name, a, ctx) {
       if (ids.length === 0 || ids.some((id) => typeof id !== "string" || id === "")) {
         return err2("blockedBy must be a task id, or an array of them");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/park`, {
-        blockedBy: ids,
-        author: AUTHOR
-      });
+      const res = await (await taskApi().park.$post({
+        param: taskParam(taskId),
+        json: { blockedBy: ids, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         blockedBy: res.after,
@@ -21337,10 +21816,10 @@ async function handleTaskTool(name, a, ctx) {
       if (clear !== true && (typeof waitingOn !== "string" || waitingOn.trim() === "")) {
         return err2("waitingOn is required: say what this task is waiting on, in words a reader understands — or pass clear: true to end the wait");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/wait`, {
-        ...clear === true ? { clear: true } : { what: waitingOn, ...hours !== undefined ? { hours } : {} },
-        author: AUTHOR
-      });
+      const res = await (await taskApi().wait.$post({
+        param: taskParam(taskId),
+        json: clear === true ? { clear: true, author: AUTHOR } : { what: waitingOn, hours, author: AUTHOR }
+      })).json();
       if (clear === true)
         return ok2({ taskId, cleared: true, changed: res.changed ?? false });
       return ok2({
@@ -21353,10 +21832,10 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "archive_task": {
       const { taskId, reason } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/archive`, {
-        ...reason !== undefined ? { reason } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().archive.$post({
+        param: taskParam(taskId),
+        json: { reason, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         archivedAt: res.task.archivedAt ?? null,
@@ -21370,9 +21849,10 @@ async function handleTaskTool(name, a, ctx) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
       if (goalId !== undefined) {
-        const res2 = await http("POST", `${board()}/goals/${encodeURIComponent(goalId)}/restore`, {
-          author: AUTHOR
-        });
+        const res2 = await (await listsApi().goals[":goalId"].restore.$post({
+          param: { ...boardParam(), goalId: encodeURIComponent(goalId) },
+          json: { author: AUTHOR }
+        })).json();
         return ok2({
           goalId,
           title: res2.goal.title,
@@ -21383,9 +21863,7 @@ async function handleTaskTool(name, a, ctx) {
       if (taskId === undefined) {
         return err2("pass taskId to restore one task, or goalId to restore a goal with its tasks");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/restore`, {
-        author: AUTHOR
-      });
+      const res = await (await taskApi().restore.$post({ param: taskParam(taskId), json: { author: AUTHOR } })).json();
       return ok2({
         taskId,
         goal: res.task.goal,
@@ -21400,22 +21878,17 @@ async function handleTaskTool(name, a, ctx) {
       }
       let doneWhenLines;
       if (doneWhen !== undefined) {
-        const dw = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when`, {
-          lines: doneWhen,
-          author: AUTHOR
-        });
+        const dw = await (await contentApi().tasks[":taskId"]["done-when"].$post({
+          param: taskParam(taskId),
+          json: { lines: doneWhen, author: AUTHOR }
+        })).json();
         doneWhenLines = dw.lines;
       }
-      if (body === undefined && title === undefined) {
-        return ok2({ taskId, doneWhen: doneWhenLines });
-      }
       if (body !== undefined) {
-        const res2 = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/body`, {
-          markdown: body,
-          ...title !== undefined ? { title } : {},
-          ...reason !== undefined ? { reason } : {},
-          author: AUTHOR
-        });
+        const res2 = await (await taskApi().body.$post({
+          param: taskParam(taskId),
+          json: { markdown: body, title, reason, author: AUTHOR }
+        })).json();
         return ok2({
           taskId,
           title: res2.task?.title,
@@ -21424,11 +21897,12 @@ async function handleTaskTool(name, a, ctx) {
           ...doneWhenLines !== undefined ? { doneWhen: doneWhenLines } : {}
         });
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/title`, {
-        title,
-        ...reason !== undefined ? { reason } : {},
-        author: AUTHOR
-      });
+      if (title === undefined)
+        return ok2({ taskId, doneWhen: doneWhenLines });
+      const res = await (await taskApi().title.$post({
+        param: taskParam(taskId),
+        json: { title, reason, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         title: res.task?.title,
@@ -21441,7 +21915,10 @@ async function handleTaskTool(name, a, ctx) {
       if (!Array.isArray(lines) || lines.length === 0) {
         return err2("lines must name at least one done-when line to report");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/done-when/report`, { lines, author: AUTHOR });
+      const res = await (await contentApi().tasks[":taskId"]["done-when"].report.$post({
+        param: taskParam(taskId),
+        json: { lines, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         lines: res.lines,
@@ -21452,43 +21929,45 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_task_goal": {
       const { taskId, goal, position, batchId } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/goal`, {
-        goal,
-        author: AUTHOR,
-        ...position !== undefined ? { position } : {},
-        ...batchId !== undefined ? { batchId } : {}
-      });
+      const res = await (await taskApi().goal.$post({
+        param: taskParam(taskId),
+        json: {
+          goal,
+          author: AUTHOR,
+          position,
+          batchId
+        }
+      })).json();
       return ok2({ taskId, goal: res.task.goal, order: res.task.order, changed: res.changed });
     }
     case "set_goal_list": {
       const { workspaceId, goals, drop } = a;
-      const res = await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
-        goals,
-        ...drop !== undefined ? { drop } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.$put({
+        param: wsParam(workspaceId),
+        json: { goals, drop, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         changed: res.changed,
         created: res.created,
         movedToChores: res.movedToChores,
-        strandedDone: res.strandedDone,
-        ...res.bucketReview ? { bucketReview: res.bucketReview } : {}
+        strandedDone: res.strandedDone
       });
     }
     case "rename_goal": {
       const { workspaceId, goal, title, dueAt } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/rename`, {
-        goal,
-        title,
-        ...dueAt !== undefined ? { dueAt } : {},
-        author: AUTHOR
-      });
+      const res = await (await listsApi().goals.rename.$post({
+        param: wsParam(workspaceId),
+        json: { goal, title, dueAt, author: AUTHOR }
+      })).json();
       return ok2({ workspaceId, goal: res.goal, changed: res.changed });
     }
     case "reorder_goals": {
       const { workspaceId, order } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/goals/reorder`, { order, author: AUTHOR });
+      const res = await (await listsApi().goals.reorder.$post({
+        param: wsParam(workspaceId),
+        json: { order, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         order: res.order,
@@ -21497,13 +21976,13 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "add_review_item": {
       const { taskId, review } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/review-items`, {
-        review,
-        author: AUTHOR
-      });
+      const res = await (await itemApi()["review-items"].$post({
+        param: taskParam(taskId),
+        json: { review, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
-        reviewItemId: res.item?.id,
+        reviewItemId: res.item.id,
         ...res.url !== undefined ? { url: res.url } : {},
         ...res.reviewAdvice !== undefined ? { reviewAdvice: res.reviewAdvice } : {},
         ...heldResult(res)
@@ -21516,14 +21995,17 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? Pass its reviewItemId (from the queue row or the ticket), or taskId — alone for a ticket that is itself a decision, with reviewItemId for one of the items filed on it");
         }
-        const address = await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread") {
-          await http("POST", `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(address.threadId)}/answer`, {
-            text,
-            commentId: address.commentId,
-            ...answeredWith !== undefined ? { optionId: answeredWith } : {},
-            author: AUTHOR
-          });
+          await threadsApi().threads[":threadId"].answer.$post({
+            param: threadParam(address.docId, address.threadId),
+            json: {
+              text,
+              commentId: address.commentId,
+              optionId: answeredWith,
+              author: AUTHOR
+            }
+          }).then((r) => r.json());
           return ok2({
             reviewItemId,
             docId: address.docId,
@@ -21535,7 +22017,7 @@ async function handleTaskTool(name, a, ctx) {
         effectiveTaskId = address.taskId;
       }
       const res = await recordReviewAnswer(ctx, {
-        board: board(),
+        ws: boardParam().ws,
         taskId: effectiveTaskId,
         text,
         ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -21562,14 +22044,6 @@ async function handleTaskTool(name, a, ctx) {
         revisedRange,
         lessSpecific
       } = a;
-      const patch = {
-        ...headline !== undefined ? { headline } : {},
-        ...detail !== undefined ? { detail } : {},
-        ...options !== undefined ? { options } : {},
-        ...revisedRange !== undefined ? { revisedRange } : {},
-        ...lessSpecific !== undefined ? { lessSpecific } : {},
-        author: AUTHOR
-      };
       if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
         if (taskId !== undefined || reviewItemId !== undefined) {
           return err2("two addresses in one call — pass taskId + reviewItemId for an item on a ticket, or docId + threadId + commentId for one raised on a doc thread, not both");
@@ -21580,7 +22054,18 @@ async function handleTaskTool(name, a, ctx) {
         if (reply !== undefined) {
           return err2("`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply");
         }
-        const docRes = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/revise`, { ...patch, commentId });
+        const docRes = await threadsApi().threads[":threadId"].revise.$post({
+          param: threadParam(docId, threadId),
+          json: {
+            headline,
+            detail,
+            options,
+            revisedRange,
+            lessSpecific,
+            author: AUTHOR,
+            commentId
+          }
+        }).then((r) => r.json());
         return ok2({
           docId,
           threadId,
@@ -21595,12 +22080,23 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? A bare reviewItemId (from the queue row or the ticket), taskId (+ reviewItemId for one of the items filed on the ticket), or docId + threadId + commentId for one raised on a doc thread");
         }
-        const address = await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread") {
           if (reply !== undefined) {
             return err2("`reply` is ticket-only — a doc-thread item already lives in its thread, so point at the change there with post_reply");
           }
-          const docRes = await http("POST", `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(address.threadId)}/revise`, { ...patch, commentId: address.commentId });
+          const docRes = await threadsApi().threads[":threadId"].revise.$post({
+            param: threadParam(address.docId, address.threadId),
+            json: {
+              headline,
+              detail,
+              options,
+              revisedRange,
+              lessSpecific,
+              author: AUTHOR,
+              commentId: address.commentId
+            }
+          }).then((r) => r.json());
           return ok2({
             reviewItemId,
             docId: address.docId,
@@ -21617,7 +22113,10 @@ async function handleTaskTool(name, a, ctx) {
         return err2("`reply` needs an item thread to land on, and a ticket's own decision has none — revise without `reply`, then point at the change with post_reply on the task");
       }
       const targetItemId = reviewItemId ?? "r-legacy";
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/review-items/${encodeURIComponent(targetItemId)}/revise`, { ...patch, ...reply !== undefined ? { reply } : {} });
+      const res = await (await itemApi()["review-items"][":itemId"].revise.$post({
+        param: itemParam(effectiveTaskId, targetItemId),
+        json: { headline, detail, options, revisedRange, lessSpecific, author: AUTHOR, reply }
+      })).json();
       return ok2({
         taskId: effectiveTaskId,
         ...reviewItemId !== undefined ? { reviewItemId } : { decision: true },
@@ -21631,9 +22130,11 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "withdraw_review_item": {
       const { reviewItemId, taskId, docId, threadId, commentId, reason, undo } = a;
-      const body = { author: AUTHOR, ...reason !== undefined ? { reason } : {} };
       const docWithdraw = async (address) => {
-        await http("POST", `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(address.threadId)}/withdraw${undo ? "/undo" : ""}`, { ...body, commentId: address.commentId });
+        await (undo ? threadsApi().threads[":threadId"].withdraw.undo : threadsApi().threads[":threadId"].withdraw).$post({
+          param: threadParam(address.docId, address.threadId),
+          json: { author: AUTHOR, reason, commentId: address.commentId }
+        }).then((r) => r.json());
         return ok2({
           ...reviewItemId !== undefined ? { reviewItemId } : {},
           ...address,
@@ -21644,10 +22145,14 @@ async function handleTaskTool(name, a, ctx) {
         if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
           return err2("two addresses in one call — pass reviewItemId alone (it carries its own address), or the docId + threadId + commentId triple, not both");
         }
-        const address = taskId !== undefined ? { kind: "task-item", taskId } : await resolveReviewItemId(ctx, board(), reviewItemId);
+        const address = taskId !== undefined ? { kind: "task-item", taskId } : await resolveReviewItemId(ctx, boardParam().ws, reviewItemId);
         if (address.kind === "doc-thread")
           return docWithdraw(address);
-        await http("POST", `${board()}/tasks/${encodeURIComponent(address.taskId)}/review-items/${encodeURIComponent(reviewItemId)}/withdraw${undo ? "/undo" : ""}`, body);
+        const item = itemApi()["review-items"][":itemId"];
+        await (undo ? item.withdraw.undo : item.withdraw).$post({
+          param: itemParam(address.taskId, reviewItemId),
+          json: { author: AUTHOR, reason }
+        }).then((r) => r.json());
         return ok2({ taskId: address.taskId, reviewItemId, withdrawn: undo !== true });
       }
       if (docId === undefined || threadId === undefined || commentId === undefined) {
@@ -21662,9 +22167,14 @@ async function handleTaskTool(name, a, ctx) {
         if (reviewItemId === undefined) {
           return err2("which item? Pass its reviewItemId (from the queue row or the ticket), or taskId — alone for a ticket that is itself a decision, with reviewItemId for one of the items filed on it");
         }
-        const address = await http("GET", `${board()}/review-items/${encodeURIComponent(reviewItemId)}`);
+        const address = await (await reviewItemsClient(http).workspaces[":ws"]["review-items"][":itemId"].$get({
+          param: { ...boardParam(), itemId: encodeURIComponent(reviewItemId) }
+        })).json();
         if (address.kind === "doc-thread") {
-          await http("POST", `${board()}/docs/${encodeURIComponent(address.docId)}/threads/${encodeURIComponent(address.threadId)}/comments`, { author: AUTHOR, text: question });
+          await threadsApi().threads[":threadId"].comments.$post({
+            param: threadParam(address.docId, address.threadId),
+            json: { author: AUTHOR, text: question }
+          }).then((r) => r.json());
           return ok2({
             reviewItemId,
             docId: address.docId,
@@ -21674,8 +22184,11 @@ async function handleTaskTool(name, a, ctx) {
         }
         effectiveTaskId = address.taskId;
       }
-      const path = reviewItemId === undefined ? `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/more-info` : `${board()}/tasks/${encodeURIComponent(effectiveTaskId)}/review-items/${encodeURIComponent(reviewItemId)}/more-info`;
-      const res = await http("POST", path, { question, author: AUTHOR });
+      const json = { question, author: AUTHOR };
+      const res = await (reviewItemId === undefined ? await itemApi()["more-info"].$post({ param: taskParam(effectiveTaskId), json }) : await itemApi()["review-items"][":itemId"]["more-info"].$post({
+        param: itemParam(effectiveTaskId, reviewItemId),
+        json
+      })).json();
       return ok2({
         taskId: effectiveTaskId,
         ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -21686,7 +22199,7 @@ async function handleTaskTool(name, a, ctx) {
     case "answer_decision": {
       const { taskId, text, optionId, reviewItemId } = a;
       const res = await recordReviewAnswer(ctx, {
-        board: board(),
+        ws: boardParam().ws,
         taskId,
         text,
         ...reviewItemId !== undefined ? { reviewItemId } : {},
@@ -21696,11 +22209,10 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "set_task_dependencies": {
       const { taskId, after, afterEnforce } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/after`, {
-        after,
-        ...afterEnforce !== undefined ? { afterEnforce } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().after.$post({
+        param: taskParam(taskId),
+        json: { after, afterEnforce, author: AUTHOR }
+      })).json();
       return ok2({
         taskId,
         changed: res.changed,
@@ -21713,14 +22225,17 @@ async function handleTaskTool(name, a, ctx) {
       if (rule === undefined) {
         return err2("rule required — a rule object to set, or null to clear the schedule.");
       }
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/schedule`, {
-        rule,
-        ...timezone !== undefined ? { timezone } : {},
-        ...until !== undefined ? { until } : {},
-        ...onMissed !== undefined ? { onMissed } : {},
-        ...output !== undefined ? { output } : {},
-        author: AUTHOR
-      });
+      const res = await (await taskApi().schedule.$post({
+        param: taskParam(taskId),
+        json: {
+          rule,
+          timezone,
+          until,
+          onMissed,
+          output,
+          author: AUTHOR
+        }
+      })).json();
       const schedule = res.task.schedule ?? null;
       const nextAt = schedule ? nextOccurrence(schedule) : undefined;
       return ok2({
@@ -21732,26 +22247,28 @@ async function handleTaskTool(name, a, ctx) {
     }
     case "import_tasks_markdown": {
       const { workspaceId, path, apply } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/import-tasks`, { path, ...apply !== undefined ? { apply } : {}, author: AUTHOR });
-      return ok2(res);
+      const res = await contentApi()["import-tasks"].$post({
+        param: { ws: encodeURIComponent(workspaceId) },
+        json: { path, apply, author: AUTHOR }
+      });
+      return ok2(await res.json());
     }
     case "link_refs": {
       const { taskId, ref } = a;
-      const res = await http("POST", `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref
-      });
+      const res = await (await contentApi().tasks[":taskId"].links.$post({ param: taskParam(taskId), json: { ref } })).json();
       return ok2({ taskId, changed: res.changed });
     }
     case "list_backlinks": {
       const { ref } = a;
-      const res = await http("POST", `${board()}/refs:backlinks`, { ref });
+      const res = await (await contentApi()["refs:backlinks"].$post({ param: boardParam(), json: { ref } })).json();
       return ok2({ ref, tasks: res.tasks });
     }
     case "unlink_refs": {
       const { taskId, ref } = a;
-      const res = await http("DELETE", `${board()}/tasks/${encodeURIComponent(taskId)}/links`, {
-        ref
-      });
+      const res = await (await contentApi().tasks[":taskId"].links.$delete({
+        param: taskParam(taskId),
+        json: { ref }
+      })).json();
       return ok2({ taskId, changed: res.changed });
     }
   }
@@ -21760,13 +22277,15 @@ async function handleTaskTool(name, a, ctx) {
 
 // packages/mcp/src/tools/whiteboard.ts
 async function handleWhiteboardTool(name, a, ctx) {
+  const board = () => whiteboardClient(ctx.http).workspaces[":ws"];
+  const ws = () => encodeURIComponent(boardIdOf(name, a));
   switch (name) {
     case "create_whiteboard": {
       const title = typeof a.title === "string" ? a.title : undefined;
-      const res = await ctx.http("POST", `${boardPathOf(name, a)}/whiteboards`, {
-        ...title !== undefined ? { title } : {},
-        author: ctx.AUTHOR
-      });
+      const res = await (await board().whiteboards.$post({
+        param: { ws: ws() },
+        json: { title, author: ctx.AUTHOR }
+      })).json();
       if (typeof res?.docId !== "string")
         return ctx.err("the server did not return a whiteboard");
       await ctx.watchDoc(res.docId);
@@ -21778,20 +22297,20 @@ async function handleWhiteboardTool(name, a, ctx) {
         return ctx.err("docId is required");
       if (!Array.isArray(a.shapes))
         return ctx.err("shapes must be a list");
-      const res = await ctx.http("POST", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`, {
-        shapes: a.shapes,
-        ...a.mode !== undefined ? { mode: a.mode } : {},
-        ...a.point !== undefined ? { point: a.point } : {},
-        author: ctx.AUTHOR
+      const res = await board().docs[":docId"].whiteboard.$post({
+        param: { ws: ws(), docId: encodeURIComponent(docId) },
+        json: { shapes: a.shapes, mode: a.mode, point: a.point, author: ctx.AUTHOR }
       });
-      return ctx.ok(res);
+      return ctx.ok(await res.json());
     }
     case "get_whiteboard": {
       const docId = typeof a.docId === "string" ? a.docId : "";
       if (docId === "")
         return ctx.err("docId is required");
-      const res = await ctx.http("GET", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`);
-      return ctx.ok(res);
+      const res = await board().docs[":docId"].whiteboard.$get({
+        param: { ws: ws(), docId: encodeURIComponent(docId) }
+      });
+      return ctx.ok(await res.json());
     }
     default:
       return;
@@ -21804,7 +22323,8 @@ async function declareWorkspaceLead(args, deps) {
   const named = typeof args.leadAgentId === "string" ? args.leadAgentId.trim() : "";
   const declaring = named.length === 0 || named === deps.self.id;
   const leadAgentId = declaring ? deps.self.id : named;
-  const path = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  const param = { ws: encodeURIComponent(workspaceId) };
+  const roster = () => workspaceAgentsClient(deps.http).workspaces[":ws"];
   if (declaring && deps.identityIsShared === true) {
     return {
       isError: true,
@@ -21815,20 +22335,22 @@ async function declareWorkspaceLead(args, deps) {
   let attached;
   let subscription = { open: false, persisted: false };
   if (declaring) {
-    attached = await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-      agentId: deps.self.id,
-      agentName: deps.self.name,
-      runtime: deps.runtime,
-      pluginVersion: deps.pluginVersion,
-      processId: deps.processId
-    });
+    attached = await (await roster().agents.$post({
+      param,
+      json: {
+        agentId: deps.self.id,
+        agentName: deps.self.name,
+        runtime: deps.runtime,
+        pluginVersion: deps.pluginVersion,
+        processId: deps.processId
+      }
+    })).json();
     subscription = await deps.watchWorkspace(workspaceId);
   }
-  const res = await deps.http("PUT", `${path}/lead`, {
-    leadAgentId,
-    author: deps.self,
-    ...args.takeover === true ? { takeover: true } : {}
-  });
+  const res = await (await workspaceBoardClient(deps.http).workspaces[":ws"].lead.$put({
+    param,
+    json: { leadAgentId, author: deps.self, takeover: args.takeover === true ? true : undefined }
+  })).json();
   const settledLead = res.workspace?.leadAgentId ?? leadAgentId;
   const seat = {
     workspaceId,
@@ -21844,7 +22366,7 @@ async function declareWorkspaceLead(args, deps) {
     if (typeof q?.id !== "string")
       continue;
     try {
-      await deps.http("POST", `${path}/comment-queue/${encodeURIComponent(q.id)}/ack`, {});
+      await roster()["comment-queue"][":id"].ack.$post({ param: { ...param, id: encodeURIComponent(q.id) } }, { init: { body: "{}" } });
     } catch {}
   }
   const warnings = [];
@@ -21902,9 +22424,6 @@ var LEAD_CHAT_FILE_MAX_BYTES = 25 * 1024 * 1024;
 var FILE_NAME_MAX = 160;
 var FILE_TYPE_MAX = 100;
 var LEAD_CHAT_FILE_ID = /^lf-[A-Za-z0-9_-]{8,40}$/;
-function leadChatFilePath(workspaceId, fileId) {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/files/${encodeURIComponent(fileId)}`;
-}
 var LEAD_LINE_MIN_GAP = 1 / 1024;
 function parseLeadChatAttachment(raw) {
   if (typeof raw !== "object" || raw === null)
@@ -21937,7 +22456,10 @@ async function readChatAttachment(ctx, workspaceId, fileId) {
     return ctx.err("workspaceId and fileId are required");
   if (!LEAD_CHAT_FILE_ID.test(fileId))
     return ctx.err("fileId is not a chat file id");
-  const got = await ctx.http("GET", `${leadChatFilePath(workspaceId, fileId)}?encoding=base64`);
+  const got = await (await leadChatFilesClient(ctx.http).workspaces[":ws"]["lead-chat"].files[":id"].$get({
+    param: { ws: encodeURIComponent(workspaceId), id: encodeURIComponent(fileId) },
+    query: { encoding: "base64" }
+  })).json();
   const file = parseLeadChatAttachment(got.file);
   if (!file || typeof got.data !== "string")
     return ctx.err("the server sent no file");
@@ -21956,11 +22478,10 @@ async function readChatAttachment(ctx, workspaceId, fileId) {
 // packages/mcp/src/tools/workspace.ts
 async function setBoardRetired(ctx, workspaceId, retired, reason) {
   const { http, AUTHOR } = ctx;
-  const res = await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/retired`, {
-    retired,
-    ...retired && reason !== undefined ? { reason } : {},
-    author: AUTHOR
-  });
+  const res = await (await workspaceBoardClient(http).workspaces[":ws"].retired.$put({
+    param: { ws: encodeURIComponent(workspaceId) },
+    json: { retired, reason: retired ? reason : undefined, author: AUTHOR }
+  })).json();
   return {
     workspaceId,
     name: res.workspace.name,
@@ -21983,7 +22504,17 @@ async function handleWorkspaceTool(name, a, ctx) {
     unwatchDoc,
     watchWorkspace
   } = ctx;
-  const board = () => boardPathOf(name, a);
+  const wsOf = (workspaceId) => ({ ws: encodeURIComponent(workspaceId) });
+  const here = () => wsOf(boardIdOf(name, a));
+  const onBoard = () => workspaceBoardClient(http).workspaces[":ws"];
+  const roster = () => workspaceAgentsClient(http).workspaces[":ws"];
+  const lanes = () => dispatchesClient(http).workspaces[":ws"];
+  const doc2 = () => docFileClient(http).workspaces[":ws"].docs[":docId"];
+  const docOf = (workspaceId, docId) => ({
+    ...wsOf(workspaceId),
+    docId: encodeURIComponent(docId)
+  });
+  const repos = () => agentMachineClient(http).api.repos;
   switch (name) {
     case "create_workspace": {
       const {
@@ -21991,10 +22522,15 @@ async function handleWorkspaceTool(name, a, ctx) {
         leadAgentId,
         subscribe
       } = a;
-      const res = await http("POST", "/workspaces", {
-        name: wsName,
-        leadAgentId: leadAgentId ?? AUTHOR.id
-      });
+      const made = await (await attachmentsClient(http).workspaces.$post({
+        json: {
+          name: wsName,
+          leadAgentId: leadAgentId ?? AUTHOR.id
+        }
+      })).json();
+      if (!("workspace" in made))
+        return err2("the server did not return a board");
+      const res = made;
       if (subscribe !== false && res.workspace?.id) {
         await watchWorkspace(res.workspace.id);
       }
@@ -22002,15 +22538,15 @@ async function handleWorkspaceTool(name, a, ctx) {
         workspaceId: res.workspace.id,
         name: res.workspace.name,
         leadAgentId: res.workspace.leadAgentId,
-        ...res.url !== undefined ? { url: res.url } : {}
+        url: res.url
       });
     }
     case "rename_workspace": {
       const { workspaceId, name: nextName } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
-        name: nextName,
-        author: AUTHOR
-      });
+      const res = await (await onBoard().rename.$post({
+        param: wsOf(workspaceId),
+        json: { name: nextName, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         name: res.workspace.name,
@@ -22047,10 +22583,13 @@ async function handleWorkspaceTool(name, a, ctx) {
     case "set_review_item_criteria": {
       const { criteria } = a;
       const effectiveWorkspaceId = boardIdOf(name, a);
-      const res = await http("PUT", `/workspaces/${encodeURIComponent(effectiveWorkspaceId)}/settings`, {
-        reviewItemCriteria: criteria !== undefined && criteria.trim() !== "" ? criteria : null,
-        author: AUTHOR
-      });
+      const res = await (await onBoard().settings.$put({
+        param: wsOf(effectiveWorkspaceId),
+        json: {
+          reviewItemCriteria: criteria !== undefined && criteria.trim() !== "" ? criteria : null,
+          author: AUTHOR
+        }
+      })).json();
       return ok2({
         workspaceId: effectiveWorkspaceId,
         criteria: res.reviewItemCriteria.value,
@@ -22059,9 +22598,7 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "attach_doc": {
       const { workspaceId, docId } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs:attach`, {
-        docId
-      });
+      const res = await (await onBoard()["docs:attach"].$post({ param: wsOf(workspaceId), json: { docId } })).json();
       return ok2({
         ok: true,
         workspaceId,
@@ -22071,7 +22608,7 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "get_workspace": {
       const { workspaceId } = a;
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}?format=json`);
+      const res = await (await onBoard().$get({ param: wsOf(workspaceId), query: { format: "json" } })).json();
       return ok2({
         workspaceId: res.workspace.id,
         name: res.workspace.name,
@@ -22087,12 +22624,14 @@ async function handleWorkspaceTool(name, a, ctx) {
       if (typeof text !== "string" || text.trim().length === 0) {
         return err2("text is required: the plan request in the words it was asked in.");
       }
-      const params = new URLSearchParams({ q: text });
-      if (typeof docId === "string" && docId.length > 0)
-        params.set("docId", docId);
-      if (typeof limit === "number" && Number.isFinite(limit))
-        params.set("limit", String(limit));
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/related-work?${params.toString()}`);
+      const res = await (await onBoard()["related-work"].$get({
+        param: wsOf(workspaceId),
+        query: {
+          q: text,
+          docId: typeof docId === "string" && docId.length > 0 ? docId : undefined,
+          limit: typeof limit === "number" && Number.isFinite(limit) ? String(limit) : undefined
+        }
+      })).json();
       return ok2({
         workspaceId,
         considered: res.considered,
@@ -22102,14 +22641,18 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "attach_agent": {
       const { workspaceId, agentId, runtime, capabilities, subscribe } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-        agentId: agentId ?? AUTHOR.id,
-        ...agentId === undefined || agentId === AUTHOR.id ? { agentName: AUTHOR.name } : {},
-        runtime: runtime ?? "claude-code-local",
-        ...capabilities !== undefined ? { capabilities } : {},
-        pluginVersion: PLUGIN_VERSION,
-        processId: PROCESS_ID
-      });
+      const self = agentId === undefined || agentId === AUTHOR.id;
+      const res = await (await roster().agents.$post({
+        param: wsOf(workspaceId),
+        json: {
+          agentId: agentId ?? AUTHOR.id,
+          agentName: self ? AUTHOR.name : undefined,
+          runtime: runtime ?? "claude-code-local",
+          capabilities,
+          pluginVersion: PLUGIN_VERSION,
+          processId: PROCESS_ID
+        }
+      })).json();
       if (agentId === undefined || agentId === AUTHOR.id)
         markAttached2(workspaceId);
       if (subscribe !== false)
@@ -22118,7 +22661,7 @@ async function handleWorkspaceTool(name, a, ctx) {
         if (typeof q?.id !== "string")
           continue;
         try {
-          await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/comment-queue/${encodeURIComponent(q.id)}/ack`, {});
+          await roster()["comment-queue"][":id"].ack.$post({ param: { ...wsOf(workspaceId), id: encodeURIComponent(q.id) } }, { init: { body: "{}" } });
         } catch {}
       }
       return ok2({
@@ -22148,54 +22691,67 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "heartbeat": {
       const { workspaceId, agentId, toolCallAt } = a;
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentId ?? AUTHOR.id)}/heartbeat`, { toolCallAt: toolCallAt ?? Date.now() });
+      await roster().agents[":agentId"].heartbeat.$post({
+        param: { ...wsOf(workspaceId), agentId: encodeURIComponent(agentId ?? AUTHOR.id) },
+        json: { toolCallAt: toolCallAt ?? Date.now() }
+      });
       if (agentId === undefined || agentId === AUTHOR.id)
         markAttached2(workspaceId);
-      return ok2({ workspaceId, agentId: agentId ?? AUTHOR.id, state: res.attachment?.state });
+      return ok2({ workspaceId, agentId: agentId ?? AUTHOR.id });
     }
     case "get_unfiled_ask_count": {
       const { agent } = a;
       const who = agent?.trim() || AUTHOR.name;
-      return ok2(await http("GET", `${board()}/chat-audit/${encodeURIComponent(who)}`));
+      const res = await lanes()["chat-audit"][":agent"].$get({
+        param: { ...here(), agent: encodeURIComponent(who) }
+      });
+      return ok2(await res.json());
     }
     case "publish_chat_audit": {
       const { day, entries } = a;
-      return ok2(await http("POST", `${board()}/chat-audit`, {
-        ...day !== undefined ? { day } : {},
-        auditor: AUTHOR.name,
-        entries
-      }));
+      const res = await lanes()["chat-audit"].$post({
+        param: here(),
+        json: { day, auditor: AUTHOR.name, entries }
+      });
+      return ok2(await res.json());
     }
     case "register_dispatch": {
       const { taskId, worktreePath, reason } = a;
-      return ok2(await http("POST", `${board()}/dispatches`, {
-        taskId,
-        worktreePath,
-        author: AUTHOR,
-        ...typeof reason === "string" && reason.trim().length > 0 ? { reason: reason.trim() } : {}
-      }));
+      const res = await lanes().dispatches.$post({
+        param: here(),
+        json: {
+          taskId,
+          worktreePath,
+          author: AUTHOR,
+          reason: typeof reason === "string" && reason.trim().length > 0 ? reason.trim() : undefined
+        }
+      });
+      return ok2(await res.json());
     }
     case "close_dispatch": {
       const { taskId } = a;
-      return ok2(await http("DELETE", `${board()}/dispatches/${encodeURIComponent(taskId)}`));
+      const res = await lanes().dispatches[":taskId"].$delete({
+        param: { ...here(), taskId: encodeURIComponent(taskId) }
+      });
+      return ok2(await res.json());
     }
     case "report_dispatch": {
       const { taskId, prNumber, headCommit, checks: checks3, doneWhen } = a;
-      return ok2(await http("POST", `${board()}/dispatches/${encodeURIComponent(taskId)}/report`, {
-        prNumber,
-        headCommit,
-        checks: checks3,
-        doneWhen,
-        agentName: AUTHOR.name,
-        author: AUTHOR
-      }));
+      const res = await lanes().dispatches[":taskId"].report.$post({
+        param: { ...here(), taskId: encodeURIComponent(taskId) },
+        json: { prNumber, headCommit, checks: checks3, doneWhen, agentName: AUTHOR.name, author: AUTHOR }
+      });
+      return ok2(await res.json());
     }
     case "set_parallelism_cap": {
       const { workspaceId, cap: rawCap } = a;
       const parsed = parseCapArg(rawCap);
       if (!parsed.ok)
         return err2(parsed.error);
-      const res = await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/parallelism-cap`, { cap: parsed.cap, author: AUTHOR });
+      const res = await (await onBoard()["parallelism-cap"].$put({
+        param: wsOf(workspaceId),
+        json: { cap: parsed.cap, author: AUTHOR }
+      })).json();
       return ok2({
         workspaceId,
         cap: res.cap,
@@ -22209,90 +22765,111 @@ async function handleWorkspaceTool(name, a, ctx) {
     }
     case "set_github_subscriptions": {
       const { workspaceId, subscriptions } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/github-subscriptions`, {
-        subscriptions
-      }));
+      const res = await onBoard()["github-subscriptions"].$put({
+        param: wsOf(workspaceId),
+        json: { subscriptions }
+      });
+      return ok2(await res.json());
     }
     case "set_board_embeds": {
       const { workspaceId, embeds } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/embeds`, { embeds }));
+      const res = await onBoard().embeds.$put({ param: wsOf(workspaceId), json: { embeds } });
+      return ok2(await res.json());
     }
     case "register_worktree": {
       const { path } = a;
-      return ok2(await http("POST", "/api/repos/checkouts", { path }));
+      return ok2(await (await repos().checkouts.$post({ json: { path } })).json());
     }
     case "list_worktrees": {
-      return ok2(await http("GET", "/api/repos"));
+      return ok2(await (await repos().$get()).json());
     }
     case "unregister_worktree": {
       const { path } = a;
-      return ok2(await http("DELETE", "/api/repos/checkouts", { path }));
+      return ok2(await (await repos().checkouts.$delete({ json: { path } })).json());
     }
     case "mount_folder": {
       const { path, privacy } = a;
-      return ok2(await http("POST", "/api/mounts", { path, ...privacy === undefined ? {} : { privacy } }));
+      const res = await mountsClient(http).api.mounts.$post({
+        json: { path, ...privacy === undefined ? {} : { privacy } }
+      });
+      return ok2(await res.json());
     }
     case "list_mounts": {
       const { path, mountId, after, limit } = a;
-      const q = new URLSearchParams;
-      if (path !== undefined)
-        q.set("path", path);
-      if (mountId !== undefined)
-        q.set("mountId", mountId);
-      if (after !== undefined)
-        q.set("after", after);
-      if (limit !== undefined)
-        q.set("limit", String(limit));
-      const qs = q.toString();
-      const route = mountId === undefined ? "/api/mounts" : "/api/mounts/files";
-      return ok2(await http("GET", qs === "" ? route : `${route}?${qs}`));
+      const mounts = mountsClient(http).api.mounts;
+      if (mountId === undefined) {
+        return ok2(await (await mounts.$get({ query: { path } })).json());
+      }
+      const res = await mounts.files.$get({
+        query: {
+          path,
+          mountId,
+          after,
+          limit: limit === undefined ? undefined : String(limit)
+        }
+      });
+      return ok2(await res.json());
     }
     case "unmount_folder": {
       const { path, mountId } = a;
-      return ok2(await http("DELETE", "/api/mounts", { path, mountId }));
+      const res = await mountsClient(http).api.mounts.$delete({ json: { path, mountId } });
+      return ok2(await res.json());
     }
     case "set_project_privacy": {
       const { path, privacy, mountId } = a;
-      return ok2(await http("PUT", "/api/mounts/privacy", {
-        path,
-        privacy,
-        ...mountId === undefined ? {} : { mountId }
-      }));
+      const res = await mountsClient(http).api.mounts.privacy.$put({
+        json: { path, privacy, ...mountId === undefined ? {} : { mountId } }
+      });
+      return ok2(await res.json());
     }
     case "set_project_conventions": {
       const { path, conventionsPath } = a;
-      return ok2(await http("PUT", "/api/mounts/conventions", { path, conventionsPath }));
+      const res = await mountsClient(http).api.mounts.conventions.$put({
+        json: { path, conventionsPath }
+      });
+      return ok2(await res.json());
     }
     case "read_project_conventions": {
       const { path } = a;
-      return ok2(await http("GET", `/api/mounts/conventions?path=${encodeURIComponent(path)}`));
+      const res = await mountsClient(http).api.mounts.conventions.$get({ query: { path } });
+      return ok2(await res.json());
     }
     case "set_project_meetings": {
       const { path, meetingsPath, retention, gitignore } = a;
-      return ok2(await http("PUT", "/api/mounts/meetings", {
-        path,
-        meetingsPath,
-        ...retention !== undefined ? { retention } : {},
-        ...gitignore !== undefined ? { gitignore } : {}
-      }));
+      const res = await mountsClient(http).api.mounts.meetings.$put({
+        json: {
+          path,
+          meetingsPath,
+          retention,
+          gitignore
+        }
+      });
+      return ok2(await res.json());
     }
     case "set_doc_title": {
       const { workspaceId, docId, title } = a;
-      return ok2(await http("PUT", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/title`, { title }));
+      const res = await doc2().title.$put({ param: docOf(workspaceId, docId), json: { title } });
+      return ok2(await res.json());
     }
     case "get_doc_metadata":
     case "set_doc_metadata": {
       const { workspaceId, docId, fields } = a;
-      const path = `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/metadata`;
-      return ok2(name === "get_doc_metadata" ? await http("GET", path) : await http("PUT", path, { fields: fields ?? {} }));
+      const param = docOf(workspaceId, docId);
+      const res = name === "get_doc_metadata" ? await doc2().metadata.$get({ param }) : await doc2().metadata.$put({ param, json: { fields: fields ?? {} } });
+      return ok2(await res.json());
     }
     case "move_doc_to_project": {
       const { workspaceId, docId, relPath } = a;
-      return ok2(await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move`, { relPath }));
+      const res = await doc2().move.$post({ param: docOf(workspaceId, docId), json: { relPath } });
+      return ok2(await res.json());
     }
     case "move_doc_file": {
       const { workspaceId, docId, path, mode } = a;
-      return ok2(await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/move-file`, { path, mode }));
+      const res = await doc2()["move-file"].$post({
+        param: docOf(workspaceId, docId),
+        json: { path, mode }
+      });
+      return ok2(await res.json());
     }
     case "leave_workspace": {
       const { workspaceId } = a;
@@ -22301,7 +22878,9 @@ async function handleWorkspaceTool(name, a, ctx) {
       }
       let detached = true;
       try {
-        await http("DELETE", `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(AUTHOR.id)}`);
+        await roster().agents[":agentId"].$delete({
+          param: { ...wsOf(workspaceId), agentId: encodeURIComponent(AUTHOR.id) }
+        });
       } catch (e) {
         if (!(e instanceof Error) || !e.message.includes(" → 404:"))
           throw e;
@@ -22329,12 +22908,15 @@ async function handleWorkspaceTool(name, a, ctx) {
         return err2("workspaceId and queueId are required");
       if (words === "")
         return err2("text is empty — say the answer");
-      const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/voice-queue/${encodeURIComponent(queueId)}/answer`, {
-        agentId: AUTHOR.id,
-        text: words,
-        ...full ? { written: full } : {},
-        ...kept ? { minute: kept } : {}
-      });
+      const res = await (await roster()["voice-queue"][":id"].answer.$post({
+        param: { ...wsOf(workspaceId), id: encodeURIComponent(queueId) },
+        json: {
+          agentId: AUTHOR.id,
+          text: words,
+          written: full || undefined,
+          minute: kept || undefined
+        }
+      })).json();
       return ok2({
         delivered: res.delivered === true,
         ...res.delivered === true ? {} : { note: "No page is waiting for this answer. Post it on the task or a thread." }
@@ -22346,11 +22928,10 @@ async function handleWorkspaceTool(name, a, ctx) {
         return err2("workspaceId is required");
       const place = placeOf(a);
       try {
-        const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/point`, {
-          agentId: AUTHOR.id,
-          agentName: AUTHOR.name,
-          ...place
-        });
+        const res = await (await personClient(http).workspaces[":ws"].point.$post({
+          param: wsOf(workspaceId),
+          json: { agentId: AUTHOR.id, agentName: AUTHOR.name, ...place }
+        })).json();
         return ok2({
           pointed: true,
           spot: res.spot,
@@ -22371,7 +22952,10 @@ async function handleWorkspaceTool(name, a, ctx) {
       if (words === "")
         return err2("text is empty — say the line");
       try {
-        const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`, { agentId: AUTHOR.id, text: words });
+        const res = await (await leadMeetingClient(http).workspaces[":ws"]["lead-chat"].meeting.say.$post({
+          param: wsOf(workspaceId),
+          json: { agentId: AUTHOR.id, text: words }
+        })).json();
         if (res.said === false) {
           return ok2({ said: false, reason: res.lapsed ?? "lapsed", note: res.hint ?? "" });
         }
@@ -22390,7 +22974,14 @@ async function handleWorkspaceTool(name, a, ctx) {
     case "coach_moment": {
       const { goal, matched, observed, line } = a;
       try {
-        const r = await http("POST", "/coach/moments", { goal, matched, observed, line });
+        const r = await (await agentMachineClient(http).coach.moments.$post({
+          json: {
+            goal,
+            matched,
+            observed,
+            line
+          }
+        })).json();
         return ok2({ raised: true, id: r.id });
       } catch (e) {
         const m = String(e).match(/→ (409|422): (.*)$/s);
@@ -22418,37 +23009,39 @@ async function handleWorkspaceTool(name, a, ctx) {
       if (goal !== undefined && goal !== null && typeof goal !== "string") {
         return err2("goal is a plan goal id, urgent, not-this-week or drop, or null");
       }
-      const body = {
-        agentId: AUTHOR.id,
-        key,
-        ...rank !== undefined ? { rank } : {},
-        ...goal !== undefined ? { goal } : {}
-      };
       try {
-        const res = await http("POST", "/api/review-queue/rank", body);
+        const sent = await agentMachineClient(http).api["review-queue"].rank.$post({
+          json: {
+            agentId: AUTHOR.id,
+            key,
+            rank,
+            goal
+          }
+        });
+        const res = await sent.json();
         return ok2({ ...res, ranked: true });
       } catch (e) {
         const m = String(e).match(/→ (400|403|404): (.*)$/s);
         if (!m)
           throw e;
-        const body2 = (() => {
+        const body = (() => {
           try {
             return JSON.parse(m[2] ?? "");
           } catch {
             return {};
           }
         })();
-        return ok2({ ranked: false, reason: body2.error ?? "refused", message: body2.message });
+        return ok2({ ranked: false, reason: body.error ?? "refused", message: body.message });
       }
     }
     case "request_plugin_refresh": {
-      return ok2(await http("POST", "/api/plugin/refresh"));
+      return ok2(await (await agentMachineClient(http).api.plugin.refresh.$post()).json());
     }
     case "list_attachments":
     case "list_agents": {
       const { workspaceId } = a;
-      const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/agents`);
-      return ok2(res);
+      const res = await roster().agents.$get({ param: wsOf(workspaceId) });
+      return ok2(await res.json());
     }
   }
   return;
@@ -22524,8 +23117,13 @@ function restoreNoticeContent(opts) {
 }
 
 // packages/mcp/src/watch-registry.ts
-function watchesPath(deps) {
-  return `/api/agents/${encodeURIComponent(deps.author.id)}/watches`;
+function watchesRoute(http, agentId) {
+  const route = personClient(http).api.agents[":agentId"].watches;
+  const param = { agentId: encodeURIComponent(agentId) };
+  return {
+    read: async () => (await route.$get({ param })).json(),
+    change: (json) => route.$post({ param, json })
+  };
 }
 function createWatchRegistry(deps) {
   const state = { coverage: undefined, lastPersistError: undefined };
@@ -22540,7 +23138,6 @@ function createWatchRegistry(deps) {
     },
     watchPersistenceMode: () => watchPersistenceMode(deps),
     lastPersistError: () => state.lastPersistError,
-    watchesPath: () => watchesPath(deps),
     streamMode: () => usesMux(deps) ? "multiplexed" : "per-key"
   };
 }
@@ -22552,7 +23149,8 @@ async function refreshCoverage(deps, state) {
   if (deps.identityIsShared)
     return;
   try {
-    state.coverage = parseCoverage(await deps.http("GET", watchesPath(deps))) ?? state.coverage;
+    const read = await watchesRoute(deps.http, deps.author.id).read();
+    state.coverage = parseCoverage(read) ?? state.coverage;
   } catch {}
   return state.coverage;
 }
@@ -22563,7 +23161,11 @@ async function persistWatchChange(deps, state, change) {
   if (deps.identityIsShared)
     return false;
   try {
-    await deps.http("POST", watchesPath(deps), { ...change, name: deps.author.name });
+    await watchesRoute(deps.http, deps.author.id).change({
+      add: change.add,
+      remove: change.remove,
+      name: deps.author.name
+    });
     state.lastPersistError = undefined;
     return true;
   } catch (err2) {
@@ -22703,7 +23305,7 @@ async function ensureWatchesRestored(deps, rt) {
   rt.inFlight = (async () => {
     const attempts = rt.state.attempts + 1;
     try {
-      const res = await deps.http("GET", deps.registry.watchesPath());
+      const res = await watchesRoute(deps.http, deps.author.id).read();
       deps.registry.setCoverage(parseCoverage(res));
       const keys = (res.watches ?? []).map((w) => w.key);
       const restored = [];
@@ -22719,13 +23321,18 @@ async function ensureWatchesRestored(deps, rt) {
       const reattached = [];
       for (const workspaceId of boardsToReattach(deps.registry.coverage())) {
         try {
-          const attachRes = await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-            agentId: deps.author.id,
-            agentName: deps.author.name,
-            runtime: "claude-code-local",
-            pluginVersion: deps.pluginVersion,
-            processId: deps.processId
-          });
+          const board = workspaceAgentsClient(deps.http).workspaces[":ws"];
+          const ws = encodeURIComponent(workspaceId);
+          const attachRes = await (await board.agents.$post({
+            param: { ws },
+            json: {
+              agentId: deps.author.id,
+              agentName: deps.author.name,
+              runtime: "claude-code-local",
+              pluginVersion: deps.pluginVersion,
+              processId: deps.processId
+            }
+          })).json();
           deps.markAttached(workspaceId);
           reattached.push(workspaceId);
           deps.deferredEmits.emitOutsideToolCall(() => deliverAttachBacklog(workspaceId, attachRes, {
@@ -22735,7 +23342,7 @@ async function ensureWatchesRestored(deps, rt) {
               }
             },
             ackComment: async (rowId) => {
-              await deps.http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/comment-queue/${encodeURIComponent(rowId)}/ack`, {});
+              await board["comment-queue"][":id"].ack.$post({ param: { ws, id: encodeURIComponent(rowId) } }, { init: { body: "{}" } });
             }
           }));
         } catch {}

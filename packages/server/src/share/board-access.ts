@@ -70,6 +70,17 @@ export function mayEditDocs(role: AccessRole): boolean {
   return role === 'owner' || role === 'edit';
 }
 
+const ACCESS_RANK: Record<AccessRole, number> = { view: 0, comment: 1, edit: 2, owner: 3 };
+
+/**
+ * Whether moving a person from `before` to `after` lets them do more. A
+ * widening needs the owner's own proof (`routes/workspace-members.ts`); a
+ * narrowing, or no change, applies at once.
+ */
+export function widensAccess(before: AccessRole, after: AccessRole): boolean {
+  return ACCESS_RANK[after] > ACCESS_RANK[before];
+}
+
 /** A caller-supplied mode, or undefined when it is not one of the two. */
 export function parseRolesMode(value: unknown): RolesMode | undefined {
   return value === 'report-only' || value === 'enforce' ? value : undefined;

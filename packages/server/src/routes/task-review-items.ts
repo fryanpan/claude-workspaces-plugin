@@ -9,7 +9,8 @@
  * plugin bundle; `answerTaskReview` on the derived `r-legacy` row delegates
  * back into `answerDecision`, so one implementation records both. The two
  * doors that record a question rather than move the item are
- * `task-review-ask-back.ts`.
+ * `task-review-ask-back.ts`, and taking an item back is
+ * `task-review-withdraw.ts`.
  */
 import {
   type Thread,
@@ -33,8 +34,9 @@ import {
   asksForSecret,
 } from '../share/board-role.ts';
 import { SHARING_NOTICE_ACTOR } from '../sharing-notice.ts';
-import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
+import type * as C from './review-items-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 import { askBackFromAnswer } from './task-review-ask-back.ts';
 import {
   type TaskRouteRequest,
@@ -61,13 +63,13 @@ export async function handleTaskReviewItems(
     judgeTaskDecision,
     answerCoverage,
   } = ctx;
-  const { req, scope, visitor, authorFor, refuseCategoryAuthor, roleFor } = rq;
+  const { req, scope, visitor, authorFor, roleFor } = rq;
 
   const workspaceId = scope?.workspaceId ?? '';
   const taskReviewAddMatch = matchRest(scope, /^tasks\/([^/]+)\/review-items$/);
   if (taskReviewAddMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewAddMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.AddReviewItemBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     // A SHARE VISITOR MAY NOT FILE THIS SHAPE — see `SECRET_FILING_DENIAL`.
@@ -97,19 +99,22 @@ export async function handleTaskReviewItems(
     // is for the callers that already read it — this is a new door, and
     // a new door has no old callers to keep.
     const url = reviewItemUrlFor(ctx, workspaceId, taskId, res.item.id, Boolean(visitor));
-    return j(200, {
-      task: res.task,
-      item: gate.item,
-      ...(url !== undefined ? { url } : {}),
-      ...(res.advice !== undefined ? { reviewAdvice: res.advice } : {}),
-      ...heldFields(gate),
-    });
+    return j(
+      200,
+      answerAs<C.AddReviewItemAnswer>({
+        task: res.task,
+        item: gate.item,
+        url,
+        reviewAdvice: res.advice,
+        ...heldFields(gate),
+      }),
+    );
   }
   const taskReviewAnswerMatch = matchRest(scope, /^tasks\/([^/]+)\/review-items\/([^/]+)\/answer$/);
   if (taskReviewAnswerMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskReviewAnswerMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewAnswerMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.ReviewAnswerBody>(await safeJson(req));
     const text = body?.text;
     if (typeof text !== 'string' || text.length === 0) {
       return j(400, { error: 'text required' });
@@ -223,7 +228,10 @@ export async function handleTaskReviewItems(
     );
     const stillOpen =
       res.item.answer === undefined ? res.item.partialAnswers?.at(-1)?.open : undefined;
-    return j(200, { ...res, ...(stillOpen ? { openParts: stillOpen } : {}) });
+    return j(
+      200,
+      answerAs<C.TicketAnswer>({ ...res, ...(stillOpen ? { openParts: stillOpen } : {}) }),
+    );
   }
   /**
    * RELEASE a held review item — the reader overruling the gate.
@@ -296,11 +304,9 @@ export async function handleTaskReviewItems(
     const taskId = decodeURIComponent(taskReviewReviseMatch[1] ?? '');
     const reviewItemId = decodeURIComponent(taskReviewReviseMatch[2] ?? '');
     const url = reviewItemUrlFor(ctx, workspaceId, taskId, reviewItemId, Boolean(visitor));
-    {
-      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
-      if (denied) return denied;
-    }
-    const body = await safeJson(req);
+    const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
+    if (denied) return denied;
+    const body = sent<C.ReviseReviewItemBody>(await safeJson(req));
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
     const task = taskStore.getTask(taskId);
@@ -370,12 +376,15 @@ export async function handleTaskReviewItems(
       if (wasHeldDecision && gate && !gate.held) {
         announceTaskReview(revised.task, gate.item, author);
       }
-      return j(200, {
-        task: revised.task,
-        item: gate?.item ?? revised.item,
-        ...(url !== undefined ? { url } : {}),
-        ...heldFields(gate),
-      });
+      return j(
+        200,
+        answerAs<C.ReviseReviewItemAnswer>({
+          task: revised.task,
+          item: gate?.item ?? revised.item,
+          url,
+          ...heldFields(gate),
+        }),
+      );
     }
     if (reply !== undefined) {
       const item = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId);
@@ -413,87 +422,18 @@ export async function handleTaskReviewItems(
         generate: !visitor,
       });
     }
-    return j(200, {
-      task: res.task,
-      item: gate.item,
-      ...(url !== undefined ? { url } : {}),
-      ...(res.threadId !== undefined ? { threadId: res.threadId } : {}),
-      ...(thread ? { thread } : {}),
-      ...(res.advice !== undefined ? { reviewAdvice: res.advice } : {}),
-      ...heldFields(gate),
-    });
-  }
-  // Taking a TICKET-borne ask back — the same exit the doc-thread
-  // withdraw route has had, for the surface that lacked it: an item
-  // filed with add_review_item had no way off the reader's queue short
-  // of revising it into something else, which is a lie about what was
-  // asked. Same contract as the doc route: the words stay on the ticket
-  // verbatim, marked withdrawn with the reason beside them; refused on
-  // an answered item (409 — the state, not the request, is what's
-  // wrong); `/undo` puts the ask back in front of the reader.
-  const taskReviewWithdrawMatch = matchRest(
-    scope,
-    /^tasks\/([^/]+)\/review-items\/([^/]+)\/withdraw(\/undo)?$/,
-  );
-  if (taskReviewWithdrawMatch && req.method === 'POST') {
-    // No visitor refusal here, unlike its neighbours. Withdrawing is the exit
-    // from filing, and a share member files review items on the board they
-    // were admitted to (Bryan, 2026-09-03). The board question is asked one
-    // layer up: `shareScopeAllows` admits this path only when the TASK is on
-    // the workspace this member holds.
-    const taskId = decodeURIComponent(taskReviewWithdrawMatch[1] ?? '');
-    const reviewItemId = decodeURIComponent(taskReviewWithdrawMatch[2] ?? '');
-    {
-      const denied = ownerOnlyDenial(ctx, rq, taskId, reviewItemId);
-      if (denied) return denied;
-    }
-    // The sharing notice's card is the owner's one way back in while sharing
-    // is off; an agent that withdrew it would leave him nothing to approve.
-    // Only the notice itself takes it down, when the switch comes back on.
-    {
-      const task = taskStore.getTask(taskId);
-      if (task && reviewItemFilerId(task, reviewItemId) === SHARING_NOTICE_ACTOR.id) {
-        return j(403, {
-          error: 'sharing-notice',
-          message: 'the sharing notice withdraws itself when sharing is turned back on',
-        });
-      }
-    }
-    const undo = taskReviewWithdrawMatch[3] !== undefined;
-    const body = await safeJson(req);
-    const author = authorFor(body?.author);
-    if (!author) return j(400, { error: 'author required' });
-    if (isCategoryAuthor(author)) return refuseCategoryAuthor();
-    const reason = body?.reason;
-    if (reason !== undefined && typeof reason !== 'string') {
-      return j(400, { error: 'reason must be a string' });
-    }
-    const res = taskStore.withdrawReviewItem(taskId, reviewItemId, {
-      actor: author,
-      ...(reason !== undefined ? { reason } : {}),
-      ...(undo ? { undo: true } : {}),
-    });
-    if (!res.ok) {
-      const status =
-        res.error === 'not-found' || res.error === 'unknown-review-item'
-          ? 404
-          : res.error === 'answered'
-            ? 409
-            : 400;
-      return j(status, {
-        error: res.error,
-        ...(res.message !== undefined ? { message: res.message } : {}),
-      });
-    }
-    taskProjection.refreshTask(res.task);
-    // Announced on the way BACK only, exactly as the doc route reasons:
-    // a withdrawal must not buzz the reader with the ask just taken off
-    // their queue, and a reinstated item still held by the gate is on
-    // nobody's queue yet.
-    if (undo && !isReviewItemHeld(res.item)) {
-      announceTaskReview(res.task, res.item, author);
-    }
-    return j(200, { taskId, reviewItemId, item: res.item, withdrawn: !undo });
+    return j(
+      200,
+      answerAs<C.ReviseReviewItemAnswer>({
+        task: res.task,
+        item: gate.item,
+        url,
+        threadId: res.threadId,
+        thread: thread ?? undefined,
+        reviewAdvice: res.advice,
+        ...heldFields(gate),
+      }),
+    );
   }
   return undefined;
 }

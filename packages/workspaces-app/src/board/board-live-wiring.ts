@@ -37,12 +37,13 @@ import {
   onPageScroll,
   pageScroller,
   scrollFraction,
-  scrollToFraction,
+  scrollToFractionWhenDrawn,
 } from '../presence/page-scroll.ts';
-import type { BoardState } from './board-actions.ts';
+import { type BoardState, showToast } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
 import { ACTIVITY_REFRESH_EVENTS } from './board-presence-model.ts';
 import { startHomeClock } from './home-clock.ts';
+import { listenCollabCore, rereadCollabCore, stripToast } from './presence-core-switch.ts';
 
 /** The row shape `loadDiscussion` accepts — a task or a goal, both of which
  *  keep their comments in a body doc, so the id is always resolvable. */
@@ -229,6 +230,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   // key names the PARTICIPANT, not one of their connections, so a follow
   // survives the followed person reloading. A spot on the board itself is
   // its address: the tab, panel, thread or item, opened in place.
+  /** Ends the wait for the last followed scroll, so a newer one replaces it. */
+  let stopScrolling = (): void => {};
   const follower = createFollower({
     room: client.awareness,
     workspaceId,
@@ -237,9 +240,12 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     go: (href) => location.assign(href),
     show: (spot) => {
       if (spot.path) deps.showPath(spot.path);
-      // On the next frame: the path may have just shown another tab.
+      // From the next frame, once the page the path showed has room: it may
+      // have just shown another tab, or one still filling in.
       const { scroll } = spot;
-      if (scroll !== undefined) requestAnimationFrame(() => scrollToFraction(scroller(), scroll));
+      stopScrolling();
+      if (scroll !== undefined)
+        stopScrolling = scrollToFractionWhenDrawn(document, BOARD_SCROLL_ROOTS, scroll);
     },
     storage: deps.followStorage ?? sessionStorage,
     onChange: (key) => {
@@ -250,8 +256,11 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   state.followedKey = follower.key();
   // The room may have answered before this ran; no later change would say so.
   follower.refresh();
-  stopOnOwnInput(window, follower, (target) =>
-    target instanceof Element ? target.closest('#board-people') !== null : false,
+  stopOnOwnInput(
+    window,
+    follower,
+    (target) => (target instanceof Element ? target.closest('#board-people') !== null : false),
+    () => stripToast('Stopped following', showToast),
   );
   let lastActivePush = 0;
   const touch = () => {
@@ -339,6 +348,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   // archived or renamed (`page-nudges.ts` on the server), and who has access.
   es.addEventListener('library.changed', () => libraryChanged());
   es.addEventListener('members.changed', () => membersChanged());
+  // The owner switched the collab core for this board: redraw the strip.
+  listenCollabCore(es);
 
   // A task going done takes its discussion out of the queue, and so does an
   // item taken back: a reader's Mark read, or a run's output item whose files
@@ -389,6 +400,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
       if (state.pane === 'home') void loadHome();
       libraryChanged();
       membersChanged();
+      // A flip of the collab core sent while the stream was down.
+      void rereadCollabCore(workspaceId);
     },
   });
   // Its own line, under the reconnect banner rather than sharing it: that one

@@ -130,6 +130,12 @@ export function buildShell(
     <div class="board-main" id="board-main">
       <nav id="board-nav" class="board-nav" aria-label="Workspace pages">
         ${navRailItemsHtml()}
+        <!-- Messages opens the lead chat, whose heading picks the channel
+             (lead-chat/lead-chat-channels.ts). Not a page: no data-nav, and
+             shown once there is a chat to open. -->
+        <button type="button" id="board-nav-messages" class="board-nav-item board-nav-messages" data-lead-chat-toggle title="Messages" aria-expanded="false" hidden>
+          <span class="board-nav-icon" aria-hidden="true">${NAV_ICONS.messages}</span><span class="board-nav-label">Messages</span><span class="board-nav-dot" aria-hidden="true"></span>
+        </button>
         <!-- The rail's foot, apart from the four tabs above it (Bryan,
              2026-09-11: settings reached "from a bottom-left button in the
              nav bar", "so that settings never crowd the main tabs or the top

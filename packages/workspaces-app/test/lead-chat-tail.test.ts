@@ -62,4 +62,36 @@ describe('the bar', () => {
     expect(line?.classList.contains('lc-dim')).toBe(true);
     expect(line?.textContent).toBe('You: Listening…');
   });
+
+  it('keeps its rows as the words change, and drops the ones no longer drawn', () => {
+    const box = row();
+    const said = { role: 'person', text: 'hi' } as LeadChatViewModel['messages'][number];
+    drawBarLines(box, model({ messages: [said], listening: true }));
+    const [first, second] = [...box.children];
+    drawBarLines(box, model({ messages: [said], listening: true, heard: 'the ferry' }));
+    expect(box.children[0]).toBe(first);
+    expect(box.children[1]).toBe(second);
+    expect(second?.textContent).toBe('You: the ferry');
+    drawBarLines(box, model({ messages: [said], listening: true }));
+    expect(box.children[1]).toBe(second);
+    expect(second?.classList.contains('lc-tail')).toBe(false);
+    expect(second?.textContent).toBe('You: Listening…');
+    drawBarLines(box, model({ messages: [said] }));
+    expect(box.children).toHaveLength(1);
+    expect(box.children[0]).toBe(first);
+  });
+
+  it('keeps the clip of a live line across redraws, cut or not', () => {
+    const box = row();
+    drawBarLines(box, model({ listening: true, heard: 'the' }));
+    const clip = box.querySelector('.lc-tail-clip');
+    const words = box.querySelector('.lc-tail-text');
+    const label = box.querySelector('.lc-tail-label');
+    clip?.classList.add('lc-cut');
+    drawBarLines(box, model({ listening: true, heard: 'the ferry task' }));
+    expect(box.querySelector('.lc-tail-clip')).toBe(clip);
+    expect(box.querySelector('.lc-tail-text')).toBe(words);
+    expect(box.querySelector('.lc-tail-label')).toBe(label);
+    expect(words?.textContent).toBe('the ferry task');
+  });
 });

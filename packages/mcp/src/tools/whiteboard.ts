@@ -12,7 +12,8 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
-import { boardPathOf } from '../board-path.ts';
+import { boardIdOf } from '../board-path.ts';
+import { whiteboardClient } from '../server-client.ts';
 
 export interface WhiteboardToolContext {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
@@ -27,13 +28,18 @@ export async function handleWhiteboardTool(
   a: Record<string, unknown>,
   ctx: WhiteboardToolContext,
 ): Promise<CallToolResult | undefined> {
+  const board = () => whiteboardClient(ctx.http).workspaces[':ws'];
+  const ws = () => encodeURIComponent(boardIdOf(name, a));
   switch (name) {
     case 'create_whiteboard': {
       const title = typeof a.title === 'string' ? a.title : undefined;
-      const res = (await ctx.http('POST', `${boardPathOf(name, a)}/whiteboards`, {
-        ...(title !== undefined ? { title } : {}),
-        author: ctx.AUTHOR,
-      })) as { docId?: string; url?: string; meta?: { reviewUrl?: string } };
+      // An absent title is undefined, and JSON drops it.
+      const res = await (
+        await board().whiteboards.$post({
+          param: { ws: ws() },
+          json: { title, author: ctx.AUTHOR },
+        })
+      ).json();
       if (typeof res?.docId !== 'string') return ctx.err('the server did not return a whiteboard');
       await ctx.watchDoc(res.docId);
       return ctx.ok({ docId: res.docId, url: res.meta?.reviewUrl ?? res.url });
@@ -42,26 +48,20 @@ export async function handleWhiteboardTool(
       const docId = typeof a.docId === 'string' ? a.docId : '';
       if (docId === '') return ctx.err('docId is required');
       if (!Array.isArray(a.shapes)) return ctx.err('shapes must be a list');
-      const res = await ctx.http(
-        'POST',
-        `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`,
-        {
-          shapes: a.shapes,
-          ...(a.mode !== undefined ? { mode: a.mode } : {}),
-          ...(a.point !== undefined ? { point: a.point } : {}),
-          author: ctx.AUTHOR,
-        },
-      );
-      return ctx.ok(res);
+      const res = await board().docs[':docId'].whiteboard.$post({
+        param: { ws: ws(), docId: encodeURIComponent(docId) },
+        // An absent mode or point is undefined, and JSON drops it.
+        json: { shapes: a.shapes, mode: a.mode, point: a.point, author: ctx.AUTHOR },
+      });
+      return ctx.ok(await res.json());
     }
     case 'get_whiteboard': {
       const docId = typeof a.docId === 'string' ? a.docId : '';
       if (docId === '') return ctx.err('docId is required');
-      const res = await ctx.http(
-        'GET',
-        `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`,
-      );
-      return ctx.ok(res);
+      const res = await board().docs[':docId'].whiteboard.$get({
+        param: { ws: ws(), docId: encodeURIComponent(docId) },
+      });
+      return ctx.ok(await res.json());
     }
     default:
       return undefined;

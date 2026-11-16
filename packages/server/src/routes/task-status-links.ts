@@ -17,11 +17,14 @@ import {
 } from '../share/ref-scope.ts';
 import { BAD_REF_ERROR } from '../task-create.ts';
 import { type TaskStatus, isValidRef, taskChip } from '../tasks.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type * as T from './task-content-contract.ts';
 import {
   type TaskRouteRequest,
   type TaskRoutesContext,
   markPersonRelease,
 } from './task-routes-context.ts';
+import type * as C from './task-state-contract.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleTaskStatusAndLinks(
@@ -44,7 +47,7 @@ export async function handleTaskStatusAndLinks(
   const taskTransitionMatch = matchRest(scope, /^tasks\/([^/]+)\/transition$/);
   if (taskTransitionMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskTransitionMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TransitionBody>(await safeJson(req));
     const author = authorFor(body?.author);
     const to = body?.to as TaskStatus | undefined;
     if (!author || !to) return j(400, { error: 'author + to required' });
@@ -122,10 +125,13 @@ export async function handleTaskStatusAndLinks(
     released(taskId);
     // The success arm carries the NON-enforcing blockers as warnings, which
     // is the same report and the same cut.
-    return j(200, {
-      ...res,
-      blockers: blockersInVisitorScope(res.blockers, visitor, workspacesOfDoc),
-    });
+    return j(
+      200,
+      answerAs<C.TransitionAnswer>({
+        ...res,
+        blockers: blockersInVisitorScope(res.blockers, visitor, workspacesOfDoc),
+      }),
+    );
   }
   // Retired 2026-08-25 with the rest of evidence support, and kept as a
   // NO-OP rather than deleted. An old bundle reaches this route from a
@@ -196,7 +202,7 @@ export async function handleTaskStatusAndLinks(
   // narrowing the task-scoped twin above already applies to a visitor,
   // applied to everyone, because the address now names whose question it is.
   if (restIs(scope, 'refs:backlinks') && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<T.RefBody>(await safeJson(req));
     const ref = body?.ref;
     // A malformed ref must NOT fall through to an empty answer: [] and
     // "I didn't understand you" are indistinguishable to the caller,
@@ -206,7 +212,7 @@ export async function handleTaskStatusAndLinks(
       .backlinksFor(ref)
       .filter((t) => t.workspaceId === scope.workspaceId)
       .map(taskChip);
-    return j(200, { ref, tasks });
+    return j(200, answerAs<T.BacklinksAnswer>({ ref, tasks }));
   }
   // Mine the links people already wrote into structured refs — every
   // doc body, task body, goal body, and stored url ref, both
@@ -333,7 +339,7 @@ export async function handleTaskStatusAndLinks(
   }
   if (taskLinksMatch && (req.method === 'POST' || req.method === 'DELETE')) {
     const taskId = decodeURIComponent(taskLinksMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<T.RefBody>(await safeJson(req));
     const ref = body?.ref;
     if (!isValidRef(ref)) return j(400, { error: BAD_REF_ERROR });
     // The ref names its target in the BODY, so the path check that admitted
@@ -354,7 +360,7 @@ export async function handleTaskStatusAndLinks(
     // row for them), so refresh the projection by hand — the same
     // pattern as createWorkspace/attachDoc above.
     taskProjection.refreshTask(res.task);
-    return j(200, { ok: true, changed: res.changed, task: res.task });
+    return j(200, answerAs<T.LinkAnswer>({ ok: true, changed: res.changed, task: res.task }));
   }
   // set_task_goal (§3.10): goal + exact position — the write
   // half of triage and the board's regroup gesture. Every field here is
@@ -368,7 +374,7 @@ export async function handleTaskStatusAndLinks(
   const taskGoalMatch = matchRest(scope, /^tasks\/([^/]+)\/goal$/);
   if (taskGoalMatch && req.method === 'POST') {
     const taskId = decodeURIComponent(taskGoalMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<C.TaskGoalBody>(await safeJson(req));
     const goal = body?.goal;
     if (typeof goal !== 'string' || goal.length === 0) {
       return j(400, { error: 'goal required' });
@@ -401,7 +407,7 @@ export async function handleTaskStatusAndLinks(
     // (triagedAgainst, triagePendingTs) without emitting an event —
     // refresh the projection by hand, same as attachDoc.
     if (!res.changed) taskProjection.refreshTask(res.task);
-    return j(200, res);
+    return j(200, answerAs<C.TaskChange>(res));
   }
   return undefined;
 }

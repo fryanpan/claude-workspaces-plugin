@@ -24,13 +24,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -39,91 +33,28 @@ import {
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { CHROME_LOG_ARGS, boundCdp, connectWatched, dumpRunning, watchOf } from './chrome-stall.ts';
 import type { MeetingBrowserRun, MeetingSizeRun, Rect } from './lead-chat-browser-reading.ts';
+import { bounded, go, read, tap, until } from './lead-chat-meeting-page.ts';
 
+/** The step under way, which the overall deadline names when it fires. */
+let current = 'starting';
 const step = (what: string): void => {
+  current = what;
   process.stderr.write(`[lead-chat-meeting-driver] ${what}\n`);
 };
 
-async function until<T>(
-  what: string,
-  read: () => Promise<T | null> | T | null,
-  ms = 20_000,
-): Promise<T> {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    const v = await read();
-    if (v !== null && v !== undefined) return v;
-    await sleep(25);
-  }
-  throw new Error(`never happened: ${what}`);
-}
-
-/** The chat's meeting as the page shows it, through its shadow roots. */
-const READ = `(() => {
-  const host = document.querySelector('[data-lead-chat="button"]');
-  const btn = host && host.shadowRoot && host.shadowRoot.querySelector('button');
-  const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
-  const q = (s) => sr && sr.querySelector(s);
-  // A tab behind another draws no frames, so the panel's grow animation stalls part-way; read the end state.
-  for (const a of q('.lc-pane')?.getAnimations?.() ?? []) a.finish();
-  const box = (el) => { if (!el || el.hidden) return null; const r = el.getBoundingClientRect(); return r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
-  const nav = document.querySelector('.cw-host-nav');
-  const frame = document.querySelector('iframe[data-cw-mock-frame]');
-  const b = btn && btn.getBoundingClientRect();
-  const hit = b ? document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) : null;
-  return {
-    button: box(btn),
-    buttonOnTop: !!hit && hit === host,
-    pane: box(q('.lc-pane')),
-    start: box(q('.lc-start')),
-    next: q('[data-wiz="next"]') && !q('[data-wiz="next"]').disabled ? box(q('[data-wiz="next"]')) : null,
-    go: box(q('[data-wiz="start"]')),
-    wizard: box(q('.lc-wiz')),
-    head: box(q('.lc-meet')),
-    headText: q('.lc-meet') && !q('.lc-meet').hidden ? q('.lc-meet').textContent : '',
-    end: box(q('.lc-end')),
-    tap: box(q('.lc-tap')),
-    notes: q('.lc-notes') && !q('.lc-notes').hidden ? q('.lc-notes').textContent : '',
-    notesBox: box(q('.lc-notes')),
-    composeBox: box(q('.lc-compose')),
-    bar: box(q('.lc-bar')),
-    barText: q('.lc-bar') && !q('.lc-bar').hidden ? q('.lc-bar').textContent : '',
-    nav: box(nav),
-    navLinks: nav ? [...nav.querySelectorAll('a')].map((a) => a.textContent) : [],
-    frame: box(frame),
-    viewport: { width: document.documentElement.clientWidth, height: innerHeight },
-  };
-})()`;
-
-interface Read {
-  button: Rect | null;
-  buttonOnTop: boolean;
-  pane: Rect | null;
-  start: Rect | null;
-  next: Rect | null;
-  go: Rect | null;
-  wizard: Rect | null;
-  head: Rect | null;
-  headText: string;
-  end: Rect | null;
-  tap: Rect | null;
-  notes: string;
-  notesBox: Rect | null;
-  composeBox: Rect | null;
-  bar: Rect | null;
-  barText: string;
-  nav: Rect | null;
-  navLinks: string[];
-  frame: Rect | null;
-  viewport: { width: number; height: number };
-}
-
 const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
+/** A dump, written without becoming the step under way. */
+const dump = (text: string): void => {
+  process.stderr.write(`[lead-chat-meeting-driver] ${text}\n`);
+};
 
 async function setup(cdp: Cdp, width: number, height: number): Promise<Cdp> {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  // A dialog holds the page's main thread, and every evaluate behind it.
+  cdp.on('Page.javascriptDialogOpening', (p) => step(`a dialog opened: ${JSON.stringify(p)}`));
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width,
     height,
@@ -144,6 +75,7 @@ async function openBrowser(width: number, height: number) {
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--mute-audio',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-meeting-${width}-${process.pid}`,
@@ -152,44 +84,239 @@ async function openBrowser(width: number, height: number) {
     },
   );
   const main = await setup(
-    await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS)),
+    await connectWatched(b, `recording tab at ${width}`, dump),
     width,
     height,
   );
   // A second tab of the same browser: its own session storage, so it is not
   // the recorder — only a page watching the meeting.
-  const res = await fetch(`http://127.0.0.1:${b.port}/json/new?about:blank`, { method: 'PUT' });
-  const target = (await res.json()) as { webSocketDebuggerUrl: string };
-  const watcher = await setup(await Cdp.connect(target.webSocketDebuggerUrl), width, height);
-  return { main, watcher, browser: b };
-}
-
-async function read(cdp: Cdp): Promise<Read> {
-  return (await cdp.evaluate(READ)) as Read;
-}
-
-async function go(cdp: Cdp, url: string): Promise<Read> {
-  const loaded = cdp.once('Page.loadEventFired');
-  await cdp.send('Page.navigate', { url });
-  await loaded;
-  return until('the agent button on the page', async () => {
-    const r = await read(cdp);
-    return r.button ? r : null;
+  const res = await fetch(`http://127.0.0.1:${b.port}/json/new?about:blank`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(15_000),
   });
-}
-
-async function tap(cdp: Cdp, r: Rect): Promise<void> {
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
-  }
+  const target = (await res.json()) as { webSocketDebuggerUrl: string };
+  const second = await Cdp.connect(target.webSocketDebuggerUrl);
+  const w = watchOf(main);
+  const watcher = await setup(
+    w ? boundCdp(second, w, `watching tab at ${width}`, dump) : second,
+    width,
+    height,
+  );
+  return { main, watcher, browser: b };
 }
 
 async function shot(cdp: Cdp, dir: string | undefined, name: string): Promise<void> {
   if (!dir) return;
   const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
   writeFileSync(join(dir, `${name}.png`), Buffer.from(png.data, 'base64'));
+}
+
+/** What one size of the run needs from the server `main` set up. */
+interface Meet {
+  ear: { frames: number[]; opens: number; say: ((text: string) => void) | null };
+  at: (path: string) => string;
+  doc: string;
+  ws: string;
+  shots: string | undefined;
+  route: Array<[string, string]>;
+}
+
+/**
+ * One size, start to end, in a function of its own rather than the body of
+ * `main`'s loop over sizes. Bun 1.3.10's optimising JIT (DFG) can keep
+ * reading the FIRST pass's `page` inside a closure made in the second pass of
+ * that loop: the `until` callbacks at 430 then evaluated in the 1180 browser,
+ * already killed, and waited out their 15s ("recording tab at 1180: CDP
+ * Runtime.evaluate did not finish", raised while moving at 430). A scope a
+ * call creates is a new scope each call.
+ */
+async function meetAt(width: number, height: number, meet: Meet): Promise<MeetingSizeRun> {
+  const { ear, at, doc, ws, shots, route } = meet;
+  step(`start a meeting at ${width}`);
+  const { main: page, watcher, browser } = await openBrowser(width, height);
+  // Started on the board at one size and on a doc page at the other: the
+  // first is a full page load to the notes doc, the second a move in place.
+  const startedFrom = width === 1180 ? 'board' : 'doc';
+  const first = await go(page, startedFrom === 'doc' ? at(`/docs/${doc}`) : at(''));
+  await tap(page, first.button as Rect);
+  const open = await until('Start a meeting in the panel', async () => {
+    const r = await read(page);
+    return r.start && r.pane ? r : null;
+  });
+  await tap(page, open.start as Rect);
+  const step1 = await until('the wizard, its docs read', async () => {
+    const r = await read(page);
+    return r.next ? r : null;
+  });
+  await shot(page, shots, `meeting-wizard-${width}`);
+  await tap(page, step1.next as Rect);
+  const step2 = await until('step 2', async () => {
+    const r = await read(page);
+    return r.go ? r : null;
+  });
+  const wizard = step2.wizard;
+  await tap(page, step2.go as Rect);
+  const n0 = ear.frames.length;
+  await until('audio reaching the engine', () => (ear.frames.length > n0 + 10 ? true : null));
+  // The page goes to the doc the notes land in, as the board records it.
+  const landed = await until('the page on the notes doc', async () => {
+    const snap = (await (await fetch(at('/lead-chat'))).json()) as {
+      meeting: { docId: string; meetingId?: string } | null;
+    };
+    const notesDoc = snap.meeting?.meetingId ? snap.meeting.docId : null;
+    if (!notesDoc) return null;
+    try {
+      const path = String(await bounded(page.evaluate('location.pathname'), 'the address'));
+      return path === `/workspaces/${ws}/docs/${notesDoc}` ? { path, notesDoc } : null;
+    } catch {
+      return null; // between documents
+    }
+  });
+  const started = await until('the meeting heading', async () => {
+    try {
+      const r = await read(page);
+      return r.head ? r : null;
+    } catch {
+      return null;
+    }
+  });
+  await shot(page, shots, `meeting-heading-${width}`);
+
+  step(`a second tab watches at ${width}`);
+  await go(watcher, at(''));
+  const watchOpen = await read(watcher);
+  await tap(watcher, watchOpen.button as Rect);
+  await until('the watcher shows the meeting', async () => {
+    const r = await read(watcher);
+    return r.head ? r : null;
+  });
+  const line = `The slipway opens at nine, said at ${width}.`;
+  const said = Date.now();
+  ear.say?.(line);
+  await until('the line on the recording page', async () =>
+    (await read(page)).notes.includes(line) ? true : null,
+  );
+  const recorderMs = Date.now() - said;
+  await until('the line on the watching tab', async () =>
+    (await read(watcher)).notes.includes(line) ? true : null,
+  );
+  const watcherMs = Date.now() - said;
+  const watching = await read(watcher);
+  const moves: MeetingSizeRun['moves'] = [];
+  for (const [surface, url] of route) {
+    step(`move to ${surface} at ${width}`);
+    const before = ear.frames.length;
+    const opensBefore = ear.opens;
+    const movedAt = Date.now();
+    const landed = await go(page, url);
+    // Resumed with no tap, or waiting for one.
+    const state = await until(
+      `the recording back on ${surface}`,
+      async () => {
+        if (ear.frames.length > before + 20 && (ear.frames.at(-1) ?? 0) > movedAt)
+          return 'recording';
+        const r = await read(page);
+        return r.tap ? 'tap' : null;
+      },
+      20_000,
+    );
+    let tapped = false;
+    if (state === 'tap') {
+      tapped = true;
+      const r = await read(page);
+      await tap(page, r.tap as Rect);
+      await until(`audio again on ${surface} after the tap`, () =>
+        ear.frames.length > before + 20 ? true : null,
+      );
+    }
+    const window = ear.frames.slice(Math.max(0, before - 1));
+    let gap = 0;
+    let gapAt = 0;
+    for (let i = 1; i < window.length; i++) {
+      const d = (window[i] ?? 0) - (window[i - 1] ?? 0);
+      if (d > gap) {
+        gap = d;
+        gapAt = i;
+      }
+    }
+    // The new page's opening burst: frames it held while its socket came
+    // back, delivered together.
+    const firstAfter = window[gapAt] ?? 0;
+    const burst = window.slice(gapAt).filter((t) => t - firstAfter < 30).length;
+    const after = await read(page);
+    if (surface === 'mock') await shot(page, shots, `meeting-mock-${width}`);
+    moves.push({
+      surface,
+      gapMs: gap,
+      burstFrames: burst,
+      tapped,
+      engineReopened: ear.opens > opensBefore,
+      headShown: after.head !== null,
+      notesKept: after.notes.includes(line),
+      paneOpen: after.pane !== null,
+      ...(surface === 'mock'
+        ? {
+            nav: landed.nav,
+            navLinks: landed.navLinks,
+            frame: landed.frame,
+            buttonOnTop: landed.buttonOnTop,
+          }
+        : {}),
+    });
+  }
+  step(`the watching tab closes its chat, then ends the meeting, at ${width}`);
+  await bounded(
+    watcher.evaluate(
+      `document.querySelector('[data-lead-chat="layer"]').shadowRoot.querySelector('.lc-close').click()`,
+    ),
+    'closing the watching tab’s chat',
+  );
+  const later = `The ferry leaves at ten, said at ${width}.`;
+  ear.say?.(later);
+  const closed = await until('the line in the closed chat’s bar', async () => {
+    const r = await read(watcher);
+    return r.pane === null && r.barText.includes(later) ? r : null;
+  });
+  await tap(watcher, closed.bar as Rect);
+  const w = await until('the watching tab’s chat open again', async () => {
+    const r = await read(watcher);
+    return r.end ? r : null;
+  });
+  await tap(watcher, w.end as Rect);
+  await until('the meeting gone on the recording page', async () => {
+    const r = await read(page);
+    return r.head === null ? true : null;
+  });
+  const stoppedAt = ear.frames.length;
+  await sleep(600);
+  const framesAfterEnd = ear.frames.length - stoppedAt;
+  const snap = (await (await fetch(at('/lead-chat'))).json()) as { meeting: unknown };
+  const run: MeetingSizeRun = {
+    width,
+    startedFrom,
+    landedPath: landed.path,
+    notesDoc: landed.notesDoc,
+    wizard,
+    headText: started.headText,
+    head: started.head,
+    pane: started.pane,
+    viewport: started.viewport,
+    recorderMs,
+    watcherMs,
+    notesBox: watching.notesBox,
+    composeBox: watching.composeBox,
+    closedBar: closed.bar,
+    moves,
+    framesAfterEnd,
+    endedOnServer: snap.meeting === null,
+  };
+  page.close();
+  watcher.close();
+  // Closed, so its pages leave the board before the next size meets.
+  await stopBrowser(browser.proc, browser.profile);
+  const held = browsers.findIndex((x) => x.proc === browser.proc);
+  if (held >= 0) browsers.splice(held, 1);
+  return run;
 }
 
 async function main(): Promise<void> {
@@ -290,194 +417,18 @@ async function main(): Promise<void> {
     ];
 
     const sizes: MeetingSizeRun[] = [];
+    const meet: Meet = { ear, at, doc, ws, shots, route };
     for (const [width, height] of [
       [1180, 820],
       [430, 932],
     ] as const) {
-      step(`start a meeting at ${width}`);
-      const { main: page, watcher, browser } = await openBrowser(width, height);
-      // Started on the board at one size and on a doc page at the other: the
-      // first is a full page load to the notes doc, the second a move in place.
-      const startedFrom = width === 1180 ? 'board' : 'doc';
-      const first = await go(page, startedFrom === 'doc' ? at(`/docs/${doc}`) : at(''));
-      await tap(page, first.button as Rect);
-      const open = await until('Start a meeting in the panel', async () => {
-        const r = await read(page);
-        return r.start && r.pane ? r : null;
-      });
-      await tap(page, open.start as Rect);
-      const step1 = await until('the wizard, its docs read', async () => {
-        const r = await read(page);
-        return r.next ? r : null;
-      });
-      await shot(page, shots, `meeting-wizard-${width}`);
-      await tap(page, step1.next as Rect);
-      const step2 = await until('step 2', async () => {
-        const r = await read(page);
-        return r.go ? r : null;
-      });
-      const wizard = step2.wizard;
-      await tap(page, step2.go as Rect);
-      const n0 = ear.frames.length;
-      await until('audio reaching the engine', () => (ear.frames.length > n0 + 10 ? true : null));
-      // The page goes to the doc the notes land in, as the board records it.
-      const landed = await until('the page on the notes doc', async () => {
-        const snap = (await (await fetch(at('/lead-chat'))).json()) as {
-          meeting: { docId: string; meetingId?: string } | null;
-        };
-        const notesDoc = snap.meeting?.meetingId ? snap.meeting.docId : null;
-        if (!notesDoc) return null;
-        try {
-          const path = String(await page.evaluate('location.pathname'));
-          return path === `/workspaces/${ws}/docs/${notesDoc}` ? { path, notesDoc } : null;
-        } catch {
-          return null; // between documents
-        }
-      });
-      const started = await until('the meeting heading', async () => {
-        try {
-          const r = await read(page);
-          return r.head ? r : null;
-        } catch {
-          return null;
-        }
-      });
-      await shot(page, shots, `meeting-heading-${width}`);
-
-      step(`a second tab watches at ${width}`);
-      await go(watcher, at(''));
-      const watchOpen = await read(watcher);
-      await tap(watcher, watchOpen.button as Rect);
-      await until('the watcher shows the meeting', async () => {
-        const r = await read(watcher);
-        return r.head ? r : null;
-      });
-      const line = `The slipway opens at nine, said at ${width}.`;
-      const said = Date.now();
-      ear.say?.(line);
-      await until('the line on the recording page', async () =>
-        (await read(page)).notes.includes(line) ? true : null,
-      );
-      const recorderMs = Date.now() - said;
-      await until('the line on the watching tab', async () =>
-        (await read(watcher)).notes.includes(line) ? true : null,
-      );
-      const watcherMs = Date.now() - said;
-      const watching = await read(watcher);
-      const moves: MeetingSizeRun['moves'] = [];
-      for (const [surface, url] of route) {
-        step(`move to ${surface} at ${width}`);
-        const before = ear.frames.length;
-        const opensBefore = ear.opens;
-        const movedAt = Date.now();
-        const landed = await go(page, url);
-        // Resumed with no tap, or waiting for one.
-        const state = await until(
-          `the recording back on ${surface}`,
-          async () => {
-            if (ear.frames.length > before + 20 && (ear.frames.at(-1) ?? 0) > movedAt)
-              return 'recording';
-            const r = await read(page);
-            return r.tap ? 'tap' : null;
-          },
-          20_000,
-        );
-        let tapped = false;
-        if (state === 'tap') {
-          tapped = true;
-          const r = await read(page);
-          await tap(page, r.tap as Rect);
-          await until(`audio again on ${surface} after the tap`, () =>
-            ear.frames.length > before + 20 ? true : null,
-          );
-        }
-        const window = ear.frames.slice(Math.max(0, before - 1));
-        let gap = 0;
-        let gapAt = 0;
-        for (let i = 1; i < window.length; i++) {
-          const d = (window[i] ?? 0) - (window[i - 1] ?? 0);
-          if (d > gap) {
-            gap = d;
-            gapAt = i;
-          }
-        }
-        // The new page's opening burst: frames it held while its socket came
-        // back, delivered together.
-        const firstAfter = window[gapAt] ?? 0;
-        const burst = window.slice(gapAt).filter((t) => t - firstAfter < 30).length;
-        const after = await read(page);
-        if (surface === 'mock') await shot(page, shots, `meeting-mock-${width}`);
-        moves.push({
-          surface,
-          gapMs: gap,
-          burstFrames: burst,
-          tapped,
-          engineReopened: ear.opens > opensBefore,
-          headShown: after.head !== null,
-          notesKept: after.notes.includes(line),
-          paneOpen: after.pane !== null,
-          ...(surface === 'mock'
-            ? {
-                nav: landed.nav,
-                navLinks: landed.navLinks,
-                frame: landed.frame,
-                buttonOnTop: landed.buttonOnTop,
-              }
-            : {}),
-        });
-      }
-      step(`the watching tab closes its chat, then ends the meeting, at ${width}`);
-      await watcher.evaluate(
-        `document.querySelector('[data-lead-chat="layer"]').shadowRoot.querySelector('.lc-close').click()`,
-      );
-      const later = `The ferry leaves at ten, said at ${width}.`;
-      ear.say?.(later);
-      const closed = await until('the line in the closed chat’s bar', async () => {
-        const r = await read(watcher);
-        return r.pane === null && r.barText.includes(later) ? r : null;
-      });
-      await tap(watcher, closed.bar as Rect);
-      const w = await until('the watching tab’s chat open again', async () => {
-        const r = await read(watcher);
-        return r.end ? r : null;
-      });
-      await tap(watcher, w.end as Rect);
-      await until('the meeting gone on the recording page', async () => {
-        const r = await read(page);
-        return r.head === null ? true : null;
-      });
-      const stoppedAt = ear.frames.length;
-      await sleep(600);
-      const framesAfterEnd = ear.frames.length - stoppedAt;
-      const snap = (await (await fetch(at('/lead-chat'))).json()) as { meeting: unknown };
-      sizes.push({
-        width,
-        startedFrom,
-        landedPath: landed.path,
-        notesDoc: landed.notesDoc,
-        wizard,
-        headText: started.headText,
-        head: started.head,
-        pane: started.pane,
-        viewport: started.viewport,
-        recorderMs,
-        watcherMs,
-        notesBox: watching.notesBox,
-        composeBox: watching.composeBox,
-        closedBar: closed.bar,
-        moves,
-        framesAfterEnd,
-        endedOnServer: snap.meeting === null,
-      });
-      page.close();
-      watcher.close();
-      // Closed, so its pages leave the board before the next size meets.
-      await stopBrowser(browser.proc, browser.profile);
-      const held = browsers.findIndex((x) => x.proc === browser.proc);
-      if (held >= 0) browsers.splice(held, 1);
+      sizes.push(await meetAt(width, height, meet));
     }
     const run: MeetingBrowserRun = { sizes };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(dump);
+    throw e;
   } finally {
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
     await handle?.stop();
@@ -486,10 +437,10 @@ async function main(): Promise<void> {
 }
 
 setTimeout(() => {
-  step('gave up after 230s');
-  void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
-    process.exit(3),
-  );
+  process.stderr.write(`[lead-chat-meeting-driver] gave up after 230s, during: ${current}\n`);
+  void dumpRunning(dump)
+    .finally(() => Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))))
+    .finally(() => process.exit(3));
 }, 230_000).unref();
 await main();
 process.exit(0);

@@ -16,6 +16,19 @@ import { hasOwnerProof } from '../share/owner-proof.ts';
 import { redactCapChangeForVisitor } from '../share/redact-workspace.ts';
 import { PARALLELISM_CAP_MAX, PARALLELISM_CAP_MIN, type WorkspaceNotesHome } from '../tasks.ts';
 import { parseVoiceContext } from '../voice.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type {
+  BoardSettingsAnswer,
+  BoardSettingsBody,
+  ParallelismCapAnswer,
+  ParallelismCapBody,
+  RenameBoardAnswer,
+  RenameBoardBody,
+  RetiredAnswer,
+  RetiredBody,
+  SetLeadAnswer,
+  SetLeadBody,
+} from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 // Moved down from server.ts with the settings route below, their only caller.
@@ -82,7 +95,7 @@ export async function handleWorkspaceSettings(
   const wsRetiredMatch = pathname.match(/^\/workspaces\/([^/]+)\/retired$/);
   if (wsRetiredMatch && req.method === 'PUT') {
     const workspaceId = decodeURIComponent(wsRetiredMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<RetiredBody>(await safeJson(req));
     const retired = body?.retired;
     // Explicit both ways. A missing field defaulting to `true` would
     // make an empty body retire a board, which is the one direction
@@ -104,7 +117,7 @@ export async function handleWorkspaceSettings(
     // some unrelated mutation next touches this workspace, which on a
     // board somebody just retired is never.
     taskProjection.ensureWorkspace(workspaceId);
-    return j(200, res);
+    return j(200, answerAs<RetiredAnswer>(res));
   }
   // The board's parallelism cap on its own address (Bryan, 2026-08-31:
   // "Bryan and Team Lead can set a parallelism limit on the workspace").
@@ -125,7 +138,7 @@ export async function handleWorkspaceSettings(
     // stood here are DELETED rather than left dormant.
     const { workspaceId } = scope;
     if (req.method === 'PUT') {
-      const body = await safeJson(req);
+      const body = sent<ParallelismCapBody>(await safeJson(req));
       if (!body || !Object.hasOwn(body, 'cap')) {
         return j(400, { error: 'cap required: an integer, or null to restore the default' });
       }
@@ -156,7 +169,7 @@ export async function handleWorkspaceSettings(
     }
     const view = parallelismCapView(workspaceId);
     if (!view) return j(404, { error: 'workspace not found' });
-    return j(200, { workspaceId, ...view });
+    return j(200, { workspaceId, ...answerAs<ParallelismCapAnswer>(view) });
   }
   // Workspace settings — two tunable prompts today: what the quality
   // gate judges a review item against, and what the effort scorer
@@ -197,7 +210,7 @@ export async function handleWorkspaceSettings(
        */
       const denied = requireOwner(workspaceId);
       if (denied) return denied;
-      const body = await safeJson(req);
+      const body = sent<BoardSettingsBody>(await safeJson(req));
       const author = authorFor(body?.author);
       if (!author) return j(400, { error: 'author required' });
       // Validate EVERY supplied field before applying ANY of them. A
@@ -355,11 +368,11 @@ export async function handleWorkspaceSettings(
       board && boardPromptBeforeMarkdown(board, field) ? { writtenBeforeMarkdown: true } : {};
     return j(200, {
       workspaceId,
-      reviewItemCriteria: {
+      reviewItemCriteria: answerAs<BoardSettingsAnswer['reviewItemCriteria']>({
         ...criteria,
         default: DEFAULT_REVIEW_ITEM_CRITERIA,
         ...beforeMarkdown('reviewItemCriteria'),
-      },
+      }),
       effortEstimatePrompt: {
         ...effortPrompt,
         default: DEFAULT_EFFORT_ESTIMATE_PROMPT,
@@ -401,7 +414,7 @@ export async function handleWorkspaceSettings(
   const wsBoardRenameMatch = pathname.match(/^\/workspaces\/([^/]+)\/rename$/);
   if (wsBoardRenameMatch && req.method === 'POST') {
     const workspaceId = decodeURIComponent(wsBoardRenameMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<RenameBoardBody>(await safeJson(req));
     const name = body?.name;
     if (typeof name !== 'string') return j(400, { error: 'name required' });
     const author = authorFor(body?.author);
@@ -409,7 +422,7 @@ export async function handleWorkspaceSettings(
     const res = taskStore.renameWorkspace(workspaceId, name, { actor: author });
     if (!res.ok) return j(res.error === 'workspace-not-found' ? 404 : 400, res);
     taskProjection.ensureWorkspace(workspaceId);
-    return j(200, res);
+    return j(200, answerAs<RenameBoardAnswer>(res));
   }
   // set_workspace_lead: hand the board's lead-agent seat to someone
   // else. A standing assignment, not a session fact — the lead may be
@@ -417,7 +430,7 @@ export async function handleWorkspaceSettings(
   const wsLeadMatch = pathname.match(/^\/workspaces\/([^/]+)\/lead$/);
   if (wsLeadMatch && req.method === 'PUT') {
     const workspaceId = decodeURIComponent(wsLeadMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<SetLeadBody>(await safeJson(req));
     const leadAgentId = body?.leadAgentId;
     if (typeof leadAgentId !== 'string' || leadAgentId.trim().length === 0) {
       return j(400, { error: 'leadAgentId required' });
@@ -441,7 +454,7 @@ export async function handleWorkspaceSettings(
       ...(takeover ? { takeover: true } : {}),
     });
     if (!res.ok) return j(res.error === 'workspace-not-found' ? 404 : 400, res);
-    return j(200, res);
+    return j(200, answerAs<SetLeadAnswer>(res));
   }
   // Voice (§3.8): transcript + per-surface context in, route decision +
   // ack out. EVERY utterance gets an explicit ack naming what was heard

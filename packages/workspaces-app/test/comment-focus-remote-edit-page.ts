@@ -42,6 +42,51 @@ export const CHUNKS = [
   'before the evening ferry.',
 ];
 
+/** What the reader types after each edit of the burst: long enough that
+ *  the box wraps onto a new line during it, whatever the font. */
+export const BURST_WORDS = [
+  'and the Harborlight pilots board at the north quay before the tide turns ',
+  'then the Riverbend ferry waits at the middle berth for the evening freight ',
+  'and the Saltmarsh tide table decides which slipway takes the loaded ferry ',
+  'then Alice and Bob sign the survey and send it to the harbour office ',
+];
+
+/** The words each edit of the burst puts in the doc, in the order sent. */
+export const BURST_MARKERS = [
+  'Riverbend lengthens pier 12',
+  'Saltmarsh pilots rest ashore',
+  'Saltmarsh lengthens pier 13',
+  'Bob lengthens pier 16',
+];
+
+/**
+ * Logs, on the page, each burst edit reaching the doc and each burst word
+ * reaching the box, and every settle the driver asks for. A burst is several
+ * edits in flight with the reader's typing and no settle in between; this is
+ * the page's own record of that, so it reads the same on a fast machine and a
+ * loaded runner, where a time bound did not.
+ */
+export const WATCH_BURST = `(() => {
+  const markers = ${JSON.stringify(BURST_MARKERS)};
+  const words = ${JSON.stringify(BURST_WORDS.map((w) => w.trim()))};
+  const log = (window.__burstLog = []);
+  const seen = new Set();
+  const look = () => {
+    const doc = document.querySelector('#editor .ProseMirror')?.textContent ?? '';
+    const box = __box()?.textContent ?? '';
+    markers.forEach((m, i) => {
+      if (!seen.has('edit ' + i) && doc.includes(m)) { seen.add('edit ' + i); log.push('edit ' + i); }
+    });
+    words.forEach((w, i) => {
+      if (!seen.has('word ' + i) && box.includes(w)) { seen.add('word ' + i); log.push('word ' + i); }
+    });
+  };
+  new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true });
+  const settled = window.__settled;
+  window.__settled = () => { look(); log.push('settle'); return settled(); };
+  return true;
+})()`;
+
 /**
  * The page-side helpers. `__box()` is the editable surface the reader types
  * into: the new-comment composer's, or the reply box of the target thread's

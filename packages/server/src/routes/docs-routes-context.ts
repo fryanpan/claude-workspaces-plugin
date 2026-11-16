@@ -32,7 +32,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { LinkedDockItem } from '../mockup-linked-items.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
-import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
+import type { GateRunOpts, HeldFields, ThreadReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
 import type { AccessProposals } from '../share/access-proposals.ts';
@@ -43,6 +43,8 @@ import type { BoardWorkspace, Task, TaskStore } from '../tasks.ts';
 import type { ThreadOpenerProofs } from '../thread-opener-proofs.ts';
 import type { ThreadRequestDedup } from '../thread-request-dedup.ts';
 import type { createWebhookDispatcher } from '../webhooks.ts';
+import type { ScopedEditFields } from './doc-threads-contract.ts';
+import type { Sent } from './route-contract.ts';
 
 export type { ThreadReviewGate };
 
@@ -91,7 +93,7 @@ export function parsePlacement(
  *  judge it by, and whether the caller confirmed writing over a person's
  *  change. Used by both `doc-threads-routes.ts` and `doc-edit-routes.ts`. */
 export function scopedEditGuard(
-  body: Record<string, unknown> | null,
+  body: Sent<ScopedEditFields> | null,
   authorFor: (claimed: unknown) => User | undefined,
 ): ScopedEditGuard {
   const reader = authorFor(body?.author)?.id;
@@ -244,7 +246,7 @@ export interface DocRoutesContext {
     author: User,
   ) => Promise<ThreadReviewGate>;
   /** The response fields a filing route adds when the gate held the item. */
-  heldFields: (gate: ThreadReviewGate | undefined) => Record<string, unknown>;
+  heldFields: (gate: ThreadReviewGate | undefined) => HeldFields;
   /** Replace a task's body markdown through the body doc. */
   rewriteTaskBody: (
     task: Task,

@@ -146,6 +146,13 @@ export interface ServerOptions {
    */
   requireSignInToWrite?: boolean;
   /**
+   * Fixes the collab core's server-wide setting (`collab-core-switch.ts`). A
+   * board whose own switch is on takes the core's path only while that is on.
+   * Unset reads `CW_COLLAB_CORE`; unset there too, the owner's runtime switch
+   * decides, which starts off.
+   */
+  collabCore?: boolean;
+  /**
    * How a component build reaches esm.sh (`component-cdn.ts`). Tests hand in
    * a fake so no build leaves the machine; absent, the real host.
    */
@@ -677,11 +684,23 @@ export interface ServerOptions {
   homeFeedClientId?: string;
   /**
    * The Google Maps JavaScript API browser key (`CW_GOOGLE_MAPS_KEY`), handed
-   * only to a doc page whose content draws a `<StreetMap basemap="google">`
-   * (`routes/doc-map-key.ts`). Absent, such a map draws on OpenStreetMap and
-   * says so. Never logged.
+   * only to a doc page whose content draws a `<StreetMap>` on Google, which a
+   * tag with no `basemap` does (`routes/doc-map-key.ts`). Absent, such a map
+   * draws on OpenStreetMap. Never logged.
    */
   googleMapsKey?: string;
+  /**
+   * On a project machine, where a board pushed from the Mac is received
+   * (`routes/board-import.ts`, from `CW_BOARD_IMPORT_DIR`). Absent, the
+   * family claims no path.
+   */
+  boardImport?: {
+    dir: string;
+    /** The boards this machine takes (`CW_BOARD_IMPORT_BOARDS`). */
+    boards: readonly string[];
+    /** The one service token admitted (`CW_BOARD_IMPORT_CLIENT_ID`), when set. */
+    clientId?: string;
+  };
   /**
    * WHO may come through `proxiedTrustedHosts`, by the email Cloudflare
    * Access verified — folded the way the roster folds addresses.
@@ -989,8 +1008,8 @@ export interface ServerOptions {
    */
   loopBlockThresholdMs?: number;
   /**
-   * Families mounted on the Hono app after `HONO_FAMILIES`
-   * (`routes/hono-front.ts`, types in `hono-env.ts`). Production passes none; a test mounts a probe
+   * Families mounted on the Hono app after the production ones
+   * (`routes/hono-families.ts`, types in `hono-env.ts`). Production passes none; a test mounts a probe
    * route so it can show the gates run before Hono answers.
    */
   honoFamilies?: readonly HonoFamily[];
@@ -1000,4 +1019,7 @@ export interface ServerOptions {
    * once per request — whichever router answers — counts these.
    */
   observeAdmission?: (pathname: string, admitted: boolean) => void;
+  /** Called once, when the first doc or board `/y/` socket opens. `bin.ts`
+   *  writes it into this start's record (`server-starts.ts`). */
+  onFirstClientSocket?: (at: number) => void;
 }

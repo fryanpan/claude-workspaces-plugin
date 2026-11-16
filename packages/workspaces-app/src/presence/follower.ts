@@ -226,6 +226,9 @@ export function stopOnOwnInput(
   target: Pick<EventTarget, 'addEventListener'>,
   follower: Follower,
   isStrip: (el: EventTarget | null) => boolean,
+  /** The follow ended this way: the page says so, or the reader is left
+   *  guessing why the next move did not carry them along. */
+  onStop?: () => void,
 ): void {
   const inAgentChat = (el: EventTarget | null): boolean =>
     // Duck-typed: the target may be a text node or a non-DOM EventTarget.
@@ -233,6 +236,7 @@ export function stopOnOwnInput(
   const stop = (ev: Event): void => {
     if (!follower.key() || isStrip(ev.target) || inAgentChat(ev.target)) return;
     follower.follow(null);
+    onStop?.();
   };
   for (const name of ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const) {
     target.addEventListener(name, stop, { passive: true, capture: true });

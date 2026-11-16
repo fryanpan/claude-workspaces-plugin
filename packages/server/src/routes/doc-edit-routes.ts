@@ -16,6 +16,19 @@ import type { prose } from '@claude-workspaces/core';
 import { taskIdOfBodyDoc } from '../task-projection.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import {
+  type BlockEditsBody,
+  type CreateAnchorAnswer,
+  type CreateAnchorBody,
+  type DeleteBlockAtAnchorBody,
+  type DeleteBlocksInRangeBody,
+  type DeleteSectionBody,
+  type EditAtAnchorBody,
+  type FindAndReplaceBody,
+  type InsertBlocksAtAnchorBody,
+  type ResolveAllSuggestionsBody,
+} from './doc-edits-contract.ts';
+import type { SetContentBody } from './doc-lifecycle-contract.ts';
+import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
   PLACEMENT_INVALID,
@@ -24,6 +37,7 @@ import {
   scopedEditGuard,
   withSyncError,
 } from './docs-routes-context.ts';
+import { answerAs, sent } from './route-contract.ts';
 
 /** Most edits one `block_edits` call may carry. A batch is one transaction, so
  *  the ceiling is what stops a single request holding the doc's write lock
@@ -133,7 +147,7 @@ export async function handleDocEditRoutes(
   // Write-the-bound-file + reparse_from_disk, which raced the
   // write-back and clobbered (see docs/research/2026-08-03 review).
   if (rest === 'content' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<SetContentBody>(await safeJson(req));
     const markdown = String(body?.markdown ?? '');
     if (markdown.length === 0) return j(400, { error: 'markdown is required' });
     // Stale-write guard (2026-08-26 incident): a whole-doc rewrite
@@ -188,7 +202,7 @@ export async function handleDocEditRoutes(
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'agent_anchors' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<CreateAnchorBody>(await safeJson(req));
     const find = String(body?.find ?? '');
     if (find.length === 0) return j(400, { error: 'find is required' });
     const res = docStore.createAgentAnchor(docId, {
@@ -198,14 +212,14 @@ export async function handleDocEditRoutes(
       occurrence: typeof body?.occurrence === 'number' ? body.occurrence : undefined,
       label: body?.label ? String(body.label) : undefined,
     });
-    return res.ok ? j(200, res) : j(409, res);
+    return res.ok ? j(200, answerAs<CreateAnchorAnswer>(res)) : j(409, res);
   }
   const anchorMatch = rest.match(/^agent_anchors\/([^/]+)(\/.*)?$/);
   if (anchorMatch) {
     const anchorId = decodeURIComponent(anchorMatch[1] ?? '');
     const anchorRest = anchorMatch[2] ?? '';
     if (anchorRest === '/edit' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<EditAtAnchorBody>(await safeJson(req));
       const kind = body?.kind as 'replace' | 'insert_after' | undefined;
       const text = String(body?.text ?? '');
       if (kind !== 'replace' && kind !== 'insert_after') {
@@ -217,7 +231,7 @@ export async function handleDocEditRoutes(
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (anchorRest === '/insert_blocks' && req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<InsertBlocksAtAnchorBody>(await safeJson(req));
       const markdown = String(body?.markdown ?? '');
       if (markdown.length === 0) return j(400, { error: 'markdown is required' });
       const placement = parsePlacement(body?.placement);
@@ -235,7 +249,7 @@ export async function handleDocEditRoutes(
     }
   }
   if (rest === 'find_and_replace' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<FindAndReplaceBody>(await safeJson(req));
     const find = String(body?.find ?? '');
     const replace = String(body?.replace ?? '');
     if (find.length === 0) return j(400, { error: 'find is required' });
@@ -290,7 +304,7 @@ export async function handleDocEditRoutes(
   // never sees half a batch. Authorship decides direct-vs-proposal inside
   // core: an edit to a block a person has touched comes back `suggested`.
   if (rest === 'block_edits' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<BlockEditsBody>(await safeJson(req));
     const parsed = parseBlockEdits(body?.edits);
     if (!parsed.ok) return j(400, parsed);
     const author = parseSuggestionAuthor(visitor ? { author: authorFor(body?.author) } : body);
@@ -312,7 +326,7 @@ export async function handleDocEditRoutes(
     return j(200, { suggestions: docStore.listSuggestions(docId) });
   }
   if (rest === 'suggestions/resolve_all' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<ResolveAllSuggestionsBody>(await safeJson(req));
     const action = body?.action as 'accept' | 'reject' | undefined;
     if (action !== 'accept' && action !== 'reject') {
       return j(400, { error: 'action must be accept or reject' });
@@ -332,7 +346,7 @@ export async function handleDocEditRoutes(
     return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(404, res);
   }
   if (rest === 'delete_block_at_anchor' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<DeleteBlockAtAnchorBody>(await safeJson(req));
     const threadId = body?.threadId ? String(body.threadId) : undefined;
     const anchorId = body?.anchorId ? String(body.anchorId) : undefined;
     if ((threadId && anchorId) || (!threadId && !anchorId)) {
@@ -346,7 +360,7 @@ export async function handleDocEditRoutes(
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'delete_blocks_in_range' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<DeleteBlocksInRangeBody>(await safeJson(req));
     const startFind = String(body?.startFind ?? '');
     const endFind = String(body?.endFind ?? '');
     if (startFind.length === 0 || endFind.length === 0) {
@@ -367,7 +381,7 @@ export async function handleDocEditRoutes(
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'delete_section' && req.method === 'POST') {
-    const body = await safeJson(req);
+    const body = sent<DeleteSectionBody>(await safeJson(req));
     const heading = String(body?.heading ?? '');
     if (heading.length === 0) return j(400, { error: 'heading is required' });
     const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>

@@ -42,19 +42,56 @@ function showTail(row: HTMLElement, label: HTMLElement, text: string): void {
   fitClip(clip);
 }
 
+/**
+ * The bar's rows are updated in place, never rebuilt: the bar is a button, and
+ * a row replaced between a press and its release takes the click with it, so
+ * a tap landing while the words redraw would open nothing.
+ */
 export function drawBarLines(box: HTMLElement, m: LeadChatViewModel): void {
   watchWidth(box);
   const doc = box.ownerDocument;
-  box.replaceChildren();
-  for (const line of barLines(m)) {
-    const row = doc.createElement('span');
-    row.className = `lc-bar-line${line.dim ? ' lc-dim' : ''}`;
-    box.append(row);
-    const label = doc.createElement('b');
+  const lines = barLines(m);
+  lines.forEach((line, i) => {
+    let row = box.children[i] as HTMLElement | undefined;
+    if (!row) {
+      row = doc.createElement('span');
+      box.append(row);
+    }
+    row.className = `lc-bar-line${line.dim ? ' lc-dim' : ''}${line.live ? ' lc-tail' : ''}`;
+    let label = row.firstElementChild;
+    if (label?.tagName !== 'B') {
+      label = doc.createElement('b');
+      row.replaceChildren(label);
+    }
     label.textContent = `${line.who}: `;
-    if (line.live) showTail(row, label, line.text);
-    else row.append(label, line.text);
-  }
+    if (line.live) label.className = 'lc-tail-label';
+    else label.removeAttribute('class');
+    const rest = label.nextSibling;
+    let keep: ChildNode;
+    if (line.live) {
+      let clip = rest instanceof Element && rest.classList.contains('lc-tail-clip') ? rest : null;
+      let words = clip?.firstElementChild;
+      if (!clip || !words) {
+        clip = doc.createElement('span');
+        clip.className = 'lc-tail-clip';
+        words = doc.createElement('span');
+        words.className = 'lc-tail-text';
+        clip.append(words);
+        label.after(clip);
+      }
+      words.textContent = line.text;
+      keep = clip;
+    } else if (rest && rest.nodeType === doc.TEXT_NODE) {
+      rest.textContent = line.text;
+      keep = rest;
+    } else {
+      keep = doc.createTextNode(line.text);
+      label.after(keep);
+    }
+    while (keep.nextSibling) keep.nextSibling.remove();
+    if (line.live) fitClip(keep as Element);
+  });
+  while (box.children.length > lines.length) box.lastElementChild?.remove();
 }
 
 /** The meeting's one line of notes, above the typing box. */

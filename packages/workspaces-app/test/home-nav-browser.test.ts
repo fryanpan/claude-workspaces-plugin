@@ -123,6 +123,7 @@ describe.skipIf(CHROME === null)("Home's bottom bar, and a workspace's navbar", 
         'Tasks',
         'Library',
         'Activity',
+        'Messages',
       ]);
       for (const h of r.workspace1000Hits) expect(h.reached, h.label).toBe(true);
       expect(r.workspace1000Coach.bottom).toBeLessThanOrEqual(r.workspace1000.top);

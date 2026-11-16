@@ -1,47 +1,49 @@
 /**
- * ── The Hono app: the router route families move into, one family a PR ──
+ * ── The Hono sub-apps the router calls, one per place families sit ──
  *
- * Milestone M12 moves this server's routes from the hand-ordered chain in
- * `request-chain.ts` onto Hono. This file is the first step and moves no
- * route: it builds a Hono app from `HONO_FAMILIES`, which is empty, and the
- * chain tries it below the gates and above every route family it holds.
+ * Milestone M12 moved this server's routes from a hand-ordered chain onto
+ * Hono. The router is `hono-app.ts`: one Hono app whose middleware are the
+ * gates (`hono-gates.ts`), the front app, the upgrade-and-stream run and the
+ * board app, in that order. This file builds each sub-app from a list of
+ * families; the router calls it from its own middleware, so the order
+ * families are tried in is the order they had in the chain.
  *
  * Three properties hold for every family that joins.
  *
  * - **The gates have already run.** The app is called with what
- *   `request-chain-gates.ts` proved — the admitted request and its
- *   attribution — as Hono's `env`, so a handler reads `c.env.gate` instead
- *   of admitting the request again. Admission and share scoping run once per
- *   request, whichever router answers.
+ *   `hono-gates.ts` proved — the admitted request and its attribution — as
+ *   Hono's `env`, so a handler reads `c.env.gate` instead of admitting the
+ *   request again. Admission and share scoping run once per request. The one
+ *   exception is the open app, which IS one of the gates: it is tried inside
+ *   them, above admission, with an empty env, and each of its families
+ *   checks its own caller.
  * - **An address no family claims falls through unchanged.** Hono's
  *   not-found answer is never sent; `honoFront` returns null for it and the
- *   chain carries on from the line below its call, as it did before Hono.
- * - **A websocket upgrade never enters the app.** The Yjs, audio and Recall
- *   sockets are taken over by Bun's `server.upgrade` in the chain's stream
- *   block, and stay there.
+ *   router's next middleware runs, as the next line of the chain did.
+ * - **A websocket upgrade skips the front.** The Yjs, audio and Recall
+ *   sockets are taken over in the router's upgrade-and-stream middleware,
+ *   which sits below the front, so an upgrade request must not be answered
+ *   by a front family first. The board app, below that middleware, does let
+ *   an upgrade in (`upgrades: 'enter'`).
  *
  * Errors are rethrown rather than answered with Hono's default 500, so a
- * throw inside a Hono handler reaches the chain's Sentry span exactly as a
- * throw inside a chain handler does.
+ * throw inside a Hono handler reaches the front door's Sentry span.
  *
- * MOVING A FAMILY: write it as a `HonoFamily`, add it to `HONO_FAMILIES`, and
- * delete its call from the chain in the same commit. The route-answer
- * snapshot (`test/route-answers.test.ts`) fails if any address in the route
- * table is answered differently afterwards — and the move has to keep the
- * family's position relative to the eight adjacencies `route-table.ts`
- * lists, because Hono is tried before every family still in the chain.
+ * MOVING OR ADDING A FAMILY: register it in `hono-families.ts` — or, if it
+ * reads the workspace scope, in `hono-board-families.ts`; if it answers
+ * above admission, in `hono-open-families.ts`. The route-answer snapshot
+ * (`test/route-answers.test.ts`) fails if any address in the route table is
+ * answered differently afterwards — and a family has to keep its position
+ * relative to the eight adjacencies `route-table.ts` lists.
  */
-import { Hono } from 'hono';
-import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
-
-/**
- * The families Hono answers, in registration order. Empty until the first
- * family moves; see this file's header for how one joins.
- */
-export const HONO_FAMILIES: readonly HonoFamily[] = [];
+import { type Env, Hono } from 'hono';
+import type { HonoAppEnv, HonoGateEnv } from '../hono-env.ts';
 
 /** Try the Hono app. Null means no family claimed the request. */
-export type HonoFront = (req: Request, env: HonoGateEnv) => Promise<Response | null>;
+export type HonoFront<E extends object = HonoGateEnv> = (
+  req: Request,
+  env: E,
+) => Promise<Response | null>;
 
 /** Does this request ask to become a websocket? Those stay on Bun. */
 export function isWebSocketUpgrade(req: Request): boolean {
@@ -51,9 +53,29 @@ export function isWebSocketUpgrade(req: Request): boolean {
 /** The header that marks Hono's not-found answer. Never sent to a caller. */
 const MISS_HEADER = 'x-cw-hono-miss';
 
-/** Build the app from its families, once. */
-export function createHonoFront(families: readonly HonoFamily[]): HonoFront {
-  const app = new Hono<HonoAppEnv>();
+export interface HonoFrontOptions {
+  /**
+   * What a websocket upgrade does at this app. `skip` (the default) hands it
+   * back unseen, for the front: it is tried ABOVE the stream block, which has
+   * to see every upgrade first. `enter` lets it in like any request, for the
+   * open app (whose paths no upgrade uses) and the board app (tried BELOW the
+   * stream block, so an upgrade reaching it is one no socket took).
+   */
+  upgrades?: 'skip' | 'enter';
+}
+
+/**
+ * Build an app from its families, once. Three are built: the open app, tried
+ * inside the gates above admission (`HonoOpenAppEnv`); the front, tried above
+ * the stream block with the gates' proof (`HonoAppEnv`); and the board app,
+ * tried below the stream block, which resolves the workspace scope and ends
+ * in the tail (`HonoBoardAppEnv`).
+ */
+export function createHonoFront<A extends Env = HonoAppEnv>(
+  families: readonly ((app: Hono<A>) => void)[],
+  opts: HonoFrontOptions = {},
+): HonoFront<NonNullable<A['Bindings']>> {
+  const app = new Hono<A>();
   for (const family of families) family(app);
 
   // The not-found answer Hono builds is a marker, never a reply. It is
@@ -69,10 +91,11 @@ export function createHonoFront(families: readonly HonoFamily[]): HonoFront {
     throw err;
   });
 
+  const skipUpgrades = (opts.upgrades ?? 'skip') === 'skip';
   // No shortcut for an empty family list: the app runs on every request that
   // is not an upgrade, so the existing suite exercises the miss path today.
   return async (req, env) => {
-    if (isWebSocketUpgrade(req)) return null;
+    if (skipUpgrades && isWebSocketUpgrade(req)) return null;
     const res = await app.fetch(req, env);
     return res.headers.get(MISS_HEADER) === missMark ? null : res;
   };

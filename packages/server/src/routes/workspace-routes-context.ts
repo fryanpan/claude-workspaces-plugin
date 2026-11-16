@@ -5,6 +5,7 @@ import type { AttachMountsBrief } from '../attach-mounts.ts';
 import type { AttachmentPrivacyStore } from '../attachment-privacy.ts';
 import type { AgentCallerVerdict } from '../auth/agent-token.ts';
 import type { ChatAudit } from '../chat-audit.ts';
+import type { CollabCoreSwitch } from '../collab-core-switch.ts';
 import type { CollabRooms } from '../collab-rooms.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
@@ -35,6 +36,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
 import type { VoiceRouter } from '../voice.ts';
+import type { DirectMessageRoutesContext } from './direct-messages.ts';
 import type { ParallelismCapView } from './task-routes-context.ts';
 
 /**
@@ -71,6 +73,8 @@ export interface WorkspaceRoutesContext {
   shareLinks: ShareLinks;
   /** The core room hosts, rechecked on every revoke (`collab-rooms.ts`). */
   collabRooms: CollabRooms;
+  /** Which boards' sockets the collab core serves (`collab-core-switch.ts`). */
+  collabCoreSwitch: CollabCoreSwitch;
   /** Files and applies access proposals (`share/access-proposals.ts`). */
   accessProposals: AccessProposals;
   /** Where a spoken request is routed and how its answer comes back. */
@@ -79,6 +83,8 @@ export interface WorkspaceRoutesContext {
    *  made a person wait. */
   spokenRelay: SpokenReplyRelay;
   spokenTimings: SpokenTimings;
+  /** The one-to-one messages between the board's people (`direct-messages.ts`). */
+  directMessages: DirectMessageRoutesContext;
   /** The board's chat with its lead: the log, and the answers it waits on. */
   leadChat: LeadChat;
   /** The photos and files people sent the board's lead. */

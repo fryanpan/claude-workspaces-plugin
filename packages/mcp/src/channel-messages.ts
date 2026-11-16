@@ -50,6 +50,7 @@ import {
 import { type ReviewItemStalePayload, reviewItemStaleLine } from './review-stale-line.ts';
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
+import { workspaceAgentsClient } from './server-client.ts';
 import {
   UNTRUSTED_LABEL,
   collapseLines,
@@ -553,10 +554,10 @@ async function emitBoardChannelMessage(
   // that asymmetry is the whole reason the receipt is on this side.
   if (event === 'voice.request' && typeof p.queueId === 'string' && p.workspaceId) {
     try {
-      await deps.http(
-        'POST',
-        `/workspaces/${encodeURIComponent(p.workspaceId)}/voice-queue/${encodeURIComponent(p.queueId)}/ack`,
-        {},
+      await workspaceAgentsClient(deps.http).workspaces[':ws']['voice-queue'][':id'].ack.$post(
+        { param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.queueId) } },
+        // The receipt has always carried an empty JSON body.
+        { init: { body: '{}' } },
       );
     } catch {
       // Left on the queue on purpose — see above.

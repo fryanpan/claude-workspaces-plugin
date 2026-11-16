@@ -7,12 +7,16 @@
  * neither the token nor a private half passes through this process. Without
  * a keeper (`CW_KEEPER_URL`) the step refuses: there is no other place that
  * holds the token and may run it.
+ *
+ * Its lines also name, per repo, the Actions secrets a workflow pushed with
+ * the new key could read, from the keeper's answer (`keeper-push-exposure.ts`).
  */
 import {
   announceToBoard,
   boardUrlFromEnv,
 } from '../../packages/server/src/keeper/keeper-announce.ts';
 import { KEEPER_URL_ENV, keeperPushKeys } from '../../packages/server/src/keeper/keeper-client.ts';
+import { exposureLines } from '../../packages/server/src/keeper/keeper-push-exposure.ts';
 
 export async function makePushKeysThroughKeeper(
   app: string,
@@ -32,7 +36,12 @@ export async function makePushKeysThroughKeeper(
     announce: announceToBoard(boardUrlFromEnv(env), requester),
     onHeld: (h) => console.log(`[deploy] approve with your passkey: ${h.approveUrl}`),
   });
-  let body: { error?: string; keys?: { repo: string; id: number }[]; retired?: string[] } = {};
+  let body: {
+    error?: string;
+    keys?: { repo: string; id: number }[];
+    retired?: string[];
+    exposure?: unknown;
+  } = {};
   try {
     body = JSON.parse(r.body);
   } catch {}
@@ -42,5 +51,10 @@ export async function makePushKeysThroughKeeper(
   return [
     ...(body.keys ?? []).map((k) => `${k.repo}: write deploy key ${k.id}`),
     ...(body.retired ?? []).map((k) => `${k}: older key removed`),
+    ...(Array.isArray(body.exposure)
+      ? exposureLines(body.exposure)
+      : [
+          'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
+        ]),
   ];
 }

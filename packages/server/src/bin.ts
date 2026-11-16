@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDiscovery } from '@claude-workspaces/core/discovery-file';
+import { parseImportBoards } from '../../../infra/project-machine/board-import-store.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
@@ -17,7 +18,13 @@ import { storeSecret } from './secret-store.ts';
 import { captureServerError, flushServerSentry, initServerSentry } from './sentry.ts';
 import { resolveServerConfig } from './server-config.ts';
 import { createServerDeps } from './server-deps.ts';
-import { markServerServing, recordThisServerStart, serverStartsPath } from './server-starts.ts';
+import {
+  markFirstClientSocket,
+  markServerServing,
+  markServerShutdown,
+  recordThisServerStart,
+  serverStartsPath,
+} from './server-starts.ts';
 import { createServer } from './server.ts';
 import { defaultUserSettingsPath } from './settings-allow-file.ts';
 
@@ -66,6 +73,9 @@ const homeFeedClientId = process.env.CW_HOME_FEED_CLIENT_ID?.trim() || undefined
 // A browser key, restricted by Google to the board's site; sent only to a doc
 // that draws a Google map (routes/doc-map-key.ts).
 const googleMapsKey = process.env.CW_GOOGLE_MAPS_KEY?.trim() || undefined;
+// A project machine's pushed-board import (routes/board-import.ts); unset off one.
+const boardImportDir = process.env.CW_BOARD_IMPORT_DIR?.trim() || undefined;
+const boardImportClientId = process.env.CW_BOARD_IMPORT_CLIENT_ID?.trim() || undefined;
 const {
   requestedPort,
   hostname,
@@ -261,6 +271,8 @@ while (!handle) {
   try {
     handle = createServer({
       port,
+      // The reconnect end of the restart gap `starts:report` prints.
+      onFirstClientSocket: (at) => markFirstClientSocket(serverStartsPath(dataDir), thisStart, at),
       ...(hostname ? { hostname } : {}),
       dataDir,
       widgetDistDir: widgetDist,
@@ -276,6 +288,15 @@ while (!handle) {
       ...(homeRemotesConfig ? { homeRemotes: { config: homeRemotesConfig } } : {}),
       ...(homeFeedClientId ? { homeFeedClientId } : {}),
       ...(googleMapsKey ? { googleMapsKey } : {}),
+      ...(boardImportDir
+        ? {
+            boardImport: {
+              dir: boardImportDir,
+              boards: parseImportBoards(process.env.CW_BOARD_IMPORT_BOARDS),
+              ...(boardImportClientId ? { clientId: boardImportClientId } : {}),
+            },
+          }
+        : {}),
       ...(frameOrigin ? { frameOrigin } : {}),
       ...(frameBoardHosts ? { frameBoardHosts } : {}),
       allowedOrigins,
@@ -516,6 +537,8 @@ if (pluginRefresher) {
 // Graceful shutdown
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {
+    // The other end of that gap, before anything that could hang.
+    markServerShutdown(serverStartsPath(dataDir), thisStart, Date.now());
     console.log(`[feedback] shutting down (${sig})`);
     // Report whatever the current squelch window was still counting; nothing
     // else will ask for it once the process is gone.

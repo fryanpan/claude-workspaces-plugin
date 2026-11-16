@@ -1782,7 +1782,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_share_member_role',
       description:
-        "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer.",
+        "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer. Any other change that lets them do more (a comment or view member moved to 'member', which is edit) needs the owner's own proof from the board's page; without it the call gets a 403 `owner-proof-required` and nothing changes.",
       inputSchema: {
         type: 'object',
         properties: {

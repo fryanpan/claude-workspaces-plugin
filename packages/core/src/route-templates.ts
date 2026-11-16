@@ -2,9 +2,8 @@
  * Route templates, and the one function that turns a pathname into a span
  * name — `routePatternForSpan`.
  *
- * It lives beside `trace-privacy.ts` rather than inside it because the table
- * is the bulk of both files put together, and because the table is now a
- * CHECKED claim: `packages/server/test/span-route-names.test.ts` walks
+ * It lives beside `trace-privacy.ts` because the table is most of both files
+ * and is a CHECKED claim: `packages/server/test/span-route-names.test.ts` walks
  * `ROUTE_TABLE` — the server's own written-down set of every path it answers
  * — and fails on any route this file cannot name.
  *
@@ -132,6 +131,10 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'tasks', ':id', 'assignee'],
   ['workspaces', ':id', 'tasks', ':id', 'due'],
   ['workspaces', ':id', 'tasks', ':id', 'park'],
+  ['workspaces', ':id', 'tasks', ':id', 'wait'],
+  ['workspaces', ':id', 'tasks', ':id', 'done-when'],
+  ['workspaces', ':id', 'tasks', ':id', 'done-when', 'report'],
+  ['workspaces', ':id', 'tasks', ':id', 'done-when', ':id', 'check'],
   ['workspaces', ':id', 'tasks', ':id', 'archive'],
   ['workspaces', ':id', 'tasks', ':id', 'restore'],
   ['workspaces', ':id', 'tasks', ':id', 'notes'],
@@ -194,9 +197,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   //
   // A tab in a browser and the JSON behind it are one address distinguished
   // by `?format=json`, and a query string is not part of a route pattern, so
-  // `''`, `home` and `tasks` each appear ONCE here and cover both. Two
-  // entries would not have been wrong; they would have been a second place
-  // to forget.
+  // `''`, `home` and `tasks` each appear ONCE here and cover both.
   ['workspaces', ':id'],
   ['workspaces', ':id', 'home'],
   ['workspaces', ':id', 'home', 'read'],
@@ -240,6 +241,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'lead-chat', 'files'],
   ['workspaces', ':id', 'lead-chat', 'files', ':id'],
   ['workspaces', ':id', 'lead-chat', 'meeting'],
+  ['workspaces', ':id', 'lead-chat', 'meeting', 'say'],
   ['workspaces', ':id', 'lead-chat', 'model'],
   ['workspaces', ':id', 'point'],
   ['workspaces', ':id', 'person', 'watch'],
@@ -256,6 +258,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // and the agent roster, both moved off names the glossary spends elsewhere.
   ['workspaces', ':id', 'events:stream'],
   ['workspaces', ':id', 'me', 'events:stream'],
+  ['workspaces', ':id', 'me', 'dm'],
   ['workspaces', ':id', 'agents'],
   ['workspaces', ':id', 'agents', ':id'],
   ['workspaces', ':id', 'agents', ':id', 'heartbeat'],
@@ -283,6 +286,9 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'board-tokens', 'refresh'],
   ['api', 'board-tokens', ':id', 'revoke'],
   ['api', 'board-sockets', ':id', 'roots'],
+  // A board pushed onto a project machine (routes/board-import.ts).
+  ['api', 'board-import', ':id'],
+  ['api', 'board-import', ':id', 'print'],
   ['api', 'github-push-keys'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],
@@ -379,6 +385,8 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'docs', ':id', 'agent-components', 'place'],
   ['workspaces', ':id', 'docs', ':id', 'agent-components', ':id', 'state'],
   ['workspaces', ':id', 'docs', ':id', 'component-grants'],
+  ['workspaces', ':id', 'docs', ':id', 'whiteboard'],
+  ['workspaces', ':id', 'whiteboards'],
   ['workspaces', ':id', 'docs', ':id', 'notes-method'],
   ['workspaces', ':id', 'docs', ':id', 'plan'],
   ['workspaces', ':id', 'docs', ':id', 'plan-request'],
@@ -413,6 +421,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'members'],
   ['workspaces', ':id', 'audience'],
   ['workspaces', ':id', 'roles-mode'],
+  ['workspaces', ':id', 'collab-core'],
   ['workspaces', ':id', 'refs:backfill'],
   ['workspaces', ':id', 'refs:backlinks'],
   ['workspaces', ':id', 'review-items', ':id'],

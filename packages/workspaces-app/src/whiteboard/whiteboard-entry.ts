@@ -200,6 +200,7 @@ async function joinRoom(
     },
     storage: sessionStorage,
     inputTarget: window,
+    title: () => document.getElementById('wb-title')?.textContent ?? undefined,
   });
 }
 
