@@ -37,7 +37,7 @@ import {
   onPageScroll,
   pageScroller,
   scrollFraction,
-  scrollToFraction,
+  scrollToFractionWhenDrawn,
 } from '../presence/page-scroll.ts';
 import { type BoardState, showToast } from './board-actions.ts';
 import { discussionIsBusy } from './board-discussion-render.ts';
@@ -230,6 +230,8 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   // key names the PARTICIPANT, not one of their connections, so a follow
   // survives the followed person reloading. A spot on the board itself is
   // its address: the tab, panel, thread or item, opened in place.
+  /** Ends the wait for the last followed scroll, so a newer one replaces it. */
+  let stopScrolling = (): void => {};
   const follower = createFollower({
     room: client.awareness,
     workspaceId,
@@ -238,9 +240,12 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     go: (href) => location.assign(href),
     show: (spot) => {
       if (spot.path) deps.showPath(spot.path);
-      // On the next frame: the path may have just shown another tab.
+      // From the next frame, once the page the path showed has room: it may
+      // have just shown another tab, or one still filling in.
       const { scroll } = spot;
-      if (scroll !== undefined) requestAnimationFrame(() => scrollToFraction(scroller(), scroll));
+      stopScrolling();
+      if (scroll !== undefined)
+        stopScrolling = scrollToFractionWhenDrawn(document, BOARD_SCROLL_ROOTS, scroll);
     },
     storage: deps.followStorage ?? sessionStorage,
     onChange: (key) => {
