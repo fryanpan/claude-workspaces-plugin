@@ -5,7 +5,8 @@
  */
 import { AGENT_SPOTS_FIELD, PERSON_SPOT_FIELD } from '@claude-workspaces/core/workspace-presence';
 import { describe, expect, it } from 'vitest';
-import { type PresenceChip, chipHue, presenceHue } from '../src/board/board-presence-model.ts';
+import type { PresenceChip } from '../src/board/board-presence-model.ts';
+import { roomColours } from '../src/presence/presence-colours.ts';
 import {
   PAGE_TITLE_FIELD,
   placeChips,
@@ -122,7 +123,11 @@ describe('placeChips', () => {
 
   it('puts an agent that has pointed nowhere under elsewhere, and leaves the reader alone', () => {
     expect(view[5]).toEqual(['Quiet', false, 'Not pointing at anything']);
-    expect(placed[0]).toEqual({ ...chip('p-me', 'Alice (you)'), self: true });
+    expect(placed[0]).toEqual({
+      ...chip('p-me', 'Alice (you)'),
+      self: true,
+      color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+    });
   });
 
   it('names an agent the board knows only by id with the name it points under', () => {
@@ -135,9 +140,9 @@ describe('placeChips', () => {
     });
     expect(lead?.label).toBe('Harborlight');
     // Its colour is keyed to its id, so the new name does not repaint it.
-    expect(lead && chipHue(lead)).toBe(chipHue(chip('a-agent-lead', 'agent-lead', 'agent')));
-    // CONTROL: the hue of the two labels differs, so the check above can fail.
-    expect(presenceHue('Harborlight')).not.toBe(presenceHue('agent-lead'));
+    expect(lead?.color).toBe(roomColours(states, SELF, ['a-agent-lead']).get('a-agent-lead'));
+    // CONTROL: the colour was set.
+    expect(lead?.color).toMatch(/^#[0-9a-f]{6}$/);
     // CONTROL: an agent with no spot keeps the label it came with.
     const [quiet] = placeChips([chip('a-agent-quiet', 'agent-quiet', 'agent')], {
       states,

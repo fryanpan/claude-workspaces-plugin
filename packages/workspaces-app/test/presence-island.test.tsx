@@ -82,6 +82,9 @@ afterEach(() => {
 const deckCircles = (host: HTMLElement) => [
   ...host.querySelectorAll<HTMLElement>('.board-presence-deck .board-presence-circle'),
 ];
+/** The elements `sel` matches that the page draws at the current width. */
+const shownIn = (host: HTMLElement, sel: string) =>
+  [...host.querySelectorAll<HTMLElement>(sel)].filter((c) => styleOf(c).display !== 'none');
 /** Open the list, as a tap on the deck does, and settle the render. */
 async function openList(host: HTMLElement): Promise<void> {
   host.querySelector<HTMLButtonElement>('.board-presence-deck')?.click();
@@ -389,21 +392,32 @@ describe('presence island — the deck and its list (design F)', () => {
     expect(rowButtons(host)[0]?.getAttribute('title')).toContain('· following');
   });
 
-  it('draws at most four circles in the deck; the list names everyone', async () => {
+  it('holds at most four marks in the deck, the last counting the rest; the list names everyone', async () => {
     const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) => person(n));
     const { host } = mountPeople(chips);
-    expect(deckCircles(host)).toHaveLength(4);
+    // Three circles and "+2": the marks add up to all five.
+    expect(deckCircles(host)).toHaveLength(3);
+    expect(shownIn(host, '.board-presence-more').map((m) => m.textContent)).toEqual(['+2']);
+    expect(host.querySelector('.board-presence-names')?.textContent).toBe(
+      'Alice, Bob, Harborlight',
+    );
     await openList(host);
     expect(rowButtons(host)).toHaveLength(5);
   });
 
-  it('shows three of those circles on a phone, so its slot stays narrow', () => {
+  it('holds three marks on a phone, so its slot stays narrow', () => {
     const chips = ['Alice', 'Bob', 'Harborlight', 'Riverbend', 'Saltmarsh'].map((n) => person(n));
     const { host } = mountPeople(chips);
-    const shown = () => deckCircles(host).filter((c) => styleOf(c).display !== 'none').length;
-    expect(shown()).toBe(4);
     setViewport(PHONE);
-    expect(shown()).toBe(3);
+    expect(shownIn(host, '.board-presence-deck .board-presence-circle')).toHaveLength(2);
+    expect(shownIn(host, '.board-presence-more').map((m) => m.textContent)).toEqual(['+3']);
+    expect(shownIn(host, '.board-presence-names')).toHaveLength(0);
+  });
+
+  it('draws everybody when they fit, with no count', () => {
+    const { host } = mountPeople(['Alice', 'Bob', 'Riverbend', 'Saltmarsh'].map((n) => person(n)));
+    expect(deckCircles(host)).toHaveLength(4);
+    expect(shownIn(host, '.board-presence-more')).toHaveLength(0);
   });
 
   it('closes on Escape and on a tap outside the strip', async () => {

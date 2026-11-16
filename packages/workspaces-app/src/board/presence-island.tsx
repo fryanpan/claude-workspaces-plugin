@@ -29,12 +29,8 @@
 import { signal } from '@preact/signals';
 import { type ComponentChildren, Fragment, render } from 'preact';
 import { useLayoutEffect } from 'preact/hooks';
-import {
-  type DriftNotice,
-  type PresenceChip,
-  chipHue,
-  initialsOf,
-} from './board-presence-model.ts';
+import { soloColour } from '../presence/presence-colours.ts';
+import { type DriftNotice, type PresenceChip, initialsOf } from './board-presence-model.ts';
 import {
   PresenceDeck,
   type PresenceFace,
@@ -45,10 +41,14 @@ import {
 export type { PresenceFace, PresenceHandlers } from './presence-deck.tsx';
 export { LONG_PRESS_MS } from './presence-deck.tsx';
 
+/** The colour a chip wears: the one its page gave it, or its own slot. */
+export const chipColour = (chip: Pick<PresenceChip, 'key' | 'color'>): string =>
+  chip.color ?? soloColour(chip.key);
+
 /** Today's circle: a filled span with the initials in it. */
 export const CLASSIC_FACE: PresenceFace = {
   base: 'board-presence-circle',
-  style: (chip) => ({ background: `hsl(${chipHue(chip)}, 45%, 45%)` }),
+  style: (chip) => ({ background: chipColour(chip) }),
   circle: (chip) => <span class="board-presence-initials">{initialsOf(chip.label)}</span>,
 };
 
