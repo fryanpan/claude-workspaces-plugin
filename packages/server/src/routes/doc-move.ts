@@ -3,6 +3,8 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import { type WorkspaceScope, matchRest } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import type { DocMoveBody } from './doc-file-contract.ts';
+import { sent } from './route-contract.ts';
 
 /**
  * The migration verb over HTTP:
@@ -56,7 +58,7 @@ export async function handleDocMoveRoute(
   if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
   const docId = decodeURIComponent(match[1] ?? '');
   if (!ctx.isValidDocId(docId)) return j(400, { error: 'bad docId' });
-  const body = await ctx.safeJson(req);
+  const body = sent<DocMoveBody>(await ctx.safeJson(req));
   const res = moveDocToProject(ctx, {
     workspaceId: scope.workspaceId,
     board: scope.board,

@@ -1,7 +1,8 @@
 /**
  * The contract for the routes an agent uses to reach its person
  * (`route-contract.ts` says what a contract is): hear where the board owner's
- * tab lands and send it somewhere (`workspace-point.ts`), confirm which
+ * tab lands and send it somewhere, or point its followers at a place
+ * (`workspace-point.ts`), confirm which
  * person it works for (`agent-identity.ts`), and answer that person
  * privately (`private-messages.ts`).
  */
@@ -37,6 +38,8 @@ export interface PersonWatchBody extends AgentCallerFields {
   on?: boolean;
 }
 export type PersonShowBody = AgentCallerFields & PlaceFields;
+/** `point` names a place as `person/show` does, and writes nothing. */
+export type PointBody = PersonShowBody;
 /** An `email` names the person; `personId: null` clears the link. */
 export interface ConfirmPersonBody {
   email?: string;
@@ -55,6 +58,7 @@ export interface PersonShowAnswer {
   ok: true;
   spot: PresenceSpot;
 }
+export type PointAnswer = PersonShowAnswer;
 export interface ConfirmPersonAnswer {
   ok: true;
   state: Extract<LinkResult, { ok: true }>['state'];
@@ -70,6 +74,7 @@ const AGENT = '/api/agents/:agentId';
 export const personContract = new Hono()
   .post(`${PERSON}/watch`, json<PersonWatchBody>(), answers<PersonWatchAnswer>())
   .post(`${PERSON}/show`, json<PersonShowBody>(), answers<PersonShowAnswer>())
+  .post('/workspaces/:ws/point', json<PointBody>(), answers<PointAnswer>())
   .post(`${AGENT}/person`, json<ConfirmPersonBody>(), answers<ConfirmPersonAnswer>())
   .post(`${AGENT}/messages/:personId`, json<PrivateReplyBody>(), answers<PrivateReplyAnswer>());
 

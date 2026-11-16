@@ -334,6 +334,9 @@ export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts
 export type { WorkspaceBoardContract } from './routes/workspace-board-contract.ts';
 export type { WorkspaceAgentsContract } from './routes/workspace-agents-contract.ts';
 export type { DispatchesContract } from './routes/dispatches-contract.ts';
+export type { DocFileContract } from './routes/doc-file-contract.ts';
+export type { LeadMeetingContract } from './routes/lead-meeting-contract.ts';
+export type { AgentMachineContract } from './routes/agent-machine-contract.ts';
 export type { DocEditsContract } from './routes/doc-edits-contract.ts';
 export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
 export type {

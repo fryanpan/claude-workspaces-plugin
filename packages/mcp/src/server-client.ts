@@ -22,15 +22,18 @@ import type { Hono } from 'hono';
  */
 import { hc } from 'hono/client';
 import type {
+  AgentMachineContract,
   AgentNotesContract,
   AttachmentsContract,
   DispatchesContract,
   DocComponentsContract,
   DocEditsContract,
+  DocFileContract,
   DocLifecycleContract,
   DocThreadsContract,
   InboxContract,
   LeadChatFilesContract,
+  LeadMeetingContract,
   LibraryFoldersContract,
   MountsApi,
   PersonContract,
@@ -82,3 +85,6 @@ export const leadChatFilesClient = (http: Http) => typedClient<LeadChatFilesCont
 export const workspaceBoardClient = (http: Http) => typedClient<WorkspaceBoardContract>(http);
 export const workspaceAgentsClient = (http: Http) => typedClient<WorkspaceAgentsContract>(http);
 export const dispatchesClient = (http: Http) => typedClient<DispatchesContract>(http);
+export const docFileClient = (http: Http) => typedClient<DocFileContract>(http);
+export const leadMeetingClient = (http: Http) => typedClient<LeadMeetingContract>(http);
+export const agentMachineClient = (http: Http) => typedClient<AgentMachineContract>(http);

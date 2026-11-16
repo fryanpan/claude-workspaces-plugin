@@ -13,15 +13,18 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
+import { agentMachineContract } from '../src/routes/agent-machine-contract.ts';
 import { agentNotesContract } from '../src/routes/agent-notes-contract.ts';
 import { attachmentsContract } from '../src/routes/attachments-contract.ts';
 import { dispatchesContract } from '../src/routes/dispatches-contract.ts';
 import { docComponentsContract } from '../src/routes/doc-components-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
+import { docFileContract } from '../src/routes/doc-file-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
 import { docThreadsContract } from '../src/routes/doc-threads-contract.ts';
 import { inboxContract } from '../src/routes/inbox-contract.ts';
 import { leadChatFilesContract } from '../src/routes/lead-chat-files-contract.ts';
+import { leadMeetingContract } from '../src/routes/lead-meeting-contract.ts';
 import { libraryFoldersContract } from '../src/routes/library-folders-contract.ts';
 import { personContract } from '../src/routes/person-contract.ts';
 import { reviewItemsContract } from '../src/routes/review-items-contract.ts';
@@ -182,6 +185,8 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
     // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
     app: workspaceBoardContract as unknown as Hono<any>,
     servedBy: [
+      'github-hub.ts:handleGithubHubRoute',
+      'workspace-embeds.ts:handleWorkspaceEmbeds',
       'workspaces-create-read.ts:handleWorkspaceCreateRead',
       'workspace-settings.ts:handleWorkspaceSettings',
       'workspace-content.ts:handleWorkspaceContent',
@@ -201,6 +206,34 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
     servedBy: [
       'dispatch-and-notes.ts:handleDispatchAndNoteRoutes',
       'chat-audit-routes.ts:handleChatAuditRoutes',
+    ],
+  },
+  {
+    name: 'doc file',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: docFileContract as unknown as Hono<any>,
+    servedBy: [
+      'doc-title.ts:handleDocTitleRoute',
+      'doc-metadata.ts:handleDocMetadataRoute',
+      'doc-move.ts:handleDocMoveRoute',
+      'doc-file-move.ts:handleDocFileMoveRoute',
+    ],
+  },
+  {
+    name: 'lead meeting',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: leadMeetingContract as unknown as Hono<any>,
+    servedBy: ['workspace-lead-chat.ts:handleWorkspaceLeadChat'],
+  },
+  {
+    name: 'agent machine',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: agentMachineContract as unknown as Hono<any>,
+    servedBy: [
+      'repos.ts:handleRepoRoutes',
+      'ops.ts:handleOpsRoutes',
+      'review-queue.ts:handleReviewQueueRoutes',
+      'coach.ts:handleCoachRoutes',
     ],
   },
 ];

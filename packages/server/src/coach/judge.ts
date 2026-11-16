@@ -18,6 +18,17 @@ export const LINE_MAX_CHARS = 220;
 /** The fewest words a quote of a longer goal may have. */
 const MIN_QUOTE_WORDS = 3;
 
+/** A raised moment, as `POST /coach/moments` declares it. */
+export interface CoachMomentBody {
+  /** 1-based index into the goals. */
+  goal: number;
+  matched: string;
+  observed: string;
+  line: string;
+}
+/** What `checkMoment` sees of a sent moment: each field present or not, unchecked. */
+export type SentMoment = { [K in keyof CoachMomentBody]?: unknown };
+
 export interface CheckedMoment {
   goalIndex: number;
   matched: string;
@@ -51,7 +62,7 @@ export function quotesGoal(quote: string, goalText: string): boolean {
 
 /** The moment as checked, or the reason it is refused. `goal` is 1-based. */
 export function checkMoment(
-  body: Record<string, unknown> | null,
+  body: SentMoment | null,
   goals: readonly LearningGoal[],
 ): CheckedMoment | string {
   const { goal, matched, observed, line } = body ?? {};

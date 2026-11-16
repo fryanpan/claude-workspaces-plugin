@@ -1,7 +1,7 @@
 /**
- * The board, roster and dispatch tools in `tools/workspace.ts` call the
- * server through the typed client, over `workspace-board-contract.ts`,
- * `workspace-agents-contract.ts` and `dispatches-contract.ts`.
+ * Every tool in `tools/workspace.ts` calls the server through the typed
+ * client, over the board, agents, dispatches, doc file, person, lead meeting
+ * and agent machine contracts.
  *
  * The cases record what reached `http`: the same method, path and body the
  * hand-spelled paths sent, ids percent-encoded as before, and no key for a
@@ -11,7 +11,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  agentMachineClient,
   dispatchesClient,
+  docFileClient,
   workspaceAgentsClient,
   workspaceBoardClient,
 } from '../src/server-client.ts';
@@ -42,12 +44,14 @@ const ANSWER = {
   holders: [],
 };
 
-function recorder() {
+/** `refuse`, when given, is the error every call throws, as `http` throws a non-2xx. */
+function recorder(refuse?: string) {
   const calls: Call[] = [];
   const marks: string[] = [];
   const ctx = {
     http: async (method: string, path: string, body?: unknown) => {
       calls.push([method, path, body]);
+      if (refuse !== undefined) throw new Error(refuse);
       return ANSWER;
     },
     ok: (data: unknown) => ({ content: [{ type: 'text', text: JSON.stringify(data) }] }),
@@ -235,6 +239,66 @@ describe('the dispatch and chat-audit tools, through the typed client', () => {
   });
 });
 
+describe('the doc, pointer, meeting and machine tools, through the typed client', () => {
+  it('sends each verb where the hand-spelled path did', async () => {
+    const r = recorder();
+    await r.run('set_github_subscriptions', { subscriptions: [{ repo: 'o/r' }] });
+    await r.run('set_board_embeds', { embeds: {} });
+    await r.run('register_worktree', { path: '/r' });
+    await r.run('list_worktrees', {});
+    await r.run('unregister_worktree', { path: '/r' });
+    await r.run('set_doc_title', { docId: 'd 1', title: 'Riverbend' });
+    await r.run('get_doc_metadata', { docId: 'd 1' });
+    await r.run('set_doc_metadata', { docId: 'd 1', fields: { status: 'draft' } });
+    await r.run('set_doc_metadata', { docId: 'd 1' });
+    await r.run('move_doc_to_project', { docId: 'd 1', relPath: 'notes/a.md' });
+    await r.run('move_doc_file', { docId: 'd 1', path: '/n/a.md', mode: 'move' });
+    await r.run('point_at', { taskId: ' t-1 ', scroll: 2 });
+    await r.run('say_in_meeting', { text: ' hello ' });
+    await r.run('coach_moment', { goal: 1, matched: 'm', observed: 'o', line: 'l?' });
+    await r.run('rank_review_item', { key: 'k 1', rank: 3 });
+    await r.run('rank_review_item', { key: 'k 1', goal: null });
+    await r.run('request_plugin_refresh', {});
+    const D = `${B}/docs/d%201`;
+    expect(r.calls).toEqual([
+      ['PUT', `${B}/github-subscriptions`, { subscriptions: [{ repo: 'o/r' }] }],
+      ['PUT', `${B}/embeds`, { embeds: {} }],
+      ['POST', '/api/repos/checkouts', { path: '/r' }],
+      ['GET', '/api/repos', undefined],
+      ['DELETE', '/api/repos/checkouts', { path: '/r' }],
+      ['PUT', `${D}/title`, { title: 'Riverbend' }],
+      ['GET', `${D}/metadata`, undefined],
+      ['PUT', `${D}/metadata`, { fields: { status: 'draft' } }],
+      ['PUT', `${D}/metadata`, { fields: {} }],
+      ['POST', `${D}/move`, { relPath: 'notes/a.md' }],
+      ['POST', `${D}/move-file`, { path: '/n/a.md', mode: 'move' }],
+      [
+        'POST',
+        `${B}/point`,
+        { agentId: AUTHOR.id, agentName: AUTHOR.name, taskId: 't-1', scroll: 2 },
+      ],
+      ['POST', `${B}/lead-chat/meeting/say`, { agentId: AUTHOR.id, text: 'hello' }],
+      ['POST', '/coach/moments', { goal: 1, matched: 'm', observed: 'o', line: 'l?' }],
+      ['POST', '/api/review-queue/rank', { agentId: AUTHOR.id, key: 'k 1', rank: 3 }],
+      ['POST', '/api/review-queue/rank', { agentId: AUTHOR.id, key: 'k 1', goal: null }],
+      ['POST', '/api/plugin/refresh', undefined],
+    ]);
+  });
+
+  it('still answers a refusal as a result, not an error', async () => {
+    const refused = recorder('POST /x → 409: {"error":"no-meeting","hint":"none"}');
+    expect(await refused.run('say_in_meeting', { text: 'hello' })).toMatchObject({ said: false });
+    expect(
+      await refused.run('coach_moment', { goal: 1, matched: 'm', observed: 'o', line: 'l?' }),
+    ).toEqual({ raised: false, reason: 'no-meeting' });
+    const missing = recorder('POST /x → 404: {"error":"no-task"}');
+    expect(await missing.run('point_at', { taskId: 't-1' })).toEqual({
+      pointed: false,
+      error: 'no-task',
+    });
+  });
+});
+
 /** Compiled, never run: a renamed field on either side fails the typecheck. */
 function typeProbes(http: never) {
   const board = workspaceBoardClient(http).workspaces[':ws'];
@@ -246,5 +310,11 @@ function typeProbes(http: never) {
   const lanes = dispatchesClient(http).workspaces[':ws'];
   // @ts-expect-error a dispatch names its task by `taskId`
   lanes.dispatches.$post({ param: { ws: 'w' }, json: { task: 't', worktreePath: '/w' } });
+  const doc = docFileClient(http).workspaces[':ws'].docs[':docId'];
+  // @ts-expect-error a move names its target by `relPath`
+  doc.move.$post({ param: { ws: 'w', docId: 'd' }, json: { path: 'a.md' } });
+  const moments = agentMachineClient(http).coach.moments;
+  // @ts-expect-error the coach reads `observed`, not `seen`
+  moments.$post({ json: { goal: 1, matched: 'm', seen: 'o', line: 'l' } });
 }
 void typeProbes;
