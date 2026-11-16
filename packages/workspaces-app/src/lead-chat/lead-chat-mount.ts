@@ -34,6 +34,8 @@
  * board's owner — so nobody else is offered a composer that refuses.
  */
 import type { VoiceContext } from '../voice-capture.ts';
+import { type DmClient, createDmClient } from './dm-client.ts';
+import { wireChannels } from './lead-chat-channel-wiring.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
 import { wireComposer } from './lead-chat-composer-wiring.ts';
 import { messageLinkOf, withMessageLink } from './lead-chat-link.ts';
@@ -70,6 +72,7 @@ export interface LeadChatMountOpts {
   stream?: EventSource;
   /** Injected by tests. */
   client?: LeadChatClient;
+  dm?: DmClient;
   storage?: ModeStorage | null;
   /** Per tab: which tab records the board's meeting. Defaults to the
    *  page's session storage. */
@@ -89,6 +92,11 @@ export interface LeadChatMount {
   /** Open the pane on the Start a meeting wizard — the board's "Have a
    *  meeting". With a meeting already running, only the pane opens. */
   startMeeting(): void;
+  /** The board's Messages item: open the chat, or close it. */
+  toggle(): void;
+  /** Told after every draw whether the reader has a chat to open, and
+   *  whether any channel in it holds a message they have not seen. */
+  onMessages(fn: (m: { available: boolean; unread: boolean }) => void): void;
   destroy(): void;
 }
 
@@ -129,6 +137,15 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     opts.reducedMotion ?? (() => win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   const ui = { open: false, bar: false, notice: '' };
+  const channels = wireChannels({
+    doc,
+    view,
+    dm: opts.dm ?? createDmClient({ workspaceId: opts.workspaceId }),
+    session,
+    isOpen: () => ui.open,
+    changed: () => render(),
+  });
+  const messageFns: Array<(m: { available: boolean; unread: boolean }) => void> = [];
   /** The panel stays open as the reader moves between the board's pages:
    *  this tab remembers it was open, and the next page opens it again. */
   const keepOpen = (open: boolean): void => {
@@ -222,7 +239,10 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       ...(meet ? { meeting: meet.model() } : {}),
       more: s.more,
       loadingOlder: s.loadingOlder,
+      ...channels.model(s, ui.open),
     });
+    const available = (s.loaded && s.canTalk) || channels.available();
+    for (const fn of messageFns) fn({ available, unread: channels.unread() });
     view.button.dataset.meeting = String(!!s.meeting);
     olderIfAtTop();
   };
@@ -344,7 +364,8 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     const text = view.composer.value.trim();
     if (!composing.sendable()) return;
     view.send.disabled = true;
-    if (await deliver(text, 'chat', composing.attachments.ids())) {
+    const direct = channels.send(text);
+    if (direct ? await direct : await deliver(text, 'chat', composing.attachments.ids())) {
       view.composer.value = '';
       composing.attachments.clear();
     }
@@ -352,7 +373,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   };
 
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && composing.closeSheet()) return;
+    if (e.key === 'Escape' && (composing.closeSheet() || channels.closeMenu())) return;
     if (e.key === 'Escape' && (ui.open || ui.bar)) closeAll();
   };
   /** A full-screen panel making way for a page: listening goes on in the bar. */
@@ -446,7 +467,16 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       if (!ui.open) openPane(view.button.getBoundingClientRect(), false);
       if (!client.state().meeting) meet?.wizard.show();
     },
+    toggle() {
+      if (ui.open) closeAll();
+      else openPane(null);
+    },
+    onMessages(fn) {
+      messageFns.push(fn);
+      render();
+    },
     destroy() {
+      channels.destroy();
       meet?.destroy();
       voice.destroy();
       client.close();

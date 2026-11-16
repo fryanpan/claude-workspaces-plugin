@@ -331,6 +331,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |
+| `/workspaces/:ws/me/dm` | GET, POST | `routes/direct-messages.ts` | share-scope |  |
 | `/workspaces/:ws/me/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/members` | GET | `routes/workspace-members.ts` | share-scope |  |
 | `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |

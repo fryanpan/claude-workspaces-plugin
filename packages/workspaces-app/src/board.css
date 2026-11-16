@@ -2501,6 +2501,29 @@ html:has(.board-walk-cred-form) {
   width: 100%;
   height: 100%;
 }
+/* Messages opens the lead chat rather than a page (M10). Hidden until the
+   reader has a chat to open; a steady dot while a channel in it holds a
+   message they have not seen. */
+.board-nav-item.board-nav-messages {
+  position: relative;
+}
+.board-nav-item.board-nav-messages[hidden] {
+  display: none;
+}
+.board-nav-dot {
+  position: absolute;
+  top: 7px;
+  left: 22px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+  opacity: 0;
+}
+.board-nav-dot.on {
+  opacity: 1;
+}
 
 /* ################# BOARD · RAIL MIC (HOLD-TO-TALK) #################
    Docked at the rail's foot.
@@ -8115,8 +8138,12 @@ label.board-sched-chip:hover {
   body:has(claude-feedback-widget) .board-nav {
     padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
   }
+  /* min-width 0, as the open chat's bar has (html[data-lc-full]): equal tabs
+     whatever their label, so "Messages" does not widen its tab and every tab
+     stays put when the chat opens. */
   .board-nav-item {
     flex: 1;
+    min-width: 0;
     flex-direction: column;
     justify-content: center;
     gap: 2px;
@@ -8128,6 +8155,10 @@ label.board-sched-chip:hover {
   .board-nav-icon {
     width: 18px;
     height: 18px;
+  }
+  .board-nav-dot {
+    top: 6px;
+    left: calc(50% + 6px);
   }
   /* The page's own tail has to clear the 54px bar. The height is a VARIABLE
      rather than copies of `58px` because more than one reader needs it and one
