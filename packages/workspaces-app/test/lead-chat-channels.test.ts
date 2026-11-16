@@ -56,6 +56,7 @@ function fakeServer(opts: { signedIn?: boolean } = {}) {
     { id: 'pm-1', author: BOB, to: ME.id, text: 'The mooring list is confirmed.', ts: 1 },
   ];
   const posts: Array<{ url: string; body: unknown }> = [];
+  const people = [BOB];
   let n = 1;
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
     const json = (status: number, body: unknown) =>
@@ -78,7 +79,7 @@ function fakeServer(opts: { signedIn?: boolean } = {}) {
       return json(200, { ok: true, message });
     }
     if (url === '/workspaces/w-harbor/me/dm') {
-      return json(200, { me: ME, people: [BOB], lead: { agentId: 'agent-a1', name: 'Riverbend' } });
+      return json(200, { me: ME, people, lead: { agentId: 'agent-a1', name: 'Riverbend' } });
     }
     if (url === `/workspaces/w-harbor/me/dm?with=${BOB.id}`) {
       return json(200, { messages: bobLog, more: false });
@@ -87,7 +88,7 @@ function fakeServer(opts: { signedIn?: boolean } = {}) {
       return json(200, { agentId: 'agent-a1', messages: [], more: false });
     return json(404, {});
   });
-  return { fetchFn, posts };
+  return { fetchFn, posts, joined: (p: { id: string; name: string }) => void people.push(p) };
 }
 
 class Stream extends EventTarget {
@@ -227,6 +228,27 @@ describe('the chat’s channels', () => {
       message: { id: 'pm-8', author: BOB, to: ME.id, text: 'Other board', ts: 8 },
     });
     expect(t.view.list.textContent).not.toContain('Other board');
+  });
+
+  it('lists a person who joined after the page loaded once they write', async () => {
+    const t = mount();
+    await vi.waitFor(() => expect(t.streams.length).toBe(1));
+    t.joined({ id: 'user-saltmarsh', name: 'Saltmarsh' });
+    t.streams[0]?.emit('direct.message', {
+      workspaceId: 'w-harbor',
+      message: {
+        id: 'pm-5',
+        author: { id: 'user-saltmarsh', name: 'Saltmarsh' },
+        to: ME.id,
+        text: 'Hello.',
+        ts: 5,
+      },
+    });
+    t.m.toggle();
+    t.view.picker.button.click();
+    await vi.waitFor(() => expect(t.rows().join('|')).toContain('Saltmarsh: Hello.'));
+    t.pick('Saltmarsh');
+    expect(t.seen.at(-1)?.unread).toBe(false);
   });
 
   it('marks #general unread when the lead answers while another channel is shown', async () => {

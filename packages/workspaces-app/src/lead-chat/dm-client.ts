@@ -167,6 +167,8 @@ export function createDmClient(opts: DmClientOpts): DmClient {
         if (!m || frame.workspaceId !== opts.workspaceId) return;
         const peer = mine(m.author.id) ? m.to : m.author.id;
         put(personChannel(peer), ofDirect(m), true);
+        // Someone who joined the board after this page read the list.
+        if (!channels.some((c) => c.peerId === peer)) void readList();
         changed();
       } catch {
         // A frame this page cannot read changes nothing.
@@ -184,11 +186,13 @@ export function createDmClient(opts: DmClientOpts): DmClient {
     });
   };
 
-  const start = async (): Promise<void> => {
+  /** The channel list; true once it answered. */
+  const readList = async (): Promise<boolean> => {
     try {
       const res = await doFetch(`${base}/me/dm`, { credentials: 'same-origin' });
-      if (!res.ok || closed) return;
+      if (!res.ok) return false;
       const list = (await res.json()) as DirectChannels;
+      if (closed) return false;
       me = list.me;
       channels = [
         ...(list.lead
@@ -209,13 +213,16 @@ export function createDmClient(opts: DmClientOpts): DmClient {
         })),
       ];
       ready = true;
-      listen();
       changed();
+      return true;
     } catch {
       // No channels: the chat is #general alone.
+      return false;
     }
   };
-  void start();
+  void readList().then((ok) => {
+    if (ok && !closed) listen();
+  });
 
   return {
     state,
