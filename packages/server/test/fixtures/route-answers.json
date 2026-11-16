@@ -152,7 +152,7 @@
   "GET /widget.js": "404 text/plain | by chain",
   "GET /widget/*": "404 text/plain | by chain",
   "GET /workspaces": "200 application/json {boardWorkspaces,workspaces} | by workspaces.ts:handleWorkspaceRoutes > workspaces-create-read.ts:handleWorkspaceCreateRead",
-  "GET /workspaces/:ws": "200 text/html cache=no-store | by shell-static.ts:serveShellRoutes",
+  "GET /workspaces/:ws": "200 application/json {collabCore,goalSummary,parallelismCap,workspace} | by workspaces.ts:handleWorkspaceRoutes > workspaces-create-read.ts:handleWorkspaceCreateRead",
   "GET /workspaces/:ws/activity": "200 text/html cache=no-store | by shell-static.ts:serveShellRoutes",
   "GET /workspaces/:ws/agents": "200 application/json {attachments,chatAudit,pluginRelease,seat,workspaceId} | by workspaces.ts:handleWorkspaceAttachmentRoutes > workspace-attachments.ts:handleWorkspaceAttachments",
   "GET /workspaces/:ws/agents/:agent/notes": "200 application/json {agent,notes} | by dispatch-and-notes.ts:handleDispatchAndNoteRoutes",

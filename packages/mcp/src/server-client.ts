@@ -24,6 +24,7 @@ import { hc } from 'hono/client';
 import type {
   AgentNotesContract,
   AttachmentsContract,
+  DispatchesContract,
   DocComponentsContract,
   DocEditsContract,
   DocLifecycleContract,
@@ -39,6 +40,8 @@ import type {
   TaskContentContract,
   TaskStateContract,
   WhiteboardContract,
+  WorkspaceAgentsContract,
+  WorkspaceBoardContract,
 } from '../../server/src/index.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
@@ -76,3 +79,6 @@ export const personClient = (http: Http) => typedClient<PersonContract>(http);
 export const whiteboardClient = (http: Http) => typedClient<WhiteboardContract>(http);
 export const inboxClient = (http: Http) => typedClient<InboxContract>(http);
 export const leadChatFilesClient = (http: Http) => typedClient<LeadChatFilesContract>(http);
+export const workspaceBoardClient = (http: Http) => typedClient<WorkspaceBoardContract>(http);
+export const workspaceAgentsClient = (http: Http) => typedClient<WorkspaceAgentsContract>(http);
+export const dispatchesClient = (http: Http) => typedClient<DispatchesContract>(http);

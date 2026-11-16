@@ -37,6 +37,14 @@ import { withoutCues } from '../spoken-reply/cues.ts';
 import { LEAD_ANSWER_MAX, LEAD_MINUTE_MAX, LEAD_WRITTEN_MAX } from '../spoken-reply/lead-answer.ts';
 import { isAttachmentRuntime } from '../tasks.ts';
 import { matchWorkspaceRoute, safeDecodeSegment } from '../workspace-path.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type {
+  AttachAgentAnswer,
+  AttachAgentBody,
+  HeartbeatBody,
+  VoiceAnswerAnswer,
+  VoiceAnswerBody,
+} from './workspace-agents-contract.ts';
 import {
   type WorkspaceRouteRequest,
   type WorkspaceRoutesContext,
@@ -182,7 +190,7 @@ export async function handleWorkspaceAttachments(
     // (`middleware/lead-scope.ts`); every other visitor is refused.
     if (visitor && rq.leadBoard !== workspaceId)
       return j(403, { error: 'not available to share visitors' });
-    const body = await safeJson(req);
+    const body = sent<AttachAgentBody>(await safeJson(req));
     const agentId = body?.agentId;
     if (typeof agentId !== 'string' || agentId.trim().length === 0) {
       return j(400, { error: 'agentId required' });
@@ -249,13 +257,17 @@ export async function handleWorkspaceAttachments(
     // server cannot see whether the session knows the capability exists, and
     // a capability announced only in a skill goes unused — measured on this
     // board three days after the mount pointer shipped in both skills.
-    return j(200, {
+    const attached: AttachAgentAnswer = {
       ...res,
+      // Named, not only spread: a spread is never checked for excess keys,
+      // so a renamed contract field would pass unnoticed here.
+      queuedComments: res.queuedComments,
       watching,
       notes: attachNotes(res, watching),
       sentry: sentryWatchPlan(),
       mounts: ctx.mountsBriefFor(workspaceId, req),
-    });
+    };
+    return j(200, attached);
   }
   const wsAgentHeartbeatMatch = pathname.match(
     /^\/workspaces\/([^/]+)\/agents\/([^/]+)\/heartbeat$/,
@@ -264,7 +276,7 @@ export async function handleWorkspaceAttachments(
     if (visitor) return j(403, { error: 'not available to share visitors' });
     const workspaceId = safeDecodeSegment(wsAgentHeartbeatMatch[1] ?? '');
     const agentId = safeDecodeSegment(wsAgentHeartbeatMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<HeartbeatBody>(await safeJson(req));
     const res = taskStore.heartbeat(workspaceId, agentId, {
       // Forwarded, not re-derived: the runtime knows when it last did
       // work; the route's job is only to not drop the field.
@@ -385,7 +397,7 @@ export async function handleWorkspaceAttachments(
     if (visitor && rq.leadBoard !== workspaceId)
       return j(403, { error: 'not available to share visitors' });
     const entryId = safeDecodeSegment(wsVoiceAnswerMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<VoiceAnswerBody>(await safeJson(req));
     // Only an agent on this board answers aloud on it, proved the way its
     // own feed is: on this machine, with its token.
     const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
@@ -428,13 +440,18 @@ export async function handleWorkspaceAttachments(
     // The chat shows words: a tone cue (`[warm]`) is for the voice alone.
     const shown = withoutCues(text) || text;
     if (leadChat.answer(workspaceId, entryId, shown, agentId, written)) {
-      return j(200, { ok: true, delivered: true });
+      return j(200, { ok: true, ...answerAs<VoiceAnswerAnswer>({ delivered: true }) });
     }
     leadChat.voiceReply(workspaceId, entryId, written ?? shown, agentId, written !== undefined);
-    return j(200, {
-      ok: true,
-      delivered: spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId, written),
-    });
+    const delivered = spokenRelay.answerRequest(
+      workspaceId,
+      entryId,
+      text,
+      minute,
+      agentId,
+      written,
+    );
+    return j(200, { ok: true, ...answerAs<VoiceAnswerAnswer>({ delivered }) });
   }
   const wsAgentDetachMatch = pathname.match(/^\/workspaces\/([^/]+)\/agents\/([^/]+)$/);
   if (wsAgentDetachMatch && req.method === 'DELETE') {
