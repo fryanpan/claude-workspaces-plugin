@@ -16,7 +16,8 @@
  * could fail a claim would be worse than the collision it prevents.
  */
 import type { AttachmentKeepalive } from './attachment-keepalive.ts';
-import { type PresenceRow, claimWarning } from './claim-warning.ts';
+import { claimWarning } from './claim-warning.ts';
+import { taskBoardClient, workspaceAgentsClient } from './server-client.ts';
 
 export interface AttachmentDeps {
   /** The REST call to the feedback server; throws on a non-2xx. */
@@ -72,11 +73,13 @@ function markAttached(deps: AttachmentDeps, workspaceId: string): void {
 async function sendDueHeartbeats(deps: AttachmentDeps): Promise<void> {
   for (const workspaceId of deps.keepalive.due()) {
     try {
-      await deps.http(
-        'POST',
-        `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(deps.author.id)}/heartbeat`,
-        { toolCallAt: now(deps) },
-      );
+      await workspaceAgentsClient(deps.http).workspaces[':ws'].agents[':agentId'].heartbeat.$post({
+        param: {
+          ws: encodeURIComponent(workspaceId),
+          agentId: encodeURIComponent(deps.author.id),
+        },
+        json: { toolCallAt: now(deps) },
+      });
     } catch {
       // The board will read this session as away, and `coverage` reports
       // exactly that — which is the honest outcome of a server we cannot
@@ -109,12 +112,14 @@ async function sendDueHeartbeats(deps: AttachmentDeps): Promise<void> {
 async function claimNoticeFor(deps: AttachmentDeps, taskId: string): Promise<string | undefined> {
   for (const workspaceId of deps.keepalive.boards()) {
     try {
-      const res = (await deps.http(
-        'GET',
-        // includeBlocked so a row held by a dependency is still findable —
-        // its being blocked says nothing about whether somebody is on it.
-        `/workspaces/${encodeURIComponent(workspaceId)}/next?includeBlocked=true`,
-      )) as { tasks?: PresenceRow[] };
+      const res = await (
+        await taskBoardClient(deps.http).workspaces[':ws'].next.$get({
+          param: { ws: encodeURIComponent(workspaceId) },
+          // includeBlocked so a row held by a dependency is still findable —
+          // its being blocked says nothing about whether somebody is on it.
+          query: { includeBlocked: 'true' },
+        })
+      ).json();
       const row = res.tasks?.find((t) => t?.id === taskId);
       if (row) return claimWarning(row, deps.author.id, now(deps));
     } catch {

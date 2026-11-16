@@ -26,39 +26,25 @@
  * same reason `nudge-line.ts` and `voice-line.ts` are: the wording is a
  * decision, and inline in a 3,000-line switch it cannot be asserted.
  */
+import type { NextAnswer } from '../../server/src/index.ts';
 
-/** The presence shape the queue route returns — `OwnerSession` server-side.
- *  Declared structurally rather than imported: the MCP package does not
- *  depend on the server's types, and a row from an older server simply
- *  arrives without these fields. */
-export interface SessionPresence {
-  agentId: string;
-  /** Last time the session SAID it was alive. */
-  lastHeartbeat: number;
-  /** Last time the server SAW it do something. */
-  lastToolCallAt: number;
-  state: 'active' | 'unresponsive' | 'away';
-  stateLabel: string;
-  pluginVersion?: string;
-}
+/** A queue row as `GET /workspaces/:ws/next` answers it. */
+type NextRow = NextAnswer['tasks'][number];
 
-/** `ClaimSession` server-side: the same, plus WHEN the row was taken. */
-export interface ClaimPresence extends SessionPresence {
-  /** The row's latest transition into in-progress. */
-  at: number;
-}
+/** The session behind a row's owner: when it last said it was alive
+ *  (`lastHeartbeat`) and when the server last saw it act (`lastToolCallAt`). */
+export type SessionPresence = NonNullable<NextRow['ownerSession']>;
 
-/** As much of a queue row as this decision needs. */
-export interface PresenceRow {
-  id: string;
-  title?: string;
-  /** The session behind the row's OWNER. */
-  ownerSession?: SessionPresence;
-  /** The session that last moved the row into in-progress. The only one that
-   *  exists on a row nobody assigned — a transition never touches
-   *  `assignee`, so an owner-keyed read names the FILER instead. */
-  claimedBy?: ClaimPresence;
-}
+/** The session that took a row, and `at`, its latest move into in-progress. */
+export type ClaimPresence = NonNullable<NextRow['claimedBy']>;
+
+/**
+ * As much of a queue row as this decision needs. `claimedBy` is the only
+ * session on a row nobody assigned: a transition never touches `assignee`,
+ * so an owner-keyed read names the FILER instead.
+ */
+export type PresenceRow = Pick<NextRow, 'id' | 'ownerSession' | 'claimedBy'> &
+  Partial<Pick<NextRow, 'title'>>;
 
 /** Mirrors mcp.ts's helper of the same name, duplicated for the same reason
  *  `nudge-line.ts` duplicates it: mcp.ts exports nothing. */

@@ -47,6 +47,8 @@ import type { CrossReview } from '../cross-review.ts';
 import { reviewWait } from '../review-answer-ledger.ts';
 import { type ReviewRanks, parseGoalTag, parseRank } from '../review-ranks.ts';
 import type { ReviewSizePrefs } from '../review-size-prefs.ts';
+import type { RankReviewItemBody } from './agent-machine-contract.ts';
+import { sent } from './route-contract.ts';
 
 export interface ReviewQueueRoutesContext {
   crossReview: CrossReview;
@@ -115,7 +117,7 @@ async function handleRank(ctx: ReviewQueueRoutesContext, req: Request): Promise<
   if (notLocal) return j(notLocal.status, notLocal.body);
   const length = Number(req.headers.get('content-length') ?? '0');
   if (!Number.isFinite(length) || length > MAX_RANK_BYTES) return j(413, { error: 'too-large' });
-  const body = await ctx.safeJson(req);
+  const body = sent<RankReviewItemBody>(await ctx.safeJson(req));
   const agentId = body?.agentId;
   if (typeof agentId !== 'string' || !/^[a-z0-9-]{1,128}$/.test(agentId)) {
     return j(400, { error: 'bad-agent', message: 'agentId is required' });
@@ -132,8 +134,10 @@ async function handleRank(ctx: ReviewQueueRoutesContext, req: Request): Promise<
       message: 'Only the lead of the plan board may rank review items.',
     });
   }
-  const hasRank = body !== null && 'rank' in body;
-  const hasGoal = body !== null && 'goal' in body;
+  // `!== undefined`, not `in`: a JSON body holds no undefined value, so the
+  // two agree, and `in` would let a renamed field pass the typecheck.
+  const hasRank = body?.rank !== undefined;
+  const hasGoal = body?.goal !== undefined;
   if (!hasRank && !hasGoal) {
     return j(400, { error: 'bad-rank', message: 'send a rank, a goal, or both' });
   }

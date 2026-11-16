@@ -1,6 +1,8 @@
 import { type RelocateError, relocateDocFile } from '../doc-file-relocate.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import type { DocFileMoveBody } from './doc-file-contract.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
+import { sent } from './route-contract.ts';
 
 /**
  * Move a bound doc's file, or repoint the doc at a file git already moved:
@@ -48,7 +50,7 @@ export async function handleDocFileMoveRoute(
   if (visitor) return j(403, { error: 'moving a doc file is not available to share visitors' });
   if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
   if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
-  const body = await ctx.safeJson(req);
+  const body = sent<DocFileMoveBody>(await ctx.safeJson(req));
   const lead = rq.leadBoard;
   const res = await relocateDocFile(
     { docStore: ctx.docStore },

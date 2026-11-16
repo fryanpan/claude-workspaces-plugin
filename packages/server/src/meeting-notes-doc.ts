@@ -88,7 +88,7 @@ import {
   taskCaptureUrl,
 } from './meeting-task-capture.ts';
 import { type MeetingTitleStore, createMeetingTitler } from './meeting-titler.ts';
-import { meetingTimingPath } from './meetings.ts';
+import { meetingTimingPath, readTranscript } from './meetings.ts';
 import { commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import { recordMeetingCost } from './notes-cost-store.ts';
 import { foldDetailsIntoItem, itemFirstLine } from './notes-dictation.ts';
@@ -125,6 +125,7 @@ import {
   runNotesQualityPass,
 } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
+import { applyRecapShape } from './notes-recap-apply.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
@@ -1444,6 +1445,28 @@ export function withServerNotesSinks(
       console.error('[meeting-notes] last-topic tidy failed:', err);
     }
   };
+  const shapeRecapAtStop = (summary: { docId: string; meetingId: string }): void => {
+    try {
+      const doc = docStore().get(summary.docId);
+      const ids = { docId: summary.docId, meetingId: summary.meetingId };
+      const section = heading.headingId(ids, readNotesOutline(docStore(), summary.docId));
+      if (!doc || section === undefined) return;
+      const spoken =
+        deps.dataDir !== undefined
+          ? readTranscript(deps.dataDir, summary.docId, summary.meetingId).map((t) => t.text)
+          : [];
+      const shaped = applyRecapShape(doc.ydoc, section, spoken, {
+        author: NOTES_AUTHOR_ID,
+        commented: () => commentedBlockIds(doc.ydoc),
+      });
+      console.log(
+        `[meeting-notes] ${summary.docId} meeting ${summary.meetingId} recap ` +
+          (shaped.applied ? `shaped ${JSON.stringify(shaped.counts)}` : `left: ${shaped.reason}`),
+      );
+    } catch (err) {
+      console.error('[meeting-notes] recap shape failed:', err);
+    }
+  };
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
     (extractor && captureBoard
@@ -1556,6 +1579,11 @@ export function withServerNotesSinks(
       // fact about the notes, and it rides the SAME line so that nobody has
       // to join two of them to ask the one question.
       const quality = qualityPass(summary);
+      // THEN THE RECAP IS SHAPED (`notes-recap-apply.ts`): decisions and
+      // follow-ups first, each point once and under its subject, two levels
+      // at most. After the quality pass, so that record judges what the
+      // note-taker wrote rather than what this pass made of it.
+      shapeRecapAtStop(summary);
       // WHAT IT COST, INTO THE ROLLING FIGURE, before the line is built — the
       // chooser's number is an average over finished meetings and this
       // meeting has just finished. Booked against the method the DOC holds at

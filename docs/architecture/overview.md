@@ -83,7 +83,7 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract; the mount, doc-thread, doc-edit, doc-lifecycle, attachment and sharing tools, `post_status`, the tools that move one task or change one of its fields, the tools that file tasks and write their done-when lists and links, the tools that read the queue and task list and edit goal bands, and the review-item tools send through it, so a renamed server field fails typecheck there. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract. Every tool, and the plumbing that attaches, heartbeats, acks a queued row, restores watches and declares a lead, sends through it, so a renamed server field fails typecheck there. Two things stay raw on purpose: `http-client.ts` and `server-client.ts` themselves, because they are the transport `hc` sends through, and `read_doc_outline`'s GET, which waits on its route-table row (its read mints block ids). Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
@@ -2004,6 +2004,15 @@ voice can hand every note its own tag back, and a group that has gained an
 untagged note the fold cannot account for is unfolded rather than guessed at. Like the tidy, it writes the
 document directly, and like the tidy it reads no transcript and composes
 nothing.
+
+`notes-recap-shape.ts` and `notes-recap-apply.ts` join the same family in
+the same after-the-write position, once, at a meeting's stop. The first is
+pure: it reads the section's markdown and the meeting's spoken sentences and
+returns the section with decisions and follow-ups first, each point once and
+under the heading of its subject, and no deeper than two levels. The second
+writes that into the doc directly, like the tidy, and only when every block
+in the section is still the note-taker's and none carries a comment or a
+suggestion. Neither composes anything or calls a model.
 
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a

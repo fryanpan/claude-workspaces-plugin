@@ -13,7 +13,9 @@ import {
   setDocMetadata,
 } from '../doc-metadata.ts';
 import { boundFiles } from '../slow-fs.ts';
+import type { DocMetadataBody } from './doc-file-contract.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
+import { sent } from './route-contract.ts';
 
 /**
  * A doc's metadata fields: `GET` and `PUT /workspaces/<ws>/docs/<docId>/metadata`.
@@ -80,7 +82,7 @@ export async function handleDocMetadataRoute(
           lookup.found && 'error' in lookup ? lookup.error : 'no metadata schema governs this doc',
       });
     }
-    const body = await ctx.safeJson(req);
+    const body = sent<DocMetadataBody>(await ctx.safeJson(req));
     const fields = body?.fields;
     if (typeof fields !== 'object' || fields === null || Array.isArray(fields)) {
       return j(400, { error: 'fields must be an object of field names to values' });

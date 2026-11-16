@@ -25,6 +25,8 @@ import {
   embedOriginsFromJson,
   parseBoardEmbeds,
 } from '@claude-workspaces/core/board-embeds';
+import { sent } from './route-contract.ts';
+import type { BoardEmbedsBody } from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 export const EMBED_ORIGINS_FILE = 'embed-origins.json';
@@ -51,7 +53,7 @@ export async function handleWorkspaceEmbeds(
   const { workspaceId } = scope;
   const origins = embedOrigins(ctx.dataDir);
   if (req.method === 'PUT') {
-    const body = await ctx.safeJson(req);
+    const body = sent<BoardEmbedsBody>(await ctx.safeJson(req));
     const parsed = parseBoardEmbeds(body?.embeds, origins);
     if (!parsed.ok) return ctx.j(400, { error: parsed.error });
     if (!ctx.taskStore.setBoardEmbeds(workspaceId, parsed.embeds)) {

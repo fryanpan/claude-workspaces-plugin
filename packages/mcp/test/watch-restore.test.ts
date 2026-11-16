@@ -88,7 +88,6 @@ function harness(
     },
     watchPersistenceMode: () => 'server',
     lastPersistError: () => undefined,
-    watchesPath: () => WATCHES_PATH,
   };
   const deferredEmits = opts.deferredEmits ?? createDeferredEmitter((fn) => fn());
   const deps: WatchRestoreDeps = {

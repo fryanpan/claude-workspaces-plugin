@@ -15,6 +15,7 @@
 import { isBookkeepingEvent } from './bookkeeping-events.ts';
 import { isChannelEvent } from './channel-gate.ts';
 import type { ChannelNotification } from './channel-messages.ts';
+import { workspaceAgentsClient } from './server-client.ts';
 
 export interface FrameHandlerDeps {
   /** Where a rendered line goes — `server.notification` in the real process. */
@@ -141,10 +142,12 @@ async function ackCommentRow(deps: FrameHandlerDeps, payload: unknown): Promise<
   const p = payload as { commentQueueId?: unknown; workspaceId?: unknown };
   if (typeof p?.commentQueueId !== 'string' || typeof p?.workspaceId !== 'string') return;
   try {
-    await deps.http(
-      'POST',
-      `/workspaces/${encodeURIComponent(p.workspaceId)}/comment-queue/${encodeURIComponent(p.commentQueueId)}/ack`,
-      {},
+    await workspaceAgentsClient(deps.http).workspaces[':ws']['comment-queue'][':id'].ack.$post(
+      {
+        param: { ws: encodeURIComponent(p.workspaceId), id: encodeURIComponent(p.commentQueueId) },
+      },
+      // The receipt has always carried an empty JSON body.
+      { init: { body: '{}' } },
     );
   } catch {
     // Left on the queue on purpose — see above.

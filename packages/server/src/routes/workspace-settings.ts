@@ -26,6 +26,8 @@ import type {
   RenameBoardBody,
   RetiredAnswer,
   RetiredBody,
+  SetLeadAnswer,
+  SetLeadBody,
 } from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
@@ -428,7 +430,7 @@ export async function handleWorkspaceSettings(
   const wsLeadMatch = pathname.match(/^\/workspaces\/([^/]+)\/lead$/);
   if (wsLeadMatch && req.method === 'PUT') {
     const workspaceId = decodeURIComponent(wsLeadMatch[1] ?? '');
-    const body = await safeJson(req);
+    const body = sent<SetLeadBody>(await safeJson(req));
     const leadAgentId = body?.leadAgentId;
     if (typeof leadAgentId !== 'string' || leadAgentId.trim().length === 0) {
       return j(400, { error: 'leadAgentId required' });
@@ -452,7 +454,7 @@ export async function handleWorkspaceSettings(
       ...(takeover ? { takeover: true } : {}),
     });
     if (!res.ok) return j(res.error === 'workspace-not-found' ? 404 : 400, res);
-    return j(200, res);
+    return j(200, answerAs<SetLeadAnswer>(res));
   }
   // Voice (§3.8): transcript + per-surface context in, route decision +
   // ack out. EVERY utterance gets an explicit ack naming what was heard

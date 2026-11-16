@@ -1,4 +1,6 @@
+import type { DocTitleBody } from './doc-file-contract.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
+import { sent } from './route-contract.ts';
 
 /**
  * A doc's title, as something a person can change.
@@ -43,7 +45,7 @@ export async function handleDocTitleRoute(
   if (rest !== 'title') return undefined;
   if (req.method !== 'PUT') return j(405, { error: 'method not allowed' });
   if (visitor) return j(403, { error: 'not available to share visitors' });
-  const body = await ctx.safeJson(req);
+  const body = sent<DocTitleBody>(await ctx.safeJson(req));
   const title = body?.title;
   if (typeof title !== 'string') return j(400, { error: 'title is required' });
   // Judged before the store sees it, because the store's refusal is about a

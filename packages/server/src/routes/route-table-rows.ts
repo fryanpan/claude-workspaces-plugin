@@ -388,6 +388,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/workspace-lead-chat.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/lead-chat/meeting', 'POST'],
+    ['trusted-local', '/workspaces/:ws/lead-chat/meeting/say', 'POST'],
   ]),
   ...family('routes/workspace-lead-chat-files.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat/files', 'POST'],

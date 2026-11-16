@@ -23,7 +23,7 @@ import {
   sourceOfDevice,
 } from './coverage.ts';
 import { type GoalsDocReading, goalTitle } from './goals-doc.ts';
-import { checkMoment } from './judge.ts';
+import { type SentMoment, checkMoment } from './judge.ts';
 import type { SessionNews } from './session-feed.ts';
 import type { CoachStore } from './store.ts';
 import {
@@ -91,7 +91,7 @@ export interface Coach {
   here(signal: Omit<HereSignal, 'at'>): void;
   activity(row: Event): void;
   /** The session raises a moment. */
-  raise(body: Record<string, unknown> | null): RaiseResult;
+  raise(body: SentMoment | null): RaiseResult;
   /** `text` is what he wrote with a thumbs down. */
   answer(id: string, answer: MomentAnswer, text?: string): boolean;
   setReadiness(readiness: CoachReadiness): void;

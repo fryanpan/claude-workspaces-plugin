@@ -594,6 +594,7 @@
   "POST /workspaces/:ws/lead-chat": "400 application/json error=text required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-lead-chat.ts:handleWorkspaceLeadChat",
   "POST /workspaces/:ws/lead-chat/files": "201 application/json {file} | by workspaces.ts:handleWorkspaceRoutes > workspace-lead-chat.ts:handleWorkspaceLeadChat > workspace-lead-chat-files.ts:handleLeadChatFiles",
   "POST /workspaces/:ws/lead-chat/meeting": "400 application/json error=author required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-lead-chat.ts:handleWorkspaceLeadChat",
+  "POST /workspaces/:ws/lead-chat/meeting/say": "400 application/json error=agentId required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-lead-chat.ts:handleWorkspaceLeadChat",
   "POST /workspaces/:ws/lead-chat/model": "403 application/json error=owner-proof-required {error,hint} | by workspaces.ts:handleWorkspaceRoutes > workspace-lead-chat.ts:handleWorkspaceLeadChat > workspace-lead-chat-model.ts:handleLeadChatModel",
   "POST /workspaces/:ws/library/folders": "400 application/json error=bad-name {error,message} | by workspace-library-folders.ts:handleLibraryFolderRoutes",
   "POST /workspaces/:ws/library/folders/:folderId/archive": "404 application/json error=not-found {error,message} | by workspace-library-folders.ts:handleLibraryFolderRoutes",

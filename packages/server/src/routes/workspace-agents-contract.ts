@@ -74,6 +74,7 @@ export const workspaceAgentsContract = new Hono()
   .delete(`${AGENTS}/:agentId`, contractOnly)
   .post(`${AGENTS}/:agentId/heartbeat`, json<HeartbeatBody>(), contractOnly)
   .post('/workspaces/:ws/comment-queue/:id/ack', contractOnly)
+  .post('/workspaces/:ws/voice-queue/:id/ack', contractOnly)
   .post(
     '/workspaces/:ws/voice-queue/:id/answer',
     json<VoiceAnswerBody>(),
