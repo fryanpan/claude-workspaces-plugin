@@ -13,10 +13,6 @@
  *                         environment's CW_SECRET_CW_BOARD_OWNER_EMAIL, which
  *                         machine:deploy reads in CI as the Keychain's
  *                         cw-board-owner-email
- *   RESEND_API_KEY, SIGNIN_TEST_GOOGLE_CLIENT_ID, SIGNIN_TEST_GOOGLE_CLIENT_SECRET
- *                         optional, for signin-test.yml: each from the
- *                         environment when set, else from the Keychain item
- *                         `KEYCHAIN_VALUES` names (account claude-workspaces)
  *   CLOUDFLARE_ACCOUNT_ID optional: else the one account the token reaches
  *   CF_TFSTATE_BUCKET     optional: the state bucket the token may write
  *
@@ -33,8 +29,10 @@
  * an input left out (no FLY_API_TOKEN, a config missing from this checkout)
  * would otherwise delete the secret an earlier apply wrote, and the
  * workflows would then skip their deploys without failing.
+ *
+ * Apps' secrets (signin-test.yml's Resend key and Google client) are not
+ * here: `app-secrets.ts` writes them with a GitHub token alone.
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -52,25 +50,6 @@ export const CONFIG_VAR: Record<keyof ConfigPaths, string> = {
   shareLink: 'TF_VAR_share_link_config',
 };
 
-/**
- * The values signin-test.yml needs, each read from the environment when set,
- * else from the Keychain under `service` (account `claude-workspaces`, stored
- * plain, as `service-tokens.ts` stores values).
- */
-export const KEYCHAIN_VALUES = [
-  { env: 'RESEND_API_KEY', service: 'resend-api-key', tfVar: 'TF_VAR_resend_api_key' },
-  {
-    env: 'SIGNIN_TEST_GOOGLE_CLIENT_ID',
-    service: 'signin-test-google-client-id',
-    tfVar: 'TF_VAR_signin_test_google_client_id',
-  },
-  {
-    env: 'SIGNIN_TEST_GOOGLE_CLIENT_SECRET',
-    service: 'signin-test-google-client-secret',
-    tfVar: 'TF_VAR_signin_test_google_client_secret',
-  },
-] as const;
-
 export type CiSecretsMode = 'plan' | 'apply';
 
 export interface CiSecretsIo {
@@ -78,8 +57,6 @@ export interface CiSecretsIo {
   /** A config relative to the repo root, or null when it is missing. */
   read: (rel: string) => string | null;
   api: (token: string) => CloudflareApi;
-  /** A Keychain item's value under account claude-workspaces, or null when there is none. */
-  keychain: (service: string) => string | null;
   /** Where the state and the saved plan go, mode 700, each file 600. */
   stateDir: string;
   /** terraform's own folder (providers, backend), beside `stateDir`. */
@@ -146,15 +123,6 @@ export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number
   if (fly) tfEnv.TF_VAR_fly_api_token = fly;
   const ownerEmail = value(io.env, 'CW_OWNER_EMAIL');
   if (ownerEmail) tfEnv.TF_VAR_owner_email = ownerEmail;
-  for (const item of KEYCHAIN_VALUES) {
-    const found = value(io.env, item.env) || (io.keychain(item.service)?.trim() ?? '');
-    if (found) tfEnv[item.tfVar] = found;
-    else {
-      say(
-        `no ${item.env} and no Keychain item ${item.service}: this run does not write it, and deletes one an earlier apply wrote (apply refuses that without --drop)`,
-      );
-    }
-  }
   const absent: string[] = [];
   for (const [key, rel] of Object.entries(CONFIG_PATHS.prod)) {
     const text = io.read(rel);
@@ -200,7 +168,7 @@ export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number
     const gone = deletions(shown.stdout);
     if (gone.length && !drop) {
       say(
-        `the plan deletes ${gone.join(', ')}: a missing input (FLY_API_TOKEN, CW_OWNER_EMAIL, a Keychain value, a config) or a token Terraform would replace. Supply it, or pass --drop to delete on purpose; nothing was applied`,
+        `the plan deletes ${gone.join(', ')}: a missing input (FLY_API_TOKEN, CW_OWNER_EMAIL, a config) or a token Terraform would replace. Supply it, or pass --drop to delete on purpose; nothing was applied`,
       );
       return 1;
     }
@@ -214,29 +182,6 @@ export async function ciSecrets(argv: string[], io: CiSecretsIo): Promise<number
   } finally {
     io.removeFile(plan);
   }
-}
-
-/**
- * `security find-generic-password -w` on macOS. The service name is the only
- * argument that varies; the value comes back on stdout to this process alone.
- */
-export function readKeychain(
-  service: string,
-  bin = 'security',
-  platform: string = process.platform,
-): string | null {
-  if (platform !== 'darwin') return null;
-  const r = spawnSync(
-    bin,
-    ['find-generic-password', '-a', 'claude-workspaces', '-s', service, '-w'],
-    {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    },
-  );
-  if (r.status !== 0) return null;
-  const out = (r.stdout ?? '').replace(/\r?\n$/, '');
-  return out === '' ? null : out;
 }
 
 if (import.meta.main) {
@@ -256,7 +201,6 @@ if (import.meta.main) {
       return existsSync(p) ? readFileSync(p, 'utf8') : null;
     },
     api: (t) => cloudflareApi(t),
-    keychain: readKeychain,
     stateDir,
     dataDir,
     terraform: (args, env) => spawnTerraform(CI_SECRETS_DIR, args, env, true, stateDir),
