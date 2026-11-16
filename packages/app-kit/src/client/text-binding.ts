@@ -4,24 +4,9 @@
  * cursor stays on the character it was on.
  */
 import type * as Y from 'yjs';
+import { splice } from '../text/splice.ts';
 
-/** The one splice that turns `from` into `to`: the common prefix and
- *  suffix stay, the middle is replaced. */
-export function splice(
-  from: string,
-  to: string,
-): { index: number; remove: number; insert: string } {
-  let start = 0;
-  const max = Math.min(from.length, to.length);
-  while (start < max && from[start] === to[start]) start++;
-  let end = 0;
-  while (end < max - start && from[from.length - 1 - end] === to[to.length - 1 - end]) end++;
-  return {
-    index: start,
-    remove: from.length - start - end,
-    insert: to.slice(start, to.length - end),
-  };
-}
+export { splice };
 
 type Delta = Array<{ insert?: unknown; delete?: number; retain?: number }>;
 

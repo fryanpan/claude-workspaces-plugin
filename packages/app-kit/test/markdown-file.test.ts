@@ -4,65 +4,9 @@
  * unsaved changes survive the instance going away.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  type FileConflict,
-  type FileRoomState,
-  type MarkdownFileOptions,
-  markdownFileRoom,
-} from '../src/markdown-file/index.ts';
+import { type FileConflict, markdownFileRoom } from '../src/markdown-file/index.ts';
+import { fakeFile, manualSchedule, memoryState, open } from './markdown-file-fakes.ts';
 import { until } from './poll.ts';
-
-/** A file the app reads and writes asynchronously, counting writes. */
-function fakeFile(initial: string) {
-  const file = {
-    text: initial,
-    writes: [] as string[],
-    failNext: false,
-    /** Runs while a save is in flight. */
-    during: null as (() => void) | null,
-  };
-  return {
-    file,
-    load: async () => file.text,
-    save: async (text: string) => {
-      await Promise.resolve();
-      file.during?.();
-      file.during = null;
-      if (file.failNext) {
-        file.failNext = false;
-        throw new Error('the file store refused the write');
-      }
-      file.text = text;
-      file.writes.push(text);
-    },
-  };
-}
-
-function memoryState(): FileRoomState {
-  const m = new Map<string, string>();
-  return { read: (k) => m.get(k) ?? null, write: (k, v) => void m.set(k, v) };
-}
-
-/** A schedule the test drives: it records the last request. */
-function manualSchedule() {
-  const s = { requested: [] as number[] };
-  return { s, schedule: (ms: number) => void s.requested.push(ms) };
-}
-
-async function open(extra: Partial<MarkdownFileOptions> & { initial?: string } = {}) {
-  const f = fakeFile(extra.initial ?? '# Harborlight\n\nTide tables.\n');
-  const state = extra.state ?? memoryState();
-  const { s, schedule } = manualSchedule();
-  const room = await markdownFileRoom({
-    load: f.load,
-    save: f.save,
-    state,
-    schedule,
-    debounceMs: 2000,
-    ...extra,
-  });
-  return { room, f, state, s, body: room.doc.getText('body') };
-}
 
 describe('markdownFileRoom', () => {
   it('reads the file into the doc and writes nothing until it changes', async () => {

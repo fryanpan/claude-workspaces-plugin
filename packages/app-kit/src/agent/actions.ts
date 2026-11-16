@@ -1,4 +1,3 @@
-import { splice } from '../client/text-binding.ts';
 /**
  * Two server actions an app's tool dispatch calls through
  * `room.action(roomId, agentPrincipal(sessionId), name, body)`:
@@ -13,6 +12,7 @@ import { splice } from '../client/text-binding.ts';
  * whose origin is the principal that ran it.
  */
 import type { ActionHandler } from '../collab/index.ts';
+import { splice } from '../text/splice.ts';
 
 export type EditResult =
   | { ok: true }

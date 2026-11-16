@@ -19,7 +19,9 @@ own Durable Objects:
   page side prebuilt, with Yjs inside, for a page with no bundler.
 - `@claude-workspaces/app-kit/theme.css`: the Web Awesome theme file the
   claude-workspaces board uses. Bundle it with the app's CSS; its base theme
-  is an `@import` from `@awesome.me/webawesome`.
+  is an `@import` from `@awesome.me/webawesome`, an optional peer
+  dependency: an app that uses the theme installs it, and a Worker that does
+  not never gets it.
 - `@claude-workspaces/app-kit/auth`: password sign-in as every app on the
   shared stack runs it. `passwordAuthOptions(mailer)` returns the Better Auth
   options for accounts, password hashing, email verification and sessions,
@@ -27,8 +29,11 @@ own Durable Objects:
   The sign-in Worker template (`templates/signin`) uses the same function.
   It imports nothing.
 
-The package ships TypeScript source; Bun, wrangler and esbuild bundle it
-directly.
+The tarball ships compiled JavaScript with `.d.ts` declarations, so an app
+typechecks it with its own default settings: no `allowImportingTsExtensions`,
+and a Worker on `@cloudflare/workers-types` needs no DOM lib for `./do`,
+`./markdown-file` or `./agent`. In this repo the package points at its
+TypeScript source.
 
 ## Worker apps
 
@@ -83,7 +88,19 @@ schedule })` holds the doc for a file kept elsewhere (Dropbox, R2):
   the local text is kept, the next save overwrites the file with it, and
   `onConflict({ base, remote, local })` is the only place the outside
   edit survives: write `remote` somewhere (a conflict copy beside the
-  file) so it is not lost.
+  file) so it is not lost. `onConflict` may be async; no save starts until
+  it settles, and if the object is evicted first, the next instance meets
+  the same conflict and calls it again. If it rejects, nothing is saved
+  over the file until a later `refresh()` or `flush()` calls it again and
+  it succeeds.
+- A failed save is retried after a delay that doubles with each failure
+  in a row: `debounceMs`, then twice that, up to 5 minutes. Pass
+  `retryDelayMs: (failures) => ms` to choose another.
+- When the file is gone, have `load` or `save` throw `FileMissingError`
+  (or pass `isMissing(err)` to recognise the app's own error).
+  `onMissing(err)` is called once and saving stops; edits still go to
+  `state`, and `file.missing()` says so. To put the file back, write
+  `file.text()` to it and call `file.refresh()`.
 
 **An agent's edits.** The app's tool dispatch runs an edit as the agent
 session that asked for it:
@@ -139,3 +156,18 @@ and moves to a new version by replacing the tarball and that line.
 
 - 0.3.0: `./do`, `./markdown-file`, `./agent`, `./client` and the prebuilt
   `cw-collab.js` / `cw-collab.mjs`, for Worker apps.
+- 0.3.1: ships compiled `.js` and `.d.ts` instead of TypeScript source;
+  `splice` moved to a module with no DOM code, so the server half imports
+  none; `onConflict` may be async and the save waits for it; failed saves
+  back off (`retryDelayMs`) and a missing file is reported once
+  (`FileMissingError`, `onMissing`) instead of retried forever; Web Awesome
+  is an optional peer dependency.
+
+## Testing this package
+
+The Worker tests (`test/*-do.test.ts`) run workerd through Miniflare 5,
+which is still a beta: `miniflare@5.20261110.2-beta` in `package.json`.
+The eviction tests (`unsafeEvictDurableObject` with `webSockets:
+'hibernate'`, in `test/workerd-harness.ts`) are written against it.
+Wrangler 4 bundles Miniflare 4, so an app that copies these tests adds the
+5 beta as its own dev dependency rather than using wrangler's copy.

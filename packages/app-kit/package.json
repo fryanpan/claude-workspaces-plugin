@@ -1,6 +1,6 @@
 {
   "name": "@claude-workspaces/app-kit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The collab core, its Durable Object adapter, a page's client, the shared Web Awesome theme and the shared password sign-in options, for apps made with `bun run new-app` and for Worker apps.",
   "license": "MIT",
   "type": "module",
@@ -24,13 +24,21 @@
     "build:client": "bun run scripts/build-client.ts"
   },
   "dependencies": {
-    "@awesome.me/webawesome": "3.14.0",
     "@claude-workspaces/core": "workspace:*",
     "lib0": "^0.2.117",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.20"
   },
+  "peerDependencies": {
+    "@awesome.me/webawesome": "3.14.0"
+  },
+  "peerDependenciesMeta": {
+    "@awesome.me/webawesome": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@awesome.me/webawesome": "3.14.0",
     "@cloudflare/workers-types": "5.20261113.1",
     "esbuild": "0.25.12",
     "miniflare": "5.20261110.2-beta"

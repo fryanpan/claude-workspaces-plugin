@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import type { RoomDocs } from '../collab/index.ts';
 /**
  * A live doc whose record is a markdown file somewhere else (Dropbox, a
  * bucket, a disk), read and written by the app's own async `load` and
@@ -19,10 +20,18 @@ import * as Y from 'yjs';
  * share at the start and at the end. Where the people editing have unsaved
  * changes, an outside edit that does not touch them goes in beside them; one
  * that overlaps them loses to them, and `onConflict` is told, with both
- * versions, so nothing is lost without the app hearing of it.
+ * versions, so nothing is lost without the app hearing of it. The merge,
+ * and so any save behind it, waits for `onConflict` to finish; the file's
+ * text is recorded as merged only once it has, so an eviction inside it
+ * meets the same conflict again on the next open.
+ *
+ * A failed save is tried again after `retryDelayMs(failures)`, which grows
+ * with each failure in a row. A save or read that fails because the file is
+ * gone (`isMissing`, by default a `FileMissingError`) is not retried:
+ * `onMissing` is told once, edits keep going to `state`, and saving resumes
+ * when `refresh()` finds the file again.
  */
-import { splice } from '../client/text-binding.ts';
-import type { RoomDocs } from '../collab/index.ts';
+import { splice } from '../text/splice.ts';
 
 /** A synchronous key-value store that survives the app's process. */
 export interface FileRoomState {
@@ -37,6 +46,11 @@ export interface FileConflict {
   remote: string;
   /** The doc as the people editing it left it; this is what is kept. */
   local: string;
+}
+
+/** What an app's `load` or `save` throws when the file no longer exists. */
+export class FileMissingError extends Error {
+  override name = 'FileMissingError';
 }
 
 export interface MarkdownFileOptions {
@@ -54,9 +68,23 @@ export interface MarkdownFileOptions {
   /** The doc's text field. Default `body`. */
   field?: string;
   /** An outside edit overlapped unsaved local edits. The local text wins
-   *  and the next save overwrites the file: keep `remote` here or lose it. */
-  onConflict?: (conflict: FileConflict) => void;
+   *  and the next save overwrites the file: keep `remote` here or lose it.
+   *  It may return a promise (the type is `unknown` so that a 0.3.0
+   *  callback returning any value still fits); no save starts until it
+   *  settles. If it rejects, the
+   *  outside edit is not counted as merged: no save runs until the merge is
+   *  tried again (by `refresh()` or the next `flush()`) and succeeds. */
+  onConflict?: (conflict: FileConflict) => unknown;
   onSaveError?: (err: unknown) => void;
+  /** How long to wait before saving again after `failures` failed saves in
+   *  a row. Default: `debounceMs` doubled per failure, at most 5 minutes. */
+  retryDelayMs?: (failures: number) => number;
+  /** Whether an error from `load` or `save` means the file is gone. Default:
+   *  it is a `FileMissingError`. */
+  isMissing?: (err: unknown) => boolean;
+  /** The file is gone. Called once; saves stop until `refresh()` reads the
+   *  file again. To put it back, write `room.text()` to it, then refresh. */
+  onMissing?: (err: unknown) => unknown;
 }
 
 export interface MarkdownFileRoom {
@@ -67,6 +95,8 @@ export interface MarkdownFileRoom {
   text(): string;
   /** Whether the doc holds changes the file does not. */
   dirty(): boolean;
+  /** Whether the file was found gone, so nothing is being saved. */
+  missing(): boolean;
   /** Write the doc to the file now, if it has changed. */
   flush(): Promise<void>;
   /** Read the file again and merge an outside edit into the doc. */
@@ -75,6 +105,8 @@ export interface MarkdownFileRoom {
 
 const KEY_DOC = 'doc';
 const KEY_BASE = 'base';
+const KEY_MISSING = 'missing';
+const MAX_RETRY_MS = 5 * 60_000;
 
 /** Transactions the room itself makes, so they are not taken for edits. */
 const FROM_FILE = Symbol('markdown-file');
@@ -88,6 +120,9 @@ const b64decode = (text: string): Uint8Array => Uint8Array.from(atob(text), (c) 
 
 export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<MarkdownFileRoom> {
   const debounceMs = opts.debounceMs ?? 2000;
+  const retryDelayMs =
+    opts.retryDelayMs ?? ((n: number) => Math.min(debounceMs * 2 ** (n - 1), MAX_RETRY_MS));
+  const isMissing = opts.isMissing ?? ((err: unknown) => err instanceof FileMissingError);
   const doc = new Y.Doc();
   const text = doc.getText(opts.field ?? 'body');
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +140,12 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
   if (saved) Y.applyUpdate(doc, b64decode(saved), FROM_FILE);
   /** The file's text as last read or written. */
   let base = opts.state.read(KEY_BASE);
+  let missing = opts.state.read(KEY_MISSING) === '1';
+  /** Saves that have failed in a row. */
+  let failures = 0;
+  /** `onConflict` failed: the outside edit is not merged and must not be
+   *  overwritten until it is. */
+  let conflictPending = false;
 
   const persist = (): void => {
     opts.state.write(KEY_DOC, b64encode(Y.encodeStateAsUpdate(doc)));
@@ -112,6 +153,27 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
   const setBase = (value: string): void => {
     base = value;
     opts.state.write(KEY_BASE, value);
+  };
+  /** Ask for a save: after the debounce, or the backoff while saves fail. */
+  const scheduleSave = (): void => {
+    if (missing) return;
+    schedule(failures > 0 ? retryDelayMs(failures) : debounceMs);
+  };
+  const failed = (err: unknown): void => {
+    failures++;
+    opts.onSaveError?.(err);
+    scheduleSave();
+  };
+  const setMissing = async (err: unknown): Promise<void> => {
+    if (missing) return;
+    missing = true;
+    opts.state.write(KEY_MISSING, '1');
+    await opts.onMissing?.(err);
+  };
+  const found = (): void => {
+    if (!missing) return;
+    missing = false;
+    opts.state.write(KEY_MISSING, '');
   };
 
   const applySplice = (index: number, remove: number, insert: string): void => {
@@ -121,7 +183,7 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
     }, FROM_FILE);
   };
 
-  const merge = (remote: string): void => {
+  const merge = async (remote: string): Promise<void> => {
     if (base === null) {
       // First open: the file is the doc.
       applySplice(0, text.length, remote);
@@ -129,13 +191,18 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
       persist();
       return;
     }
-    if (remote === base) return;
+    const from = base;
     const current = text.toString();
-    const ext = splice(base, remote);
-    if (current === base) {
+    if (remote === from || remote === current) {
+      conflictPending = false;
+      setBase(remote);
+      return;
+    }
+    const ext = splice(from, remote);
+    if (current === from) {
       applySplice(ext.index, ext.remove, ext.insert);
     } else {
-      const local = splice(base, current);
+      const local = splice(from, current);
       const extEnd = ext.index + ext.remove;
       const localEnd = local.index + local.remove;
       if (extEnd < local.index) {
@@ -144,22 +211,44 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
         const shift = local.insert.length - local.remove;
         applySplice(ext.index + shift, ext.remove, ext.insert);
       } else {
-        opts.onConflict?.({ base, remote, local: current });
+        conflictPending = true;
+        await opts.onConflict?.({ base: from, remote, local: current });
       }
     }
+    conflictPending = false;
     setBase(remote);
     persist();
-    if (text.toString() !== base) schedule(debounceMs);
   };
 
-  merge(await opts.load());
-  // Woken with changes the file never got (an eviction mid-debounce).
-  if (text.toString() !== base) schedule(debounceMs);
+  /** Read the file and merge it. A missing file is recorded, not thrown. */
+  const reload = async (): Promise<void> => {
+    let remote: string;
+    try {
+      remote = await opts.load();
+    } catch (err) {
+      if (base === null || !isMissing(err)) throw err;
+      await setMissing(err);
+      return;
+    }
+    found();
+    await merge(remote);
+    // Unsaved changes: edits beside the outside one, a conflict's winner,
+    // or an eviction mid-debounce.
+    if (text.toString() !== base) scheduleSave();
+  };
+
+  try {
+    await reload();
+  } catch (err) {
+    // `onConflict` failed: open anyway, and let the save retry the merge.
+    if (!conflictPending) throw err;
+    failed(err);
+  }
 
   doc.on('update', (_update: Uint8Array, origin: unknown) => {
     if (origin === FROM_FILE) return;
     persist();
-    schedule(debounceMs);
+    scheduleSave();
   });
 
   let chain: Promise<void> = Promise.resolve();
@@ -173,25 +262,34 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
     docs: { open: () => doc },
     text: () => text.toString(),
     dirty: () => text.toString() !== base,
+    missing: () => missing,
     flush: () =>
       serial(async () => {
+        if (missing) return;
+        if (conflictPending) {
+          try {
+            await reload();
+          } catch (err) {
+            failed(err);
+            return;
+          }
+          if (missing) return;
+        }
         const now = text.toString();
         if (now === base) return;
         try {
           await opts.save(now);
         } catch (err) {
-          opts.onSaveError?.(err);
-          schedule(debounceMs);
+          if (isMissing(err)) await setMissing(err);
+          else failed(err);
           return;
         }
+        failures = 0;
         setBase(now);
         // Edited again while the save was in flight: save that too.
-        if (text.toString() !== now) schedule(debounceMs);
+        if (text.toString() !== now) scheduleSave();
       }),
-    refresh: () =>
-      serial(async () => {
-        merge(await opts.load());
-      }),
+    refresh: () => serial(reload),
   };
   return room;
 }

@@ -176,8 +176,15 @@ save debounce on the object's alarm so an eviction cannot drop it.
 gives the app's tool dispatch two edits, `editDoc` and `setTile`.
 `src/client/` is the page side (moved out of the template, which re-exports
 it), and `scripts/build-client.ts` prebuilds it as `cw-collab.js` for a page
-with no bundler. The tests in `packages/app-kit/test/` run real Workers in a
-local workerd through Miniflare, hibernation included.
+with no bundler. `src/text/` holds `splice`, which the page, the file merge
+and the agent's edit share; it imports nothing, so the server half pulls in
+no DOM code. Since 0.3.1 the tarball ships compiled `.js` and `.d.ts`
+(`scripts/compile-lib.ts`), so an outside app needs no
+`allowImportingTsExtensions`, and Web Awesome is an optional peer that only
+`./theme.css` needs. The tests in `packages/app-kit/test/` run real Workers in a
+local workerd through Miniflare, hibernation included; `outside-app.test.ts`
+installs the tarball beside a Worker app with a plain tsconfig and checks its
+typecheck and server bundle.
 
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
