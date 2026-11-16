@@ -37,6 +37,7 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { tapPointDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -146,18 +147,6 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
   return cdp;
 }
 
-async function tap(cdp: Cdp, at: { x: number; y: number }): Promise<void> {
-  for (const type of ['mousePressed', 'mouseReleased'] as const) {
-    await cdp.send('Input.dispatchMouseEvent', {
-      type,
-      x: at.x,
-      y: at.y,
-      button: 'left',
-      clickCount: 1,
-    });
-  }
-}
-
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lead-chat-item-link-'));
   let handle: ServerHandle | undefined;
@@ -260,7 +249,7 @@ async function main(): Promise<void> {
           async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
         );
         const before = opened.length;
-        await tap(cdp, btn);
+        await tapPointDelivered(cdp, btn, step);
         await until('listening', async () => ((await cdp.evaluate(LISTENING)) ? true : null));
         await until('the listener opened', () => (opened.length > before ? true : null));
         if (order === 'voice-first') await openItem();

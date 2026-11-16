@@ -38,7 +38,7 @@ import type { TranscriptionEngine, TranscriptionOpenOpts } from '../../server/sr
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import { CHROME_LOG_ARGS, connectWatched, dumpRunning } from './chrome-stall.ts';
-import { TAP_PROBE_INSTALL, TAP_PROBE_READ } from './lead-chat-tap-probe.ts';
+import { TAP_PROBE_INSTALL, TAP_PROBE_READ, tapPointDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known' };
@@ -266,7 +266,7 @@ async function main(): Promise<void> {
       /** Voice on from the agent button: the bar comes out, listening. */
       const voiceOn = async (): Promise<void> => {
         const before = opened.length;
-        await tap(cdp, await button());
+        await tapPointDelivered(cdp, await button(), step);
         await until(
           async () =>
             `listening (saw ${JSON.stringify(await cdp.evaluate(STATE))}; page ${String(await cdp.evaluate(TAP_PROBE_READ))})`,
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
       };
       const openPanel = async (): Promise<void> => {
         const bar = await until('the bar', async () => (await cdp.evaluate(BAR)) as XY | null);
-        await tap(cdp, bar);
+        await tapPointDelivered(cdp, bar, step);
         await until('the panel open', async () => ((await state()).paneOpen ? true : null));
       };
 
@@ -322,7 +322,7 @@ async function main(): Promise<void> {
             async () => ((await state()).barOut ? true : null),
             6000,
           ).catch(() => false);
-          if (!back) await tap(cdp, await button());
+          if (!back) await tapPointDelivered(cdp, await button(), step);
           await until('the bar', async () => ((await state()).barOut ? true : null));
           await openPanel();
         }

@@ -91,3 +91,11 @@ export async function tapDelivered(
     log(`the page saw no press for the tap at ${x},${y}; sending it again`);
   }
 }
+
+/** `tapDelivered` at a point. Not for a tap that loads a page: the count
+ *  lives on the page, so a new one reads as a tap nobody saw. */
+export const tapPointDelivered = (
+  cdp: Cdp,
+  at: { x: number; y: number },
+  log?: (line: string) => void,
+): Promise<void> => tapDelivered(cdp, { left: at.x, top: at.y, width: 0, height: 0 }, log);
