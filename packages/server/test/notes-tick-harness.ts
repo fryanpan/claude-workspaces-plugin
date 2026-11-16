@@ -32,7 +32,8 @@ import {
 } from '../src/meeting-notes.ts';
 import { notesTopicHashes } from '../src/notes-heading-level.ts';
 import { type NotesTimingLog, createNotesTimingLog } from '../src/notes-timing.ts';
-import { headingsOf, noteLines, oneDocStore, sectionBody } from './notes-doc-helpers.ts';
+import { headingsOf, oneDocStore } from './notes-doc-helpers.ts';
+import { meetingNoteLines, meetingNotes } from './notes-meeting-sections.ts';
 import { waitFor } from './wait-for.ts';
 
 /**
@@ -405,7 +406,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     return {
       tick,
       markdown: markdown(),
-      notes: sectionBody(ydoc, SCRIPT_TOPIC),
+      notes: meetingNotes(ydoc, SCRIPT_TOPIC),
       headings: headings(),
       ...(seen?.input ? { input: seen.input } : {}),
       composed: seen?.composed ?? [],
@@ -420,7 +421,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     timing: () => timing,
     ydoc,
     markdown,
-    notes: () => sectionBody(ydoc, SCRIPT_TOPIC),
+    notes: () => meetingNotes(ydoc, SCRIPT_TOPIC),
     headings,
     countHeadings: (text) => headings().filter((h) => h === text).length,
     say(...utterances) {
@@ -493,8 +494,5 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
   return harness;
 }
 
-/** The lines the notes section currently holds — the unit a test counts when
- *  it wants to know whether a note appeared twice. */
-export function notesItems(ydoc: Y.Doc): string[] {
-  return noteLines(ydoc, SCRIPT_TOPIC);
-}
+/** The meeting's notes one per line (`notes-meeting-sections.ts`). */
+export const notesItems = (ydoc: Y.Doc): string[] => meetingNoteLines(ydoc, SCRIPT_TOPIC);
