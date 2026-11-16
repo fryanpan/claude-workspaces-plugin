@@ -2475,12 +2475,12 @@ body.composer-open #editor > .ProseMirror ::selection {
   cursor: pointer;
   white-space: nowrap;
 }
-/* Circles overlap by 8px, and a small one by 4px, so every circle's
+/* Circles overlap by 6px, and a small one by 2px, so every circle's
    initials stay in sight: the wider overlap this replaced hid all but an 8px
    sliver of each small circle, and with it the letters (Bryan, 2026-11-15:
    "no user or agent name indicators"). */
 .board-presence-deck > * {
-  margin-left: -8px;
+  margin-left: -6px;
   transition: opacity 0.2s ease;
   cursor: inherit;
 }
@@ -2496,7 +2496,7 @@ body.composer-open #editor > .ProseMirror ::selection {
   font-size: 8px;
 }
 .board-presence-deck > .board-presence-away {
-  margin-left: -4px;
+  margin-left: -2px;
 }
 /* 9px on a 20px square reads as a circle, so a small agent loses the
    corners that tell it from a person. */
@@ -2523,13 +2523,40 @@ body.composer-open #editor > .ProseMirror ::selection {
   font-size: 13px;
   text-overflow: ellipsis;
 }
-/* A phone's deck draws three circles, so its slot can stay narrow beside
-   the page title; the list still names everyone, and the followed person
-   is drawn first, so never the one dropped. */
+/* The last mark when not everybody fits: how many more the list names. The
+   size of a small circle, in the quiet colour, so it reads as a count and
+   not as a person. */
+.board-presence-deck > .board-presence-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  margin-left: -2px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+.board-presence-deck > .board-presence-more-narrow {
+  display: none;
+}
+/* A phone's deck holds three marks (`deckFit`), so its slot can stay narrow
+   beside the page title; the list still names everyone, and the followed
+   person is drawn first, so never the one dropped. */
 @media (max-width: 1100px) {
-  .board-presence-deck > :nth-child(n + 4),
+  .board-presence-deck > .board-presence-drop-narrow,
+  .board-presence-deck > .board-presence-more-wide,
   .board-presence-deck > .board-presence-names {
     display: none;
+  }
+  .board-presence-deck > .board-presence-more-narrow {
+    display: inline-flex;
   }
 }
 /* The followed circle sits over its neighbours, so its ring is never cut. */

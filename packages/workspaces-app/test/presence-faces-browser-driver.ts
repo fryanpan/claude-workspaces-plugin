@@ -48,6 +48,8 @@ export interface FaceRead {
 export interface FacesRound {
   width: number;
   deck: FaceRead[];
+  /** The "+N" mark the deck shows, or null. */
+  more: string | null;
   /** The names beside the deck: their words, and whether they show. */
   names: { text: string; shown: boolean };
   /** Each row's circle fill in Alice's open list, by key. */
@@ -84,6 +86,13 @@ const READ_NAMES = `(() => {
   if (!n) return { text: '', shown: false };
   const r = n.getBoundingClientRect();
   return { text: n.textContent.trim(), shown: getComputedStyle(n).display !== 'none' && r.width > 0 };
+})()`;
+
+const READ_MORE = `(() => {
+  const m = [...document.querySelectorAll('.board-presence-deck .board-presence-more')].find(
+    (e) => getComputedStyle(e).display !== 'none',
+  );
+  return m ? m.textContent.trim() : null;
 })()`;
 
 const FILLS_BY_KEY = (scope: string) => `(() => Object.fromEntries(
@@ -141,8 +150,8 @@ async function main(): Promise<void> {
       await navigate(bob, `${base}/workspaces/${ws}`);
       await navigate(salt, `${base}/workspaces/${ws}/docs/${docId}`);
       // Bob, Saltmarsh, the lead and both agents: five, of which the deck
-      // draws four.
-      await deckOf(alice, 4);
+      // draws three and counts two.
+      await deckOf(alice, 3);
       // Bob here and Saltmarsh elsewhere: everybody has arrived, so no
       // later arrival can move a colour between the reads below.
       await until('Bob here and Saltmarsh elsewhere in Alice’s deck', async () =>
@@ -154,6 +163,7 @@ async function main(): Promise<void> {
       );
       const deck = (await alice.evaluate(READ_DECK)) as FaceRead[];
       const names = (await alice.evaluate(READ_NAMES)) as FacesRound['names'];
+      const more = (await alice.evaluate(READ_MORE)) as string | null;
       await deckOf(salt, 3);
       const docDeck = (await salt.evaluate(FILLS_BY_KEY('.board-presence-deck'))) as Record<
         string,
@@ -167,7 +177,7 @@ async function main(): Promise<void> {
         )) as Record<string, string>;
         return Object.keys(got).length >= 5 ? got : null;
       });
-      rounds.push({ width, deck, names, rows, docDeck });
+      rounds.push({ width, deck, more, names, rows, docDeck });
       for (const p of people) await closePerson(p);
     }
   } finally {

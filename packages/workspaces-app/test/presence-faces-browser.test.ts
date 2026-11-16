@@ -48,22 +48,26 @@ describe.skipIf(CHROME === null)('the presence deck’s faces, in a browser', ()
       .rounds;
   }, SUITE_MS);
 
-  for (const [width, drawn] of [
-    [1180, 4],
-    [430, 3],
+  for (const [width, drawn, more] of [
+    [1180, 3, '+2'],
+    [430, 2, '+3'],
   ] as const) {
-    it(`paints each person and agent in the deck a different colour at ${width}`, () => {
-      const { deck } = round(width);
-      // CONTROL: the deck was read, people and agents both.
-      expect(deck.length).toBe(drawn);
-      expect(deck.some((f) => f.kind === 'person')).toBe(true);
-      expect(deck.some((f) => f.kind === 'agent')).toBe(true);
-      for (const [i, a] of deck.entries()) {
-        expect(a.fill, a.key).toMatch(/^rgb\(/);
-        for (const b of deck.slice(i + 1)) {
-          expect(gap(a.fill, b.fill), `${a.key} ${a.fill} vs ${b.key} ${b.fill}`).toBeGreaterThan(
-            APART,
-          );
+    it(`draws marks that add up to everybody at ${width}`, () => {
+      const r = round(width);
+      // Five others: the circles and the "+N" mark count all of them.
+      expect(r.deck.length).toBe(drawn);
+      expect(r.more).toBe(more);
+    }, 60_000);
+
+    it(`paints each person and agent a different colour at ${width}`, () => {
+      // Every participant, from the open list: the deck draws only some.
+      const fills = Object.entries(round(width).rows);
+      // CONTROL: all five were read.
+      expect(fills.length).toBe(5);
+      for (const [i, [ka, a]] of fills.entries()) {
+        expect(a, ka).toMatch(/^rgb\(/);
+        for (const [kb, b] of fills.slice(i + 1)) {
+          expect(gap(a, b), `${ka} ${a} vs ${kb} ${b}`).toBeGreaterThan(APART);
         }
       }
     }, 60_000);
@@ -89,19 +93,20 @@ describe.skipIf(CHROME === null)('the presence deck’s faces, in a browser', ()
     it(`gives a participant one colour in the deck, the list and on a doc at ${width}`, () => {
       const { deck, rows, docDeck } = round(width);
       for (const f of deck) expect(rows[f.key], f.key).toBe(f.fill);
-      const shared = deck.filter((f) => docDeck[f.key] !== undefined);
-      // CONTROL: Bob and the lead are in both decks.
+      // Saltmarsh's deck on the doc, against Alice's list on the board.
+      const shared = Object.keys(docDeck).filter((k) => rows[k] !== undefined);
+      // CONTROL: Bob and the lead are on both pages.
       expect(shared.length).toBeGreaterThanOrEqual(2);
-      for (const f of shared) expect(docDeck[f.key], f.key).toBe(f.fill);
+      for (const k of shared) expect(docDeck[k], k).toBe(rows[k]);
     }, 60_000);
   }
 
   it('names who leads the deck beside it at 1180, and not at 430', () => {
     const wide = round(1180).names;
     expect(wide.shown).toBe(true);
-    // Bob is on Alice's page, so he leads; Saltmarsh, the first of those
-    // elsewhere, follows, and the lead and two agents make three more.
-    expect(wide.text).toBe('Bob, Saltmarsh +3');
+    // The people and agents the deck draws, Bob first: he is on Alice's
+    // page. The "+2" mark counts the rest.
+    expect(wide.text).toBe('Bob, Saltmarsh, Harborlight');
     expect(round(430).names.shown).toBe(false);
   }, 60_000);
 });

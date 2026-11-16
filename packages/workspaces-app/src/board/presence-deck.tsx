@@ -47,9 +47,19 @@ export interface PresenceFace {
   circle: (chip: PresenceChip) => ComponentChildren;
 }
 
-/** The deck shows at most this many circles; the list names everyone. Four
- *  overlapping circles are 88px, which leaves the title room at 430px. */
+/** The deck holds at most this many marks on a wide screen and on a phone,
+ *  an overflow mark included; the list names everyone. Four marks are 88px,
+ *  which leaves the title room at 430px. */
 const DECK_MAX = 4;
+const DECK_MAX_NARROW = 3;
+
+/** How many circles the deck draws, and the count its "+N" mark carries, for
+ *  `n` participants in `max` marks. When they do not all fit, the last mark
+ *  says how many more there are, so the marks always add up to everyone. */
+export function deckFit(n: number, max: number): { circles: number; more: number } {
+  return n <= max ? { circles: n, more: 0 } : { circles: max - 1, more: n - (max - 1) };
+}
+
 /** How long a circle takes to slide between the deck and its row. */
 const FLIP_MS = 420;
 /** A mouse leaving the strip closes an unpinned list after this grace, so a
@@ -86,15 +96,11 @@ export function usePress(onTap: () => void, onHold: () => void) {
   };
 }
 
-/** How many names the deck spells out beside its circles on a wide screen. */
-const NAMED = 2;
-
-/** The words to the left of the deck: the first names of whoever leads it, and how
- *  many more there are. "Bob, Saltmarsh +2". The list names everyone. */
-export function deckNames(chips: PresenceChip[]): string {
-  const names = chips.slice(0, NAMED).map((c) => c.label.trim().split(/\s+/)[0] ?? c.label);
-  const more = chips.length - names.length;
-  return `${names.join(', ')}${more > 0 ? ` +${more}` : ''}`;
+/** The words to the left of the deck on a wide screen: the first names of
+ *  the people and agents whose circles it draws. The "+N" mark counts the
+ *  rest, so the words carry no count of their own. */
+export function deckNames(drawn: PresenceChip[]): string {
+  return drawn.map((c) => c.label.trim().split(/\s+/)[0] ?? c.label).join(', ');
 }
 
 function circleClass(face: PresenceFace, chip: PresenceChip, followed: boolean): string {
@@ -103,11 +109,17 @@ function circleClass(face: PresenceFace, chip: PresenceChip, followed: boolean):
   }${followed ? ' board-following' : ''}`;
 }
 
-function Circle(props: { chip: PresenceChip; face: PresenceFace; followed: boolean }) {
-  const { chip, face, followed } = props;
+function Circle(props: {
+  chip: PresenceChip;
+  face: PresenceFace;
+  followed: boolean;
+  /** Classes that drop it from the deck at one size (`deckFit`). */
+  drop?: string;
+}) {
+  const { chip, face, followed, drop } = props;
   return (
     <span
-      class={circleClass(face, chip, followed)}
+      class={`${circleClass(face, chip, followed)}${drop ? ` ${drop}` : ''}`}
       data-key={chip.key}
       aria-hidden="true"
       style={face.style?.(chip)}
@@ -345,7 +357,13 @@ export function PresenceDeck(props: {
   // Nobody else in the workspace: the strip is hidden, and so is the list.
   if (others.length === 0) return null;
 
-  const deckChips = [...here, ...away].slice(0, DECK_MAX);
+  const all = [...here, ...away];
+  const wide = deckFit(all.length, DECK_MAX);
+  const narrow = deckFit(all.length, DECK_MAX_NARROW);
+  const deckChips = all.slice(0, wide.circles);
+  /** Which sizes leave circle `i` out: the deck draws `wide.circles` on a
+   *  wide screen and `narrow.circles` on a phone. */
+  const dropOf = (i: number) => (i >= narrow.circles ? 'board-presence-drop-narrow' : undefined);
   const summary = `${here.length} here with you, ${away.length} elsewhere${
     followedChip ? `, following ${followedChip.label}` : ''
   }`;
@@ -404,13 +422,29 @@ export function PresenceDeck(props: {
             }
           }}
         >
-          {deckChips.map((chip) => (
-            <Circle key={chip.key} chip={chip} face={face} followed={chip.key === followedKey} />
+          {deckChips.map((chip, i) => (
+            <Circle
+              key={chip.key}
+              chip={chip}
+              face={face}
+              followed={chip.key === followedKey}
+              drop={dropOf(i)}
+            />
           ))}
+          {wide.more > 0 && (
+            <span class="board-presence-more board-presence-more-wide" aria-hidden="true">
+              +{wide.more}
+            </span>
+          )}
+          {narrow.more > 0 && (
+            <span class="board-presence-more board-presence-more-narrow" aria-hidden="true">
+              +{narrow.more}
+            </span>
+          )}
           {/* Hidden at 1100px and below, where the deck has no room for it.
               For the eye only: the button's aria-label is its name. */}
           <span class="board-presence-names" aria-hidden="true">
-            {deckNames([...here, ...away])}
+            {deckNames(deckChips)}
           </span>
         </button>
         {shown && (
