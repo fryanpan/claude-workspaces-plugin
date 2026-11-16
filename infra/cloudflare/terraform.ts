@@ -36,7 +36,11 @@ export interface TfResult {
 export function lockDownState(dir: string): void {
   if (!existsSync(dir)) return;
   chmodSync(dir, 0o700);
-  for (const f of readdirSync(dir)) chmodSync(join(dir, f), 0o600);
+  // A subdirectory (a TF_DATA_DIR set inside the work dir) keeps its search
+  // bit: at 0600 the next terraform call cannot open what init wrote there.
+  for (const f of readdirSync(dir, { withFileTypes: true })) {
+    chmodSync(join(dir, f.name), f.isDirectory() ? 0o700 : 0o600);
+  }
 }
 
 /**
