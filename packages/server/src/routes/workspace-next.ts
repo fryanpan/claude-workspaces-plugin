@@ -129,11 +129,12 @@ export async function handleWorkspaceNext(
       if (!task) return row;
       const owner = ownerSessionOf(task);
       const claim = claimSessionOf(task);
-      return {
-        ...row,
-        ...(owner !== undefined ? { ownerSession: owner } : {}),
-        ...(claim !== undefined ? { claimedBy: claim } : {}),
-      };
+      // Assigned by name rather than spread, so a renamed contract field
+      // fails the typecheck here; an absent session leaves its key out.
+      const presence: Pick<NextAnswer['tasks'][number], 'ownerSession' | 'claimedBy'> = {};
+      if (owner !== undefined) presence.ownerSession = owner;
+      if (claim !== undefined) presence.claimedBy = claim;
+      return { ...row, ...presence };
     });
     // The queue still ranks — a retired board's in-flight work is
     // finishable — but the caller is told what it is looking at BEFORE

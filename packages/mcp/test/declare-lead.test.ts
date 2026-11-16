@@ -81,6 +81,32 @@ describe('declareWorkspaceLead — declaring yourself', () => {
     ]);
   });
 
+  it('sends each request whole, with a receipt per queued comment', async () => {
+    const { calls, deps } = harness({
+      attach: {
+        attachment: { agentId: SELF.id },
+        queuedComments: [{ id: 'q 1', docId: 'd-1', event: 'comment', text: 'Alice asks', ts: 1 }],
+      },
+    });
+    await declareWorkspaceLead({ workspaceId: 'w 1' }, deps);
+    const http = calls.filter((c) => c.kind === 'http').map((c) => [c.method, c.path, c.body]);
+    expect(http).toEqual([
+      [
+        'POST',
+        '/workspaces/w%201/agents',
+        {
+          agentId: SELF.id,
+          agentName: SELF.name,
+          runtime: 'claude-code-local',
+          pluginVersion: '0.1.65',
+          processId: 'proc-test-1',
+        },
+      ],
+      ['PUT', '/workspaces/w%201/lead', { leadAgentId: SELF.id, author: SELF }],
+      ['POST', '/workspaces/w%201/comment-queue/q%201/ack', {}],
+    ]);
+  });
+
   it('attaches as itself, reporting the bundle it is running', async () => {
     const { calls, deps } = harness();
     await declareWorkspaceLead({ workspaceId: WS }, deps);

@@ -102,7 +102,6 @@ async function restoreAs(who: { id: string; name: string }) {
   };
   const wired: string[] = [];
   let coverage: WatchCoverage | undefined;
-  const watchesPath = `/api/agents/${encodeURIComponent(who.id)}/watches`;
   const registry: WatchRegistry = {
     watchDoc: async (docId) => {
       wired.push(docId);
@@ -121,7 +120,6 @@ async function restoreAs(who: { id: string; name: string }) {
     },
     watchPersistenceMode: () => 'server',
     lastPersistError: () => undefined,
-    watchesPath: () => watchesPath,
   };
   const restore = createWatchRestore({
     http: recording,
