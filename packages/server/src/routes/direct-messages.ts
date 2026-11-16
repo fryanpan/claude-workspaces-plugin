@@ -59,7 +59,15 @@ export async function handleDirectMessageRoutes(
     return j(403, { error: 'person_proof_required' });
   }
   const me = rq.provenIdentityFor?.() ?? null;
-  if (!me || me.kind !== 'person') return j(401, { error: 'not_signed_in' });
+  if (!me || me.kind !== 'person') {
+    // The list for nobody is no channels, so a page open without a sign-in
+    // (the owner on loopback) logs no failed request. Reads and sends refuse.
+    if (req.method === 'GET' && !rq.url.searchParams.has('with')) {
+      const none: DirectChannels = { me: null, people: [], lead: null };
+      return j(200, none);
+    }
+    return j(401, { error: 'not_signed_in' });
+  }
   const people = ctx.peopleOn(scope.workspaceId);
   if (!people.some((p) => p.id === me.id)) return j(403, { error: 'not_on_this_board' });
   const others = people.filter((p) => p.id !== me.id);

@@ -192,7 +192,7 @@ export function createDmClient(opts: DmClientOpts): DmClient {
       const res = await doFetch(`${base}/me/dm`, { credentials: 'same-origin' });
       if (!res.ok) return false;
       const list = (await res.json()) as DirectChannels;
-      if (closed) return false;
+      if (closed || !list.me) return false;
       me = list.me;
       channels = [
         ...(list.lead

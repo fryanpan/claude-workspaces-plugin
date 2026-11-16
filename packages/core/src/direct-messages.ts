@@ -37,7 +37,8 @@ export interface DirectPeer {
 /** What `GET /workspaces/<id>/me/dm` answers: who the reader is, the board's
  *  other people, and the reader's own lead agent when they linked one. */
 export interface DirectChannels {
-  me: DirectPeer;
+  /** Null for a caller that proves no person: no channels. */
+  me: DirectPeer | null;
   people: DirectPeer[];
   lead: { agentId: string; name: string } | null;
 }

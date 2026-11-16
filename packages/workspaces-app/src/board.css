@@ -8141,8 +8141,12 @@ label.board-sched-chip:hover {
   body:has(claude-feedback-widget) .board-nav {
     padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
   }
+  /* min-width 0, as the open chat's bar has (html[data-lc-full]): equal tabs
+     whatever their label, so "Messages" does not widen its tab and every tab
+     stays put when the chat opens. */
   .board-nav-item {
     flex: 1;
+    min-width: 0;
     flex-direction: column;
     justify-content: center;
     gap: 2px;

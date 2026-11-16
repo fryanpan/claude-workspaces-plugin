@@ -116,7 +116,12 @@ describe('direct messages between the people on a board', () => {
   });
 
   it('refuses a caller that proves no person, and an empty or oversized text', async () => {
-    expect((await s.local(dm())).status).toBe(401);
+    // The list is "no channels", so a page open on loopback logs no error.
+    const list = await s.local(dm());
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ me: null, people: [], lead: null });
+    expect((await s.local(`${dm()}?with=${encodeURIComponent(bobId)}`)).status).toBe(401);
+    expect((await s.local(dm(), post({ to: bobId, text: 'hello' }))).status).toBe(401);
     const bearer = await s.visitor(ALICE, dm(), {
       headers: { authorization: 'Bearer not-a-person' },
     });

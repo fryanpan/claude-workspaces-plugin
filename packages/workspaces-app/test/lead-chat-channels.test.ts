@@ -64,7 +64,11 @@ function fakeServer(opts: { signedIn?: boolean } = {}) {
         status,
         headers: { 'content-type': 'application/json' },
       });
-    if (opts.signedIn === false) return json(401, { error: 'not_signed_in' });
+    if (opts.signedIn === false) {
+      return url === '/workspaces/w-harbor/me/dm'
+        ? json(200, { me: null, people: [], lead: null })
+        : json(401, { error: 'not_signed_in' });
+    }
     if (url === '/workspaces/w-harbor/me/dm' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { to: string; text: string };
       posts.push({ url, body });

@@ -216,7 +216,7 @@
   "GET /workspaces/:ws/library/stars": "200 application/json {starred} | by workspace-library-views.ts:handleLibraryViewRoutes",
   "GET /workspaces/:ws/load-reports": "200 application/json {reports,workspaceId} | by workspaces.ts:handleWorkspaceRoutes > workspace-next.ts:handleWorkspaceNext",
   "GET /workspaces/:ws/manifest.webmanifest": "200 application/manifest+json cache=private, max-age=3600 | by workspaces.ts:handleWorkspaceRoutes > workspace-manifest.ts:handleWorkspaceManifest",
-  "GET /workspaces/:ws/me/dm": "401 application/json error=not_signed_in {error} | by workspaces.ts:handleWorkspaceRoutes > direct-messages.ts:handleDirectMessageRoutes",
+  "GET /workspaces/:ws/me/dm": "200 application/json {lead,me,people} | by workspaces.ts:handleWorkspaceRoutes > direct-messages.ts:handleDirectMessageRoutes",
   "GET /workspaces/:ws/me/events:stream": "401 application/json error=person_proof_required {error} | by upgrade-stream.ts:serveUpgradeAndStreamRoutes",
   "GET /workspaces/:ws/members": "200 application/json {audience,members,openProposals,rolesMode,workspaceId,you} | by workspaces.ts:handleWorkspaceRoutes > workspace-members.ts:handleWorkspaceMembers",
   "GET /workspaces/:ws/mockups/:docId": "404 text/html | by shell-static.ts:serveShellRoutes",
