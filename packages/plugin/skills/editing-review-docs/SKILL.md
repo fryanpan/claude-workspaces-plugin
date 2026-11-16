@@ -175,6 +175,21 @@ id=lead-riverbend options="yes,maybe,no" picked=maybe
 ```
 ````
 
+## Adding a chart or a map
+
+In a bound `.mdx` doc, write `<PlotChart …/>` for a chart or
+`<StreetMap …/>` for a street map with markers, popups, radius rings,
+category-coloured points and a legend. Both draw in the doc page with no
+import. Every prop is a literal, and a map's large data goes in a `.json`
+file beside the doc named by `src`. A map draws on Google Maps where the
+server holds a key, and on OpenStreetMap where it does not; `basemap="osm"`
+or `"carto-light"` picks a keyless map instead. Props, examples and limits:
+[doc-components.md](doc-components.md).
+
+```mdx
+<StreetMap title="Harborlight halls" rings={[150, 300]} src="data/halls.json" />
+```
+
 ## Signals the file is under review
 
 - The user said "review", "workspace", "live feedback", or "the editor" — the

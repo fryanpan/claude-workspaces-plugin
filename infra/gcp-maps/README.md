@@ -13,6 +13,7 @@ One apply makes:
 | `google_project_service.apis["apikeys.googleapis.com"]` | The API Keys API, which Terraform uses to make the key |
 | `google_project_service.apis["maps-backend.googleapis.com"]` | The Maps JavaScript API, the only API the key may call |
 | `google_apikeys_key.maps_browser` | The key, named `workspaces maps (browser)`, restricted to the referrers you pass and to the Maps JavaScript API |
+| `local_sensitive_file.maps_browser_key` | The key, written mode 600 to `key_file` on the machine that applies, for the server there to read at boot |
 
 Destroying the root deletes the key and leaves both APIs on
 (`disable_on_destroy = false`), because other things in the project may use
@@ -27,8 +28,29 @@ matches `allowed_referrers`, and only for the Maps JavaScript API. An empty
 referrer list would leave it usable from any site, so the variable refuses
 one.
 
-It is still not committed. The output is `sensitive`, and it goes to the
-server's configuration, not into the repository.
+It is still not committed. The output is `sensitive`, and the key goes to
+the server through the file below, not into the repository.
+
+## How the server gets the key
+
+Apply writes the key to `key_file`, by default
+`~/Library/Application Support/claude-workspaces/google-maps-key`, mode 600.
+That folder is prod's own root on the boot disk, beside
+`keeper-caller-token`. The server reads the file once at boot
+(`packages/server/src/google-maps-key.ts`), so the key reaches prod with no
+edit to its launchd plist; restart the server after an apply that changes
+the key. Apply on the machine that runs the server, or pass `key_file` for
+another path there.
+
+The server looks in this order:
+
+1. `CW_GOOGLE_MAPS_KEY`, the key itself, when the environment sets it.
+2. The file `CW_GOOGLE_MAPS_KEY_FILE` names, or else the default path above.
+
+With neither, there is no key and every map draws on OpenStreetMap; a
+missing file logs nothing. A file that is a link, not a plain file, owned by
+another user, or not shaped like a key is skipped with a warning naming the
+path.
 
 ## Inputs
 
@@ -37,6 +59,7 @@ server's configuration, not into the repository.
 | `project` | The Workspaces GCP project id. No default |
 | `allowed_referrers` | The pages that may use the key, as Google's referrer patterns: prod's board host, staging, and local dev. No default |
 | `display_name` | Defaults to `workspaces maps (browser)` |
+| `key_file` | Where the key is written for the server. Defaults to `~/Library/Application Support/claude-workspaces/google-maps-key` |
 
 The real hostnames go on the command line or in a gitignored
 `terraform.tfvars` here, never in a committed file.
@@ -65,8 +88,11 @@ terraform -chdir=infra/gcp-maps init \
 terraform -chdir=infra/gcp-maps apply \
   -var 'project=<workspaces-project-id>' \
   -var 'allowed_referrers=["workspaces.example.com/*","localhost:8788/*"]'
-terraform -chdir=infra/gcp-maps output -raw maps_browser_key
+terraform -chdir=infra/gcp-maps output maps_browser_key_file
 ```
+
+The first `init` after the `local` provider was added records it in
+`.terraform.lock.hcl`; commit that change.
 
 ## State
 

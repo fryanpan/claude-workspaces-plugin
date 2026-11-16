@@ -683,6 +683,13 @@ export interface ServerOptions {
    */
   homeFeedClientId?: string;
   /**
+   * The Google Maps JavaScript API browser key (`google-maps-key.ts`), handed
+   * only to a doc page whose content draws a `<StreetMap>` on Google, which a
+   * tag with no `basemap` does (`routes/doc-map-key.ts`). Absent, such a map
+   * draws on OpenStreetMap. Never logged.
+   */
+  googleMapsKey?: string;
+  /**
    * On a project machine, where a board pushed from the Mac is received
    * (`routes/board-import.ts`, from `CW_BOARD_IMPORT_DIR`). Absent, the
    * family claims no path.
