@@ -7,6 +7,7 @@
     "build": "bun run scripts/build.ts",
     "start": "bun run src/server.ts",
     "dev": "bun run scripts/build.ts && bun run src/server.ts",
+    "deploy:staging": "bun run scripts/deploy-staging.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

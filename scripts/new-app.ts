@@ -9,6 +9,9 @@
  * tarball in the app's `package.json`, so the app holds no copy of their
  * source and depends on nothing in this repo.
  *
+ * The app's `fly.toml` names its staging app `<dir name>-staging`, the name
+ * `bun run deploy:staging` deploys to unless given another.
+ *
  * A relative `<dir>` is read from the repo root, wherever the command was
  * typed. Refuses a `<dir>` that exists and is not empty. Prints the next steps.
  */
@@ -57,6 +60,11 @@ export function makeApp(dir: string): { dir: string; name: string; kit: string }
   };
   const dependencies = { ...pkg.dependencies, [KIT]: kit };
   writeFileSync(pkgPath, `${JSON.stringify({ ...pkg, name, dependencies }, null, 2)}\n`);
+
+  // The staging app `bun run deploy:staging` makes, named after this one.
+  const flyPath = join(target, 'fly.toml');
+  const fly = readFileSync(flyPath, 'utf8');
+  writeFileSync(flyPath, fly.replace(/^app = ".*"$/m, `app = "${name}-staging"`));
   return { dir: target, name, kit };
 }
 
