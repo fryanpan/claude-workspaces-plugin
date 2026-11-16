@@ -19,11 +19,11 @@ import {
 } from '../share/redact-workspace.ts';
 import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
-import { wantsJson } from '../workspace-path.ts';
 import type * as Contract from './attachments-contract.ts';
 import { type LeadBind, refuseLeadBind } from './lead-bind-scope.ts';
 import { refuseLeadDiff } from './lead-diff-scope.ts';
-import { answerAs, sent } from './route-contract.ts';
+import { answerAs, queryOf, sent } from './route-contract.ts';
+import type { BoardReadAnswer, BoardReadQuery } from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -373,7 +373,7 @@ export async function handleWorkspaceCreateRead(
   // as well as its record now that the `/api` prefix is gone, and the browser
   // asking for the page must fall through to the HTML shell at the tail of
   // the chain rather than be answered here with a body it cannot render.
-  if (boardWsMatch && req.method === 'GET' && wantsJson(url)) {
+  if (boardWsMatch && req.method === 'GET' && queryOf<BoardReadQuery>(url).format === 'json') {
     const workspaceId = decodeURIComponent(boardWsMatch[1] ?? '');
     const stored = taskStore.getWorkspace(workspaceId);
     if (!stored) return j(404, { error: 'workspace not found' });
@@ -404,7 +404,8 @@ export async function handleWorkspaceCreateRead(
         : visitor
           ? redactCapChangeForVisitor(capView.lastChange)
           : capView.lastChange;
-    return j(200, {
+    // The fields `get_workspace` reads, checked against the contract.
+    const read: BoardReadAnswer = {
       workspace,
       // How many builders the board may run and how many it is running,
       // so an agent deciding what to work on sees the ceiling in the
@@ -435,6 +436,9 @@ export async function handleWorkspaceCreateRead(
       // usually an agent deciding whether to work here and a boolean
       // gives it nothing to act on.
       ...(isRetired(stored) ? { retired: retiredNotice(stored) } : {}),
+    };
+    return j(200, {
+      ...read,
       // Whether this board's sockets take the collab core (`active`): its
       // own setting AND the server-wide one. The board page reads it to pick
       // which presence strip to draw and to paint the owner's switch;

@@ -8,6 +8,7 @@ export type {
   DocEditsContract,
   DocLifecycleContract,
   DocComponentsContract,
+  DispatchesContract,
   DocThreadsContract,
   InboxContract,
   LeadChatFilesContract,
@@ -24,5 +25,7 @@ export type {
   ThreadByFindBody,
   ThreadCreateBody,
   WhiteboardContract,
+  WorkspaceAgentsContract,
+  WorkspaceBoardContract,
 } from './server.ts';
 export type { HeldFields } from './review-gate-types.ts';

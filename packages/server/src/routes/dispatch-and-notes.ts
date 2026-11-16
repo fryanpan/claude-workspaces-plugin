@@ -19,8 +19,10 @@ import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { filingStateFor } from '../unfiled-ask-filing.ts';
 import { judgeTurnNote } from '../unfiled-ask.ts';
 import type { AgentNoteAnswer } from './agent-notes-contract.ts';
+import type { DispatchReportBody, RegisterDispatchBody } from './dispatches-contract.ts';
 import { handleLeadMirrorRoute } from './lead-mirror.ts';
 import { handlePromptMarkRoute } from './prompt-marks.ts';
+import { sent } from './route-contract.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /**
@@ -149,7 +151,7 @@ export async function handleDispatchAndNoteRoutes(
       return j(200, { dispatches: dispatches.list() });
     }
     if (req.method === 'POST') {
-      const body = await safeJson(req);
+      const body = sent<RegisterDispatchBody>(await safeJson(req));
       const taskId = body?.taskId;
       const worktreePath = body?.worktreePath;
       const agentName = typeof body?.agentName === 'string' ? body.agentName.trim() : '';
@@ -250,7 +252,7 @@ export async function handleDispatchAndNoteRoutes(
       return j(200, { taskId, reports: dispatchReports.forTask(taskId) });
     }
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    const body = await safeJson(req);
+    const body = sent<DispatchReportBody>(await safeJson(req));
     const author = authorFor(body?.author);
     const res = dispatchReports.submit({
       workspaceId: reportScope.workspaceId,

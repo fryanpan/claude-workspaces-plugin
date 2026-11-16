@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { agentNotesContract } from '../src/routes/agent-notes-contract.ts';
 import { attachmentsContract } from '../src/routes/attachments-contract.ts';
+import { dispatchesContract } from '../src/routes/dispatches-contract.ts';
 import { docComponentsContract } from '../src/routes/doc-components-contract.ts';
 import { docEditsContract } from '../src/routes/doc-edits-contract.ts';
 import { docLifecycleContract } from '../src/routes/doc-lifecycle-contract.ts';
@@ -30,6 +31,8 @@ import { taskBoardContract } from '../src/routes/task-board-contract.ts';
 import { taskContentContract } from '../src/routes/task-content-contract.ts';
 import { taskStateContract } from '../src/routes/task-state-contract.ts';
 import { whiteboardContract } from '../src/routes/whiteboard-contract.ts';
+import { workspaceAgentsContract } from '../src/routes/workspace-agents-contract.ts';
+import { workspaceBoardContract } from '../src/routes/workspace-board-contract.ts';
 
 const answers = JSON.parse(
   readFileSync(join(import.meta.dir, 'fixtures', 'route-answers.json'), 'utf8'),
@@ -173,6 +176,32 @@ const CONTRACTS: Array<{ name: string; app: Hono; servedBy: string[] }> = [
     // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
     app: leadChatFilesContract as unknown as Hono<any>,
     servedBy: ['workspace-lead-chat-files.ts:handleLeadChatFiles'],
+  },
+  {
+    name: 'workspace board',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: workspaceBoardContract as unknown as Hono<any>,
+    servedBy: [
+      'workspaces-create-read.ts:handleWorkspaceCreateRead',
+      'workspace-settings.ts:handleWorkspaceSettings',
+      'workspace-content.ts:handleWorkspaceContent',
+      'workspace-related.ts:handleWorkspaceRelated',
+    ],
+  },
+  {
+    name: 'workspace agents',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: workspaceAgentsContract as unknown as Hono<any>,
+    servedBy: ['workspace-attachments.ts:handleWorkspaceAttachments'],
+  },
+  {
+    name: 'dispatches',
+    // biome-ignore lint/suspicious/noExplicitAny: a contract's schema type is irrelevant here.
+    app: dispatchesContract as unknown as Hono<any>,
+    servedBy: [
+      'dispatch-and-notes.ts:handleDispatchAndNoteRoutes',
+      'chat-audit-routes.ts:handleChatAuditRoutes',
+    ],
   },
 ];
 
