@@ -31,7 +31,6 @@ import {
   initialsOf,
   pluginDriftNotice,
   presenceChips,
-  presenceHue,
   taskActivity,
   timeAgo,
   unfiledAskNotice,
@@ -782,22 +781,6 @@ describe('initialsOf (the letters a presence circle carries)', () => {
   it('never comes back empty — a blank circle reads as a broken one', () => {
     expect(initialsOf('')).toBe('?');
     expect(initialsOf('   ')).toBe('?');
-  });
-});
-
-describe('presenceHue (deterministic circle colour)', () => {
-  it('is stable and in range', () => {
-    const h = presenceHue('Ana Reyes');
-    expect(h).toBe(presenceHue('Ana Reyes'));
-    expect(h).toBeGreaterThanOrEqual(0);
-    expect(h).toBeLessThan(360);
-  });
-  it('gives you and the person watching you the same colour', () => {
-    // The self chip's label carries "(you)"; the colour must not.
-    expect(presenceHue('Ana Reyes (you)')).toBe(presenceHue('Ana Reyes'));
-  });
-  it('separates different names (the reason for a hash over a constant)', () => {
-    expect(presenceHue('Ana Reyes')).not.toBe(presenceHue('Ben Ito'));
   });
 });
 

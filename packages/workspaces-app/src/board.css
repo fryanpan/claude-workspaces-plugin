@@ -922,15 +922,9 @@ body.board-body {
 .board-presence-deck > .board-presence-wa:not(.board-following) wa-avatar {
   box-shadow: 0 0 0 2px var(--bg);
 }
-.board-presence-deck > .board-presence-wa.board-presence-away {
-  margin-left: -12px;
-}
-.board-presence-deck > .board-presence-wa.board-presence-away:first-child {
-  margin-left: 0;
-}
 .board-presence-deck > .board-presence-wa.board-presence-away wa-avatar {
   --size: 20px;
-  font-size: 0;
+  font-size: 8px;
 }
 .board-presence-row .board-presence-wa wa-avatar,
 .board-follow-bar .board-presence-wa wa-avatar {

@@ -48,7 +48,7 @@ export interface PresenceFace {
 }
 
 /** The deck shows at most this many circles; the list names everyone. Four
- *  overlapping circles are 82px, which leaves the title room at 430px. */
+ *  overlapping circles are 88px, which leaves the title room at 430px. */
 const DECK_MAX = 4;
 /** How long a circle takes to slide between the deck and its row. */
 const FLIP_MS = 420;
@@ -84,6 +84,17 @@ export function usePress(onTap: () => void, onHold: () => void) {
       if (!held.current) onTap();
     },
   };
+}
+
+/** How many names the deck spells out beside its circles on a wide screen. */
+const NAMED = 2;
+
+/** The words beside the deck: the first names of whoever leads it, and how
+ *  many more there are. "Bob, Saltmarsh +2". The list names everyone. */
+export function deckNames(chips: PresenceChip[]): string {
+  const names = chips.slice(0, NAMED).map((c) => c.label.trim().split(/\s+/)[0] ?? c.label);
+  const more = chips.length - names.length;
+  return `${names.join(', ')}${more > 0 ? ` +${more}` : ''}`;
 }
 
 function circleClass(face: PresenceFace, chip: PresenceChip, followed: boolean): string {
@@ -396,6 +407,11 @@ export function PresenceDeck(props: {
           {deckChips.map((chip) => (
             <Circle key={chip.key} chip={chip} face={face} followed={chip.key === followedKey} />
           ))}
+          {/* Hidden at 1100px and below, where the deck has no room for it.
+              For the eye only: the button's aria-label is its name. */}
+          <span class="board-presence-names" aria-hidden="true">
+            {deckNames([...here, ...away])}
+          </span>
         </button>
         {shown && (
           <section

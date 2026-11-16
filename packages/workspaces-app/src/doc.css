@@ -69,6 +69,12 @@
   bottom: 0;
   right: 90px;
 }
+/* The doc's toolbar has no room for the names beside the deck (styles.css,
+   PRESENCE CIRCLES): they would push its circles under the buttons to its
+   left. Hovering or tapping the deck lists everyone by name. */
+#doc-people .board-presence-names {
+  display: none;
+}
 @media (max-width: 1100px) {
   #toggle-format {
     order: 2;

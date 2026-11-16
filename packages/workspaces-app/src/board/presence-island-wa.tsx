@@ -21,10 +21,11 @@ import '@awesome.me/webawesome/dist/components/toast/toast.js';
 import type WaToast from '@awesome.me/webawesome/dist/components/toast/toast.js';
 import type { JSX } from 'preact';
 import { BUILD_ID } from '../stale-client.ts';
-import { type PresenceChip, chipHue, initialsOf } from './board-presence-model.ts';
+import { type PresenceChip, initialsOf } from './board-presence-model.ts';
 import {
   type PresenceFace,
   type PresenceHandlers,
+  chipColour,
   mountPresenceIsland,
 } from './presence-island.tsx';
 
@@ -52,7 +53,7 @@ export const WA_FACE: PresenceFace = {
   base: 'board-presence-wa',
   circle: (chip: PresenceChip) =>
     avatar(initialsOf(chip.label), chip.kind === 'agent' ? 'rounded' : 'circle', {
-      backgroundColor: `hsl(${chipHue(chip)}, 45%, 45%)`,
+      backgroundColor: chipColour(chip),
     }),
 };
 
