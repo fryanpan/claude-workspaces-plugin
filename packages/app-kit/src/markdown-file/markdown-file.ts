@@ -26,10 +26,14 @@ import type { RoomDocs } from '../collab/index.ts';
  * meets the same conflict again on the next open.
  *
  * A failed save is tried again after `retryDelayMs(failures)`, which grows
- * with each failure in a row. A save or read that fails because the file is
- * gone (`isMissing`, by default a `FileMissingError`) is not retried:
- * `onMissing` is told once, edits keep going to `state`, and saving resumes
- * when `refresh()` finds the file again.
+ * with each failure in a row (`defaultRetryDelayMs` unless the app passes its
+ * own). A save or read that fails because the file is gone (`isMissing`, by
+ * default a `FileMissingError`) is not retried: edits keep going to `state`,
+ * and saving resumes when `refresh()` finds the file again. `onMissing` is
+ * called once per disappearance: not again while the file stays gone, again
+ * if it comes back and goes again. That it was called is recorded in `state`
+ * only once it settles, so an eviction inside it, or a rejection, means the
+ * next read that finds the file gone calls it again.
  */
 import { splice } from '../text/splice.ts';
 
@@ -77,13 +81,18 @@ export interface MarkdownFileOptions {
   onConflict?: (conflict: FileConflict) => unknown;
   onSaveError?: (err: unknown) => void;
   /** How long to wait before saving again after `failures` failed saves in
-   *  a row. Default: `debounceMs` doubled per failure, at most 5 minutes. */
+   *  a row. Default: `defaultRetryDelayMs(failures, debounceMs)`, which is
+   *  `debounceMs` doubled per failure, at most 5 minutes. */
   retryDelayMs?: (failures: number) => number;
   /** Whether an error from `load` or `save` means the file is gone. Default:
    *  it is a `FileMissingError`. */
   isMissing?: (err: unknown) => boolean;
-  /** The file is gone. Called once; saves stop until `refresh()` reads the
-   *  file again. To put it back, write `room.text()` to it, then refresh. */
+  /** The file is gone. Called once per disappearance (not again while it
+   *  stays gone); saves stop until `refresh()` reads the file again. If it
+   *  rejects, or the instance is evicted before it settles, the next read
+   *  that finds the file gone calls it again; a rejection also goes to
+   *  `onSaveError`. To put the file back, write `room.text()` to it, then
+   *  refresh. */
   onMissing?: (err: unknown) => unknown;
 }
 
@@ -106,7 +115,16 @@ export interface MarkdownFileRoom {
 const KEY_DOC = 'doc';
 const KEY_BASE = 'base';
 const KEY_MISSING = 'missing';
-const MAX_RETRY_MS = 5 * 60_000;
+/** How long after the last change the file is written, by default. */
+export const DEFAULT_DEBOUNCE_MS = 2000;
+/** The longest a failed save waits before it is tried again, by default. */
+export const MAX_RETRY_MS = 5 * 60_000;
+
+/** The default `retryDelayMs`: `debounceMs` doubled per failure in a row,
+ *  at most `MAX_RETRY_MS`. An app wrapping it (to log, or cap it lower)
+ *  passes its own `debounceMs` if it set one. */
+export const defaultRetryDelayMs = (failures: number, debounceMs = DEFAULT_DEBOUNCE_MS): number =>
+  Math.min(debounceMs * 2 ** (Math.max(1, failures) - 1), MAX_RETRY_MS);
 
 /** Transactions the room itself makes, so they are not taken for edits. */
 const FROM_FILE = Symbol('markdown-file');
@@ -119,9 +137,8 @@ const b64encode = (bytes: Uint8Array): string => {
 const b64decode = (text: string): Uint8Array => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 
 export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<MarkdownFileRoom> {
-  const debounceMs = opts.debounceMs ?? 2000;
-  const retryDelayMs =
-    opts.retryDelayMs ?? ((n: number) => Math.min(debounceMs * 2 ** (n - 1), MAX_RETRY_MS));
+  const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+  const retryDelayMs = opts.retryDelayMs ?? ((n: number) => defaultRetryDelayMs(n, debounceMs));
   const isMissing = opts.isMissing ?? ((err: unknown) => err instanceof FileMissingError);
   const doc = new Y.Doc();
   const text = doc.getText(opts.field ?? 'body');
@@ -140,7 +157,10 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
   if (saved) Y.applyUpdate(doc, b64decode(saved), FROM_FILE);
   /** The file's text as last read or written. */
   let base = opts.state.read(KEY_BASE);
-  let missing = opts.state.read(KEY_MISSING) === '1';
+  /** `onMissing` has been called, and settled, for this disappearance. */
+  let notified = opts.state.read(KEY_MISSING) === '1';
+  /** The file was found gone, so nothing is saved. */
+  let missing = notified;
   /** Saves that have failed in a row. */
   let failures = 0;
   /** `onConflict` failed: the outside edit is not merged and must not be
@@ -165,14 +185,21 @@ export async function markdownFileRoom(opts: MarkdownFileOptions): Promise<Markd
     scheduleSave();
   };
   const setMissing = async (err: unknown): Promise<void> => {
-    if (missing) return;
     missing = true;
+    if (notified) return;
+    try {
+      await opts.onMissing?.(err);
+    } catch (cbErr) {
+      opts.onSaveError?.(cbErr);
+      return;
+    }
+    notified = true;
     opts.state.write(KEY_MISSING, '1');
-    await opts.onMissing?.(err);
   };
   const found = (): void => {
-    if (!missing) return;
+    if (!missing && !notified) return;
     missing = false;
+    notified = false;
     opts.state.write(KEY_MISSING, '');
   };
 

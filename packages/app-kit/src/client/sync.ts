@@ -7,6 +7,12 @@
  * asks for what the page wrote while it was away. No DOM: tests run it in Bun
  * and in Node.
  *
+ * A close code from 4400 to 4499 is the server saying the doc this socket
+ * held is gone (deleted, replaced, moved): reconnecting would push the page's
+ * old state into whatever room now has that address, so the handle stops,
+ * its status becomes `closed`, and `closedBy()` reports the code and reason.
+ * Any other close reconnects, unless `onClose` returns `false`.
+ *
  * A browser cannot put headers on a socket. A page that signs in with a
  * token rather than a cookie passes `url` as a function, so each reconnect
  * reads the current token, or sends it as a `protocols` entry.
@@ -18,7 +24,24 @@ import * as Y from 'yjs';
 
 const MSG_SYNC = 0;
 
-export type SyncStatus = 'connecting' | 'synced' | 'offline';
+/** `closed`: the handle has stopped and will not reconnect (a terminal
+ *  close code, `onClose` returning `false`, or `close()`). */
+export type SyncStatus = 'connecting' | 'synced' | 'offline' | 'closed';
+
+/** The first and last close codes that end a doc handle for good. */
+export const TERMINAL_CLOSE_MIN = 4400;
+export const TERMINAL_CLOSE_MAX = 4499;
+
+/** Whether a close code means the doc is gone and the page must not
+ *  reconnect. */
+export const isTerminalClose = (code: number): boolean =>
+  code >= TERMINAL_CLOSE_MIN && code <= TERMINAL_CLOSE_MAX;
+
+/** How a socket closed, as `onClose` and `closedBy()` see it. */
+export interface DocClose {
+  code: number;
+  reason: string;
+}
 
 export interface DocSync {
   doc: Y.Doc;
@@ -26,6 +49,9 @@ export interface DocSync {
   synced: Promise<void>;
   status(): SyncStatus;
   onStatus(fn: (s: SyncStatus) => void): void;
+  /** The close that stopped the handle for good, or `null` while it is
+   *  still connected or reconnecting. `close()` leaves it `null`. */
+  closedBy(): DocClose | null;
   close(): void;
 }
 
@@ -38,6 +64,11 @@ export interface DocSyncOptions {
   /** First retry delay; doubles to `maxRetryMs`. */
   retryMs?: number;
   maxRetryMs?: number;
+  /** Called on every close the page did not ask for. Return `false` to stop
+   *  reconnecting. A terminal code (4400 to 4499) stops it whatever this
+   *  returns. */
+  // biome-ignore lint/suspicious/noConfusingVoidType: a page's `(e) => log(e)`, typed as returning void, must fit.
+  onClose?: (event: DocClose) => boolean | void;
 }
 
 const frame = (write: (enc: encoding.Encoder) => void): Uint8Array => {
@@ -56,6 +87,8 @@ export function connectDoc(url: DocUrl, opts: DocSyncOptions = {}): DocSync {
   let status: SyncStatus = 'connecting';
   let ws: WebSocket | null = null;
   let closed = false;
+  let stoppedBy: DocClose | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let retry = opts.retryMs ?? 500;
   let markSynced: () => void = () => {};
   const synced = new Promise<void>((r) => {
@@ -75,6 +108,8 @@ export function connectDoc(url: DocUrl, opts: DocSyncOptions = {}): DocSync {
   doc.on('update', onUpdate);
 
   const open = (): void => {
+    timer = null;
+    if (closed) return;
     const address = typeof url === 'function' ? url() : url;
     const socket = opts.headers
       ? new WebSocket(address, { headers: opts.headers } as unknown as string[])
@@ -97,11 +132,24 @@ export function connectDoc(url: DocUrl, opts: DocSyncOptions = {}): DocSync {
         markSynced();
       }
     });
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (ev) => {
       if (ws === socket) ws = null;
       if (closed) return;
+      const event: DocClose = { code: ev.code, reason: ev.reason };
+      let keepGoing = true;
+      try {
+        keepGoing = opts.onClose?.(event) !== false;
+      } catch {
+        // A throwing callback must not leave the page silently offline.
+      }
+      if (isTerminalClose(event.code) || !keepGoing) {
+        closed = true;
+        stoppedBy = event;
+        setStatus('closed');
+        return;
+      }
       setStatus('offline');
-      setTimeout(open, retry);
+      timer = setTimeout(open, retry);
       retry = Math.min(retry * 2, opts.maxRetryMs ?? 10_000);
     });
   };
@@ -114,10 +162,14 @@ export function connectDoc(url: DocUrl, opts: DocSyncOptions = {}): DocSync {
     onStatus: (fn) => {
       listeners.push(fn);
     },
+    closedBy: () => stoppedBy,
     close: () => {
       closed = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
       doc.off('update', onUpdate);
       ws?.close();
+      setStatus('closed');
     },
   };
 }

@@ -2,10 +2,15 @@
  * `markdownFileRoom` when things go wrong: an outside edit that loses a
  * conflict waits for the app's async `onConflict` before anything is saved
  * over it, a failing save backs off, and a file that is gone is reported
- * once and not retried.
+ * once per disappearance and not retried.
  */
 import { describe, expect, it } from 'vitest';
-import { type FileConflict, markdownFileRoom } from '../src/markdown-file/index.ts';
+import {
+  type FileConflict,
+  MAX_RETRY_MS,
+  defaultRetryDelayMs,
+  markdownFileRoom,
+} from '../src/markdown-file/index.ts';
 import { manualSchedule, memoryState, open } from './markdown-file-fakes.ts';
 import { until } from './poll.ts';
 
@@ -129,6 +134,22 @@ describe('a failed save', () => {
     await room.flush();
     expect(s.requested).toEqual([2000, 100, 200]);
   });
+
+  it('by default waits defaultRetryDelayMs, which an app can wrap', async () => {
+    expect([1, 2, 3].map((n) => defaultRetryDelayMs(n))).toEqual([2000, 4000, 8000]);
+    expect(defaultRetryDelayMs(3, 500)).toBe(2000);
+    expect(defaultRetryDelayMs(40)).toBe(MAX_RETRY_MS);
+    const { room, f, s, body } = await open({
+      initial: 'x',
+      debounceMs: 300,
+      onSaveError: () => {},
+    });
+    body.insert(1, 'y');
+    f.file.failing = 2;
+    await room.flush();
+    await room.flush();
+    expect(s.requested).toEqual([300, defaultRetryDelayMs(1, 300), defaultRetryDelayMs(2, 300)]);
+  });
 });
 
 describe('a file that is gone', () => {
@@ -171,6 +192,85 @@ describe('a file that is gone', () => {
     f.file.gone = true;
     await room.refresh();
     expect(room.missing()).toBe(true);
+    expect(reported.length).toBe(1);
+  });
+
+  it('is reported again when it comes back and goes again', async () => {
+    const reported: unknown[] = [];
+    const { room, f } = await open({ onMissing: (e) => void reported.push(e) });
+    f.file.gone = true;
+    await room.refresh();
+    await room.refresh();
+    expect(reported.length).toBe(1);
+    f.file.gone = false;
+    await room.refresh();
+    f.file.gone = true;
+    await room.refresh();
+    expect(reported.length).toBe(2);
+  });
+
+  it('is not reported again by a new instance once onMissing settled', async () => {
+    const state = memoryState();
+    const first = await open({ state, onMissing: () => {} });
+    first.f.file.gone = true;
+    await first.room.refresh();
+    const reported: unknown[] = [];
+    const second = await markdownFileRoom({
+      load: first.f.load,
+      save: first.f.save,
+      state,
+      schedule: manualSchedule().schedule,
+      onMissing: (e) => void reported.push(e),
+    });
+    expect(second.missing()).toBe(true);
+    expect(reported).toEqual([]);
+  });
+
+  it('is reported again by a new instance when the old one went away inside onMissing', async () => {
+    const state = memoryState();
+    let entered = false;
+    const first = await open({
+      state,
+      onMissing: () => {
+        entered = true;
+        return new Promise<void>(() => {});
+      },
+    });
+    first.f.file.gone = true;
+    void first.room.refresh();
+    await until('the first instance to call onMissing', () => entered);
+    expect(first.room.missing()).toBe(true);
+
+    const reported: unknown[] = [];
+    const second = await markdownFileRoom({
+      load: first.f.load,
+      save: first.f.save,
+      state,
+      schedule: manualSchedule().schedule,
+      onMissing: (e) => void reported.push(e),
+    });
+    expect(reported.length).toBe(1);
+    expect(second.missing()).toBe(true);
+  });
+
+  it('is reported again on the next refresh when onMissing rejected', async () => {
+    let refuse = true;
+    const reported: unknown[] = [];
+    const errors: unknown[] = [];
+    const { room, f } = await open({
+      onMissing: async (e) => {
+        if (refuse) throw new Error('the notice could not be sent');
+        reported.push(e);
+      },
+      onSaveError: (e) => errors.push(e),
+    });
+    f.file.gone = true;
+    await room.refresh();
+    expect(room.missing()).toBe(true);
+    expect(errors.map((e) => (e as Error).message)).toEqual(['the notice could not be sent']);
+    refuse = false;
+    await room.refresh();
+    await room.refresh();
     expect(reported.length).toBe(1);
   });
 });
