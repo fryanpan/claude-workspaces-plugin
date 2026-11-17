@@ -227,6 +227,9 @@ export interface MemoryLogStats {
   timers: number;
   activations: { tag: string; count: number }[];
   activationsTotal: number;
+  /** `residentDocs` split by what keeps each one in memory
+   *  (`DocStore.residentBy`). The line leaves `held=` off without it. */
+  residentBy?: Record<string, number>;
 }
 
 export type PrintReason = 'first' | 'delta' | 'interval';
@@ -284,8 +287,17 @@ export function formatMemoryLine(i: MemoryLineInput): string {
     `heap=${i.heapMb === null ? 'unavailable' : `${i.heapMb}MB`}` +
     (i.census ? ` ${formatHeapCensus(i.census)}` : '') +
     // Last, so a grep written against the heap and census fields still reads.
-    ` ${i.buffers ? formatBufferCounters(i.buffers) : 'buffers=unavailable'}`
+    ` ${i.buffers ? formatBufferCounters(i.buffers) : 'buffers=unavailable'}` +
+    // After the buffers, for the same reason: what holds each resident doc.
+    formatResidentBy(s.residentBy)
   );
+}
+
+/** ` held=connected:2,short-window:40,…` — every reason, in the order
+ *  given, zeros included so a field's absence never reads as a zero. */
+function formatResidentBy(by: Record<string, number> | undefined): string {
+  const parts = Object.entries(by ?? {}).map(([why, n]) => `${why}:${n}`);
+  return parts.length > 0 ? ` held=${parts.join(',')}` : '';
 }
 
 export interface MemoryLogOptions {

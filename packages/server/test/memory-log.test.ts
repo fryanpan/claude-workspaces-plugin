@@ -180,6 +180,18 @@ describe('the line', () => {
     );
   });
 
+  it('ends with what holds each resident doc, when the store says', () => {
+    const r = rig();
+    r.setStats(
+      baseStats({
+        residentBy: { connected: 2, 'short-window': 40, 'person-window': 7, 'past-window': 0 },
+      }),
+    );
+    expect(r.log.sample()).toEndWith(
+      ' buffers=unavailable held=connected:2,short-window:40,person-window:7,past-window:0',
+    );
+  });
+
   it('says footprint was unavailable and still prints when the reader has nothing', () => {
     const lines: string[] = [];
     const log = new MemoryLog({

@@ -1110,7 +1110,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // count an item mid-judgement as open.
   taskStore.setThreadAskReader((taskId) => {
     let open = 0;
-    for (const thread of docStore.listThreads(`task:${taskId}`, { status: 'open' })) {
+    // `peekThreads`: the stall pass asks this of every row every ten
+    // minutes, and a count must not bring the row's doc back into memory.
+    for (const thread of docStore.peekThreads(`task:${taskId}`, { status: 'open' })) {
       const pending = pendingDeclaration(thread);
       if (pending?.review && !isReviewPayloadGated(pending.review)) open += 1;
     }

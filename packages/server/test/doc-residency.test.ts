@@ -5,7 +5,7 @@
  * is in `doc-eviction.test.ts`.
  */
 import { describe, expect, it } from 'bun:test';
-import { type ResidencyLimits, pastWindow } from '../src/doc-residency.ts';
+import { type ResidencyLimits, pastWindow, windowHolds } from '../src/doc-residency.ts';
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -52,5 +52,24 @@ describe('pastWindow', () => {
       lastPersonAt: NOW - DAY,
     });
     expect(pastWindow(entries, NOW, limits)).toEqual([]);
+  });
+});
+
+describe('windowHolds', () => {
+  it('names the window holding each doc, and leaves out the ones past both', () => {
+    const entries = [
+      { docId: 'riverbend-fresh', lastReachedAt: NOW - 5 * MIN },
+      { docId: 'harborlight-person', lastReachedAt: NOW - 2 * DAY, lastPersonAt: NOW - 2 * DAY },
+      { docId: 'saltmarsh-idle', lastReachedAt: NOW - 31 * MIN },
+      // Both windows hold it; the short one is named, since it alone would.
+      { docId: 'alice-both', lastReachedAt: NOW - MIN, lastPersonAt: NOW - MIN },
+    ];
+    expect(Object.fromEntries(windowHolds(entries, NOW, limits))).toEqual({
+      'riverbend-fresh': 'short-window',
+      'harborlight-person': 'person-window',
+      'alice-both': 'short-window',
+    });
+    // The two answers are complements of each other.
+    expect(pastWindow(entries, NOW, limits)).toEqual(['saltmarsh-idle']);
   });
 });
