@@ -86,7 +86,8 @@ export interface DocStoreWorkspacePersistence {
   decorate(meta: DocMeta): DocMeta;
   list(): DocMeta[];
   threadCounts(docId: string): { open: number; total: number };
-  listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[];
+  /** Threads read without loading the doc (`DocStore.peekThreads`). */
+  peekThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[];
   peekMeta(docId: string): DocMeta | undefined;
   docExists(docId: string): boolean;
   doc(docId: string): LiveDoc | undefined;
@@ -139,7 +140,7 @@ export class DocStoreWorkspaces {
     const out: Array<Thread & { docId: string; relPath?: string }> = [];
     for (const meta of this.p.list()) {
       if (attachmentIdOf(meta) !== setId) continue;
-      for (const t of this.p.listThreads(meta.docId, opts)) {
+      for (const t of this.p.peekThreads(meta.docId, opts)) {
         out.push({ ...t, docId: meta.docId, relPath: meta.relPath });
       }
     }
@@ -768,7 +769,7 @@ export class DocStoreWorkspaces {
       // workspace with even one open thread is left fully intact.
       const blocked: Array<{ docId: string; openThreads: number }> = [];
       for (const m of members) {
-        const openThreads = this.p.listThreads(m.docId, { status: 'open' }).length;
+        const openThreads = this.p.peekThreads(m.docId, { status: 'open' }).length;
         if (openThreads > 0) blocked.push({ docId: m.docId, openThreads });
       }
       if (blocked.length > 0) return { ok: false, error: 'has-open-threads', files: blocked };

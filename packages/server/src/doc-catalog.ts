@@ -254,6 +254,14 @@ export class DocCatalog {
     return entry ? { ...entry.threads } : null;
   }
 
+  /** Remember a cold doc's comment count, read off its `.ydoc`, on a row
+   *  written before rows kept it. In memory only: the next save rewrites
+   *  the row with the count in it. */
+  noteCommentCount(docId: string, comments: number): void {
+    const entry = this.docIndex.get(docId);
+    if (entry && entry.comments === undefined) entry.comments = comments;
+  }
+
   /** The most recent comment timestamp on a doc, from its index row. */
   lastThreadActivityFromIndex(docId: string): number | undefined {
     return this.docIndex.get(docId)?.lastThreadActivityAt;
@@ -389,8 +397,10 @@ export class DocCatalog {
     const threads = listThreads(doc.ydoc);
     let lastThreadActivityAt: number | undefined;
     let open = 0;
+    let comments = 0;
     for (const t of threads) {
       if (t.status === 'open') open++;
+      comments += t.comments.length;
       for (const c of t.comments) {
         if (lastThreadActivityAt === undefined || c.ts > lastThreadActivityAt) {
           lastThreadActivityAt = c.ts;
@@ -404,6 +414,7 @@ export class DocCatalog {
       // entry must describe this write.
       meta: { ...doc.meta },
       threads: { open, total: threads.length },
+      comments,
       ...(lastThreadActivityAt !== undefined ? { lastThreadActivityAt } : {}),
       ...(pendingFileWrite ? { pendingFileWrite: true } : {}),
     };

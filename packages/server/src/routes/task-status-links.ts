@@ -327,7 +327,9 @@ export async function handleTaskStatusAndLinks(
           docNeedsReview: (docId, workspaceId) =>
             reviewInScope({ kind: 'doc', docId }) &&
             docNeedsReview(docId, {
-              openThreads: (id) => docStore.listThreads(id, { status: 'open' }),
+              // A pasted list of links is a status page: reading each
+              // doc's asks must not load every doc it names.
+              openThreads: (id) => docStore.peekThreads(id, { status: 'open' }),
               boardTasks: () => taskStore.listTasks(workspaceId),
               reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
               canonical: (id) => docStore.resolveDocId(id),

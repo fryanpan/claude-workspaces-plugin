@@ -35,6 +35,7 @@ import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import { DocImageVersions } from './doc-image-versions.ts';
+import { DocLoadSites } from './doc-load-sites.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type ResidencyEntry, type WindowHold, pastWindow, windowHolds } from './doc-residency.ts';
 import { DiskDocStateStore } from './doc-state/disk.ts';
@@ -538,6 +539,18 @@ interface HandedRead {
   file: PrereadFile;
 }
 
+/** A doc's plain-text length: what `getDocStatus` reports and the review
+ *  sizer turns into words. */
+function textLengthOf(ydoc: Y.Doc, type: DocType): number {
+  if (contentKind(type) === 'flat') return ydoc.getText('content').length;
+  return prose.walkProse(prose.getProseFragment(ydoc)).plainText.length;
+}
+
+/** Comments across a set of threads. */
+function commentsIn(threads: readonly Thread[]): number {
+  return threads.reduce((n, t) => n + t.comments.length, 0);
+}
+
 export class DocStore {
   private docs = new Map<string, LiveDoc>();
 
@@ -687,6 +700,8 @@ export class DocStore {
     stats: () => this.stats(),
     readBuffers: () => this.bufferCounters(),
   });
+  /** Which caller brought each doc into memory (doc-load-sites.ts). */
+  private readonly loadSites = new DocLoadSites();
   private evictTicker: ReturnType<typeof setInterval> | null = null;
   /** The `?v=` each open doc's relative images are asked for with. */
   private readonly imageVersions = new DocImageVersions({
@@ -777,7 +792,7 @@ export class DocStore {
       decorate: (meta) => this.cfg.decorateDocMeta?.(meta) ?? meta,
       list: () => this.list(),
       threadCounts: (docId) => this.threadCounts(docId),
-      listThreads: (docId, filter) => this.listThreads(docId, filter),
+      peekThreads: (docId, filter) => this.peekThreads(docId, filter),
       peekMeta: (docId) => this.peekMeta(docId),
       docExists: (docId) => this.docExists(docId),
       doc: (docId) => this.resolveDoc(docId),
@@ -1274,6 +1289,10 @@ export class DocStore {
     activationsTotal: number;
     /** `residentDocs` split by what keeps each one (`residentBy`). */
     residentBy: Record<ResidentReason, number>;
+    /** Docs brought into memory since boot, by the caller that loaded each
+     *  (`DocLoadSites`): source locations and counts, nothing from a doc. */
+    loads: { tag: string; count: number }[];
+    loadsTotal: number;
   } {
     const files = this.bindings.stats(Date.now());
     const presence = this.fanout.stats();
@@ -1295,6 +1314,7 @@ export class DocStore {
       activations: files.activations,
       activationsTotal: files.activationsTotal,
       residentBy: this.residentBy(),
+      ...this.loadSites.stats(),
     };
   }
 
@@ -2305,6 +2325,7 @@ export class DocStore {
       );
     }
     this.docs.set(docId, doc);
+    this.loadSites.record();
     this.hydratedAt.set(docId, this.now());
     this.fanout.wireEvents(doc);
     this.cfg.onDocWired?.(doc);
@@ -3005,11 +3026,12 @@ export class DocStore {
     // Hydrate the doc ourselves first so the provider below finds it resident.
     //
     // Threads live in the `.ydoc`, so a parked binding costs this call
-    // nothing. And the callers are the fan-outs: the workspace listing and
-    // the archive route each walk EVERY docId on a board, none of which
-    // reaches a URL for the request prewarm to find. One bad file among them
-    // used to park the whole server. (The home queue and the stall scan read
-    // through `peekThreads` now, which loads nothing.)
+    // nothing. And the callers used to be the fan-outs: the workspace
+    // listing and the archive route each walk EVERY docId on a review, none
+    // of which reaches a URL for the request prewarm to find. One bad file
+    // among them used to park the whole server. (They, the home queue, the
+    // stall scan and `links:titles` read through `peekThreads` now, which
+    // loads nothing.)
     //
     // And it costs no BINDING either: the read-only resolve leaves the file
     // alone entirely, so a walk over a board's docs can no longer wake every
@@ -3103,22 +3125,61 @@ export class DocStore {
    *  no saved state, or one that cannot be read, has none — what a load
    *  through `listThreads` would have answered. */
   private readColdThreads(docId: string): Thread[] {
+    return this.readCold(docId, [], (ydoc) => listThreadsWithLinks(ydoc));
+  }
+
+  /** `read` over the doc's `.ydoc` decoded into a copy nothing keeps;
+   *  `missing` when there is no saved state or it cannot be read. */
+  private readCold<T>(docId: string, missing: T, read: (ydoc: Y.Doc) => T): T {
     const target = this.catalog.aliasTarget(docId) ?? docId;
     let bytes: Uint8Array | null;
     try {
       bytes = this.state.read(target);
     } catch (err) {
-      console.error(`[doc-store] failed to read threads of ${target}:`, err);
-      return [];
+      console.error(`[doc-store] failed to read ${target} cold:`, err);
+      return missing;
     }
-    if (!bytes) return [];
+    if (!bytes) return missing;
     const ydoc = new Y.Doc();
     try {
       Y.applyUpdate(ydoc, bytes);
-      return listThreadsWithLinks(ydoc);
+      return read(ydoc);
     } finally {
       ydoc.destroy();
     }
+  }
+
+  /**
+   * `getDocStatus().textLength`, WITHOUT making the doc resident: a resident
+   * doc answers from memory, a cold one from its `.ydoc` decoded into a copy
+   * nothing keeps. Null for a doc that does not exist. The review sizer asks
+   * it of every doc a queued item links to; through `getDocStatus` each ask
+   * loaded and BOUND the doc for its window.
+   */
+  peekTextLength(docId: string): number | null {
+    const resident = this.peek(docId);
+    if (resident) return textLengthOf(resident.ydoc, resident.meta.type);
+    const type = this.peekMeta(docId)?.type;
+    if (type === undefined) return null;
+    return this.readCold<number | null>(docId, null, (ydoc) => textLengthOf(ydoc, type));
+  }
+
+  /**
+   * Every comment across a doc's threads, WITHOUT making it resident — the
+   * count the board's row badge shows. A cold doc answers from its index row
+   * where the row carries it, and otherwise from its `.ydoc` read cold, which
+   * the row then remembers: the projection asks this of every row on a board.
+   */
+  peekCommentCount(docId: string): number {
+    const resident = this.peek(docId);
+    if (resident) return commentsIn(listThreads(resident.ydoc));
+    const target = this.catalog.aliasTarget(docId) ?? docId;
+    const entry = this.saveTimers.has(target) ? undefined : this.catalog.entry(target);
+    if (entry?.comments !== undefined) return entry.comments;
+    if (entry?.threads.total === 0) return 0;
+    const n = this.readCold(target, 0, (ydoc) => commentsIn(listThreads(ydoc)));
+    if (entry) this.catalog.noteCommentCount(target, n);
+    return n;
   }
 
   private indexSaysNoThreads(docId: string, status?: 'open' | 'resolved'): boolean {
@@ -3275,15 +3336,11 @@ export class DocStore {
     const parked = binding ? undefined : this.reportedPark(doc.docId);
     const meta = this.catalog.withActivity(doc.meta);
 
-    let textLength: number;
-    let blockCount: number;
+    const textLength = textLengthOf(doc.ydoc, doc.meta.type);
+    let blockCount = 1;
     let pendingSuggestions = 0;
-    if (contentKind(doc.meta.type) === 'flat') {
-      textLength = doc.ydoc.getText('content').length;
-      blockCount = 1;
-    } else {
+    if (contentKind(doc.meta.type) !== 'flat') {
       const fragment = prose.getProseFragment(doc.ydoc);
-      textLength = prose.walkProse(fragment).plainText.length;
       blockCount = fragment.length;
       pendingSuggestions = suggestOps.listSuggestions(doc.ydoc).length;
     }

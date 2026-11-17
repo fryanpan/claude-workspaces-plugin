@@ -192,6 +192,42 @@ describe('the line', () => {
     );
   });
 
+  it('ends with the docs loaded in the window and the sites that loaded them', () => {
+    const r = rig();
+    r.setStats(
+      baseStats({
+        residentBy: { 'short-window': 3 },
+        loads: [{ tag: 'packages/server/src/boot.ts:10', count: 3 }],
+        loadsTotal: 3,
+      }),
+    );
+    expect(r.log.sample()).toEndWith(
+      ' held=short-window:3 loaded=+3 by=packages/server/src/boot.ts:10*3',
+    );
+    // The next line counts only what this window loaded, busiest site first.
+    r.setStats(
+      baseStats({
+        residentBy: { 'short-window': 50 },
+        loads: [
+          { tag: 'packages/server/src/home-pane.ts:122', count: 40 },
+          { tag: 'packages/server/src/boot.ts:10', count: 5 },
+          { tag: 'packages/server/src/routes/archive.ts:160', count: 7 },
+        ],
+        loadsTotal: 52,
+      }),
+    );
+    r.setMb(400);
+    r.advance(30_000);
+    expect(r.log.sample()).toEndWith(
+      ' loaded=+49 by=packages/server/src/home-pane.ts:122*40,' +
+        'packages/server/src/routes/archive.ts:160*7,packages/server/src/boot.ts:10*2',
+    );
+    // A window that loaded nothing says so rather than dropping the field.
+    r.setMb(800);
+    r.advance(30_000);
+    expect(r.log.sample()).toEndWith(' loaded=+0 by=none');
+  });
+
   it('says footprint was unavailable and still prints when the reader has nothing', () => {
     const lines: string[] = [];
     const log = new MemoryLog({

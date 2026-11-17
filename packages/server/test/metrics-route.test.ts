@@ -162,7 +162,7 @@ describe('GET /api/metrics', () => {
     expect(body).not.toContain(srcDir);
     const parsed = JSON.parse(body) as Record<string, unknown>;
     for (const [key, value] of Object.entries(parsed)) {
-      if (key === 'activations') continue;
+      if (key === 'activations' || key === 'loads') continue;
       // `notesQuality`, `blockingWait` and `residentBy` are nested counts;
       // every leaf under them is still a number, which is what keeps the
       // no-identifiers promise true as the rollups grow fields.
@@ -175,9 +175,14 @@ describe('GET /api/metrics', () => {
     // `activations` is the one non-scalar field: source locations and counts.
     // A tag is a repo-relative path into `packages/` and nothing else — never
     // an absolute host path, and never anything derived from a doc.
+    // `loads` is the same shape for the same reason: who loaded each doc.
     const activations = parsed.activations as { tag: string; count: number }[];
+    const loads = parsed.loads as { tag: string; count: number }[];
     expect(Array.isArray(activations)).toBe(true);
-    for (const row of activations) {
+    expect(Array.isArray(loads)).toBe(true);
+    // Control: the doc posted above was loaded, so `loads` has a row to judge.
+    expect(loads.length).toBeGreaterThan(0);
+    for (const row of [...activations, ...loads]) {
       expect(typeof row.count).toBe('number');
       expect(row.tag).toMatch(/^(packages\/[\w./-]+:\d+|external|unknown|other)$/);
       expect(row.tag.startsWith('/')).toBe(false);

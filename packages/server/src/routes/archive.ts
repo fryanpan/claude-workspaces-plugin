@@ -157,7 +157,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
           .filter((m) => attachmentIdOf(m) === setId)
           .map((m) => ({
             docId: m.docId,
-            openThreads: docStore.listThreads(m.docId, { status: 'open' }).length,
+            openThreads: docStore.peekThreads(m.docId, { status: 'open' }).length,
           }))
           .filter((f) => f.openThreads > 0);
         if (blocked.length > 0) {
