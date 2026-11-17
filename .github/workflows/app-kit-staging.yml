@@ -11,6 +11,8 @@
 # Secret, in the `cloudflare-prod` environment (deployments from main only):
 #   FLY_API_TOKEN  the org deploy token fly.yml uses. The org is the one it
 #                  reaches (deploy-staging.ts resolveOrg).
+# The token reaches every app in the org, so deploy-staging.ts refuses an
+# `app` input whose name does not end in `-staging` before any fly command.
 # It is on the deploy step alone: `bun install`, new-app and the setup
 # actions never see it. The repo and its logs are public: nothing here
 # prints it.
@@ -21,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       app:
-        description: Fly app name for the trial
+        description: Fly app name for the trial; must end in -staging (deploy-staging.ts refuses any other)
         required: false
         default: cw-appkit-trial-staging
 

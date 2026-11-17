@@ -66,7 +66,9 @@ It makes the Fly app and its 1 GB data volume if they are missing, sets
 deploys with `APP_URL` set to the app's `fly.dev` origin and
 `APP_ENV=staging`, then waits for `/health` to answer 200 and prints how long
 the whole command took. Give another app name as the first argument, and
-`--region` for somewhere other than `sjc`.
+`--region` for somewhere other than `sjc`. The name must end in `-staging`:
+any other name is refused before any `fly` command runs, so a deploy cannot
+overwrite an app in the org that is not a staging app.
 
 It needs `fly` on the PATH and reads `FLY_API_TOKEN` and `FLY_ORG` from the
 environment. On a Mac, an unset one is read from the Keychain entries
