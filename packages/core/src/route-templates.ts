@@ -258,6 +258,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // and the agent roster, both moved off names the glossary spends elsewhere.
   ['workspaces', ':id', 'events:stream'],
   ['workspaces', ':id', 'me', 'events:stream'],
+  ['workspaces', ':id', 'me', 'dm'],
   ['workspaces', ':id', 'agents'],
   ['workspaces', ':id', 'agents', ':id'],
   ['workspaces', ':id', 'agents', ':id', 'heartbeat'],

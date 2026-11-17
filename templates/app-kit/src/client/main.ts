@@ -7,7 +7,12 @@ import '@awesome.me/webawesome/dist/components/button/button.js';
 import { connectDoc } from './sync.ts';
 import { bindTextarea } from './text-binding.ts';
 
-const STATUS_TEXT = { connecting: 'Connecting…', synced: 'Live', offline: 'Offline, retrying…' };
+const STATUS_TEXT = {
+  connecting: 'Connecting…',
+  synced: 'Live',
+  offline: 'Offline, retrying…',
+  closed: 'Closed. Reload to open it again.',
+};
 
 function openDocForm(): void {
   const form = document.getElementById('open-doc') as HTMLFormElement | null;

@@ -4,7 +4,7 @@
  * audit: no-text — the log is inline; nothing here reads a source file.
  */
 import { describe, expect, it } from 'vitest';
-import { buildTable, median, parseDurations } from './vitest-durations.ts';
+import { buildTable, median, mergeRuns, parseDurations } from './vitest-durations.ts';
 
 const ESC = String.fromCharCode(27);
 const PREFIX = 'client (1)\tTest (client + unit)\t2026-11-14T14:35:57.4077992Z ';
@@ -44,5 +44,17 @@ describe('buildTable', () => {
 
   it('has a median of zero for an empty kind', () => {
     expect(median([])).toBe(0);
+  });
+});
+
+describe('mergeRuns', () => {
+  it('takes each file’s median across runs, and keeps a file only some runs measured', () => {
+    expect(
+      mergeRuns([
+        { 'dom:x': 40, 'dom:y': 10 },
+        { 'dom:x': 60, 'dom:y': 12 },
+        { 'dom:x': 50, 'node:z': 2 },
+      ]),
+    ).toEqual({ 'dom:x': 50, 'dom:y': 11, 'node:z': 2 });
   });
 });

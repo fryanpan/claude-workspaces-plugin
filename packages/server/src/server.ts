@@ -73,6 +73,7 @@ import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
+import { FileDirectMessageStore } from './direct-messages.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
 import { confirmGrantFolder } from './doc-components-agent.ts';
@@ -1109,7 +1110,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // count an item mid-judgement as open.
   taskStore.setThreadAskReader((taskId) => {
     let open = 0;
-    for (const thread of docStore.listThreads(`task:${taskId}`, { status: 'open' })) {
+    // `peekThreads`: the stall pass asks this of every row every ten
+    // minutes, and a count must not bring the row's doc back into memory.
+    for (const thread of docStore.peekThreads(`task:${taskId}`, { status: 'open' })) {
       const pending = pendingDeclaration(thread);
       if (pending?.review && !isReviewPayloadGated(pending.review)) open += 1;
     }
@@ -2458,7 +2461,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     boardName: (id) => taskStore.getWorkspace(id)?.name,
     feed: async (id) => {
-      await crossReview.prepare();
       const { items } = await crossReview.queue();
       return homeFeedOf(id, taskStore.getWorkspace(id)?.name ?? id, items);
     },
@@ -3139,6 +3141,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
     // Declared below; called only per request, after it exists.
     proposeAccess: (input) => accessProposals.propose(input),
+    ...(opts.googleMapsKey ? { googleMapsKey: opts.googleMapsKey } : {}),
   };
 
   // The owner's notice when the master sharing switch goes off: one decision
@@ -3423,6 +3426,26 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    directMessages: {
+      store: new FileDirectMessageStore(dataDir),
+      // Every active person this board admits, the owner included.
+      peopleOn: (boardId) =>
+        identities
+          .list()
+          .filter(
+            (rec) =>
+              rec.kind === 'person' &&
+              rec.status === 'active' &&
+              !rec.mergedInto &&
+              personAccessOn(boardId, rec) !== null,
+          )
+          .map((rec) => ({ id: rec.id, name: rec.displayName })),
+      leadAgentOf: (personId) => personAgentLinks.leadAgentOf(personId),
+      agentName: (agentId) => identities.get(agentId)?.displayName ?? agentId,
+      sse,
+      j,
+      safeJson,
+    },
     collabRooms,
     collabCoreSwitch,
     agentSpots,

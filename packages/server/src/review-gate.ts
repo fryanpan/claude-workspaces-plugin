@@ -722,7 +722,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
         priorAskRowFor(target.address),
         {
           getTask: (id) => taskStore.getTask(id),
-          listThreads: (id) => docStore.listThreads(id),
+          listThreads: (id) => docStore.peekThreads(id),
         },
         Date.now(),
       );

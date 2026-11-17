@@ -46,7 +46,7 @@ import { lastBoardActivityAt } from './board-activity.ts';
 import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
-import type { DocStore } from './doc-store.ts';
+import type { DocStore, ThreadsAhead } from './doc-store.ts';
 import { changedFilesInWorktree, changedFilesInWorktreeAsync } from './git-diff.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
@@ -597,7 +597,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       counts: (askedBy: string | undefined) => boolean = () => true,
     ): ReviewItemRow[] => {
       const out: ReviewItemRow[] = [];
-      for (const thread of docStore.listThreads(docId)) {
+      for (const thread of docStore.peekThreads(docId)) {
         const declaring = pendingDeclaration(thread);
         if (!declaring?.review || isReviewPayloadGated(declaring.review)) continue;
         if (!counts(declaring.author?.id)) continue;
@@ -625,6 +625,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
      */
     const lifts = new Map<string, Lift>();
     for (const t of tasks) {
+      // A done row is not judged (`classifyOpenTasks` reads only `todo` and
+      // `in-progress`), so nothing this loop gathers for it changes a
+      // verdict, and its body's threads were most of what this pass loaded.
+      if (t.status === 'done') continue;
       const state = taskStore.reviewState(t.id);
       // Absent means the row vanished between the list and this read. Treated
       // as unreadable rather than as clear, for the same reason a throw is:
@@ -658,7 +662,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         if (item.answer !== undefined)
           answered.push({ at: item.answer.ts, headline: item.review.headline });
       }
-      for (const thread of docStore.listThreads(taskBodyDocId(t.id))) {
+      for (const thread of docStore.peekThreads(taskBodyDocId(t.id))) {
         for (const comment of thread.comments) {
           const review = comment.review;
           if (review?.answeredAt !== undefined)
@@ -792,7 +796,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
      *  it is the row moving. The asks on it are `declaredAsks`'s to read. */
     const newestComment = (docId: string): number => {
       let newest = 0;
-      for (const thread of docStore.listThreads(docId)) {
+      for (const thread of docStore.peekThreads(docId)) {
         if (thread.lastActivity > newest) newest = thread.lastActivity;
       }
       return newest;
@@ -937,7 +941,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       // to begin with.
       const meta = docStore.peekMeta(docId);
       const title = meta?.title || meta?.relPath?.split('/').pop() || docId;
-      for (const thread of docStore.listThreads(docId, { status: 'open' })) {
+      for (const thread of docStore.peekThreads(docId, { status: 'open' })) {
         const ask = personAwaitingReply(thread);
         if (ask === undefined) continue;
         out.push({ ...ask, id: docId, docId, title, threadId: thread.id });
@@ -948,7 +952,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   function heldThreadReviewItems(workspace: BoardWorkspace): HeldItemInput[] {
     const out: HeldItemInput[] = [];
     const scan = (docId: string, title: string, taskId?: string) => {
-      for (const thread of docStore.listThreads(docId, { status: 'open' })) {
+      for (const thread of docStore.peekThreads(docId, { status: 'open' })) {
         for (const comment of thread.comments) {
           const review = comment.review;
           // `held`, not `gated`: a verdict still out is seconds old, and a
@@ -1010,7 +1014,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       // two surfaces store an answer in two places.
       if (item.answer !== undefined) return true;
     }
-    for (const thread of docStore.listThreads(taskBodyDocId(taskId))) {
+    for (const thread of docStore.peekThreads(taskBodyDocId(taskId))) {
       for (const comment of thread.comments) {
         if (comment.review !== undefined && reviewAnswered(comment.review)) return true;
       }
@@ -1111,6 +1115,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   /** What the last `prepare` read, until the snapshot that follows it takes it.
    *  Unset outside the timer's path, so `nudgeStalls` reads git itself. */
   let preparedChangedWork: Map<string, ChangedWork | undefined> | undefined;
+  /** The timed pass's read-ahead, held from `prepare` to `snapshot`. */
+  let preparedThreads: ThreadsAhead | undefined;
   const stallSnapshot = (
     workspace: BoardWorkspace,
     prepared?: ReadonlyMap<string, ChangedWork | undefined>,
@@ -1327,10 +1333,11 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   });
   /**
    * The docs the snapshot below reads threads from, each with the filter it
-   * reads them under: every row's body (`stallVerdict` reads all threads),
-   * every goal body and every board doc (open threads only). A doc two walks
-   * read is loaded for the wider one. Links are left to the snapshot — it
-   * reads them only for the handful of rows it already called stuck.
+   * reads them under: every unfinished row's body (`stallVerdict` reads all
+   * threads), every unfinished goal body and every board doc (open threads
+   * only). A doc two walks read is read for the wider one. A done row's body
+   * is read by neither walk. Links are left to the snapshot — it reads them
+   * only for the handful of rows it already called stuck.
    */
   const stallReadTargets = (): Map<string, 'open' | undefined> => {
     const targets = new Map<string, 'open' | undefined>();
@@ -1338,7 +1345,9 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       if (!targets.has(docId) || status === undefined) targets.set(docId, status);
     };
     for (const workspace of taskStore.listWorkspaces()) {
-      for (const task of taskStore.listTasks(workspace.id)) add(taskBodyDocId(task.id), undefined);
+      for (const task of taskStore.listTasks(workspace.id)) {
+        if (task.status !== 'done') add(taskBodyDocId(task.id), undefined);
+      }
       for (const goal of taskStore.listGoalRows(workspace.id)) {
         if (goal.status !== 'done') add(taskBodyDocId(goal.id), 'open');
       }
@@ -1347,22 +1356,35 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     return targets;
   };
   const stallNudger = new StallNudger({
-    // On the timer, the cold docs the snapshot reads are loaded first, a
-    // slice at a time. The snapshot itself is one synchronous pass over every
-    // board, and at 3,000 rows it spent about half a second loading the docs
-    // an idle sweep had released.
+    // On the timer, the cold docs the snapshot reads are read first, a slice
+    // at a time, and NOT loaded: their threads are held for the snapshot and
+    // the docs stay out of memory (`DocStore.peekThreads`, the only thread
+    // read in this module, and the one `reviewState` reads through). The snapshot itself is one
+    // synchronous pass over every board, and at 3,000 rows it spent about
+    // half a second loading the docs an idle sweep had released; loading
+    // them here instead kept them resident, since this runs every ten
+    // minutes and the shortest residency window is thirty.
     //
     // The builders' worktrees are read here too, and for a bigger reason:
     // the UI gate's git reads, done inside the snapshot, held the loop for
     // ~460ms per open dispatch in a local reproduction, on every tick.
     prepare: async () => {
       preparedChangedWork = await readChangedWork();
-      await docStore.warmForThreadReads(stallReadTargets());
+      // A pass that prepared and never ticked leaves its read-ahead here.
+      preparedThreads?.drop();
+      preparedThreads = await docStore.readThreadsAhead(stallReadTargets());
     },
     snapshot: () => {
       const prepared = preparedChangedWork;
       preparedChangedWork = undefined;
-      const snapshots = taskStore.listWorkspaces().map((ws) => stallSnapshot(ws, prepared));
+      const threadsAhead = preparedThreads;
+      preparedThreads = undefined;
+      let snapshots: StallSnapshot[];
+      try {
+        snapshots = taskStore.listWorkspaces().map((ws) => stallSnapshot(ws, prepared));
+      } finally {
+        threadsAhead?.drop();
+      }
       keepMoving.observe(snapshots, Date.now());
       doneWhenReady.tick(Date.now());
       return snapshots;

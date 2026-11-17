@@ -86,6 +86,8 @@ function rig(opts: { loaded?: boolean } = {}) {
       return {
         view: {} as never,
         startMeeting() {},
+        toggle() {},
+        onMessages() {},
         destroy: () => log.push(`destroy ${o.workspaceId}`),
       };
     },

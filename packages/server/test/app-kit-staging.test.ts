@@ -186,10 +186,10 @@ describe('deploy:staging --dry-run', () => {
     }
   });
 
-  it('deploys under the name it is given', async () => {
-    const r = await deploy(['saltmarsh-demo', '--dry-run'], stubDir());
+  it('deploys under the staging name it is given', async () => {
+    const r = await deploy(['saltmarsh-demo-staging', '--dry-run'], stubDir());
     expect(r.status).toBe(0);
-    expect(r.out).toContain('fly deploy --app saltmarsh-demo');
+    expect(r.out).toContain('fly deploy --app saltmarsh-demo-staging');
     expect(r.out).not.toContain('riverbend-notes-staging');
   });
 
@@ -258,6 +258,23 @@ describe('deploy:staging', () => {
       probe.stop();
     }
   }, 30_000);
+});
+
+describe('deploy:staging with a name that is not a staging app', () => {
+  it('refuses before reading a credential or running any fly command', async () => {
+    // A project machine's app in the same org: the token could reach it.
+    for (const name of ['saltmarsh-demo', 'harborlight-staging-db', 'riverbend-notes']) {
+      const dir = stubDir();
+      const r = await deploy([name, '--url', 'http://127.0.0.1:9/health'], dir, {
+        FLY_API_TOKEN: FAKE_TOKEN,
+        FLY_ORG: 'harborlight',
+      });
+      expect(r.status).toBe(1);
+      expect(r.out).toContain(`refusing to deploy to "${name}": not a staging app`);
+      expect(read(dir, 'fly-args')).toBe('');
+      expect(read(dir, 'security-args')).toBe('');
+    }
+  });
 });
 
 describe('credentials', () => {

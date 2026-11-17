@@ -36,6 +36,8 @@ variables {
     { id = "g-org", name = "Access: Organizations, Identity Providers, and Groups Read", scopes = ["com.cloudflare.api.account"] },
     { id = "g-tun", name = "Cloudflare Tunnel Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-wrk", name = "Workers Scripts Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-d1", name = "D1 Write", scopes = ["com.cloudflare.api.account"] },
+    { id = "g-ts", name = "Turnstile Sites Write", scopes = ["com.cloudflare.api.account"] },
     { id = "g-zone", name = "Zone Read", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-dns", name = "DNS Write", scopes = ["com.cloudflare.api.account.zone"] },
     { id = "g-ssl", name = "SSL and Certificates Read", scopes = ["com.cloudflare.api.account.zone"] },
@@ -56,7 +58,7 @@ run "the_token_holds_what_the_workflows_need_and_no_more" {
 
   assert {
     condition = jsonencode([for p in cloudflare_account_token.ci_deploy.policies : sort([for g in p.permission_groups : g.id])]) == jsonencode([
-      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk"]),
+      sort(["g-apps", "g-svc", "g-org", "g-tun", "g-wrk", "g-d1", "g-ts"]),
       sort(["g-zone", "g-dns", "g-ssl", "g-rts"]),
       ["g-r2"],
     ])

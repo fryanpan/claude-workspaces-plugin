@@ -31,10 +31,11 @@
  *
  * The anti-vacuity assertion is what changed with it. It used to be a pool
  * read outstanding when the scan returned, which proved the scan had reached
- * the doc through the async door. With no read at all, what proves the scan
- * reached the doc is that the doc is RESIDENT and UNBOUND: in memory from
- * its `.ydoc`, holding no binding. A scan that skipped the doc leaves it
- * neither.
+ * the doc through the async door. With no read at all, it was that the doc
+ * was RESIDENT and UNBOUND. Since the scan stopped loading what it reads
+ * (`DocStore.peekThreads`), the doc stays out of memory too, so what proves
+ * the scan reached it is the read itself: the scan asked for this doc's
+ * threads and got back the open one, which only its `.ydoc` holds.
  *
  * The board, the doc and the paths here are invented.
  */
@@ -52,6 +53,22 @@ const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
+
+/** How many threads each `peekThreads` call on `DOC_ID` answered. The board
+ *  holds the doc under its minted id, so a call is matched by what `peek`
+ *  would resolve, not by the name it was created under. */
+function threadReadsOf(h: ServerHandle): number[] {
+  const answers: number[] = [];
+  const ds = h.docStore;
+  const read = ds.peekThreads.bind(ds);
+  const minted = ds.list().find((m) => m.docId === DOC_ID || m.alias === DOC_ID)?.docId;
+  ds.peekThreads = (docId, filter) => {
+    const threads = read(docId, filter);
+    if (docId === DOC_ID || docId === minted) answers.push(threads.length);
+    return threads;
+  };
+  return answers;
+}
 
 describe('the stall scan over a board holding an unreadable doc', () => {
   let dataDir: string;
@@ -140,16 +157,19 @@ describe('the stall scan over a board holding an unreadable doc', () => {
     // every test in this process, so a neighbouring file's read in flight
     // makes the total whatever it likes. What this scan costs is the change.
     const inflightBefore = boundFiles.stats().inflight;
+    const reads = threadReadsOf(handle);
     handle.nudgeStalls();
 
     // The scan RETURNED, and it started no read of its own: a thread listing
     // no longer opens the bound file at all.
     expect(boundFiles.stats().inflight).toBe(inflightBefore);
 
-    // Not a vacuous pass. The doc is in memory — so the scan did reach it —
-    // and it holds no binding, which is the whole of what the read may cost.
-    expect(handle.docStore.peek(DOC_ID)).toBeDefined();
-    expect(handle.docStore.getDocStatus(DOC_ID)?.bound).toBe(false);
+    // Not a vacuous pass. The scan asked for this doc's threads and got the
+    // open one off its `.ydoc`, so it did reach it — and the doc is neither
+    // in memory nor bound, which is the whole of what the read may cost.
+    expect(reads).toContain(1);
+    expect(handle.docStore.peek(DOC_ID)).toBeUndefined();
+    expect(handle.docStore.boundPathOf(DOC_ID)).toBeUndefined();
 
     // And the file is untouched: a doc that binds without having read its file
     // overwrites that file on the next write-back.
@@ -164,12 +184,13 @@ describe('the stall scan over a board holding an unreadable doc', () => {
     writeFileSync(boundPath, '# Design\n\nA readable first version.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
+    const reads = threadReadsOf(handle);
     handle.nudgeStalls();
 
     // One: the scan binds nothing even when the file would answer happily,
     // so the case above measured the rule and not the sick folder.
     expect(handle.docStore.boundPathOf(DOC_ID)).toBeUndefined();
-    expect(handle.docStore.peek(DOC_ID)).toBeDefined();
+    expect(reads).toContain(1);
 
     // Two: binding still works in this fixture. A read of the doc's CONTENT
     // arms it, deferred onto the pool, so give the read a turn to land.

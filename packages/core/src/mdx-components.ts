@@ -7,8 +7,8 @@
  * when it uses a name one of those imports binds from a path the server can
  * build: a relative `.ts` / `.tsx` / `.js` / `.jsx` / `.mjs` file, or an
  * `https://` module. A tag that uses a bare import (`from 'leaflet'`) is one
- * too, so the build can refuse it with the fix. Any other tag — `<PlotChart>`
- * with no import, a tag whose import is an `.astro` file — keeps the preview
+ * too, so the build can refuse it with the fix. Any other tag — `<PlotChart>` or
+ * `<StreetMap>` with no import, a tag whose import is an `.astro` file — keeps the preview
  * it has today.
  *
  * The server (`server/src/doc-component-builds.ts`) and the page
@@ -62,7 +62,7 @@ export interface ComponentInput {
 export const COMPONENT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs'] as const;
 
 /** Tags the page draws itself, which a component tag may hold without an import. */
-export const BUILTIN_TAGS = ['PlotChart'] as const;
+export const BUILTIN_TAGS = ['PlotChart', 'StreetMap'] as const;
 
 export function importKind(specifier: string): ImportKind {
   if (/^https?:\/\//i.test(specifier)) return 'cdn';

@@ -36,7 +36,7 @@ import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import { DocImageVersions } from './doc-image-versions.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
-import { type ResidencyEntry, pastWindow } from './doc-residency.ts';
+import { type ResidencyEntry, type WindowHold, pastWindow, windowHolds } from './doc-residency.ts';
 import { DiskDocStateStore } from './doc-state/disk.ts';
 import type { DocStateStore } from './doc-state/store.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
@@ -261,6 +261,24 @@ export type WsCtx = {
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
+
+/** One walk's read-ahead (`DocStore.readThreadsAhead`): how many cold docs
+ *  it read, and the call that ends it. */
+export interface ThreadsAhead {
+  readonly read: number;
+  drop(): void;
+}
+
+/** What keeps a doc out of the idle sweep's reach (`evictionHold`). */
+export type EvictionHold =
+  | 'connected'
+  | 'recording'
+  | 'sync-error'
+  | 'pending-write'
+  | 'human-edit';
+
+/** Why a resident doc is still in memory: a hold, a window, or neither yet. */
+export type ResidentReason = EvictionHold | WindowHold | 'past-window';
 
 /**
  * The slice of a websocket the share sweeps need: what authorized it, and how
@@ -872,6 +890,7 @@ export class DocStore {
     // 3. Out of memory. Aliases and the index row are deliberately untouched;
     //    `activityMtime` stays too, so a listing still answers without a stat.
     this.docs.delete(docId);
+    this.forgetThreadsAhead(docId);
     this.lastTouchedAt.delete(docId);
     this.lastPersonAt.delete(docId);
     this.hydratedAt.delete(docId);
@@ -910,7 +929,7 @@ export class DocStore {
    * nothing is watching the file for it. There is no per-doc subscriber
    * count to hold on today; when there is, it belongs in this list.
    */
-  private evictionHold(docId: string, doc: LiveDoc, now: number): string | null {
+  private evictionHold(docId: string, doc: LiveDoc, now: number): EvictionHold | null {
     // Somebody is in it. Their next keystroke belongs to this Y.Doc.
     if (doc.conns.size > 0) return 'connected';
     // A meeting is being recorded into it. The notes arrive by a door none
@@ -970,6 +989,33 @@ export class DocStore {
       if (this.evictDoc(docId)) evicted.push(docId);
     }
     return evicted;
+  }
+
+  /**
+   * Every resident doc counted once, under the first thing keeping it: a
+   * hold (`evictionHold`), else the window it is still inside, else
+   * `past-window` — released by the next sweep. The `[doc-store] mem` line
+   * prints it, so a resident count that will not fall names its rule.
+   */
+  private residentBy(): Record<ResidentReason, number> {
+    const now = this.now();
+    const out: Record<ResidentReason, number> = {
+      connected: 0,
+      recording: 0,
+      'sync-error': 0,
+      'pending-write': 0,
+      'human-edit': 0,
+      'short-window': 0,
+      'person-window': 0,
+      'past-window': 0,
+    };
+    const entries: ResidencyEntry[] = [];
+    for (const docId of this.docs.keys()) entries.push(this.residencyEntry(docId, now));
+    const windows = windowHolds(entries, now);
+    for (const [docId, doc] of this.docs) {
+      out[this.evictionHold(docId, doc, now) ?? windows.get(docId) ?? 'past-window']++;
+    }
+    return out;
   }
 
   /** One resident doc's clocks, as `pastWindow` judges them. */
@@ -1226,6 +1272,8 @@ export class DocStore {
     activations: { tag: string; count: number }[];
     /** Every activation, including the tags not listed above. */
     activationsTotal: number;
+    /** `residentDocs` split by what keeps each one (`residentBy`). */
+    residentBy: Record<ResidentReason, number>;
   } {
     const files = this.bindings.stats(Date.now());
     const presence = this.fanout.stats();
@@ -1246,6 +1294,7 @@ export class DocStore {
         (this.componentBuilds.running ? 1 : 0),
       activations: files.activations,
       activationsTotal: files.activationsTotal,
+      residentBy: this.residentBy(),
     };
   }
 
@@ -1398,6 +1447,7 @@ export class DocStore {
     this.fanout.closeSockets(doc, closeReason);
     this.editSessions.closeDoc(docId);
     this.docs.delete(docId);
+    this.forgetThreadsAhead(docId);
     this.catalog.forgetActivity(docId);
     this.lastTouchedAt.delete(docId);
     this.lastPersonAt.delete(docId);
@@ -2955,10 +3005,11 @@ export class DocStore {
     // Hydrate the doc ourselves first so the provider below finds it resident.
     //
     // Threads live in the `.ydoc`, so a parked binding costs this call
-    // nothing. And the callers are the fan-outs: the home queue, the
-    // workspace listing, the archive route and the stall scan each walk EVERY
-    // docId on a board, none of which reaches a URL for the request prewarm
-    // to find. One bad file among them used to park the whole server.
+    // nothing. And the callers are the fan-outs: the workspace listing and
+    // the archive route each walk EVERY docId on a board, none of which
+    // reaches a URL for the request prewarm to find. One bad file among them
+    // used to park the whole server. (The home queue and the stall scan read
+    // through `peekThreads` now, which loads nothing.)
     //
     // And it costs no BINDING either: the read-only resolve leaves the file
     // alone entirely, so a walk over a board's docs can no longer wake every
@@ -2966,9 +3017,10 @@ export class DocStore {
     //
     // A doc that is not in memory and whose index row says it has no threads
     // of the kind asked for answers empty without being loaded. The stall
-    // scan asks this of every task body and board doc every ten minutes; at
-    // 3,000 tasks the loads held the loop for about a second and added
-    // ~130MB of heap, nearly all of it for docs with nothing to return. The
+    // scan used to ask this of every task body and board doc every ten
+    // minutes; at 3,000 tasks the loads held the loop for about a second and
+    // added ~130MB of heap, nearly all of it for docs with nothing to return.
+    // It reads through `peekThreads` now, which loads nothing at all. The
     // row is exact outside a pending write (see `threadCounts`).
     if (!this.docs.has(docId) && this.indexSaysNoThreads(docId, filter?.status)) return [];
     this.resolveDocForRead(docId);
@@ -2976,28 +3028,97 @@ export class DocStore {
   }
 
   /**
-   * Load, ahead of a synchronous walk, the docs that walk will read threads
-   * from, handing the loop back between loads.
+   * A doc's threads, read WITHOUT making the doc resident.
    *
-   * Each value is the filter the walk will pass to `listThreads`, so a doc
-   * the walk would answer empty from the index is not loaded here either.
-   * The stall tick reads every task body and board doc in one synchronous
-   * pass; without this, the first tick after a boot or an idle sweep loaded
-   * every cold doc with a thread inside that pass. Resolves to how many docs
-   * it loaded.
+   * A resident doc answers from memory. A cold one answers empty when its
+   * index row says so, and otherwise from its `.ydoc` decoded into a
+   * throwaway copy that is dropped before this returns: same threads, no
+   * entry in the doc map, nothing for the idle sweep to release later.
+   *
+   * For the walks that read every task body and board doc: the stall pass,
+   * and the review queue Home and the cross-board flow read. Through
+   * `listThreads` each read loaded the doc for its thirty minutes, so a pass
+   * every ten minutes, or a Home read, kept every doc with a thread resident
+   * for good.
    */
-  async warmForThreadReads(
+  peekThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {
+    if (this.peek(docId)) return this.listThreads(docId, filter);
+    let all: Thread[] | undefined;
+    for (const ahead of this.threadsAhead) {
+      all = ahead.get(docId);
+      if (all !== undefined) break;
+    }
+    if (all === undefined) {
+      if (this.indexSaysNoThreads(docId, filter?.status)) return [];
+      all = this.readColdThreads(docId);
+    }
+    return filter?.status ? all.filter((t) => t.status === filter.status) : all;
+  }
+
+  /** What each walk's `readThreadsAhead` read, until that walk drops it.
+   *  One map per walk, so the stall pass and a Home queue read that overlap
+   *  do not end each other's read-ahead. A cold doc cannot change without
+   *  coming into memory, `peekThreads` asks the resident doc first, and a doc
+   *  leaving memory is struck from every map, so nothing here can answer for
+   *  a doc that moved. */
+  private readonly threadsAhead = new Set<Map<string, Thread[]>>();
+
+  /**
+   * Read, ahead of a synchronous walk, the cold docs that walk will ask
+   * `peekThreads` about, handing the loop back between reads. Each value is
+   * the filter the walk will pass, so a doc its index row answers empty for
+   * is skipped, and so is a resident one. Held until the walk calls the
+   * handle's `drop`; `read` is how many docs it read.
+   */
+  async readThreadsAhead(
     targets: ReadonlyMap<string, 'open' | undefined>,
     slice: TimeSlice = timeSlice(),
-  ): Promise<number> {
-    let loaded = 0;
-    for (const [docId, status] of targets) {
-      await slice.yieldIfDue();
-      if (this.stopped) break;
-      if (this.docs.has(docId) || this.indexSaysNoThreads(docId, status)) continue;
-      if (this.resolveDocForRead(docId)) loaded++;
+  ): Promise<ThreadsAhead> {
+    const ahead = new Map<string, Thread[]>();
+    this.threadsAhead.add(ahead);
+    const drop = () => {
+      this.threadsAhead.delete(ahead);
+    };
+    try {
+      for (const [docId, status] of targets) {
+        await slice.yieldIfDue();
+        if (this.stopped) break;
+        if (this.peek(docId) || this.indexSaysNoThreads(docId, status)) continue;
+        ahead.set(docId, this.readColdThreads(docId));
+      }
+    } catch (err) {
+      drop();
+      throw err;
     }
-    return loaded;
+    return { read: ahead.size, drop };
+  }
+
+  /** A doc left memory: what a read-ahead held for it may predate what it
+   *  was while resident. */
+  private forgetThreadsAhead(docId: string): void {
+    for (const ahead of this.threadsAhead) ahead.delete(docId);
+  }
+
+  /** Threads off the `.ydoc` on disk, into a copy nothing keeps. A doc with
+   *  no saved state, or one that cannot be read, has none — what a load
+   *  through `listThreads` would have answered. */
+  private readColdThreads(docId: string): Thread[] {
+    const target = this.catalog.aliasTarget(docId) ?? docId;
+    let bytes: Uint8Array | null;
+    try {
+      bytes = this.state.read(target);
+    } catch (err) {
+      console.error(`[doc-store] failed to read threads of ${target}:`, err);
+      return [];
+    }
+    if (!bytes) return [];
+    const ydoc = new Y.Doc();
+    try {
+      Y.applyUpdate(ydoc, bytes);
+      return listThreadsWithLinks(ydoc);
+    } finally {
+      ydoc.destroy();
+    }
   }
 
   private indexSaysNoThreads(docId: string, status?: 'open' | 'resolved'): boolean {

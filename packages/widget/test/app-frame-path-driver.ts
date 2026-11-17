@@ -9,7 +9,8 @@
  *
  * Three things happen to that frame, with nothing changed in the app: its own
  * script reloads it, the same with the query dropped from the address, and a
- * faded pin on a thread made at another query is tapped.
+ * faded pin on a thread made at another query is tapped, and its popover's
+ * "Show where this was made".
  *
  * Spawned by `app-frame-path.test.ts`, which reads the JSON it prints.
  *
@@ -271,10 +272,14 @@ async function walk(
     () => false,
   );
   // A pin is redrawn with the page, so a press and its release can land on
-  // two elements and make no click.
-  await tapUntil(cdp, frame, dim, `location.search.includes('tab=b')`, 'the faded pin').catch(
-    () => {},
-  );
+  // two elements and make no click. The tap opens the thread where the reader
+  // is; its popover's one action loads the state the thread was made in.
+  const show = Q('.thread-popover .goto');
+  await tapUntil(cdp, frame, dim, `!!${show}`, 'the faded pin')
+    .then(() =>
+      tapUntil(cdp, frame, show, `location.search.includes('tab=b')`, 'Show where this was made'),
+    )
+    .catch(() => {});
   // The widget takes `cw-goto` off the address only with its line to the
   // board working, so this reads that too.
   const pinTapped = await see(

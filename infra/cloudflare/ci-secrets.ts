@@ -29,6 +29,9 @@
  * an input left out (no FLY_API_TOKEN, a config missing from this checkout)
  * would otherwise delete the secret an earlier apply wrote, and the
  * workflows would then skip their deploys without failing.
+ *
+ * Apps' secrets (signin-test.yml's Resend key and Google client) are not
+ * here: `app-secrets.ts` writes them with a GitHub token alone.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';

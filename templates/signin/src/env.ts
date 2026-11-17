@@ -20,4 +20,8 @@ export interface Env {
   TURNSTILE_SECRET_KEY: string;
   /** "log" prints mail to the Worker log. For local development only. */
   MAIL_TRANSPORT?: string;
+  /** Secret. A Resend key that can send from MAIL_FROM's domain. */
+  RESEND_API_KEY?: string;
+  /** The sender, such as `Sign-in <signin@mail.example.com>`. */
+  MAIL_FROM?: string;
 }

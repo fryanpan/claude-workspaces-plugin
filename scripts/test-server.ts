@@ -32,12 +32,20 @@
  * COVERAGE. Each CHUNK writes its own lcov — not each worker: bun rewrites
  * `<coverage-dir>/lcov.info` on every run, so a worker pointed at one
  * directory keeps only its last chunk, which is a coverage number quietly
- * measured from a fraction of the suite. They are concatenated into
- * `<dir>/lcov.info` at the end. That is a legitimate merge for this format:
- * `scripts/coverage.ts` takes the MAXIMUM hit count across records for a
- * line, so a line covered in any worker is covered, and a file no worker
- * loaded is still absent — which is what makes it count as zero rather than
- * disappear from the denominator.
+ * measured from a fraction of the suite. They are merged into
+ * `<dir>/lcov.info` at the end, as ONE record per file: the union of the
+ * lines every chunk reported for it, each at its highest hit count. That is
+ * exactly what `scripts/coverage.ts` computes from the records anyway — it
+ * takes the MAXIMUM hit count across records for a line — so a line covered
+ * in any worker is covered, and a file no worker loaded is still absent,
+ * which is what makes it count as zero rather than disappear from the
+ * denominator.
+ *
+ * One record per file rather than the chunks concatenated, because every
+ * chunk reports every file it loaded: CI's shard of ~50 chunks wrote 58,341
+ * records for 1,155 files, a 76 MB lcov per shard. That was uploaded,
+ * downloaded and parsed on the path every CI verdict waits for. Merged, it is
+ * about 1.6 MB and parses to the same numbers.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -152,7 +160,49 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
-/** Concatenate every chunk's lcov into one. See the header for why that is sound. */
+/**
+ * Lcov texts as one record per file: every `DA:` line any of them reported,
+ * at its highest hit count. Only `SF:` and `DA:` survive — they are all
+ * `scripts/coverage.ts` reads — plus the `LF:`/`LH:` totals of what was kept.
+ */
+export function compactLcov(texts: readonly string[]): string {
+  const files = new Map<string, Map<number, number>>();
+  for (const text of texts) {
+    let lines: Map<number, number> | undefined;
+    for (const raw of text.split('\n')) {
+      const line = raw.trim();
+      if (line.startsWith('SF:')) {
+        const file = line.slice(3);
+        lines = files.get(file);
+        if (!lines) {
+          lines = new Map();
+          files.set(file, lines);
+        }
+      } else if (line.startsWith('DA:') && lines) {
+        const [n, hits] = line.slice(3).split(',');
+        const num = Number(n);
+        if (!Number.isFinite(num)) continue;
+        lines.set(num, Math.max(lines.get(num) ?? 0, Number(hits) || 0));
+      } else if (line === 'end_of_record') {
+        lines = undefined;
+      }
+    }
+  }
+  const out: string[] = [];
+  for (const [file, lines] of files) {
+    out.push(`SF:${file}`);
+    let hit = 0;
+    for (const n of [...lines.keys()].sort((a, b) => a - b)) {
+      const count = lines.get(n) ?? 0;
+      if (count > 0) hit++;
+      out.push(`DA:${n},${count}`);
+    }
+    out.push(`LF:${lines.size}`, `LH:${hit}`, 'end_of_record');
+  }
+  return out.length === 0 ? '' : `${out.join('\n')}\n`;
+}
+
+/** Merge every chunk's lcov into one. See the header for why that is sound. */
 export function mergeLcov(dirs: string[], outDir: string): number {
   const parts: string[] = [];
   for (const dir of dirs) {
@@ -160,7 +210,7 @@ export function mergeLcov(dirs: string[], outDir: string): number {
     if (existsSync(p)) parts.push(readFileSync(p, 'utf8'));
   }
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'lcov.info'), parts.join(''));
+  writeFileSync(join(outDir, 'lcov.info'), compactLcov(parts));
   return parts.length;
 }
 

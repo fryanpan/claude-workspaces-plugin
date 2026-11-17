@@ -6,14 +6,18 @@
  *
  *   { "boards": { "<boardId>": { "repos": [
  *       { "repo": "owner/name" },
- *       { "repo": "owner/other", "approval": true } ] } } }
+ *       { "repo": "owner/other", "approval": true },
+ *       { "repo": "outside-org/app", "workflowApprovers": "editors" } ] } } }
  *
  * A push goes through without a person unless its repo says
  * `"approval": true`, which holds every push to it. Whatever the flag, a
  * push that touches `.github/` waits for a person (`pusher.ts`): a workflow
  * runs with the repo's Actions secrets once it lands, and GitHub cannot stop
  * a deploy key from writing one on a public repo, so that check is the only
- * one there is.
+ * one there is. Only the board's owner may release that hold, unless the
+ * repo says `"workflowApprovers": "editors"`: the operator writes that for an
+ * outside org's own repo, whose secrets are the org's, so its own editors
+ * approve its workflow changes.
  *
  * No route writes it. The operator edits it on the machine: on the Mac in
  * prod's data dir, which a walled lead's profile denies; on a project
@@ -32,7 +36,15 @@ export interface RepoRule {
   repo: string;
   /** Hold every push for a person's answer on a review item. False unless the file says true. */
   approval: boolean;
+  /**
+   * Who may approve a push that changes `.github/`: the board's owner, or
+   * any member who may edit the board. `owner` unless the file says
+   * `editors`.
+   */
+  workflowApprovers: WorkflowApprovers;
 }
+
+export type WorkflowApprovers = 'owner' | 'editors';
 
 /** `owner/name`: GitHub's own character set, no dot-only segment. */
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
@@ -75,9 +87,15 @@ export function parsePolicy(text: string): Map<string, RepoRule[]> | null {
     for (const r of repos) {
       const repo = (r as { repo?: unknown } | null)?.repo;
       const approval = (r as { approval?: unknown }).approval;
+      const approvers = (r as { workflowApprovers?: unknown }).workflowApprovers;
       if (typeof repo !== 'string' || !isRepoName(repo)) return null;
       if (approval !== undefined && typeof approval !== 'boolean') return null;
-      rules.push({ repo, approval: approval === true });
+      if (approvers !== undefined && approvers !== 'owner' && approvers !== 'editors') return null;
+      rules.push({
+        repo,
+        approval: approval === true,
+        workflowApprovers: approvers === 'editors' ? 'editors' : 'owner',
+      });
     }
     out.set(boardId, rules);
   }

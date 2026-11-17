@@ -13,6 +13,7 @@ import type { PresenceSpot } from '@claude-workspaces/core/workspace-presence';
 import { navFromPath } from '../board/board-presence-model.ts';
 import type { BoardNav, PresenceChip } from '../board/board-presence-model.ts';
 import { type RoomStates, spotOfParticipant } from './follow-model.ts';
+import { roomColours, soloColour } from './presence-colours.ts';
 
 /** The page's own title, beside `spot` in its awareness state, so a person on
  *  another page reads "On Riverbend launch plan" rather than an id. */
@@ -106,13 +107,20 @@ function agentNameOf(spot: PresenceSpot): string | undefined {
 
 /**
  * Each chip with `here` (on the reader's page), `line` (the row's words),
- * `page` (the name of their page) and `place` (the card's sentence). A
+ * `page` (the name of their page), `place` (the card's sentence) and `color`
+ * (`presence-colours.ts`). A
  * participant the room has no spot for (an agent that has not pointed
  * anywhere yet) is elsewhere: the reader cannot see them here.
  */
 export function placeChips(chips: PresenceChip[], ctx: PlaceContext): PresenceChip[] {
   const titles = new Map([...(ctx.titles ?? []), ...titlesFromStates(ctx.states)]);
-  return chips.map((chip) => {
+  const colours = roomColours(
+    ctx.states,
+    ctx.selfClientId,
+    chips.map((c) => c.key),
+  );
+  return chips.map((plain) => {
+    const chip = { ...plain, color: colours.get(plain.key) ?? soloColour(plain.key) };
     if (chip.self) return chip;
     const spot = spotOfParticipant(ctx.states, chip.key, ctx.selfClientId);
     if (!spot) {

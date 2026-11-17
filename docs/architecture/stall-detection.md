@@ -117,9 +117,17 @@ or by an agent the roster cannot place parks nobody, and a linked doc's plain
 COMMENTS
 and edits still count for every task that links it — that exoneration expires
 with the quiet window rather than lasting as long as a question does. Reading
-those threads goes through `docStore.listThreads`, which hydrates an evicted doc
-from disk rather than peeking, so a board whose tasks link many cold docs pulls
-them back into memory on the loop's schedule.
+those threads, and every other thread the pass reads, goes through
+`docStore.peekThreads`, which answers a doc that is not in memory from its
+`.ydoc` decoded into a throwaway copy and leaves it out of memory. Before
+that the pass loaded every doc it read, done tasks included, and since it runs
+every ten minutes against a thirty-minute residency window, no doc with a
+thread was ever released. A done task's body is not read at all: the
+classifier judges only `todo` and `in-progress` rows. The timed pass decodes
+the cold docs ahead of the synchronous scan, a slice at a time
+(`readThreadsAhead`), so the scan itself does no disk reads for them. Each
+walk holds its own read-ahead until it drops it, so the Home review queue,
+which reads every board's threads the same way, cannot end the pass's.
 
 **Task notes count as movement.** A task's quiet time is measured from the
 newest of: its status change, its last workspace event, its last thread

@@ -494,6 +494,9 @@ export interface PresenceChip {
   /** Where they are as the card says it: the page, and what they are
    *  reading or pointing at there. */
   place?: string;
+  /** The colour they wear on every page (`presence/presence-colours.ts`).
+   *  Absent until a page has placed it. */
+  color?: string;
 }
 
 /** What the attachments read says about plugin versions. */
@@ -759,24 +762,6 @@ export function initialsOf(name: string): string {
       .join('')
       .toUpperCase() || '?'
   );
-}
-
-/** Deterministic hue from a label, so the same person wears the same colour
- *  on every paint and every viewer's screen without a stored palette. The
- *  "(you)" suffix is stripped first — you and the person watching you must
- *  agree on your colour. */
-export function presenceHue(label: string): number {
-  const base = label.replace(/\s*\(you\)$/, '');
-  let h = 0;
-  for (const ch of base) h = (h * 31 + (ch.codePointAt(0) ?? 0)) % 360;
-  return h;
-}
-
-/** A chip's hue. A person's comes from their name; an agent's from its id,
- *  because an agent's label moves from its id to the name it points under
- *  the first time it points, and its colour must not move with it. */
-export function chipHue(chip: Pick<PresenceChip, 'kind' | 'key' | 'label'>): number {
-  return presenceHue(chip.kind === 'agent' && chip.key.startsWith('a-') ? chip.key : chip.label);
 }
 
 /**

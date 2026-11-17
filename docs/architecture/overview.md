@@ -56,7 +56,7 @@ flowchart TB
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)<br/>token-drop/ (prod only: a service token CI rotated, sealed to the Mac's key, into the Keychain)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · direct-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)<br/>token-drop/ (prod only: a service token CI rotated, sealed to the Mac's key, into the Keychain)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · supervisor-stop.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · heap-probe.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · spend-alarm.ts · page-loads.ts"]
   end
@@ -164,6 +164,27 @@ Worker on D1, spreads into its own Better Auth config too, so hashing,
 verification and session rules have one source. `server/test/app-kit.test.ts` makes,
 builds and runs an app outside the repo and syncs a doc between two of its
 pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
+
+**A Cloudflare Worker app hosts the same core in its own Durable Objects**
+(kit 0.3.0). `packages/app-kit/src/do/` wraps the room host for the
+hibernation API: each socket's grant rides in its attachment, so a woken
+instance re-attaches every socket with its role, and the doc saves to the
+object's SQLite inside the message that changed it. `src/markdown-file/`
+holds a doc whose record is a file the app loads and saves itself, with the
+save debounce on the object's alarm so an eviction cannot drop it.
+`src/agent/` names an agent session as a principal (`agent:<sessionId>`) and
+gives the app's tool dispatch two edits, `editDoc` and `setTile`.
+`src/client/` is the page side (moved out of the template, which re-exports
+it), and `scripts/build-client.ts` prebuilds it as `cw-collab.js` for a page
+with no bundler. `src/text/` holds `splice`, which the page, the file merge
+and the agent's edit share; it imports nothing, so the server half pulls in
+no DOM code. Since 0.3.1 the tarball ships compiled `.js` and `.d.ts`
+(`scripts/compile-lib.ts`), so an outside app needs no
+`allowImportingTsExtensions`, and Web Awesome is an optional peer that only
+`./theme.css` needs. The tests in `packages/app-kit/test/` run real Workers in a
+local workerd through Miniflare, hibernation included; `outside-app.test.ts`
+installs the tarball beside a Worker app with a plain tsconfig and checks its
+typecheck and server bundle.
 
 **Workspaces runs a board on the core when two switches say so** (D1 step
 5). `server/src/collab-core-switch.ts` holds the per-board setting
@@ -1475,6 +1496,19 @@ reaches the lead as a request. The server writes the speech watch
 (`core/src/page-speech.ts`, a new top-level core module) into every mock, app
 and doc-file frame, and `lead-chat/page-speech.ts` reads what the frames
 post; the reasons are in [app-voice](app-voice.md).
+
+**Messages (M10).** The board's Messages item opens that same chat, and the
+chat's heading is a channel picker (`lead-chat/lead-chat-channels.ts`, wired
+by `lead-chat-channel-wiring.ts`). `#general` is the board's lead chat as
+above. The reader's own lead agent (`/api/me/messages`) and each other person
+on the board are one-to-one channels, read by `lead-chat/dm-client.ts` over
+the reader's own person stream. Person-to-person messages are
+`server/src/direct-messages.ts` (a new top-level module: one log per pair
+under `direct-messages/`, the private-message store's format) behind
+`routes/direct-messages.ts` at `/workspaces/<ws>/me/dm`, which only a proven
+person on the board reaches; a send is framed `direct.message` to the two
+people's own streams and to no agent. The shapes are
+`core/src/direct-messages.ts` (a new top-level core module).
 
 **Tab titles.** Every page's browser tab starts with its workspace's name,
 then the page's own name (`Harborlight · tides.md · Workspaces`), so several
@@ -2874,6 +2908,28 @@ which it sets to the chart's height (`plotHeight`) before Plot arrives, so
 the doc does not move when it does. It fetches Plot and `buildPlot`
 from `/app/plot/plot.js` the first time a doc shows one, for KaTeX's reason
 below; `plot-entry.ts` is what the build compiles to that path.
+A `<StreetMap>` is read by name the same way. Core's `map-spec.ts` turns its
+literal props, and the JSON file its `src` names beside the doc, into a
+spec (markers, radius rings in feet, category-coloured points, legend
+entries); core's `map-basemaps.ts` is the list of street maps a tag may name
+by key, with the origins each loads tiles from, and is the one place a
+provider is added. `mdx-street-map.ts` reads the `src` file through the
+doc's files route, draws the legend, and fetches Leaflet from
+`/app/map/map.js` (built from `map-entry.ts`) and its stylesheet the first
+time a doc shows a map; markers and rings are SVG paths, points one canvas.
+The files route serves a `src` file only when a `<StreetMap>` in the doc's
+live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
+`google` is the one keyed basemap and the default for a tag that names
+none: `mdx-street-map.ts` asks `routes/doc-map-key.ts` for the key, which the
+server answers only while the doc's live content draws
+on that basemap (`doc-file-scope.ts` `mapBasemapsNamed`), and draws on
+OpenStreetMap when it gets none, with a line saying why if the tag named
+Google itself. The server reads that key once at boot in `google-maps-key.ts`,
+from `CW_GOOGLE_MAPS_KEY` or else the mode-600 file `infra/gcp-maps` writes
+under prod's boot-disk root. `map-google.ts`, in the same chunk, loads
+Google's Maps JavaScript API with that key and puts its tiles under the
+Leaflet layers through GoogleMutant, which reads the global `L` that
+`leaflet-global.ts` sets.
 
 An agent reaches a doc's components through `doc-components-agent.ts`, in the
 doc-store group's `doc-*.ts` glob, and so does not move the picture. It lists

@@ -689,6 +689,11 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // (`routes/upgrade-stream.ts`). Every comment on it is on a board that
   // person is a member of (`addressees.ts`).
   'me/events:stream': ['GET'],
+  // One person's direct messages with another person on this board
+  // (`routes/direct-messages.ts`). The route answers only for the person the
+  // request proved, and only about people this same board admits, so a
+  // member reaches nobody here they could not already see in its audience.
+  'me/dm': ['GET', 'POST'],
 };
 
 /** The per-task verbs, under `/workspaces/<id>/tasks/<taskId>/`. See BOARD_MEMBER_ROUTES. */
@@ -1397,6 +1402,14 @@ function docSubrouteAllowed(sub: string, method: string): boolean {
    * what the doc displays.
    */
   if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
+  /**
+   * The key a `<StreetMap>` on Google in the doc draws with
+   * (`routes/doc-map-key.ts`), answered only while the doc's live content
+   * draws on that basemap. A read, on a doc already inside the shared board:
+   * the map is part of what the doc displays, and the key is a browser key
+   * Google restricts to the board's site.
+   */
+  if (sub.startsWith('map-key/')) return method === 'GET';
   /**
    * A built component of an `.mdx` doc (`routes/doc-components.ts`), served
    * only while the doc's own build map names it. Reads only, on a doc already

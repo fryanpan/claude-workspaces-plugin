@@ -3,7 +3,9 @@
  * `bun run deploy:staging [app] [--region <r>] [--url <u>] [--started-at <ms>] [--dry-run]`:
  * put this app on Fly at https://<app>.fly.dev and wait until it answers.
  *
- *   app        default `<package name>-staging`
+ *   app        default `<package name>-staging`. Any name must end in
+ *              `-staging`, the suffix new-app gives every staging app, so a
+ *              deploy cannot land on an app in the org that is not one.
  *   --region   where the app, its volume and its machine go; default sjc
  *   --url      the address to wait on; default https://<app>.fly.dev/health
  *   --started-at  when the timed run began, in epoch ms; default now. The
@@ -34,6 +36,8 @@ const ROOT = join(import.meta.dirname, '..');
 
 /** Fly's rule for an app name: what `app` may be. */
 const APP_NAME = /^[a-z0-9][a-z0-9-]{1,62}$/;
+/** The suffix new-app gives a staging app (`<dir name>-staging`); the only apps this deploys to. */
+export const STAGING_SUFFIX = '-staging';
 const REGION = /^[a-z]{3}$/;
 /** fly.toml's `[mounts] source`. */
 export const VOLUME = 'app_data';
@@ -73,6 +77,11 @@ export function parseArgs(argv: string[], pkgName: string): Options {
     else app = arg;
   }
   if (!APP_NAME.test(app)) throw new Error(`not a Fly app name: ${JSON.stringify(app)}`);
+  if (!app.endsWith(STAGING_SUFFIX)) {
+    throw new Error(
+      `refusing to deploy to ${JSON.stringify(app)}: not a staging app. This deploys only to apps whose name ends in "${STAGING_SUFFIX}", the name new-app gives one, so it cannot overwrite another app in the org`,
+    );
+  }
   if (!REGION.test(region)) throw new Error(`not a Fly region: ${JSON.stringify(region)}`);
   return { app, region, url: url || `https://${app}.fly.dev/health`, dryRun, startedAt };
 }

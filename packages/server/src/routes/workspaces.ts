@@ -17,6 +17,7 @@
  * the DELETE. Each entry point is called from the position its routes
  * occupied, so nothing overtakes anything.
  */
+import { handleDirectMessageRoutes } from './direct-messages.ts';
 import { handleWorkspaceAttachments } from './workspace-attachments.ts';
 import { handleWorkspaceContent } from './workspace-content.ts';
 import { handleWorkspaceDelete } from './workspace-delete.ts';
@@ -65,6 +66,9 @@ export async function handleWorkspaceRoutes(
     // The board's chat with its lead. Anchored on its one `lead-chat`
     // segment; position carries no behaviour.
     (await handleWorkspaceLeadChat(ctx, rq)) ??
+    // One person's messages to another on this board. Anchored on its one
+    // `me/dm` path; position carries no behaviour.
+    (await handleDirectMessageRoutes(ctx.directMessages, rq)) ??
     // An agent's pointer. Anchored on its one `point` segment; position
     // carries no behaviour.
     (await handleWorkspacePoint(ctx, rq)) ??

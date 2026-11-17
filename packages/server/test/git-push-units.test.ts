@@ -45,7 +45,7 @@ const FAKE = 'fake-push-credential-for-tests-only';
 const KEY_A = `-----BEGIN OPENSSH PRIVATE KEY-----\n${'b3BlbnNzaC1rZXktdjEAAAAA'.repeat(3)}\nZmFrZS1rZXktZm9yLXRlc3RzLW9ubHk=\n-----END OPENSSH PRIVATE KEY-----\n`;
 
 describe('the push policy', () => {
-  it('reads each board’s repos and approval flags, approval only when asked for, and nothing malformed', () => {
+  it('reads each board’s repos, approval flags and workflow approvers, each only when asked for, and nothing malformed', () => {
     const rules = parsePolicy(
       JSON.stringify({
         boards: {
@@ -54,16 +54,21 @@ describe('the push policy', () => {
               { repo: 'Harborlight/notes' },
               { repo: 'Harborlight/app', approval: true },
               { repo: 'Harborlight/docs', approval: false },
+              { repo: 'Riverbend/app', workflowApprovers: 'editors' },
+              { repo: 'Saltmarsh/app', workflowApprovers: 'owner' },
             ],
           },
         },
       }),
     );
     expect(rules?.get('harbor')).toEqual([
-      // Approval is opt-in: only an explicit true holds every push.
-      { repo: 'Harborlight/notes', approval: false },
-      { repo: 'Harborlight/app', approval: true },
-      { repo: 'Harborlight/docs', approval: false },
+      // Approval is opt-in: only an explicit true holds every push. A
+      // workflow change is the owner's to approve unless the rule says editors.
+      { repo: 'Harborlight/notes', approval: false, workflowApprovers: 'owner' },
+      { repo: 'Harborlight/app', approval: true, workflowApprovers: 'owner' },
+      { repo: 'Harborlight/docs', approval: false, workflowApprovers: 'owner' },
+      { repo: 'Riverbend/app', approval: false, workflowApprovers: 'editors' },
+      { repo: 'Saltmarsh/app', approval: false, workflowApprovers: 'owner' },
     ]);
     for (const bad of [
       'not json',
@@ -71,6 +76,8 @@ describe('the push policy', () => {
       '{"boards":[]}',
       '{"boards":{"w":{"repos":[{"repo":"../etc"}]}}}',
       '{"boards":{"w":{"repos":[{"repo":"a/b","approval":"yes"}]}}}',
+      '{"boards":{"w":{"repos":[{"repo":"a/b","workflowApprovers":"anyone"}]}}}',
+      '{"boards":{"w":{"repos":[{"repo":"a/b","workflowApprovers":true}]}}}',
     ])
       expect(parsePolicy(bad)).toBeNull();
   });

@@ -71,22 +71,22 @@ function joinBoard(board: Booted, user: { id: string; name: string }) {
 /** What a reader can tell about each circle of the deck: who, which face,
  *  which ring. */
 function strip() {
-  return [...el('board-people').querySelectorAll<HTMLElement>('.board-presence-deck > *')].map(
-    (b) => {
-      const avatar = b.querySelector('wa-avatar');
-      return {
-        label: b.getAttribute('data-key'),
-        kind: b.classList.contains('board-presence-agent') ? 'agent' : 'person',
-        following: b.classList.contains('board-following'),
-        // What the avatar drew in its shadow root, not the property it was
-        // handed: a component that never rendered would still hold the prop.
-        initials: avatar
-          ? avatar.shadowRoot?.querySelector('[part="initials"]')?.textContent
-          : b.textContent,
-        shape: avatar?.getAttribute('shape') ?? null,
-      };
-    },
-  );
+  return [
+    ...el('board-people').querySelectorAll<HTMLElement>('.board-presence-deck > [data-key]'),
+  ].map((b) => {
+    const avatar = b.querySelector('wa-avatar');
+    return {
+      label: b.getAttribute('data-key'),
+      kind: b.classList.contains('board-presence-agent') ? 'agent' : 'person',
+      following: b.classList.contains('board-following'),
+      // What the avatar drew in its shadow root, not the property it was
+      // handed: a component that never rendered would still hold the prop.
+      initials: avatar
+        ? avatar.shadowRoot?.querySelector('[part="initials"]')?.textContent
+        : b.textContent,
+      shape: avatar?.getAttribute('shape') ?? null,
+    };
+  });
 }
 
 /** The row standing for `name` in the list the deck opens. */
