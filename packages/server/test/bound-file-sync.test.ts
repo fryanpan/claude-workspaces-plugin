@@ -7,7 +7,7 @@
  * side with a board agent token minted on the target, as the Mac would.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { type ChildProcess, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -22,16 +22,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { exportBoard, importBoard } from '../../../infra/project-machine/board-bundle.ts';
 import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { startBoardSync } from '../src/bound-file-sync/board-sync.ts';
 import { loadSyncConfig, parseSyncConfig } from '../src/bound-file-sync/sync-config.ts';
 import { boundFiles } from '../src/slow-fs.ts';
+import { bootBin, stopBin as stop } from './boot-bin.ts';
 import { waitFor } from './wait-for.ts';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const scratch = mkdtempSync(join(tmpdir(), 'cw-bound-sync-'));
 const children: ChildProcess[] = [];
 const stops: (() => void)[] = [];
@@ -42,50 +41,9 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-async function boot(dataDir: string): Promise<{ base: string; child: ChildProcess }> {
-  const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  const child = spawn(
-    'bun',
-    [
-      'run',
-      join(repoRoot, 'packages/server/src/bin.ts'),
-      '--port',
-      String(port),
-      '--host',
-      '127.0.0.1',
-      '--data-dir',
-      dataDir,
-    ],
-    {
-      cwd: repoRoot,
-      stdio: 'ignore',
-      env: { ...process.env, CW_SUMMARIES: '0', HOME: join(scratch, 'home') },
-    },
-  );
-  children.push(child);
-  const base = `http://127.0.0.1:${port}`;
-  await waitFor(
-    async () => {
-      try {
-        return (await fetch(`${base}/api/deploy`, { headers: { host: `localhost:${port}` } }))
-          .status > 0
-          ? true
-          : null;
-      } catch {
-        return null;
-      }
-    },
-    { timeout: 30_000, interval: 100, describe: 'the server to answer on loopback' },
-  );
-  return { base, child };
-}
-
-async function stop(child: ChildProcess): Promise<void> {
-  const exited = new Promise<void>((r) => child.once('exit', () => r()));
-  child.kill('SIGTERM');
-  await exited;
+/** A real server on the data dir, on a port it picks itself (see boot-bin.ts). */
+function boot(dataDir: string) {
+  return bootBin({ dataDir, children, env: { HOME: join(scratch, 'home') } });
 }
 
 function api(base: string) {

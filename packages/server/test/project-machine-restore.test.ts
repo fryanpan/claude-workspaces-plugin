@@ -15,7 +15,7 @@
  * Keys are generated inside the test. Nothing leaves loopback.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { type ChildProcess, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateSnapshotKeys } from '../../../infra/project-machine/snapshot.ts';
+import { bootBin, stopBin as stop } from './boot-bin.ts';
 import { waitFor } from './wait-for.ts';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -43,50 +44,9 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-async function freePort(): Promise<number> {
-  const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  if (port === undefined) throw new Error('no port from the probe server');
-  return port;
-}
-
-async function boot(dataDir: string): Promise<{ base: string; child: ChildProcess }> {
-  const port = await freePort();
-  const child = spawn(
-    'bun',
-    [
-      'run',
-      join(repoRoot, 'packages', 'server', 'src', 'bin.ts'),
-      '--port',
-      String(port),
-      '--host',
-      '127.0.0.1',
-      '--data-dir',
-      dataDir,
-    ],
-    { cwd: repoRoot, stdio: 'ignore', env: { ...process.env, CW_SUMMARIES: '0' } },
-  );
-  children.push(child);
-  const base = `http://127.0.0.1:${port}`;
-  await waitFor(
-    async () => {
-      try {
-        const res = await fetch(`${base}/api/deploy`, { headers: { host: `localhost:${port}` } });
-        return res.status > 0 ? true : null;
-      } catch {
-        return null;
-      }
-    },
-    { timeout: 30_000, interval: 100, describe: 'the server to answer on loopback' },
-  );
-  return { base, child };
-}
-
-async function stop(child: ChildProcess): Promise<void> {
-  const exited = new Promise<void>((r) => child.once('exit', () => r()));
-  child.kill('SIGTERM');
-  await exited;
+/** A real server on the data dir, on a port it picks itself (see boot-bin.ts). */
+function boot(dataDir: string) {
+  return bootBin({ dataDir, children });
 }
 
 function api(base: string) {
