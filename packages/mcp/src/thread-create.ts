@@ -7,6 +7,7 @@
  * about the task, and a fresh task's description is empty — there is nothing
  * in it to find.
  */
+import type { ThreadByFindBody, ThreadCreateBody } from '../../server/src/index.ts';
 
 export interface ThreadCreateInput {
   docId: string;
@@ -25,11 +26,27 @@ export interface ThreadCreateInput {
    *  server validates it and refuses a malformed one, so a shape check here
    *  would be a second copy of one rule, free to drift from the first. */
   review?: unknown;
+  /** Who the comment is for: ids, emails or names. Passed through; the
+   *  server resolves each against the board's roster and refuses the rest. */
+  to?: unknown;
 }
 
-export interface ThreadCreateRequest {
-  path: string;
-  body: Record<string, unknown>;
+/**
+ * Which endpoint, and the body it takes. `by` is what `create_thread` switches
+ * on to call the typed client; `path` is the address that call reaches.
+ */
+export type ThreadCreateRequest =
+  | { by: 'subject'; path: string; body: ThreadCreateBody }
+  | { by: 'find'; path: string; body: ThreadByFindBody };
+
+/**
+ * The body with its absent fields left out, as the server has always been
+ * sent it. Every field is still NAMED at the call: a spread of a conditional
+ * literal escapes the excess-property check, so a field the server renamed
+ * would go on typechecking.
+ */
+function present<T extends object>(body: T): T {
+  return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) as T;
 }
 
 export function threadCreateRequest(
@@ -46,27 +63,31 @@ export function threadCreateRequest(
   // comment on the whole document.
   if (input.find === undefined) {
     return {
+      by: 'subject',
       path: `${board}/docs/${doc}/threads`,
-      body: {
+      body: present<ThreadCreateBody>({
         author,
         text: input.text,
         anchor: { kind: 'subject' },
-        ...(input.review !== undefined ? { review: input.review } : {}),
-      },
+        review: input.review,
+        to: input.to,
+      }),
     };
   }
   return {
+    by: 'find',
     path: `${board}/docs/${doc}/threads/by_find`,
-    body: {
+    body: present<ThreadByFindBody>({
       author,
       text: input.text,
       find: input.find,
-      ...(input.contextBefore !== undefined ? { contextBefore: input.contextBefore } : {}),
-      ...(input.contextAfter !== undefined ? { contextAfter: input.contextAfter } : {}),
-      ...(input.occurrence !== undefined ? { occurrence: input.occurrence } : {}),
-      ...(input.path !== undefined ? { path: input.path } : {}),
-      ...(input.suggest !== undefined ? { suggest: input.suggest } : {}),
-      ...(input.review !== undefined ? { review: input.review } : {}),
-    },
+      contextBefore: input.contextBefore,
+      contextAfter: input.contextAfter,
+      occurrence: input.occurrence,
+      path: input.path,
+      suggest: input.suggest,
+      review: input.review,
+      to: input.to,
+    }),
   };
 }

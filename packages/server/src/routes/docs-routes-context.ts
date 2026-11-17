@@ -22,6 +22,7 @@ import type {
   User,
   suggestOps,
 } from '@claude-workspaces/core';
+import type { AddresseeResult } from '../addressees.ts';
 import type { AgentSpots } from '../agent-spots.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
@@ -31,9 +32,10 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { LinkedDockItem } from '../mockup-linked-items.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
-import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
+import type { GateRunOpts, HeldFields, ThreadReviewGate } from '../review-gate-types.ts';
 import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
+import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -41,6 +43,8 @@ import type { BoardWorkspace, Task, TaskStore } from '../tasks.ts';
 import type { ThreadOpenerProofs } from '../thread-opener-proofs.ts';
 import type { ThreadRequestDedup } from '../thread-request-dedup.ts';
 import type { createWebhookDispatcher } from '../webhooks.ts';
+import type { ScopedEditFields } from './doc-threads-contract.ts';
+import type { Sent } from './route-contract.ts';
 
 export type { ThreadReviewGate };
 
@@ -89,7 +93,7 @@ export function parsePlacement(
  *  judge it by, and whether the caller confirmed writing over a person's
  *  change. Used by both `doc-threads-routes.ts` and `doc-edit-routes.ts`. */
 export function scopedEditGuard(
-  body: Record<string, unknown> | null,
+  body: Sent<ScopedEditFields> | null,
   authorFor: (claimed: unknown) => User | undefined,
 ): ScopedEditGuard {
   const reader = authorFor(body?.author)?.id;
@@ -142,6 +146,12 @@ export interface DocRoutesContext {
   summarizer: ThreadSummarizer | null;
   /** The data directory — read for the mockup capture's output path. */
   dataDir: string;
+  /** File an access card for the owner's approval (`share/access-proposals.ts`):
+   *  the component folder grant's only path. Absent, nothing is filed. */
+  proposeAccess?: AccessProposals['propose'];
+  /** The Google Maps browser key, for `routes/doc-map-key.ts`. Absent, a
+   *  Google map draws on its fallback. */
+  googleMapsKey?: string;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -163,6 +173,9 @@ export interface DocRoutesContext {
   ) => { id: string; name: string } | null;
   /** The board a doc belongs to, or null. */
   resolveWorkspaceForDoc: (docId: string) => string | null;
+  /** A comment's `to`, resolved against the roster of the boards this doc is
+   *  on (`addressees.ts`). Absent `to` answers ok with no addressees. */
+  addresseesFor: (docId: string, to: unknown) => AddresseeResult;
   /** Anyone besides the owner can reach the board: a share link, a member
    *  who redeemed one, or a share. */
   boardIsShared: (workspaceId: string) => boolean;
@@ -233,7 +246,7 @@ export interface DocRoutesContext {
     author: User,
   ) => Promise<ThreadReviewGate>;
   /** The response fields a filing route adds when the gate held the item. */
-  heldFields: (gate: ThreadReviewGate | undefined) => Record<string, unknown>;
+  heldFields: (gate: ThreadReviewGate | undefined) => HeldFields;
   /** Replace a task's body markdown through the body doc. */
   rewriteTaskBody: (
     task: Task,

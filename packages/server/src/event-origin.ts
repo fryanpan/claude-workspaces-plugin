@@ -26,7 +26,13 @@
  * `redactBoardEventForVisitor`, and never logged.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { GEO_COOKIE, type GeoPoint, TOUCH_COOKIE, parseGeoCookie } from '@claude-workspaces/core';
+import {
+  GEO_COOKIE,
+  type GeoPoint,
+  TOUCH_COOKIE,
+  type User,
+  parseGeoCookie,
+} from '@claude-workspaces/core';
 
 /** The four kinds Weekly Review buckets by. A Mac is `desktop`. */
 export type DeviceKind = 'ipad' | 'phone' | 'desktop' | 'other';
@@ -46,6 +52,8 @@ export interface EventOrigin {
 interface OriginContext {
   origin: EventOrigin;
   open: boolean;
+  /** Who the request proved, set once attribution has run. */
+  author?: () => User | null;
 }
 
 const store = new AsyncLocalStorage<OriginContext>();
@@ -120,6 +128,22 @@ export async function withEventOrigin<T>(origin: EventOrigin, fn: () => Promise<
 export function currentEventOrigin(): EventOrigin {
   const ctx = store.getStore();
   return ctx?.open ? ctx.origin : {};
+}
+
+/**
+ * Record who the in-flight request proved, for writers below the route that
+ * see no request (`doc-history/recorder.ts`). `author` is the attribution's
+ * own `provenAuthor`: a proof, never a name the body claimed.
+ */
+export function setRequestAuthor(author: () => User | null): void {
+  const ctx = store.getStore();
+  if (ctx?.open) ctx.author = author;
+}
+
+/** Who the in-flight request proved, or null outside one or when it proved nobody. */
+export function currentRequestAuthor(): User | null {
+  const ctx = store.getStore();
+  return ctx?.open && ctx.author ? ctx.author() : null;
 }
 
 /**

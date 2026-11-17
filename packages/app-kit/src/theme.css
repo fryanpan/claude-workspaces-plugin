@@ -1,0 +1,6 @@
+/*
+ * The shared theme, as the app kit package exports it. In this repo it
+ * imports the board's theme file; `scripts/pack.ts` replaces this file with
+ * a copy of it.
+ */
+@import "../../workspaces-app/src/wa-theme.css";

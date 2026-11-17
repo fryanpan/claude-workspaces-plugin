@@ -481,6 +481,22 @@ export interface PresenceChip {
    *  identity: it is minted fresh on every connect. */
   clientId?: number;
   state?: PresenceAgent['state'];
+  /** The reader's own chip. The strip draws the reader nowhere: the "me"
+   *  button beside it already does. */
+  self?: boolean;
+  /** On the reader's page, as opposed to elsewhere in the workspace
+   *  (`presence/presence-places.ts`). Absent until a page has placed it. */
+  here?: boolean;
+  /** Where they are, in words, for the strip's list. */
+  line?: string;
+  /** The name of the page they are on ("Library", "quay.md"). */
+  page?: string;
+  /** Where they are as the card says it: the page, and what they are
+   *  reading or pointing at there. */
+  place?: string;
+  /** The colour they wear on every page (`presence/presence-colours.ts`).
+   *  Absent until a page has placed it. */
+  color?: string;
 }
 
 /** What the attachments read says about plugin versions. */
@@ -748,17 +764,6 @@ export function initialsOf(name: string): string {
   );
 }
 
-/** Deterministic hue from a label, so the same person wears the same colour
- *  on every paint and every viewer's screen without a stored palette. The
- *  "(you)" suffix is stripped first — you and the person watching you must
- *  agree on your colour. */
-export function presenceHue(label: string): number {
-  const base = label.replace(/\s*\(you\)$/, '');
-  let h = 0;
-  for (const ch of base) h = (h * 31 + (ch.codePointAt(0) ?? 0)) % 360;
-  return h;
-}
-
 /**
  * WHO a presence entry is, as opposed to which connection it arrived over.
  *
@@ -859,6 +864,7 @@ export function presenceChips(
       title: `${p.name} · in ${where} · ${timeAgo(p.lastActive, now)}`,
       docId: p.docId,
       clientId: p.clientId,
+      ...(p.self ? { self: true } : {}),
     });
   }
   // Attached is not present. A session that exited keeps its roster row —

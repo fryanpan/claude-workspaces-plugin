@@ -39,7 +39,9 @@ export type HoldKind =
   | 'token.move'
   | 'access.open'
   | 'move.grant'
-  | 'cloudflare.apply'
+  | 'github.secrets'
+  | 'cloudflare.sync'
+  | 'service-token.rotate'
   | 'other';
 
 export type Verdict =
@@ -458,7 +460,8 @@ export function classifyCloudflare(
     return { kind: 'refused', reason: 'a write under tokens mints a credential for the requester' };
   }
   // Making, rotating or refreshing an Access service token answers with its
-  // secret. Only `cf:apply`'s mint step makes one (`keeper-terraform.ts`).
+  // secret. Only a config sync makes one (`keeper-cf-sync.ts`) and only the
+  // rotate request rotates one (`keeper-rotate.ts`), each on its own tap.
   if (segments.some((s) => s.toLowerCase() === 'service_tokens')) {
     return {
       kind: 'refused',

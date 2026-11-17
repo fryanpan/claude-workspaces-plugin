@@ -15,6 +15,7 @@ import { type DocMeta, type User, createThread } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { DocCatalog, type DocCatalogHost } from '../src/doc-catalog.ts';
 import { DOC_INDEX_VERSION, type DocIndexEntry } from '../src/doc-index.ts';
+import { DiskDocStateStore } from '../src/doc-state/disk.ts';
 import type { LiveDoc } from '../src/doc-store.ts';
 
 const harborlight: User = {
@@ -65,7 +66,7 @@ let owed: boolean;
 function makeCatalog(): DocCatalog {
   const host: DocCatalogHost = {
     dataDir: () => dataDir,
-    ydocPath: (docId) => join(dataDir, `${docId}.ydoc`),
+    docState: () => new DiskDocStateStore(dataDir),
     residentDoc: (docId) => resident.get(docId),
     residentDocs: () => resident.values(),
     hasPendingSave: (docId) => pendingSaves.has(docId),

@@ -21,7 +21,9 @@
  * about tasks.
  */
 import type { FeedbackClient, User } from '@claude-workspaces/core';
+import { PERSON_SPOT_FIELD, parseSpot } from '@claude-workspaces/core/workspace-presence';
 import type { BootLocation } from '../boot-env.ts';
+import { placeChips, spotLabel } from '../presence/presence-places.ts';
 import type { BoardState } from './board-actions.ts';
 import {
   type DriftNotice,
@@ -109,9 +111,21 @@ export function createBoardChromeRegion(deps: BoardChromeDeps): BoardChromeRegio
     // the DOM from here on, and they re-render themselves keyed on the
     // participant — so a repaint that changes one person leaves everybody
     // else's circle as the identical node, mid-press and all.
+    // Which of them share the reader's page, and which only the workspace:
+    // the two groups of the strip's list (`presence-places.ts`).
+    const mine = parseSpot(awareness.getLocalState()?.[PERSON_SPOT_FIELD]) ?? {
+      surface: 'board' as const,
+      path: location.pathname,
+    };
     presenceData.value = {
-      chips: presenceChips(peopleFromAwareness(), state.agents, Date.now()),
+      chips: placeChips(presenceChips(peopleFromAwareness(), state.agents, Date.now()), {
+        states: awareness.getStates(),
+        selfClientId: awareness.clientID,
+        mine,
+      }),
       followedKey: state.followedKey,
+      page: spotLabel(mine, new Map()),
+      ...(state.info?.name ? { app: state.info.name } : {}),
     };
     const notices = [
       pluginDriftNotice(state.pluginRelease),

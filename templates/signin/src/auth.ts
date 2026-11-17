@@ -1,0 +1,84 @@
+import { apiKey } from '@better-auth/api-key';
+import { type Mailer, composeMail, passwordAuthOptions } from '@claude-workspaces/app-kit/auth';
+import { betterAuth } from 'better-auth';
+import { admin, captcha, genericOAuth, magicLink } from 'better-auth/plugins';
+import type { Env } from './env.ts';
+
+/** Google's published OAuth endpoints. Tests replace them with a local stub. */
+export interface GoogleEndpoints {
+  authorizationUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+}
+
+export const GOOGLE_ENDPOINTS: GoogleEndpoints = {
+  authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenUrl: 'https://oauth2.googleapis.com/token',
+  userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
+};
+
+/** The routes Turnstile guards. Each needs an `x-captcha-response` header. */
+export const TURNSTILE_PATHS = [
+  '/sign-up/email',
+  '/sign-in/email',
+  '/sign-in/magic-link',
+  '/request-password-reset',
+];
+
+/** The permission an agent's API key needs to register a user. */
+export const REGISTER_USERS = { users: ['create'] };
+
+export interface AuthDeps {
+  mailer: Mailer;
+  /** Code-level overrides only: no env var can point verification elsewhere. */
+  googleEndpoints?: GoogleEndpoints;
+  turnstileVerifyUrl?: string;
+}
+
+export function createAuth(env: Env, deps: AuthDeps) {
+  const send = (kind: Parameters<typeof composeMail>[0], to: string, url: string) =>
+    deps.mailer.send(composeMail(kind, to, url));
+  return betterAuth({
+    baseURL: env.BETTER_AUTH_URL,
+    secret: env.BETTER_AUTH_SECRET,
+    trustedOrigins: [env.BETTER_AUTH_URL],
+    // Better Auth recognises a D1 binding and uses its own Kysely D1 dialect.
+    // That dialect refuses interactive transactions; see rate-limit.ts.
+    database: env.DB,
+    // Its built-in limiter keeps counts per isolate in memory. The D1 limiter
+    // in app.ts replaces it, so every isolate sees the same counts.
+    rateLimit: { enabled: false },
+    advanced: { ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] } },
+    // Accounts, password hashing, verification and sessions: shared with an
+    // app made by `bun run new-app`.
+    ...passwordAuthOptions(deps.mailer),
+    plugins: [
+      magicLink({ sendMagicLink: ({ email, url }) => send('magic-link', email, url) }),
+      genericOAuth({
+        config: [
+          {
+            providerId: 'google',
+            clientId: env.GOOGLE_CLIENT_ID,
+            clientSecret: env.GOOGLE_CLIENT_SECRET,
+            ...(deps.googleEndpoints ?? GOOGLE_ENDPOINTS),
+            scopes: ['openid', 'email', 'profile'],
+            pkce: true,
+            // Google's stable account id is the userinfo `sub`. Never the
+            // email: an address can change hands, a subject cannot.
+            accountSubject: ({ profile }) => String(profile.sub ?? ''),
+          },
+        ],
+      }),
+      captcha({
+        provider: 'cloudflare-turnstile',
+        secretKey: env.TURNSTILE_SECRET_KEY,
+        endpoints: TURNSTILE_PATHS,
+        ...(deps.turnstileVerifyUrl ? { siteVerifyURLOverride: deps.turnstileVerifyUrl } : {}),
+      }),
+      admin(),
+      apiKey(),
+    ],
+  });
+}
+
+export type Auth = ReturnType<typeof createAuth>;

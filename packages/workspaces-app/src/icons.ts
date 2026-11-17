@@ -27,6 +27,10 @@ export const SVG_ENDS = 'stroke-linecap="round" stroke-linejoin="round" aria-hid
  */
 export const FEEDBACK_MIC_ICON = `<svg ${SVG} ${SVG_ENDS}><path d="M5.5 3.2h13a3 3 0 0 1 3 3v7.4a3 3 0 0 1-3 3h-6.7l-4.6 3.6v-3.6H5.5a3 3 0 0 1-3-3V6.2a3 3 0 0 1 3-3z"/><rect x="10.3" y="6.4" width="3.4" height="5.2" rx="1.7"/><path d="M8.5 10.4a3.5 3.5 0 0 0 7 0"/></svg>`;
 
+/** A mic — voice feedback on the doc on screen, beside the widget's comment
+ *  button in a doc's corner (`doc/doc-comment-buttons-chunk.ts`). */
+export const MIC_ICON = `<svg ${SVG} ${SVG_ENDS}><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></svg>`;
+
 /** New task — the Board's primary action, drawn in the same vocabulary. */
 export const PLUS_ICON = `<svg ${SVG} ${SVG_ENDS}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
 
@@ -54,6 +58,7 @@ export const NAV_ICONS = {
   tasks: BOARD_NAV_ICONS.tasks,
   activity: BOARD_NAV_ICONS.activity,
   library: BOARD_NAV_ICONS.library,
+  messages: `<svg ${SVG} ${SVG_ENDS}><path d="M4 5.5h16v10H9l-5 4z"/></svg>`,
   collapse: `<svg ${SVG} ${SVG_ENDS}><polyline points="14 6 8 12 14 18"/></svg>`,
   expand: `<svg ${SVG} ${SVG_ENDS}><polyline points="10 6 16 12 10 18"/></svg>`,
   share: `<svg ${SVG} ${SVG_ENDS}><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.3 10.8 7.4-4.3M8.3 13.2l7.4 4.3"/></svg>`,

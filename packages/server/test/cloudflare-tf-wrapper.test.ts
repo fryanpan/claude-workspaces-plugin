@@ -1,5 +1,5 @@
 /**
- * `bun run cf:plan` / `cf:apply` (infra/cloudflare/run.ts, vars.ts,
+ * `bun run cf:plan` and CI's apply (infra/cloudflare/run.ts, vars.ts,
  * terraform.ts) with fake configs, a fake Keychain, a fake account and a fake
  * terraform: which variables it assembles, where each credential goes, what
  * CI prints, and what it refuses before terraform runs. Nothing here reads
@@ -189,11 +189,6 @@ function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
     env: {},
     keychainHas: (n) => n in KEYCHAIN,
     keychainRead: (n) => KEYCHAIN[n] ?? '',
-    keychainHasService: () => false,
-    storeToken: () => {
-      throw new Error('this config names no service token');
-    },
-    confirm: () => false,
     api: () => fakeApi(),
     writeState: (name, content) => {
       r.state[name] = content;
@@ -293,19 +288,19 @@ describe('runWrapper', () => {
     expect(leaks(r)).toEqual([]);
   });
 
-  it('prints each server’s audience settings after a local apply', async () => {
+  it('a local apply prints where applies run now, and runs and writes nothing', async () => {
     const r = fakeIo();
-    expect(await runWrapper('apply', PROD, r.io)).toBe(0);
-    expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'apply', 'output']);
-    expect(r.out).toEqual([
-      'riverbend: CF_ACCESS_AUD=aud-riverbend\n',
-      `riverbend: CF_ACCESS_HOST_AUDS='{"riverbend-workspaces.${ZONE}":"aud-riverbend"}'\n`,
-    ]);
+    expect(await runWrapper('apply', PROD, r.io)).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.state).toEqual({});
+    const said = r.err.join('');
+    expect(said).toContain('applies when its pull request merges to main');
+    expect(said).toContain('bun run cf:sync-config');
   });
 
   it('runs no terraform and writes nothing when no token is set anywhere', async () => {
     const r = fakeIo({ keychainHas: () => false });
-    expect(await runWrapper('apply', PROD, r.io)).toBe(1);
+    expect(await runWrapper('plan', PROD, r.io)).toBe(1);
     expect(r.calls).toEqual([]);
     expect(r.state).toEqual({});
     expect(r.err.join()).toContain('CLOUDFLARE_API_TOKEN');

@@ -9,6 +9,7 @@ import {
   deadline,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   tap,
   until,
@@ -33,7 +34,7 @@ import {
   READY,
   VOICE_BUBBLES,
   VOICE_WORDS,
-  chipTitle,
+  leadPlace,
 } from './whiteboard-chat-browser-probes.ts';
 import type {
   ArrivalCase,
@@ -116,22 +117,26 @@ async function presence(
 ): Promise<PresenceCase> {
   const B = `/workspaces/${board.ws}`;
   const anonId = `mover${width}`;
-  const tab = await openPerson(width, height, { anonId, name: 'Alice', ws: board.ws });
-  const lead = `${LEAD.agentName} · pointing in ${whiteboard}`;
+  const tab = await openPerson(width, height, {
+    anonId,
+    name: 'Alice',
+    ws: board.ws,
+    signIn: true,
+  });
   await board.point({ docId: board.docId });
   await navigate(tab, `${board.base}${B}/docs/${board.docId}`);
   await until('the person on the doc', () =>
-    board.spotOf(`anon-${anonId}`)?.docId === board.docId ? true : null,
+    board.spotOf(personIdOf(anonId))?.docId === board.docId ? true : null,
   );
   await board.point({ docId: whiteboard, x: 400, y: 300 });
   const moved = navigate(tab, `${board.base}${B}/whiteboards/${whiteboard}`);
   await until('the person on the whiteboard', () =>
-    board.spotOf(`anon-${anonId}`)?.docId === whiteboard ? true : null,
+    board.spotOf(personIdOf(anonId))?.docId === whiteboard ? true : null,
   );
   const arrived = Date.now();
   await until(
     'the lead on the arrival',
-    async () => ((await read<string | null>(tab, chipTitle)) === lead ? true : null),
+    async () => ((await read<string | null>(tab, leadPlace)) === 'here' ? true : null),
     10_000,
   );
   const arrivalMs = Date.now() - arrived;
@@ -139,15 +144,14 @@ async function presence(
   await read(tab, READY);
 
   await board.point({ docId: board.docId });
-  const away = `${LEAD.agentName} · pointing in ${board.docId}`;
   await until('the lead away', async () =>
-    (await read<string | null>(tab, chipTitle)) === away ? true : null,
+    (await read<string | null>(tab, leadPlace)) === 'away' ? true : null,
   );
   const pointed = Date.now();
   await board.point({ docId: whiteboard, x: 500, y: 300 });
   await until(
     'the lead back',
-    async () => ((await read<string | null>(tab, chipTitle)) === lead ? true : null),
+    async () => ((await read<string | null>(tab, leadPlace)) === 'here' ? true : null),
     10_000,
   );
   const liveMs = Date.now() - pointed;

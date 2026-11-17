@@ -14,12 +14,12 @@ import { handleGitPushRoutes } from './git-push.ts';
 export const gitPushFeature: FeatureModule<FeatureDeps> = {
   name: 'git-push',
   start: (deps) => {
-    const { dataDir, opts, taskStore, boardOfSocket, personRoleOn, j } = deps;
+    const { dataDir, opts, taskStore, boardOfSocket, personAccessOn, j } = deps;
     const gp = opts.gitPush;
     const pusher = new GitPusher({
       dataDir,
       taskStore,
-      personRoleOn,
+      personAccessOn,
       credential: gp?.credential ?? (async () => null),
       ...(gp?.remoteUrlFor ? { remoteUrlFor: gp.remoteUrlFor } : {}),
       ...(gp?.runGit ? { runGit: gp.runGit } : {}),

@@ -9,7 +9,8 @@ audience there.
 
 ## Making them
 
-`bun run cf:plan` and `bun run cf:apply` (`../cloudflare/README.md`) make
+`bun run cf:plan` shows and CI's apply, after `bun run cf:sync-config`
+(`../cloudflare/README.md`), makes
 every application this file describes, with the rest of the account's
 Cloudflare configuration. The config takes each project's hostnames as
 written rather than deriving them. A project's own hostname is
@@ -25,12 +26,12 @@ Per project, the Terraform config (`../cloudflare/modules/access`) makes:
    and a `non_identity` policy `<project> service tokens` for the service
    tokens named here;
 3. each service token named here, adopting the live one of that name. One
-   that does not exist is made by a local `cf:apply`, which puts its client
+   that does not exist is made by `cf:sync-config`, which puts its client
    id and secret in the Keychain as `cw-<name>-access-client-id` and
    `cw-<name>-access-secret` (`../cloudflare/README.md`, "Service tokens").
 
-After a local apply the wrapper prints each server's `CF_ACCESS_AUD` and
-`CF_ACCESS_HOST_AUDS`; `machine:deploy` reads them from `terraform output`.
+`machine:deploy` reads each server's `CF_ACCESS_AUD` and
+`CF_ACCESS_HOST_AUDS` from `terraform output`.
 Before terraform runs it refuses, with
 nothing changed:
 

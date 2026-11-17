@@ -25,7 +25,6 @@ import { CoachCoverage, sessionSource } from './coverage.ts';
 import { type DocBoards, placeIsOff } from './exclusion.ts';
 import { type GoalsDocReading, readGoalsDoc } from './goals-doc.ts';
 import { CoachHub } from './hub.ts';
-import { coachSectionFor } from './landing.ts';
 import { type Coach, type DocLabel, createCoach } from './moment.ts';
 import { MorningWake } from './morning.ts';
 import { SessionFeed, type SessionFrame } from './session-feed.ts';
@@ -42,7 +41,7 @@ export interface CoachWiringDeps {
     prewarmHydration(docId: string): Promise<unknown>;
     createForCaller(
       docId: string,
-      init: { type: 'markdown'; sourceUrl: string; title: string; workspaceId: string },
+      init: { type: 'markdown'; sourceUrl: string; title: string },
     ): { ok: true; doc: { docId: string } } | { ok: false };
     attachFileAsync(docId: string, path: string): Promise<{ ok: boolean }>;
     docExists(docId: string): boolean;
@@ -87,8 +86,6 @@ export interface CoachWiring {
   feed: SessionFeed;
   morning: MorningWake;
   setup: CoachSetupDeps;
-  /** The front page's section, for the owner. */
-  landing: () => string;
   /** True when this agent, by name, is the coach session: the lead seated
    *  on the board that holds the learning-goals doc. */
   isCoachSession: (workspaceId: string, agentName: string) => boolean;
@@ -195,11 +192,13 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     createBoard: deps.createBoard,
     createDoc: async (docId, path, title, workspaceId) => {
       await deps.docStore.prewarmHydration(docId);
+      // Filed on the board below. `workspaceId` in a doc's own meta is the
+      // attachment-set field, and writing the board id there hid both docs
+      // from the board's Library.
       const created = deps.docStore.createForCaller(docId, {
         type: 'markdown',
         sourceUrl: path,
         title,
-        workspaceId,
       });
       if (!created.ok) return null;
       const id = created.doc.docId;
@@ -283,15 +282,6 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     feed,
     morning,
     setup,
-    landing: () => {
-      const t = (deps.now ?? Date.now)();
-      return coachSectionFor(
-        store,
-        readGoals,
-        { online: feed.reachable(), paused: feed.paused(t), boardName: deps.boardName },
-        t,
-      );
-    },
     isCoachSession,
     sessionTurn,
     sessionPrompt,

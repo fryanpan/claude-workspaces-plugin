@@ -39,7 +39,11 @@ export type ReviewAccessChange =
   | { op: 'unlock-board'; workspaceId: string }
   /** Turn the master switch back on: the sharing notice's card, filed on
    *  `workspaceId`, the board that holds the notice. */
-  | { op: 'sharing-on'; workspaceId: string };
+  | { op: 'sharing-on'; workspaceId: string }
+  /** Let component builds read the files git does not list in `folder`, an
+   *  absolute real path (design decision 5). Its code then runs in the page
+   *  for every reader, so it widens what a doc's visitors are sent. */
+  | { op: 'component-folder'; workspaceId: string; folder: string };
 
 const ROLE_WORD: Record<AccessRole, string> = { owner: 'Owner', member: 'Regular User' };
 
@@ -119,8 +123,27 @@ export function accessChangeLine(change: ReviewAccessChange): string {
       return 'Unlocks this board, so it can be shared again.';
     case 'sharing-on':
       return 'Turns sharing back on for every board, so the people each one names can sign in again.';
+    case 'component-folder':
+      return `Lets docs on any board build components from the files git does not list in ${folderTail(change.folder)}. Their code runs in the page for every reader of a doc that imports them.`;
   }
 }
+
+/** A folder as a card names it: its last three names, so the line says
+ *  which folder without spelling out the rest of a path on this machine. */
+export function folderTail(folder: string): string {
+  const parts = folder.split('/').filter((p) => p !== '');
+  return `${parts.length > 3 ? '…/' : '/'}${parts.slice(-3).join('/')}/`;
+}
+
+/** An absolute path with no empty, `.` or `..` segment. */
+const isFolder = (v: unknown): v is string =>
+  typeof v === 'string' &&
+  v.startsWith('/') &&
+  v.length < 4096 &&
+  v
+    .slice(1)
+    .split('/')
+    .every((p) => p !== '' && p !== '.' && p !== '..');
 
 /** Keys in a fixed order, so two equal payloads serialize alike. */
 function canonical(value: unknown): string {
@@ -154,6 +177,9 @@ export function readAccessChange(raw: unknown): ReviewAccessChange | undefined {
   }
   if (r.op === 'set-role' && typeof r.email === 'string' && isRole(r.role) && isRole(r.before)) {
     return { op: 'set-role', workspaceId, email: r.email, role: r.role, before: r.before };
+  }
+  if (r.op === 'component-folder' && isFolder(r.folder)) {
+    return { op: 'component-folder', workspaceId, folder: r.folder };
   }
   if (r.op === 'open-board' || r.op === 'unlock-board' || r.op === 'sharing-on') {
     return { op: r.op, workspaceId };

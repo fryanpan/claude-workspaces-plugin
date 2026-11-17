@@ -93,7 +93,12 @@ interface Entry<T> {
 export class ThreadRequestDedup<T> {
   private readonly seen = new Map<string, Entry<T>[]>();
 
-  constructor(private readonly ttlMs = DEFAULT_TTL_MS) {}
+  /** `now` is the clock the TTL is read from; tests pass their own so a
+   *  slow runner cannot age an entry out mid-test. */
+  constructor(
+    private readonly ttlMs = DEFAULT_TTL_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   private key(docId: string, requestId: string): string {
     return `${docId} ${requestId}`;
@@ -138,7 +143,7 @@ export class ThreadRequestDedup<T> {
     identityKey: string,
   ): Promise<T> | undefined {
     if (!requestId) return undefined;
-    this.prune(Date.now());
+    this.prune(this.now());
     const entries = this.seen.get(this.key(docId, requestId));
     return entries?.find((e) => e.text === text && e.identityKey === identityKey)?.promise;
   }
@@ -186,7 +191,7 @@ export class ThreadRequestDedup<T> {
         // — so a retry gets the full window measured from when a response
         // could plausibly have reached the client, not from when the
         // original request started.
-        entry.settledAt = Date.now();
+        entry.settledAt = this.now();
       }
       return { value, deduped: false };
     } catch (err) {

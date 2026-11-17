@@ -23,6 +23,7 @@ import * as Y from 'yjs';
 import { getProseFragment } from '../../core/src/prose.ts';
 import { activityLogPath } from '../src/activity.ts';
 import type { Event } from '../src/activity.ts';
+import { ownerDisplayNames } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -337,7 +338,7 @@ describe('edit_session activity rows', () => {
     docStream.stop();
   }, 30_000);
 
-  it('names an unproven editor by its announced name when writes need no sign-in', async () => {
+  it('names an unproven editor by the owner, not its announced name, when writes need no sign-in', async () => {
     await boot(false);
     await humanTypes();
     const [row] = await waitFor(() => {
@@ -345,7 +346,10 @@ describe('edit_session activity rows', () => {
       return rows.length > 0 ? rows : null;
     });
     expect(row?.actor).toBe('person');
-    expect(row?.actorName).toBe('Bob');
+    // A deployment that needs no sign-in is single-person: the server names
+    // the editor the owner, whatever its presence announced.
+    expect(row?.actorName).toBe(ownerDisplayNames()[0]);
+    expect(row?.actorName).not.toBe('Bob');
     expect(row?.actorId).toBeUndefined();
     expect(row?.payload.source).toBe('editor');
   }, 30_000);

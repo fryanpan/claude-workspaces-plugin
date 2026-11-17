@@ -33,7 +33,7 @@ const review = (asks: string[], goal = 'Ship Riverbend') =>
 const boards = (rows: string[]) =>
   `<div id="landing-boards"><ul>${rows.map((r) => `<li class="grp"><span class="grp-name">${r}</span></li>`).join('')}</ul><details class="fold"><summary>Inactive workspaces <span class="count">1</span></summary><ul><li>Saltmarsh</li></ul></details></div>`;
 const page = (asks: string[], rows: string[]) =>
-  `<section id="coach">coach</section>${review(asks)}<section id="inbox">inbox</section>${boards(rows)}`;
+  `${review(asks)}<section id="inbox">inbox</section>${boards(rows)}`;
 
 let served: string;
 let fetches: number;
@@ -89,7 +89,7 @@ describe('the workspaces list stays live', () => {
     await until(() => names().length === 2);
     expect(names()).toEqual(['Riverbend', 'Harborlight']);
     expect(asks()).toEqual(['Pick the Harborlight name', 'Approve the Riverbend plan']);
-    // The coach and the inbox are not this module's to redraw.
+    // The inbox is not this module's to redraw.
     expect(document.querySelector('#inbox')?.textContent).toBe('inbox');
   });
 

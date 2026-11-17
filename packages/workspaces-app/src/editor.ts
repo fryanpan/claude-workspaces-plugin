@@ -38,6 +38,7 @@ import { MermaidCodeBlock } from './mermaid-code-block.ts';
 import { NotesLinkAffordance, type NotesLinkAffordanceOptions } from './notes-link-affordance.ts';
 import { PlanPlaceholder } from './plan-placeholder.ts';
 import type { InlineThreadCard } from './review-surface.ts';
+import { componentSelectionRange, domSelectionRange } from './selection-range.ts';
 import { SettleWash, type SettleWashOptions } from './settle-wash.ts';
 import { SuggestInput } from './suggest-input.ts';
 import { CODE_BLOCK_MARKS, SuggestDelete, SuggestInsert } from './suggest-marks.ts';
@@ -372,13 +373,13 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     return ySyncPluginKey.getState(editor.state);
   }
 
-  function toRel(from: number, to: number) {
+  function toRel(from: number, to: number, quote?: string) {
     const sync = syncState();
     if (!sync?.binding) return null;
     const { mapping, type } = sync.binding;
     const startRel = absolutePositionToRelativePosition(from, type, mapping);
     const endRel = absolutePositionToRelativePosition(to, type, mapping);
-    const snippet = editor.state.doc.textBetween(from, to, ' ').slice(0, 80);
+    const snippet = quote ?? editor.state.doc.textBetween(from, to, ' ').slice(0, 80);
     return {
       start: Y.encodeRelativePosition(startRel),
       end: Y.encodeRelativePosition(endRel),
@@ -391,32 +392,16 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     rangeRel: toRel,
     getSelectionRel() {
       if (!syncState()?.binding) return null;
-      // 1) ProseMirror's own selection — authoritative in edit mode.
+      // Words a live component drew have no doc position: they anchor to
+      // the tag's source, quoting what was selected (selection-range.ts).
+      const drawn = componentSelectionRange(editor.view, window.getSelection());
+      if (drawn) return toRel(drawn.from, drawn.to, drawn.snippet);
+      // ProseMirror's own selection is authoritative in edit mode; in view
+      // mode it reads empty, so the raw DOM selection is mapped instead.
       const { from, to, empty } = editor.state.selection;
       if (!empty) return toRel(from, to);
-      // 2) Fall back to the raw DOM selection. In VIEW mode (contenteditable
-      //    =false) a long-press text selection — notably on iOS Safari —
-      //    never propagates into ProseMirror's selection state, so the PM
-      //    selection reads empty even though the user has visibly selected
-      //    text. Map the DOM range back to document positions via posAtDOM so
-      //    commenting works without making the doc editable.
-      const dom = window.getSelection();
-      if (!dom || dom.rangeCount === 0 || dom.isCollapsed) return null;
-      const range = dom.getRangeAt(0);
-      const view = editor.view;
-      if (!view.dom.contains(range.startContainer) || !view.dom.contains(range.endContainer)) {
-        return null;
-      }
-      let a: number;
-      let b: number;
-      try {
-        a = view.posAtDOM(range.startContainer, range.startOffset);
-        b = view.posAtDOM(range.endContainer, range.endOffset);
-      } catch {
-        return null;
-      }
-      if (a < 0 || b < 0 || a === b) return null;
-      return toRel(Math.min(a, b), Math.max(a, b));
+      const dom = domSelectionRange(editor.view, window.getSelection());
+      return dom ? toRel(dom.from, dom.to) : null;
     },
     resolveRel(startRel, endRel) {
       const sync = syncState();

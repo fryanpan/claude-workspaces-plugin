@@ -168,6 +168,8 @@ body.board-body {
    first task row most of a screen down. */
 .board-cluster {
   grid-area: cluster;
+  /* The presence deck is placed against this box (PRESENCE STRIP below). */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -839,6 +841,154 @@ body.board-body {
 }
 .board-presence-agent .board-presence-name::before {
   content: "🤖 ";
+}
+/* Where the deck sits (design F, Bryan 2026-11-15): 104px in from the
+   window's right edge on a wide screen and 140px on a phone, the same as on a
+   doc (doc.css, MAIN LAYOUT), so a reader moving between the two finds it
+   where they left it. The cluster's right edge is the window's less 14px.
+   The host stays in the row as a fixed slot, kept while nobody is here, so
+   nothing beside it moves as people arrive and leave. */
+#board-people {
+  flex: none;
+  width: 96px;
+}
+#board-people.hidden {
+  display: flex !important;
+  visibility: hidden;
+}
+#board-people .board-presence-f {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 90px;
+}
+@media (max-width: 1100px) {
+  /* At most three circles on a phone (styles.css). */
+  #board-people {
+    width: 72px;
+  }
+  #board-people .board-presence-f {
+    right: 126px;
+  }
+}
+/* The Web Awesome strip, on a board the collab core serves
+   (`presence-island-wa.tsx`). The same 28px circles as `.board-presence-circle`
+   in styles.css, drawn by a `<wa-avatar>` inside a bare button: the button
+   keeps the press, the focus and the 36px hit area, and the avatar carries
+   the fill, the shape and the rings. Two classes on the button, so the base
+   `.board-following` ring (one class, in styles.css) lands on the avatar
+   rather than on the button as well. */
+.board-people .board-presence-wa {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.board-people .board-presence-wa.board-presence-agent {
+  border-radius: 9px;
+}
+.board-presence-wa::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.board-presence-wa wa-avatar {
+  --size: 28px;
+  box-sizing: border-box;
+  /* Set here, not left to the avatar's var(--wa-border-radius-circle): that
+     variable lives in wa-theme.css, which loads after the strip mounts, and
+     until it arrives the circles paint square. */
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background-color: var(--bg-hover);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.board-presence-wa wa-avatar[shape="rounded"] {
+  border-radius: 9px;
+}
+/* The deck and its rows on Web Awesome (styles.css draws the classic
+   ones): a white edge between overlapping avatars, 20px for anybody
+   elsewhere, 24px in a row of the list. */
+.board-presence-deck > .board-presence-wa:not(.board-following) wa-avatar {
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.board-presence-deck > .board-presence-wa.board-presence-away wa-avatar {
+  --size: 20px;
+  font-size: 8px;
+}
+.board-presence-deck > .board-presence-wa.board-presence-away wa-avatar[shape="rounded"] {
+  border-radius: 5px;
+}
+.board-presence-row .board-presence-wa wa-avatar,
+.board-follow-bar .board-presence-wa wa-avatar {
+  --size: 24px;
+  font-size: 9.5px;
+}
+.board-presence-wa.board-presence-unresponsive wa-avatar {
+  border-color: var(--yellow);
+}
+.board-presence-wa.board-following wa-avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* The strip's toasts beside the Web Awesome strip: a <wa-toast> dressed as
+   .board-toast — same place, font, ground, padding, corner and width, with
+   no accent bar, close button or slide. Web Awesome sets its own font size on
+   each layer, so each layer inherits instead. */
+wa-toast.board-wa-toast {
+  --gap: 0;
+  /* Auto, as .board-toast is: from left 50% it shrinks to fit the half it
+     has, so it wraps where today's toast wraps. */
+  width: auto;
+  max-width: min(90vw, 480px);
+  font: inherit;
+  padding: 0 0 calc(20px + var(--board-bottom-bar, 0px) + var(--safe-bottom));
+  z-index: 80;
+  /* Web Awesome scrolls the stack (overflow-y: auto), which clips the
+     toast's 50px shadow to the stack's own width: a hard-edged grey block
+     under the toast that .board-toast does not have. One toast at a time
+     needs no scrolling. */
+  overflow: visible;
+}
+wa-toast.board-wa-toast wa-toast-item {
+  font: inherit;
+}
+wa-toast.board-wa-toast wa-toast-item::part(toast-item) {
+  font: inherit;
+  background: var(--fg);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  animation: none;
+}
+wa-toast.board-wa-toast wa-toast-item::part(content) {
+  padding: 10px 16px;
+  font: inherit;
+  color: var(--bg);
+}
+wa-toast.board-wa-toast wa-toast-item::part(accent),
+wa-toast.board-wa-toast wa-toast-item::part(close-button) {
+  display: none;
+}
+/* At ≤1100 both toasts stand clear of the feedback widget's "≡" chip; the
+   rule and its reasons are with .board-toast's. This one matters most: a
+   <wa-toast> is a popover in the top layer, so it draws over the chip rather
+   than under it. */
+@media (max-width: 1100px) {
+  body:has(claude-feedback-widget) wa-toast.board-wa-toast {
+    inset-inline-start: calc((100vw - 160px) / 2);
+    max-width: calc(100vw - 160px - 24px);
+  }
 }
 /* Plugin drift, beside the agents it is about. Full-width so it wraps rather
    than competing with the chips for room on a phone. */
@@ -2350,6 +2500,29 @@ html:has(.board-walk-cred-form) {
   display: block;
   width: 100%;
   height: 100%;
+}
+/* Messages opens the lead chat rather than a page (M10). Hidden until the
+   reader has a chat to open; a steady dot while a channel in it holds a
+   message they have not seen. */
+.board-nav-item.board-nav-messages {
+  position: relative;
+}
+.board-nav-item.board-nav-messages[hidden] {
+  display: none;
+}
+.board-nav-dot {
+  position: absolute;
+  top: 7px;
+  left: 22px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+  opacity: 0;
+}
+.board-nav-dot.on {
+  opacity: 1;
 }
 
 /* ################# BOARD · RAIL MIC (HOLD-TO-TALK) #################
@@ -4762,9 +4935,9 @@ html:has(.board-walk-cred-form) {
 
 /* ################# BOARD · LIBRARY #################
    The Library tab (`board/library-page.ts`), ported from the approved mock
-   (front page, round 4): a sticky header naming the project, then two short
-   tables — recent meetings, recent files — each a title and one time, whose
-   header is the sort; then "Where files live", folded shut (mock v2).
+   (front page, round 4): a sticky header naming the project, then Recent
+   files — meetings among them — each a title and one time, whose header is
+   the sort; then the folder tree; then "Where files live", folded shut.
    A row is one line at every width; a long title ends in an ellipsis. */
 .library-page {
   font-size: 15px;
@@ -4926,9 +5099,17 @@ html:has(.board-walk-cred-form) {
 .library-cols,
 .library-tbl .library-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px;
   column-gap: 16px;
   align-items: center;
+}
+.library-cols {
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+/* A row's time column is as wide as its own time, not the header's 104px:
+   right-aligned in 104px, "5h ago" left 60px of the name's room empty at 430.
+   Every time still ends on the same right edge, under its header. */
+.library-tbl .library-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 .library-cols {
   padding: 0 0 4px;
@@ -5137,6 +5318,361 @@ html:has(.board-walk-cred-form) {
 }
 .library-place-note.is-stray {
   color: var(--warn-fg, #b25e09);
+}
+/* Folders: the tree under Recent files (`board/library-tree.ts`, layout A of
+   the folders mock). A file row gains a third column for its ⋯ menu, and
+   every row, ⋯ and menu item is 44px tall at every width: a pointer query
+   cannot be trusted to name the owner's iPad, and a 34px target misses there. */
+.library-page {
+  --lf-more-w: 44px;
+  --lf-hit: 44px;
+}
+.lf-tbl .library-cols {
+  grid-template-columns: minmax(0, 1fr) 104px var(--lf-more-w);
+}
+.lf-tbl .library-row {
+  grid-template-columns: minmax(0, 1fr) auto var(--lf-more-w);
+}
+/* A folder has no time, so its name runs up to the ⋯ (Bryan, 14 Nov: "Names
+   cut off too early. Give them a lot more room."). */
+.lf-tbl .lf-folder {
+  grid-template-columns: minmax(0, 1fr) var(--lf-more-w);
+}
+.lf-folder > .library-when {
+  display: none;
+}
+/* Star / Unstar in a row's ⋯ menu (`board/library-starred.ts`), so the name
+   keeps the width a per-row star would take (Bryan, 13 Nov). */
+.lf-star-item svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  fill: none;
+}
+.lf-star-item.is-on svg {
+  fill: currentColor;
+  color: var(--accent);
+}
+/* A starred folder in the Starred list opens the folder in the tree. */
+.lf-starred-folder > .library-main {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lf-row {
+  min-height: var(--lf-hit);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.lf-row > .library-main {
+  align-items: center;
+  align-self: stretch;
+  color: inherit;
+  text-decoration: none;
+  gap: 7px;
+}
+.lf-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+}
+.lf-ico svg {
+  width: 16px;
+  height: 16px;
+}
+.lf-meet .lf-ico {
+  color: var(--accent);
+}
+.lf-more,
+.lf-more-gap {
+  width: var(--lf-more-w);
+  height: var(--lf-hit);
+}
+.lf-more {
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lf-more:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.lf-folderlabel {
+  flex: 0 3 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 40%;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-folderlabel svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.lf-section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* One height for every front-page heading, with or without a 44px
+     control in it, so the sections keep one rhythm. */
+  min-height: var(--lf-hit);
+  margin: 10px 0 0;
+}
+.library-body .lf-section-head h2 {
+  margin: 0;
+}
+.lf-newfolder {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--lf-hit);
+  padding: 0 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--accent);
+  cursor: pointer;
+}
+.lf-newfolder:hover {
+  text-decoration: underline;
+}
+/* Recently Viewed and Recently Created: two tabs in one row (Bryan,
+   2026-11-13), styled as the task panel's tabs (`.board-detail-tab`). Both
+   labels keep one weight and the underline is always 2px, only coloured when
+   chosen, so picking a tab moves neither tab nor anything below. The row's
+   own rule is the baseline the underline sits on. */
+.lf-recent-tabs {
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+.lf-tablist {
+  display: flex;
+  gap: 4px;
+}
+.lf-recent-tab {
+  min-height: var(--lf-hit);
+  margin-bottom: -1px;
+}
+/* Recently Viewed's "Show more" holds the right of the tab row at the width
+   of its longer label, so neither label moves it or the tabs. */
+.lf-recent-tabs .lf-viewmore {
+  justify-content: flex-end;
+  min-width: 6.5em;
+  margin-left: auto;
+}
+.lf-colhead {
+  justify-self: end;
+}
+.lf-folder {
+  width: calc(100% + 16px);
+}
+.lf-folder .library-name {
+  flex: 0 1 auto;
+  font-weight: 550;
+}
+.lf-folder[aria-expanded="true"] .library-caret {
+  transform: rotate(90deg);
+}
+.lf-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lf-landhint {
+  /* Takes only the room the name leaves: with a zero basis the name never
+     shrinks for it. Under the old 1000x shrink factor Bryan's phone still
+     showed "Meetin…" beside "new meetings la…". */
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-children {
+  margin-left: 3px;
+  padding-left: 13px;
+  border-left: 1px solid var(--border);
+}
+.lf-empty-hint {
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+.lf-drop {
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.lf-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  min-height: var(--lf-hit);
+  padding: 3px 0;
+}
+.lf-name-input {
+  flex: 1 1 120px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  outline: none;
+}
+.lf-err {
+  flex: 1 0 100%;
+  padding-left: 23px;
+  font-size: 12px;
+  color: var(--danger, #c0392b);
+}
+/* The ⋯ menus and the Move to… sheet, over a scrim that closes them. */
+.lf-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.28);
+}
+.lf-scrim.is-clear {
+  background: transparent;
+}
+.lf-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+}
+.lf-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--lf-hit);
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--fg);
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.lf-menu-item:hover {
+  background: var(--bg-hover);
+}
+.lf-menu-item[disabled] {
+  color: var(--fg-muted);
+  cursor: default;
+  background: none;
+}
+.lf-menu-note {
+  max-width: 240px;
+  padding: 4px 10px 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.lf-sheet {
+  position: fixed;
+  z-index: 71;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 60px));
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  box-sizing: border-box;
+}
+.lf-sheet h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+.lf-sheet p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lf-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  cursor: pointer;
+}
+.lf-sheet-row:hover {
+  background: var(--bg-hover);
+}
+.lf-sheet-row[disabled] {
+  color: var(--fg-muted);
+  cursor: default;
+  background: none;
+}
+.lf-nm {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lf-cancel {
+  float: right;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+@media (max-width: 600px) {
+  /* The name needs the room on a phone; the folder it is in is one tap away. */
+  .lf-folderlabel {
+    display: none;
+  }
 }
 @media (max-width: 1100px) {
   .library-row {
@@ -7362,6 +7898,19 @@ label.board-sched-chip:hover {
   align-items: center;
   gap: 14px;
 }
+/* At ≤1100 with a feedback widget on the page, the toast is centred in the
+   room left of the widget's column rather than on the page: centred on the
+   page at 430 its right end ran under the widget's "≡" chip, which stands
+   76px in from the right edge (`.fab-list.side`, widget-mic.ts) and is 44px
+   or wider, so 160px clears it with room for a count. The Web Awesome toast
+   takes the same place (its rule beside the strip's).
+   presence-strip-wa-browser.test.ts reads both boxes against the chip's. */
+@media (max-width: 1100px) {
+  body:has(claude-feedback-widget) .board-toast {
+    left: calc((100vw - 160px) / 2);
+    max-width: calc(100vw - 160px - 24px);
+  }
+}
 .board-toast.hidden {
   display: none;
 }
@@ -7589,8 +8138,12 @@ label.board-sched-chip:hover {
   body:has(claude-feedback-widget) .board-nav {
     padding-right: calc(max(18px, env(safe-area-inset-right)) + 54px);
   }
+  /* min-width 0, as the open chat's bar has (html[data-lc-full]): equal tabs
+     whatever their label, so "Messages" does not widen its tab and every tab
+     stays put when the chat opens. */
   .board-nav-item {
     flex: 1;
+    min-width: 0;
     flex-direction: column;
     justify-content: center;
     gap: 2px;
@@ -7602,6 +8155,10 @@ label.board-sched-chip:hover {
   .board-nav-icon {
     width: 18px;
     height: 18px;
+  }
+  .board-nav-dot {
+    top: 6px;
+    left: calc(50% + 6px);
   }
   /* The page's own tail has to clear the 54px bar. The height is a VARIABLE
      rather than copies of `58px` because more than one reader needs it and one

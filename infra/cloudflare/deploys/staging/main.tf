@@ -1,5 +1,5 @@
 # The staging environment's Cloudflare configuration. Run it through
-# `bun run cf:plan staging` / `bun run cf:apply staging` (README.md), which
+# `bun run cf:plan staging` (README.md), which
 # assemble the variables and put the credentials into terraform's
 # environment only.
 # Wired and validated, never applied yet: it adopts nothing but its own

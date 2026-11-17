@@ -134,6 +134,15 @@ const BUTTON = `(() => {
   return b && b.width > 0 ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null;
 })()`;
 
+/** The board loads the comment widget once its socket is ready, and the mic
+ *  after it; the bar steps back from that corner when it arrives
+ *  (`lead-chat-place.ts`). That is the page settling, not the line growing, so
+ *  every read here starts after it. */
+const CORNER_DRAWN = `(() => {
+  const mic = document.querySelector('claude-feedback-widget')?.shadowRoot?.querySelector('.fab-mic');
+  return mic && mic.getBoundingClientRect().width > 0 ? true : null;
+})()`;
+
 async function click(cdp: Cdp, at: { x: number; y: number }): Promise<void> {
   const press = { ...at, button: 'left', clickCount: 1 };
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...press });
@@ -249,6 +258,10 @@ async function main(): Promise<void> {
         const at = await until(
           'the agent button',
           async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
+        );
+        await until(
+          'the comment widget in its corner',
+          async () => (await cdp.evaluate(CORNER_DRAWN)) as true | null,
         );
         hear = null;
         await click(cdp, at);

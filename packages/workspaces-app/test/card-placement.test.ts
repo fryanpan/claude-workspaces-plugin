@@ -22,6 +22,8 @@ import { PHONE, setViewport } from './css-harness.ts';
 
 afterEach(() => {
   document.body.removeAttribute('data-cards');
+  delete document.documentElement.dataset.lcDocked;
+  document.documentElement.style.removeProperty('--lc-dock-w');
   setViewport({ width: 1024, height: 768 });
 });
 
@@ -83,5 +85,26 @@ describe('publishing the surface to the stylesheet', () => {
     setViewport(PHONE);
     applyPlacement();
     expect(document.body.dataset.cards).toBe('inline');
+  });
+});
+
+describe('the lead chat docked beside the doc', () => {
+  function dock(px: number): void {
+    document.documentElement.dataset.lcDocked = 'true';
+    document.documentElement.style.setProperty('--lc-dock-w', `${px}px`);
+  }
+
+  it('at 1180 a docked 420px chat leaves no room for the margin, so the cards go inline', () => {
+    setViewport({ width: 1180, height: 820 });
+    // CONTROL: the same width with the chat closed has the margin.
+    expect(cardPlacement()).toBe('balloon');
+    dock(420);
+    expect(cardPlacement()).toBe('inline');
+  });
+
+  it('a window wide enough for both keeps the margin with the chat docked', () => {
+    setViewport({ width: 1600, height: 900 });
+    dock(420);
+    expect(cardPlacement()).toBe('balloon');
   });
 });

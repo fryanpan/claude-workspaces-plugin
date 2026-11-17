@@ -184,6 +184,25 @@ describe('buildLibrary', () => {
     expect(lib.files.map((r) => r.name)).toEqual(['Kept']);
   });
 
+  // Coach setup wrote the Coach board's own id into the set field of the
+  // Learning goals and Coach memory docs, so the Library read them as a set's
+  // members and listed neither. With Home's coach section gone, the Library is
+  // where the Learning goals doc is reached.
+  it("lists a doc whose set field names this board itself, and still leaves out a real set's member", () => {
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-goals', { title: 'Learning goals', workspaceId: 'w-test' }),
+          meta('d-member', { title: 'A set member', workspaceId: 'r-2' }),
+          // A set file under the board's own id is still a set member: only a
+          // doc with no file path in a set is read as one filed on the board.
+          meta('d-file', { title: 'A set file', workspaceId: 'w-test', relPath: 'notes.md' }),
+        ],
+      }),
+    );
+    expect(lib.files.map((r) => r.name)).toEqual(['Learning goals']);
+  });
+
   it('offers every project markdown file no board doc holds, and a mounted file at its address', () => {
     const docs = [meta('d-plan', { title: 'Riverbend project plan' })];
     const keys: Record<string, string> = { 'd-plan': makeDocKey(REPO, 'docs/plan.md') };
@@ -213,7 +232,16 @@ describe('buildLibrary', () => {
       { name: 'README.md', at: 3_000, open: 'README.md', folder: '' },
       // The bound doc is its FILE here — same name it had before anybody
       // opened it, same clock as the rows around it.
-      { name: 'plan.md', at: 2_000, href: '/workspaces/w-test/docs/d-plan', folder: 'docs' },
+      // It carries its doc id, so the page can file it in a Library folder,
+      // and when its record was made: no birth time is read here.
+      {
+        name: 'plan.md',
+        at: 2_000,
+        created: 1_000,
+        href: '/workspaces/w-test/docs/d-plan',
+        folder: 'docs',
+        docId: 'd-plan',
+      },
     ]);
   });
 

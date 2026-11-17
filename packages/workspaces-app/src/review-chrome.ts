@@ -158,6 +158,8 @@ export interface ReviewChrome {
   openComposer: (prefill?: string) => void;
   hideComposer: () => void;
   renderDocLabel: () => void;
+  /** Replace the label's path (the file moved) and redraw it. */
+  setLabelHint: (hint: string) => void;
   /** Tear down the chrome for this document: signal-bound listeners are
    *  already gone via `scope.dispose()`; this clears the rendered UI so the
    *  next document's mount doesn't briefly show this one's threads. */
@@ -627,6 +629,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     });
 
   // --- doc label --------------------------------------------------------------
+  let labelHint = opts.labelHint;
   function renderDocLabel(): void {
     const m = readDocMeta(ydoc);
     const full = docLabel({
@@ -634,7 +637,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
       relPath: m.relPath,
       title: m.title,
       docId: m.docId,
-      labelHint: opts.labelHint,
+      labelHint,
       huddle: m.huddle,
     });
     // On mobile the full path eats the topbar — show just the basename
@@ -689,7 +692,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
         relPath: readDocMeta(ydoc).relPath,
         title: readDocMeta(ydoc).title,
         docId: readDocMeta(ydoc).docId,
-        labelHint: opts.labelHint,
+        labelHint,
         huddle: readDocMeta(ydoc).huddle,
       }),
     onRenamed: () => renderDocLabel(),
@@ -749,6 +752,10 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     openComposer,
     hideComposer,
     renderDocLabel,
+    setLabelHint: (hint: string) => {
+      labelHint = hint;
+      renderDocLabel();
+    },
     destroy() {
       // Signal-bound listeners are already gone via scope.dispose(); clear the
       // rendered UI so the next document's mount doesn't briefly show this

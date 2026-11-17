@@ -13,12 +13,9 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  LEAD_CHAT_FILE_ID,
-  leadChatFilePath,
-  parseLeadChatAttachment,
-} from '@claude-workspaces/core/lead-chat';
+import { LEAD_CHAT_FILE_ID, parseLeadChatAttachment } from '@claude-workspaces/core/lead-chat';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { leadChatFilesClient } from '../server-client.ts';
 
 /** The largest image sent inline: the API refuses images past about 5 MB of
  *  base64. A larger one is read from its path. */
@@ -40,10 +37,13 @@ export async function readChatAttachment(
 ): Promise<CallToolResult> {
   if (!workspaceId || !fileId) return ctx.err('workspaceId and fileId are required');
   if (!LEAD_CHAT_FILE_ID.test(fileId)) return ctx.err('fileId is not a chat file id');
-  const got = (await ctx.http(
-    'GET',
-    `${leadChatFilePath(workspaceId, fileId)}?encoding=base64`,
-  )) as { file?: unknown; data?: unknown };
+  const got = await (
+    await leadChatFilesClient(ctx.http).workspaces[':ws']['lead-chat'].files[':id'].$get({
+      param: { ws: encodeURIComponent(workspaceId), id: encodeURIComponent(fileId) },
+      query: { encoding: 'base64' },
+    })
+  ).json();
+  // Parsed rather than trusted: the bytes go to disk under its name.
   const file = parseLeadChatAttachment(got.file);
   if (!file || typeof got.data !== 'string') return ctx.err('the server sent no file');
   const dir = mkdtempSync(join(ctx.tempRoot ?? tmpdir(), 'cw-chat-file-'));

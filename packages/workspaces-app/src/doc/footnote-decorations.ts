@@ -10,10 +10,11 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
  * STRICTLY RENDER-TIME, like the task-link chips beside it. A footnote is
  * the literal characters in the prose and nothing else — no mark, no node,
  * no attribute — so this plugin writes nothing to the document. It reads the
- * text of every block on every state change and hands back two decorations
- * per note: one over the `^[…]` run itself (the stylesheet folds it down to
- * a superscript, or hides it where the margin carries the note) and one over
- * the fact the note supports.
+ * text of every block on every state change and hands back decorations of
+ * two kinds per note: the `^[…]` run itself (the stylesheet folds it down to
+ * a superscript, or hides it where the margin carries the note) and the fact
+ * the note supports. The run is two decorations, so that only its closing
+ * `]` carries the number the stylesheet draws: see `build`.
  *
  * The fact decoration SAYS WHERE THE WORDS ARE; it does not say to draw a
  * line under them. At rest only an "Unconfirmed" note's fact carries one, and
@@ -113,9 +114,17 @@ function build(doc: ProseNode, caret: number, editable: boolean): DecorationSet 
   const decos: Decoration[] = [];
   for (const r of footnoteRuns(doc)) {
     const open = editable && caret > r.from && caret < r.to;
+    const cls = open ? 'cw-fn cw-fn-open' : 'cw-fn';
+    // The run renders as one span per differently formatted piece: a link or
+    // a comment highlight inside the note cuts it up. Every piece folds away
+    // and names its note (`data-cw-fn-run`, for hover and taps), but only the
+    // closing `]` carries the number the stylesheet draws, and one character
+    // cannot be cut — so a note draws its number exactly once.
     decos.push(
-      Decoration.inline(r.from, r.to, {
-        class: open ? 'cw-fn cw-fn-open' : 'cw-fn',
+      Decoration.inline(r.from, r.to - 1, { class: cls, 'data-cw-fn-run': String(r.n) }),
+      Decoration.inline(r.to - 1, r.to, {
+        class: cls,
+        'data-cw-fn-run': String(r.n),
         'data-cw-fn': String(r.n),
         'data-cw-fn-note': r.note,
         ...(r.unsure ? { 'data-cw-fn-unsure': '' } : {}),

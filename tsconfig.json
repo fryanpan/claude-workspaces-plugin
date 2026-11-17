@@ -14,7 +14,11 @@
     "cookbook/**/*.ts",
     "scripts/**/*.ts",
     "infra/project-machine/**/*.ts",
-    "infra/board-router-worker/**/*.ts"
+    "infra/board-router-worker/**/*.ts",
+    "infra/signin-test/**/*.ts",
+    "templates/*/src/**/*.ts",
+    "templates/*/test/**/*.ts",
+    "templates/*/scripts/**/*.ts"
   ],
   "exclude": ["**/node_modules", "**/dist", "**/build"]
 }

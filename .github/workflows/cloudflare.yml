@@ -4,23 +4,37 @@
 #                 summarised on the PR. Skipped, not failed, when the plan
 #                 secrets are absent (a fork's PR, or before they are set).
 #   push to main  the same check, then apply to prod in the GitHub Environment
-#                 `cloudflare-prod`.
+#                 `cloudflare-prod`. A merged pull request is the approval: the
+#                 environment has no required reviewer.
+#   dispatch      the same as a push, when run on main. The keeper dispatches
+#                 it after `bun run cf:sync-config` writes the gitignored
+#                 configs' secrets (infra/cloudflare/README.md, "CI"); a
+#                 dispatch on any other branch runs the check and applies
+#                 nothing.
 #
-# No Fly token is used here. Project machines take new server code from the
-# signed releases server-release.yml publishes, and an image change is
-# `machine:deploy` from the keeper (docs/process/project-machine.md).
+# No Fly token is used here: a project machine's image deploys from fly.yml.
+# Machines take new server code from the signed releases server-release.yml
+# publishes (docs/process/project-machine.md).
 #
 # The repo is public, so these logs are too. terraform's own output is not
 # printed: a plan is reported as resource addresses and verbs only
 # (infra/cloudflare/plan-summary.ts), and addresses carry no hostname.
 #
-# Secrets, by name (README.md, "CI"). The same names are set twice: the
-# repository's copies are read-only and are what a pull request's plan gets;
-# the `cloudflare-prod` environment's copies (deployments from main only)
-# can write, and GitHub gives an environment secret precedence over a
-# repository secret of the same name in the jobs that use the environment.
-#   CLOUDFLARE_API_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   both
-#   CF_ROUTER_CONFIG, CF_ACCESS_CONFIG, CF_SHARE_LINK_CONFIG       repository
+# Secrets, by name (README.md, "CI"). The repository's copies are read-only
+# and are what a pull request's plan gets; the `cloudflare-prod`
+# environment's copies (deployments from main only) can write, and GitHub
+# gives an environment secret precedence over a repository secret of the
+# same name in the jobs that use the environment.
+#   CLOUDFLARE_API_TOKEN                                       both; required
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY                     both; optional
+#   CF_ROUTER_CONFIG, CF_ACCESS_CONFIG, CF_SHARE_LINK_CONFIG   repository
+# `bun run cf:ci-secrets apply` (infra/cloudflare/ci-secrets/) writes the
+# environment's three and the configs; keeper-setup the repository's three.
+# Without the R2 pair, ci-credentials.ts derives the state bucket's key from
+# CLOUDFLARE_API_TOKEN (its id, and the SHA-256 of its value), masks it, and
+# hands it to terraform's environment alone. The token then needs R2 write
+# for an apply (read for a plan, which takes no lock); the repository's plan
+# token has no R2 permission, so a plan needs the repository's R2 pair.
 # Variable (optional): CF_TFSTATE_BUCKET, default claude-workspaces-tfstate.
 #
 # This file is outside `bun run verify:parity`, which reads ci.yml only: its
@@ -42,6 +56,7 @@ on:
       - infra/board-router-worker/worker.js
       - infra/share-link-worker/worker.js
       - .github/workflows/cloudflare.yml
+  workflow_dispatch: {}
 
 permissions: {}
 
@@ -75,11 +90,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # The S3 backend reads the R2 key pair under the AWS names.
+    # ci-credentials.ts hands the S3 backend its key under the AWS names.
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
       CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
       CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
@@ -88,7 +103,7 @@ jobs:
       - name: Plan secrets are present
         id: secrets
         run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$CF_ROUTER_CONFIG" ]; then
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CF_ROUTER_CONFIG" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -113,7 +128,7 @@ jobs:
         if: steps.secrets.outputs.present == 'true'
         env:
           CF_PLAN_SUMMARY: ${{ runner.temp }}/plan.md
-        run: bun infra/cloudflare/run.ts plan prod --ci
+        run: bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts plan prod --ci
       - name: Post the plan summary
         if: steps.secrets.outputs.present == 'true'
         env:
@@ -122,7 +137,7 @@ jobs:
         run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/plan.md"
 
   apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: check
     runs-on: ubuntu-latest
     environment: cloudflare-prod
@@ -131,22 +146,18 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-    # The S3 backend reads the R2 key pair under the AWS names.
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
-      CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
-      CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
-      CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+    # The write token and the state key are on the one step that needs them,
+    # not the job: `bun install` and the setup actions never see them.
     steps:
       # Until the environment's secrets are set, a merge skips the apply
-      # rather than failing main.
+      # rather than failing main. Only whether each is set leaves this step.
       - name: Apply secrets are present
         id: secrets
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_CONFIG: ${{ secrets.CF_ROUTER_CONFIG != '' }}
         run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$CF_ROUTER_CONFIG" ]; then
+          if [ "$HAS_TOKEN" = true ] && [ "$HAS_CONFIG" = true ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -169,4 +180,14 @@ jobs:
           terraform_wrapper: false
       - name: Apply prod
         if: steps.secrets.outputs.present == 'true'
-        run: bun infra/cloudflare/run.ts apply prod --ci
+        # ci-credentials.ts hands the S3 backend its key under the AWS names:
+        # the R2 pair when set, else the one derived from the token.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
+          CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
+          CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
+          CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+        run: bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts apply prod --ci

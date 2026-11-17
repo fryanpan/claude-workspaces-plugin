@@ -178,6 +178,16 @@ export function fakeFetch(w: World, cf: Cf, keeperAccountsFail = false): typeof 
       if (!known) return json({ success: false }, 401);
       if (path === '/accounts')
         return json({ success: true, result: [{ id: ACCOUNT, name: ACCOUNT_NAME }] });
+      // The four CI tokens behind the names GitHub holds (below), all active.
+      if (path === '/user/tokens' && method === 'GET') {
+        const kinds = ['apply', 'plan', 'state read-write', 'state read-only'];
+        const result = kinds.map((k, i) => ({
+          id: `ci${i}`,
+          name: `claude-workspaces CI ${k} 2026-11-12T09:00`,
+          status: 'active',
+        }));
+        return json({ success: true, result });
+      }
       if (!cf.canMint) return json({ success: false, errors: [{ message: 'forbidden' }] }, 403);
       if (path === '/user/tokens/permission_groups') {
         return json({
@@ -213,6 +223,12 @@ export function fakeFetch(w: World, cf: Cf, keeperAccountsFail = false): typeof 
         );
       }
       if (method === 'DELETE' && url.pathname === '/v1/requests/req1') return json({ ok: true });
+      // GitHub holds the CI credentials already, so the CI step skips; its
+      // own cases are keeper-setup-ci.test.ts.
+      if (method === 'GET' && url.pathname === '/v1/github-status') {
+        const all = ['CLOUDFLARE_API_TOKEN', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+        return json({ scopes: ['repo'], names: { repository: all, 'cloudflare-prod': all } });
+      }
       // The generic Cloudflare route, read with the keeper's own token.
       if (method === 'GET' && url.pathname === '/v1/cloudflare/accounts')
         return keeperAccountsFail

@@ -22,6 +22,7 @@
  */
 
 import { escapeHtml } from '@claude-workspaces/core';
+import { folderTail } from '@claude-workspaces/core/review-access';
 import {
   approveRequest,
   letInRequest,
@@ -44,7 +45,7 @@ export interface AccessProposal {
   taskId: string;
   taskTitle: string;
   reviewItemId: string;
-  change: { op: string; entries?: string[]; email?: string; role?: string };
+  change: { op: string; entries?: string[]; email?: string; role?: string; folder?: string };
   line: string;
   why: string;
   proposedBy: string;
@@ -135,6 +136,9 @@ export function changeSentence(p: AccessProposal): string {
   }
   if (p.change.op === 'unlock-board') {
     return 'Links can be minted for this board again. Nobody new is let in by this alone.';
+  }
+  if (p.change.op === 'component-folder') {
+    return `Docs build components from the files git does not list in ${folderTail(p.change.folder ?? '')}, and that code runs in every reader's page. Nobody new is let in.`;
   }
   if (p.change.op === 'sharing-on') {
     return 'Every board reopens to the people it names, except a board closed on its own. Nobody new is let in.';

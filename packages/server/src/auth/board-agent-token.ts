@@ -115,11 +115,13 @@ export function isValidBoardTokenId(id: unknown): id is string {
   return typeof id === 'string' && TOKEN_ID.test(id);
 }
 
-/** The `at2` bearer this request carries, or null. Shape-matched, so a
- *  bearer for another protocol is never offered to this verifier. */
+/** The `at2` or `at3` bearer this request carries, or null. Shape-matched,
+ *  so a bearer for another protocol is never offered to the board door. An
+ *  `at3` (`agent-grant-token.ts`) is the same door's next version; the
+ *  server's verifier tells the two apart by the tag. */
 export function boardAgentBearerOf(headers: Headers): string | null {
   const raw = headers.get('authorization');
-  const m = raw?.match(/^Bearer\s+(at2\.[^\s]+)$/i);
+  const m = raw?.match(/^Bearer\s+(at[23]\.[^\s]+)$/i);
   return m?.[1] ?? null;
 }
 

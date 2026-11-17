@@ -11,7 +11,7 @@
  * removes anything — only `ackComment` does.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { VOICE_ACK_GRACE_MS } from './agent-voice-queue.ts';
 import type { AgentStorePersistence } from './task-agents.ts';
@@ -134,7 +134,7 @@ export class AgentCommentQueue {
         const drop = new Set(mine.slice(0, overflow).map((q) => q.id));
         next = next.filter((q) => !drop.has(q.id));
       }
-      writeFileSync(
+      writeQueueFile(
         commentQueuePath(this.p.dataDir(), workspaceId),
         `${JSON.stringify({ queue: next }, null, 2)}\n`,
       );
@@ -169,7 +169,7 @@ export class AgentCommentQueue {
         rmSync(path, { force: true });
         return;
       }
-      writeFileSync(path, `${JSON.stringify({ queue }, null, 2)}\n`);
+      writeQueueFile(path, `${JSON.stringify({ queue }, null, 2)}\n`);
     } catch (err) {
       console.error(`[tasks] failed to rewrite comment queue for ${workspaceId}:`, err);
     }
@@ -246,4 +246,11 @@ export class AgentCommentQueue {
     this.writeCommentQueue(workspaceId, queue);
     return handOver;
   }
+}
+
+/** Write a queue file mode 600: its rows carry what a comment or a private
+ *  message said, and a private message lives nowhere a member can read. */
+function writeQueueFile(path: string, text: string): void {
+  writeFileSync(path, text, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }

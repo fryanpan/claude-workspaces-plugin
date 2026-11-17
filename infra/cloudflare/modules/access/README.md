@@ -12,7 +12,7 @@ hostnames, so each project's stamps carry an audience no other server accepts.
 
 A project with nobody listed gets no `allow` policy, so it admits no person.
 Applications and service tokens carry `prevent_destroy`. A token is never
-created by an apply: `cf:apply` makes a missing one first, keeps its secret in
+created by an apply: `cf:sync-config` makes a missing one first, keeps its secret in
 the Keychain, and the root imports it (`../../service-tokens.ts`), so no
 `client_secret` enters the state. The email list is wrapped in
 `sensitive()`, so a plan does not print it.

@@ -75,6 +75,8 @@ export interface CompactDocRow {
   reviewUrl?: string;
   stale?: boolean;
   huddle?: boolean;
+  /** The board's Library folder this doc is filed in, by id and path of names. */
+  folder?: { id: string; path: string };
 }
 
 function truthy(v: string | null): boolean {
@@ -216,7 +218,11 @@ export function pageDocs<T>(
 /** The compact row, from a decorated meta and the counts the caller looked up. */
 export function compactDocRow(
   meta: DocMeta & { reviewUrl?: string },
-  extras: { boardId: string | null; threads: { open: number; total: number } },
+  extras: {
+    boardId: string | null;
+    threads: { open: number; total: number };
+    folder?: { id: string; path: string } | null;
+  },
 ): CompactDocRow {
   const row: CompactDocRow = {
     docId: meta.docId,
@@ -238,5 +244,6 @@ export function compactDocRow(
   if (meta.reviewUrl !== undefined) row.reviewUrl = meta.reviewUrl;
   if (meta.stale) row.stale = true;
   if (meta.huddle) row.huddle = true;
+  if (extras.folder) row.folder = extras.folder;
   return row;
 }

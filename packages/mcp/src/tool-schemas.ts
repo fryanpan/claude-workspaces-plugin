@@ -19,6 +19,8 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { COMPONENT_TOOLS } from './component-schemas.ts';
+import { FOLDER_TOOLS } from './folder-schemas.ts';
 import { PERSON_TOOLS } from './person-schemas.ts';
 import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
 
@@ -177,6 +179,15 @@ const CONFIRM_SCOPED_OVERWRITE = {
     'Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance.',
 };
 
+/** `to` on a comment: who it is for. The server resolves and refuses. */
+const ADDRESSEES_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  maxItems: 10,
+  description:
+    'Who this comment is for: person ids, emails or display names, or agent ids or names, on this board. Only they are notified, and the thread waits on them. Everyone who can read the doc still sees it. Omit to notify the board as usual.',
+};
+
 const TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -202,7 +213,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_docs',
       description:
-        'List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.',
+        "List the review docs on the server, one page at a time. A page holds the 50 most recently active docs as compact rows, plus nextCursor. A row filed in one of the board's Library folders names it as folder: {id, path}. Narrow it with workspaceId, kind, query or sourcePrefix. Pass `full: true` for the whole doc meta.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -293,6 +304,7 @@ export const TOOL_LIST: ListToolsResult = {
           threadId: { type: 'string' },
           text: { type: 'string' },
           review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA,
         },
         required: ['workspaceId', 'docId', 'threadId', 'text'],
       },
@@ -611,6 +623,7 @@ export const TOOL_LIST: ListToolsResult = {
           },
           text: { type: 'string' },
           review: REVIEW_ITEM_SCHEMA,
+          to: ADDRESSEES_SCHEMA,
         },
         required: ['workspaceId', 'docId', 'text'],
       },
@@ -618,7 +631,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'resolve_thread',
       description:
-        'Mark a thread resolved. It retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable.',
+        "Mark a thread resolved. It retires every review item on the thread, so use withdraw_review_item to take back one of your own asks while the others stay answerable. On a comment a person left, use set_thread_progress with 'done' instead and let them resolve it: a resolve takes the comment off their open page at once.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -631,6 +644,25 @@ export const TOOL_LIST: ListToolsResult = {
           threadId: { type: 'string' },
         },
         required: ['workspaceId', 'docId', 'threadId'],
+      },
+    },
+    {
+      name: 'set_thread_progress',
+      description:
+        "Show a person what you are doing with their comment. Send 'working' when you start on it and 'done' when the change is made. The thread stays open and on their page, so they check the work and resolve it themselves. 'open' clears the mark. Their reply on a done thread clears it too, because that reply sends the work back. Refused on a resolved thread.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The board this resource is on. get_workspace lists the boards you are attached to.',
+          },
+          docId: { type: 'string' },
+          threadId: { type: 'string' },
+          state: { type: 'string', enum: ['working', 'done', 'open'] },
+        },
+        required: ['workspaceId', 'docId', 'threadId', 'state'],
       },
     },
     {
@@ -1750,7 +1782,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_share_member_role',
       description:
-        "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer.",
+        "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer. Any other change that lets them do more (a comment or view member moved to 'member', which is edit) needs the owner's own proof from the board's page; without it the call gets a 403 `owner-proof-required` and nothing changes.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -3360,6 +3392,37 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'get_doc_metadata',
+      description:
+        "Read a doc's metadata fields: the YAML front matter at the top of its .md, judged against the schema its folder declares in .workspaces/doc-metadata.schema.json (the nearest one, up to the repo top). Answers the schema's fields, the values set, which fields are wrong and why, and defaults the editor shows for blank fields. schema is null when no schema governs the doc, and schemaReason says why: not-file-bound (the doc has no file), file-not-answering (its file is not responding; try later), no-file (no schema file between the doc's folder and the repo top), unreadable or invalid (the schema file is there but cannot be used; schemaError says how). Works on a doc nobody has opened, without opening it. Contract: docs/architecture/doc-metadata.md in the claude-workspaces repo.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board the doc is filed on.' },
+          docId: { type: 'string', description: 'The doc to read.' },
+        },
+        required: ['workspaceId', 'docId'],
+      },
+    },
+    {
+      name: 'set_doc_metadata',
+      description:
+        "Set a doc's metadata fields in its YAML front matter. fields maps a field name to its value: text, a number, true/false, or a list of text, as the schema says; null or an empty value removes the field. Only the lines of the fields you set change, and every open page and the file get the change within about a second. A field the schema does not declare, a read-only field or a wrong type is refused, nothing is written, and the answer names each wrong field. Refused with no-schema when no schema governs the doc.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board the doc is filed on.' },
+          docId: { type: 'string', description: 'The doc to change.' },
+          fields: {
+            type: 'object',
+            description: 'Field name to value, e.g. {"status": "draft", "tags": ["fares"]}.',
+            additionalProperties: true,
+          },
+        },
+        required: ['workspaceId', 'docId', 'fields'],
+      },
+    },
+    {
       name: 'move_doc_to_project',
       description:
         "Move a markdown doc into a folder of this board's project. The doc keeps its id, comments and history, and the Library then shows it as a project file. The old copy stays on disk. The target must be inside a mounted folder or the meetings folder. The server refuses mockups, a doc on another board, a file that exists, and a meeting that is recording.",
@@ -3381,6 +3444,36 @@ export const TOOL_LIST: ListToolsResult = {
           },
         },
         required: ['workspaceId', 'docId', 'relPath'],
+      },
+    },
+    {
+      name: 'move_doc_file',
+      description:
+        'Move the file of a bound markdown doc, or point the doc at a file that git already moved. The doc keeps its id, comments, anchors, links and front matter, and edits not yet saved to disk go to the new path. mode "move": the server renames the file. mode "repoint": the file is already at the new path, for example after git mv. The new path must stay inside the same repository. The server refuses a file that exists (move), a missing file (repoint), and a path another doc is bound to. In a walled folder, use git mv and then "repoint".',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description: 'The board the doc is filed on.',
+          },
+          docId: {
+            type: 'string',
+            description: 'The doc whose file moves.',
+          },
+          path: {
+            type: 'string',
+            description:
+              'The new file: absolute, or relative to the repository root, ending in .md, .mdx or .markdown, e.g. "docs/plans/ferry.md".',
+          },
+          mode: {
+            type: 'string',
+            enum: ['move', 'repoint'],
+            description:
+              '"move" renames the file. "repoint" follows a file that is already at the new path.',
+          },
+        },
+        required: ['workspaceId', 'docId', 'path', 'mode'],
       },
     },
     {
@@ -3464,5 +3557,7 @@ export const TOOL_LIST: ListToolsResult = {
     },
     ...WHITEBOARD_TOOLS,
     ...PERSON_TOOLS,
+    ...FOLDER_TOOLS,
+    ...COMPONENT_TOOLS,
   ],
 };

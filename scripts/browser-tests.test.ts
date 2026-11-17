@@ -104,7 +104,9 @@ describe('ci.yml still opts in', () => {
 
   it('sets the variable on one step per gate that needs a browser', () => {
     const opted = yaml.split('\n').filter((l) => l.includes(`${BROWSER_TESTS_ENV}:`));
-    // The browser members, plus test:vitest for the cases inside the suite.
+    // The browser members, plus test:vitest's `client-browser` step for the
+    // cases inside the suite. The unit `client` step runs no file that calls
+    // the gate, so it does not set the variable.
     expect(opted).toHaveLength(MEMBERS.filter((m) => m.browser === true).length + 1);
     for (const l of opted) expect(l).toMatch(/'1'|"1"|:\s*1\s*$/);
   });

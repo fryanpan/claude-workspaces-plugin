@@ -37,7 +37,7 @@
  * forged or missing stamp routed here is refused by the server, not by this
  * file.
  *
- * Deploying it: `bun run cf:apply` (infra/cloudflare/README.md).
+ * Deploying it: merge the change; CI applies it (infra/cloudflare/README.md).
  */
 
 /** A board id is one path segment of id characters, compared undecoded. */

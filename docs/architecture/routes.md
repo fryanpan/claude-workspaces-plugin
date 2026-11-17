@@ -26,6 +26,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/agent-notes/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agent-token` | GET | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/merge` | POST | `routes/agent-identity.ts` | loopback-only |  |
+| `/api/agents/:agentId/messages/:personId` | POST | `routes/private-messages.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`). |
+| `/api/agents/:agentId/person` | POST | `routes/agent-identity.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`). |
 | `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`). |
 | `/api/attachments` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
@@ -38,6 +40,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/auth/verify` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-session` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-token` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/board-import/:ws` | GET, PUT | `routes/board-import.ts` | board-import |  |
+| `/api/board-import/:ws/print` | POST | `routes/board-import.ts` | board-import |  |
 | `/api/board-sockets/:ws/roots` | GET, PUT | `routes/board-socket-roots.ts` | loopback-only |  |
 | `/api/board-tokens` | GET, POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/board-tokens/:id/revoke` | POST | `routes/board-tokens.ts` | loopback-only |  |
@@ -63,6 +67,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/keeper/holds` | POST | `routes/keeper-holds.ts` | loopback-only |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
 | `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
+| `/api/me/messages` | GET, POST | `routes/private-messages.ts` | trusted-local |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
@@ -195,6 +200,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/calendar/events/:eventId/join` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit` | GET, POST | `routes/chat-audit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit/:agent` | GET | `routes/chat-audit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/collab-core` | POST | `routes/workspace-members.ts` | trusted-local |  |
 | `/workspaces/:ws/comment-queue/:id/ack` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches` | GET, POST | `routes/dispatch-and-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches/:taskId` | DELETE | `routes/dispatch-and-notes.ts` | trusted-local |  |
@@ -208,11 +214,17 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId` | DELETE | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components` | GET | `routes/doc-component-agent.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components/:id/state` | GET, POST | `routes/doc-component-agent.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/agent-components/place` | POST | `routes/doc-component-agent.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/app-voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/archive` | POST | `routes/archive.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/assets` | POST | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/assets/*` | GET, HEAD | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/audio` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/block_edits` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/component-grants` | POST | `routes/doc-component-agent.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/components/*` | GET, HEAD | `routes/doc-components.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | GET | `routes/doc-edit-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/content` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/delete_block_at_anchor` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
@@ -231,7 +243,9 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/meetings/:meetingId/speakers` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/metadata` | GET, PUT | `routes/doc-metadata.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/move` | POST | `routes/doc-move.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/move-file` | POST | `routes/doc-file-move.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/notes-method` | GET, PUT | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan` | POST | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan-request` | POST | `routes/doc-resource.ts` | trusted-local |  |
@@ -254,6 +268,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_blocks_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/linked-items` | POST | `routes/doc-thread-linked-item.ts` | owner-in-handler | the guard admits `threads/*`; the handler refuses a visitor, since the item may be on a board they were not given |
+| `/workspaces/:ws/docs/:docId/threads/:threadId/progress` | POST | `routes/doc-threads-routes.ts` | owner-in-handler | the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/promote` | POST | `routes/docs.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reanchor` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reopen` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
@@ -269,6 +284,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/voice-feedback.md` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/voice-feedback/:file` | GET | `routes/doc-voice-feedback.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/whiteboard` | GET, POST | `routes/whiteboard-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/y` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/embeds` | GET | `routes/workspace-embeds.ts` | share-scope |  |
 | `/workspaces/:ws/embeds` | PUT | `routes/workspace-embeds.ts` | trusted-local |  |
@@ -298,13 +314,25 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/lead-chat/files` | POST | `routes/workspace-lead-chat-files.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/files/:id` | GET, HEAD | `routes/workspace-lead-chat-files.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/meeting` | POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
+| `/workspaces/:ws/lead-chat/meeting/say` | POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat/model` | POST | `routes/workspace-lead-chat-model.ts` | trusted-local | refuses every caller today: 409 `model-switch-off` |
 | `/workspaces/:ws/library` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/workspaces/:ws/library/docs/:docId/folder` | PUT | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders` | GET, POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/archive` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/move` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/rename` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
+| `/workspaces/:ws/library/folders/:folderId/unarchive` | POST | `routes/workspace-library-folders.ts` | trusted-local |  |
 | `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | share-scope |  |
 | `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |
+| `/workspaces/:ws/library/stars` | GET | `routes/workspace-library-views.ts` | trusted-local |  |
+| `/workspaces/:ws/library/stars` | POST | `routes/workspace-library-views.ts` | trusted-local |  |
+| `/workspaces/:ws/library/views` | POST | `routes/workspace-library-views.ts` | trusted-local |  |
 | `/workspaces/:ws/links:titles` | POST | `routes/task-status-links.ts` | trusted-local |  |
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |
+| `/workspaces/:ws/me/dm` | GET, POST | `routes/direct-messages.ts` | share-scope |  |
+| `/workspaces/:ws/me/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
 | `/workspaces/:ws/members` | GET | `routes/workspace-members.ts` | share-scope |  |
 | `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
 | `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
@@ -325,6 +353,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/review-items/viewed` | POST | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/review/:id` | GET | `routes/board-links.ts` | trusted-local |  |
 | `/workspaces/:ws/reviews/:id` | GET | `routes/board-links.ts` | trusted-local |  |
+| `/workspaces/:ws/roles-mode` | POST | `routes/workspace-members.ts` | trusted-local |  |
 | `/workspaces/:ws/settings` | GET, PUT | `routes/workspace-settings.ts` | owner-in-handler | the guard admits both verbs; the GET is a member’s and `workspace-settings.ts` refuses a Regular User’s PUT itself — every field it writes is board-wide |
 | `/workspaces/:ws/tasks` | GET, POST | `routes/tasks-list-create.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId` | GET | `routes/task-page.ts` | trusted-local |  |
@@ -336,6 +365,9 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/assignee` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/body` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/detail` | GET | `routes/task-detail.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/done-when` | POST | `routes/task-done-when.ts` | trusted-local |  |
+| `/workspaces/:ws/tasks/:taskId/done-when/:lineId/check` | POST | `routes/task-done-when.ts` | trusted-local |  |
+| `/workspaces/:ws/tasks/:taskId/done-when/report` | POST | `routes/task-done-when.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/due` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/evidence` | POST | `routes/task-status-links.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/goal` | POST | `routes/task-status-links.ts` | share-scope |  |
@@ -353,15 +385,17 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/release` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets` | POST | `routes/task-review-items.ts` | trusted-local |  |
-| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw` | POST | `routes/task-review-items.ts` | share-scope |  |
-| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo` | POST | `routes/task-review-items.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw` | POST | `routes/task-review-withdraw.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo` | POST | `routes/task-review-withdraw.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/schedule` | POST | `routes/task-fields.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/title` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/transition` | POST | `routes/task-status-links.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/wait` | POST | `routes/task-fields.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/batch` | POST | `routes/tasks-batch.ts` | trusted-local |  |
 | `/workspaces/:ws/voice` | POST | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/voice-queue/:id/ack` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/voice-queue/:id/answer` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/voice/converse` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/voice/timings` | GET | `routes/workspace-settings.ts` | trusted-local |  |
+| `/workspaces/:ws/whiteboards` | POST | `routes/whiteboard-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/y` | GET | `routes/upgrade-stream.ts` | collab-scope |  |

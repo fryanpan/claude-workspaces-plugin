@@ -1,6 +1,8 @@
 /**
  * Making the Access service tokens the config names and the account lacks,
- * for `cf:apply` on the Mac (`run.ts`). Terraform owns every token
+ * in the keeper's run for `cf:sync-config` (`keeper-run.ts tokens`), and
+ * storing a token's pair in Bryan's Keychain (`sync-config.ts`,
+ * `rotate-token.ts`). Terraform owns every token
  * (`modules/access`), but it does not make one: the wrapper does, here, and
  * the apply that follows adopts it by id (`service_token_ids`, imported in
  * each root). That is what keeps a token's secret out of the state. The
@@ -18,8 +20,8 @@
  * value is printed, logged, written to a file, or put in an argument: the
  * Keychain line goes to `security -i` on stdin.
  *
- * Tested by `packages/server/test/cloudflare-tf-service-tokens.test.ts` and,
- * through the wrapper, `cloudflare-tf-wrapper.test.ts`.
+ * Tested by `packages/server/test/cloudflare-tf-service-tokens.test.ts` and
+ * `cloudflare-tf-keeper-wrapper.test.ts` (the `cf:sync-config` side).
  */
 import { spawnSync } from 'node:child_process';
 import type { CloudflareApi } from '../project-machine/cloudflare.ts';
@@ -141,15 +143,17 @@ export function keychainHasService(service: string, bin = 'security'): boolean {
 }
 
 /**
- * Add one item, refusing to replace an existing one (no `-U`). The value is
- * checked against the shape Cloudflare gives it, so it cannot break out of
- * the quoted `-w` argument of the line `security -i` reads on stdin.
+ * Add one item, refusing to replace an existing one unless `replace` (`-U`,
+ * for a rotated secret). The value is checked against the shape Cloudflare
+ * gives it, so it cannot break out of the quoted `-w` argument of the line
+ * `security -i` reads on stdin.
  */
 export function keychainAdd(
   service: string,
   value: string,
   kind: 'id' | 'secret',
   bin = 'security',
+  replace = false,
 ): void {
   if (!SERVICE.test(service)) throw new Error(`${service} is not a Keychain service name`);
   if (!(kind === 'id' ? CLIENT_ID : SECRET).test(value)) {
@@ -157,9 +161,11 @@ export function keychainAdd(
       `the value for ${service} is not shaped like an Access ${kind === 'id' ? 'client id' : 'secret'}`,
     );
   }
-  if (keychainHasService(service, bin)) throw new Error(`the Keychain already holds ${service}`);
+  if (!replace && keychainHasService(service, bin)) {
+    throw new Error(`the Keychain already holds ${service}`);
+  }
   const r = spawnSync(bin, ['-i'], {
-    input: `add-generic-password -a ${ACCOUNT} -s ${service} -w "${value}"\n`,
+    input: `add-generic-password${replace ? ' -U' : ''} -a ${ACCOUNT} -s ${service} -w "${value}"\n`,
     stdio: ['pipe', 'ignore', 'ignore'],
     env: process.env,
   });
@@ -176,4 +182,14 @@ export function storeTokenInKeychain(
 ): void {
   keychainAdd(services.clientId, clientId, 'id');
   keychainAdd(services.secret, secret, 'secret');
+}
+
+/** A rotated pair over the old one: same services, `-U`. */
+export function replaceTokenInKeychain(
+  services: TokenServices,
+  clientId: string,
+  secret: string,
+): void {
+  keychainAdd(services.clientId, clientId, 'id', 'security', true);
+  keychainAdd(services.secret, secret, 'secret', 'security', true);
 }

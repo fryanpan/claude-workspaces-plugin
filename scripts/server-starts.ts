@@ -3,7 +3,11 @@
  * the server started in the window, and how many of those a deploy, the
  * watchdog or a host reboot explains. The rest are crashes to root-cause.
  *
- *   bun run starts:report --data-dir <data> [--hours 24] [--json]
+ *   bun run starts:report --data-dir <data> [--hours 24] [--last 20] [--json]
+ *
+ * It also prints the reconnect gap of each of the last `--last` starts: from
+ * the previous process beginning its shutdown to this one listening, and to
+ * the first doc or board page reconnecting — with the median and longest.
  *
  * `--data-dir` defaults the way the server's does (`CW_DATA_DIR`, else the
  * checkout's `data/`), so pass prod's explicitly from a dev checkout. Exits 2
@@ -15,8 +19,10 @@
 import { MISSING_DATA_DIR, dataDirFromArgs } from '../packages/server/src/data-dir.ts';
 import { deployLogPath, readDeployLogEntries } from '../packages/server/src/deploy-log.ts';
 import {
+  formatReconnectGaps,
   formatStartsReport,
   readServerStarts,
+  reconnectGaps,
   serverStartsPath,
   summarizeStarts,
 } from '../packages/server/src/server-starts.ts';
@@ -39,15 +45,27 @@ if (!Number.isFinite(hours) || hours <= 0) {
   process.exit(2);
 }
 
+const last = Number(arg('last') ?? '20');
+if (!Number.isInteger(last) || last <= 0) {
+  console.error('--last must be a positive whole number');
+  process.exit(2);
+}
+
 const file = serverStartsPath(dataDir);
 const until = Date.now();
+const starts = readServerStarts(file);
 const summary = summarizeStarts({
-  starts: readServerStarts(file),
+  starts,
   deploys: readDeployLogEntries(deployLogPath(dataDir)),
   since: until - hours * 60 * 60_000,
   until,
 });
+const gaps = reconnectGaps(starts, last);
 console.log(
-  args.includes('--json') ? JSON.stringify(summary, null, 2) : formatStartsReport(summary, file),
+  args.includes('--json')
+    ? JSON.stringify({ ...summary, reconnectGaps: gaps }, null, 2)
+    : summary.recordedFrom === null
+      ? formatStartsReport(summary, file)
+      : `${formatStartsReport(summary, file)}\n${formatReconnectGaps(gaps)}`,
 );
 process.exit(summary.recordedFrom === null ? 2 : 0);

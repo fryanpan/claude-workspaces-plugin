@@ -137,6 +137,24 @@ describe('person presence', () => {
     expect(h.pp.current('w-harbor')?.spot.docId).toBe('d-d');
   });
 
+  it("never counts a socket whose proof named somebody else, though it announces the owner's id", () => {
+    const h = harness();
+    const room = new Awareness(new Y.Doc());
+    h.pp.attach('w-harbor', room);
+    page(room, { presenceUser: { id: 'user-alice', kind: 'person', verified: true } }).set(
+      at({ surface: 'doc', docId: 'd-a' }, true),
+    );
+    page(room, { presenceUser: { id: 'guest-k7q2', kind: 'guest', verified: false } }).set(
+      at({ surface: 'doc', docId: 'd-b' }, true),
+    );
+    expect(h.pp.current('w-harbor')).toBeNull();
+    // Control: the owner's own stamp counts.
+    page(room, { presenceUser: { id: OWNER, kind: 'person', verified: true } }).set(
+      at({ surface: 'doc', docId: 'd-c' }, true),
+    );
+    expect(h.pp.current('w-harbor')?.spot.docId).toBe('d-c');
+  });
+
   it('keeps an agent on one board from hearing or moving a tab on another', () => {
     const h = harness();
     const a = new Awareness(new Y.Doc());

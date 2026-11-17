@@ -25,6 +25,7 @@ import {
   docView,
   navigate,
   openPerson,
+  personIdOf,
   shutdown,
   until,
 } from './follow-browser-kit.ts';
@@ -38,6 +39,9 @@ export interface TargetStep {
   placed: boolean;
   /** From the move to the follower showing it. */
   ms: number;
+  /** What each page showed when the move fell short: CI is the only place
+   *  these fail, so the failure has to say where the follow stood. */
+  seen?: { follower: unknown; leader?: unknown };
 }
 
 export interface PointTargetsRun {
@@ -71,6 +75,28 @@ const lastLineShown = (word: string) =>
 const SETTINGS_SCROLLER = `[...document.querySelectorAll('#board-settings-view, #board-settings-view *')].find((e) => e.scrollHeight - e.clientHeight > 40 && /auto|scroll/.test(getComputedStyle(e).overflowY))`;
 const scrollSettings = `(() => { const e = ${SETTINGS_SCROLLER}; if (!e) return false; e.scrollTop = 30; return true; })()`;
 const settingsScrolled = `(() => { const e = ${SETTINGS_SCROLLER}; return !!e && e.scrollTop > 0; })()`;
+/** Where a page stands: its address, the follow it holds, the threads it has
+ *  open and how far its settings page is scrolled. */
+const SEEN = `(() => {
+  const key = Object.keys(sessionStorage).find((k) => k.startsWith('cw-follow:'));
+  const s = ${SETTINGS_SCROLLER};
+  return {
+    at: location.pathname + location.search,
+    follow: key ? sessionStorage.getItem(key) : null,
+    open: [...document.querySelectorAll('.thread.active')].map((e) => e.dataset.threadId),
+    threads: document.querySelectorAll('.thread[data-thread-id]').length,
+    settings: s ? { top: s.scrollTop, room: s.scrollHeight - s.clientHeight } : null,
+    visible: document.visibilityState,
+  };
+})()`;
+/** Every address a page writes over the one it loaded at. A follower is sent
+ *  to each one, so a page that passes through a second address on its way to
+ *  the first sends the follower on three journeys, and the follow ends on
+ *  whichever lands. */
+const RECORD_ADDRESS_WRITES = `(() => { const w = (window.__addressWrites = []); for (const k of ['pushState', 'replaceState']) { const f = history[k].bind(history); history[k] = (s, t, u) => { if (u != null) w.push(String(u)); return f(s, t, u); }; } })()`;
+/** Compared parsed, so the same address spelled another way still matches. */
+const onlyWrote = (path: string) =>
+  `(() => { const key = (u) => { const x = new URL(u, location.href); return decodeURIComponent(x.pathname) + '?' + [...x.searchParams].sort().join('&'); }; const want = key(${JSON.stringify(path)}); return (window.__addressWrites ?? []).every((u) => key(u) === want); })()`;
 
 async function main(): Promise<void> {
   deadline('point-targets-driver', 200_000);
@@ -153,6 +179,7 @@ async function main(): Promise<void> {
       const firstPerson = await openPerson(width, height, {
         anonId: `first-person-targets${width}`,
         name: 'Alice',
+        signIn: true,
         ws,
         follow: 'a-agent-house-lead',
       });
@@ -160,6 +187,8 @@ async function main(): Promise<void> {
       await navigate(firstPerson, `${base}${B}`);
       await until('the board', async () => ((await firstPerson.evaluate(BOARD_UP)) ? true : null));
 
+      /** The person being followed, once there is one. */
+      let leader: Awaited<ReturnType<typeof openPerson>> | null = null;
       const moved = async (
         what: string,
         move: () => Promise<void>,
@@ -181,7 +210,25 @@ async function main(): Promise<void> {
               8000,
             ).catch(() => false)) === true
           : true;
-        steps.push({ width, what, expected, address, placed: onPlace, ms: Date.now() - t0 });
+        const ms = Date.now() - t0;
+        const seen =
+          onPlace && address === expected
+            ? undefined
+            : {
+                follower: await tab.evaluate(SEEN).catch((e: unknown) => String(e)),
+                ...(leader
+                  ? { leader: await leader.evaluate(SEEN).catch((e: unknown) => String(e)) }
+                  : {}),
+              };
+        steps.push({
+          width,
+          what,
+          expected,
+          address,
+          placed: onPlace,
+          ms,
+          ...(seen ? { seen } : {}),
+        });
         step(`  ${JSON.stringify(steps.at(-1))}`);
       };
       const agent = (
@@ -256,12 +303,17 @@ async function main(): Promise<void> {
       const secondPerson = await openPerson(width, height, {
         anonId: `second-person-targets${width}`,
         name: 'Bob',
+        signIn: true,
         ws,
       });
+      leader = secondPerson;
       const secondPersonSessions = await frameSessions(secondPerson);
+      await secondPerson.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: RECORD_ADDRESS_WRITES,
+      });
       await navigate(secondPerson, `${base}${onDoc}`);
       await firstPerson.evaluate(
-        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-anon-second-person-targets${width}' }))`,
+        `sessionStorage.setItem('cw-follow:${ws}', JSON.stringify({ key: 'p-${personIdOf(`second-person-targets${width}`)}' }))`,
       );
       await navigate(firstPerson, `${base}${B}`);
       await until('the doc under secondPerson', async () =>
@@ -304,6 +356,10 @@ async function main(): Promise<void> {
         'person board page',
         () => navigate(secondPerson, `${base}${onSettings}`),
         onSettings,
+        // The phone's settings opens through its list: that step must not
+        // reach the address, or the room hears it. Only the 430 run passes
+        // through the list, so only it can fail this.
+        async () => (await secondPerson.evaluate(onlyWrote(onSettings))) === true,
       );
       await moved(
         'person board scroll',
@@ -316,6 +372,7 @@ async function main(): Promise<void> {
         async () => (await firstPerson.evaluate(settingsScrolled)) === true,
       );
       await closePerson(secondPerson);
+      leader = null;
       await closePerson(firstPerson);
     }
     process.stdout.write(

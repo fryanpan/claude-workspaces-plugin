@@ -69,7 +69,9 @@ const keyOf = (dir: string, folder: string[]): string => `${dir}\0${folder.join(
 
 /** Paths relative to `dir`, as git names them, or null when git would not list. */
 function gitList(dir: string, folder: string[]): Promise<Set<string> | null> {
-  const pathspec = ['--', `:(literal)${folder.join('/')}/`];
+  // An empty folder is the doc's own: a `<StreetMap src>` file beside it
+  // (`doc-file-scope.ts` mapDataFolder). A framed page's folder never is.
+  const pathspec = ['--', folder.length > 0 ? `:(literal)${folder.join('/')}/` : '.'];
   if (gitBarred(dir)) {
     // A walled lead's repository: git contained, or "would not list".
     const got = containedGit(dir, [

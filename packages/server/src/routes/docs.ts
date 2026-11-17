@@ -4,6 +4,7 @@ import { createConflictWith } from '../doc-create-conflict.ts';
 import { RESERVED_DOC_PREFIXES, isReservedDocId } from '../doc-ids.ts';
 import { compactDocRow, matchesDocFilters, pageDocs, parseListDocsQuery } from '../doc-listing.ts';
 import { normalizeDocOriginRepo, resolveOriginRepoCheckout } from '../doc-origin-repo.ts';
+import { filedFolder } from '../library-folders.ts';
 /**
  * The doc, thread and bind REST block, in the order it is matched.
  *
@@ -81,10 +82,17 @@ import { placeableGoals } from '../task-queue.ts';
 import { clipToWordBoundary } from '../task-title.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
+import { handleDocComponentAgentRoute } from './doc-component-agent.ts';
+import { handleDocComponentsRoute } from './doc-components.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
+import { handleDocFileMoveRoute } from './doc-file-move.ts';
 import { handleDocFilesRoute } from './doc-files.ts';
+import type { DocCreateAnswer, DocCreateBody } from './doc-lifecycle-contract.ts';
+import { handleDocMapKeyRoute } from './doc-map-key.ts';
+import { handleDocMetadataRoute } from './doc-metadata.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
 import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
+import type { ThreadPromoteAnswer, ThreadPromoteBody } from './doc-threads-contract.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
 import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
@@ -93,6 +101,7 @@ import type {
   DocRouteRequest,
   DocRoutesContext,
 } from './docs-routes-context.ts';
+import { answerAs, sent } from './route-contract.ts';
 import { handleWhiteboardRoutes } from './whiteboard-routes.ts';
 /** The anchor's display snippet, whichever anchor kind carries it — an
  *  orphan keeps its original's snippet. */
@@ -176,7 +185,7 @@ export async function handleDocCreateListRoutes(
     // A file bind names a host path. Agents only — see
     // browserCannotBindBody for why a page, on any origin, is refused.
     if (isBrowserRequest(req.headers)) return j(403, browserCannotBindBody());
-    const body = await safeJson(req);
+    const body = sent<DocCreateBody>(await safeJson(req));
     const docId = (body?.docId as string) ?? '';
     if (!isValidDocId(docId)) return j(400, { error: 'bad docId' });
     const type = (body?.type as DocType) ?? 'markdown';
@@ -310,7 +319,7 @@ export async function handleDocCreateListRoutes(
         hint:
           conflict === 'type'
             ? `"${docId}" is already a ${existing.meta.type ?? 'doc'}, and a create cannot change a doc's type. Pick a name that is not in use.`
-            : `"${docId}" is already bound to another file, and a create cannot repoint it. Edit the file it serves from, or pick a name that is not in use.`,
+            : `"${docId}" is already bound to another file, and a create cannot repoint it. If the file moved, call move_doc_file with mode "repoint"; otherwise edit the file it serves from, or pick a name that is not in use.`,
       });
     }
     const created = docStore.createForCaller(docId, {
@@ -450,17 +459,21 @@ export async function handleDocCreateListRoutes(
     const pageLinks = mockupHtml === null ? [] : rootRelativePageLinks(mockupHtml);
     const warning = mockupLinkWarning(pageLinks, pageLinks.length ? boardApp() : undefined);
     const decorated = withReviewUrl(doc.meta);
-    return j(200, {
-      ...(warning ? { warning: warning.message, linkWarning: warning } : {}),
-      docId: doc.docId,
-      // The page to hand a person: every make-or-attach answer says `url`.
-      ...(decorated.reviewUrl ? { url: decorated.reviewUrl } : {}),
-      meta: decorated,
-      // Where the doc landed, in the same call that created it — a
-      // caller who supplied no workspace still learns which one it got.
-      hubWorkspaceId: boardWorkspaceId,
-      ...(attached ? { attached } : {}),
-    });
+    return j(
+      200,
+      answerAs<DocCreateAnswer>({
+        warning: warning?.message,
+        linkWarning: warning,
+        docId: doc.docId,
+        // The page to hand a person: every make-or-attach answer says `url`.
+        url: decorated.reviewUrl || undefined,
+        meta: decorated,
+        // Where the doc landed, in the same call that created it — a
+        // caller who supplied no workspace still learns which one it got.
+        hubWorkspaceId: boardWorkspaceId,
+        attached,
+      }),
+    );
   }
   if (restIs(scope, 'docs') && req.method === 'GET') {
     // `?workspaceId=` scopes the listing. Without honouring it here,
@@ -531,6 +544,7 @@ export async function handleDocCreateListRoutes(
           const row = compactDocRow(decorate(m), {
             boardId: homeForDocIndexed(boardIndex, m),
             threads: docStore.threadCounts(m.docId),
+            folder: filedFolder(scope.board, m, ctx.dataDir),
           });
           if (visitor) row.sourceUrl = undefined;
           return row;
@@ -559,7 +573,7 @@ export async function handleDocPromoteRoute(
   if (promoteMatch && req.method === 'POST') {
     const docId = canonicalDocId(decodeURIComponent(promoteMatch[1] ?? ''));
     const threadId = decodeURIComponent(promoteMatch[2] ?? '');
-    const body = await safeJson(req);
+    const body = sent<ThreadPromoteBody>(await safeJson(req));
     /**
      * THE PATH NAMES THE DESTINATION, and this is the clearest thing the
      * cutover fixes on the whole share surface.
@@ -667,23 +681,28 @@ export async function handleDocPromoteRoute(
     );
     // The new task's link: a task's thread URL is the task's own page.
     const url = threadUrl(`task:${res.task.id}`, Boolean(visitor));
-    return j(200, {
-      task: res.task,
-      ...(url !== undefined ? { url } : {}),
-      ...(promoteVisibility !== undefined ? { visibility: promoteVisibility } : {}),
-      // Third create path, same report. Promoting a thread has exactly
-      // the same goal semantics as a create, so an agent that learns to
-      // read `placement` on one and finds it missing on another is being
-      // taught the field is unreliable.
-      placement: {
-        ...res.placement,
-        ...(res.placement.placed
-          ? {}
-          : { goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []) }),
-      },
-      ...(promoteLinks.ignored.length > 0 ? { ignoredLinks: promoteLinks.ignored } : {}),
-      ...(res.shapeGaps !== undefined ? { shapeGaps: res.shapeGaps } : {}),
-    });
+    return j(
+      200,
+      answerAs<ThreadPromoteAnswer>({
+        task: res.task,
+        // Named, not spread, so a renamed answer field fails here; JSON
+        // drops an undefined one, as the spread did.
+        url,
+        ...(promoteVisibility !== undefined ? { visibility: promoteVisibility } : {}),
+        // Third create path, same report. Promoting a thread has exactly
+        // the same goal semantics as a create, so an agent that learns to
+        // read `placement` on one and finds it missing on another is being
+        // taught the field is unreliable.
+        placement: {
+          ...res.placement,
+          ...(res.placement.placed
+            ? {}
+            : { goals: placeableGoals(taskStore.getWorkspace(workspaceId)?.goals ?? []) }),
+        },
+        ignoredLinks: promoteLinks.ignored.length > 0 ? promoteLinks.ignored : undefined,
+        ...(res.shapeGaps !== undefined ? { shapeGaps: res.shapeGaps } : {}),
+      }),
+    );
   }
   return undefined;
 }
@@ -710,7 +729,11 @@ export async function handleDocResourceRoutes(
   // server, which then flushed weeks-old content over files on disk. Every
   // other subroute below can edit, so every other subroute takes the binding
   // hydrate. See `DocStore.getForRead`.
-  const readOnly = rq.req.method === 'GET' && (rest === 'threads' || rest.startsWith('threads/'));
+  // A metadata GET is a read too: it finds the file from the doc's meta
+  // (`DocStore.recordedPathOf`) and reads the front matter from the `.ydoc`.
+  const readOnly =
+    rq.req.method === 'GET' &&
+    (rest === 'threads' || rest.startsWith('threads/') || rest === 'metadata');
   const doc = readOnly ? docStore.getForRead(addressed) : docStore.get(addressed);
   if (!doc) return j(404, { error: 'doc not found' });
   // Canonicalize ONCE, here, and the ~30 subroutes below inherit both
@@ -724,8 +747,13 @@ export async function handleDocResourceRoutes(
   return (
     (await handleDocResourceCore(ctx, docRq)) ??
     (await handleDocAssetsRoute(ctx, docRq)) ??
+    (await handleDocComponentsRoute(ctx, docRq)) ??
+    (await handleDocComponentAgentRoute(ctx, docRq)) ??
     (await handleDocFilesRoute(ctx, docRq)) ??
+    (await handleDocMapKeyRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
+    (await handleDocFileMoveRoute(ctx, docRq)) ??
+    (await handleDocMetadataRoute(ctx, docRq)) ??
     (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
     (await handleDocThreadLinkedItemRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??

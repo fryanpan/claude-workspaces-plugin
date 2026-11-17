@@ -1,4 +1,3 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
 import { type DocMeta, listThreads } from '@claude-workspaces/core';
 import {
   DOC_INDEX_VERSION,
@@ -6,6 +5,7 @@ import {
   readAllDocIndexes,
   writeDocIndex,
 } from './doc-index.ts';
+import type { DocStateStore } from './doc-state/store.ts';
 import type { LiveDoc } from './doc-store.ts';
 
 /**
@@ -19,7 +19,8 @@ import type { LiveDoc } from './doc-store.ts';
  */
 export interface DocCatalogHost {
   dataDir(): string;
-  ydocPath(docId: string): string;
+  /** Where each doc's Yjs state lives (`doc-state/store.ts`). */
+  docState(): DocStateStore;
   residentDoc(docId: string): LiveDoc | undefined;
   residentDocs(): Iterable<LiveDoc>;
   /** A debounced `.ydoc` save is pending, so the row may be behind the doc. */
@@ -149,7 +150,7 @@ export class DocCatalog {
       // was already resident when the alias was claimed. Nothing is resident
       // now, so the file on disk is what has to be consulted — including the
       // pre-index `.ydoc`s this pass runs before.
-      if (docId !== alias && existsSync(this.host.ydocPath(alias))) {
+      if (docId !== alias && this.host.docState().has(alias)) {
         console.warn(
           `[doc-store] alias "${alias}" is also a doc id on disk; leaving it to that doc (${docId} keeps its own id)`,
         );
@@ -173,16 +174,14 @@ export class DocCatalog {
    */
   indexUnindexedDocs(): void {
     let written = 0;
-    let files: string[];
+    let docIds: string[];
     try {
-      files = readdirSync(this.host.dataDir());
+      docIds = this.host.docState().list();
     } catch (err) {
-      console.error('[doc-store] could not read the data dir:', err);
+      console.error('[doc-store] could not list saved doc state:', err);
       return;
     }
-    for (const file of files) {
-      if (!file.endsWith('.ydoc')) continue;
-      const docId = file.slice(0, -'.ydoc'.length);
+    for (const docId of docIds) {
       if (!docId || this.docIndex.has(docId)) continue;
       try {
         // Boot, and the row is written from the doc in the same turn.
@@ -335,8 +334,8 @@ export class DocCatalog {
     if (cached !== undefined) return cached;
     let lastActivityAt = createdAt;
     try {
-      const p = this.host.ydocPath(docId);
-      if (existsSync(p)) lastActivityAt = Math.round(statSync(p).mtimeMs);
+      const savedAt = this.host.docState().savedAt(docId);
+      if (savedAt !== undefined) lastActivityAt = Math.round(savedAt);
     } catch {}
     this.activityMtime.set(docId, lastActivityAt);
     return lastActivityAt;

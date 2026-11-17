@@ -268,6 +268,7 @@ Why: These questions wait, and no reminder goes to anyone.
 - Make `post_reply` your first action in the turn. Reply on each thread separately.
 - Keep your turns short while comments arrive.
 - If you do not act on a comment, reply and say why.
+- On a person's comment, call `set_thread_progress` with `working` when you start and `done` when the change is made. Do not resolve it: the person checks the work and resolves it, and a resolve takes the comment off their open page at once.
 
 Why: Comment events arrive only between turns. A long turn holds every new comment until it ends.
 

@@ -1,6 +1,6 @@
 /**
- * `cf:plan` and `cf:apply` through the keeper: the Cloudflare Terraform run,
- * with the keeper's token, started from the keeper's own release
+ * `cf:plan` through the keeper: the Cloudflare Terraform plan, with the
+ * keeper's token, started from the keeper's own release
  * (`infra/cloudflare/keeper-run.ts`, run by `runTerraform` in
  * `keeper-exec.ts`).
  *
@@ -12,35 +12,26 @@
  * This matches the keeper's reads: a Cloudflare read whose answer carries no
  * credential runs without a tap.
  *
- * **An apply is a tap, on the plan the owner reads.** At submit the keeper
- * plans first and keeps the saved plan under an id of its own. The approval
- * page shows that plan's text, and an approval applies exactly that saved
- * file; terraform refuses it if the state moved on since. The text prints
- * `(sensitive value)` for each project's sign-in list, so the run also
- * reports who each list gains or loses, which goes to the page and nowhere
- * else. Text cut at the run's limit is marked on the page, and the tap then
- * applies nothing, because the owner did not see the whole plan. A plan that changes
- * nothing runs no tap. When the account lacks a service token the config
- * names, the request instead makes exactly those tokens, listed on the page,
- * and hands their pairs back to the requester for Bryan's Keychain
- * (`service-tokens.ts`); the requester asks again for the apply, which is a
- * second tap on a plan that imports them. No apply ever creates a token
- * itself, because the provider would keep its secret in the state.
+ * **Nothing here applies.** Applies run in CI, on a merge to main or a
+ * dispatch of `cloudflare.yml` (`infra/cloudflare/README.md`). An `apply`
+ * request is refused with a pointer there. The one keeper request that
+ * reaches the account through this run's discovery to make something is
+ * `cf-sync` (`keeper-cf-sync.ts`), which makes a missing service token.
  *
  * The requester's input is the configs and the state bucket's credential; it
  * is checked here and handed to the run on stdin, never written down.
  */
-import { randomBytes } from 'node:crypto';
 import type { Verdict } from './keeper-policy.ts';
 import type { FlyResult } from './keeper-requests.ts';
 
 export const TF_ENVS = ['prod', 'staging'] as const;
 export type TerraformEnv = (typeof TF_ENVS)[number];
-export type TerraformMode = 'plan' | 'apply' | 'mint';
+/** `tokens` makes exactly the missing service tokens a `cf-sync` approval named. */
+export type TerraformMode = 'plan' | 'tokens';
 
 export interface TerraformCall {
   type: 'terraform';
-  command: 'plan' | 'apply';
+  command: 'plan';
   env: TerraformEnv;
   /** JSON: `{configs, state, bucket?}`, as `parseTerraformInput` reads it. */
   input: string;
@@ -57,20 +48,6 @@ export interface SignInChange {
   removed: string[];
 }
 
-/** What a held apply will run once approved: the saved plan, or the tokens. */
-export type TerraformHold =
-  | {
-      stage: 'apply';
-      planId: string;
-      plan: string;
-      summary: string;
-      /** For the approval page only: never the requester's answer or a log line. */
-      access: SignInChange[];
-      /** The plan text was cut here, so the page did not show it all and the tap applies nothing. */
-      cut?: { shown: number; total: number };
-    }
-  | { stage: 'mint'; tokens: Record<string, string> };
-
 /** Runs `keeper-run.ts <mode> <env>` with this stdin; the result's stdout is its report. */
 export type TerraformRunner = (
   mode: TerraformMode,
@@ -78,30 +55,33 @@ export type TerraformRunner = (
   stdin: string,
 ) => Promise<FlyResult>;
 
-const CONFIG_KEYS = ['router', 'access', 'shareLink'] as const;
+export const CONFIG_KEYS = ['router', 'access', 'shareLink'] as const;
+export type ConfigKey = (typeof CONFIG_KEYS)[number];
 const MAX_CONFIG = 256 * 1024;
 const BUCKET = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 
+export const APPLY_MOVED =
+  'applies run in CI now: merge a pull request touching infra/cloudflare/, or run bun run cf:sync-config for a change to the gitignored configs (infra/cloudflare/README.md)';
+
 export function classifyTerraform(command: unknown, env: unknown, input: unknown): Verdict {
+  if (command === 'apply') return { kind: 'refused', reason: APPLY_MOVED };
   if (!TF_ENVS.includes(env as TerraformEnv)) {
     return { kind: 'refused', reason: 'env must be prod or staging' };
   }
   const parsed = parseTerraformInput(input);
   if ('error' in parsed) return { kind: 'refused', reason: parsed.error };
-  const summary = `terraform ${String(command)} ${String(env)}`;
-  if (command === 'plan') return { kind: 'routine', app: null, summary };
-  if (command === 'apply') return { kind: 'held', hold: 'cloudflare.apply', app: null, summary };
-  return { kind: 'refused', reason: 'command must be plan or apply' };
+  if (command === 'plan') return { kind: 'routine', app: null, summary: `terraform plan ${env}` };
+  return { kind: 'refused', reason: 'command must be plan' };
 }
 
-interface Input {
-  configs: Partial<Record<(typeof CONFIG_KEYS)[number], string>>;
+export interface TerraformInput {
+  configs: Partial<Record<ConfigKey, string>>;
   state: { accessKeyId: string; secretAccessKey: string };
   bucket?: string;
 }
 
 /** The requester's input, with nothing it did not need; or why it is refused. */
-export function parseTerraformInput(raw: unknown): Input | { error: string } {
+export function parseTerraformInput(raw: unknown): TerraformInput | { error: string } {
   let v: unknown;
   try {
     v = JSON.parse(typeof raw === 'string' ? raw : '');
@@ -111,7 +91,7 @@ export function parseTerraformInput(raw: unknown): Input | { error: string } {
   const o = (v ?? {}) as Record<string, unknown>;
   const c = (o.configs ?? {}) as Record<string, unknown>;
   const s = (o.state ?? {}) as Record<string, unknown>;
-  const configs: Input['configs'] = {};
+  const configs: TerraformInput['configs'] = {};
   for (const k of CONFIG_KEYS) {
     const text = c[k];
     if (text === undefined) continue;
@@ -134,21 +114,20 @@ export function parseTerraformInput(raw: unknown): Input | { error: string } {
   };
 }
 
-interface PlanReport {
-  ok: boolean;
-  text?: string;
-  summary?: string;
-  changes?: number;
-  missing?: Record<string, string>;
-  access?: SignInChange[];
-  cut?: { shown: number; total: number };
+/** The last line of a run's stdout, read as its report; or null. */
+export function runReport<T>(r: FlyResult): T | null {
+  try {
+    return JSON.parse(r.stdout.trim().split('\n').pop() ?? '') as T;
+  } catch {
+    return null;
+  }
 }
 
 const strings = (x: unknown): x is string[] =>
   Array.isArray(x) && x.every((v) => typeof v === 'string');
 
 /** The run's sign-in changes, or null when the report does not hold a readable list. */
-function signInChanges(x: unknown): SignInChange[] | null {
+export function signInChanges(x: unknown): SignInChange[] | null {
   if (!Array.isArray(x)) return null;
   const ok = x.every((c) => {
     const o = (c ?? {}) as Record<string, unknown>;
@@ -161,7 +140,7 @@ function signInChanges(x: unknown): SignInChange[] | null {
  * The run's result with the sign-in changes taken out of its report, for an
  * answer that goes back to the requester.
  */
-function withoutAccess(r: FlyResult): FlyResult {
+export function withoutAccess(r: FlyResult): FlyResult {
   const lines = r.stdout.trim().split('\n');
   try {
     const last = JSON.parse(lines.pop() ?? '') as Record<string, unknown>;
@@ -174,80 +153,14 @@ function withoutAccess(r: FlyResult): FlyResult {
   }
 }
 
-function report(r: FlyResult): PlanReport | null {
-  try {
-    const last = r.stdout.trim().split('\n').pop() ?? '';
-    return JSON.parse(last) as PlanReport;
-  } catch {
-    return null;
-  }
+/** The run's stdin: the checked input and the keeper's own fields, never the requester's. */
+export function terraformStdin(input: unknown, extra: Record<string, unknown>): string {
+  const parsed = parseTerraformInput(input);
+  if ('error' in parsed) throw new Error(`refused: ${parsed.error}`);
+  return JSON.stringify({ ...parsed, ...extra });
 }
 
-const stdinFor = (call: TerraformCall, extra: Record<string, unknown>): string => {
-  const input = parseTerraformInput(call.input);
-  if ('error' in input) throw new Error(`refused: ${input.error}`);
-  return JSON.stringify({ ...input, ...extra });
-};
-
-const newPlanId = (): string => randomBytes(18).toString('base64url');
-
-/**
- * Before an apply is held: plan it and keep the plan. Answers the result to
- * hand straight back when there is nothing to approve (a failed or empty
- * plan), or what the hold will run.
- */
-export async function prepareApply(
-  call: TerraformCall,
-  run: TerraformRunner,
-): Promise<{ ran: FlyResult } | { hold: TerraformHold; summary: string }> {
-  const planId = newPlanId();
-  const result = await run('plan', call.env, stdinFor(call, { planId, keep: true }));
-  const r = report(result);
-  if (result.status !== 0 || !r?.ok) return { ran: withoutAccess(result) };
-  const missing = r.missing ?? {};
-  if (Object.keys(missing).length > 0) {
-    // That plan would have terraform make the tokens, so the run kept no copy of it.
-    return {
-      hold: { stage: 'mint', tokens: missing },
-      summary: `make Access service tokens for ${call.env}: ${Object.values(missing).join(', ')}`,
-    };
-  }
-  if (!r.changes) return { ran: withoutAccess(result) };
-  const access = signInChanges(r.access);
-  if (access === null) {
-    return {
-      ran: {
-        status: 1,
-        stdout: `${JSON.stringify({ ok: false, error: 'the plan did not say who it lets sign in; nothing was held' })}\n`,
-        stderr: '',
-      },
-    };
-  }
-  const hold: TerraformHold = {
-    stage: 'apply',
-    planId,
-    plan: r.text ?? '',
-    summary: r.summary ?? '',
-    access,
-    ...(r.cut ? { cut: r.cut } : {}),
-  };
-  return { hold, summary: `terraform apply ${call.env}` };
-}
-
-/** The run an approval or a routine plan starts. */
-export function runTerraformCall(
-  call: TerraformCall,
-  hold: TerraformHold | undefined,
-  run: TerraformRunner,
-): Promise<FlyResult> {
-  if (!hold) return run('plan', call.env, stdinFor(call, { planId: newPlanId(), keep: false }));
-  if (hold.stage === 'mint') return run('mint', call.env, stdinFor(call, { expect: hold.tokens }));
-  if (hold.cut) {
-    return Promise.reject(
-      new Error(
-        'refused: the plan was longer than the approval page showed, so nothing was applied',
-      ),
-    );
-  }
-  return run('apply', call.env, stdinFor(call, { planId: hold.planId }));
+/** A routine plan: no sign-in list, which only an approval page may show. */
+export function runTerraformPlan(call: TerraformCall, run: TerraformRunner): Promise<FlyResult> {
+  return run('plan', call.env, terraformStdin(call.input, { access: false })).then(withoutAccess);
 }

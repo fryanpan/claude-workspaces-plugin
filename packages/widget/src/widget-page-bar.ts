@@ -43,8 +43,9 @@ export function pageBarHeight(vv: VisualViewport): number {
 /**
  * Re-run `update` in the next frame whenever the bar could have come or gone:
  * the window resizing, anything scrolling (a sticky footer sticks on scroll),
- * and the page's DOM changing — a node added, or a class, style or `hidden`
- * flipped, which is how an app hides its tab bar on a full-screen view.
+ * a transition ending (a bar that slid into place), and the page's DOM
+ * changing — a node added, or a class, style or `hidden` flipped, which is how
+ * an app hides its tab bar on a full-screen view.
  * Mutations inside the widget's own chrome are skipped, or the widget's own
  * writes would re-measure forever. Returns the teardown.
  */
@@ -65,11 +66,17 @@ export function watchPageBar(update: () => void): () => void {
     attributes: true,
     attributeFilter: ['class', 'style', 'hidden'],
   });
-  addEventListener('resize', soon);
-  addEventListener('scroll', soon, { capture: true, passive: true });
+  // A bar that slides in is measured mid-slide by the mutation that starts
+  // it, and nothing else fires when it comes to rest: a doc's comment
+  // composer, caught while it crossed the bottom edge, left the buttons
+  // lifted over the page after it had settled clear of that edge. So a
+  // transition ending re-measures too. One capturing listener each, a scroll
+  // anywhere included; none of them is cancelable, so `passive` changes
+  // nothing.
+  const events = ['resize', 'scroll', 'transitionend'];
+  for (const t of events) addEventListener(t, soon, true);
   return () => {
     mo.disconnect();
-    removeEventListener('resize', soon);
-    removeEventListener('scroll', soon, true);
+    for (const t of events) removeEventListener(t, soon, true);
   };
 }

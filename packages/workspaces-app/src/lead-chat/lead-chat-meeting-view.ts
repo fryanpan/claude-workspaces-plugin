@@ -1,7 +1,12 @@
 /**
  * The lead chat's meeting, as the panel draws it: one heading row — a steady
- * red dot, "Meeting", up to four faces, End meeting — and the live notes box
- * under it, which every page of the board shows while the meeting runs.
+ * red dot, "Meeting", up to four faces, End meeting — and the live notes as
+ * ONE line just above the typing box, which every page of the board shows
+ * while the meeting runs. The line is the newest thing said (or the words
+ * still being heard on the recording tab), and keeps its end in view as it
+ * grows (`lead-chat-tail.ts` draws it). The whole record is the notes doc.
+ * It was a box of every line under the header, which took up to 38% of the
+ * panel (the owner, 13 Nov: "the raw notes take half the chat").
  *
  * Drawing only; `lead-chat-mount.ts` decides what End meeting and the tap do.
  */
@@ -25,17 +30,13 @@ export const MEETING_STYLES = `
 .lc-meet-sp { flex: 1; }
 .lc-end { flex: none; height: 36px; margin: 0; padding: 0 12px; border: 1px solid #1a1a18; border-radius: 8px; background: #1a1a18; color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .lc-end:disabled { opacity: .5; cursor: default; }
-.lc-notes { flex: none; display: flex; flex-direction: column; max-height: 38%; border-bottom: 1px solid var(--border, #d1d5da); background: #faf8f3; }
-.lc-notes-h { flex: none; display: flex; align-items: baseline; gap: 6px; padding: 8px 16px 4px; font-size: 12.5px; color: var(--fg-muted, #57606a); white-space: nowrap; }
-.lc-notes-h b { color: var(--fg, #1b1f23); font-weight: 650; }
-.lc-notes-doc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.lc-notes-n { flex: none; font-variant-numeric: tabular-nums; }
-.lc-notes-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 8px; display: flex; flex-direction: column; gap: 3px; overscroll-behavior: contain; }
-.lc-line { font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
-.lc-line b { font-weight: 600; margin-right: 4px; }
+.lc-notes { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--border, #d1d5da); background: #faf8f3; }
+.lc-notes-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 16px; }
+.lc-line { flex: 1; min-width: 0; font-size: 13.5px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-line b { font-weight: 600; }
 .lc-line.lc-dim { color: var(--fg-muted, #57606a); }
-.lc-notes-empty { margin: 2px 0; font-size: 13px; color: var(--fg-muted, #57606a); }
-.lc-tap { flex: none; margin: 0 16px 8px; height: 40px; border: 1px solid #d1242f; border-radius: 8px; background: var(--bg, #fff); color: #d1242f; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.lc-notes-n { flex: none; font-size: 12.5px; color: var(--fg-muted, #57606a); font-variant-numeric: tabular-nums; }
+.lc-tap { flex: none; margin: 4px 16px 8px; height: 40px; border: 1px solid #d1242f; border-radius: 8px; background: var(--bg, #fff); color: #d1242f; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .lc-run-note { flex: none; margin: 0 16px 6px; font-size: 12.5px; color: var(--fg-muted, #57606a); }
 `;
 
@@ -51,11 +52,45 @@ export interface MeetingViewModel {
   said?: ReadonlySet<number>;
 }
 
+/** The one line of notes: who said it and what, as `lead-chat-tail.ts`
+ *  draws it. `live` is words still being heard, which grow at the end. */
+export interface NoteLine {
+  who: string;
+  text: string;
+  live?: boolean;
+  dim?: boolean;
+  /** A line the board's lead said, and whether this page is playing it or
+   *  has played it. */
+  lead?: boolean;
+  said?: 'playing' | 'said';
+}
+
+/** The newest thing the meeting heard: the words in progress on the tab
+ *  recording, else the last line, else that nothing was said yet. */
+export function newestLine(m: MeetingViewModel): NoteLine | null {
+  const meeting = m.meeting;
+  if (!meeting) return null;
+  if (m.recording && m.run.partial) {
+    return { who: 'Heard', text: m.run.partial, live: true, dim: true };
+  }
+  const l = meeting.lines.at(-1);
+  if (!l) return { who: 'Notes', text: NOTES_EMPTY, dim: true };
+  const line: NoteLine = { who: l.who, text: l.text.replace(/\s+/g, ' ') };
+  if (l.lead) {
+    line.lead = true;
+    if (m.playing === l.turn) line.said = 'playing';
+    else if (m.said?.has(l.turn)) line.said = 'said';
+  }
+  return line;
+}
+
 export interface MeetingView {
   /** The heading row; drawn into the panel's header while a meeting runs. */
   head: HTMLElement;
-  /** The live notes box, under the header. */
+  /** The live notes: one line, just above the typing box. */
   notes: HTMLElement;
+  /** The notes' one line, which the panel fills with `newestLine`. */
+  line: HTMLElement;
   end: HTMLButtonElement;
   tap: HTMLButtonElement;
   render(m: MeetingViewModel): void;
@@ -98,33 +133,28 @@ export function createMeetingView(doc: Document): MeetingView {
   const notes = el('section', 'lc-notes');
   notes.hidden = true;
   notes.setAttribute('aria-label', 'Meeting notes');
-  const nh = el('div', 'lc-notes-h');
-  const docName = el('span', 'lc-notes-doc');
+  const row = el('div', 'lc-notes-row');
+  const line = el('div', 'lc-line');
+  line.setAttribute('role', 'log');
+  line.setAttribute('aria-live', 'polite');
   const count = el('span', 'lc-notes-n');
-  nh.append(el('b', '', 'Notes'), docName, count);
-  const list = el('div', 'lc-notes-list');
-  list.setAttribute('role', 'log');
-  list.setAttribute('aria-live', 'polite');
+  row.append(line, count);
   const runNote = el('p', 'lc-run-note');
   const tap = el('button', 'lc-tap', 'Tap to keep recording');
   tap.type = 'button';
-  notes.append(nh, list, runNote, tap);
-
-  let lastLines = -1;
+  notes.append(row, runNote, tap);
 
   return {
     head,
     notes,
+    line,
     end,
     tap,
     render(m) {
       const meeting = m.meeting;
       head.hidden = !meeting;
       notes.hidden = !meeting;
-      if (!meeting) {
-        lastLines = -1;
-        return;
-      }
+      if (!meeting) return;
       dot.classList.toggle('lc-off', m.recording && m.run.phase !== 'recording');
       faces.replaceChildren();
       for (const p of meeting.people.slice(0, FACES_SHOWN)) {
@@ -134,33 +164,10 @@ export function createMeetingView(doc: Document): MeetingView {
       }
       faces.setAttribute('aria-label', meeting.people.map((p) => p.name).join(', '));
       end.disabled = m.ending;
-      docName.textContent =
-        meeting.notes === 'none' ? '· not written down' : `· ${meeting.docTitle}`;
+      // Where the notes go is the row's tooltip: the row is one line.
+      row.title =
+        meeting.notes === 'none' ? 'Notes: not written down' : `Notes: ${meeting.docTitle}`;
       count.textContent = linesLabel(meeting.lines.length);
-
-      const atFoot = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
-      list.replaceChildren();
-      if (meeting.lines.length === 0 && !m.run.partial) {
-        list.append(el('p', 'lc-notes-empty', NOTES_EMPTY));
-      }
-      for (const l of meeting.lines) {
-        const row = el('div', 'lc-line');
-        row.dataset.turn = String(l.turn);
-        if (l.lead) {
-          row.dataset.lead = '1';
-          if (m.playing === l.turn) row.dataset.said = 'playing';
-          else if (m.said?.has(l.turn)) row.dataset.said = 'said';
-        }
-        row.append(el('b', '', l.who), l.text);
-        list.append(row);
-      }
-      if (m.recording && m.run.partial) {
-        const row = el('div', 'lc-line lc-dim');
-        row.append(m.run.partial);
-        list.append(row);
-      }
-      if (atFoot || lastLines !== meeting.lines.length) list.scrollTop = list.scrollHeight;
-      lastLines = meeting.lines.length;
 
       tap.hidden = !(m.recording && m.run.phase === 'tap');
       const note =

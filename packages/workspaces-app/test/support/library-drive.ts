@@ -8,12 +8,19 @@
 import { libraryHref } from '../../src/board/board-url.ts';
 import type { LibraryPayload } from '../../src/board/library-model.ts';
 import { type LibraryPage, createLibraryPage } from '../../src/board/library-page.ts';
-import { fakeHistory } from '../boot-harness.ts';
+import { type FakeStorage, fakeHistory, fakeStorage } from '../boot-harness.ts';
 
 export interface DriveOptions {
   payload?: LibraryPayload | null | (LibraryPayload | null)[];
   openAnswer?: { ok: boolean; status: number; data: Record<string, unknown> | null };
   requestedOpen?: string;
+  /** Who is reading; omitted, an anonymous reader who cannot star. */
+  viewer?: { id: string; name: string; kind: string };
+  toasts?: string[];
+  /** The recent-files tab this device last picked; omitted, none stored. */
+  recentTab?: 'viewed' | 'created';
+  /** The device's storage, to share one across two page loads. */
+  storage?: FakeStorage;
 }
 
 export interface Driven {
@@ -22,6 +29,7 @@ export interface Driven {
   history: ReturnType<typeof fakeHistory>;
   sent: { path: string; method: string; body: unknown }[];
   navigated: string[];
+  storage: FakeStorage;
 }
 
 export function driveLibrary(
@@ -35,6 +43,8 @@ export function driveLibrary(
   const history = fakeHistory();
   const sent: Driven['sent'] = [];
   const navigated: string[] = [];
+  const storage =
+    opts.storage ?? fakeStorage(opts.recentTab ? { 'cw-library-recent-tab': opts.recentTab } : {});
   const page = createLibraryPage({
     root,
     workspaceId: WS,
@@ -63,6 +73,9 @@ export function driveLibrary(
       return wanted;
     },
     now: () => NOW,
+    viewer: () => opts.viewer ?? null,
+    toast: (msg) => opts.toasts?.push(msg),
+    storage,
   });
-  return { page, root, history, sent, navigated };
+  return { page, root, history, sent, navigated, storage };
 }

@@ -38,10 +38,13 @@ import type { WebSocketHandler } from 'bun';
 import type { Awareness } from 'y-protocols/awareness';
 import type { AppSocketLink } from './app-socket-link.ts';
 import type { AppVoiceRelay } from './app-voice/relay.ts';
+import type { CoreSync } from './collab-core-path.ts';
 import { type DocStore, type FeedbackWs } from './doc-store.ts';
 import type { SocketEditor } from './edit-sessions.ts';
 import type { MeetingRelay } from './meeting-protocol.ts';
+import type { PresenceStamp } from './presence-identity.ts';
 import type { RecallMeetingRelay } from './recall-meeting.ts';
+import type { SocketAccess } from './share/board-access.ts';
 import type { SpokenReplyRelay } from './spoken-reply/relay.ts';
 import type { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { onClose, onMessage, onOpen } from './yjs-protocol.ts';
@@ -61,8 +64,13 @@ export interface SocketHandlersContext {
   spokenRelay: SpokenReplyRelay;
   /** A mock's or app's own voice sessions, keyed by socket. */
   appVoiceRelay: AppVoiceRelay;
+  /** The collab core's sync, for sockets stamped `core` (`collab-core-path.ts`). */
+  core?: CoreSync;
   /** A board room opened: where its agents last pointed (`agent-spots.ts`). */
   onBoardRoomOpen?: (workspaceId: string, awareness: Awareness) => void;
+  /** Called once, when this process's first doc or board editing socket
+   *  opens — the reconnect end of a restart's gap (`server-starts.ts`). */
+  onFirstClientSocket?: (at: number) => void;
 }
 
 /**
@@ -98,6 +106,12 @@ export type UpgradeData = {
   presenceOnly?: boolean;
   widgetDoorGrant?: { token: string; origin: string };
   editor?: SocketEditor;
+  /** The person's access on the board (`share/board-access.ts`). */
+  access?: SocketAccess;
+  /** The collab core serves this socket's sync (`collab-core-switch.ts`). */
+  core?: boolean;
+  /** Who peers see this socket's presence as (`presence-identity.ts`). */
+  presenceUser?: PresenceStamp;
   /** A voice socket's proven speaker, and its mark when a mock relayed it —
    *  what the notes the server writes after the page has gone carry. */
   author?: User | null;
@@ -121,6 +135,7 @@ export type UpgradeData = {
  */
 export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandler<UpgradeData> {
   const { docStore, meetingRelay, recallRelay, voiceRelay, spokenRelay, appVoiceRelay } = ctx;
+  let firstClientSocketSeen = false;
 
   return {
     // Yjs sync step 2 hands a fresh tab the WHOLE doc state in one binary
@@ -184,8 +199,12 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (typed.data.docId.startsWith('ws:')) {
         ctx.onBoardRoomOpen?.(typed.data.docId.slice(3), doc.awareness);
       }
-      onOpen(doc, typed);
+      onOpen(doc, typed, ctx.core);
       docStore.notePageOpened(doc);
+      if (!firstClientSocketSeen) {
+        firstClientSocketSeen = true;
+        ctx.onFirstClientSocket?.(Date.now());
+      }
     },
     message(ws, message) {
       if (ws.data.kind === 'recall') {
@@ -264,7 +283,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         const buf = message as unknown as ArrayBufferView;
         data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
       }
-      onMessage(doc, typed, data);
+      onMessage(doc, typed, data, ctx.core);
     },
     close(ws, code, reason) {
       if (ws.data.kind === 'recall') {
@@ -301,7 +320,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         meetingRelay.onClose(ws, code, reason);
         return;
       }
-      onClose(ws as unknown as FeedbackWs);
+      onClose(ws as unknown as FeedbackWs, ctx.core);
       // While open, the connection itself holds the doc; the week-long
       // window counts from here (`doc-residency.ts`).
       docStore.notePersonLeft((ws as unknown as FeedbackWs).data.docId);

@@ -7,8 +7,9 @@
  *   the session is writing, carrying the whole message so far.
  * - `{ kind: 'tools', calls: [{ name, input, output?, failed? }] }`: the
  *   tool calls of one batch.
- * - `{ kind: 'model', model?, effort?, started? }`: what the session runs on,
- *   for the lead chat's model chip (`lead-chat/lead-model.ts`).
+ * - `{ kind: 'model', model?, effort?, started?, compacting? }`: what the
+ *   session runs on, for the lead chat's model chip, and whether it is
+ *   compacting its context (`lead-chat/lead-model.ts`).
  *
  * The hook has already reduced every string the way it reduces a turn note
  * (`note-redact.ts`); this route bounds them. A session that is not the
@@ -26,6 +27,7 @@ import {
 } from '@claude-workspaces/core/lead-chat';
 import { SHARED_IDENTITY_ERROR, SHARED_IDENTITY_MESSAGE } from '../agent-watches.ts';
 import { isSharedAgentName } from '../chat-audit.ts';
+import type { ModelReport } from '../lead-chat/lead-model.ts';
 import type { MirroredText } from '../lead-chat/mirror.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -39,16 +41,16 @@ const CALLS_MAX = 50;
 /** What a hook may say a session runs on: shown to the owner, never run. */
 const MODEL_ID = /^claude-[a-z0-9-]{1,60}(\[1m\])?$/;
 
-export function parseModelReport(
-  raw: Record<string, unknown>,
-): { model?: string; effort?: string; started?: boolean } | null {
-  const { model, effort, started } = raw;
+export function parseModelReport(raw: Record<string, unknown>): ModelReport | null {
+  const { model, effort, started, compacting } = raw;
   if (model !== undefined && (typeof model !== 'string' || !MODEL_ID.test(model))) return null;
   if (effort !== undefined && !isLeadEffort(effort)) return null;
+  if (compacting !== undefined && typeof compacting !== 'boolean') return null;
   return {
     ...(typeof model === 'string' ? { model } : {}),
     ...(typeof effort === 'string' ? { effort } : {}),
     ...(started === true ? { started: true } : {}),
+    ...(typeof compacting === 'boolean' ? { compacting } : {}),
   };
 }
 

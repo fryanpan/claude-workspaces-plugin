@@ -11,6 +11,7 @@
  */
 import type * as Y from 'yjs';
 import { getThreads, listThreads, postReply } from './schema.ts';
+import { PROGRESS_KEY, readThreadProgress } from './thread-progress.ts';
 import type { Comment, LinkedReviewItem, Thread } from './types.ts';
 
 /** The longest board name, headline and path a stored link may carry. */
@@ -84,7 +85,9 @@ export function linkedItemText(item: LinkedReviewItem, note?: string): string {
  */
 export function listThreadsWithLinks(doc: Y.Doc): Thread[] {
   const maps = getThreads(doc);
-  return listThreads(doc).map((t) => {
+  return listThreads(doc).map((plain) => {
+    const progress = readThreadProgress(maps.get(plain.id)?.get(PROGRESS_KEY));
+    const t = progress ? { ...plain, progress } : plain;
     const raw = maps.get(t.id)?.get('comments') as Y.Array<Y.Map<unknown>> | undefined;
     if (!raw) return t;
     const linked = new Map<string, LinkedReviewItem>();

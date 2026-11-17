@@ -25,6 +25,12 @@ import type {
   DocRouteRequest,
   DocRoutesContext,
 } from './docs-routes-context.ts';
+import { answerAs, sent } from './route-contract.ts';
+import type {
+  CreateWhiteboardAnswer,
+  CreateWhiteboardBody,
+  DrawOnWhiteboardBody,
+} from './whiteboard-contract.ts';
 
 const MAX_TITLE = 200;
 
@@ -40,7 +46,7 @@ export async function handleWhiteboardCreateRoute(
   const { scope, req } = rq;
   if (!restIs(scope, 'whiteboards') || req.method !== 'POST') return undefined;
   const { docStore, j, safeJson, withReviewUrl, fileUnderBoardWorkspace } = ctx;
-  const body = await safeJson(req);
+  const body = sent<CreateWhiteboardBody>(await safeJson(req));
   const raw = body?.title;
   if (raw !== undefined && typeof raw !== 'string')
     return j(400, { error: 'title must be a string' });
@@ -48,11 +54,14 @@ export async function handleWhiteboardCreateRoute(
   const docId = newDocId();
   const doc = docStore.getOrCreate(docId, { type: 'whiteboard', title, titleSource: 'given' });
   fileUnderBoardWorkspace(doc.docId, scope.workspaceId);
-  return j(200, {
-    docId: doc.docId,
-    url: whiteboardHref(scope.workspaceId, doc.docId),
-    meta: withReviewUrl(doc.meta, scope.workspaceId),
-  });
+  return j(
+    200,
+    answerAs<CreateWhiteboardAnswer>({
+      docId: doc.docId,
+      url: whiteboardHref(scope.workspaceId, doc.docId),
+      meta: withReviewUrl(doc.meta, scope.workspaceId),
+    }),
+  );
 }
 
 /** `GET|POST /workspaces/<ws>/docs/<id>/whiteboard`. */
@@ -70,7 +79,7 @@ export async function handleWhiteboardRoutes(
     return j(200, { docId, ...readScene(doc.ydoc) });
   }
   if (req.method !== 'POST') return undefined;
-  const body = await safeJson(req);
+  const body = sent<DrawOnWhiteboardBody>(await safeJson(req));
   const parsed = parseShapes(body?.shapes ?? []);
   if (!parsed.ok) return j(400, { error: 'bad_shapes', hint: parsed.error });
   const mode = body?.mode ?? 'add';

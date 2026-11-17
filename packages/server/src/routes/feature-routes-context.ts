@@ -12,6 +12,7 @@
 import type { Identities } from '../identities.ts';
 import type { LandingPart } from '../landing-changes.ts';
 import type { ServerOptions } from '../server-options.ts';
+import type { AccessRole } from '../share/board-access.ts';
 import type { TaskStore } from '../tasks.ts';
 
 export interface FeatureDeps {
@@ -28,13 +29,14 @@ export interface FeatureDeps {
   boardOfSocket: (req: Request) => string | null;
   /**
    * What a PERSON may do on a board: 'owner' for the owner's identity or an
-   * operator address, the share row's role for a member's proven address,
-   * null for anyone else. Never asked of an agent.
+   * operator address, the membership row's access level (edit, comment or
+   * view) for a member's proven address, null for anyone else. Never asked
+   * of an agent (`board-membership.ts` `personAccessOn`).
    */
-  personRoleOn: (
+  personAccessOn: (
     workspaceId: string,
     person: { id: string; email?: string },
-  ) => 'owner' | 'member' | null;
+  ) => AccessRole | null;
   /** The key an agent-stream token is checked against. */
   agentTokenKey: () => string;
   /**

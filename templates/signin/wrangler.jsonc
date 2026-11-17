@@ -1,0 +1,25 @@
+// Copy this file with the template, then replace every REPLACE_ME value.
+// Secrets (BETTER_AUTH_SECRET, GOOGLE_CLIENT_SECRET, TURNSTILE_SECRET_KEY)
+// never go here: set them with `wrangler secret put <NAME>`, and for local
+// runs in a gitignored .dev.vars (see .dev.vars.example).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "signin-template",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "signin-template",
+      "database_id": "REPLACE_ME_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:8797",
+    "GOOGLE_CLIENT_ID": "REPLACE_ME_GOOGLE_CLIENT_ID",
+    "TURNSTILE_SITE_KEY": "REPLACE_ME_TURNSTILE_SITE_KEY"
+  },
+  "dev": { "port": 8797 }
+}

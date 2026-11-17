@@ -14,7 +14,6 @@ import {
 import { contextMatches, samePage } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { clipAudio, composerNote } from './widget-auth.ts';
-import { goTo } from './widget-goto.ts';
 import { IGNORE_ATTR, submitOnEnter } from './widget-picker.ts';
 import { receipt, threadSnippet } from './widget-thread-text.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
@@ -75,7 +74,9 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
     }
     // Pinned when the anchor's captured context matches the current page /
     // view, and dimmed when it was made on this page with other controls set
-    // (`samePage`): a tap on that pin puts the page back in that state.
+    // (`samePage`). A tap on either opens the thread and never loads the
+    // page; the page list (`widget-page-list.ts`) offers the load back to the
+    // state a dimmed one was made in, off the budget.
     // Legacy anchors with no context show everywhere (back-compat). Threads
     // on other pages still reach the panel's list — just not the page.
     const exact = contextMatches(t.anchor.context, el.currentContext);
@@ -102,12 +103,8 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
     pin.dataset.state =
       statusBase === 'resolved' ? statusBase : pendingDeclaration(t) ? 'review' : statusBase;
     pin.title = t.comments[0]?.text ?? 'open thread';
-    const url = t.anchor.context?.url;
-    if (!exact && url) pin.dataset.dim = '';
-    pin.addEventListener('click', (ev) => {
-      if (!exact && url) goTo(url, t.id);
-      else showThreadPopover(el, t, ev.clientX, ev.clientY);
-    });
+    if (!exact && t.anchor.context?.url) pin.dataset.dim = '';
+    pin.addEventListener('click', (ev) => showThreadPopover(el, t, ev.clientX, ev.clientY));
     pinLayer.appendChild(pin);
     el.threadPositions.set(t.id, { el: res.element, status: statusBase, at: t.anchor.at });
   }

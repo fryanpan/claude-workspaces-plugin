@@ -76,6 +76,8 @@ const READ = `(() => {
   const btn = host && host.shadowRoot && host.shadowRoot.querySelector('button');
   const sr = document.querySelector('[data-lead-chat="layer"]')?.shadowRoot;
   const q = (s) => sr && sr.querySelector(s);
+  // A tab behind another draws no frames, so the panel's grow animation stalls part-way; read the end state.
+  for (const a of q('.lc-pane')?.getAnimations?.() ?? []) a.finish();
   const box = (el) => { if (!el || el.hidden) return null; const r = el.getBoundingClientRect(); return r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
   const lead = sr ? [...sr.querySelectorAll('.lc-line[data-lead="1"]')] : [];
   return {

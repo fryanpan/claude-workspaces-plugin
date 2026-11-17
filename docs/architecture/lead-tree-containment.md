@@ -103,6 +103,7 @@ any I/O because `covers` is true.
 | `file-binding.ts` seed read (826) | the doc's first read at boot | `guards.readSync` → `tree-fs` | unchanged |
 | `file-binding.ts` `existsSync(abs)` / `existsSync(binding.path)` (825, 1094, 1291, 1553, 1934, 2021, 2294, 2317, 2913) | "is the file there" | plain `existsSync`, follows a link | `guards.exists` → new `existsTree` |
 | `file-binding.ts` `exportAndRebind` (1359–1364) | moving a doc into a project | `guards.mkdirSync` + `guards.writeSync`; the `existsSync` before it follows a link | `existsTree`; the write is unchanged |
+| `doc-file-relocate.ts` `relocateDocFile` | `move_doc_file` | under a root: refuses `move`; `repoint` reads the new file through `boundFiles.read` and rebinds through `attachFile` | unchanged; a contained rename does not exist, so the server never renames under a root |
 | `file-binding.ts` `retargetHomeBinding` (1406–1412) | first write of a pinned doc | guarded write; `existsSync` follows a link | `existsTree` |
 | `doc-store.ts` (1988) | a reparse read | `boundFiles.read` → `tree-fs` | unchanged |
 | `file-stamp.ts` `statStampSync` (46) | the size and mtime at attach | plain `statSync` (PR 1440 follow-up 6) | `guards.statSync` |
@@ -110,6 +111,9 @@ any I/O because `covers` is true.
 | `doc-store.ts` boot rebind `existsSync(src)` (1669) | is the file there | follows a link | `guards.exists` |
 | `doc-store-workspaces.ts` `existsSync(root)` (260) | is the set's root there | follows a link | `guards.exists` |
 | `routes/workspace-content.ts` huddle seed (367–369) | creates a meeting file | the meetings home is never a covered folder (`mounts.refuses`) | unchanged; add a test |
+| `doc-metadata.ts` `findMetadataSchema` | the metadata schema search, from the doc's folder up to the repository top | `guards.exists` and `guards.readBoundedSync` → `tree-fs` | unchanged (added after this inventory) |
+| `component-build.ts` `leadLocal`, `leadLoad` | a component tag's imports and their `component.json`, for an `.mdx` doc under a root | `guards.stat` and `guards.readBytes` → `tree-fs`. The root holding the doc is the boundary: a candidate counts only when `containedOf` names the same root. The resolver answers in its own esbuild namespace and the loader hands over the bytes, so esbuild opens no path under the root. No git runs, so there is no git-ignore check (the lead could commit any file anyway). `doc-component-builds.ts` stamps the watched paths through `boundFiles.statMtime` → `tree-fs` | unchanged (added after this inventory; `component-build-lead-root.test.ts`) |
+| `doc-components-agent.ts` `grantFolderFor`, `confirmGrantFolder` | the folder an agent asks the owner to grant for git-ignored component sources, and its re-check at approval | refused when covered: `allows`/`covers` on the doc and the folder as named before any `realpath` or `stat`, and again on the real path; `gitWorkTree` asks `gitBarred`. A grant reaches a build only through the resolver above, which asks the guards first | unchanged (added after this inventory; `component-grant-card.test.ts`) |
 
 ### B. Folder and diff sets
 
@@ -206,6 +210,8 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 | `git-diff.ts` `gitAsync` (57–59) | the diff review's reads | sandboxed |
 | `git-diff.ts` `gitSync` (35–36) | the same | barred (sync) |
 | `git-provenance.ts` (94–97) | provenance, the conflict hint and the uncommitted mark | barred (sync) |
+| `doc-git-modified.ts` | `log -1 --format=%cs`, a metadata field's git default | barred: `log` is not a contained subcommand, so the default is blank (added after this inventory) |
+| `component-build.ts` `gitWorkTree`, `gitIgnores` | `rev-parse --show-toplevel`, `check-ignore -q`, hardened args and env | not called for a doc under a root: its build uses the root as the boundary and reads through `tree-fs` (section A). Elsewhere, barred: a doc whose `.git` points into a lead's repository has no work tree and builds nothing. `doc-component-builds.ts` asks `gitBarred` again before reusing a cached work tree, since a root can be registered later (added after this inventory) |
 
 Out of scope: `git-push/git.ts` runs git in a temp repository the server makes
 from the lead's bundle, with the server's own config. A bundle carries no
@@ -219,6 +225,7 @@ keeper run in the owner's own checkouts.
 | a write-back's temp file | beside the target in the lead tree | `tree-fs` `writeTree`: random name, `O_CREAT\|O_EXCL\|O_NOFOLLOW_ANY`, judged, renamed by folder descriptor |
 | clobber backups, live copies (`file-binding.ts` 2600–2712) | `<dataDir>/clobber-backups` | the content comes from a guarded read; the file is written in the data dir |
 | pre-compact backups (`pre-compact-backup.ts`) | beside the `.ydoc` in the data dir | not a lead tree |
+| a doc's `.ydoc`, its archived and staged copies (`doc-state/disk.ts`) | data dir and `<dataDir>/_archive` | not a lead tree |
 | `mockup-capture.ts` and `mockup-versions.ts` temps | data dir | not a lead tree |
 
 PR 1440 follow-up 10 stays open: a temp is created by path and renamed by

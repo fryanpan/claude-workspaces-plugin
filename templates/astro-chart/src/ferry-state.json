@@ -1,0 +1,10 @@
+{
+  "title": "Ferry trips, from the doc's state",
+  "data": {
+    "rows": [
+      { "town": "Harborlight", "trips": 4 },
+      { "town": "Riverbend", "trips": 7 },
+      { "town": "Saltmarsh", "trips": 2 }
+    ]
+  }
+}

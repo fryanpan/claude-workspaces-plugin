@@ -129,6 +129,15 @@ export function buildSettingsView(): string {
                 </span>
                 <input type="checkbox" id="board-show-estimates" class="board-check" />
               </label>
+              <!-- Whether this board's live editing runs on the collab core
+                   (collab-core-row.ts). The owner's, one tap; the box follows
+                   the board's stream, so a change elsewhere shows here. -->
+              <label class="board-settings-row board-settings-row--push" for="board-collab-core">
+                <span class="board-settings-label">Collab core
+                  <small id="board-collab-core-note" class="board-settings-note"></small>
+                </span>
+                <input type="checkbox" id="board-collab-core" class="board-check" aria-describedby="board-collab-core-note" />
+              </label>
               <!-- Who can sign in to this board: exact addresses and @domains, and
                    the people each let in (Bryan, 29 Oct: "share a board with named
                    emails or a whole domain, and only he can change who is in").

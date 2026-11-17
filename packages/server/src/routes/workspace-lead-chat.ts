@@ -26,6 +26,8 @@ import { isValidAgentId } from '../agent-watches.ts';
 import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
+import type { MeetingSayAnswer, MeetingSayBody } from './lead-meeting-contract.ts';
+import { answerAs, sent } from './route-contract.ts';
 import { handleLeadChatFiles } from './workspace-lead-chat-files.ts';
 import { handleLeadChatModel } from './workspace-lead-chat-model.ts';
 import {
@@ -319,7 +321,7 @@ async function leadSays(
   workspaceId: string,
   rq: WorkspaceRouteRequest,
 ): Promise<Response> {
-  const body = await ctx.safeJson(req);
+  const body = sent<MeetingSayBody>(await ctx.safeJson(req));
   const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
   // Always the token: the route is new, and every caller (`say_in_meeting`)
@@ -342,17 +344,20 @@ async function leadSays(
   const held =
     running && ctx.leadLineHolds ? await ctx.leadLineHolds.wait(workspaceId, running) : null;
   if (held && !held.said) {
-    return ctx.j(200, {
-      ok: true,
-      said: false,
-      lapsed: held.reason,
-      hint:
-        held.reason === 'replaced'
-          ? 'A newer line from you replaced this one.'
-          : held.reason === 'ended'
-            ? 'The meeting ended before the line could be said.'
-            : 'The room kept talking and moved past this line, so it was not said.',
-    });
+    return ctx.j(
+      200,
+      answerAs<MeetingSayAnswer>({
+        ok: true,
+        said: false,
+        lapsed: held.reason,
+        hint:
+          held.reason === 'replaced'
+            ? 'A newer line from you replaced this one.'
+            : held.reason === 'ended'
+              ? 'The meeting ended before the line could be said.'
+              : 'The room kept talking and moved past this line, so it was not said.',
+      }),
+    );
   }
   const r = ctx.leadChatMeetings.said(workspaceId, who, text);
   if (!r.ok) {
@@ -367,16 +372,19 @@ async function leadSays(
     }
     return ctx.j(500, { error: r.error });
   }
-  return ctx.j(200, {
-    ok: true,
-    said: true,
-    meetingId: r.meeting.id,
-    turn: r.line.turn,
-    ...(held ? { waitedMs: held.waitedMs } : {}),
-    // Played only from a microphone meeting's recording tab
-    // (`leadLinePlaysHere` on the page).
-    played: ctx.leadMeetingVoice !== null && r.meeting.source === 'mic',
-  });
+  return ctx.j(
+    200,
+    answerAs<MeetingSayAnswer>({
+      ok: true,
+      said: true,
+      meetingId: r.meeting.id,
+      turn: r.line.turn,
+      ...(held ? { waitedMs: held.waitedMs } : {}),
+      // Played only from a microphone meeting's recording tab
+      // (`leadLinePlaysHere` on the page).
+      played: ctx.leadMeetingVoice !== null && r.meeting.source === 'mic',
+    }),
+  );
 }
 
 /**

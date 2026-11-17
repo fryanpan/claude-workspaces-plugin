@@ -1,0 +1,7 @@
+# Copy to .dev.vars (gitignored) for `wrangler dev --local`. Generate real
+# values; never commit .dev.vars.
+BETTER_AUTH_SECRET=REPLACE_ME_WITH_32_RANDOM_BYTES
+GOOGLE_CLIENT_SECRET=REPLACE_ME
+# Cloudflare's published always-pass test secret, safe for local runs only.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+MAIL_TRANSPORT=log

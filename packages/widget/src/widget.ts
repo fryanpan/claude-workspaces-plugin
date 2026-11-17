@@ -155,6 +155,10 @@ function defaultServerUrl(): string {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 }
 
+/** The widgets connected on this page, and how many have asked for the history patch (it runs on the first). */
+const onPage = new Set<FeedbackWidgetEl>();
+let patched = 0;
+
 export class FeedbackWidgetEl extends HTMLElement {
   shadow: ShadowRoot;
   client: FeedbackClient | null = null;
@@ -167,7 +171,6 @@ export class FeedbackWidgetEl extends HTMLElement {
     user: null,
   };
   currentContext: AnchorContext = {};
-  private historyPatched = false;
   feedbackMode = false;
   modeCleanup: (() => void) | null = null;
   hoverEl: HTMLElement | null = null;
@@ -357,15 +360,16 @@ export class FeedbackWidgetEl extends HTMLElement {
     update();
   }
 
+  // One patch per page, whatever number of widgets come and go on it: a doc
+  // page swaps docs in place, removing one widget and adding the next, and a
+  // patch per widget left every removed one wrapping pushState and listening
+  // for popstate for the life of the tab. The patch tells the widgets still
+  // connected (`onPage`); `disconnectedCallback` takes a widget out.
   private wireHistoryListeners(): void {
-    if (this.historyPatched) return;
-    this.historyPatched = true;
+    onPage.add(this);
+    if (patched++) return;
     const emit = () => {
-      this.currentContext = {
-        ...this.currentContext,
-        url: currentUrl(),
-      };
-      this.scheduleRender();
+      for (const w of onPage) w.setContext({ url: currentUrl() });
     };
     window.addEventListener('popstate', emit);
     window.addEventListener('hashchange', emit);
@@ -382,6 +386,7 @@ export class FeedbackWidgetEl extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    onPage.delete(this);
     try {
       exitFeedbackMode(this);
     } catch {}

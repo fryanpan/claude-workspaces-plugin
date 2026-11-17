@@ -5,10 +5,14 @@
  * with what this answers.
  *
  * While the panel is docked, `<html data-lc-docked>` and `--lc-dock-w` say
- * so, and the board's column makes room for it (board.css, PANE LAYOUT).
+ * so, and the page makes room for it: the board's column (board.css, PANE
+ * LAYOUT), a doc's shell (doc.css, MAIN LAYOUT). A change to either fires
+ * `ROOM_CHANGE_EVENT`, so a doc moves its comment cards into the flow when
+ * the panel leaves too little width for their margin (`card-placement.ts`).
  * While it fills a narrow screen, `<html data-lc-full>` pins the board's
  * navbar to the bottom beneath it.
  */
+import { ROOM_CHANGE_EVENT } from '../card-placement.ts';
 import type { ModeStorage } from './lead-chat-mode.ts';
 
 /** The docked panel's width until the reader drags it, and its bounds. */
@@ -99,9 +103,13 @@ export function createDock(opts: {
     resize(width(vw()) + step, true);
   });
 
+  /** The docked width last published, so an unchanged one fires nothing. */
+  let published: number | null = null;
   return {
     width,
     docked(w) {
+      const changed = w !== published;
+      published = w;
       if (w === null) {
         delete html.dataset.lcDocked;
         html.style.removeProperty('--lc-dock-w');
@@ -109,6 +117,7 @@ export function createDock(opts: {
         html.dataset.lcDocked = 'true';
         html.style.setProperty('--lc-dock-w', `${w}px`);
       }
+      if (changed) win.dispatchEvent(new Event(ROOM_CHANGE_EVENT));
     },
     full(on) {
       if (on) html.dataset.lcFull = 'true';

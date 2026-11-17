@@ -1,6 +1,7 @@
 import { linkedItemText } from '@claude-workspaces/core/linked-item';
 import type { Comment, LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
 import { cssColor, escapeHtml as esc, formatTime } from '@claude-workspaces/core/ui-shared';
+import { decorateProgress, progressSlot } from './comment-extras.ts';
 import { receipt, threadSnippet } from './widget-thread-text.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -62,7 +63,7 @@ export function foldedHtml(t: Thread, el: FeedbackWidgetEl, where: string): stri
   if (n > 1 && last) body += commentHtml(last, t, el, true);
   return (
     `<div class="meta"><span class="dot"></span><span class="author-name">${esc(t.createdBy.name)}</span>` +
-    `<span class="time">${formatTime(last?.ts ?? 0)}</span></div>` +
+    `<span class="time">${formatTime(last?.ts ?? 0)}</span>${progressSlot(t)}</div>` +
     `<div class="snippet">${esc(threadSnippet(t.anchor))}</div>` +
     body +
     (where ? `<div class="where">${esc(where)}</div>` : '')
@@ -72,18 +73,20 @@ export function foldedHtml(t: Thread, el: FeedbackWidgetEl, where: string): stri
 /** The opened card's header, above the popover's body. */
 export function openHeadHtml(t: Thread, where: string): string {
   return (
-    `<div class="meta"><span class="dot"></span><span class="author-name">${esc(t.createdBy.name)}</span></div>` +
+    `<div class="meta"><span class="dot"></span><span class="author-name">${esc(t.createdBy.name)}</span><span class="time"></span>${progressSlot(t)}</div>` +
     `<div class="snippet">${esc(threadSnippet(t.anchor))}</div>` +
     (where ? `<div class="where">${esc(where)}</div>` : '')
   );
 }
 
 /**
- * Give an opened thread's popover its linked items: the budgeted bundle
+ * Give an opened thread's popover its linked items and its agent's mark
+ * (`comment-extras.ts`): the budgeted bundle
  * draws each comment as its words alone. The row goes after the comment that
  * carries it, and the line that only names the item comes out of the words.
  */
 export function decorateLinked(pop: HTMLElement, t: Thread): void {
+  decorateProgress(pop, t);
   const rows = pop.querySelectorAll<HTMLElement>('.comments > .comment');
   t.comments.forEach((c, i) => {
     const row = rows[i];

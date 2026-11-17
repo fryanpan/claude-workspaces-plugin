@@ -78,6 +78,8 @@ infra/access-apps/access.local.json
 infra/cloudflare/state/
 infra/cloudflare/**/.terraform/
 infra/cloudflare/.terraform-check/
+infra/gcp-maps/.terraform/
+infra/gcp-maps/*.tfvars
 infra/cloudflare/deploys/*/*.local.json
 infra/cloudflare/deploys/*/*.local.toml
 *.tfstate

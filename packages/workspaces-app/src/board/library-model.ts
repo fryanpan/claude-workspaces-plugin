@@ -31,6 +31,21 @@ export interface LibraryRow {
    * path. Never painted on a row — it names a burst (`fileEntries`).
    */
   folder?: string;
+  /** The board doc this row opens. Absent on a file no doc holds yet. */
+  docId?: string;
+  /** The Library folder it is filed in; absent means none. */
+  folderId?: string;
+}
+
+/** One Library folder, as the server sends it (`library-folders.ts`). */
+export interface LibraryFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  /** Names from the top level down, joined with `/`. */
+  path: string;
+  /** The built-in Meetings folder: new meetings land in it. */
+  meetings?: true;
 }
 
 export interface LibraryPayload {
@@ -39,6 +54,12 @@ export interface LibraryPayload {
   files: LibraryRow[];
   /** Where each kind really lives (`packages/server/src/library-location.ts`). */
   where?: LibraryWhere[];
+  /** The board's live folders. */
+  folders?: LibraryFolder[];
+  /** What the reader opened here, newest first; only theirs, never an agent's. */
+  viewed?: Array<{ docId: string; at: number }>;
+  /** What the reader starred here, newest first: items and folders. */
+  starred?: Array<{ kind: 'doc' | 'folder'; id: string; at: number }>;
 }
 
 /** The three kinds of thing a board files. */
@@ -150,11 +171,13 @@ export const BURST_MIN = 3;
  * Grouped by time alone. Folder cannot decide it: one measured run wrote to
  * four sibling folders, and edits to one folder hours apart are not a burst.
  * A file with no clock reading is never in a burst — nothing measured puts it
- * beside anything.
+ * beside anything, and nor is a row `solo` names: a meeting sits in Recent
+ * files too, and a person's meeting is never part of a generator's run.
  */
 export function fileEntries(
   files: readonly LibraryRow[],
   sort: LibrarySort = 'modified',
+  solo: (row: LibraryRow) => boolean = () => false,
 ): LibraryFileEntry[] {
   const out: LibraryFileEntry[] = [];
   let run: LibraryRow[] = [];
@@ -166,7 +189,7 @@ export function fileEntries(
   for (const row of files) {
     const prev = run.at(-1);
     const t = rowClock(row, sort);
-    if (t === undefined) {
+    if (t === undefined || solo(row)) {
       flush();
       out.push({ kind: 'file', row });
       continue;

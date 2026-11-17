@@ -37,6 +37,61 @@
    Appending at the end is what starts that up again. */
 /* ================= MAIN LAYOUT ================= */
 
+/* Where the presence deck sits (design F, Bryan 2026-11-15): 104px in from
+   the window's right edge on a wide screen and 140px on a phone, the same as
+   on the board (board.css, PRESENCE STRIP). The toolbar's right edge is the
+   window's less 14px (12px on a phone). The host is a slot in the row, after
+   the format and preview buttons and before comments and More; on a phone Aa
+   moves after it. The slot widens by More's width and gap when More is
+   hidden, so its left edge never moves under the deck.
+   Empty, the slot takes no room (Bryan, 2026-11-15: "a weird gap in the
+   icons on the top right"). Somebody arriving is news, so the controls LEFT
+   of the slot move over once to make room; comments, More and the deck,
+   which is placed against the toolbar, hold their place. */
+#topbar .toolbar {
+  position: relative;
+}
+#doc-people {
+  order: 1;
+  flex: none;
+  width: 96px;
+}
+#doc-people:has(~ #doc-more[hidden]) {
+  width: 140px;
+}
+#toggle-threads,
+#doc-more {
+  order: 2;
+}
+#doc-people .board-presence-f {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 90px;
+}
+/* The doc's toolbar has no room for the names beside the deck (styles.css,
+   PRESENCE CIRCLES): they would push its circles under the buttons to its
+   left. Hovering or tapping the deck lists everyone by name. */
+#doc-people .board-presence-names {
+  display: none;
+}
+@media (max-width: 1100px) {
+  #toggle-format {
+    order: 2;
+  }
+  /* A phone's deck draws at most three circles (styles.css), so the slot
+     gives the rest back to the doc's title. */
+  #doc-people {
+    width: 72px;
+  }
+  #doc-people:has(~ #doc-more[hidden]) {
+    width: 116px;
+  }
+  #doc-people .board-presence-f {
+    right: 128px;
+  }
+}
+
 #main {
   position: relative;
   display: grid;
@@ -109,6 +164,15 @@
    open ask links. */
 #shell {
   height: calc(100dvh - var(--doc-dock-h, 0px));
+}
+/* The lead chat docked on the right (lead-chat/lead-chat-dock.ts publishes
+   `data-lc-docked` and `--lc-dock-w`) takes its width from the page rather
+   than lying over the prose: the shell, top bar included, ends at the
+   panel's left edge, as the board's column does (board.css, PANE LAYOUT).
+   Only a wide screen docks; at 1100px and under the chat is a sheet with its
+   own Close, and no column is reserved. */
+html[data-lc-docked] #shell {
+  margin-right: var(--lc-dock-w, 0px);
 }
 #toast {
   bottom: calc(var(--kb-bottom, 0px) + 24px + var(--safe-bottom) + var(--doc-dock-h, 0px));
@@ -1139,6 +1203,72 @@ body.is-archived #editor .ProseMirror {
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
+/* A <StreetMap> (mdx-street-map.ts): a Leaflet map in the page. The slot is
+   its own stacking context, so Leaflet's panes (z-index 400 to 1000) stay
+   under the doc's sticky bars and sheets. Its height is set inline before
+   Leaflet loads, so the doc does not move when the map arrives. */
+#editor > .ProseMirror .mdx-map {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  cursor: auto;
+  overflow: hidden;
+}
+#editor > .ProseMirror .mdx-map .leaflet-container {
+  font: 12px / 1.4 var(--sans);
+}
+/* Leaflet's layers sit in zero-width panes and are sized by their own style,
+   so the prose column's narrow-screen max-width on media would shrink the
+   points' canvas to nothing. */
+#editor > .ProseMirror .mdx-map canvas,
+#editor > .ProseMirror .mdx-map svg,
+#editor > .ProseMirror .mdx-map img {
+  max-width: none;
+  max-height: none;
+}
+#editor > .ProseMirror .mdx-map img.leaflet-tile {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+#editor > .ProseMirror .mdx-map .cw-map-popup {
+  font: 13px / 1.4 var(--sans);
+  color: #1f2937;
+  white-space: pre-wrap;
+}
+#editor > .ProseMirror .mdx-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font: 13px / 1.4 var(--sans);
+  color: var(--fg);
+}
+#editor > .ProseMirror .mdx-map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+#editor > .ProseMirror .mdx-map-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+#editor > .ProseMirror .mdx-map-swatch.is-ring {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid;
+  background: transparent;
+}
 /* Each line's own name and last value, at its end inside the plot: the site's
    chart labels its lines there instead of carrying a legend. */
 #editor > .ProseMirror .mdx-chart .mdx-end-label {
@@ -1185,11 +1315,12 @@ body.is-archived #editor .ProseMirror {
 #editor > .ProseMirror .mdx-block.is-editing .mdx-source {
   display: block;
 }
-/* A chart's Edit, for a reader who can write: the right end of the title's
-   row. The row is the button's 44px tall, a thumb's target, and the title
-   wraps short of it, so the chart starts below it and nothing is drawn
-   under it. Sized for "Done" and "Edit" alike so the swap moves nothing. The
-   10px and 8px are inside the block's padding, so it never meets the border. */
+/* A chart's or a component's Edit, for a reader who can write: the right end
+   of the title's row. The row is the button's 44px tall, a thumb's target,
+   and the title wraps short of it, so the chart or component starts below it
+   and nothing is drawn under it. Sized for "Done" and "Edit" alike so the
+   swap moves nothing. The 10px and 8px are inside the block's padding, so it
+   never meets the border. */
 #editor > .ProseMirror .mdx-block {
   position: relative;
 }
@@ -1214,10 +1345,16 @@ body.is-archived #editor .ProseMirror {
   background: var(--bg-hover);
   color: var(--fg);
 }
-#editor > .ProseMirror[contenteditable="true"] .mdx-block:is(.has-chart, .is-editing) .mdx-edit {
+#editor
+  > .ProseMirror[contenteditable="true"]
+  .mdx-block:is(.has-chart, .has-component, .is-editing)
+  .mdx-edit {
   display: block;
 }
-#editor > .ProseMirror[contenteditable="true"] .mdx-block:is(.has-chart, .is-editing) .mdx-head {
+#editor
+  > .ProseMirror[contenteditable="true"]
+  .mdx-block:is(.has-chart, .has-component, .is-editing)
+  .mdx-head {
   min-height: 44px;
   align-items: center;
   padding-right: 66px;
@@ -1225,7 +1362,7 @@ body.is-archived #editor .ProseMirror {
 /* A chart with no title still gets the row, so the button sits above the plot. */
 #editor
   > .ProseMirror[contenteditable="true"]
-  .mdx-block:is(.has-chart, .is-editing)
+  .mdx-block:is(.has-chart, .has-component, .is-editing)
   .mdx-view:not(:has(> .mdx-head))::before {
   content: "";
   display: block;
@@ -1245,6 +1382,35 @@ body.is-archived #editor .ProseMirror {
   color: var(--red);
 }
 #editor > .ProseMirror .mdx-edit-error[hidden] {
+  display: none;
+}
+/* A component tag drawn live (mdx-component.ts). The component lays itself
+   out; the host only gives it the column and a normal cursor, since a tap
+   inside works the component rather than opening the source. Its words are
+   selectable, unlike the rest of the block's view, so a reader can comment on
+   them (selection-range.ts). */
+#editor > .ProseMirror .mdx-live {
+  cursor: auto;
+  min-width: 0;
+  user-select: text;
+}
+/* A built-in drawn inside a component (a <PlotChart> slide) takes the width
+   of whatever holds it: a chart is drawn at its box's width, so a box that
+   shrank to fit its content would keep the chart at its first, narrow size. */
+#editor > .ProseMirror .mdx-live .mdx-builtin {
+  width: 100%;
+  min-width: 0;
+}
+#editor > .ProseMirror .mdx-live-status {
+  margin-top: 6px;
+  font: 13px / 1.4 var(--sans);
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+}
+#editor > .ProseMirror .mdx-live-status.is-error {
+  color: var(--red);
+}
+#editor > .ProseMirror .mdx-live-status[hidden] {
   display: none;
 }
 /* A ```choice block (choice-block.ts): a row of buttons, its source hidden
@@ -1520,6 +1686,103 @@ body.preview-open #preview-pane {
 /* Calm by default (owner, 2026-09-13): a thread that arrived since the reader
    last looked wears no red "new" mark, and a revealed thread does not wink —
    the scroll already puts it in front of the reader. */
+
+/* ================= DOC METADATA (doc/doc-metadata.ts) =================
+   The fields a metadata schema declares, as a compact form above the prose,
+   standing in for the raw front matter. Same measure as the prose so its
+   first label sits over the first word. Every control is one height whatever
+   it holds, and the error shares the label's line, so a wrong value moves
+   nothing. The grid fits as many 200px columns as the measure allows: two or
+   three on the iPad, one at 430. */
+.doc-metadata {
+  max-width: min(100%, 1200px);
+  margin: 0 auto 18px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  font-family: var(--sans);
+}
+body.is-reading-width #editor > .doc-metadata {
+  max-width: 36rem;
+}
+body[data-cards="inline"]:not(.is-reading-width) #editor > .doc-metadata {
+  max-width: min(100%, 900px);
+}
+.doc-metadata-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 14px;
+}
+.doc-metadata-field {
+  min-width: 0;
+}
+.doc-metadata-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.doc-metadata-head label {
+  flex: none;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.doc-metadata-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--red-strong);
+}
+.doc-metadata-control {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 2px 0 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px / 30px var(--sans);
+}
+.doc-metadata-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.doc-metadata-field.is-invalid .doc-metadata-control {
+  border-color: var(--red);
+}
+/* Read-only fields read as text, not as a box to type in. */
+.doc-metadata-control:disabled {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+  opacity: 1;
+  -webkit-text-fill-color: var(--fg);
+}
+/* A value the editor supplies (the file's last git change), not the file's. */
+.doc-metadata-field.is-default .doc-metadata-control {
+  color: var(--fg-muted);
+  -webkit-text-fill-color: var(--fg-muted);
+}
+/* The form stands in for the raw block it edits. */
+#editor.has-doc-metadata > .ProseMirror > .cm-frontmatter:first-child {
+  display: none;
+}
+@media (max-width: 720px) {
+  .doc-metadata {
+    margin-bottom: 14px;
+  }
+  /* 16px stops iOS zooming the page when a field takes focus. */
+  .doc-metadata-control {
+    font-size: 16px;
+  }
+}
 
 /* ================= MEETING RECORD CHROME =================
    What a meeting leaves on its notes doc: the meeting's heading, the link
@@ -2404,6 +2667,19 @@ body:has(.doc-floats.is-floating > .plan-float:not([hidden])) {
 }
 .thread .voice-foot .voice-undo {
   margin-left: auto;
+}
+
+/* ================= THE CORNER BUTTONS (doc/doc-comment-buttons.ts) =================
+   The comment widget's round buttons in the bottom-right corner. Inside its
+   shadow root they stand at the top of the page (z 2147483647), which on a
+   doc put them over the phone's comment composer and its Send button, the
+   comment sheet and the full-screen thread. A stacking context on the host
+   keeps them above the doc and its comment pill (800) and below each of those
+   (950 and up), so an overlay covers them the way it covers the doc and
+   nothing moves or hides as it opens. */
+claude-feedback-widget {
+  position: relative;
+  z-index: 930;
 }
 
 /* ================= THE AGENT'S CURSOR (doc/agent-focus.ts) =================
@@ -3405,6 +3681,12 @@ body.redline-mode .ProseMirror del.cw-del {
   grid-column: 1;
   width: 100%;
 }
+/* The metadata form (doc/doc-metadata.ts) sits in the prose column the same
+   way, between the heading and the prose. */
+#editor.redline-layout > .doc-metadata {
+  grid-column: 1;
+  width: 100%;
+}
 
 /* The provisional live zone (meeting-live-zone.ts) is appended after the
    prose, so here it auto-places into a second row under the prose column.
@@ -3870,12 +4152,16 @@ body.redline-mode .ProseMirror del.cw-del {
    PARENT's font, and the run's is 0, so the number floated barely above the
    baseline. A relative offset moves only the paint, so the line keeps its
    height. The text colour, not muted: the small size is subtlety enough
-   (Bryan, 2026-10-01). */
+   (Bryan, 2026-10-01).
+
+   Drawn only on the piece carrying `data-cw-fn` — the closing `]`. A link or
+   a comment highlight inside a note cuts the run into several spans, and a
+   number on each drew "2 2 2". */
 .cw-fn {
   font-size: 0;
   letter-spacing: 0;
 }
-.cw-fn::after {
+.cw-fn[data-cw-fn]::after {
   content: attr(data-cw-fn);
   display: inline;
   font: 400 11px / 0 var(--sans);
@@ -3890,7 +4176,7 @@ body.redline-mode .ProseMirror del.cw-del {
   letter-spacing: inherit;
   color: var(--fg-muted);
 }
-.cw-fn-open::after {
+.cw-fn-open[data-cw-fn]::after {
   content: none;
 }
 

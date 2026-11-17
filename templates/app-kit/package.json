@@ -1,0 +1,26 @@
+{
+  "name": "app-kit-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "start": "bun run src/server.ts",
+    "dev": "bun run scripts/build.ts && bun run src/server.ts",
+    "deploy:staging": "bun run scripts/deploy-staging.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@awesome.me/webawesome": "3.14.0",
+    "@claude-workspaces/app-kit": "workspace:*",
+    "better-auth": "1.7.22",
+    "hono": "4.13.18",
+    "lib0": "^0.2.117",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.2"
+  }
+}

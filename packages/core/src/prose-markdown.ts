@@ -17,6 +17,7 @@
  * Builds on `prose-fragment.ts`. Imports no sibling in the family.
  */
 import * as Y from 'yjs';
+import { frontMatterLines } from './doc-metadata.ts';
 import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
@@ -153,6 +154,14 @@ export function inlineMarksToDelta(
       }
     }
 
+    // A board id (`g-_abcdEFGHij_`) — OPAQUE plain text, never emphasis.
+    const idEnd = boardIdEndAt(text, i);
+    if (idEnd > 0) {
+      buf += text.slice(i, idEnd);
+      i = idEnd;
+      continue;
+    }
+
     // 2-char wrappers: **bold** / __bold__
     let matched = false;
     for (const m of ['**', '__'] as const) {
@@ -197,6 +206,25 @@ export function inlineMarksToDelta(
 }
 
 /**
+ * A board id: one lowercase letter, `-`, and the 12 base64url characters
+ * `cryptoId` mints (`g-…` goals, `t-…` tasks, `w-…` workspaces, `d-…` docs).
+ * Base64url includes `_`, and CommonMark opens emphasis on a `_` that follows
+ * punctuation, so `g-_abcdEFGHij_` read as `g-` + an italic and was written
+ * back to the bound file as `g-*abcdEFGHij*` — the id broken in the doc's
+ * text and every ref read from that text lost. Bounded on both sides by a
+ * character that cannot be part of an id, so `pre-_emphasised_` (a longer
+ * prefix) and a word glued to either end are still ordinary text.
+ */
+const BOARD_ID = /(?<![A-Za-z0-9_-])[a-z]-[A-Za-z0-9_-]{12}(?![A-Za-z0-9_-])/y;
+
+/** End index of the board id starting at `text[i]`, or -1 when none does. */
+function boardIdEndAt(text: string, i: number): number {
+  if (text[i + 1] !== '-') return -1; // the cheap reject, checked every char
+  BOARD_ID.lastIndex = i;
+  return BOARD_ID.test(text) ? BOARD_ID.lastIndex : -1;
+}
+
+/**
  * Find the index (in `r`) of the delimiter run that closes an emphasis span
  * opened by `delim` (`*`, `**`, `_` or `__`) at the start of `r`. Returns -1
  * when there is no closer.
@@ -226,6 +254,12 @@ function findEmphasisClose(r: string, delim: '*' | '**' | '_' | '__'): number {
     const math = r[p] === '$' ? mathTextAt(r, p) : null;
     if (math) {
       p = math.end;
+      continue;
+    }
+    // A board id's `_` is part of the id, not a closer.
+    const idEnd = ch === '_' ? boardIdEndAt(r, p) : -1;
+    if (idEnd > 0) {
+      p = idEnd;
       continue;
     }
     if (r[p] !== ch) {
@@ -683,14 +717,7 @@ export function parseMarkdownSource(
     let j = i + 1;
     while (j < lines.length && (lines[j] ?? '').trim() !== '---') j++;
     if (j < lines.length) {
-      const yamlLines: string[] = [];
-      for (let k = i + 1; k < j; k++) {
-        const ln = lines[k] ?? '';
-        // Drop blank lines so frontmatter that was previously round-tripped
-        // through the old parser (which left blank lines between values)
-        // self-heals on the next reparse.
-        if (ln.trim() !== '') yamlLines.push(ln);
-      }
+      const yamlLines = frontMatterLines(lines.slice(i + 1, j));
       if (yamlLines.length > 0) {
         const cb = new Y.XmlElement('codeBlock');
         cb.setAttribute('language', 'yaml-frontmatter');

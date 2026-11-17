@@ -33,7 +33,9 @@ import { createHttp, err, ok } from './http-client.ts';
 import { createMuxLoop } from './mux-loop.ts';
 import { type Watcher, createSseLoops } from './sse-loop.ts';
 import { TOOL_LIST } from './tool-schemas.ts';
+import { handleComponentTool } from './tools/components.ts';
 import { handleDocsTool } from './tools/docs.ts';
+import { handleFolderTool } from './tools/folders.ts';
 import { handleInboxTool } from './tools/inbox.ts';
 import { handlePersonTool } from './tools/person.ts';
 import { handleTaskTool } from './tools/tasks.ts';
@@ -287,6 +289,8 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
       handleInboxTool,
       handlePersonTool,
       handleWhiteboardTool,
+      handleFolderTool,
+      handleComponentTool,
     ],
     err,
   });

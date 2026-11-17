@@ -30,7 +30,12 @@ function mount(md: string): { editor: EditorHandle; ydoc: Y.Doc } {
   return { editor, ydoc };
 }
 
-const notes = () => [...document.querySelectorAll<HTMLElement>('.cw-fn')];
+/** One element per note: the piece carrying its number, the closing `]`. */
+const notes = () => [...document.querySelectorAll<HTMLElement>('.cw-fn[data-cw-fn]')];
+/** Every rendered piece of note `n`'s run, in order. */
+const pieces = (n: string) => [
+  ...document.querySelectorAll<HTMLElement>(`.cw-fn[data-cw-fn-run="${n}"]`),
+];
 const facts = () => [...document.querySelectorAll<HTMLElement>('.cw-fn-fact')];
 
 const DOC = [
@@ -82,7 +87,7 @@ describe('a footnote in the editor', () => {
         (el) => el.className === 'cw-fn-fact' || el.className === 'cw-fn-fact cw-fn-fact-unsure',
       ),
     ).toBe(true);
-    expect(notes().every((el) => el.className === 'cw-fn')).toBe(true);
+    expect(pieces('1').every((el) => el.className === 'cw-fn')).toBe(true);
   });
 
   it('leaves the document itself untouched', () => {
@@ -98,13 +103,17 @@ describe('a footnote in the editor', () => {
   it('follows the text when the paragraph before it grows', () => {
     const { editor } = mount(DOC);
     editor.editor.commands.insertContentAt(1, 'Filed in March. ');
-    expect(notes()[0]?.textContent).toBe('^[Planning Department annual report, 2025, table 4.]');
+    expect(
+      pieces('1')
+        .map((el) => el.textContent)
+        .join(''),
+    ).toBe('^[Planning Department annual report, 2025, table 4.]');
     expect(facts()[0]?.textContent).toBe('A permit takes 94 days');
   });
 
   it('opens the raw note when the caret is inside it, and folds it again after', () => {
     const { editor } = mount(DOC);
-    const el = notes()[0];
+    const el = pieces('1')[0];
     if (!el) throw new Error('no footnote rendered');
     const from = editor.editor.view.posAtDOM(el.firstChild ?? el, 0);
     editor.editor.commands.setTextSelection(from + 3);
@@ -115,7 +124,7 @@ describe('a footnote in the editor', () => {
 
   it('folds the raw note away when the doc goes read-only with the caret inside it', () => {
     const { editor } = mount(DOC);
-    const el = notes()[0];
+    const el = pieces('1')[0];
     if (!el) throw new Error('no footnote rendered');
     const from = editor.editor.view.posAtDOM(el.firstChild ?? el, 0);
     editor.editor.commands.setTextSelection(from + 3);

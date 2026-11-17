@@ -72,8 +72,9 @@ async function thread(h: ServerHandle, docId: string, find: string, text: string
  * One live board and one retired one, written by a first server and read by
  * a second, with a thread on every kind of doc the queue or the landing page
  * reads: an open task, a task whose only thread is resolved (the roster reads
- * it), an archived task (the activity reading does), a board doc, a goal, and a task
- * on the retired board (only the landing page's activity reading does).
+ * it), an archived task and a task on the retired board (which only the
+ * landing page's activity reading dates, from their index rows), a board doc,
+ * and a goal.
  */
 async function seed(): Promise<Fixture> {
   const first = createServer({ port: 0, dataDir, spawnerAgentId: null });
@@ -187,17 +188,18 @@ describe('the cross-board queue reads its docs warm', () => {
     const cold = coldReads(h);
     const first = await queue();
     expect(cold).toEqual([]);
-    // Every threaded doc on the live board was loaded, by the warm-up.
+    // Every threaded doc the queue reads was loaded, by the warm-up.
     for (const id of [
       fx.threaded.openTask,
       fx.threaded.resolvedTask,
-      fx.threaded.archivedTask,
       fx.threaded.boardDoc,
       fx.threaded.goal,
     ]) {
       expect(h.docStore.peek(id)).toBeDefined();
     }
-    // The retired board is not the queue's, so its doc stays released.
+    // The archived row and the retired board are not the queue's, so their
+    // docs stay released.
+    expect(h.docStore.peek(fx.threaded.archivedTask)).toBeUndefined();
     expect(h.docStore.peek(fx.threaded.retiredTask)).toBeUndefined();
     const asks = first.items.map((i) => ('ask' in i ? i.ask : ''));
     expect(asks).toContain(CHOICE.headline);
@@ -206,7 +208,7 @@ describe('the cross-board queue reads its docs warm', () => {
     expect(await queue()).toEqual(first);
   });
 
-  it('/ loads nothing inside the pass, the retired board included', async () => {
+  it('/ loads nothing inside the pass, and leaves history it only dates on disk', async () => {
     const h = handle as ServerHandle;
     evictAll(h);
     const cold = coldReads(h);
@@ -214,7 +216,10 @@ describe('the cross-board queue reads its docs warm', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('Harborlight board, 3 waiting');
     expect(cold).toEqual([]);
-    expect(h.docStore.peek(fx.threaded.retiredTask)).toBeDefined();
+    // The activity reading dates the archived row and the retired board from
+    // their index rows, so neither is loaded at all.
+    expect(h.docStore.peek(fx.threaded.archivedTask)).toBeUndefined();
+    expect(h.docStore.peek(fx.threaded.retiredTask)).toBeUndefined();
   });
 
   it('the answer ledger loads nothing inside the pass, and still records the answer', async () => {

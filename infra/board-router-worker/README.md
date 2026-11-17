@@ -134,8 +134,8 @@ set by a project server for its own host is stripped") sends zone cookies to
 ## Deploying
 
 ```bash
-bun run cf:plan    # reads Cloudflare, shows what would change
-bun run cf:apply   # shows the plan again and asks before changing anything
+bun run cf:plan          # reads Cloudflare, shows what would change
+bun run cf:sync-config   # a change to router.local.json: CI applies it after one tap
 ```
 
 The Worker, its routes and its records are part of the Terraform config
@@ -186,7 +186,7 @@ one address serves: a board missing from the table would get a 404.
 
 ## Each project's side
 
-`bun run cf:apply` makes the first two for a Fly project machine, whose
+CI's apply makes the first two for a Fly project machine, whose
 origin is `<project>-origin.<zone>` (docs/process/project-machine.md, "The
 tunnel").
 
@@ -202,7 +202,7 @@ tunnel").
   are still reached there), with `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` and sharing
   configured, as on the Mac today.
 - **An Access application on the project hostname.** One per project, from
-  `infra/access-apps/access.local.json`, made by `bun run cf:apply`. The server admits only that
+  `infra/access-apps/access.local.json`, made by CI's apply after `bun run cf:sync-config`. The server admits only that
   application's audience on that hostname (`CF_ACCESS_AUD`, or the host's
   entry in `CF_ACCESS_HOST_AUDS` on a server that also answers the one
   address). Until it exists, a request to the hostname carries no stamp and
@@ -211,7 +211,7 @@ tunnel").
 
 ## Not covered yet
 
-- The frame domain is routed but not deployed. `cf:apply` binds only
+- The frame domain is routed but not deployed. The apply binds only
   the project hostnames and the board paths; the frame domain is its own zone, which needs buying,
   a proxied wildcard record, a certificate for `*.<frame domain>` and a
   route for `*.<frame domain>/*`. Each project's tunnel needs an ingress rule

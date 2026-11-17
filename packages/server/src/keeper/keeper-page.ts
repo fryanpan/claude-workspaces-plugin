@@ -7,10 +7,11 @@
  * not be framed, so no other page can lay a button over "Approve".
  */
 import { randomBytes } from 'node:crypto';
+import { CI_REPO, namesByTarget } from './keeper-github.ts';
 import { moveSteps } from './keeper-move-steps.ts';
 import { type HoldKind, shellQuote } from './keeper-policy.ts';
-import { type HeldRequest, secretNames } from './keeper-requests.ts';
-import { type SignInChange, parseTerraformInput } from './keeper-terraform.ts';
+import type { HeldRequest } from './keeper-requests.ts';
+import type { SignInChange } from './keeper-terraform.ts';
 
 export const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -24,8 +25,12 @@ const WHAT: Record<HoldKind, string> = {
     'Creates a Cloudflare Access application. Approving also lets its policy, which says who may sign in, be written in the next 10 minutes.',
   'move.grant':
     'Runs nothing now. For 30 minutes after you approve, the steps below can run on this one app for this one board without another tap. Anything not listed is still held. An image, a secret, a volume, a project, a bucket, a push key and a destroy are a tap each.',
-  'cloudflare.apply':
-    "Changes Cloudflare with the keeper's token: applies exactly the Terraform plan below, or makes the Access service tokens below and hands their secrets to the requester to store in your Keychain. The keeper planned it with its own release's Terraform files, from the configs the requester sent, so anything those configs say is in the plan: check who it lets sign in.",
+  'github.secrets':
+    "Writes GitHub Actions secrets on this repository with the keeper's GitHub token. Cloudflare's CI applies with them: the environment's copies can change Cloudflare, the repository's can only read. The page lists each secret's name and where it goes; it never shows a value.",
+  'cloudflare.sync':
+    "Sends the gitignored Cloudflare configs to CI: makes any service token listed below with the keeper's Cloudflare token and hands its secret to the requester for your Keychain, writes the config secrets below to the repository, and starts cloudflare.yml on main, which applies them. The keeper planned the configs with its own release's Terraform files, so check who they let sign in.",
+  'service-token.rotate':
+    "Gives one Access service token a new secret with the keeper's Cloudflare token, and hands it to the requester for your Keychain. The old secret keeps working for 24 hours. The token's id and client id stay the same.",
   other: 'A change the keeper does not run without you.',
 };
 
@@ -124,43 +129,44 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
     details.push(`<dt>Every step this covers</dt><dd><ol id="steps">${steps.join('')}</ol></dd>`);
   } else if (r.call.type === 'terraform') {
     details.push(`<dt>Environment</dt><dd>${escapeHtml(r.call.env)}</dd>`);
-    const sent = configsSent(r.call.input);
-    if (sent.length) {
+  } else if (r.call.type === 'cf-sync') {
+    const sync = r.sync;
+    if (sync) {
       details.push(
-        `<dt>Configs the requester sent</dt><dd id="configs-sent">${escapeHtml(sent.join(', '))}</dd>`,
+        `<dt>Config secrets it writes to the repository</dt><dd id="secrets">${escapeHtml(sync.secrets.join(', '))}</dd>`,
+      );
+      details.push(`<dt>Who can sign in</dt><dd id="sign-in">${signInList(sync.access)}</dd>`);
+      const names = Object.values(sync.tokens).map((n) => `<li><code>${escapeHtml(n)}</code></li>`);
+      if (names.length)
+        details.push(
+          `<dt>Service tokens it makes</dt><dd><ol id="tokens">${names.join('')}</ol></dd>`,
+        );
+      details.push(
+        `<dt>What the next apply changes</dt><dd><pre id="plan-summary">${escapeHtml(sync.plan)}</pre></dd>`,
       );
     }
-    const tf = r.terraform;
-    if (tf?.stage === 'apply') {
-      details.push(
-        `<dt>What changes</dt><dd><pre id="plan-summary">${escapeHtml(tf.summary)}</pre></dd>`,
-      );
-      details.push(`<dt>Who can sign in</dt><dd id="sign-in">${signInList(tf.access)}</dd>`);
-      const cut = tf.cut
-        ? `\n\n[Cut here. The plan is ${tf.cut.total} characters and this page shows the first ${tf.cut.shown}. The keeper will not apply a plan it could not show in full.]`
-        : '';
-      details.push(
-        `<dt>${tf.cut ? 'The plan, cut short' : 'The whole plan'}</dt><dd><pre id="plan">${escapeHtml(tf.plan)}${escapeHtml(cut)}</pre></dd>`,
-      );
-    } else if (tf?.stage === 'mint') {
-      const names = Object.values(tf.tokens).map((n) => `<li><code>${escapeHtml(n)}</code></li>`);
-      details.push(
-        `<dt>Service tokens it makes</dt><dd><ol id="tokens">${names.join('')}</ol></dd>`,
-      );
-    }
+  } else if (r.call.type === 'github-secrets') {
+    const rows = Object.entries(namesByTarget(r.call.secrets)).map(
+      ([t, names]) =>
+        `<li data-target="${escapeHtml(t)}">${escapeHtml(t === 'repository' ? 'the repository' : `environment ${t}`)}: <code>${escapeHtml((names ?? []).join(', '))}</code></li>`,
+    );
+    details.push(`<dt>Repository</dt><dd>${escapeHtml(CI_REPO)}</dd>`);
+    details.push(
+      `<dt>Secrets it writes, by name</dt><dd><ul id="secrets">${rows.join('')}</ul></dd>`,
+    );
+  } else if (r.call.type === 'service-token-rotate') {
+    details.push(
+      `<dt>Service token</dt><dd><code id="token">${escapeHtml(r.call.name)}</code></dd>`,
+    );
   } else if (r.call.type === 'push-keys') {
     const repos = r.call.repos.map((x) => `<li><code>${escapeHtml(x)}</code></li>`);
     details.push(
       `<dt>Repos that get a write deploy key, which ${escapeHtml(r.call.app)} pushes with</dt><dd><ol>${repos.join('')}</ol></dd>`,
     );
-  } else if (r.call.body) {
+  } else if (r.call.type === 'cloudflare' && r.call.body) {
     details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body)}</pre></dd>`);
   }
-  // A plan cut short is never applied, so the page offers only Deny.
-  const cutShort = r.terraform?.stage === 'apply' && r.terraform.cut !== undefined;
-  const approveButton = cutShort
-    ? ''
-    : '<button id="approve" type="button">Approve with passkey</button>';
+  const approveButton = '<button id="approve" type="button">Approve with passkey</button>';
   const state =
     r.status === 'pending' && pageToken
       ? `<p>${approveButton}<button id="deny" type="button">Deny</button></p>`
@@ -204,16 +210,9 @@ document.getElementById('deny')?.addEventListener('click', async () => {
   return page(`Approve ${r.hold}`, body, r.status === 'pending' && pageToken ? script : '');
 }
 
-/** Which configs the keeper hands the run, by name, from the request's stdin (gone once it ran). */
-function configsSent(input: string): string[] {
-  const parsed = parseTerraformInput(input);
-  return 'error' in parsed ? [] : Object.keys(parsed.configs).sort();
-}
-
 /** Each project whose sign-in list the plan changes, with every address added or removed. */
 function signInList(changes: readonly SignInChange[]): string {
-  if (!changes.length)
-    return "<p>No change to any project's list of people who may sign in. Which hostnames an application covers is in the plan below.</p>";
+  if (!changes.length) return "<p>No change to any project's list of people who may sign in.</p>";
   const items = (verb: string, xs: readonly string[]) =>
     xs.map((x) => `<li>${verb} <code>${escapeHtml(x)}</code></li>`).join('');
   const rows = changes.map(
@@ -271,4 +270,13 @@ document.getElementById('enroll').addEventListener('click', async () => {
   } catch (e) { say('Not registered: ' + e.message); }
 });`;
   return page('Register a passkey', body, script);
+}
+
+/** The names a `fly secrets import` stdin sets, never their values. */
+export function secretNames(input: string | undefined): string[] {
+  if (!input) return [];
+  return input
+    .split('\n')
+    .map((line) => line.split('=', 1)[0]?.trim() ?? '')
+    .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
 }

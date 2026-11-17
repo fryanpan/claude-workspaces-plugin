@@ -1,8 +1,9 @@
 /**
- * Home's bottom bar: Review, Inbox, Projects and Coach, at the widths a
- * workspace's navbar is a bottom bar (≤1100px). Bryan, 31 Oct: "From home can
- * you give me on mobile a navbar to go between review items, inbox, projects,
- * coach".
+ * Home's bottom bar: Review, Inbox and Projects, at the widths a workspace's
+ * navbar is a bottom bar (≤1100px). Bryan, 31 Oct: "From home can you give me
+ * on mobile a navbar to go between review items, inbox, projects, coach". The
+ * Coach entry went with Home's coach section ("Coach should not be on home
+ * page"); the coach lives on its own Coach board.
  *
  * Built from a workspace navbar's markup and classes — `board-nav`,
  * `board-nav-item`, `board-nav-icon`, `board-nav-label` — so the two bars
@@ -40,19 +41,17 @@ const ICONS = {
   review: `<svg ${SVG}><path d="M4 5h16v11H9l-5 4z"/><path d="m9 10.5 2 2 4-4"/></svg>`,
   inbox: `<svg ${SVG}><path d="M3 13h5l1.5 3h5l1.5-3h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/></svg>`,
   projects: `<svg ${SVG}><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>`,
-  coach: `<svg ${SVG}><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>`,
 } as const;
 
 /**
- * The sections the viewer's page carries, in page order. Inbox and Coach are
- * the owner's sections, so each has an entry only when the page carries it.
+ * The sections the viewer's page carries, in page order. Inbox is the
+ * owner's section, so it has an entry only when the page carries it.
  */
-export function landingSections(has: { inbox: boolean; coach: boolean }): LandingSection[] {
+export function landingSections(has: { inbox: boolean }): LandingSection[] {
   return [
     { id: 'landing-review', label: 'Review', icon: ICONS.review },
     ...(has.inbox ? [{ id: 'inbox', label: 'Inbox', icon: ICONS.inbox }] : []),
     { id: 'landing-boards', label: 'Projects', icon: ICONS.projects },
-    ...(has.coach ? [{ id: 'coach', label: 'Coach', icon: ICONS.coach }] : []),
   ];
 }
 
@@ -107,6 +106,6 @@ body:has(claude-feedback-widget) .home-nav{padding-right:calc(max(18px, env(safe
 .home-nav .board-nav-icon svg{display:block;width:100%;height:100%}
 .home-nav .board-nav-label{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .home-nav > .board-nav-dock{order:-1;display:flex;align-items:center;align-self:stretch;padding:0 10px;border-right:1px solid #ced4da}
-#landing-review,#inbox,#landing-boards,#coach{scroll-margin-top:12px}
+#landing-review,#inbox,#landing-boards{scroll-margin-top:12px}
 }
 `;

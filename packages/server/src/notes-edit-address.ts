@@ -53,6 +53,16 @@
  * carried nothing, and re-addressing it would write a blank note. A batch
  * that failed for those reasons is left exactly as it was.
  *
+ * A PLACEMENT THE DOC REFUSED STILL OWES ITS NOTES. `insert_before_block`
+ * opens a subheading in front of a bullet, and a model that writes the new
+ * note under that subheading in the same markdown has put the note in the
+ * placement. When the doc refuses the placement itself (`nested-item`,
+ * `not-yours`) the subheading is a regroup that did not happen, and it is
+ * left out: at the section end it would head nothing. The notes under it are
+ * words, and only they are re-homed. Measured on a prod huddle whose point
+ * lost its end: six ticks refused such a placement and every one was logged
+ * as carrying no words.
+ *
  * AND ONLY EDITS THAT CARRY WORDS. A `delete_block` or a `nest_blocks` that
  * failed moved nothing, which is a regroup that did not happen rather than a
  * note that did not arrive — the distinction `meeting-notes-doc.ts` already
@@ -76,16 +86,18 @@ import type { prose } from '@claude-workspaces/core';
  *  "the words were wrong". */
 const ADDRESS_ERRORS: ReadonlySet<string> = new Set(['unknown-block', 'not-a-heading']);
 
+/** The verdicts that refuse a placement where it stands, as opposed to a
+ *  block that is gone. Only the notes the placement carried are re-homed. */
+const PLACEMENT_REFUSALS: ReadonlySet<string> = new Set(['nested-item', 'not-yours']);
+
 /** The ops that would have PUT WORDS in the doc. A move and a delete carry
  *  none, so a failed one loses nothing to recover. */
 const CARRIES_WORDS: ReadonlySet<prose.BlockEditOp> = new Set([
   'insert_under_heading',
   'insert_at_end',
   // A placement whose anchor has gone still carries the words it was going to
-  // write. Only the ADDRESS errors route here, so a placement REFUSED
-  // (`not-yours`, `nested-item`) is left alone deliberately: re-addressing it
-  // would write the subheading at the section end, which is the placement the
-  // op exists to escape.
+  // write. A placement REFUSED (`not-yours`, `nested-item`) re-homes only the
+  // notes under its subheading, never the subheading — see the header.
   'insert_before_block',
   'replace_block',
 ]);
@@ -125,12 +137,14 @@ export function repairNotesEditAddresses(
   const repair: NotesAddressRepair = { edits: [], repaired: [], sources: [] };
   if (outcomes.length !== edits.length) return repair;
   for (const [i, outcome] of outcomes.entries()) {
-    if (outcome.status !== 'failed') continue;
-    if (outcome.error === undefined || !ADDRESS_ERRORS.has(outcome.error)) continue;
+    if (outcome.status !== 'failed' || outcome.error === undefined) continue;
     if (!CARRIES_WORDS.has(outcome.op)) continue;
+    const refused = outcome.op === 'insert_before_block' && PLACEMENT_REFUSALS.has(outcome.error);
+    if (!refused && !ADDRESS_ERRORS.has(outcome.error)) continue;
     const edit = edits[i];
     if (edit === undefined) continue;
-    const markdown = markdownOf(edit);
+    const whole = markdownOf(edit);
+    const markdown = refused && whole !== undefined ? withoutHeadings(whole) : whole;
     // A word-carrying op always has markdown; the check is what keeps this
     // total rather than a cast, and an edit with none has nothing to recover.
     if (markdown === undefined || markdown.trim().length === 0) continue;
@@ -146,6 +160,16 @@ export function repairNotesEditAddresses(
     );
   }
   return repair;
+}
+
+/** `markdown` with its heading lines taken out: the notes a placement carried
+ *  under the subheading it was opening. Empty when it carried only headings. */
+function withoutHeadings(markdown: string): string {
+  return markdown
+    .split('\n')
+    .filter((line) => !/^#{1,6}\s/.test(line))
+    .join('\n')
+    .trim();
 }
 
 /** The words an edit was going to write, for the ops that write any. */

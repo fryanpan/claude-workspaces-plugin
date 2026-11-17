@@ -1501,11 +1501,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return rows;
     const comment = commentOfEvent(payload);
     if (!comment) return rows;
+    // A comment that names who it is for goes to the agents it names and to
+    // nobody else: not the lead, not the board's watchers.
+    const named = namedAgents(payload);
     const addressees = new Set<string>(
-      leadOnly ? [] : agentWatches.agentsWatching(`ws:${workspaceId}`),
+      named ?? (leadOnly ? [] : agentWatches.agentsWatching(`ws:${workspaceId}`)),
     );
     const lead = taskStore.getWorkspace(workspaceId)?.leadAgentId;
-    if (lead) addressees.add(lead);
+    if (lead && !named) addressees.add(lead);
     for (const agentId of addressees) {
       if (commentAuthorIs(agentId, comment.author)) continue;
       const id = taskStore.queueComment(workspaceId, {
@@ -1520,6 +1523,56 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       if (id !== false) rows.set(agentId, id);
     }
     return rows;
+  };
+
+  /** The agent ids an addressed comment names, or null when it names
+   *  nobody (an ordinary comment, delivered as before). An addressed comment
+   *  naming only people answers an empty list: no agent is woken. */
+  const namedAgents = (payload: WebhookPayload): string[] | null => {
+    if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return null;
+    const to = commentOfEvent(payload)?.addressedTo;
+    if (!to || to.length === 0) return null;
+    return to.filter((a) => a.kind === 'agent').map((a) => a.id);
+  };
+
+  /** Board-channel options for a comment: an addressed one reaches pages
+   *  and the agents it names (`SseBus.broadcast`'s `agentAudience`). */
+  const audienceOf = (payload: WebhookPayload): { agentAudience?: string[] } => {
+    const named = namedAgents(payload);
+    return named ? { agentAudience: named } : {};
+  };
+
+  /**
+   * Each person an addressed comment names hears it on their own channel,
+   * `person~<identityId>`, whatever board or page they have open. The frame
+   * carries the comment and where it is, not the doc's metadata: the channel
+   * is opened by the person's own proof (`routes/upgrade-stream.ts`), and a
+   * share visitor's board frames are redacted on a path this one skips.
+   */
+  const tellAddressedPeople = (
+    workspaceId: string | undefined,
+    docId: string,
+    payload: WebhookPayload,
+  ): void => {
+    if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return;
+    const comment = commentOfEvent(payload);
+    if (!comment?.addressedTo) return;
+    const docTitle = (payload as { docTitle?: unknown }).docTitle;
+    for (const who of comment.addressedTo) {
+      if (who.kind !== 'person' || who.id === comment.author.id) continue;
+      const frame = {
+        event: 'comment.addressed',
+        ...(workspaceId ? { workspaceId } : {}),
+        docId,
+        ...(typeof docTitle === 'string' ? { docTitle } : {}),
+        threadId: payload.threadId,
+        commentId: comment.id,
+        author: { id: comment.author.id, name: comment.author.name },
+        text: comment.text,
+        addressedTo: comment.addressedTo,
+      };
+      sse.broadcast(`person~${who.id}`, frame);
+    }
   };
 
   /** An addressee holding the board stream just received (or is receiving)
@@ -1615,10 +1668,16 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         taskStore.getTask(rowId)?.workspaceId ?? taskStore.getGoalRow(rowId)?.workspaceId;
       if (!workspaceId) return;
       const rows = queueCommentRows(workspaceId, docId, payload);
-      sse.broadcast(`ws~${workspaceId}`, payload, (who) => {
-        const rowId = who.agentId ? rows.get(who.agentId) : undefined;
-        return rowId ? { ...payload, workspaceId, commentQueueId: rowId } : undefined;
-      });
+      sse.broadcast(
+        `ws~${workspaceId}`,
+        payload,
+        (who) => {
+          const rowId = who.agentId ? rows.get(who.agentId) : undefined;
+          return rowId ? { ...payload, workspaceId, commentQueueId: rowId } : undefined;
+        },
+        audienceOf(payload),
+      );
+      tellAddressedPeople(workspaceId, docId, payload);
       markCommentRowsEmitted(workspaceId, rows);
       stampReceipt(docId, payload, [docId, `ws~${workspaceId}`]);
       // Task path only: a plain doc thread moves no row, so refreshing the
@@ -1643,13 +1702,19 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       // review frames carried no row id, so those rows are acked off the
       // grace-window redelivery instead — late receipt beats double frame.
       if (board !== attachmentId) {
-        sse.broadcast(`ws~${board}`, payload, (who) => {
-          const rowId = who.agentId ? rows.get(who.agentId) : undefined;
-          return rowId ? { ...payload, workspaceId: board, commentQueueId: rowId } : undefined;
-        });
+        sse.broadcast(
+          `ws~${board}`,
+          payload,
+          (who) => {
+            const rowId = who.agentId ? rows.get(who.agentId) : undefined;
+            return rowId ? { ...payload, workspaceId: board, commentQueueId: rowId } : undefined;
+          },
+          audienceOf(payload),
+        );
       }
       markCommentRowsEmitted(board, rows);
     }
+    tellAddressedPeople(boards[0], docId, payload);
     const channels = [docId, ...boards.map((b) => `ws~${b}`)];
     // The product-feedback doc's owner board's lead hears it here whether or
     // not it watched the doc, unless that board already holds the doc.

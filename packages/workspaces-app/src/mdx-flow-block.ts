@@ -5,6 +5,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { AddMarkStep, RemoveMarkStep, ReplaceStep, type Step } from '@tiptap/pm/transform';
 import type { EditorView, NodeView } from '@tiptap/pm/view';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
+import { ComponentMount, componentKeyOf, componentLiveOf } from './mdx-component.ts';
 import { type MdxSummary, renderMdxSummary, summarizeMdx } from './mdx-preview.ts';
 
 /**
@@ -19,6 +20,13 @@ import { type MdxSummary, renderMdxSummary, summarizeMdx } from './mdx-preview.t
  * a local edit inside any block not open for editing. While it is open the
  * chart redraws as the reader pauses, and a source that does not draw keeps
  * the last chart that did, with the reason under the source.
+ *
+ * A component tag — one whose import the server builds — draws the built
+ * component itself, live, in place of the preview (`mdx-component.ts`), and
+ * offers Edit as a chart does: a props edit is a text edit, and the drawing
+ * stays until the rebuilt bundle lands. Its mount lives in a `ComponentMount`
+ * that only its own build hash moves, so an edit anywhere else in the doc,
+ * here or on another page, never remounts it.
  */
 
 export { MDX_FLOW_LANGUAGE };
@@ -31,11 +39,13 @@ export function isMdxFlowNode(node: PMNode): boolean {
 export const REDRAW_MS = 300;
 
 /** Whether a block's view drew a chart, so a broken edit has one to keep. */
-const drewChart = (s: MdxSummary) => !s.error && (s.chart !== undefined || s.plot !== undefined);
+const drewChart = (s: MdxSummary) =>
+  !s.error && (s.chart !== undefined || s.plot !== undefined || s.map !== undefined);
 
 /** Whether a block is a chart's tag, drawn or not: a tag left broken must
  *  still offer Edit when the doc is next opened. */
-const isChartTag = (s: MdxSummary) => drewChart(s) || (s.kind === 'jsx' && /Chart$/.test(s.label));
+const isChartTag = (s: MdxSummary) =>
+  drewChart(s) || (s.kind === 'jsx' && (/Chart$/.test(s.label) || s.label === 'StreetMap'));
 
 /** Draw `next` into `view`, and say why it failed when it did: the tag did not
  *  parse, it no longer reads as a chart, Plot refused its spec, or a drawing
@@ -69,8 +79,8 @@ export function mdxFlowNodeView(
   view.setAttribute('aria-expanded', 'false');
   wrapper.appendChild(view);
 
-  // Shown on a chart to a reader who can write; CSS hides it when the editor
-  // is read-only. Its label swaps between two words of one width.
+  // Shown on a chart or a component to a reader who can write; CSS hides it
+  // when the editor is read-only. Its label swaps between two words of one width.
   const edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'mdx-edit';
@@ -93,6 +103,21 @@ export function mdxFlowNodeView(
   error.hidden = true;
   wrapper.appendChild(error);
 
+  // A component tag's live drawing, made the first time the block is one.
+  const live = componentLiveOf(editor);
+  let component: ComponentMount | null = null;
+  const drawComponent = () => {
+    if (!live) return;
+    if (!component) {
+      component = new ComponentMount(live);
+      // A tap inside the component works the component; it does not open
+      // the source.
+      component.host.addEventListener('click', (e) => e.stopPropagation());
+    }
+    if (component.host.parentNode !== view) view.replaceChildren(component.host, component.status);
+    component.follow(() => componentKeyOf(editor.state.doc, node.textContent));
+  };
+
   let rendered = '';
   // The summary the view shows: the last one that drew, while a broken edit
   // keeps it.
@@ -104,7 +129,27 @@ export function mdxFlowNodeView(
     if (node.textContent === rendered) return;
     rendered = node.textContent;
     const next = summarizeMdx(rendered);
-    const kept = drewChart(summary) ? [...view.childNodes] : null;
+    const key = live && next.kind === 'jsx' ? componentKeyOf(editor.state.doc, rendered) : null;
+    if (key) {
+      summary = next;
+      drawComponent();
+      view.dataset.kind = 'component';
+      wrapper.dataset.kind = 'component';
+      wrapper.classList.remove('has-chart');
+      wrapper.classList.add('has-component');
+      error.hidden = true;
+      error.textContent = '';
+      return;
+    }
+    if (component?.host.parentNode === view) view.replaceChildren();
+    wrapper.classList.remove('has-component');
+    // A broken chart keeps the last one that drew only while it is still a
+    // chart: the reader is typing in it, or the tag still names a chart.
+    // ProseMirror hands one view a different block when a rewrite moves the
+    // doc's blocks, and an import or a component that lands there is not a
+    // chart that broke.
+    const keep = drewChart(summary) && (editing() || isChartTag(next));
+    const kept = keep ? [...view.childNodes] : null;
     drawnAt = view.clientWidth;
     const failed = drawInto(view, next, drawnAt);
     if (failed && kept) {
@@ -157,6 +202,7 @@ export function mdxFlowNodeView(
     });
   view.addEventListener('click', toggle);
   view.addEventListener('keydown', (e) => {
+    if (e.target !== view) return; // a key inside a component is the component's
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     toggle();
@@ -185,6 +231,14 @@ export function mdxFlowNodeView(
   edit.addEventListener('mousedown', (e) => e.preventDefault());
   edit.addEventListener('click', () => setEditing(!editing()));
   render();
+  // A node view is made while the editor builds its view, before the doc it
+  // reads the imports from is settled: a tag that did not read as a
+  // component then is asked again once it is.
+  if (live && summary.kind === 'jsx' && !component)
+    queueMicrotask(() => {
+      rendered = '';
+      render();
+    });
   showComment();
 
   return {
@@ -201,7 +255,10 @@ export function mdxFlowNodeView(
     // block for the re-render loop it prevents.
     ignoreMutation(mutation) {
       const target = mutation.target as Node;
-      if (mutation.type === 'selection') return false;
+      // A selection of a component's words is the reader's, for a comment
+      // (selection-range.ts): ProseMirror has no position there, and reading
+      // one would collapse it in view mode.
+      if (mutation.type === 'selection') return component?.host.contains(target) ?? false;
       return !(code === target || code.contains(target));
     },
     stopEvent(event) {
@@ -211,6 +268,7 @@ export function mdxFlowNodeView(
     destroy() {
       if (pending) clearTimeout(pending);
       resized?.disconnect();
+      component?.destroy();
     },
   };
 }

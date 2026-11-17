@@ -26,6 +26,9 @@ import { type WorkspaceScope, matchRest, restIs } from '../middleware/workspace-
 import { listArchivedDocs, listArchivedReviews } from '../review-archive.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
+import type { ArchiveSetBody } from './attachments-contract.ts';
+import type { ArchiveDocBody } from './doc-lifecycle-contract.ts';
+import { sent } from './route-contract.ts';
 
 /** Review-only delete. `DELETE /workspaces/<id>` still fronts both. */
 const REVIEW_DELETE = /^attachments\/([^/]+)$/;
@@ -215,7 +218,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
     if (reviewArchiveMatch && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
       const setId = decodeURIComponent(reviewArchiveMatch[1] ?? '');
-      const body = await safeJson(req);
+      const body = sent<ArchiveSetBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
       const reason = typeof body?.reason === 'string' ? (body.reason as string) : undefined;
       return archiveReview(setId, author?.name ?? 'unknown', reason);
@@ -224,7 +227,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
     if (reviewUnarchiveMatch && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
       const setId = decodeURIComponent(reviewUnarchiveMatch[1] ?? '');
-      const body = await safeJson(req);
+      const body = sent<ArchiveSetBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
       const res = docStore.unarchiveReview(setId, { archivedBy: author?.name ?? 'unknown' });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
@@ -253,7 +256,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
     if (docArchiveMatch && req.method === 'POST') {
       if (visitor) return j(403, { error: 'not available to share visitors' });
       const docId = canonicalDocId(decodeURIComponent(docArchiveMatch[1] ?? ''));
-      const body = await safeJson(req);
+      const body = sent<ArchiveDocBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
       const reason = typeof body?.reason === 'string' ? (body.reason as string) : undefined;
       const res = docStore.archiveDoc(docId, {
@@ -277,7 +280,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       // caller gets one. Asserted in doc-id-routes.test.ts so the
       // asymmetry is a decision on the record rather than a surprise.
       const docId = decodeURIComponent(docUnarchiveMatch[1] ?? '');
-      const body = await safeJson(req);
+      const body = sent<ArchiveDocBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
       const res = docStore.unarchiveDoc(docId, { archivedBy: author?.name ?? 'unknown' });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);

@@ -22,6 +22,8 @@
  */
 import { LEAD_CHAT_FILE_MAX_BYTES } from '@claude-workspaces/core/lead-chat';
 import { readCapped } from './doc-assets.ts';
+import type { LeadChatFileAnswer, LeadChatFileQuery } from './lead-chat-files-contract.ts';
+import { answerAs, queryOf } from './route-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 const UPLOAD = /^\/workspaces\/[^/]+\/lead-chat\/files$/;
@@ -65,9 +67,12 @@ export async function handleLeadChatFiles(
   const file = ctx.leadChatFiles.get(workspaceId, id);
   const path = ctx.leadChatFiles.pathOf(workspaceId, id);
   if (!file || !path) return ctx.j(404, { error: 'no-file' });
-  if (rq.url.searchParams.get('encoding') === 'base64') {
+  if (queryOf<LeadChatFileQuery>(rq.url).encoding === 'base64') {
     const bytes = await Bun.file(path).arrayBuffer();
-    return ctx.j(200, { file, data: Buffer.from(bytes).toString('base64') });
+    return ctx.j(
+      200,
+      answerAs<LeadChatFileAnswer>({ file, data: Buffer.from(bytes).toString('base64') }),
+    );
   }
   const headers: Record<string, string> = {
     'content-type': file.type,

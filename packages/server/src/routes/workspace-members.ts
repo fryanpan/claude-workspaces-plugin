@@ -12,8 +12,17 @@
  * THREE ROUTES, one of them everybody's:
  *
  *   GET    /workspaces/<id>/members              the list, plus YOUR own role
- *   POST   /workspaces/<id>/members/<email>/role promote or demote  (owner)
+ *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
+ *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
+ *   POST   /workspaces/<id>/collab-core          the collab core on or off, for this
+ *                                                board and server-wide (owner)
+ *
+ * A change that lets somebody do more needs the owner's own proof, because
+ * `requireOwner` passes every agent on this machine: a promotion to Owner
+ * files an access card, and view to comment, either to edit, enforce to report-only
+ * and collab-core off to on are refused with `owner-proof-required`. A
+ * narrowing applies at once.
  *
  * The READ is a member's, deliberately: everything in a workspace is available
  * to everyone in it (`.claude/rules/workspace-board.md`), and a Regular User
@@ -36,14 +45,22 @@
  * a promoted guest can do here locks the operator out of their own board.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import { collabCoreView } from '../collab-core-switch.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
-import { normalizeBoardRole } from '../share/board-role.ts';
+import {
+  parseAccessRole,
+  parseRolesMode,
+  seatAndAccess,
+  widensAccess,
+} from '../share/board-access.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
+import { sent } from './route-contract.ts';
+import type { AudienceBody, MemberRoleBody } from './share-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -51,7 +68,8 @@ export async function handleWorkspaceMembers(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { shareLinks, accessProposals, docStore, sse, j, safeJson } = ctx;
+  const { shareLinks, accessProposals, docStore, sse, collabRooms, collabCoreSwitch, j, safeJson } =
+    ctx;
   const { req, scope, accessEmail, roleFor, requireOwner, visitor } = rq;
   if (!scope) return undefined;
   const { workspaceId } = scope;
@@ -68,9 +86,23 @@ export async function handleWorkspaceMembers(
           message: "Only the board's owner changes who is in this board.",
         })
       : requireOwner(workspaceId);
+  /**
+   * A widening the owner did not make from the board's own page. Only the
+   * Owner promotion files a card; these three are switches the owner flips
+   * in Settings, so an agent's call is refused and changes nothing.
+   */
+  const refuseUnproven = (what: string): Response | null =>
+    proven()
+      ? null
+      : j(403, {
+          error: 'owner-proof-required',
+          message: `Only the board's owner ${what}, from the board's own page.`,
+        });
   /** Hang up what these members still have open on this board. */
   const hangUp = (emails: readonly string[]): { closedSockets: number; closedStreams: number } => {
     const keys = new Set(emails.map((e) => shareMemberKey(workspaceId, e)));
+    // And the core's room hosts, whose connections carry no member key.
+    collabRooms.recheck();
     return {
       closedSockets: docStore.closeSocketsForShareMembers((k) => keys.has(k)),
       closedStreams: sse.closeForShareMembers((k) => keys.has(k)),
@@ -93,7 +125,15 @@ export async function handleWorkspaceMembers(
       you: {
         email: accessEmail ? normalizeEmail(accessEmail) : null,
         role: roleFor(workspaceId),
+        // The four-word role (`share/board-access.ts`), read the way a
+        // socket's is (`board-membership.ts` `boardAccessOf`).
+        accessRole:
+          roleFor(workspaceId) === 'owner'
+            ? 'owner'
+            : (shareLinks.accessRoleOf(workspaceId, accessEmail) ?? 'edit'),
       },
+      // Whether comment and view are enforced on this board yet.
+      rolesMode: shareLinks.rolesModeOf(workspaceId),
       // Role spelled out on the wire even when the row omits it, and each
       // person filed under the entry that admits them (`share/access-view.ts`).
       members: accessPeople(shareLinks, workspaceId),
@@ -112,13 +152,17 @@ export async function handleWorkspaceMembers(
     // throws a `URIError`, and an address this server has never heard of would
     // come back as a 500 rather than as the 404 it is.
     const email = safeDecodeSegment(roleMatch[1] ?? '');
-    const body = await safeJson(req);
-    // Undefined rather than a fallback: `normalizeBoardRole` refuses anything
-    // that is not one of the two words, so a typo'd "Owner" is a 400 and never
-    // a silent demotion.
-    const role = normalizeBoardRole(body?.role);
-    if (!role) return j(400, { error: "role must be 'owner' or 'member'" });
+    const body = sent<MemberRoleBody>(await safeJson(req));
+    // Undefined rather than a fallback: anything that is not one of the four
+    // words (or `member`, the old spelling of edit) is a 400 and never a
+    // silent demotion.
+    const accessRole = parseAccessRole(body?.role);
+    if (!accessRole) {
+      return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
+    }
+    const { seat: role, access } = seatAndAccess(accessRole);
     const before = shareLinks.roleOf(workspaceId, email);
+    const accessBefore = shareLinks.accessRoleOf(workspaceId, email);
     if (before === null) return j(404, { error: 'not a member', workspaceId });
     // A promotion by anything but the owner's own browser is a proposal.
     if (role === 'owner' && before !== 'owner' && !proven()) {
@@ -135,10 +179,95 @@ export async function handleWorkspaceMembers(
         accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
       );
     }
-    if (!shareLinks.setMemberRole(workspaceId, email, role)) {
+    // View to comment, or either to edit, lets them do more: the owner's own.
+    if (accessBefore !== null && widensAccess(accessBefore, accessRole)) {
+      const unproven = refuseUnproven('widens what a member may do');
+      if (unproven) return unproven;
+    }
+    if (!shareLinks.setMemberRole(workspaceId, email, role, access)) {
       return j(404, { error: 'not a member', workspaceId });
     }
-    return j(200, { ok: true, workspaceId, email: normalizeEmail(email), role });
+    // A socket's role is read once, at its upgrade, so a change hangs up what
+    // they have open and they reconnect under the new one.
+    const closed = accessBefore === accessRole ? {} : hangUp([email]);
+    return j(200, {
+      ok: true,
+      workspaceId,
+      email: normalizeEmail(email),
+      role,
+      accessRole,
+      ...closed,
+    });
+  }
+
+  // ── Turn comment and view enforcement on or off ───────────────────────
+  //
+  // Every board starts report-only: a comment or view socket's edit is
+  // applied and logged. `enforce` drops it (`socket-write-gate.ts`). The
+  // mode is read per frame, so open sockets follow it without a reconnect.
+  if (scope.rest === 'roles-mode' && req.method === 'POST') {
+    const denied = refuseVisitor();
+    if (denied) return denied;
+    const body = await safeJson(req);
+    const mode = parseRolesMode(body?.mode);
+    if (!mode) return j(400, { error: "mode must be 'report-only' or 'enforce'" });
+    // Back to report-only applies comment and view members' edits again.
+    if (mode === 'report-only' && shareLinks.rolesModeOf(workspaceId) === 'enforce') {
+      const unproven = refuseUnproven('stops enforcing comment and view');
+      if (unproven) return unproven;
+    }
+    shareLinks.setRolesMode(workspaceId, mode);
+    console.error(`[roles] board ${workspaceId} roles mode set to ${mode}`);
+    return j(200, { ok: true, workspaceId, rolesMode: mode });
+  }
+
+  // ── Serve this board's sockets with the collab core, or not ───────────
+  //
+  // Two settings (`collab-core-switch.ts`): the board's own (`on`) and the
+  // server-wide one (`serverWide`), and a board takes the core only while
+  // both are on. Both start off. The board page's switch sends both in one
+  // request, so moving a board is one tap. Read at connect, so a page takes
+  // the new path at its next reconnect. A server-wide setting the
+  // environment fixed (`CW_COLLAB_CORE`) is refused with 409.
+  if (scope.rest === 'collab-core' && req.method === 'POST') {
+    const denied = refuseVisitor();
+    if (denied) return denied;
+    const body = await safeJson(req);
+    const on = typeof body?.on === 'boolean' ? body.on : undefined;
+    const serverWide = typeof body?.serverWide === 'boolean' ? body.serverWide : undefined;
+    const bad = (k: string) => body?.[k] !== undefined && typeof body[k] !== 'boolean';
+    if ((on === undefined && serverWide === undefined) || bad('on') || bad('serverWide')) {
+      return j(400, { error: 'on must be true or false' });
+    }
+    const fixed = collabCoreSwitch.fixed;
+    if (serverWide !== undefined && fixed !== undefined && serverWide !== fixed) {
+      return j(409, {
+        error: 'fixed-by-environment',
+        message: `CW_COLLAB_CORE fixes the collab core ${fixed ? 'on' : 'off'} on this server.`,
+      });
+    }
+    // On hands writes to different code to judge: the owner's own call.
+    const widens =
+      (on === true && !collabCoreSwitch.boardOn(workspaceId)) ||
+      (serverWide === true && !collabCoreSwitch.serverWide);
+    if (widens) {
+      const unproven = refuseUnproven('turns the collab core on');
+      if (unproven) return unproven;
+    }
+    try {
+      if (serverWide !== undefined) collabCoreSwitch.setServerWide(serverWide);
+      if (on !== undefined) collabCoreSwitch.set(workspaceId, on);
+    } catch (err) {
+      console.error(`[collab-core] could not switch board ${workspaceId}:`, err);
+      return j(500, { error: 'could not save the setting' });
+    }
+    const said = [
+      on === undefined ? null : `board ${workspaceId} ${on ? 'on' : 'off'}`,
+      serverWide === undefined ? null : `server-wide ${serverWide ? 'on' : 'off'}`,
+    ].filter(Boolean);
+    console.error(`[collab-core] switched ${said.join(', ')}`);
+    // The switch tells the board's open pages itself (`server.ts`).
+    return j(200, { ok: true, workspaceId, ...collabCoreView(collabCoreSwitch, workspaceId) });
   }
 
   // ── End one person's access ───────────────────────────────────────────
@@ -171,7 +300,7 @@ export async function handleWorkspaceMembers(
   if (scope.rest === 'audience' && req.method === 'POST') {
     const denied = refuseVisitor();
     if (denied) return denied;
-    const body = await safeJson(req);
+    const body = sent<AudienceBody>(await safeJson(req));
     const parse = (raw: unknown): string[] | null => {
       if (raw === undefined) return [];
       const parsed = parseShareAudience(raw);

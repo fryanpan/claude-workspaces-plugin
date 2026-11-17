@@ -47,6 +47,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/allow-rules.ts': 'not-in-inventory',
   'packages/server/src/attachment-privacy.ts': 'not-in-inventory',
   'packages/server/src/auth/agent-caller.ts': 'not-in-inventory',
+  // `<dataDir>/agent-grant-tokens.json`, a path built from the data dir alone.
+  'packages/server/src/auth/agent-grant-token.ts': 'data-dir',
   'packages/server/src/auth/board-agent-token.ts': 'not-in-inventory',
   'packages/server/src/auth/session-revocations.ts': 'not-in-inventory',
   'packages/server/src/board-socket-roots.ts': 'not-in-inventory',
@@ -61,6 +63,11 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/chat-audit.ts': 'not-in-inventory',
   'packages/server/src/client-release.ts': 'not-in-inventory',
   'packages/server/src/coach/setup.ts': 'not-in-inventory',
+  'packages/server/src/collab-core-switch.ts': 'data-dir',
+  'packages/server/src/component-build.ts': 'tree-fs',
+  // `<dataDir>/component-grants.json`, a path built from the data dir alone.
+  'packages/server/src/component-grants.ts': 'data-dir',
+  'packages/server/src/component-cdn.ts': 'data-dir',
   'packages/server/src/connector/snapshot.ts': 'not-in-inventory',
   'packages/server/src/dependency-install.ts': 'owner-checkout',
   'packages/server/src/deploy-log.ts': 'owner-checkout',
@@ -68,13 +75,18 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/deploy.ts': 'owner-checkout',
   'packages/server/src/dispatch-registry.ts': 'watch-only',
   'packages/server/src/dispatch-reports.ts': 'not-in-inventory',
-  'packages/server/src/doc-catalog.ts': 'not-in-inventory',
+  'packages/server/src/doc-component-builds.ts': 'tree-fs',
+  // A grant folder: `allows`/`covers` on the doc and the folder as named
+  // before any realpath or stat, and again on the real path (section A).
+  'packages/server/src/doc-components-agent.ts': 'refused-when-covered',
   'packages/server/src/doc-copies.ts': 'tree-fs',
   'packages/server/src/doc-create-conflict.ts': 'spelling-only',
   'packages/server/src/doc-edit-ops.ts': 'not-in-inventory',
   'packages/server/src/doc-file-frame.ts': 'tree-fs',
   'packages/server/src/doc-file-listing.ts': 'tree-fs',
   'packages/server/src/doc-file-page-cache.ts': 'tree-fs',
+  'packages/server/src/doc-file-relocate.ts': 'tree-fs',
+  'packages/server/src/doc-git-modified.ts': 'refused-when-covered',
   'packages/server/src/doc-identity-check.ts': 'not-in-inventory',
   'packages/server/src/doc-identity-journal.ts': 'not-in-inventory',
   'packages/server/src/doc-identity-migration.ts': 'not-in-inventory',
@@ -85,6 +97,9 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/doc-move.ts': 'never-covered',
   'packages/server/src/doc-origin-repo.ts': 'refused-when-covered',
   'packages/server/src/doc-store-workspaces.ts': 'tree-fs',
+  // `<dataDir>/_history/<docId>.yhist`, a path built from the data dir alone.
+  'packages/server/src/doc-history/log.ts': 'data-dir',
+  'packages/server/src/doc-state/disk.ts': 'data-dir',
   'packages/server/src/doc-store.ts': 'tree-fs',
   'packages/server/src/file-binding.ts': 'tree-fs',
   'packages/server/src/file-stamp.ts': 'tree-fs',
@@ -102,6 +117,11 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/git-push/run.ts': 'not-in-inventory',
   'packages/server/src/github-hub.ts': 'not-in-inventory',
   'packages/server/src/github-relay/relay-config.ts': 'not-in-inventory',
+  // One fixed file under prod's own root, `~/Library/Application Support/
+  // claude-workspaces/google-maps-key` (beside prod's checkout), or the path
+  // the operator's `CW_GOOGLE_MAPS_KEY_FILE` names; read once at boot, never
+  // a path a doc or a lead supplies.
+  'packages/server/src/google-maps-key.ts': 'owner-checkout',
   'packages/server/src/google-oauth.ts': 'not-in-inventory',
   'packages/server/src/home-brief.ts': 'not-in-inventory',
   'packages/server/src/home-remotes.ts': 'not-in-inventory',
@@ -130,7 +150,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/lead-chat/log.ts': 'not-in-inventory',
   'packages/server/src/lead-chat/meeting.ts': 'not-in-inventory',
   'packages/server/src/lead-chat/pane.ts': 'no-path',
-  'packages/server/src/library.ts': 'tree-fs',
+  'packages/server/src/library-folders.ts': 'data-dir',
+  'packages/server/src/library-lister.ts': 'tree-fs',
   'packages/server/src/meeting-home.ts': 'never-covered',
   'packages/server/src/meeting-notes-target.ts': 'not-in-inventory',
   'packages/server/src/meeting-raw.ts': 'not-in-inventory',
@@ -158,9 +179,14 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/org-relay/relay-log.ts': 'not-in-inventory',
   'packages/server/src/page-loads.ts': 'not-in-inventory',
   'packages/server/src/permission-grants.ts': 'not-in-inventory',
+  // `<dataDir>/person-agent-links.json`, a path built from the data dir alone.
+  'packages/server/src/person-agent-link.ts': 'data-dir',
   'packages/server/src/plugin-refresh.ts': 'owner-checkout',
   'packages/server/src/plugin-release.ts': 'not-in-inventory',
   'packages/server/src/pre-compact-backup.ts': 'data-dir',
+  // `<dataDir>/private-messages/<pair>.jsonl`; ids are percent-encoded into one
+  // file name, so no id names a path outside that folder.
+  'packages/server/src/private-messages.ts': 'data-dir',
   'packages/server/src/private-meta.ts': 'not-in-inventory',
   'packages/server/src/prompt-store.ts': 'not-in-inventory',
   'packages/server/src/public-host.ts': 'not-in-inventory',
@@ -175,11 +201,12 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/review-ranks.ts': 'not-in-inventory',
   'packages/server/src/review-size-prefs.ts': 'not-in-inventory',
   'packages/server/src/routes/doc-assets.ts': 'tree-fs',
+  'packages/server/src/routes/doc-components.ts': 'data-dir',
   'packages/server/src/routes/doc-voice-feedback.ts': 'not-in-inventory',
   'packages/server/src/routes/git-push.ts': 'not-in-inventory',
   'packages/server/src/routes/meetings-calendar.ts': 'not-in-inventory',
   'packages/server/src/routes/mount-file.ts': 'refused-when-covered',
-  'packages/server/src/routes/mounts.ts': 'refused-when-covered',
+  'packages/server/src/routes/mounts-api.ts': 'refused-when-covered',
   'packages/server/src/routes/review-raw.ts': 'tree-fs',
   'packages/server/src/routes/shell-static.ts': 'tree-fs',
   'packages/server/src/routes/workspace-content.ts': 'tree-fs',

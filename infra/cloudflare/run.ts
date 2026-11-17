@@ -1,23 +1,20 @@
 #!/usr/bin/env bun
 /**
- * `bun run cf:plan [prod|staging]` and `bun run cf:apply [prod|staging]`:
- * one reviewed Terraform run over an environment's Cloudflare configuration
- * (README.md). CI runs the same script with `--ci`
- * (`.github/workflows/cloudflare.yml`).
+ * `bun run cf:plan [prod|staging]`: one Terraform plan over an environment's
+ * Cloudflare configuration (README.md). CI runs the same script with `--ci`
+ * (`.github/workflows/cloudflare.yml`), and only CI applies: `cf:apply`
+ * without `--ci` prints where applies happen now and changes nothing
+ * (`APPLY_POINTER`).
  *
  *   1. assemble the variables from the environment's configs (`vars.ts`);
  *   2. take the credentials from the environment or the Keychain
  *      (`credentials.ts`);
  *   3. read the account for the ids Terraform cannot know offline, and refuse
  *      what would repoint or shadow something this config did not make
- *      (`discover.ts`); on a local apply, make each service token the
- *      account lacks and put its pair in the Keychain (`service-tokens.ts`),
- *      which CI cannot do and so refuses;
+ *      (`discover.ts`); a service token the account lacks is named, and CI's
+ *      apply refuses it, because only `cf:sync-config` makes one;
  *   4. write the tfvars and the -backend-config file to `state/<env>/`, 600;
- *   5. `terraform init` against the R2 state, then plan, or apply (which shows
- *      the plan and asks first);
- *   6. after a local apply, print each project's CF_ACCESS_AUD and
- *      CF_ACCESS_HOST_AUDS for a server on the Mac.
+ *   5. `terraform init` against the R2 state, then plan, or (CI) apply.
  *
  * With `--ci` the plan is saved and only its summary is printed
  * (`plan-summary.ts`), and to the file CF_PLAN_SUMMARY names when set; a
@@ -29,7 +26,7 @@
  *
  * On the Mac, once the keeper holds the Cloudflare token (`CW_KEEPER_URL`
  * set, `--ci` absent, no `CLOUDFLARE_API_TOKEN` in the environment), the
- * keeper runs terraform from its own release instead, and this process reads
+ * keeper runs the plan from its own release instead, and this process reads
  * no Cloudflare token (`keeper-wrapper.ts`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -45,13 +42,7 @@ import { tfCredentials } from './credentials.ts';
 import { type KeeperWrapperIo, runThroughKeeper } from './keeper-wrapper.ts';
 import { planSummary } from './plan-summary.ts';
 import { audienceLines, discoverRun, initArgs, writeRunFiles } from './prepare.ts';
-import {
-  type MintIo,
-  keychainHasService,
-  mintServiceTokens,
-  storeTokenInKeychain,
-  tokenServices,
-} from './service-tokens.ts';
+import { tokenServices } from './service-tokens.ts';
 import {
   TF_DIR,
   type TfEnv,
@@ -66,7 +57,20 @@ import { CONFIG_ENV, CONFIG_PATHS, type ReadConfig } from './vars.ts';
 
 const REPO = resolve(TF_DIR, '..', '..');
 
-export interface WrapperIo extends Omit<MintIo, 'out' | 'err'> {
+/** What `cf:apply` on the Mac prints instead of applying. */
+export const APPLY_POINTER = [
+  'cf:apply no longer runs here: Cloudflare applies run in CI, with nobody at a terminal.',
+  '  - A change to infra/cloudflare/ or either Worker applies when its pull request merges to main',
+  '    (.github/workflows/cloudflare.yml, job apply).',
+  '  - A change to the gitignored configs (people, domains, session length, a new service token):',
+  '    bun run cf:sync-config, then one passkey tap. The keeper writes the configs to GitHub,',
+  '    makes any missing service token and starts cloudflare.yml on main.',
+  '  - To see what would change first: bun run cf:plan.',
+  'Nothing was changed.',
+  '',
+].join('\n');
+
+export interface WrapperIo {
   /** A config relative to the repo root, or null when it is missing. */
   read: ReadConfig;
   env: Record<string, string | undefined>;
@@ -102,6 +106,10 @@ export async function runWrapper(
   opts: WrapperOptions,
   io: WrapperIo,
 ): Promise<number> {
+  if (command === 'apply' && !opts.ci) {
+    io.err(APPLY_POINTER);
+    return 1;
+  }
   try {
     const creds = tfCredentials(io);
     const api = io.api(creds.token);
@@ -111,38 +119,20 @@ export async function runWrapper(
       io.err('Refused before terraform ran; nothing was changed.\n');
       return 1;
     }
-    const { runtime } = found;
     const missing = found.missing;
-    if (Object.keys(missing).length > 0) {
-      if (command === 'apply' && opts.ci) {
-        for (const name of Object.values(missing)) {
-          io.err(
-            `  - service token "${name}" does not exist, and CI has no Keychain for its secret\n`,
-          );
-        }
-        io.err(
-          `Run bun run cf:apply ${opts.env} on the Mac once to make it. Nothing was changed.\n`,
-        );
-        return 1;
-      }
+    for (const name of Object.values(missing)) {
       if (command === 'apply') {
-        const minted = await mintServiceTokens(api, runtime.account_id, missing, {
-          keychainHasService: io.keychainHasService,
-          storeToken: io.storeToken,
-          confirm: io.confirm,
-          out: io.out,
-          err: io.err,
-        });
-        if (!minted.ok) return 1;
-        runtime.service_token_ids = { ...runtime.service_token_ids, ...minted.ids };
+        io.err(`  - service token "${name}" does not exist, and CI cannot make one\n`);
       } else if (!opts.ci) {
-        for (const name of Object.values(missing)) {
-          const s = tokenServices(name);
-          io.out(
-            `Service token "${name}" does not exist: cf:apply makes it and stores its pair in the Keychain (${s.clientId}, ${s.secret}).\n`,
-          );
-        }
+        const s = tokenServices(name);
+        io.out(
+          `Service token "${name}" does not exist: cf:sync-config makes it and stores its pair in the Keychain (${s.clientId}, ${s.secret}).\n`,
+        );
       }
+    }
+    if (command === 'apply' && Object.keys(missing).length > 0) {
+      io.err('Run bun run cf:sync-config on the Mac to make it. Nothing was changed.\n');
+      return 1;
     }
     const { varFile, backend } = writeRunFiles(
       opts.env,
@@ -153,15 +143,7 @@ export async function runWrapper(
     const env = creds.env;
     if (!step(io, 'init', io.terraform(initArgs(backend), env, opts.ci))) return 1;
 
-    if (!opts.ci) {
-      if (!step(io, command, io.terraform([command, varFile], env))) return 1;
-      if (command === 'apply') {
-        const out = io.terraform(['output', '-json', 'access'], env, true);
-        if (out.status === 0)
-          for (const l of audienceLines(JSON.parse(out.stdout || '{}'))) io.out(`${l}\n`);
-      }
-      return 0;
-    }
+    if (!opts.ci) return step(io, 'plan', io.terraform(['plan', varFile], env)) ? 0 : 1;
 
     const planFile = io.statePath('plan.tfplan');
     // A pull request's plan holds no lock: its state credential is read-only.
@@ -209,9 +191,6 @@ export function realIo(tfEnv: TfEnv): WrapperIo {
     env: process.env,
     keychainHas,
     keychainRead,
-    keychainHasService: (service) => keychainHasService(service),
-    storeToken: storeTokenInKeychain,
-    confirm: (question) => prompt(`${question} Only 'yes' is accepted:`)?.trim() === 'yes',
     api: (token) => cloudflareApi(token),
     writeState: (name, content) => {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -233,16 +212,14 @@ export function throughKeeper(env: Record<string, string | undefined>, ci: boole
 }
 
 export function realKeeperWrapperIo(origin: string): KeeperWrapperIo {
-  const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'cf:apply';
+  const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'cf:plan';
   return {
     read: configReader(process.env),
     env: process.env,
     keychainHas,
     keychainRead,
-    keychainHasService: (service) => keychainHasService(service),
-    storeToken: storeTokenInKeychain,
-    keeper: (command, env, input) =>
-      keeperTerraform(origin, command, env, input, {
+    keeper: (env, input) =>
+      keeperTerraform(origin, 'plan', env, input, {
         requester,
         announce: announceToBoard(boardUrlFromEnv(), requester),
         onHeld: (held) => {
@@ -266,8 +243,9 @@ if (import.meta.main) {
     process.exit(2);
   }
   const ci = args.includes('--ci');
-  const run = throughKeeper(process.env, ci)
-    ? runThroughKeeper(command, env, realKeeperWrapperIo(process.env.CW_KEEPER_URL?.trim() ?? ''))
-    : runWrapper(command, { env, ci }, realIo(env));
+  const run =
+    command === 'plan' && throughKeeper(process.env, ci)
+      ? runThroughKeeper(env, realKeeperWrapperIo(process.env.CW_KEEPER_URL?.trim() ?? ''))
+      : runWrapper(command, { env, ci }, realIo(env));
   run.then((code) => process.exit(code));
 }

@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
+import { liveFolders } from '../library-folders.ts';
+import { diffReviewsOn, setRow } from '../library-sets.ts';
+import { starsFor } from '../library-stars.ts';
+import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
   type LibrarySources,
   type ProjectFile,
@@ -81,6 +86,20 @@ export interface LibraryRouteRequest {
   scope?: WorkspaceScope<BoardWorkspace>;
   req: Request;
   visitor: ShareTarget | null;
+  /** The request's author: a proven session outranks the claim it is handed. */
+  authorFor?: (claimed: unknown) => User | undefined;
+}
+
+/**
+ * The person whose Recently Viewed list a request reads. A signed-in
+ * session decides it; without one, the `viewer` the page names — the same
+ * id its views were recorded under. Share visitors read none.
+ */
+export function viewerOf(rq: LibraryRouteRequest): string | null {
+  if (rq.visitor || !rq.authorFor) return null;
+  const id = new URL(rq.req.url).searchParams.get('viewer');
+  const claimed = id ? { id, name: id, kind: 'known' } : undefined;
+  return personKeyOf(rq.authorFor(claimed));
 }
 
 /**
@@ -113,7 +132,19 @@ export async function handleLibraryRoutes(
   if (items && req.method === 'GET') {
     const onBox = !visitor && isOnBox(ctx, req);
     const src = sourcesFor(ctx, scope, onBox);
-    return j(200, buildLibrary(visitor ? visitorSources(src) : src));
+    const payload = buildLibrary(visitor ? visitorSources(src) : src);
+    const onBoard = new Set(scope.board.docIds);
+    const viewer = viewerOf(rq);
+    const viewed = viewsFor(scope.board, viewer, (id) => onBoard.has(id));
+    const folders = new Set(liveFolders(scope.board).map((f) => f.id));
+    const starred = starsFor(scope.board, viewer, (s) =>
+      s.kind === 'doc' ? onBoard.has(s.id) : folders.has(s.id),
+    );
+    return j(200, {
+      ...payload,
+      ...(viewed.length ? { viewed } : {}),
+      ...(starred.length ? { starred } : {}),
+    });
   }
   if (visitor) return j(403, { error: 'the library is not available to share visitors' });
   if (open && req.method === 'POST') return openFile(ctx, scope, req);
@@ -157,7 +188,8 @@ function sourcesFor(
   // applies to a local-only project.
   const setHidden = (m: { setId?: string; workspaceId?: string }): boolean =>
     !onBox && (ctx.isLocalOnlySet?.(m.setId ?? m.workspaceId) ?? false);
-  const docs = docStore.list().filter((m) => ids.has(m.docId) && !setHidden(m));
+  const all = docStore.list();
+  const docs = all.filter((m) => ids.has(m.docId) && !setHidden(m));
   const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
   // One stat per bound doc per load, shared by both of its clocks.
   const stats = new Map<string, { mtimeMs: number; birthtimeMs: number } | undefined>();
@@ -188,7 +220,11 @@ function sourcesFor(
     : [];
   return {
     workspaceId: scope.workspaceId,
+    folders: scope.board,
     docs,
+    sets: diffReviewsOn(all, (setId) => ids.has(setId) && !setHidden({ setId })).map((s) =>
+      setRow(scope.workspaceId, s),
+    ),
     docKeyOf: (docId) => docStore.repos.primaryKeyFor(docId),
     lastMeeting: (docId) => {
       let latest: { startedAt: number; endedAt: number | null } | undefined;

@@ -11,7 +11,10 @@
  * 3. Each project app (`cw-<project>`, the deploy's name for one) adopted.
  * 4. `CW_KEEPER_URL` in the fleet's launch environment (`~/.claude/settings.json`)
  *    and in prod's launchd job, and prod restarted onto it.
- * 5. The check: the store is unreadable to this user, and a probe `fly apps
+ * 5. CI credentials (`keeper-setup-ci.ts`): the apply and plan tokens and
+ *    the two R2 keys `cloudflare.yml` runs with, written to GitHub through
+ *    the keeper on one tap.
+ * 6. The check: the store is unreadable to this user, and a probe `fly apps
  *    create` is held for a passkey, its link printed, and then withdrawn.
  *
  * Every step reads what is already there first and skips what is done, so a
@@ -27,6 +30,7 @@ import { SECRET_ACCOUNT, storedSecretService } from '../../../core/src/secret-na
 import { CALLER_HEADER, CALLER_TOKEN_FILE } from './keeper-callers.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
 import { atomicWrite, ensureCallerToken, withKeeperUrl } from './keeper-setup-callers.ts';
+import { ciCredentials } from './keeper-setup-ci.ts';
 import {
   type CfAccount,
   cfPermissionsStamp,
@@ -389,7 +393,22 @@ async function steps(o: SetupOptions): Promise<void> {
     ok(`restarted ${o.label}; it runs with CW_KEEPER_URL`);
   }
 
-  step('5. Check it');
+  step('5. CI credentials');
+  const ci = await ciCredentials({
+    keeperUrl: url,
+    callerToken: caller.token,
+    dryRun: o.dryRun,
+    fetch: o.fetch,
+    account,
+    current: () => keychain('cloudflare-api-token'),
+    bucket: o.env.CF_TFSTATE_BUCKET,
+    readSecret: o.readSecret,
+    readLine: o.readLine,
+    print: o.print,
+  });
+  if ('stop' in ci) throw new Stop(ci.stop);
+
+  step('6. Check it');
   const creds = join(o.root, 'state', 'credentials.json');
   let readable = true;
   try {

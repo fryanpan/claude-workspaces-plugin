@@ -21,7 +21,7 @@
  * bound-doc sync behaviour rests on, and this file moved them without
  * touching them.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type DocMeta,
@@ -586,8 +586,9 @@ export interface FileBindingHost {
   doc(docId: string): LiveDoc | undefined;
   /** Only what is already in memory — no hydrate, no access stamp. */
   residentDoc(docId: string): LiveDoc | undefined;
-  /** The doc's persisted `.ydoc` path, whose mtime the at-rest arbitration reads. */
-  ydocPath(docId: string): string;
+  /** When the doc's Yjs state was last saved (epoch ms, unrounded), or
+   *  undefined when it never was. The at-rest arbitration reads it. */
+  stateSavedAt(docId: string): number | undefined;
   /** Arm the debounced `.ydoc` persist (and the sidecar and index row with it). */
   schedulePersist(doc: LiveDoc): void;
   /** Persist the `.ydoc` now, synchronously. */
@@ -1372,6 +1373,35 @@ export class FileBindings {
     const previous = this.bindings.get(doc.docId)?.path ?? doc.meta.sourceUrl;
     this.retargetHomeBinding(doc, absPath, { liveWins: true });
     return { ok: true, ...(previous !== undefined ? { previous } : {}) };
+  }
+
+  /**
+   * Follow a bound file that has moved to `absPath` (`doc-file-relocate.ts`).
+   *
+   * Unlike `retargetHomeBinding`, the old binding's bookkeeping is KEPT: the
+   * file at the new path is the same file, so its `lastWritten` is still the
+   * right `prior` for the attach's arbitration. Live edits not yet on disk are
+   * reasserted onto the new path, and an outside edit made while the doc was
+   * idle is read in. The flush that follows puts any owed write on disk before
+   * the caller answers.
+   */
+  followMovedFile(doc: LiveDoc, absPath: string, preread: PrereadFile): void {
+    doc.meta.sourceUrl = absPath;
+    this.attachFile(doc.docId, absPath, { preread });
+    this.flushWrite(doc.docId, doc);
+    this.p.schedulePersist(doc);
+  }
+
+  /** A write-back for this doc is on the thread pool right now. */
+  writeInFlight(docId: string): boolean {
+    return this.bindings.get(docId)?.writeInFlight === true;
+  }
+
+  /** Every doc bound to exactly `absPath`. */
+  docsBoundAt(absPath: string): string[] {
+    const out: string[] = [];
+    for (const [docId, binding] of this.bindings) if (binding.path === absPath) out.push(docId);
+    return out;
   }
 
   /**
@@ -2772,9 +2802,8 @@ export class FileBindings {
    */
   private fileOutlivedClaim(docId: string, filePath: string, knownMtimeMs?: number): boolean {
     try {
-      const ydocPath = this.p.ydocPath(docId);
-      if (!existsSync(ydocPath)) return false;
-      const stateMtime = statSync(ydocPath).mtimeMs;
+      const stateMtime = this.p.stateSavedAt(docId);
+      if (stateMtime === undefined) return false;
       const fileMtime =
         knownMtimeMs ??
         (boundFiles.quarantined(filePath) ? undefined : statStampSync(filePath).mtimeMs);
@@ -2797,9 +2826,8 @@ export class FileBindings {
 
   private diskNewerThanState(docId: string, filePath: string, knownMtimeMs?: number): boolean {
     try {
-      const ydocPath = this.p.ydocPath(docId);
-      if (!existsSync(ydocPath)) return true;
-      const stateMtime = statSync(ydocPath).mtimeMs;
+      const stateMtime = this.p.stateSavedAt(docId);
+      if (stateMtime === undefined) return true;
       if (knownMtimeMs !== undefined) return knownMtimeMs >= stateMtime;
       if (boundFiles.quarantined(filePath)) return true;
       return statStampSync(filePath).mtimeMs >= stateMtime;

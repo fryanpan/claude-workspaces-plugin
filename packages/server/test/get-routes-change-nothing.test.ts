@@ -42,7 +42,7 @@ import { seedBoard } from './workspace-seed.ts';
 const NOT_STATE: ReadonlyArray<readonly [RegExp, string]> = [
   [
     /^[^/]+:[^/]+\.(ydoc|index\.json|private\.json)$/,
-    'A folder member opened for the first time. Its id is `<setId>:<relPath>`, the only ids with a colon, and its doc is made from the file the folder already lists, so the open records what was on disk rather than anything a caller chose (`openUnopenedMember`, `routes/request-chain.ts`).',
+    'A folder member opened for the first time. Its id is `<setId>:<relPath>`, the only ids with a colon, and its doc is made from the file the folder already lists, so the open records what was on disk rather than anything a caller chose (`openUnopenedMember`, `routes/hono-gates.ts`).',
   ],
 ];
 

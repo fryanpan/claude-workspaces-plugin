@@ -202,4 +202,14 @@ describe('the pieces it reads', () => {
       'Adds @harborlight.example. Each person there signs in with their own address, and their comments and answers count like yours.',
     );
   });
+
+  it('says what a component folder grant does, and that nobody new is let in', () => {
+    const grant: AccessProposal = {
+      ...PROPOSAL,
+      change: { op: 'component-folder', folder: '/r/saltmarsh/charts/private' },
+    };
+    expect(changeSentence(grant)).toBe(
+      "Docs build components from the files git does not list in …/saltmarsh/charts/private/, and that code runs in every reader's page. Nobody new is let in.",
+    );
+  });
 });

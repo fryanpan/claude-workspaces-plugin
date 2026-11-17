@@ -65,6 +65,7 @@ describe('keeper-setup', () => {
       'launchctl print gui/501/com.example.board',
       'launchctl bootout',
       'launchctl bootstrap',
+      'fetch GET localhost:45678/v1/github-status',
       'fetch POST localhost:45678/v1/fly',
       'fetch DELETE localhost:45678/v1/requests/req1',
     ];
@@ -101,6 +102,7 @@ describe('keeper-setup', () => {
       new RegExp(`<key>CW_KEEPER_URL</key>\\s*<string>${KEEPER}</string>`),
     );
 
+    expect(r.out).toContain('GitHub holds the CI credentials already');
     expect(r.out).toContain(`${KEEPER}/approve/req1`);
     expect(r.out).toContain('Permission denied');
     expect(r.out).toContain('The keeper is set up');
@@ -117,7 +119,9 @@ describe('keeper-setup', () => {
     expect(r.status).toBe(0);
     for (const c of r.calls) {
       expect(c).not.toMatch(/^(fly tokens|keeper import|keeper adopt|launchctl boot)/);
-      expect(c).not.toContain('api.cloudflare.com');
+      // The one Cloudflare call left is the CI step's read of which tokens are active.
+      if (c !== 'fetch GET api.cloudflare.com/client/v4/user/tokens')
+        expect(c).not.toContain('api.cloudflare.com');
     }
     expect(r.calls).toContain('fetch POST localhost:45678/v1/fly');
     expect(r.out).toContain('The keeper is set up');
@@ -221,7 +225,8 @@ describe('keeper-setup', () => {
     expect(r.calls.filter((c) => c.startsWith('keeper import'))).toEqual([
       'keeper import cloudflare-account-id',
     ]);
-    expect(r.calls.some((c) => c.includes('api.cloudflare.com'))).toBe(false);
+    const cfCalls = r.calls.filter((c) => c.includes('api.cloudflare.com'));
+    expect(cfCalls).toEqual(['fetch GET api.cloudflare.com/client/v4/user/tokens']);
     expect(cred(w, 'cloudflare-account-id')).toBe(ACCOUNT);
   });
 

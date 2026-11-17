@@ -57,7 +57,9 @@ describe(`POST /workspaces/${WS}/docs/:id/archive`, () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-arch-'));
     folder = mkdtempSync(join(tmpdir(), 'doc-arch-src-'));
-    handle = createServer({ port: 0, dataDir });
+    // Off, as on the fresh-signin browser board: a signed-out browser socket
+    // may create a mock, which is the path the widget-socket case drives.
+    handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });
@@ -128,6 +130,52 @@ describe(`POST /workspaces/${WS}/docs/:id/archive`, () => {
     expect(((await byName.json()) as { meta: { docId: string } }).meta.docId).toBe(docId);
     expect(await boardDocIds(boardId)).toContain(docId);
     expect((await archivedListing()).docs).toEqual([]);
+  });
+
+  // A doc page carries the comment widget, whose socket names `type=mockup`,
+  // and that socket creates any mockup doc that does not exist. Archiving
+  // closes it, it reconnects, and the archived id came back as an empty
+  // mockup filed on the board (fresh-signin-browser-driver, 15 Nov).
+  it('a widget socket reconnecting after the archive does not bring the doc back', async () => {
+    const widgetSocket = async (docId: string): Promise<boolean> => {
+      const origin = `http://127.0.0.1:${handle.port}`;
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${handle.port}/workspaces/${WS}/docs/${docId}/y?type=mockup&sourceUrl=${encodeURIComponent(`${origin}/workspaces/${WS}/docs/${docId}`)}`,
+        { headers: { origin } } as unknown as string[],
+      );
+      const opened = await new Promise<boolean>((resolve) => {
+        ws.addEventListener('open', () => resolve(true));
+        ws.addEventListener('error', () => resolve(false));
+        ws.addEventListener('close', () => resolve(false));
+      });
+      try {
+        ws.close();
+      } catch {
+        // Already closed by the refusal.
+      }
+      return opened;
+    };
+    // Positive control: the same socket on an id nobody made creates it, so
+    // a refusal below is the archive's doing and not a malformed socket.
+    expect(await widgetSocket('never-made-mock')).toBe(true);
+    expect(handle.docStore.get('never-made-mock')).toBeTruthy();
+
+    const created = await post(`/workspaces/${WS}/docs`, {
+      docId: 'saltmarsh-notes',
+      type: 'markdown',
+      sourceUrl: mdFile('saltmarsh-notes.md'),
+      hubWorkspaceId: WS,
+    });
+    const docId = ((await created.json()) as { docId: string }).docId;
+    expect(await widgetSocket(docId)).toBe(true);
+    expect((await post(`/workspaces/${WS}/docs/${docId}/archive`, {})).status).toBe(200);
+
+    expect(await widgetSocket(docId)).toBe(false);
+    expect(handle.docStore.get(docId)).toBeUndefined();
+    expect(await boardDocIds(WS)).not.toContain(docId);
+    // And "Put it back" still puts back the markdown doc, not a mock.
+    expect((await post(`/workspaces/${WS}/docs/${docId}/unarchive`, {})).status).toBe(200);
+    expect(handle.docStore.get(docId)?.meta.type).toBe('markdown');
   });
 
   it('404s an unknown id, and 409s a doc that belongs to a review', async () => {

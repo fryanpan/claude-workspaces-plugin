@@ -115,6 +115,60 @@ async function read(cdp: Cdp, frame: ReturnType<typeof frameSurface>): Promise<M
   return { exits, onTop };
 }
 
+/**
+ * A tap on a point inside the mock's frame, repeated only when Chrome gave
+ * it to the host page's iframe element instead.
+ *
+ * A tap sent just after the frame loads can land on the host page's
+ * `<iframe>` element, and the frame then sees nothing. Measured: the FAB was
+ * found 105ms after the frame's document started, the tap's pointerdown
+ * arrived in the host with the iframe as its target, and the frame logged no
+ * event at all. The likely mechanism (not measured) is that Chrome runs a
+ * sandboxed frame in its own process and routes input to it only once it
+ * knows where that frame is drawn. A single tap followed by a twenty-second
+ * wait for the mode then fails, at whichever width's frame was youngest.
+ *
+ * Each press is counted on both sides. Only a press the host's iframe
+ * element took is tapped again: it did nothing, so the second tap cannot
+ * toggle anything twice. A press any other host element took (the agent
+ * button over a way out) ends the loop, because that is what the test reads.
+ */
+async function tapFrame(
+  cdp: Cdp,
+  frame: ReturnType<typeof frameSurface>,
+  at: { x: number; y: number },
+): Promise<void> {
+  // Each side counts its presses in one window global: the frame every
+  // press, the host each press and, apart, those aimed at the iframe.
+  const counter = (record: string) =>
+    `(() => { if (!window.__cwPress) { window.__cwPress = { all: 0, frame: 0 }; window.addEventListener('pointerdown', (e) => { ${record} }, true); } return window.__cwPress; })()`;
+  type Count = { all: number; frame: number };
+  const host = async () =>
+    (await cdp.evaluate(
+      counter(
+        'window.__cwPress.all++; if (e.target instanceof HTMLIFrameElement) window.__cwPress.frame++;',
+      ),
+    )) as Count;
+  const inFrame = async () => (await frame.eval(counter('window.__cwPress.all++;'))) as Count;
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    const h0 = await host();
+    const f0 = await inFrame();
+    await tap(cdp, at);
+    const landed = await until('the tap reaching the host or the frame', async () => {
+      if ((await inFrame()).all > f0.all) return 'frame';
+      const h = await host();
+      if (h.frame > h0.frame) return 'iframe element';
+      // Something of the host's own took it, the agent button say: that is
+      // the reading, not a miss, so it is not tapped again.
+      if (h.all > h0.all) return 'host';
+      return null;
+    });
+    if (landed !== 'iframe element') return;
+    step(`tap ${attempt} at ${Math.round(at.x)},${Math.round(at.y)} went to the iframe element`);
+  }
+  throw new Error('twenty taps went to the iframe element, none into the frame');
+}
+
 const modeOn = (frame: ReturnType<typeof frameSurface>) =>
   frame.eval(`${W}.feedbackMode === true`) as Promise<boolean>;
 
@@ -124,14 +178,14 @@ async function enterMode(cdp: Cdp, frame: ReturnType<typeof frameSurface>): Prom
     return b ?? null;
   });
   const o = await frame.offset();
-  await tap(cdp, { x: o.x + (fab[0] + fab[2]) / 2, y: o.y + (fab[1] + fab[3]) / 2 });
+  await tapFrame(cdp, frame, { x: o.x + (fab[0] + fab[2]) / 2, y: o.y + (fab[1] + fab[3]) / 2 });
   await until('comment mode on', async () => ((await modeOn(frame)) ? true : null));
 }
 
 async function openComposer(cdp: Cdp, frame: ReturnType<typeof frameSurface>): Promise<void> {
   const o = await frame.offset();
   const row = (await frame.eval(`(${BOX})(document.getElementById('row2'))`)) as Box;
-  await tap(cdp, { x: o.x + 40, y: o.y + (row[1] + row[3]) / 2 });
+  await tapFrame(cdp, frame, { x: o.x + 40, y: o.y + (row[1] + row[3]) / 2 });
   await until('the composer', async () =>
     (await frame.eval(`!!${S}.querySelector('.composer')`)) ? true : null,
   );
@@ -176,7 +230,8 @@ async function main(): Promise<void> {
         // of the comment, then Done ends the mode.
         const tapExit = async (name: string): Promise<void> => {
           const box = (await read(cdp, frame)).exits[name];
-          if (box) await tap(cdp, { x: (box[0] + box[2]) / 2, y: (box[1] + box[3]) / 2 });
+          if (box)
+            await tapFrame(cdp, frame, { x: (box[0] + box[2]) / 2, y: (box[1] + box[3]) / 2 });
         };
         const settled = (what: string, done: () => Promise<boolean>) =>
           until(what, async () => ((await done()) ? true : null), 3000).catch(() => false);

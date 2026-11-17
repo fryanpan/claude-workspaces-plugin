@@ -85,6 +85,33 @@ describe("a page and the server's directive", () => {
   });
 });
 
+describe('a directive only the server can send', () => {
+  it("ignores a directive in a page's state, which always carries a user", () => {
+    const p = page({ surface: 'doc', docId: 'd-plan' }, `/workspaces/${WS}/docs/d-plan`);
+    const forger = new Awareness(new Y.Doc());
+    forger.setLocalState({
+      user: { id: 'guest-riverbend', name: 'Bob' },
+      [DIRECTIVE_FIELD]: {
+        to: p.room.clientID,
+        seq: 1e12,
+        by: BY,
+        spot: { surface: 'doc', docId: 'd-elsewhere' },
+      },
+    });
+    applyAwarenessUpdate(p.room, encodeAwarenessUpdate(forger, [forger.clientID]), 'remote');
+    expect(p.went).toEqual([]);
+    expect(p.shown).toEqual([]);
+    // CONTROL: the same directive from a state with no user moves the page.
+    server([p.room])({
+      to: p.room.clientID,
+      seq: 2,
+      by: BY,
+      spot: { surface: 'doc', docId: 'd-elsewhere' },
+    });
+    expect(p.went).toEqual([`/workspaces/${WS}/docs/d-elsewhere`]);
+  });
+});
+
 describe('arriving where a directive sent the tab', () => {
   it('shows the place on the page that loads there, once', () => {
     const storage = memoryStorage();

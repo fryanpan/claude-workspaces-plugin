@@ -1,3 +1,4 @@
+import { isMdxPath } from '@claude-workspaces/core/prose';
 /**
  * The markdown surface's mount: everything a markdown doc needs once its text
  * is on screen — the Tiptap editor, the review chrome, the margin, the
@@ -11,7 +12,9 @@
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
+import { setComponentDoc } from '../mdx-component.ts';
 import type { MountContext } from '../mount-context.ts';
+import { announceUser } from '../presence/announce-user.ts';
 import { wireDocSpot } from '../presence/doc-spot.ts';
 import { startReadingTracker } from '../reading-tracker.ts';
 import { type ReviewChrome, mountReviewChrome } from '../review-chrome.ts';
@@ -26,6 +29,7 @@ import { mountDocFloats } from './doc-floats.ts';
 import { wireDocGates } from './doc-gates.ts';
 import { mountMeetingHeading } from './doc-heading.ts';
 import { mountDocMargin } from './doc-margin.ts';
+import { mountDocMetadata } from './doc-metadata.ts';
 import { mountDocPreview } from './doc-preview.ts';
 import { wireDocReady } from './doc-ready.ts';
 import { mountDocSaveState } from './doc-save-state.ts';
@@ -57,7 +61,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   // editable File view of a .md diff member (see MountContext.navDocId).
   const navDocId = ctx.navDocId ?? docId;
   const { ydoc, awareness } = client;
-  awareness.setLocalStateField('user', { name: user.name, color: user.color });
+  announceUser(awareness, user);
 
   // The thread panel / composer / thread-view / drawer elements are owned
   // by the shared review chrome; only the markdown-specific elements are here.
@@ -106,6 +110,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   const docLink = ctx.workspaceId
     ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
     : undefined;
+  setComponentDoc(ydoc, isMdxPath(ctx.relPath) || isMdxPath(ctx.sourceUrl), canWrite);
   const editor: EditorHandle = createEditor({
     parent: editorMount,
     ydoc,
@@ -203,6 +208,14 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       canWrite,
       scope,
       whenSynced: (cb) => client.onReady(cb),
+    });
+    // The fields a metadata schema declares, above the prose.
+    mountDocMetadata({
+      editor: editor.editor,
+      editorMount,
+      docId,
+      canWrite,
+      onCleanup: (fn) => scope.onCleanup(fn),
     });
     // The agent's cursor (`agent-focus.ts`).
     wireAgentFocus({ editor, presence: awareness, scroller: editorMount, scope });

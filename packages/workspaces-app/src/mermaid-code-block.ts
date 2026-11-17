@@ -1,3 +1,4 @@
+import { FRONT_MATTER_LANGUAGE } from '@claude-workspaces/core/doc-metadata';
 import { MATH_DISPLAY_LANGUAGE, mathDisplayTex } from '@claude-workspaces/core/prose-math';
 import { InputRule, type NodeViewRendererProps } from '@tiptap/core';
 import CodeBlock from '@tiptap/extension-code-block';
@@ -108,6 +109,9 @@ export const MermaidCodeBlock = CodeBlock.extend({
 
       const wrapper = document.createElement('div');
       wrapper.className = 'cm-codeblock';
+      // A file's front matter: the metadata form hides it when a schema
+      // governs the doc (doc/doc-metadata.ts).
+      if (initial.attrs.language === FRONT_MATTER_LANGUAGE) wrapper.classList.add('cm-frontmatter');
 
       // Rendered diagram — only visible for mermaid blocks.
       const rendered = document.createElement('div');
@@ -206,6 +210,7 @@ export const MermaidCodeBlock = CodeBlock.extend({
           // Keep the language class in sync if the block's language attr changed.
           const newLang = (newNode.attrs.language as string | null) ?? '';
           code.className = newLang ? `language-${newLang}` : '';
+          wrapper.classList.toggle('cm-frontmatter', newLang === FRONT_MATTER_LANGUAGE);
           scheduleRender();
           updateEditingClass();
           return true;

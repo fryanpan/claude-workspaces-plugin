@@ -51,6 +51,7 @@ import { mountBoardIsland } from './board-island.tsx';
 import { mountBoardIslands } from './board-islands.ts';
 import { wireBoardLive } from './board-live-wiring.ts';
 import { postLoadReport } from './board-load-report.ts';
+import { wireMessagesNav } from './board-messages-nav.ts';
 import {
   type BoardTask,
   type BoardWorkspaceInfo,
@@ -85,6 +86,7 @@ import {
 import { createBoardWalkthrough } from './board-walkthrough.ts';
 import { mountIslandProbe } from './island-probe.tsx';
 import { createLibraryPage } from './library-page.ts';
+import { applyCollabCore } from './presence-core-switch.ts';
 import { createRepaintGuard } from './repaint-guard.ts';
 
 /**
@@ -235,7 +237,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // `?format=json` is what asks for the RECORD. This path also serves the
   // board page — one address, HTML by default — so a read without it would
   // hand this fetch the shell that is currently running it.
-  const initialRead = fetchJson<{ workspace: BoardWorkspaceInfo }>(
+  const initialRead = fetchJson<{ workspace: BoardWorkspaceInfo; collabCore?: unknown }>(
     `/workspaces/${encodeURIComponent(workspaceId)}?format=json`,
   );
 
@@ -285,6 +287,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
 
   const initial = await initialRead;
   if (initial) state.info = initial.workspace;
+  // Which presence strip to draw; the live wiring keeps it current.
+  applyCollabCore(initial);
   buildShell(document, root, state.info?.name ?? workspaceId, workspaceId);
   // Now that there is a header to sit under. See signin/write-gate.ts.
   if (!writeAccess.canWrite) showSignInBar();
@@ -545,6 +549,9 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     fetchJson,
     send,
     navigate: (href) => location.assign(href),
+    toast: showToast,
+    storage: localStorage,
+    viewer: () => (user.kind === 'anon' ? null : { id: user.id, name: user.name, kind: user.kind }),
     history,
     here: (list, place) => libraryHref(location.href, list, place),
     requestedPlace: () => libraryPlaceOf(location.search),
@@ -918,7 +925,19 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     settingsPanel.openSettings();
     settingsView.show(place === 'list' ? null : place);
   };
-  if (bootLoc.settings) showSettingsAt(bootLoc.settings);
+  // The address is the input here, as it is for Back. Opening settings on
+  // the phone passes through its list before the pane the address names, and
+  // writing that step would tell a follower `?settings=list` between two
+  // `?settings=board`s: three navigations, and the follow ends on whichever
+  // one lands.
+  if (bootLoc.settings) {
+    applyingHistory = true;
+    try {
+      showSettingsAt(bootLoc.settings);
+    } finally {
+      applyingHistory = false;
+    }
+  }
 
   // The chat with the board's lead, its button in the rail's dock (`lead-chat/`).
   leadChat = mountLeadChat({
@@ -929,6 +948,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     getContext: () =>
       voiceBoardContext(state.detailTaskId, null, state.detailThreadId, state.reviewItems),
   });
+  wireMessagesNav(el('board-nav-messages'), leadChat);
 
   // Gmail-style row shortcuts — the handler lives in board-shortcuts.ts so a
   // test can call it directly with a state of its own, rather than booting a

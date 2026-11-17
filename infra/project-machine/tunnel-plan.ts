@@ -13,7 +13,7 @@
  *   the tunnel's token, which the machine holds as CLOUDFLARE_TUNNEL_TOKEN
  *
  * The first two are the Terraform config's (`infra/cloudflare/modules/tunnel`),
- * made by `bun run cf:apply` (or CI on main) for every project in
+ * made by CI's apply on main for every project in
  * `router.local.json` whose origin is `<project>-origin.<zone>`.
  * `machine:deploy` reads the tunnel from `terraform output`, then the token
  * from Cloudflare's API with that id (`readTunnelToken`). The token is kept
@@ -46,7 +46,7 @@ export function appliedTunnel(outputs: TfOutputs, cfg: ProjectConfig): AppliedTu
   const origin = `${cfg.project}-origin.`;
   if (!t) {
     throw new Error(
-      `the Terraform state has no tunnel for ${cfg.project}: give it the origin ${origin}<zone> in router.local.json's projects and run bun run cf:apply`,
+      `the Terraform state has no tunnel for ${cfg.project}: give it the origin ${origin}<zone> in router.local.json's projects and run bun run cf:sync-config`,
     );
   }
   if (t.name !== cfg.app || !t.origin.startsWith(origin)) {
@@ -56,7 +56,7 @@ export function appliedTunnel(outputs: TfOutputs, cfg: ProjectConfig): AppliedTu
   }
   if (!ID.test(t.id)) {
     throw new Error(
-      `the Terraform state's tunnel for ${cfg.project} has no id yet; run bun run cf:apply`,
+      `the Terraform state's tunnel for ${cfg.project} has no id yet; run bun run cf:sync-config`,
     );
   }
   if (!/^[0-9a-f]{32}$/.test(t.account_id)) {

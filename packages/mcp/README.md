@@ -50,6 +50,7 @@ The MCP surface is intentionally primitive — agents compose these into whateve
 - `get_thread(docId, threadId)`.
 - `post_reply(docId, threadId, text)`.
 - `resolve_thread(docId, threadId)` / `reopen_thread(docId, threadId)`.
+- `set_thread_progress(docId, threadId, state)` — mark a person's comment `working` or `done` (or `open` to clear) without resolving it; they resolve it themselves.
 
 **Channel / observation**
 - `watch_doc(docId)` — subscribe to thread events; they arrive in your Claude Code session as `<channel source="live-feedback" ...>` messages via `notifications/claude/channel`.

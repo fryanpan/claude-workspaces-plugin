@@ -42,6 +42,8 @@
 import { type RelatedWorkCandidate, readsAsPlan, scoreRelatedWork } from '@claude-workspaces/core';
 import { isReservedGoalId } from '../task-goals.ts';
 import { isArchived } from '../tasks.ts';
+import { answerAs, queryOf } from './route-contract.ts';
+import type { RelatedWorkAnswer, RelatedWorkQuery } from './workspace-board-contract.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
 /**
@@ -89,7 +91,8 @@ export async function handleWorkspaceRelated(
 
   const { workspaceId, board: workspace } = scope;
 
-  const rawQuery = url.searchParams.get('q') ?? '';
+  const asked = queryOf<RelatedWorkQuery>(url);
+  const rawQuery = asked.q ?? '';
   const query = rawQuery.slice(0, MAX_RELATED_QUERY_LENGTH).trim();
   if (query.length === 0) {
     return j(400, {
@@ -99,8 +102,8 @@ export async function handleWorkspaceRelated(
   }
   // The doc the request came out of, when the caller has one. Used only to
   // mark link relations; an id naming nothing simply matches nothing.
-  const fromDocId = url.searchParams.get('docId') ?? undefined;
-  const limitParam = Number.parseInt(url.searchParams.get('limit') ?? '', 10);
+  const fromDocId = asked.docId;
+  const limitParam = Number.parseInt(asked.limit ?? '', 10);
   const limit =
     Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 20) : undefined;
 
@@ -195,7 +198,6 @@ export async function handleWorkspaceRelated(
     ...(fromDocId !== undefined ? { docId: fromDocId } : {}),
     /** How many rows were considered — so an empty answer reads as "nothing
      *  lines up" rather than "the board was empty". */
-    considered: candidates.length,
-    matches,
+    ...answerAs<RelatedWorkAnswer>({ considered: candidates.length, matches }),
   });
 }

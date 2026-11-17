@@ -30,7 +30,12 @@ function fakeClient() {
   return { client, sync: () => [...readyCbs].forEach((cb) => cb()) };
 }
 
-function wire(opts: { workspaceId?: string } = {}) {
+function wire(
+  opts: {
+    workspaceId?: string;
+    readFilePath?: (docId: string) => Promise<string | undefined>;
+  } = {},
+) {
   const { client, sync } = fakeClient();
   const ydoc = new Y.Doc();
   const scope = new MountScope();
@@ -38,7 +43,8 @@ function wire(opts: { workspaceId?: string } = {}) {
   const redrawThreads = vi.fn();
   const renderSetNav = vi.fn(async () => {});
   const onFirstSync = vi.fn();
-  const chrome = { renderDocLabel, redrawThreads } as unknown as ReviewChrome;
+  const setLabelHint = vi.fn();
+  const chrome = { renderDocLabel, redrawThreads, setLabelHint } as unknown as ReviewChrome;
   // The chips watch reaches through to a live ProseMirror view; nothing here
   // gives it a board to watch, so it is never asked for one.
   const editor = { editor: { view: {} } } as unknown as EditorHandle;
@@ -51,12 +57,22 @@ function wire(opts: { workspaceId?: string } = {}) {
     workspaceId: opts.workspaceId,
     renderSetNav,
     onFirstSync,
+    ...(opts.readFilePath ? { readFilePath: opts.readFilePath } : {}),
   });
   open.push(() => {
     scope.dispose();
     ydoc.destroy();
   });
-  return { ydoc, scope, sync, renderDocLabel, redrawThreads, renderSetNav, onFirstSync };
+  return {
+    ydoc,
+    scope,
+    sync,
+    renderDocLabel,
+    redrawThreads,
+    renderSetNav,
+    onFirstSync,
+    setLabelHint,
+  };
 }
 
 describe('a metadata change', () => {
@@ -73,6 +89,32 @@ describe('a metadata change', () => {
     scope.dispose();
     ydoc.getMap('meta').set('title', 'Renamed after navigation');
     expect(renderDocLabel).not.toHaveBeenCalled();
+  });
+});
+
+describe('a moved file', () => {
+  it('re-reads the path and redraws the label when the server says the file moved', async () => {
+    const readFilePath = vi.fn(async () => '/srv/harborlight/docs/dock-notes.md');
+    const { ydoc, setLabelHint } = wire({ readFilePath });
+    ydoc.getMap('meta').set('docId', 'd-harbor');
+    ydoc.getMap('meta').set('title', 'Renamed');
+    expect(readFilePath).not.toHaveBeenCalled();
+    ydoc.getMap('meta').set('fileMovedAt', 1);
+    await vi.waitFor(() =>
+      expect(setLabelHint).toHaveBeenCalledWith('/srv/harborlight/docs/dock-notes.md'),
+    );
+    expect(readFilePath).toHaveBeenCalledWith('d-harbor');
+  });
+
+  it('draws nothing once the mount is torn down mid-read', async () => {
+    let answer: (path: string) => void = () => {};
+    const readFilePath = vi.fn(() => new Promise<string>((r) => (answer = r)));
+    const { ydoc, scope, setLabelHint } = wire({ readFilePath });
+    ydoc.getMap('meta').set('fileMovedAt', 2);
+    scope.dispose();
+    answer('/srv/riverbend/ferry.md');
+    await Promise.resolve();
+    expect(setLabelHint).not.toHaveBeenCalled();
   });
 });
 

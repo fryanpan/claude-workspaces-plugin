@@ -21,13 +21,7 @@ import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  Cdp,
-  launchChrome,
-  pageSocketUrl,
-  sleep,
-  stopBrowser,
-} from '../../../scripts/headless-chrome.ts';
+import { Cdp, launchChrome, sleep, stopBrowser } from '../../../scripts/headless-chrome.ts';
 import {
   STARTUP_TIMEOUT_MS,
   chromeLaunchArgs,
@@ -38,7 +32,9 @@ import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
 import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { CHROME_LOG_ARGS, connectWatched, dumpRunning, onceWithin } from './chrome-stall.ts';
 import type { LeadChatRun, Rect, SurfaceRun, VoiceRun } from './lead-chat-browser-reading.ts';
+import { TAP_PROBE_INSTALL, TAP_PROBE_READ, tapDelivered } from './lead-chat-tap-probe.ts';
 
 const LEAD = { agentId: 'harborlight-lead', agentName: 'Harborlight Lead' };
 
@@ -47,7 +43,7 @@ const step = (what: string): void => {
 };
 
 async function until<T>(
-  what: string,
+  what: string | (() => string | Promise<string>),
   read: () => Promise<T | null> | T | null,
   ms = 20_000,
 ): Promise<T> {
@@ -57,7 +53,7 @@ async function until<T>(
     if (v !== null && v !== undefined) return v;
     await sleep(50);
   }
-  throw new Error(`never happened: ${what}`);
+  throw new Error(`never happened: ${typeof what === 'function' ? await what() : what}`);
 }
 
 /** Everything the page shows of the chat, read through its shadow roots. */
@@ -68,6 +64,9 @@ const READ = `(() => {
   const sr = layer && layer.shadowRoot;
   const pane = sr && sr.querySelector('.lc-pane');
   const bar = sr && sr.querySelector('.lc-bar');
+  // Headless Chrome under load draws few or no frames, so the panel's grow
+  // animation can stall part-way; finish it and read the end state.
+  for (const a of (pane && pane.getAnimations ? pane.getAnimations() : [])) a.finish();
   const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
   const shown = (el) => !!el && !el.hidden && el.getBoundingClientRect().width > 0;
   const b = btn && btn.getBoundingClientRect();
@@ -76,8 +75,7 @@ const READ = `(() => {
     button: shown(btn) ? box(btn) : null,
     buttonOnTop: !!hit && hit === host,
     expanded: btn ? btn.getAttribute('aria-expanded') : null,
-    // Read once the grow has finished: mid-grow the box is the button's.
-    pane: shown(pane) && pane.getAnimations().length === 0 ? box(pane) : null,
+    pane: shown(pane) ? box(pane) : null,
     bar: shown(bar) ? box(bar) : null,
     close: sr && shown(sr.querySelector('.lc-close')) ? box(sr.querySelector('.lc-close')) : null,
     barText: bar ? bar.textContent : '',
@@ -115,6 +113,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--mute-audio',
+        ...CHROME_LOG_ARGS,
       ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-${width}-${process.pid}`,
@@ -122,7 +121,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
       browsers.push(started);
     },
   );
-  const cdp = await Cdp.connect(await pageSocketUrl(b.port, STARTUP_TIMEOUT_MS));
+  const cdp = await connectWatched(b, `page at ${width}`, step);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -139,7 +138,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
 }
 
 async function go(cdp: Cdp, url: string): Promise<Read> {
-  const loaded = cdp.once('Page.loadEventFired');
+  const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
   await cdp.send('Page.navigate', { url });
   await loaded;
   return until('the agent button on the page', async () => {
@@ -148,14 +147,8 @@ async function go(cdp: Cdp, url: string): Promise<Read> {
   });
 }
 
-/** A real tap at the centre of a box, so a covered button fails here. */
-async function tap(cdp: Cdp, r: Rect): Promise<void> {
-  const x = r.left + r.width / 2;
-  const y = r.top + r.height / 2;
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
-  }
-}
+/** A real tap at the centre of a box; see `tapDelivered`. */
+const tap = (cdp: Cdp, r: Rect): Promise<void> => tapDelivered(cdp, r, step);
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lead-chat-'));
@@ -388,6 +381,7 @@ async function main(): Promise<void> {
       })()`);
       const stored = String(await cdp.evaluate(`localStorage.getItem('cw.lead-chat.mode')`));
       await go(cdp, surfaces[0]?.[1] ?? '');
+      await cdp.evaluate(TAP_PROBE_INSTALL);
       const v0 = (await cdp.evaluate(READ)) as Read;
       // Read before the tap: the question's listener may open before the bar is seen.
       const opensBefore = ears.opens;
@@ -424,13 +418,17 @@ async function main(): Promise<void> {
           Buffer.from(png.data, 'base64'),
         );
       }
-      // The bar grows into the panel, still listening; the agent button is
-      // the one listen control, and its tap stops listening and closes.
-      await tap(cdp, out.bar as Rect);
-      const grown = await until('the panel open from the bar', async () => {
-        const r = (await cdp.evaluate(READ)) as Read;
-        return r.pane ? r : null;
-      });
+      // The bar, tapped where it is now, grows into the panel still listening.
+      const barNow = answered.bar ?? out.bar;
+      await tap(cdp, barNow as Rect);
+      const grown = await until(
+        async () =>
+          `the panel open from the bar (tapped ${JSON.stringify(barNow)}; saw ${JSON.stringify(await cdp.evaluate(READ))}; page ${String(await cdp.evaluate(TAP_PROBE_READ))})`,
+        async () => {
+          const r = (await cdp.evaluate(READ)) as Read;
+          return r.pane ? r : null;
+        },
+      );
       await tap(cdp, grown.button as Rect);
       const stopped = await until('listening stopped in the open panel', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
@@ -475,6 +473,9 @@ async function main(): Promise<void> {
 
     const run: LeadChatRun = { surfaces: runs, voice };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);
+  } catch (e) {
+    await dumpRunning(step);
+    throw e;
   } finally {
     lead?.close();
     for (const b of browsers) await stopBrowser(b.proc, b.profile);
@@ -485,9 +486,9 @@ async function main(): Promise<void> {
 
 setTimeout(() => {
   step('gave up after 230s');
-  void Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))).finally(() =>
-    process.exit(3),
-  );
+  void dumpRunning(step)
+    .finally(() => Promise.all(browsers.map((b) => stopBrowser(b.proc, b.profile))))
+    .finally(() => process.exit(3));
 }, 230_000).unref();
 await main();
 process.exit(0);

@@ -3,10 +3,15 @@
  * lines, the status under the list, and the line above the first message.
  * `lead-chat-view.ts` puts them on the page.
  */
+import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
 import type { LeadChatViewModel } from './lead-chat-view.ts';
 
 /** Said while listening is on here and another tab hears the reader. */
 export const PAUSED = 'Paused. Listening in your other tab.';
+
+/** Said while the lead's session compacts its context, in place of
+ *  "Listening…": it is busy, and what the reader says waits. */
+export const COMPACTING = 'Compacting…';
 
 /** Starts the status while words are being heard. */
 export const HEARD = 'Heard: ';
@@ -20,13 +25,32 @@ export interface BarLine {
   live?: boolean;
 }
 
-/** The person's lines and the lead's, newest last, as the bar shows them. */
+/** A meeting's last two lines, newest last: the bar while the chat is
+ *  closed in a meeting, so the room's words stay on screen as the doc
+ *  page's strip keeps them. */
+function meetingBarLines(mm: MeetingViewModel): BarLine[] {
+  const lines: BarLine[] = (mm.meeting?.lines ?? []).slice(-2).map((l) => ({
+    who: l.who,
+    text: l.text.replace(/\s+/g, ' '),
+  }));
+  if (mm.recording && mm.run.partial) {
+    lines.push({ who: 'Heard', text: mm.run.partial, dim: true, live: true });
+  }
+  if (lines.length === 0) lines.push({ who: 'Meeting', text: 'Nothing said yet', dim: true });
+  return lines.slice(-2);
+}
+
+/** The person's lines and the lead's, newest last, as the bar shows them. In
+ *  a meeting, the meeting's lines. */
 export function barLines(m: LeadChatViewModel): BarLine[] {
+  if (m.meeting?.meeting) return meetingBarLines(m.meeting);
   const lines: BarLine[] = m.messages.slice(-2).map((x) => ({
     who: x.role === 'agent' ? x.author.name : 'You',
     text: x.text.replace(/\s+/g, ' '),
   }));
-  if (m.listening && m.paused && (m.voice ?? 'listening') === 'listening') {
+  if (m.compacting && !m.heard) {
+    lines.push({ who: m.lead?.name ?? 'Your lead', text: COMPACTING, dim: true });
+  } else if (m.listening && m.paused && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: PAUSED, dim: true });
   } else if (m.listening && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: m.heard || 'Listening…', dim: !m.heard, live: !!m.heard });
@@ -40,6 +64,7 @@ export function barLines(m: LeadChatViewModel): BarLine[] {
 export function statusLine(m: LeadChatViewModel): string {
   if (m.notice) return m.notice;
   const lead = m.lead?.name ?? 'Your lead';
+  if (m.compacting && !(m.listening && m.heard)) return COMPACTING;
   if (m.listening && m.voice === 'working') return `${lead} is working on it`;
   if (m.listening && m.voice === 'speaking') return `${lead} is answering`;
   if (m.listening && m.paused) return PAUSED;

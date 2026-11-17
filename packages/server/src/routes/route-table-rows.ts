@@ -93,6 +93,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['loopback-only', '/events/agent/:agentId', 'GET'],
     ['share-scope', '/workspaces/:ws/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/events:stream', 'GET'],
+    ['share-scope', '/workspaces/:ws/me/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/audio', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/app-voice', 'GET'],
@@ -106,6 +107,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/home-feed.ts', [
     ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
     ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
+  ]),
+  // A board pushed from the Mac onto a project machine: above the host guard,
+  // its own gate, and claimed only where CW_BOARD_IMPORT_DIR is set.
+  ...family('routes/board-import.ts', [
+    ['board-import', '/api/board-import/:ws', 'GET PUT'],
+    ['board-import', '/api/board-import/:ws/print', 'POST'],
   ]),
   // GitHub events for a board that holds no GitHub token: the key and the
   // list are set on this machine; the Mac's relay reads the list and pushes.
@@ -256,6 +263,24 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
       'Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`).',
     ],
     ['loopback-only', '/api/agents/:agentId/merge', 'POST'],
+    [
+      'loopback-only',
+      '/api/agents/:agentId/person',
+      'POST',
+      'Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`).',
+    ],
+  ]),
+  // A person's private conversation with their own lead agent. The person's
+  // side needs a person proof and refuses every token; the agent's reply is
+  // its own `at1` or `at2`, and only to the person linked to it.
+  ...family('routes/private-messages.ts', [
+    ['trusted-local', '/api/me/messages', 'GET POST'],
+    [
+      'loopback-only',
+      '/api/agents/:agentId/messages/:personId',
+      'POST',
+      'Also served to a board agent token (`at2`) for its own agent id (`middleware/board-agent-door.ts`).',
+    ],
   ]),
   // Mint, list and revoke `at2`: refused through the edge, from off this
   // machine, from a page, and to every visitor, `at2` holders included.
@@ -312,8 +337,30 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/library/items', 'GET'],
     ['trusted-local', '/workspaces/:ws/library/open', 'POST'],
   ]),
+  // Sorting the board's docs into folders is board configuration, written by
+  // the owner's browser and by agents; a member sees the folders through
+  // `library/items` above.
+  ...family('routes/workspace-library-folders.ts', [
+    ['trusted-local', '/workspaces/:ws/library/folders', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/rename', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/move', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/archive', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/folders/:folderId/unarchive', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/docs/:docId/folder', 'PUT'],
+  ]),
+  // A person opened or starred an item here: the records behind Recently
+  // Viewed and Starred. Only a browser's request whose author is a person is
+  // recorded.
+  ...family('routes/workspace-library-views.ts', [
+    ['trusted-local', '/workspaces/:ws/library/views', 'POST'],
+    ['trusted-local', '/workspaces/:ws/library/stars', 'GET'],
+    ['trusted-local', '/workspaces/:ws/library/stars', 'POST'],
+  ]),
 
   ...family('routes/doc-move.ts', [['trusted-local', '/workspaces/:ws/docs/:docId/move', 'POST']]),
+  ...family('routes/doc-file-move.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/move-file', 'POST'],
+  ]),
 
   // A doc on the board draws its embed frames from this mapping for every
   // reader, so a member reads it; writing it is board configuration.
@@ -338,9 +385,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/voice', 'POST'],
     ['trusted-local', '/workspaces/:ws/voice/timings', 'GET'],
   ]),
+  ...family('routes/direct-messages.ts', [['share-scope', '/workspaces/:ws/me/dm', 'GET POST']]),
   ...family('routes/workspace-lead-chat.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/lead-chat/meeting', 'POST'],
+    ['trusted-local', '/workspaces/:ws/lead-chat/meeting/say', 'POST'],
   ]),
   ...family('routes/workspace-lead-chat-files.ts', [
     ['trusted-local', '/workspaces/:ws/lead-chat/files', 'POST'],
@@ -381,6 +430,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // An agent's add files an access card instead of applying; a removal
     // applies at once. Off the member allowlist: no share visitor reaches it.
     ['trusted-local', '/workspaces/:ws/audience', 'POST'],
+    // Whether comment and view are enforced on this board (D1 step 8). Off
+    // the member allowlist, like the audience: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/roles-mode', 'POST'],
+    // Whether the collab core serves this board's sockets (D1 step 5). Off
+    // the member allowlist, like the roles mode: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/collab-core', 'POST'],
   ]),
 
   ...family('routes/workspace-content.ts', [
@@ -453,6 +508,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // `refuseOwnerOnlyWrite` besides, which is what fails closed if the
     // allowlist ever gains the prefix.
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets', 'POST'],
+  ]),
+  ...family('routes/task-review-withdraw.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo', 'POST'],
   ]),
@@ -474,6 +531,11 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/task-grants.ts', [
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/grant', 'POST'],
   ]),
+  ...family('routes/task-done-when.ts', [
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/report', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/done-when/:lineId/check', 'POST'],
+  ]),
   ...family('routes/task-fields.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/after', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/title', 'POST'],
@@ -481,6 +543,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/assignee', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/due', 'POST'],
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/schedule', 'POST'],
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/wait', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/park', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/archive', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/restore', 'POST'],
@@ -573,6 +636,23 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/doc-files.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/files/*', 'GET HEAD'],
   ]),
+  ...family('routes/doc-components.ts', [
+    ['share-scope', '/workspaces/:ws/docs/:docId/components/*', 'GET HEAD'],
+  ]),
+  // An agent's component tools; deliberately outside `components/*`.
+  ...family('routes/doc-component-agent.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/:id/state', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components/place', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/component-grants', 'POST'],
+  ]),
+  ...family('routes/whiteboard-routes.ts', [
+    ['trusted-local', '/workspaces/:ws/whiteboards', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/whiteboard', 'GET POST'],
+  ]),
+  ...family('routes/doc-metadata.ts', [
+    ['trusted-local', '/workspaces/:ws/docs/:docId/metadata', 'GET PUT'],
+  ]),
   ...family('routes/doc-voice-feedback.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback.md', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice-feedback/:file', 'GET'],
@@ -624,6 +704,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/resolve', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/reopen', 'POST'],
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/docs/:docId/threads/:threadId/progress',
+      'POST',
+      'the guard admits `threads/*`; `doc-threads-routes.ts` refuses a visitor itself',
+    ],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/reanchor', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/rewrite_region', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/insert_after', 'POST'],
@@ -648,6 +734,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/find_and_replace', 'POST'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/block_edits', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_block_at_anchor', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_blocks_in_range', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/delete_section', 'POST'],

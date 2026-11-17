@@ -1,0 +1,5 @@
+/*
+ * The shared theme, from the app kit package. Bundled by scripts/build.ts
+ * into dist/theme.css.
+ */
+@import "@claude-workspaces/app-kit/theme.css";

@@ -129,23 +129,15 @@ describe('stateCredentials from the secret card', () => {
     expect(msg).not.toContain(STATE_CARD_ID_ENTRY);
   });
 
-  it('reaches tfCredentials (cf:plan / cf:apply without the keeper)', () => {
+  it('reaches tfCredentials (cf:plan without the keeper, and the CI apply)', () => {
     const creds = tfCredentials(sources({ ...CARD, 'cloudflare-api-token': 'tok' }));
     expect(creds.env.AWS_ACCESS_KEY_ID).toBe(CARD_ID);
     expect(creds.env.AWS_SECRET_ACCESS_KEY).toBe(CARD_SECRET);
   });
 
-  it('reaches the keeper request (cf:plan / cf:apply through the keeper)', () => {
+  it('reaches the keeper request (cf:plan and cf:sync-config through the keeper)', () => {
     const src = sources(CARD);
-    const input = keeperInput('prod', {
-      ...src,
-      read: () => null,
-      keychainHasService: () => false,
-      storeToken: () => {},
-      keeper: async () => ({ status: 0, stdout: '', stderr: '' }),
-      out: () => {},
-      err: () => {},
-    });
+    const input = keeperInput('prod', { ...src, read: () => null });
     expect(JSON.parse(input).state).toEqual({ accessKeyId: CARD_ID, secretAccessKey: CARD_SECRET });
   });
 });

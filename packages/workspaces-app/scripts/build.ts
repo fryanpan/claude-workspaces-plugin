@@ -12,6 +12,7 @@ import {
 } from '@claude-workspaces/core/asset-manifest';
 import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
+import { buildWaTheme } from './build-wa-theme.ts';
 import { buildWhiteboard, copyWhiteboardAssets } from './build-whiteboard.ts';
 import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
 import { stripCssComments } from './strip-css-comments.ts';
@@ -63,6 +64,7 @@ const HASHED = [
   'settings.css',
   'whiteboard.css',
   'tokens.css',
+  'wa-theme.css',
   'index.html',
 ];
 
@@ -280,15 +282,13 @@ async function emit(buildId: string): Promise<boolean> {
     }
   }
 
-  // The whiteboard page: its own entry, React and Excalidraw split behind it.
-  const whiteboardErrors = await buildWhiteboard({
-    pkgRoot,
-    dist,
-    define,
-    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
-  });
+  const minify = process.env.NODE_ENV !== 'dev' && !isWatch;
+  const whiteboardErrors = [
+    ...(await buildWhiteboard({ pkgRoot, dist, define, minify })),
+    ...(await buildWaTheme(pkgRoot, dist)),
+  ];
   if (whiteboardErrors.length > 0) {
-    console.error('whiteboard build failed:');
+    console.error('whiteboard or theme build failed:');
     for (const m of whiteboardErrors) console.error(m);
     if (!isWatch) process.exit(1);
     return false;
@@ -348,38 +348,36 @@ async function emit(buildId: string): Promise<boolean> {
   // put it back on a page load. Its stylesheet and the woff2 fonts the stylesheet
   // names sit beside it; a browser picks woff2 from KaTeX's `src` list first,
   // so the woff and ttf copies would never be fetched.
-  const katexResult = await Bun.build({
-    entrypoints: [join(pkgRoot, 'src', 'katex-entry.ts')],
-    outdir: join(dist, 'katex'),
-    target: 'browser',
-    format: 'esm',
-    splitting: false,
-    naming: { entry: 'katex.js' },
-    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
-  });
-  if (!katexResult.success) {
-    console.error('katex build failed:');
-    for (const m of katexResult.logs) console.error(m);
-    if (!isWatch) process.exit(1);
-    return false;
+  for (const [name, entry] of [
+    ['katex', 'katex-entry.ts'],
+    // Observable Plot, fetched by `mdx-plot-chart.ts` the first time a doc
+    // shows a `<PlotChart>`, for KaTeX's reason above.
+    ['plot', 'plot-entry.ts'],
+    // Leaflet, for a `<StreetMap>` (`mdx-street-map.ts`), for the same
+    // reason; its stylesheet beside it. Markers are drawn as paths, so
+    // Leaflet's marker images are never asked for and are not copied.
+    ['map', 'map-entry.ts'],
+  ] as const) {
+    const result = await Bun.build({
+      entrypoints: [join(pkgRoot, 'src', entry)],
+      outdir: join(dist, name),
+      target: 'browser',
+      format: 'esm',
+      splitting: false,
+      naming: { entry: `${name}.js` },
+      minify: process.env.NODE_ENV !== 'dev' && !isWatch,
+    });
+    if (!result.success) {
+      console.error(`${name} build failed:`);
+      for (const m of result.logs) console.error(m);
+      if (!isWatch) process.exit(1);
+      return false;
+    }
   }
-  // Observable Plot: its own file, fetched by `mdx-plot-chart.ts` the first
-  // time a doc shows a `<PlotChart>`, for KaTeX's reason above.
-  const plotResult = await Bun.build({
-    entrypoints: [join(pkgRoot, 'src', 'plot-entry.ts')],
-    outdir: join(dist, 'plot'),
-    target: 'browser',
-    format: 'esm',
-    splitting: false,
-    naming: { entry: 'plot.js' },
-    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
-  });
-  if (!plotResult.success) {
-    console.error('plot build failed:');
-    for (const m of plotResult.logs) console.error(m);
-    if (!isWatch) process.exit(1);
-    return false;
-  }
+  const leafletDist = dirname(
+    createRequire(join(pkgRoot, 'package.json')).resolve('leaflet/dist/leaflet.css'),
+  );
+  cpSync(join(leafletDist, 'leaflet.css'), join(dist, 'map', 'leaflet.css'));
   const katexDist = dirname(
     createRequire(join(pkgRoot, 'package.json')).resolve('katex/dist/katex.min.css'),
   );

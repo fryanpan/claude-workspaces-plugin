@@ -6,8 +6,9 @@
  *
  * Through the real route: the owner signed in with the session cookie the
  * emailed-code sign-in sets, another signed-in person, and a request that
- * proves nobody. Inbox and Coach are the owner's sections, so only the owner's
- * bar has entries for them, and every entry points at a section on the page.
+ * proves nobody. Inbox is the owner's section, so only the owner's bar has an
+ * entry for it, and every entry points at a section on the page. Coach is on
+ * no one's bar: the coach is not on Home ("Coach should not be on home page").
  * That the bar shows only at mobile width and scrolls is the browser test
  * (`packages/workspaces-app/test/home-nav-browser.test.ts`).
  *
@@ -44,6 +45,22 @@ async function navOf(
   return entries.map((e) => ({ ...e, onPage: html.includes(`id="${e.id}"`) }));
 }
 
+/** Home's four regions, in the order a browser meets them on the page. */
+async function regionOrder(html: string): Promise<string[]> {
+  const wanted = new Set(['landing-review', 'coach', 'inbox', 'landing-boards']);
+  const seen: string[] = [];
+  await new HTMLRewriter()
+    .on('[id]', {
+      element(el) {
+        const id = el.getAttribute('id') ?? '';
+        if (wanted.has(id)) seen.push(id);
+      },
+    })
+    .transform(new Response(html))
+    .text();
+  return seen;
+}
+
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'landing-section-nav-'));
   dataDir = join(root, 'data');
@@ -74,14 +91,22 @@ afterAll(async () => {
 });
 
 describe("Home's section bar", () => {
-  it('gives the owner Review items, Inbox, Projects and Coach, each pointing at its section', async () => {
+  it('gives the owner Review items, Inbox and Projects, each pointing at its section, and no Coach', async () => {
     const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
     const nav = await navOf(await landing(owner.headers));
     expect(nav).toEqual([
       { id: 'landing-review', label: 'Review', onPage: true, icon: true },
       { id: 'inbox', label: 'Inbox', onPage: true, icon: true },
       { id: 'landing-boards', label: 'Projects', onPage: true, icon: true },
-      { id: 'coach', label: 'Coach', onPage: true, icon: true },
+    ]);
+  });
+
+  it("puts the owner's review items first, and draws no coach region", async () => {
+    const owner = signedInPerson(handle, dataDir, base, { email: OWNER_EMAIL });
+    expect(await regionOrder(await landing(owner.headers))).toEqual([
+      'landing-review',
+      'inbox',
+      'landing-boards',
     ]);
   });
 

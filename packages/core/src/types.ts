@@ -611,11 +611,25 @@ export interface LinkedReviewItem {
   ref: { taskId: string; reviewItemId: string } | { docId: string; threadId: string };
 }
 
+/** Somebody a comment is for: a person or an agent on the doc's board. */
+export interface Addressee {
+  id: string;
+  kind: 'person' | 'agent';
+  name: string;
+}
+
 export interface Comment {
   id: string;
   author: User;
   text: string;
   ts: number;
+  /**
+   * Who this comment is for. Written by the server alone, from ids it
+   * resolved against the board's roster, never from a body's names. It
+   * decides who is notified and who must answer; it does not hide the
+   * comment from anybody who can read the doc.
+   */
+  addressedTo?: Addressee[];
   /** Set when the comment was sent from inside a mock page — see `WriteVia`. */
   via?: WriteVia;
   /**
@@ -681,6 +695,9 @@ export interface ThreadSummary {
   commentCount: number;
   lastActivity: number;
   createdBy: User;
+  /** Ids an open thread waits on: the addressees of its latest comment.
+   *  Absent when the thread is resolved or its latest comment named nobody. */
+  waitingOn?: string[];
 }
 
 export interface Thread extends ThreadSummary {
@@ -709,6 +726,18 @@ export interface Thread extends ThreadSummary {
    * deterministic fallback during the regeneration window.
    */
   summaryPending?: boolean;
+  /** What an agent is doing with this thread, when it said: `thread-progress.ts`.
+   *  Server payloads only; the widget reads the raw field. */
+  progress?: ThreadProgress;
+}
+
+/** An agent's mark on a thread: working on it, or done. See `thread-progress.ts`. */
+export interface ThreadProgress {
+  state: 'working' | 'done';
+  /** Who set the mark. */
+  by: User;
+  /** When, in ms since the epoch. */
+  at: number;
 }
 
 /** A generated summary as stored on a thread. Mirrors `summary-prompt.ts`. */

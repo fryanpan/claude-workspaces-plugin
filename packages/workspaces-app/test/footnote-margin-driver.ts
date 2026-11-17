@@ -15,6 +15,7 @@ import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { balloonMarginVisible } from '../src/card-placement.ts';
 import { mountDocMargin } from '../src/doc/doc-margin.ts';
+import { footnoteRuns } from '../src/doc/footnote-decorations.ts';
 import { createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
 import { mountReviewChrome } from '../src/review-chrome.ts';
@@ -64,6 +65,11 @@ export interface FootnoteProbe {
   cards: number;
   /** Runs whose superscript number is drawn — every one, at every width. */
   superscripts: number;
+  /** Numbers painted anywhere in the prose, counting every piece of every
+   *  run: note 1 holds a link, which cuts its run into three pieces. */
+  numbers: number;
+  /** The pieces note 1's run renders as — the control that the link split it. */
+  linkedPieces: number;
   /** Notes whose card starts with the number drawn at their run. */
   paired: number;
   /** What the phone's popover starts with after a tap on note 3. */
@@ -229,6 +235,21 @@ async function scrollAndRestack(editorEl: HTMLElement, y: number): Promise<void>
   await frame();
 }
 
+/** A link mark on words inside note 1, as a pasted link leaves one: the
+ *  parser keeps a note's text plain, so only the editor can put it there. */
+function linkInsideFirstNote(editor: ReturnType<typeof createEditor>): void {
+  const run = footnoteRuns(editor.editor.state.doc)[0];
+  if (!run) throw new Error('the fixture has no note');
+  const at = editor.editor.state.doc.textBetween(run.from, run.to).indexOf('Safe Routes');
+  if (at < 0) throw new Error('note 1 does not name Safe Routes');
+  editor.editor
+    .chain()
+    .setTextSelection({ from: run.from + at, to: run.from + at + 'Safe Routes'.length })
+    .setLink({ href: 'https://www.example.org/safe-routes' })
+    .setTextSelection(1)
+    .run();
+}
+
 /** The fixture, mounted as the review page mounts it, and nothing measured. */
 async function mountFixture(): Promise<{
   editorEl: HTMLElement;
@@ -238,6 +259,7 @@ async function mountFixture(): Promise<{
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks(fixtureMarkdown()));
   const editor = createEditor({ parent: editorEl, ydoc, awareness: new Awareness(ydoc) });
+  linkInsideFirstNote(editor);
   const scope = new MountScope();
   const chrome = mountReviewChrome({
     docId: 'd1',
@@ -368,6 +390,11 @@ async function probe(): Promise<string> {
     notes: notes.size,
     cards: cards.length,
     superscripts: runs.filter((r) => getComputedStyle(r, '::after').display !== 'none').length,
+    numbers: [...proseEl.querySelectorAll('.cw-fn')].filter((el) => {
+      const c = drawn(el, '::after');
+      return c !== 'none' && c !== 'normal' && c !== '""';
+    }).length,
+    linkedPieces: proseEl.querySelectorAll('.cw-fn[data-cw-fn-run="1"]').length,
     scrollHeight: editorEl.scrollHeight,
     clientHeight: editorEl.clientHeight,
     scrolling,
@@ -393,6 +420,8 @@ function numberLift(run: HTMLElement): number | null {
   let prev: Text | null = null;
   for (let t = walk.nextNode(); t; t = walk.nextNode()) {
     if (run.contains(t)) break;
+    // The run's earlier pieces are folded to nothing; they have no letter.
+    if (t.parentElement?.closest('.cw-fn')) continue;
     if ((t as Text).length >= 2) prev = t as Text;
   }
   if (!prev) return null;

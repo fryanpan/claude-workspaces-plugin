@@ -13,6 +13,7 @@
 import type { FeedbackClient } from '@claude-workspaces/core';
 import { readDocMeta } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
+import { readDocMetaOrNull } from '../doc-meta.ts';
 import type { EditorHandle } from '../editor.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { refreshNotesLinkAffordances } from '../notes-link-affordance.ts';
@@ -38,6 +39,15 @@ export interface DocReadyOptions {
   /** Run once, the first time the document's state arrives — the mount's own
    *  `?thread=` reveal. Later syncs do not repeat it. */
   onFirstSync?: () => void;
+  /** The doc's file path, read again when the server says the file moved
+   *  (`fileMovedAt` on the synced meta). The path itself never enters the
+   *  CRDT, because share visitors sync it. Defaults to the REST meta. */
+  readFilePath?: (docId: string) => Promise<string | undefined>;
+}
+
+async function restFilePath(docId: string): Promise<string | undefined> {
+  const meta = await readDocMetaOrNull(docId);
+  return meta ? meta.sourceUrl || meta.relPath || undefined : undefined;
 }
 
 export function wireDocReady(opts: DocReadyOptions): void {
@@ -45,9 +55,17 @@ export function wireDocReady(opts: DocReadyOptions): void {
   const notesLinkRefs = opts.notesLinkRefs;
 
   const meta = ydoc.getMap('meta');
+  const readFilePath = opts.readFilePath ?? restFilePath;
+  let movedAt = meta.get('fileMovedAt');
   const onMeta = () => {
     chrome.renderDocLabel();
     void renderSetNav();
+    const moved = meta.get('fileMovedAt');
+    if (moved === movedAt) return;
+    movedAt = moved;
+    void readFilePath(readDocMeta(ydoc).docId).then((path) => {
+      if (!scope.disposed && path !== undefined) chrome.setLabelHint(path);
+    });
   };
   meta.observe(onMeta);
   scope.onCleanup(() => meta.unobserve(onMeta));

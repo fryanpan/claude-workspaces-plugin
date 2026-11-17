@@ -270,6 +270,8 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     const chmods = lines(log, '.chmod');
     expect(chmods).toContain(`root 0700 ${volume}/cw ${volume}/claude-projects ${volume}/lead`);
     expect(chmods).toContain(`root 0710 ${volume}/boards`);
+    // A pushed board waits in cw's folder, closed to the lead too.
+    expect(chmods).toContain(`root 0700 ${volume}/board-imports`);
     expect(chmods).toContain(`root 0700 ${volume}/cw.before-restore-1`);
     expect(chmods.filter((c) => c.includes('link.before-restore'))).toEqual([]);
 

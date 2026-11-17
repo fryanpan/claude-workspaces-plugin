@@ -37,7 +37,7 @@ describe('the local entry a client announces on connect', () => {
     // CONTROL, and the thing the old comment denied: the real constructor ends
     // with `setLocalState({})`, so a client that never touches presence still
     // holds an entry — and `ws-client` sends it, because it sends whenever
-    // `getStates()` is non-empty.
+    // `getLocalState()` is non-null.
     expect(real(doc).getStates().size).toBe(1);
     expect(new shim.Awareness(doc).getStates().size).toBe(0);
   });
@@ -45,7 +45,7 @@ describe('the local entry a client announces on connect', () => {
   it('is what decides whether a frame goes out at all', () => {
     const doc = new Y.Doc();
     // `ws-client`'s own condition, in both worlds.
-    const sends = (a: { getStates(): Map<number, unknown> }) => a.getStates().size > 0;
+    const sends = (a: { getLocalState(): unknown }) => a.getLocalState() !== null;
     expect(sends(real(doc))).toBe(true);
     expect(sends(new shim.Awareness(doc))).toBe(false);
   });

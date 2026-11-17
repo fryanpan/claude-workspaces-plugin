@@ -1,43 +1,43 @@
 /**
- * The order a vitest run starts its files in: every file that may launch a
- * real browser first, then the rest, each half in vitest's own order.
+ * How a vitest run splits its files across CI shards and the order each shard
+ * starts them in. Files are split by the measured durations in
+ * `scripts/vitest-durations.json` (the reasoning is in `scripts/vitest-shard.ts`).
  *
- * WHY. Vitest's default sort runs projects one after the other by NAME, so
- * every `dom` file is queued before any `node` file. On CI that left
- * `packages/plugin/test/check-mock-render.test.ts` (a node file, 56s, the
- * second-slowest in the suite) starting only once its shard's dom files had
- * drained, at +62s, and finishing alone at +119s while three workers sat
- * idle. That one queue position made client shard 4 the long pole (run
- * 36844754479: 123s of vitest against 69-94s for the other three).
+ * TWO KINDS OF SHARD. `CW_VITEST_KIND=browser` keeps only the files that
+ * launch Chrome, and `CW_VITEST_KIND=unit` keeps every other file. Each kind
+ * is then split across its own shards. CI runs the browser shards with two
+ * workers, so no runner has more than two Chrome-launching files running at
+ * once. The unit shards keep the full worker count. This file decides which
+ * kind a file is; the ordering decides nothing about where it runs. Unset,
+ * every file is in the run, as `bun run verify` has it.
  *
- * WHY THE BROWSER GATE IS THE SIGNAL. The 39 files that call `chromeForSuite`
- * are 6% of the suite's files and 70% of its measured test time on CI (476s of
- * 683s), and every one of the 20 slowest files but three is among them. A
- * file has to call it to launch a browser at all (`scripts/browser-tests.ts`),
- * so the signal cannot fall out of date the way a table of durations would.
- * Started first, they run beside the cheap files instead of after them.
+ * Why the split exists: with every file in one pool, longest-first started
+ * each shard's four heaviest files together, and on a 4-vCPU runner those
+ * were four Chrome drivers. That PR's runs failed a browser timing window in
+ * 4 of 5 runs, against about 15% on other branches.
  *
- * WHAT IT DOES NOT CHANGE. `shard` is vitest's own, so the split of files
- * into shards is exactly what it was, and with it every shard's tests and
- * lcov. Only the start order inside a shard moves. Locally, where the gate
- * is shut, those files skip their cases and the order costs nothing.
+ * Locally, where the browser gate is shut and no `--shard` is passed, only the
+ * order changes, and the browser files skip their cases whatever their place.
  */
 import { readFileSync } from 'node:fs';
+import { relative } from 'node:path';
 import { BaseSequencer, type TestSpecification } from 'vitest/node';
+import {
+  type Durations,
+  balancedShard,
+  loadDurations,
+  longestFirst,
+  weightOf,
+} from './vitest-shard.ts';
 
 /** The call a file must make to launch a browser (`scripts/browser-tests.ts`). */
 const BROWSER_GATE = 'chromeForSuite(';
 
 /**
- * `sorted`, with every file whose text calls the browser gate moved to the
- * front. Stable: each half keeps the order it arrived in.
+ * Files that launch a real Chrome without going through the gate. Each
+ * resolves the binary itself. They go to the browser shards.
  */
-export function browserFirst<T>(sorted: readonly T[], callsGate: (file: T) => boolean): T[] {
-  const browser: T[] = [];
-  const rest: T[] = [];
-  for (const file of sorted) (callsGate(file) ? browser : rest).push(file);
-  return [...browser, ...rest];
-}
+export const LAUNCHES_CHROME_UNGATED: readonly string[] = ['scripts/chrome-orphans.test.ts'];
 
 /** Does the file at `path` call the browser gate? An unreadable file does not. */
 export function callsBrowserGate(path: string, read = (p: string) => readFileSync(p, 'utf8')) {
@@ -48,9 +48,63 @@ export function callsBrowserGate(path: string, read = (p: string) => readFileSyn
   }
 }
 
-export class BrowserFirstSequencer extends BaseSequencer {
+export type Kind = 'browser' | 'unit';
+
+/** Which shard kind a file belongs to, from its repo-relative path. */
+export function kindOf(relPath: string, callsGate: boolean): Kind {
+  return callsGate || LAUNCHES_CHROME_UNGATED.includes(relPath) ? 'browser' : 'unit';
+}
+
+/** `CW_VITEST_KIND`, or null for every file. Anything else is a typo, and refused. */
+export function kindFromEnv(value: string | undefined): Kind | null {
+  if (value === undefined || value === '') return null;
+  if (value === 'browser' || value === 'unit') return value;
+  throw new Error(`CW_VITEST_KIND must be "browser" or "unit"; got "${value}"`);
+}
+
+/** The repo-relative path, forward slashes. */
+function relPath(root: string, moduleId: string): string {
+  return relative(root, moduleId).split('\\').join('/');
+}
+
+/** The table's key for a file: `<project>:<repo-relative path>`, forward slashes. */
+export function specKey(project: string, root: string, moduleId: string): string {
+  return `${project}:${relPath(root, moduleId)}`;
+}
+
+export class DurationSequencer extends BaseSequencer {
+  private durations: Durations | null = null;
+
+  private weigh(): {
+    key: (s: TestSpecification) => string;
+    weight: (s: TestSpecification) => number;
+  } {
+    this.durations ??= loadDurations();
+    const durations = this.durations;
+    const root = this.ctx.config.root;
+    const key = (s: TestSpecification) => specKey(s.project.name, root, s.moduleId);
+    const weight = (s: TestSpecification) =>
+      weightOf(durations, key(s), callsBrowserGate(s.moduleId));
+    return { key, weight };
+  }
+
+  override async shard(files: TestSpecification[]): Promise<TestSpecification[]> {
+    const shard = this.ctx.config.shard;
+    if (!shard) return files;
+    const kind = kindFromEnv(process.env.CW_VITEST_KIND);
+    const root = this.ctx.config.root;
+    const mine =
+      kind === null
+        ? files
+        : files.filter(
+            (s) => kindOf(relPath(root, s.moduleId), callsBrowserGate(s.moduleId)) === kind,
+          );
+    const { key, weight } = this.weigh();
+    return balancedShard(mine, key, weight, shard.index, shard.count);
+  }
+
   override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
-    const sorted = await super.sort(files);
-    return browserFirst(sorted, (spec) => callsBrowserGate(spec.moduleId));
+    const { key, weight } = this.weigh();
+    return longestFirst(files, key, weight);
   }
 }

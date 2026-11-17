@@ -141,3 +141,5 @@ If a different agent holds the seat and is live, the call comes back `declined: 
 2. Run `list_docs` on the board. The Library's "Where files live" section shows which docs are "Stored by Workspaces".
 3. For each doc that nobody is editing: `move_doc_to_project(workspaceId, docId, relPath)`, then `list_threads` to check that the thread count did not change. Do not move a meeting that is recording.
 4. Commit the moved files in a PR. Do not check out, stash or pull over a file while its doc is open.
+
+**Reorganize docs that are already in the repo** with `move_doc_file(workspaceId, docId, path, mode)`. Use `mode: "move"` to have the server rename the file. If you already ran `git mv`, use `mode: "repoint"` so the doc follows the file. The doc keeps its id, threads and links, and unsaved edits go to the new path. Do not use `attach_markdown` for this: it refuses to repoint a doc.

@@ -15,6 +15,8 @@
  * read its source. Order and drained state are not things source-reading can
  * check.
  */
+import type { AttachAgentAnswer } from '../../server/src/index.ts';
+import { workspaceAgentsClient, workspaceBoardClient } from './server-client.ts';
 export interface DeclareLeadDeps {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
   /** `open` — the SSE stream is actually live, so events reach this session
@@ -39,33 +41,8 @@ export interface DeclareLeadDeps {
   processId: string;
 }
 
-/** The half of the attach response that is a BACKLOG rather than a receipt. */
-interface AttachResponse {
-  attachment?: { agentId?: string };
-  gating?: unknown;
-  untriaged?: string[];
-  queuedVoice?: Array<{ transcript: string; ts: number }>;
-  /** Comments addressed to this agent that its stream never carried. Handed
-   *  over but NOT drained — the server holds each row until the receipt this
-   *  module sends, so a crash between attach and response re-offers them. */
-  queuedComments?: Array<{
-    id: string;
-    docId: string;
-    threadId?: string;
-    event: string;
-    author?: { id?: string; name?: string };
-    text: string;
-    ts: number;
-  }>;
-  lead?: boolean;
-  /** This board has been stood down — no new work, not ranked. */
-  retired?: { since: number; reason?: string; notice: string };
-  /** This agent leads another LIVE board with the same name. */
-  leadNameConflicts?: {
-    boards: Array<{ workspaceId: string; name: string }>;
-    notice: string;
-  };
-}
+/** The attach answer: a receipt, and the BACKLOG the server held for this agent. */
+type AttachResponse = AttachAgentAnswer;
 
 export async function declareWorkspaceLead(
   args: { workspaceId: string; leadAgentId?: string; takeover?: boolean },
@@ -78,7 +55,8 @@ export async function declareWorkspaceLead(
   // caller changing meaning — old bundles keep sending their own id.
   const declaring = named.length === 0 || named === deps.self.id;
   const leadAgentId = declaring ? deps.self.id : named;
-  const path = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  const param = { ws: encodeURIComponent(workspaceId) };
+  const roster = () => workspaceAgentsClient(deps.http).workspaces[':ws'];
 
   // Refused up front, with nothing issued. A session with no identity cannot
   // persist a watch, cannot attach, and must not take a seat — the seat is
@@ -104,15 +82,20 @@ export async function declareWorkspaceLead(
     //    hasLiveLeadAttachment read, and it is what drains a queue that built
     //    up while the seat was empty. Doing it after the seat change would
     //    leave setLeadAgent re-delivering to a lead the server cannot see.
-    attached = (await deps.http('POST', `/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-      agentId: deps.self.id,
-      // The roster row is written from this: the name every surface then
-      // uses for this agent, rather than whatever each one derives.
-      agentName: deps.self.name,
-      runtime: deps.runtime,
-      pluginVersion: deps.pluginVersion,
-      processId: deps.processId,
-    })) as AttachResponse;
+    attached = await (
+      await roster().agents.$post({
+        param,
+        json: {
+          agentId: deps.self.id,
+          // The roster row is written from this: the name every surface then
+          // uses for this agent, rather than whatever each one derives.
+          agentName: deps.self.name,
+          runtime: deps.runtime,
+          pluginVersion: deps.pluginVersion,
+          processId: deps.processId,
+        },
+      })
+    ).json();
 
     // 2. SUBSCRIBE BEFORE THE SEAT CHANGE. A seat change is announced on the
     //    WORKSPACE CHANNEL. Subscribing afterwards would let that first
@@ -134,16 +117,13 @@ export async function declareWorkspaceLead(
   }
 
   // 3. TAKE THE SEAT.
-  const res = (await deps.http('PUT', `${path}/lead`, {
-    leadAgentId,
-    author: deps.self,
-    ...(args.takeover === true ? { takeover: true } : {}),
-  })) as {
-    changed: boolean;
-    workspace?: { leadAgentId?: string };
-    previousLeadAgentId?: string;
-    declined?: string;
-  };
+  const res = await (
+    await workspaceBoardClient(deps.http).workspaces[':ws'].lead.$put({
+      param,
+      // `takeover` is sent only when true; undefined is dropped by JSON.
+      json: { leadAgentId, author: deps.self, takeover: args.takeover === true ? true : undefined },
+    })
+  ).json();
 
   const settledLead = res.workspace?.leadAgentId ?? leadAgentId;
   const seat = {
@@ -162,14 +142,18 @@ export async function declareWorkspaceLead(
   // because a queue is at least honest about not having been read.
   if (!declaring) return seat;
 
-  const a = attached ?? {};
+  const a: Partial<AttachResponse> = attached ?? {};
   // The parked comments are in this process's hands once this response goes
   // back — send the receipt per row, same contract as attach_agent's own
   // handler. A failed ack costs one redelivery after the grace window.
   for (const q of a.queuedComments ?? []) {
     if (typeof q?.id !== 'string') continue;
     try {
-      await deps.http('POST', `${path}/comment-queue/${encodeURIComponent(q.id)}/ack`, {});
+      await roster()['comment-queue'][':id'].ack.$post(
+        { param: { ...param, id: encodeURIComponent(q.id) } },
+        // The receipt has always carried an empty JSON body.
+        { init: { body: '{}' } },
+      );
     } catch {
       // Left on the queue on purpose.
     }

@@ -63,6 +63,12 @@ export const READER_CUTS: readonly ReaderCut[] = [
         '    comments.length > 0 ? (comments[comments.length - 1]?.ts ?? createdAt) : createdAt;\n',
       '    commentCount: comments.length,\n',
       '    lastActivity,\n',
+      // Who a comment is for, and who an open thread waits on: the board and
+      // the agent's tools read them; the widget draws neither.
+      "        const addressedTo = readAddressedTo(c.get('addressedTo'));\n",
+      '          ...(addressedTo ? { addressedTo } : {}),\n',
+      '  const waitingOn = waitingOnOf(status, comments);\n',
+      '    ...(waitingOn ? { waitingOn } : {}),\n',
     ],
     blocks: [],
   },
@@ -130,6 +136,8 @@ export const STRIPPED_FIELDS: readonly string[] = [
   'answerHistory',
   'partialAnswers',
   'access',
+  'addressedTo',
+  'waitingOn',
 ];
 
 /** The cut for a module path, or undefined when the file is not one of the readers. */

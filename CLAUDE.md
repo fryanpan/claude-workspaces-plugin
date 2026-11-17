@@ -46,7 +46,10 @@ proves it is one doc on one board, so it can speak, listen and write through
 its own socket),
 [lead-tree-containment](docs/architecture/lead-tree-containment.md) (every
 server path that touches a walled lead's files, how each is contained, and
-the sandboxed git that runs in a lead's own repository) and
+the sandboxed git that runs in a lead's own repository),
+[doc-metadata](docs/architecture/doc-metadata.md) (the schema a folder
+declares for its docs' front matter, the YAML the editor writes, and the
+contract another repo reads) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.
@@ -119,7 +122,7 @@ that way and add new subsystem docs to the list here.
   a new mock doc, a new link or a new review item per round (the owner,
   2026-09-14: "there should be one collaboration surface").
 
-## The gates — `bun run verify` before you push
+## The gates — CI is the gate
 
 ```bash
 bun run verify                        # every gate CI runs. ~2 min, cheapest first.
@@ -127,6 +130,16 @@ bun run verify --list                 # the members, and the one hole
 bun run verify --only lint,typecheck  # re-run what failed
 bun run verify --bail                 # stop at the first failure
 ```
+
+**CI is the gate** (the owner, 2026-11-14). Before you push, run the fast
+gates and the tests you touched: `bun run verify --only
+typecheck,lint,loc:audit,test:audit`, plus `check:widget-size` if the diff
+touches the widget, plus `bun test <file>` / `bunx vitest run <file>` for each
+test file you changed. Then push and open the PR. CI runs every member on
+GitHub's runners; when it goes red, read it with one `gh pr checks` call, fix
+and push. A full local `bun run verify` is still the whole set and still
+works, but it is no longer required before a push: several agents share this
+machine, and two full runs at once have run it out of memory.
 
 **One command, not a list you pick from.** This section used to name four
 gates. CI runs every gate `bun run verify --list` names, and a builder who
@@ -137,13 +150,15 @@ and `bun run verify:parity` — a member of the run AND a step of CI's `gates`
 job — fails if ci.yml gains a gate that is not a member, in ANY of its jobs.
 That is what keeps this paragraph true.
 
-CI is four jobs (`gates`, `client`, `server`, `coverage`) so that a verdict
-takes about ninety seconds rather than eleven minutes; `bun run verify` is
+CI is six jobs (`gates`, `gates-build`, `client` in five shards,
+`client-browser` in fourteen, `server` in two, and `ci`, the one required
+check, which also runs the coverage ratchet) so that a verdict takes
+about two minutes rather than eleven; `bun run verify` is
 still one sequential run, because this machine hosts several agents at once.
 Its last three members are a chain — both suites run under coverage
 instrumentation and `coverage` ratchets what they left in `.coverage/`, so
 neither suite runs twice. `bun run test:server` splits the server suite across
-four processes for the same reason CI splits it across eight: it is two-thirds
+four processes for the same reason CI splits each half across eight: it is two-thirds
 idle. Pass `--jobs 1` for the old one-process behaviour.
 
 Every member's output goes straight to your terminal in full; the summary at

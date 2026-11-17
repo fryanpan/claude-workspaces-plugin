@@ -11,6 +11,7 @@ import {
   parseThreadReviewItemId,
   pendingDeclaration,
 } from '@claude-workspaces/core';
+import { COLLAB_CORE_CHANGED } from '@claude-workspaces/core/workspace-presence';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
 import {
@@ -19,6 +20,7 @@ import {
   ownerDisplayNames,
   ownerIdentityIds,
 } from './actor-identity.ts';
+import { type AddresseeRoster, resolveAddressees } from './addressees.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -30,11 +32,17 @@ import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
 import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
-import { localOnlyPlacesFrom, offBoxAskView } from './ask-feed.ts';
+import { localOnlyPlacesFrom, offBoxAddressedView, offBoxAskView } from './ask-feed.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
 import { identifyCallerAgent } from './auth/agent-caller.ts';
+import {
+  AgentGrantTokens,
+  agentGrantTokenKey,
+  agentGrantTokensPath,
+  appIdFrom,
+} from './auth/agent-grant-token.ts';
 import {
   authorizeAgentCaller,
   createLegacyAgentWarner,
@@ -56,15 +64,22 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { CollabCorePath } from './collab-core-path.ts';
+import { CollabCoreSwitch, collabCoreView, parseCollabCoreEnv } from './collab-core-switch.ts';
+import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
+import { FileDirectMessageStore } from './direct-messages.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
-import { DocStore } from './doc-store.ts';
+import { confirmGrantFolder } from './doc-components-agent.ts';
+import { DiskHistoryStore } from './doc-history/log.ts';
+import { DocHistory } from './doc-history/recorder.ts';
+import { DocStore, type LiveDoc } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
@@ -77,6 +92,7 @@ import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
+import type { HonoBoardAppEnv, HonoOpenAppEnv } from './hono-env.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
@@ -120,13 +136,20 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { realTickScheduler } from './pause-ticker.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
+import { PersonAgentLinks } from './person-agent-link.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
+import { type PresenceRoster, presenceUserFor, resolveStamp } from './presence-identity.ts';
+import { FilePrivateMessageStore } from './private-messages.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { scanSettledDocRefs } from './refs-backfill.ts';
-import { createOriginPolicy, createRequestAdmission } from './request-admission.ts';
+import {
+  type RequestAdmission,
+  createOriginPolicy,
+  createRequestAdmission,
+} from './request-admission.ts';
 import { createRequestAttribution } from './request-attribution.ts';
 import { BLOCKING_WAIT_WINDOW_MS, blockingWait } from './review-answer-ledger.ts';
 import {
@@ -146,6 +169,7 @@ import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import { boardImportRoutesContext } from './routes/board-import.ts';
 import { type BoardSocketRootsRoutesContext } from './routes/board-socket-roots.ts';
 import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
 import { type ChatAuditRoutesContext } from './routes/chat-audit-routes.ts';
@@ -155,14 +179,20 @@ import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { createHonoApp } from './routes/hono-app.ts';
+import { honoBoardFamilies } from './routes/hono-board-families.ts';
+import { honoFamilies } from './routes/hono-families.ts';
+import { createHonoFront } from './routes/hono-front.ts';
+import { honoOpenFamilies } from './routes/hono-open-families.ts';
+import { honoTailFamilies } from './routes/hono-tail-families.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
 import { type OpsRoutesContext } from './routes/ops.ts';
+import type { PrivateMessageRoutesContext } from './routes/private-messages.ts';
 import { type PromptRoutesContext } from './routes/prompts.ts';
 import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
-import { createRequestChain } from './routes/request-chain.ts';
 import { type ReviewFileRoutesContext } from './routes/review-files.ts';
 import { type ReviewQueueRoutesContext } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
@@ -232,6 +262,7 @@ import { meetingContext } from './voice-meeting-context.ts';
 import { VoiceRouter, parseVoiceContext } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
 import { isRetired } from './workspace-store.ts';
+import { restampPerson } from './yjs-protocol.ts';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 8787);
 
@@ -281,6 +312,43 @@ export {
 };
 
 export type { ServerOptions };
+
+/**
+ * The typed routes another package's client reads. Re-exported here because
+ * only this module may import out of `routes/`, and the MCP child's
+ * `hc<MountsApi>` needs the type (never the code) of the app that answers.
+ */
+export type { MountsApi } from './routes/mounts-api.ts';
+export type { AgentNotesContract } from './routes/agent-notes-contract.ts';
+export type { AttachmentsContract } from './routes/attachments-contract.ts';
+export type { ShareContract } from './routes/share-contract.ts';
+export type { TaskStateContract } from './routes/task-state-contract.ts';
+export type { TaskContentContract } from './routes/task-content-contract.ts';
+export type { NextAnswer, TaskBoardContract } from './routes/task-board-contract.ts';
+export type { ReviewItemsContract } from './routes/review-items-contract.ts';
+export type { LibraryFoldersContract } from './routes/library-folders-contract.ts';
+export type { DocComponentsContract } from './routes/doc-components-contract.ts';
+export type { PersonContract, PlaceFields } from './routes/person-contract.ts';
+export type { WhiteboardContract } from './routes/whiteboard-contract.ts';
+export type { InboxContract } from './routes/inbox-contract.ts';
+export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts';
+export type { WorkspaceBoardContract } from './routes/workspace-board-contract.ts';
+export type {
+  AttachAgentAnswer,
+  WorkspaceAgentsContract,
+} from './routes/workspace-agents-contract.ts';
+export type { DispatchesContract } from './routes/dispatches-contract.ts';
+export type { DocFileContract } from './routes/doc-file-contract.ts';
+export type { LeadMeetingContract } from './routes/lead-meeting-contract.ts';
+export type { AgentMachineContract } from './routes/agent-machine-contract.ts';
+export type { DocEditsContract } from './routes/doc-edits-contract.ts';
+export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
+export type {
+  DocThreadsContract,
+  ScopedEditFields,
+  ThreadByFindBody,
+  ThreadCreateBody,
+} from './routes/doc-threads-contract.ts';
 
 /**
  * `revisedRange` off a request body: the offsets into the NEW detail that a
@@ -359,6 +427,14 @@ export interface ServerHandle {
    *  Exposed so a test can name who a board admits without a person's
    *  browser, which is the only other door that may (`board-audience.ts`). */
   shareLinks: ShareLinks;
+  /** The core room hosts every revoke rechecks (`collab-rooms.ts`). */
+  collabRooms: CollabRooms;
+  /** Which boards the collab core serves, and its room host over the doc
+   *  store's docs. Exposed so a test can read which path a socket took. */
+  collabCore: { switch: CollabCoreSwitch; path: CollabCorePath };
+  /** History for the docs of boards on the core (`doc-history/recorder.ts`).
+   *  Exposed so a test can read and restore versions; no route serves it. */
+  docHistory: DocHistory;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -571,8 +647,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // membership, both built further down. Until then only the owner is trusted.
   let commentTrustFor: CommentTrustFor | null = null;
   let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
+  // Built before the store so it attaches to every doc the store wires. Which
+  // docs it records is late-bound: the core switch and the board membership
+  // are built further down. Until then it records nothing.
+  let historyScope: ((doc: LiveDoc) => boolean) | null = null;
+  const docHistory = new DocHistory({
+    store: new DiskHistoryStore(dataDir),
+    inScope: (doc) => historyScope?.(doc) ?? false,
+    // A board doc's rows are the task store's projection, which reverts any
+    // other write to them (`task-projection.ts`), so a restore leaves them.
+    ownedElsewhere: (doc) => (doc.docId.startsWith('ws:') ? ['tasks', 'workspace'] : []),
+  });
   const docStore: DocStore = new DocStore({
     dataDir,
+    onDocWired: (doc) => docHistory.attach(doc),
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,
@@ -589,6 +677,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     commentTrustBoards: (docId) => [...(trustBoardsFor?.(docId) ?? [])],
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
+    ...(opts.componentFetch ? { componentFetch: opts.componentFetch } : {}),
   });
   // A planning meeting's minutes, under the plan section each is about.
   const boardDocIds = (ws: string) => taskStore.getWorkspace(ws)?.docIds;
@@ -1106,6 +1195,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
+    personAccessOn,
     boardsForDoc,
     boardIndexForListing,
     boardsForDocIndexed,
@@ -1283,26 +1374,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.coachSummarizer ? { summarizer: opts.coachSummarizer } : {}),
     ...(opts.coachDigestWindowMs === undefined ? {} : { digestWindowMs: opts.coachDigestWindowMs }),
   });
-  // "Your coach" on `/` reads the coach store, the goals doc and whether the
-  // coach session is connected. None of the three broadcasts, so each tells
-  // the workspaces list's feed itself.
-  coachWiring.store.onChange = () => landingChanges.notify('coach');
   {
-    const onRevision = docStore.onContentRevision;
-    docStore.onContentRevision = (docIds, revision) => {
-      onRevision?.(docIds, revision);
-      const goals = coachWiring.store.goalsDoc?.docId;
-      if (goals && docIds.includes(goals)) landingChanges.notify('coach');
-    };
     const onAgentStreams = sse.onAgentStreams;
     sse.onAgentStreams = (channel, agentId) => {
       onAgentStreams?.(channel, agentId);
       const board = coachWiring.store.goalsDoc?.workspaceId;
-      if (board && channel === `ws~${board}`) {
-        landingChanges.notify('coach');
-        // The coach session is back: what waited while it was away goes now.
-        coachWiring.agentStreamsChanged(board, agentId);
-      }
+      // The coach session is back: what waited while it was away goes now.
+      if (board && channel === `ws~${board}`) coachWiring.agentStreamsChanged(board, agentId);
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks
@@ -2096,6 +2174,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     memberOf: audienceMemberOf,
   });
   trustBoardsFor = boardsForDoc;
+  /** Each person's one lead agent, linked when both sides agree. */
+  const personAgentLinks = new PersonAgentLinks(dataDir, identities);
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -2109,8 +2189,62 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
   const removeLeadBindGuard = boundFiles.guards.add(boardSocketRoots);
   /** Board agent tokens (`at2`) and their revocation record. */
+  /** The core room hosts every revoke rechecks (collab-rooms.ts). */
+  const collabRooms = new CollabRooms();
+  /** Which boards' sockets the collab core serves, and the core's room host
+   *  over the doc store's live docs (D1 step 5). */
+  const collabCoreSwitch = new CollabCoreSwitch({
+    dataDir,
+    // Set, the environment fixes the server-wide setting; unset, the owner's
+    // runtime switch in the data folder decides (`collab-core-switch.ts`).
+    fixed: opts.collabCore ?? parseCollabCoreEnv(process.env.CW_COLLAB_CORE),
+  });
+  const collabCorePath = new CollabCorePath({
+    getDoc: (id) => docStore.peek(id),
+    rooms: collabRooms,
+  });
+  // History rides the board's core switch: a board doc by its own id, any
+  // other doc by the boards it sits on.
+  historyScope = (doc) => {
+    if (!collabCoreSwitch.serverWide || !collabCoreSwitch.anyBoardOn()) return false;
+    if (doc.docId.startsWith('ws:')) return collabCoreSwitch.usesCore(doc.docId.slice(3));
+    for (const ws of boardsForDoc(doc.docId)) if (collabCoreSwitch.usesCore(ws)) return true;
+    return false;
+  };
+  collabCoreSwitch.onChange(() => docHistory.scopeChanged());
+  // The board's open pages pick their presence strip from this, so they hear
+  // a switch at once, whoever made it. Pages only: no agent acts on which
+  // strip a page draws, and each frame costs a session a turn.
+  collabCoreSwitch.onChange((workspaceId) => {
+    const frame = {
+      event: COLLAB_CORE_CHANGED,
+      workspaceId,
+      ...collabCoreView(collabCoreSwitch, workspaceId),
+    };
+    sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
+  });
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
+  );
+  /** Agent grants (`at3`): one agent, one app, one board, capped by the
+   *  agent's person, read per verify through `personAccessOn`. */
+  const agentGrantTokens = new AgentGrantTokens(
+    agentGrantTokensPath(dataDir),
+    () => agentGrantTokenKey(cookieKey()),
+    {
+      appId: appIdFrom(process.env.CW_APP_ID),
+      personOfAgent: (agentId) => personAgentLinks.personOfAgent(agentId),
+      roleOf: (boardId, personId) => {
+        const person = identities.get(personId);
+        if (!person) return null;
+        // A grant is edit-level at most, so a person whose access is comment
+        // or view holds nothing grantable: the mint refuses and the sweep
+        // hangs up a grant minted before the person was narrowed.
+        const access = personAccessOn(boardId, person);
+        return access === 'owner' ? 'owner' : access === 'edit' ? 'member' : null;
+      },
+      personActive: (personId) => identities.get(personId)?.status === 'active',
+    },
   );
   /** The threads those tokens opened, which the org relay checks a sender by. */
   const threadOpenerProofs = new ThreadOpenerProofs(threadOpenerProofsPath(dataDir));
@@ -2155,7 +2289,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
-    boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    boardAgentGrantFor: (bearer, via) =>
+      bearer.startsWith('at3.')
+        ? agentGrantTokens.verify(bearer, via)
+        : boardAgentTokens.verify(bearer),
     boardAgentHeld: (tokenId) => boardAgentTokens.isHeld(tokenId),
     // Forward references, as above: the board sockets are opened below, and
     // the agent-token key is derived further down.
@@ -2196,6 +2333,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRelay,
     spokenRelay,
     appVoiceRelay,
+    core: collabCorePath,
+    onFirstClientSocket: opts.onFirstClientSocket,
     onBoardRoomOpen: (workspaceId, awareness) => {
       agentSpots.restore(workspaceId, awareness);
       personPresence.attach(workspaceId, awareness);
@@ -2210,6 +2349,60 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * chains rather than composes — its per-request input is the admission
    * result, so it cannot be called until the gate has answered.
    */
+  // Every name a roster row or the owner goes by, lowercased: a guest may not
+  // show one in presence. Rebuilt only when a row changes.
+  let memberNameCache: { rev: number; names: Set<string> } | null = null;
+  const memberNames = (): Set<string> => {
+    const rev = identities.revision();
+    if (memberNameCache?.rev !== rev) {
+      const names = new Set(ownerDisplayNames().map((n) => n.trim().toLowerCase()));
+      for (const r of identities.list()) names.add(r.displayName.trim().toLowerCase());
+      memberNameCache = { rev, names };
+    }
+    return memberNameCache.names;
+  };
+  // Who an unproven writable loopback socket is (the owner), which proven ids
+  // are agents, and which names a guest may not show (presence-identity.ts).
+  // Presence and the unproven-browser rung of attribution read the same one.
+  const presenceRoster: PresenceRoster = {
+    owner: () => {
+      const id = ownerIdentityIds().at(-1) ?? 'owner';
+      return { id, name: identities.displayNameFor(id) ?? ownerDisplayNames()[0] ?? 'Owner' };
+    },
+    isAgent: (id) => identities.get(id)?.kind === 'agent',
+    reservedName: (name) => memberNames().has(name.trim().toLowerCase()),
+  };
+  // Who a comment's `to` may name (`addressees.ts`): the owner, a member of a
+  // board the doc is on, or an agent attached to one.
+  const addresseeRoster: AddresseeRoster = {
+    identities,
+    owner: presenceRoster.owner,
+    isMember: (board, person) => personAccessOn(board, person) !== null,
+    attachedAgents: (board) => taskStore.listAttachments(board).map((a) => a.agentId),
+  };
+  const addresseesFor = (docId: string, to: unknown) => {
+    const row = taskIdOfBodyDoc(docId);
+    const rowBoard = row
+      ? (taskStore.getTask(row)?.workspaceId ?? taskStore.getGoalRow(row)?.workspaceId)
+      : undefined;
+    const boards = row ? (rowBoard ? [rowBoard] : []) : [...boardsForDoc(docId)];
+    return resolveAddressees(to, boards, addresseeRoster);
+  };
+  const unprovenBrowserAuthor = (req: Request, claimed: unknown): User => {
+    const u = resolveStamp(
+      presenceUserFor({
+        proven: null,
+        isAgent: presenceRoster.isAgent,
+        shareKey: null,
+        readOnly: false,
+        offBox: req.headers.has('cf-ray') || !isLoopbackAddress(server.requestIP(req)?.address),
+        owner: presenceRoster.owner,
+        ...(presenceRoster.reservedName ? { reservedName: presenceRoster.reservedName } : {}),
+      }),
+      claimed,
+    );
+    return { id: u.id, name: u.name, color: u.color, kind: u.kind === 'guest' ? 'anon' : 'known' };
+  };
   const { attributeRequest } = createRequestAttribution({
     identities,
     taskStore,
@@ -2217,6 +2410,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetBearerOf,
     widgetTokenGrantFor,
     j,
+    unprovenBrowserAuthor,
   });
 
   /**
@@ -2239,10 +2433,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     redirectTo,
     withReviewUrl,
-    // The retired boards' task docs too: the page's own activity reading
-    // walks every board, and it runs after this in the same stretch.
     landingReview: async () => {
-      await crossReview.prepare({ includeRetired: true });
       const q = await crossReview.queue();
       // Fire and forget: the page shows what is stored, and a sentence that
       // arrives now is on the next load. Each refresh declines unless due.
@@ -2259,7 +2450,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // Started further down, with the other registered features; the page
     // reads it at request time.
     landingInbox: (rankOf) => features.inbox.landingSection(rankOf),
-    landingCoach: () => coachWiring.landing(),
     landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
     appVoiceSeed,
   });
@@ -2278,6 +2468,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     peerAddress: (req) => server.requestIP(req)?.address ?? undefined,
     j,
   };
+
+  /** A board pushed from the Mac, on a project machine only — routes/board-import.ts. */
+  const boardImportCtx = boardImportRoutesContext(opts.boardImport, {
+    ...{ dataDir, verifier: staticAccessVerifier, j },
+    port: () => server.port ?? port,
+  });
 
   /** GitHub events for boards that hold no GitHub token — routes/github-hub.ts. */
   const githubHubCtx: GithubHubRoutesContext = {
@@ -2338,6 +2534,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     canonicalDocId,
     fileUnderBoardWorkspace,
+    boardAccessOf,
+    rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
+    usesCollabCore: (workspaceId) => collabCoreSwitch.usesCore(workspaceId),
     workspacesOfMember,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2347,15 +2546,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     appVoiceToken: (token, workspaceId, docId) =>
       checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
     frameOrigin: frameHost?.origin ?? null,
+    presenceRoster,
     // The lead hears every board on this machine; a stream off it gets no
     // ask from a local-only board or doc (ask-feed.ts).
-    offBoxView: (payload) =>
-      offBoxAskView(
-        payload,
-        (ask) =>
-          localOnlyPlaces.board(ask.workspaceId) ||
-          (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
-      ),
+    offBoxView: (payload) => {
+      const addressed = offBoxAddressedView(payload, localOnlyPlaces);
+      return addressed
+        ? offBoxAskView(
+            addressed,
+            (ask) =>
+              localOnlyPlaces.board(ask.workspaceId) ||
+              (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
+          )
+        : undefined;
+    },
   });
   /**
    * What the operator routes read instead of this closure's scope. Built
@@ -2523,12 +2727,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     // Forward reference: the board sockets are opened below.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    personRoleOn: (workspaceId, person) => {
-      if (ownerIdentityIds().includes(person.id)) return 'owner';
-      if (!person.email) return null;
-      if (boardRoleOf(workspaceId, person.email, true) === 'owner') return 'owner';
-      return shareLinks.roleOf(workspaceId, person.email);
-    },
+    personAccessOn,
     agentTokenKey: agentTokenKeyFor,
     ownerNoticeBoards: () => {
       const first = defaultBoardWorkspaceId();
@@ -2776,6 +2975,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** What the two agent-id-keyed routes read instead of this closure's
    *  scope — the watch set, the roster and the store a merge moves. */
   const agentIdentityRoutesCtx: AgentIdentityRoutesContext = {
+    personAgentLinks,
     agentWatches,
     identities,
     taskStore,
@@ -2793,17 +2993,48 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     warnRefusedMint,
   };
 
+  /** A person's private conversation with their own lead agent
+   *  (routes/private-messages.ts). The agent's messages ride one board's
+   *  stream and queue: the board it leads, else one it is live on, else
+   *  any it is attached to. */
+  const privateMessageRoutesCtx: PrivateMessageRoutesContext = {
+    store: new FilePrivateMessageStore(dataDir),
+    personAgentLinks,
+    identities,
+    taskStore,
+    sse,
+    boardForAgent: (agentId) => {
+      const attached = taskStore
+        .listWorkspaces()
+        .filter((w) => taskStore.listAttachments(w.id).some((a) => a.agentId === agentId));
+      const pick =
+        attached.find((w) => w.leadAgentId === agentId) ??
+        attached.find((w) => taskStore.hasLiveAttachmentFor(w.id, agentId)) ??
+        attached[0];
+      return pick?.id ?? null;
+    },
+    requestAddress: (req) => server.requestIP(req)?.address,
+    agentTokenKey: agentTokenKeyFor,
+    j,
+    safeJson,
+  };
+
   /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
   const boardTokenRoutesCtx: BoardTokenRoutesContext = {
     tokens: boardAgentTokens,
+    grants: agentGrantTokens,
     boardExists: (boardId) => taskStore.getWorkspace(boardId) !== undefined,
     ensureAgent: (agentId) => {
       const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
       return rec !== null && rec.kind === 'agent';
     },
-    closeConnections: (memberKey) =>
-      docStore.closeSocketsForShareMembers((k) => k === memberKey) +
-      sse.closeForShareMembers((k) => k === memberKey),
+    closeConnections: (memberKey) => {
+      collabRooms.recheck();
+      return (
+        docStore.closeSocketsForShareMembers((k) => k === memberKey) +
+        sse.closeForShareMembers((k) => k === memberKey)
+      );
+    },
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -2889,6 +3120,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     canonicalDocId,
     backTargetFor,
     resolveWorkspaceForDoc,
+    addresseesFor,
     pageOpened,
     withReviewUrl,
     boardIndexForListing,
@@ -2906,6 +3138,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     rewriteTaskBody,
     parseRevisedRange,
     workspacesOfDoc: shareWorkspacesOf,
+    // Declared below; called only per request, after it exists.
+    proposeAccess: (input) => accessProposals.propose(input),
+    ...(opts.googleMapsKey ? { googleMapsKey: opts.googleMapsKey } : {}),
   };
 
   // The owner's notice when the master sharing switch goes off: one decision
@@ -3004,6 +3239,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);
     },
+    grantComponentFolder: (folder, by) => {
+      const ok = confirmGrantFolder(folder, boundFiles.guards);
+      if (!ok.ok) return ok;
+      try {
+        docStore.componentGrants.grant(folder, by);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
     onChanged: pageNudges.accessChanged,
   });
   /** The owner's page of who can reach every board (routes/access.ts). */
@@ -3045,6 +3290,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const authShareRoutesCtx: AuthShareRoutesContext = {
+    personAgentLinks,
+    // A rename reaches pages already open within a frame (yjs-protocol.ts).
+    onPersonRenamed: (personId, name) => void restampPerson(personId, name),
     docStore,
     sse,
     taskStore,
@@ -3177,6 +3425,28 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    directMessages: {
+      store: new FileDirectMessageStore(dataDir),
+      // Every active person this board admits, the owner included.
+      peopleOn: (boardId) =>
+        identities
+          .list()
+          .filter(
+            (rec) =>
+              rec.kind === 'person' &&
+              rec.status === 'active' &&
+              !rec.mergedInto &&
+              personAccessOn(boardId, rec) !== null,
+          )
+          .map((rec) => ({ id: rec.id, name: rec.displayName })),
+      leadAgentOf: (personId) => personAgentLinks.leadAgentOf(personId),
+      agentName: (agentId) => identities.get(agentId)?.displayName ?? agentId,
+      sse,
+      j,
+      safeJson,
+    },
+    collabRooms,
+    collabCoreSwitch,
     agentSpots,
     personPresence,
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
@@ -3277,8 +3547,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several
-    // early returns and a hoisted inner `route` declaration that a wrapping
-    // try/finally would move out of function scope. This wrapper is the one
+    // early returns. This wrapper is the one
     // place every request passes through exactly once — the route table and
     // the fallback both call it — so one `finally` cannot leak an entry, not
     // even for an upgrade that answers `undefined`.
@@ -3286,10 +3555,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return withEventOrigin(origin, () => handleRequest(req)).finally(settled);
   }
 
-  // The ordered chain every request runs — see routes/request-chain.ts. Built
+  // The router every request runs — see routes/hono-app.ts. Built
   // last, from every route family's context above; it reads nothing per
   // request but the request.
-  const handleRequest = createRequestChain({
+  const handleRequest = createHonoApp({
     docStore,
     applyCors,
     refreshSession,
@@ -3298,9 +3567,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isValidDocId,
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
-    homeFeedCtx,
-    githubHubCtx,
-    admit,
+    honoOpenFront: createHonoFront<HonoOpenAppEnv>(
+      honoOpenFamilies({ homeFeedCtx, boardImportCtx, githubHubCtx }),
+      { upgrades: 'enter' },
+    ),
+    admit: opts.observeAdmission ? observedAdmit(admit, opts.observeAdmission) : admit,
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
@@ -3311,64 +3582,94 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
         { shares, now: Date.now() },
       ),
-    authShareRoutesCtx,
-    voiceAgentLlmRoutesCtx,
-    recallWebhookRoutesCtx,
+    honoFront: createHonoFront([
+      ...honoFamilies({
+        authShareRoutesCtx,
+        opsRoutesCtx,
+        mountRoutesCtx,
+        inboxRoutes: features.inboxRoutes,
+        keeperHoldsRoutes: features.keeperHoldsRoutes,
+        promptRoutesCtx,
+        reviewQueueRoutesCtx,
+        voicePageRoutesCtx,
+        voiceApiRoutesCtx,
+        accessRoutesCtx,
+        coachRoutesCtx,
+        voiceAgentLlmRoutesCtx,
+        recallWebhookRoutesCtx,
+        mcpConnectorCtx: {
+          host: connectorHost,
+          j,
+          requestAddress: (req) => server.requestIP(req)?.address,
+          agentTokenKey: agentTokenKeyFor,
+          // Forward reference: the board sockets are opened below.
+          boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
+        },
+        agentIdentityRoutesCtx,
+        boardTokenRoutesCtx,
+        boardSocketRootsRoutesCtx,
+        repoRoutesCtx,
+        loadReportRoutesCtx,
+        landingStreamCtx: { sse, j },
+        privateMessageRoutesCtx,
+        requireSignInToWrite,
+        policyFor,
+      }),
+      ...(opts.honoFamilies ?? []),
+    ]),
     serveUpgradeAndStreamRoutes,
-    taskStore,
     workspacesOfMember,
-    boardLinkRoutesCtx: {
-      workspacesOfMember,
-      findReviewItem: (id) => taskStore.findReviewItem(id),
-      parseThreadReviewItemId,
-      docPagePath: (docId, workspaceId) => {
-        const meta = docStore.peekMeta(docId);
-        const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
-        if (!url) return undefined;
-        const u = new URL(url);
-        return `${u.pathname}${u.search}`;
-      },
-      // The docs listing's own reading of "on this board" (`routes/docs.ts`).
-      linkCandidates: (workspaceId) => {
-        const index = boardIndexForListing();
-        return docStore
-          .list()
-          .filter(
-            (m) => m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
-          )
-          .map(linkCandidateOf);
-      },
-    },
-    opsRoutesCtx,
-    docRoutesCtx,
-    appRoutesCtx,
-    workspaceRoutesCtx,
-    taskRoutesCtx,
-    connectorHost,
-    // Forward reference: the board sockets are opened below.
-    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
-    agentTokenKeyFor,
-    agentIdentityRoutesCtx,
-    boardTokenRoutesCtx,
-    boardSocketRootsRoutesCtx,
-    chatAuditRoutesCtx,
-    repoRoutesCtx,
-    loadReportRoutesCtx,
-    mountRoutesCtx,
-    libraryRoutesCtx,
-    docMoveRoutesCtx,
-    handleArchiveRoutes,
-    reviewFileRoutesCtx,
-    meetingCalendarRoutesCtx,
-    promptRoutesCtx,
-    sse,
-    reviewQueueRoutesCtx,
-    voicePageRoutesCtx,
-    accessRoutesCtx,
-    voiceApiRoutesCtx,
-    featureRoutes: features.routes,
-    coachRoutesCtx,
-    serveShellRoutes,
+    honoBoardFront: createHonoFront<HonoBoardAppEnv>(
+      [
+        ...honoBoardFamilies({
+          docRoutesCtx,
+          appRoutesCtx,
+          workspaceRoutesCtx,
+          taskRoutesCtx,
+          chatAuditRoutesCtx,
+          libraryRoutesCtx,
+          docMoveRoutesCtx,
+          handleArchiveRoutes,
+          reviewFileRoutesCtx,
+          meetingCalendarRoutesCtx,
+          workspaceRecord: (id) => taskStore.getWorkspace(id),
+          workspacesOfMember,
+          j,
+          requireSignInToWrite,
+          policyFor,
+        }),
+        ...honoTailFamilies({
+          featureRoutes: features.routes,
+          serveShellRoutes,
+          requireSignInToWrite,
+          policyFor,
+          boardLinkRoutesCtx: {
+            workspacesOfMember,
+            findReviewItem: (id) => taskStore.findReviewItem(id),
+            parseThreadReviewItemId,
+            docPagePath: (docId, workspaceId) => {
+              const meta = docStore.peekMeta(docId);
+              const url = meta ? withReviewUrl(meta, workspaceId).reviewUrl : undefined;
+              if (!url) return undefined;
+              const u = new URL(url);
+              return `${u.pathname}${u.search}`;
+            },
+            // The docs listing's own reading of "on this board" (`routes/docs.ts`).
+            linkCandidates: (workspaceId) => {
+              const index = boardIndexForListing();
+              return docStore
+                .list()
+                .filter(
+                  (m) =>
+                    m.workspaceId === workspaceId || boardsForDocIndexed(index, m).has(workspaceId),
+                )
+                .map(linkCandidateOf);
+            },
+          },
+        }),
+      ],
+      { upgrades: 'enter' },
+    ),
   });
 
   const server = Bun.serve<UpgradeData>({
@@ -3602,12 +3903,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    collabRooms.recheck();
     // A tailnet widget door socket is authorized once at its upgrade too, by
     // a board token that expires and that the roster can revoke — and no
     // share is needed for the door, so this half runs without one.
     docStore.closeSocketsForDeadWidgetGrants(
       (token, origin) => boardWidgetGrantFor(token, origin) !== null,
     );
+    // An agent grant whose person left the board or was archived: HTTP
+    // already refuses it (`AgentGrantTokens.verify`); this hangs up what it
+    // opened while it still held.
+    const lapsed = new Set(agentGrantTokens.lapsedMemberKeys());
+    if (lapsed.size > 0) {
+      docStore.closeSocketsForShareMembers((k) => lapsed.has(k));
+      sse.closeForShareMembers((k) => lapsed.has(k));
+    }
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);
@@ -3733,7 +4043,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     folderWatches,
     shares,
     shareLinks,
+    collabRooms,
     sweepDeadShares,
+    collabCore: { switch: collabCoreSwitch, path: collabCorePath },
+    docHistory,
     appVoice: { mint: mintAppVoice },
     boardTokens: { mintHeld: (agentId, boardId) => boardAgentTokens.mintHeld(agentId, boardId) },
     // Exactly what the interval does, exposed for the same reason
@@ -3887,4 +4200,16 @@ async function safeJson(req: Request): Promise<Record<string, unknown> | null> {
   } catch {
     return null;
   }
+}
+
+/** Admission that also tells `observeAdmission` each verdict (tests only). */
+function observedAdmit(
+  admit: RequestAdmission['admit'],
+  observe: (pathname: string, admitted: boolean) => void,
+): RequestAdmission['admit'] {
+  return async (req, o) => {
+    const gate = await admit(req, o);
+    observe(o.pathname, gate.admitted);
+    return gate;
+  };
 }

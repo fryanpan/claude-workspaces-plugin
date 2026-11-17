@@ -1,5 +1,5 @@
 /**
- * Loaded by every `bun test` run (bunfig.toml [test].preload): every server a
+ * Loaded by every `bun test` run (through suite.preload.ts): every server a
  * test builds with `createServer` binds 127.0.0.1 rather than the wildcard,
  * and so does every child process a test spawns, which inherits the variable.
  *

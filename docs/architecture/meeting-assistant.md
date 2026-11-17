@@ -1163,6 +1163,17 @@ server that dies mid-meeting leaves the JSONL and audio but no segment; the
 next meeting on the same doc writes the missing segment first (its header
 says `no recorded end`), so every meeting keeps one and they stay in order.
 
+**A leg with nothing in it writes no block yet** (2026-11-15). The lead
+chat moves the page to the notes doc as soon as the first `ready` arrives,
+and the move closes the socket, so a meeting's first leg stops within a
+second, before any turn settles. Its stop used to write `## Segment 1` as
+`_(no settled turns)_`, and every later leg resumed into `(resumed)` blocks
+below it: the file opened by saying nobody spoke in a meeting whose JSONL held
+every turn. Now a leg with no turns and no gaps records its `meeting.json`
+entry with `noTurnsYet: true` and no markdown, and the next flush that has
+something to say writes the whole segment under its own heading.
+`meeting-raw-opening-leg.test.ts` holds it.
+
 **Audio: one stream per source, and the bot has none.** The microphone is
 one stream, `mic`. Recall runs the transcription engine on its own side and
 sends this server words, not audio (see "What streams, and why not the
@@ -3658,6 +3669,46 @@ note-taker's, so that "offers" cannot quietly become "never rewrites
 anything". `notes-cleanup-pass.test.ts` holds the rest, including the premise
 measured rather than assumed: authorship present before a markdown round trip
 and absent after.
+
+## The recap's shape, enforced at the stop (`notes-recap-shape.ts`, 2026-11-15)
+
+Bryan's feedback on one real recap named four defects of structure: headings
+followed the order points arrived in, so a late point sat under the wrong
+heading; a point appeared twice; two points were joined by a "because"
+nobody said; and bullets nested five deep with decisions and follow-ups
+buried in them. Each can be decided from the notes and the transcript, so
+code decides it after the note-taker's last tick rather than asking the model
+again. No model is called.
+
+- **Decisions and follow-ups go first**, under `Decisions and follow-ups` at
+  the section's level, decisions before follow-ups. A decision carries the
+  `Decision:` label the prompt asks for; a follow-up carries a `Follow-up:`,
+  `Action:` or `Next step:` label, or reads "<Name> will …".
+- **Two levels at most.** Anything deeper is lifted to the second level, in
+  order.
+- **Each point once.** Two points that `sameNote` or `coveredBy`
+  (`notes-edit-dedupe.ts`) call the same keep the fuller wording, in the place
+  the first copy held, with both copies' sub-points.
+- **No cause the room did not state.** A point joined by "because", "so
+  that", "therefore", "as a result" or ", so" is split into its two halves
+  unless a spoken sentence carries a causal word and shares words with both.
+  With no transcript to read, nothing is split.
+- **A late point moves under its subject** when its own heading and the
+  points beside it share no content word with it and exactly one other
+  heading does. **A changed subject gets a heading**: a run of two or more
+  points at the end of a topic that share words with each other and none with
+  the heading or the points above them becomes a topic of its own, named by
+  the words they share.
+
+`notes-recap-apply.ts` writes the answer at the stop, after the quality pass
+(so that record judges what the note-taker wrote). It rewrites the section
+only when every heading and bullet still carries the note-taker's authorship
+and none holds a comment or a suggestion; otherwise the section is left as it
+was and the stop logs `recap left: <reason>`. The section's first block keeps
+the id the heading store holds, so the next recording still finds the
+section, and every surviving heading or bullet keeps its own id. Numbered
+lists, paragraphs and anything else that is not a heading or a bullet make
+the section unshapeable, and it is left alone.
 
 ## Is anybody listening — lead presence (`lead-presence.ts`)
 

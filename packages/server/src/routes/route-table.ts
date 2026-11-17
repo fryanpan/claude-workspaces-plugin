@@ -48,6 +48,12 @@
  * is a value Bun holds rather than a document that rots, and the drift test
  * reads the same object.
  *
+ * HONO (M12). Families are moving one at a time into the Hono app in
+ * `hono-front.ts`, which the chain tries below its gates and above every
+ * family it still holds. A row's `module` names whichever module answers it;
+ * `test/route-answers.test.ts` records what every row answers and fails when a
+ * move changes any of it.
+ *
  * ADDING A ROUTE. Add its row here in the same commit. The rendered table is
  * `docs/architecture/routes.md`, regenerated with `bun run routes:table`, and
  * the drift test fails until the two agree.
@@ -94,6 +100,11 @@
  *   the `home-feed` caller check, then the board's live push key (`gp1`).
  *   A request carrying a cookie is refused before either. The Mac's GitHub
  *   relay is its one caller.
+ * - `board-import` — answered ABOVE the host guard by `routes/board-import.ts`,
+ *   and only on a project machine (`CW_BOARD_IMPORT_DIR`). Through the tunnel
+ *   only (`cf-ray`), an Access stamp for the host's own application naming no
+ *   email and carrying a `common_name`, and a board the machine is for. No
+ *   person, no loopback caller and no share or collab visitor reaches it.
  * - `open` — answered ABOVE the host guard. A row claiming this must say in
  *   `reason` why reading it is free; `gated` refuses one that does not.
  */
@@ -106,6 +117,7 @@ export type RouteGate =
   | 'recall-callback'
   | 'home-feed'
   | 'github-push'
+  | 'board-import'
   | 'open';
 
 /** One front-door path pattern. */
@@ -151,6 +163,7 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   setId: 'rev-1',
   threadId: 'th-1',
   itemId: 'ri-1',
+  lineId: 'dw-1',
   agentId: 'a-1',
   agent: 'a-1',
   meetingId: 'm-1',
@@ -162,6 +175,8 @@ const EXAMPLE_PARAMS: Readonly<Record<string, string>> = {
   owner: 'o-1',
   eventId: 'ev-1',
   fileId: 'f-1',
+  folderId: 'fo-1',
+  personId: 'user-1',
   // The access page's sections: `waiting`, or one board's id.
   section: 'waiting',
   // A voice feedback recording — the handler matches `seg-<N>.wav` exactly.

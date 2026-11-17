@@ -52,6 +52,24 @@ const SHADOW = `document.querySelector('${TAG}')?.shadowRoot`;
 const PINS = `[...document.querySelectorAll('.cfw-pin')].filter((p) => !p.hidden).map((p) => p.dataset.threadId)`;
 const pin = (id: string) => `document.querySelector('.cfw-pin[data-thread-id="${id}"]')`;
 const SUGG = `${SHADOW}?.querySelector('.thread-popover .cw-sugg')`;
+/** The note a suggestion block shows when an answer did not go through. */
+const NOTE = `${SUGG}?.querySelector('.cw-sugg-note')?.textContent ?? null`;
+
+/**
+ * What a tap at the centre of `find` lands on inside its frame: 'self' when
+ * the element is on top there, else what covers it ('nothing' off screen).
+ * A tap measured while something else sits over the button presses that
+ * instead, and the answer the case is waiting for never files.
+ */
+const hitAt = (find: string) => `(() => {
+  const e = ${find};
+  if (!e) return 'gone';
+  e.scrollIntoView({ block: 'nearest' });
+  const b = e.getBoundingClientRect();
+  const hit = e.getRootNode().elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+  if (hit && (hit === e || e.contains(hit))) return 'self';
+  return hit ? [hit.tagName.toLowerCase(), ...hit.classList].join('.') : 'nothing';
+})()`;
 
 const page = (body: string) =>
   `<!doctype html><html><head><meta charset="utf-8"><title>Harborlight</title>
@@ -229,6 +247,30 @@ async function main(): Promise<void> {
       await poll('its popover', () => mock.eval(up).then((v) => v || null));
     };
 
+    /**
+     * Press a suggestion's Accept or Reject once it is on top at its centre,
+     * and press again if the press reached nothing: the button still shows,
+     * enabled, with no note and `done` still false. A press that reached the
+     * button and was refused shows a note, which ends the run with it.
+     */
+    const answer = async (button: string, what: string, done: () => boolean) => {
+      for (let i = 0; i < 4 && !done(); i++) {
+        let last: unknown = null;
+        await poll(`${what} on top at its centre`, async () => {
+          last = await mock.eval(hitAt(button));
+          return last === 'self' || last === 'gone' ? true : null;
+        }).catch(() => {
+          throw new Error(`${what} never on top at its centre; covered by ${String(last)}`);
+        });
+        if (last === 'gone') break;
+        await tap(cdp, mock, button, what);
+        for (let j = 0; j < 40 && !done(); j++) await sleep(50);
+        const note = await mock.eval(NOTE);
+        if (note) throw new Error(`${what} was refused: ${String(note)}`);
+        if (!done()) step(`${what} press ${i + 1} filed nothing; pressing again`);
+      }
+    };
+
     await size(1180, 820);
     step('open the mock');
     await reload(cdp, mockUrl);
@@ -254,7 +296,9 @@ async function main(): Promise<void> {
     await shot('suggestion-430.png');
 
     step('accept');
-    await tap(cdp, mock, `${SUGG}?.querySelector('[data-accept]')`, 'Accept');
+    await answer(`${SUGG}?.querySelector('[data-accept]')`, 'Accept', () =>
+      h.docStore.listThreads(mockId).some((t) => t.comments[0]?.pageEdits),
+    );
     const editThread = await poll(
       'a page edit on the board',
       () => h.docStore.listThreads(mockId).find((t) => t.comments[0]?.pageEdits) ?? null,
@@ -276,7 +320,11 @@ async function main(): Promise<void> {
     await pinsOf(mock, 2);
     await open(reject);
     await poll('the suggestion block', () => mock.eval(`!!${SUGG}`).then((v) => v || null));
-    await tap(cdp, mock, `${SUGG}?.querySelector('[data-reject]')`, 'Reject');
+    await answer(
+      `${SUGG}?.querySelector('[data-reject]')`,
+      'Reject',
+      () => h.docStore.getThread(mockId, reject)?.status === 'resolved',
+    );
     const rejectedResolved = await poll('the rejection resolved', () =>
       h.docStore.getThread(mockId, reject)?.status === 'resolved' ? true : null,
     ).catch(() => false);

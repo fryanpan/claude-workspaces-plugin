@@ -48,6 +48,9 @@ type BufferedEvent = {
   at: number;
   payload: SsePayload;
   toAgents?: readonly string[];
+  /** A broadcast every page sees but only these agents do (`agentAudience`):
+   *  replayed to anonymous streams and to these agents, nobody else. */
+  agentAudience?: readonly string[];
   /** The payload's serialized size, measured the first time the memory line
    *  asks (`largestReplay`) and never on the broadcast path. */
   bytes?: number;
@@ -65,7 +68,13 @@ type BufferedEvent = {
  * counter, and are not comparable across epochs), and it is what keeps the map
  * from growing with the number of agents that ever attached.
  */
-type ChannelMarks = { broadcast?: string; addressedAfter: Map<string, string> };
+type ChannelMarks = {
+  broadcast?: string;
+  addressedAfter: Map<string, string>;
+  /** The newest audience-limited broadcast since `broadcast`: every page saw
+   *  it, so it is the anonymous streams' newest. Cleared like the map. */
+  pagesAfter?: string | undefined;
+};
 
 /**
  * The keepalive period and the socket idle timeout are ONE decision, so they
@@ -298,7 +307,15 @@ export class SseBus {
   broadcast(
     docId: string,
     payload: SsePayload,
-    forSink?: (who: { shareId?: string; agentId?: string }) => SsePayload | undefined,
+    forSink?: (who: { shareId?: string; agentId?: string }) => SsePayload | null | undefined,
+    /**
+     * `agentAudience` limits which AGENT streams hear this broadcast; pages
+     * hear it whatever it says. An addressed comment uses it: the board's
+     * open pages still show the comment, while only the agents it names are
+     * woken. Kept on the buffered entry so a replay draws the same line.
+     * `forSink` answering null skips one sink live as well.
+     */
+    opts: { agentAudience?: readonly string[] } = {},
   ): void {
     // Reuse the broadcast's own `eid` (doc-store.ts stamps one per fan-out, so
     // both channels of one broadcast carry the SAME wire id) and mint one for
@@ -307,10 +324,14 @@ export class SseBus {
     // process-global, so per channel the ids are strictly increasing.
     const maybeEid = (payload as { eid?: unknown }).eid;
     const id = typeof maybeEid === 'string' && maybeEid.length > 0 ? maybeEid : newEventId();
-    this.buffer(docId, id, payload);
+    const audience = opts.agentAudience;
+    this.buffer(docId, id, payload, undefined, audience);
     for (const [sink, who] of this.byDoc.get(docId) ?? []) {
+      if (audience && who.agentId !== undefined && !audience.includes(who.agentId)) continue;
       try {
-        const p = forSink?.(who) ?? payload;
+        const custom = forSink?.(who);
+        if (custom === null) continue;
+        const p = custom ?? payload;
         sink.write(p.event, p, id);
       } catch (err) {
         console.error('[sse] write failed:', err);
@@ -371,13 +392,20 @@ export class SseBus {
     id: string,
     payload: SsePayload,
     toAgents?: readonly string[],
+    agentAudience?: readonly string[],
   ): void {
     let buf = this.replay.get(docId);
     if (!buf) {
       buf = [];
       this.replay.set(docId, buf);
     }
-    buf.push({ id, at: this.now(), payload, ...(toAgents !== undefined ? { toAgents } : {}) });
+    buf.push({
+      id,
+      at: this.now(),
+      payload,
+      ...(toAgents !== undefined ? { toAgents } : {}),
+      ...(agentAudience !== undefined ? { agentAudience } : {}),
+    });
     // Outside the buffer and outside its pruning: this is what lets a cursor
     // at the end of a quiet channel still be recognised as up to date. Split
     // by audience — a broadcast everyone saw retires the addressed marks it
@@ -388,9 +416,15 @@ export class SseBus {
       marks = { addressedAfter: new Map() };
       this.channelMarks.set(docId, marks);
     }
-    if (toAgents === undefined) {
+    if (agentAudience !== undefined) {
+      // Pages and the audience saw it; a bystander agent did not, so its
+      // mark stays where it was.
+      marks.pagesAfter = id;
+      for (const agentId of agentAudience) marks.addressedAfter.set(agentId, id);
+    } else if (toAgents === undefined) {
       marks.broadcast = id;
       marks.addressedAfter.clear();
+      marks.pagesAfter = undefined;
     } else {
       for (const agentId of toAgents) marks.addressedAfter.set(agentId, id);
     }
@@ -484,12 +518,14 @@ export class SseBus {
       if (idx >= 0) {
         return {
           ok: true,
-          events: buf
-            .slice(idx + 1)
-            .filter(
-              (e) =>
-                e.toAgents === undefined || (agentId !== undefined && e.toAgents.includes(agentId)),
-            ),
+          events: buf.slice(idx + 1).filter((e) => {
+            if (e.agentAudience !== undefined) {
+              return agentId === undefined || e.agentAudience.includes(agentId);
+            }
+            return (
+              e.toAgents === undefined || (agentId !== undefined && e.toAgents.includes(agentId))
+            );
+          }),
         };
       }
     }
@@ -521,8 +557,9 @@ export class SseBus {
     if (agentId !== undefined) {
       const addressed = marks.addressedAfter.get(agentId);
       if (addressed !== undefined) return addressed;
+      return marks.broadcast;
     }
-    return marks.broadcast;
+    return marks.pagesAfter ?? marks.broadcast;
   }
 
   /** Wire id of the newest buffered event on a channel, if any. */

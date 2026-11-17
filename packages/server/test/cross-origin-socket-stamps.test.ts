@@ -59,12 +59,17 @@ function stampFor(path: string, c: Case): UpgradeData {
     taskStore: { getWorkspace: (id: string) => (id === WS ? { id } : undefined) },
     isValidDocId: () => true,
     workspacesOfMember: () => [WS],
+    boardAccessOf: () => 'edit',
+    rolesModeOf: () => 'report-only',
     policyFor: () => ({
       requestOrigin: OWN,
       localHostnames: ['localhost', '127.0.0.1'],
       allowedOrigins: [],
     }),
     requireSignInToWrite: true,
+    // An off-box peer, so no case leans on the loopback owner fallback for an
+    // unproven page: every name here comes from the proof the case sets up.
+    requestAddress: () => '203.0.113.7',
     j: (status: number, body: unknown) => Response.json(body, { status }),
   } as never);
   const url = new URL(`${OWN}${path}`);

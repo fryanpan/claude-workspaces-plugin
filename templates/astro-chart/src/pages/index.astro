@@ -1,0 +1,37 @@
+---
+// The library chart on an Astro page, drawn from a JSON snapshot of its
+// state (what get_component_state returns for the doc's "ferry" chart).
+// The chart file is core/plot-chart.ts itself, imported unchanged.
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harborlight ferry</title>
+  </head>
+  <body>
+    <main>
+      <h1>Harborlight ferry</h1>
+      <div id="ferry"></div>
+    </main>
+    <script>
+      import { mountFromSnapshot } from '@claude-workspaces/core/component-snapshot';
+      import Chart from '@claude-workspaces/core/plot-chart';
+      import snapshot from '../ferry-state.json';
+
+      const el = document.getElementById('ferry');
+      if (el) {
+        mountFromSnapshot(
+          el,
+          Chart,
+          {
+            title: 'Ferry trips',
+            data: { rows: [{ town: 'Harborlight', trips: 4 }] },
+            marks: [{ mark: 'barY', data: 'rows', options: { x: 'town', y: 'trips' } }],
+          },
+          snapshot,
+        );
+      }
+    </script>
+  </body>
+</html>

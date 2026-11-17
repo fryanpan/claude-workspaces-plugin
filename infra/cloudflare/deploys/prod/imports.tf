@@ -24,8 +24,8 @@ import {
 }
 
 # Service tokens, from `service_token_ids` rather than `imports`, because
-# staging adopts them too: `cf:apply` makes a missing token before terraform
-# runs, so it is always imported and its secret never enters the state
+# staging adopts them too: `cf:sync-config` makes a missing token before
+# terraform runs, so it is always imported and its secret never enters the state
 # (`infra/cloudflare/service-tokens.ts`).
 import {
   for_each = var.service_token_ids

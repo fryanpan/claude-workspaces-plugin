@@ -1,6 +1,8 @@
 import type { DocStore } from '../doc-store.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import type { RepoCheckoutBody } from './agent-machine-contract.ts';
+import { type Sent, sent } from './route-contract.ts';
 
 /**
  * The repo registry over HTTP: which checkouts of a project are registered,
@@ -79,7 +81,7 @@ function offBox(ctx: RepoRoutesContext, rq: RepoRouteRequest): Response | null {
  * that needs the filesystem, and it lives where it can be tested against a
  * real one.
  */
-function readPath(body: Record<string, unknown> | null): string | null {
+function readPath(body: Sent<RepoCheckoutBody> | null): string | null {
   const raw = body?.path;
   if (typeof raw !== 'string') return null;
   const path = raw.trim();
@@ -116,7 +118,7 @@ export async function handleRepoRoutes(
   }
 
   if (pathname === '/api/repos/checkouts' && req.method === 'POST') {
-    const path = readPath(await safeJson(req));
+    const path = readPath(sent<RepoCheckoutBody>(await safeJson(req)));
     if (!path) {
       return j(400, { error: 'path must be an absolute filesystem path to a checkout' });
     }
@@ -146,7 +148,7 @@ export async function handleRepoRoutes(
   // anywhere — the last of which is flagged on the doc rather than left as a
   // write-back that will fail quietly later.
   if (pathname === '/api/repos/checkouts' && req.method === 'DELETE') {
-    const path = readPath(await safeJson(req));
+    const path = readPath(sent<RepoCheckoutBody>(await safeJson(req)));
     if (!path) {
       return j(400, { error: 'path must be an absolute filesystem path to a checkout' });
     }

@@ -45,6 +45,8 @@ const MAKES_SOMETHING = /^(create_|attach_|spin_off_|import_|add_review_item$|po
 const EXEMPT: Record<string, string> = {
   create_anchor:
     "an agent's own bookmark inside a doc: nobody opens it, and the doc's url came back when the doc was attached",
+  create_folder:
+    "a Library folder is a row in the board's tree, not a page; it answers the board's folders, and the Library's url is the board's",
   attach_agent:
     'registers this session on a board it already names; it makes no page, and the board url came back from create_workspace',
 };

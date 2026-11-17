@@ -1,0 +1,71 @@
+# A timed trial of the app kit: make an app with `bun run new-app` and put
+# it on Fly staging with `bun run deploy:staging`, from main, with no step
+# for a person (templates/app-kit/README.md, "Staging").
+#
+#   dispatch  on main only. Any other branch deploys nothing.
+#
+# The clock starts before new-app, and the deploy step prints, and writes to
+# the run's summary, the time from there until https://<app>.fly.dev/health
+# answers 200.
+#
+# Secret, in the `cloudflare-prod` environment (deployments from main only):
+#   FLY_API_TOKEN  the org deploy token fly.yml uses. The org is the one it
+#                  reaches (deploy-staging.ts resolveOrg).
+# The token reaches every app in the org, so deploy-staging.ts refuses an
+# `app` input whose name does not end in `-staging` before any fly command.
+# It is on the deploy step alone: `bun install`, new-app and the setup
+# actions never see it. The repo and its logs are public: nothing here
+# prints it.
+
+name: app-kit-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Fly app name for the trial; must end in -staging (deploy-staging.ts refuses any other)
+        required: false
+        default: cw-appkit-trial-staging
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: cloudflare-prod
+    concurrency:
+      group: app-kit-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      # deploy-staging.ts runs `fly`; the action puts `flyctl` on the PATH.
+      - name: fly on the PATH
+        run: |
+          if ! command -v fly >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/flybin"
+            ln -s "$(command -v flyctl)" "$RUNNER_TEMP/flybin/fly"
+            echo "$RUNNER_TEMP/flybin" >> "$GITHUB_PATH"
+          fi
+      - name: Start the clock
+        run: echo "STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
+      - name: Make the app
+        run: bun run new-app "$RUNNER_TEMP/app"
+      - name: Install the app
+        working-directory: ${{ runner.temp }}/app
+        run: bun install
+      - name: Deploy to staging and wait for a 200
+        working-directory: ${{ runner.temp }}/app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          APP_NAME: ${{ inputs.app }}
+        run: bun run deploy:staging "$APP_NAME" --started-at "$STARTED_AT"
