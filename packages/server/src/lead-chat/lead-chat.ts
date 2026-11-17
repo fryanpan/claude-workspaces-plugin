@@ -109,9 +109,13 @@ export class LeadChat {
   private readonly waiting = new Map<string, Waiting>();
   /** queueId → the message a spoken turn wrote, for its answer. */
   private readonly spoken = new Map<string, Waiting>();
-  /** When the lead's current turn began (its last mirrored prompt), per
-   *  board. A message received after it belongs to a later turn. */
-  private readonly turnStart = new Map<string, number>();
+  /** How many turns the lead's session has begun (mirrored prompts), per
+   *  board. A count, not a clock: an ack can land in the millisecond its
+   *  turn's prompt did, and must still order after it. */
+  private readonly turns = new Map<string, number>();
+  /** messageId → the turn that took it: the one whose prompt delivered it,
+   *  or for an ack, the one after the turn running when it landed. */
+  private readonly takenBy = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(private readonly deps: LeadChatDeps) {
@@ -262,13 +266,19 @@ export class LeadChat {
    * the message it carried. A typed or spoken message on this board moves to
    * `received`; anything else is not this chat's.
    */
-  received(workspaceId: string, queueId: string, at = this.now()): boolean {
+  received(workspaceId: string, queueId: string): boolean {
+    return this.take(workspaceId, queueId, this.now(), (this.turns.get(workspaceId) ?? 0) + 1);
+  }
+
+  private take(workspaceId: string, queueId: string, at: number, turn: number): boolean {
     this.messages(workspaceId);
     const w = this.waiting.get(queueId) ?? this.spoken.get(queueId);
     if (!w || w.workspaceId !== workspaceId) return false;
     const m = this.messages(workspaceId).find((x) => x.id === w.messageId);
     if (!m || (m.state !== 'sent' && m.state !== 'queued')) return false;
-    return this.record(workspaceId, { ...m, state: 'received', receivedAt: at });
+    if (!this.record(workspaceId, { ...m, state: 'received', receivedAt: at })) return false;
+    this.takenBy.set(m.id, turn);
+    return true;
   }
 
   /**
@@ -281,7 +291,8 @@ export class LeadChat {
   mirrorPrompt(workspaceId: string, agentName: string, p: MirroredPrompt): boolean {
     if (!this.isLead(workspaceId, agentName)) return false;
     const started = this.now();
-    this.turnStart.set(workspaceId, started);
+    const turn = (this.turns.get(workspaceId) ?? 0) + 1;
+    this.turns.set(workspaceId, turn);
     this.deps.turn?.(workspaceId, 'start');
     if (p.typed) {
       if (!p.text) return false;
@@ -299,7 +310,7 @@ export class LeadChat {
     if (c.queueId) {
       this.messages(workspaceId);
       if (this.waiting.has(c.queueId) || this.spoken.has(c.queueId)) {
-        this.received(workspaceId, c.queueId, started);
+        this.take(workspaceId, c.queueId, started, turn);
         return true;
       }
     }
@@ -328,11 +339,13 @@ export class LeadChat {
     this.deps.turn?.(workspaceId, 'end');
     const list = this.messages(workspaceId);
     // Only what this turn took: a message acked mid-turn waits for the next.
-    const began = this.turnStart.get(workspaceId) ?? Number.POSITIVE_INFINITY;
+    // One taken before a restart, or before any turn was seen, is this turn's.
+    const current = this.turns.get(workspaceId) ?? Number.POSITIVE_INFINITY;
     for (const m of list) {
-      if (m.role === 'person' && m.state === 'received' && (m.receivedAt ?? 0) <= began) {
-        this.record(workspaceId, { ...m, state: 'done' });
-      }
+      if (m.role !== 'person' || m.state !== 'received') continue;
+      if ((this.takenBy.get(m.id) ?? 0) > current) continue;
+      this.takenBy.delete(m.id);
+      this.record(workspaceId, { ...m, state: 'done' });
     }
     let lastPerson = list.length - 1;
     while (lastPerson >= 0) {
@@ -404,6 +417,7 @@ export class LeadChat {
     const list = this.messages(w.workspaceId);
     const asked = list.find((m) => m.id === w.messageId);
     if (asked) this.record(w.workspaceId, { ...asked, state: 'answered' });
+    this.takenBy.delete(w.messageId);
     this.record(w.workspaceId, {
       id: this.deps.newId(),
       role: 'agent',
