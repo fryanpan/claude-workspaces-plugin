@@ -11,7 +11,7 @@
  * the Mac's repos.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { type ChildProcess, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -24,8 +24,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import {
   MoveRefused,
   exportBoard,
@@ -33,9 +32,9 @@ import {
 } from '../../../infra/project-machine/board-bundle.ts';
 import { boardPrint, loopbackGet } from '../../../infra/project-machine/board-print.ts';
 import { type MoveTarget, moveBoard } from '../../../infra/project-machine/move-board.ts';
+import { type BootedBin, bootBin, stopBin as stop } from './boot-bin.ts';
 import { waitFor } from './wait-for.ts';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const scratch = mkdtempSync(join(tmpdir(), 'cw-move-board-'));
 const children: ChildProcess[] = [];
 
@@ -44,58 +43,11 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-interface Server {
-  base: string;
-  child: ChildProcess;
-}
+type Server = BootedBin;
 
-/**
- * Boots a server on a port it picks itself, and returns once that server says
- * where it is listening.
- *
- * It used to be handed a port a probe had just freed, and was taken as up
- * once anything answered there. Another process could bind the port in the
- * gap; this child then refused it, and the test talked to the other server:
- * the target's own board came back 404 (CI runs 43395696747, 43605410257),
- * or a task posted to a board the other server never had (43550689908).
- */
-async function boot(dataDir: string): Promise<Server> {
-  const child = spawn(
-    'bun',
-    [
-      'run',
-      join(repoRoot, 'packages', 'server', 'src', 'bin.ts'),
-      '--port',
-      '0',
-      '--host',
-      '127.0.0.1',
-      '--data-dir',
-      dataDir,
-    ],
-    {
-      cwd: repoRoot,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, CW_SUMMARIES: '0', HOME: join(scratch, 'home') },
-    },
-  );
-  children.push(child);
-  let stdout = '';
-  child.stdout?.on('data', (b: Buffer) => {
-    stdout += b.toString();
-  });
-  const port = await waitFor(() => stdout.match(/listening on :(\d+)\r?\n/)?.[1], {
-    timeout: 30_000,
-    interval: 100,
-    describe: 'the server to say where it listens',
-  });
-  return { base: `http://127.0.0.1:${port}`, child };
-}
-
-async function stop(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return;
-  const exited = new Promise<void>((r) => child.once('exit', () => r()));
-  child.kill('SIGTERM');
-  await exited;
+/** A real server on the data dir, on a port it picks itself (see boot-bin.ts). */
+function boot(dataDir: string): Promise<Server> {
+  return bootBin({ dataDir, children, env: { HOME: join(scratch, 'home') } });
 }
 
 function api(base: string) {
