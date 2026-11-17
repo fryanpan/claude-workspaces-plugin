@@ -1,7 +1,7 @@
 import { listThreads, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { BoardRowSync, type RowSyncStats, sameJson } from './board-row-sync.ts';
-import type { DocStore } from './doc-store.ts';
+import type { DocStore, LiveDoc } from './doc-store.ts';
 import { slimTaskRow } from './task-row-slim.ts';
 import {
   projectGoalMeta,
@@ -361,8 +361,15 @@ export class TaskProjection {
       // missing on every rehydrated task doc.
       // Archived rows included — an archived task's discussion is still
       // readable, and its body doc has to be armed to stay that way.
+      //
+      // Only the bodies in memory, and the ones that do not exist yet. A
+      // cold body is armed when it loads (`armLoadedBody`), so loading it
+      // here bought nothing — and this branch runs whenever the board doc
+      // comes back into memory, so it loaded every task body on the board
+      // for its thirty minutes each time somebody opened the board or any
+      // task moved on it.
       for (const t of this.tasks.listTasks(workspaceId, { includeArchived: true })) {
-        this.ensureTaskBody(t);
+        if (this.bodyNeedsEnsure(t.id)) this.ensureTaskBody(t);
       }
       this.refresh(workspaceId);
       return;
@@ -535,7 +542,7 @@ export class TaskProjection {
     // ADDRESS — the panel mounts its editor on it and the discussion is
     // fetched from it, both of which have to work on a goal nobody has
     // described yet. That is the difference between a body and a body doc.
-    for (const r of goalRows) this.ensureGoalBody(r);
+    for (const r of goalRows) if (this.bodyNeedsEnsure(r.id)) this.ensureGoalBody(r);
     const goalMeta = new Map(
       goalRows.map((r) => [r.id, projectGoalMeta(r, this.commentCount(r.id), isAttachedAgent)]),
     );
@@ -578,21 +585,42 @@ export class TaskProjection {
    * cold, preserving fragment identity and every thread anchor in it.
    */
   ensureTaskBody(task: Task): void {
-    const docId = taskBodyDocId(task.id);
-    const doc = this.docStore.getOrCreate(
-      docId,
-      { type: 'markdown', title: task.title },
-      // Likewise `task:` — a body doc is minted here or nowhere.
-      { authority: 'server' },
-    );
-    const fragment = prose.getProseFragment(doc.ydoc);
-    if (fragment.length === 0 && task.body?.trim()) {
-      this.docStore.setDocContent(docId, task.body);
+    this.ensureBody(taskBodyDocId(task.id), task.title, task.body);
+  }
+
+  /** A body doc's ensure, for a task or a goal row alike. The seed is the
+   *  row's own text going in, not an edit, so it never reaches the
+   *  snapshot: the observer is armed after it, or skips it when the doc
+   *  came in through `armLoadedBody` and was armed first. */
+  private ensureBody(docId: string, title: string, body: string | undefined): void {
+    this.seeding.add(docId);
+    let doc: LiveDoc;
+    try {
+      doc = this.docStore.getOrCreate(
+        docId,
+        { type: 'markdown', title },
+        // Likewise `task:` — a body doc is minted here or nowhere.
+        { authority: 'server' },
+      );
+      if (prose.getProseFragment(doc.ydoc).length === 0 && body?.trim()) {
+        this.docStore.setDocContent(docId, body);
+      }
+    } finally {
+      this.seeding.delete(docId);
     }
-    if (this.bodyWired.get(docId) !== doc.ydoc) {
-      this.bodyWired.set(docId, doc.ydoc);
-      fragment.observeDeep(() => this.scheduleSnapshot(docId));
-    }
+    this.armBody(docId, doc.ydoc);
+  }
+
+  /** Body docs `ensureBody` is creating or seeding right now. */
+  private readonly seeding = new Set<string>();
+
+  /** Arm the snapshot observer on this instance of a body doc, once. */
+  private armBody(docId: string, ydoc: Y.Doc): void {
+    if (this.bodyWired.get(docId) === ydoc) return;
+    this.bodyWired.set(docId, ydoc);
+    prose.getProseFragment(ydoc).observeDeep(() => {
+      if (!this.seeding.has(docId)) this.scheduleSnapshot(docId);
+    });
   }
 
   /**
@@ -611,20 +639,7 @@ export class TaskProjection {
    * docId, so there is nothing for the two kinds to collide over.
    */
   ensureGoalBody(goal: GoalRow): void {
-    const docId = taskBodyDocId(goal.id);
-    const doc = this.docStore.getOrCreate(
-      docId,
-      { type: 'markdown', title: goal.title },
-      { authority: 'server' },
-    );
-    const fragment = prose.getProseFragment(doc.ydoc);
-    if (fragment.length === 0 && goal.body?.trim()) {
-      this.docStore.setDocContent(docId, goal.body);
-    }
-    if (this.bodyWired.get(docId) !== doc.ydoc) {
-      this.bodyWired.set(docId, doc.ydoc);
-      fragment.observeDeep(() => this.scheduleSnapshot(docId));
-    }
+    this.ensureBody(taskBodyDocId(goal.id), goal.title, goal.body);
   }
 
   /**
@@ -683,10 +698,44 @@ export class TaskProjection {
     );
   }
 
+  /** Read without loading: `refresh` asks it of every row on the board,
+   *  and through `get` each ask loaded, bound and touched the body doc. */
   private commentCount(rowId: string): number {
-    const doc = this.docStore.get(taskBodyDocId(rowId));
-    if (!doc) return 0;
-    return listThreads(doc.ydoc).reduce((n, t) => n + t.comments.length, 0);
+    return this.docStore.peekCommentCount(taskBodyDocId(rowId));
+  }
+
+  /** Whether a row's body must be ensured now: it is in memory (arm it, a
+   *  map hit) or it does not exist (mint and seed it). A body on disk and
+   *  out of memory is left there; `armLoadedBody` arms it when it loads. */
+  private bodyNeedsEnsure(rowId: string): boolean {
+    const docId = taskBodyDocId(rowId);
+    return this.docStore.peek(docId) !== undefined || !this.docStore.docExists(docId);
+  }
+
+  /**
+   * A task or goal body just came into memory: arm its snapshot observer,
+   * as `ensureTaskBody` would have. The server calls this from the doc
+   * store's wire hook, so a body loaded by anything — an editor, an MCP
+   * edit, a thread read — keeps the row's snapshot current without the
+   * projection having loaded every body to be sure. A body whose fragment
+   * is empty while its row holds text is seeded once the load returns.
+   */
+  armLoadedBody(doc: Pick<LiveDoc, 'docId' | 'ydoc'>): void {
+    const rowId = taskIdOfBodyDoc(doc.docId);
+    // `ensureBody` arms what it creates itself, after its seed.
+    if (!rowId || this.seeding.has(doc.docId)) return;
+    if (this.bodyWired.get(doc.docId) === doc.ydoc) return;
+    const goal = this.tasks.getGoalRow(rowId);
+    const task = goal ? undefined : this.tasks.getTask(rowId);
+    if (!goal && !task) return;
+    this.armBody(doc.docId, doc.ydoc);
+    if (prose.getProseFragment(doc.ydoc).length > 0 || !(goal ?? task)?.body?.trim()) return;
+    // After the load returns: seeding writes through the store, which must
+    // not run inside the hydrate that is still wiring this doc.
+    queueMicrotask(() => {
+      if (goal) this.ensureGoalBody(goal);
+      else if (task) this.ensureTaskBody(task);
+    });
   }
 
   /**

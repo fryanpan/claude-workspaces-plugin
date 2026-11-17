@@ -2413,6 +2413,16 @@ heap's commonest object types and biggest growers, so heap growth can be told
 from native growth. `doc-store.ts` owns the sampler and `server.ts` counts each request at the
 front door; neither module imports a subsystem.
 
+`doc-load-sites.ts` joins the doc-store group and moves no boundary. It names
+the caller that brought each doc into memory — the first stack frame outside
+`doc-store.ts`, read once per doc loaded, never per read — so the
+`[doc-store] mem` line can end `loaded=+N by=<site>*n,…` after `held=`, and
+`/api/metrics` carries the since-boot `loads`. `held=` says what keeps a
+resident doc; this says what loaded it, which is the question when the count
+jumps. It found the board projection re-arming every task body whenever a
+board doc came back into memory (`TaskProjection.armLoadedBody` now arms a body
+as it loads instead).
+
 `doc-residency.ts` joins the doc-store group and moves no boundary. It is the
 eviction WINDOWS as a pure function over each resident doc's clocks — a week
 for a doc a person's editor left, for at most 500 such docs, and thirty minutes

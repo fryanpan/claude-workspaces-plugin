@@ -119,7 +119,9 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
   /** Sizes ride on every row so Home, the landing page and the cross-board
    *  flow filter by one estimate. See `review-sizing.ts`. */
   const sizer = createReviewSizer({
-    textLength: (docId) => docStore.getDocStatus(docId)?.textLength ?? null,
+    // `peekTextLength`, not `getDocStatus`: the queue sizes every item a
+    // board holds, and a status read loaded and bound each linked doc.
+    textLength: (docId) => docStore.peekTextLength(docId),
     filesInSet: (setId) => filesInSetOf(docStore.list(), setId),
   });
 

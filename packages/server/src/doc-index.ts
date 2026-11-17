@@ -44,6 +44,9 @@ export interface DocIndexEntry {
   meta: DocMeta;
   /** Open and total thread counts, for the board's per-row badges. */
   threads: { open: number; total: number };
+  /** Comments across every thread: the board row's comment count. Absent on
+   *  a row written before it was kept; the reader then reads the `.ydoc`. */
+  comments?: number;
   /**
    * The doc had an un-flushed write to its bound `.md` when this row was
    * written — set on the ydoc save (200ms), cleared when the file write-back

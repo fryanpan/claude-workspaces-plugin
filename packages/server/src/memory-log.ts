@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { formatLoads, loadsInWindow } from './doc-load-sites.ts';
 import { backgroundPasses, readHeap } from './event-loop.ts';
 /**
  * The `[doc-store] mem` line: what this process costs, sampled often enough
@@ -230,6 +231,10 @@ export interface MemoryLogStats {
   /** `residentDocs` split by what keeps each one in memory
    *  (`DocStore.residentBy`). The line leaves `held=` off without it. */
   residentBy?: Record<string, number>;
+  /** Docs loaded since boot by site (`DocLoadSites`). The line leaves
+   *  `loaded=` off without them. */
+  loads?: { tag: string; count: number }[];
+  loadsTotal?: number;
 }
 
 export type PrintReason = 'first' | 'delta' | 'interval';
@@ -265,6 +270,8 @@ export interface MemoryLineInput {
   census: HeapCensus | null;
   /** Null when the counters could not be read; the line says so. */
   buffers: BufferCounters | null;
+  /** Docs loaded in this window and by which site; absent, no field. */
+  loads?: { loaded: number; by: { tag: string; count: number }[] } | null;
 }
 
 /** The line itself. Space-separated `key=value`; no value holds a space. */
@@ -289,7 +296,9 @@ export function formatMemoryLine(i: MemoryLineInput): string {
     // Last, so a grep written against the heap and census fields still reads.
     ` ${i.buffers ? formatBufferCounters(i.buffers) : 'buffers=unavailable'}` +
     // After the buffers, for the same reason: what holds each resident doc.
-    formatResidentBy(s.residentBy)
+    formatResidentBy(s.residentBy) +
+    // And what loaded them, after what holds them.
+    (i.loads ? formatLoads(i.loads) : '')
   );
 }
 
@@ -333,6 +342,8 @@ export class MemoryLog {
   private last: { atMs: number; mb: number } | null = null;
   private lastActivations = new Map<string, number>();
   private lastActivationsTotal = 0;
+  private lastLoads: Map<string, number> | null = null;
+  private lastLoadsTotal = 0;
   private startedAtMs: number;
   private ticker: ReturnType<typeof setInterval> | null = null;
 
@@ -386,6 +397,7 @@ export class MemoryLog {
         heapMb: this.heapMb(),
         census: this.takeCensus(nowMs),
         buffers: this.buffers(),
+        loads: this.takeLoads(stats),
       });
       this.lastActivationsTotal = stats.activationsTotal;
       this.last = { atMs: nowMs, mb };
@@ -428,6 +440,19 @@ export class MemoryLog {
     const waitMs = Math.max(HEAP_TYPES_EVERY_MS, costMs * HEAP_TYPES_COST_MULTIPLE);
     this.lastCensus = { dueMs: nowMs + waitMs, counts };
     return { counts, previous, costMs };
+  }
+
+  /** Loads since the last printed line, by site; null when stats carry none. */
+  private takeLoads(stats: MemoryLogStats): ReturnType<typeof loadsInWindow> | null {
+    if (stats.loads === undefined || stats.loadsTotal === undefined) return null;
+    const window = loadsInWindow(
+      { loads: stats.loads, loadsTotal: stats.loadsTotal },
+      this.lastLoads,
+      this.lastLoadsTotal,
+    );
+    this.lastLoads = new Map(stats.loads.map((l) => [l.tag, l.count]));
+    this.lastLoadsTotal = stats.loadsTotal;
+    return window;
   }
 
   /** The reported tag whose since-boot count grew most since the last line. */

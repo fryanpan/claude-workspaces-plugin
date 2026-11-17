@@ -647,6 +647,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // membership, both built further down. Until then only the owner is trusted.
   let commentTrustFor: CommentTrustFor | null = null;
   let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
+  // Late-bound too: a task body loaded after boot is armed by the projection
+  // as it wires (`TaskProjection.armLoadedBody`), so the projection need not
+  // load every body on a board to arm them.
+  let armLoadedBody: ((doc: LiveDoc) => void) | null = null;
   // Built before the store so it attaches to every doc the store wires. Which
   // docs it records is late-bound: the core switch and the board membership
   // are built further down. Until then it records nothing.
@@ -660,7 +664,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const docStore: DocStore = new DocStore({
     dataDir,
-    onDocWired: (doc) => docHistory.attach(doc),
+    onDocWired: (doc) => {
+      docHistory.attach(doc);
+      armLoadedBody?.(doc);
+    },
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,
@@ -1083,6 +1090,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // docs. init() runs after both stores hydrated, so the sidecar is
   // authoritative for gated fields on restart.
   const taskProjection = new TaskProjection({ docStore, tasks: taskStore });
+  armLoadedBody = (doc) => taskProjection.armLoadedBody(doc);
   taskProjection.init();
 
   // Provenance stamping at the store's one choke point: every create whose
