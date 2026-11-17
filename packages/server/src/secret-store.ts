@@ -158,7 +158,11 @@ export function secretValueFits(service: string, value: string): boolean {
 
 /** The default runner: spawn the binary, write stdin, read both pipes, and
  *  kill it rather than wait forever. */
-async function spawnCommand(file: string, args: string[], stdin: string): Promise<SecretRunResult> {
+export async function spawnCommand(
+  file: string,
+  args: string[],
+  stdin: string,
+): Promise<SecretRunResult> {
   const proc = Bun.spawn([file, ...args], {
     stdin: new TextEncoder().encode(stdin),
     stdout: 'pipe',

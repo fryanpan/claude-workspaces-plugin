@@ -10,7 +10,8 @@ approval.
 bun run cf:plan              # prod: reads the account, prints what would change, changes nothing
 bun run cf:plan staging      # the same for staging
 bun run cf:sync-config       # sends the gitignored configs to CI and starts an apply; one passkey tap
-bun run cf:rotate-token NAME # a new secret for one service token; one passkey tap
+bun run cf:rotate-token NAME # a new secret for one service token; one passkey tap (fallback)
+bun run cf:pull-token [NAME] # take a token CI rotated into the Keychain now; prod does it every 15 min
 bun run cf:ci-secrets plan    # CI's deploy token and GitHub secrets: what would change
 bun run cf:ci-secrets apply   # make the token and write the secrets ("CI's credentials" below)
 bun run cf:app-secrets apply  # apps' secrets in cloudflare-prod; a GitHub token alone ("Apps' secrets" below)
@@ -151,6 +152,12 @@ before the keeper is asked. A CI apply refuses a missing token, since CI has
 no Keychain; the error names `cf:sync-config`. `bun run cf:rotate-token
 "<name>"` gives an existing token a new secret on one tap, keeps the old
 secret working for 24 hours, and replaces the pair in the Keychain.
+Rotation runs in CI now: dispatch `.github/workflows/rotate-token.yml` on
+main with the token's name. CI rotates it, seals the new pair to the Mac's
+public key (`token-drop.pub`) into the state bucket, and prod on the Mac
+stores it in the Keychain within 15 minutes, with no tap. How the secret
+travels, and the one-time key setup: docs/process/keeper.md, "Rotating a
+service token in CI".
 Tokens carry `prevent_destroy`.
 
 **Removing.** An entry removed from a config is destroyed at the next apply,

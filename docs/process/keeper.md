@@ -225,7 +225,51 @@ state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
   new secret, on one tap whose page names the token. The old secret keeps
   working for 24 hours, and the new pair replaces the old one in your
   Keychain. A second rotation inside those 24 hours ends the old secret at
-  once.
+  once. CI now does this with no tap (below); this command stays as the
+  fallback.
+
+### Rotating a service token in CI
+
+Rotation runs in CI now, with no passkey tap and no step of yours. Dispatch
+`.github/workflows/rotate-token.yml` on main with the token's name (default
+`agent moi`). Where the secret is at each step:
+
+1. **Cloudflare.** CI's deploy token (`cloudflare-prod`, Access: Service
+   Tokens Write) rotates the one token with that name
+   (`infra/cloudflare/ci-rotate-token.ts`, the keeper's own call in
+   `keeper-rotate.ts`). The old secret works for 24 hours more.
+2. **The runner's memory.** The new client id and secret are masked
+   (`::add-mask::`) before anything else prints, then sealed with
+   libsodium's sealed box to the Mac's public key,
+   `infra/cloudflare/token-drop.pub`. No value is in an argument, a file or
+   `$GITHUB_ENV`.
+3. **The state bucket**, as ciphertext, at
+   `service-tokens/<name-slug>.sealed.json`. Its plain envelope carries only
+   the name and the rotation time, which CI reads to refuse a second rotation
+   inside 24 hours unless dispatched with `force`.
+4. **Your Keychain.** Prod on the Mac pulls at boot and every 15 minutes
+   (`packages/server/src/token-drop/`), opens the drop with the private key
+   only the Keychain holds (`cw-token-drop-private-key`), and replaces the
+   pair under `cw-<name>-access-client-id` / `cw-<name>-access-secret`. It
+   takes a drop only for a token whose client id the Keychain already holds,
+   and only that client id: rotation keeps it, so a drop forged by someone
+   who can write the bucket also needs the old client id. An older drop put
+   back is ignored. `bun run cf:pull-token ["<name>"]` does the same once by
+   hand, with `CW_DATA_DIR` set to prod's data dir.
+
+**Setting it up, once.** Prod makes its key pair at its first boot with this
+code: the private half goes into the Keychain, the public half into
+`<dataDir>/token-drop.pub` and prod's log (`[token-drop] public key …`). The
+lead commits that public key as `infra/cloudflare/token-drop.pub` by pull
+request; until then the workflow refuses before it rotates anything. Prod
+reads the bucket with the state key you already hold
+(`cloudflare-r2-tfstate`, or the secret card's pair) and needs the account
+id from `CLOUDFLARE_ACCOUNT_ID` or the secret `cloudflare-account-id`; when
+one is missing it logs `[token-drop] not pulling: …` once and does nothing.
+
+**After a pull**, a process that read the secret at its start keeps the old
+one until it restarts. The board sync (`bun run machine:sync-board`) is one:
+restart it inside the 24 hours.
 
 Making and rotating service tokens needs the keeper's token to hold Access:
 Service Tokens **Edit**, which the setup grants. These two are the only ways

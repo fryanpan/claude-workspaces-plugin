@@ -43,3 +43,28 @@ export function sealedBox(message: string, recipientPublicB64: string): string {
     eph.secretKey.fill(0);
   }
 }
+
+/**
+ * Open a box `sealedBox` made, with the recipient's key pair (base64). Null
+ * for anything that is not a box sealed to that public key, including one
+ * changed by a single bit: Poly1305 fails it.
+ */
+export function openSealedBox(
+  boxB64: string,
+  recipientPublicB64: string,
+  recipientSecretB64: string,
+): string | null {
+  const box = new Uint8Array(Buffer.from(boxB64, 'base64'));
+  const pk = new Uint8Array(Buffer.from(recipientPublicB64, 'base64'));
+  const sk = new Uint8Array(Buffer.from(recipientSecretB64, 'base64'));
+  try {
+    if (pk.length !== 32 || sk.length !== 32 || box.length < 32 + nacl.box.overheadLength) {
+      return null;
+    }
+    const eph = box.subarray(0, 32);
+    const opened = nacl.box.open(box.subarray(32), sealNonce(eph, pk), eph, sk);
+    return opened ? new TextDecoder().decode(opened) : null;
+  } finally {
+    sk.fill(0);
+  }
+}
