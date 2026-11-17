@@ -163,10 +163,10 @@ describe('GET /api/metrics', () => {
     const parsed = JSON.parse(body) as Record<string, unknown>;
     for (const [key, value] of Object.entries(parsed)) {
       if (key === 'activations') continue;
-      // `notesQuality` and `blockingWait` are nested counts; every leaf under
-      // them is still a number, which is what keeps the no-identifiers
-      // promise true as the rollups grow fields.
-      if (key === 'notesQuality' || key === 'blockingWait') {
+      // `notesQuality`, `blockingWait` and `residentBy` are nested counts;
+      // every leaf under them is still a number, which is what keeps the
+      // no-identifiers promise true as the rollups grow fields.
+      if (key === 'notesQuality' || key === 'blockingWait' || key === 'residentBy') {
         for (const leaf of numbersUnder(value)) expect(typeof leaf).toBe('number');
         continue;
       }

@@ -7,8 +7,13 @@
  * so the first pass after a boot, or after an idle sweep released the docs,
  * held the loop for as long as thousands of loads took. Two changes, one
  * `describe` each: a cold doc whose index row says it has nothing to return
- * answers empty without loading, and the timed pass loads the rest first, a
+ * answers empty without loading, and the timed pass reads the rest first, a
  * slice at a time.
+ *
+ * "Reads", not "loads", since the scan stopped bringing docs into memory at
+ * all (`DocStore.peekThreads`; `stall-pass-no-hydrate.test.ts`): a cold doc's
+ * `.ydoc` is decoded into a throwaway copy. That decode is the cost the timed
+ * pass still keeps out of the synchronous scan.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -126,6 +131,31 @@ describe('a cold doc answers a threads read from its index row', () => {
     expect(resident('saltmarsh')).toBe(false);
   });
 
+  it('reads ahead only the docs a read would decode, and loads none of them', async () => {
+    docStore.get('harborlight');
+    const slice = scriptedSlice();
+    const read = await docStore.readThreadsAhead(
+      new Map<string, 'open' | undefined>([
+        ['harborlight', undefined],
+        ['riverbend', 'open'],
+        ['saltmarsh', 'open'],
+      ]),
+      slice,
+    );
+
+    // Riverbend only: Harborlight is resident, Saltmarsh has no open thread.
+    expect(read).toBe(1);
+    expect(slice.yields()).toBe(3);
+    expect(resident('riverbend')).toBe(false);
+    expect(docStore.peekThreads('riverbend', { status: 'open' })).toHaveLength(1);
+    expect(resident('riverbend')).toBe(false);
+    docStore.dropThreadsAhead();
+    // Without the read-ahead the same answer comes off disk, still unloaded.
+    expect(docStore.peekThreads('riverbend', { status: 'open' })).toHaveLength(1);
+    expect(docStore.peekThreads('saltmarsh').map((t) => t.status)).toEqual(['resolved']);
+    expect(resident('riverbend') || resident('saltmarsh')).toBe(false);
+  });
+
   it('a warm pass stops loading once the store stops', async () => {
     const slice = scriptedSlice((n) => {
       if (n === 1) docStore.stop();
@@ -199,7 +229,7 @@ describe('the timed stall pass prepares before it ticks', () => {
   });
 });
 
-describe('the timed stall pass loads nothing inside the synchronous scan', () => {
+describe('the timed stall pass decodes nothing inside the synchronous scan', () => {
   let dataDir: string;
   let handle: ServerHandle | undefined;
 
@@ -209,26 +239,37 @@ describe('the timed stall pass loads nothing inside the synchronous scan', () =>
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  /** Every doc a `listThreads` call had to load: out of memory before the
-   *  call, in memory after it. */
-  function coldReads(h: ServerHandle): string[] {
-    const cold: string[] = [];
-    const ds = h.docStore;
-    const read = ds.listThreads.bind(ds);
-    ds.listThreads = (docId, filter) => {
-      const wasCold = ds.peek(docId) === undefined;
-      const threads = read(docId, filter);
-      if (wasCold && ds.peek(docId) !== undefined) cold.push(docId);
-      return threads;
+  /** Every doc whose `.ydoc` was decoded for its threads, tagged with
+   *  whether a read-ahead was running at the time. */
+  function coldDecodes(h: ServerHandle): Array<{ docId: string; ahead: boolean }> {
+    const decoded: Array<{ docId: string; ahead: boolean }> = [];
+    const ds = h.docStore as unknown as {
+      readColdThreads: (docId: string) => unknown;
+      readThreadsAhead: (...a: unknown[]) => Promise<number>;
     };
-    return cold;
+    let ahead = false;
+    const decode = ds.readColdThreads.bind(ds);
+    ds.readColdThreads = (docId) => {
+      decoded.push({ docId, ahead });
+      return decode(docId);
+    };
+    const readAhead = ds.readThreadsAhead.bind(ds);
+    ds.readThreadsAhead = async (...a) => {
+      ahead = true;
+      try {
+        return await readAhead(...a);
+      } finally {
+        ahead = false;
+      }
+    };
+    return decoded;
   }
 
   function evictAll(h: ServerHandle): void {
     for (const meta of h.docStore.list()) h.docStore.evictDoc(meta.docId);
   }
 
-  it('reads the thread-bearing docs warm, where the untimed pass reads them cold', async () => {
+  it('decodes the thread-bearing docs ahead, where the untimed pass decodes them inside', async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'stall-cold-'));
     const first = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     const ws = first.tasks.createWorkspace('Riverbend board').id;
@@ -258,21 +299,27 @@ describe('the timed stall pass loads nothing inside the synchronous scan', () =>
     await first.stop();
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
-    const cold = coldReads(handle);
+    const decoded = coldDecodes(handle);
     const withThreads = [taskBodyDocId(task.id), 'board-notes'];
+    const decodedIds = () => decoded.map((d) => d.docId);
 
-    // Control first: the untimed pass, over the same released docs, reads
-    // the thread-bearing ones cold. This is what the spy is for.
+    // Control first: the untimed pass, over the same released docs, decodes
+    // the thread-bearing ones inside the scan. This is what the spy is for.
     evictAll(handle);
     handle.nudgeStalls();
-    expect(withThreads.every((id) => cold.includes(id))).toBe(true);
-    // And the doc with nothing on it is loaded by neither pass.
-    expect(cold).not.toContain('board-quiet');
+    expect(withThreads.every((id) => decodedIds().includes(id))).toBe(true);
+    expect(decoded.every((d) => !d.ahead)).toBe(true);
+    // And the doc with nothing on it is decoded by neither pass.
+    expect(decodedIds()).not.toContain('board-quiet');
 
     evictAll(handle);
-    cold.length = 0;
+    decoded.length = 0;
     await handle.nudgeStallsTimed();
-    expect(cold).toEqual([]);
-    expect(handle.docStore.peek('board-quiet')).toBeUndefined();
+    expect(withThreads.every((id) => decodedIds().includes(id))).toBe(true);
+    expect(decoded.filter((d) => !d.ahead)).toEqual([]);
+    // Neither pass loaded anything.
+    for (const id of [...withThreads, 'board-quiet']) {
+      expect(handle.docStore.peek(id)).toBeUndefined();
+    }
   });
 });

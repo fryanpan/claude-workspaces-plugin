@@ -62,6 +62,36 @@ export const RESIDENCY_LIMITS: ResidencyLimits = {
   personKeepCap: PERSON_KEEP_CAP,
 };
 
+/** Which window still keeps a doc: the short one any reach earns, or the
+ *  week a person's visit earns. */
+export type WindowHold = 'short-window' | 'person-window';
+
+/**
+ * The window each doc is still inside, by id. A doc in neither is absent:
+ * those are `pastWindow`'s answer. A doc inside both is named under the
+ * short window, because that one alone would keep it.
+ */
+export function windowHolds(
+  entries: readonly ResidencyEntry[],
+  now: number,
+  limits: ResidencyLimits = RESIDENCY_LIMITS,
+): Map<string, WindowHold> {
+  // The person window goes to the most recent person visits, cap-many.
+  const personKept = new Set(
+    entries
+      .filter((e) => e.lastPersonAt !== undefined && now - e.lastPersonAt < limits.personKeepMs)
+      .sort((a, b) => (b.lastPersonAt ?? 0) - (a.lastPersonAt ?? 0))
+      .slice(0, limits.personKeepCap)
+      .map((e) => e.docId),
+  );
+  const out = new Map<string, WindowHold>();
+  for (const e of entries) {
+    if (now - e.lastReachedAt < limits.shortKeepMs) out.set(e.docId, 'short-window');
+    else if (personKept.has(e.docId)) out.set(e.docId, 'person-window');
+  }
+  return out;
+}
+
 /**
  * The docs whose window has run out, in the order given. The caller still
  * asks each one's holds (a connection, a pending write, a recording) before
@@ -72,19 +102,6 @@ export function pastWindow(
   now: number,
   limits: ResidencyLimits = RESIDENCY_LIMITS,
 ): string[] {
-  // The person window goes to the most recent person visits, cap-many.
-  const personKept = new Set(
-    entries
-      .filter((e) => e.lastPersonAt !== undefined && now - e.lastPersonAt < limits.personKeepMs)
-      .sort((a, b) => (b.lastPersonAt ?? 0) - (a.lastPersonAt ?? 0))
-      .slice(0, limits.personKeepCap)
-      .map((e) => e.docId),
-  );
-  const out: string[] = [];
-  for (const e of entries) {
-    if (now - e.lastReachedAt < limits.shortKeepMs) continue;
-    if (personKept.has(e.docId)) continue;
-    out.push(e.docId);
-  }
-  return out;
+  const held = windowHolds(entries, now, limits);
+  return entries.filter((e) => !held.has(e.docId)).map((e) => e.docId);
 }
