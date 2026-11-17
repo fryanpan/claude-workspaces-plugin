@@ -383,11 +383,16 @@ is refused.
 ```json
 { "boards": { "<boardId>": { "repos": [
   { "repo": "<owner>/<name>" },
-  { "repo": "<owner>/<other>", "approval": true } ] } } }
+  { "repo": "<owner>/<other>", "approval": true },
+  { "repo": "<outside-org>/<name>", "workflowApprovers": "editors" } ] } } }
 ```
 
 A repo with no `approval` flag pushes without a person; `"approval": true`
-holds every push to it. A `.github/` change waits on every repo. No route
+holds every push to it. A `.github/` change waits on every repo, and only
+the board's owner may approve it, unless the repo says
+`"workflowApprovers": "editors"`. Write that only for an outside org's own
+repo, whose Actions secrets are the org's, so its editors approve its
+workflow changes; leave it off every repo the board's owner owns. No route
 writes the file, and it is read again on every push. The server refuses
 the repo's default branch and anything that is not a fast-forward. Any other
 branch is allowed, including one a repo's `on: push` workflow runs for. The

@@ -19,8 +19,12 @@
  * push that adds, changes or deletes anything under `.github/` is held: a
  * workflow runs with the repo's Actions secrets as soon as it lands on any
  * branch, and a deploy key may write one on a public repo, so this hold is
- * the only gate on it. A held push is filed as a decision review
- * item with `step: 'push'` (owner-only when the board reserves that step),
+ * the only gate on it, and on a repo the board's owner owns only the
+ * owner's Push releases it: a repo's rule must say
+ * `"workflowApprovers": "editors"` (an outside org's own repo) before an
+ * editor's does. A held push is filed as a decision review
+ * item with `step: 'push'` (owner-only when the board reserves that step,
+ * or when it is a workflow change only the owner may approve),
  * at most `MAX_HELD_PER_BOARD` at a time. It runs only when the item's
  * answer chose Push AND carries `answeredBy`, which the store writes for a
  * person and never for an agent (`review-items/approver.ts`), so the lead
@@ -34,7 +38,7 @@ import type { AccessRole } from '../share/board-access.ts';
 import type { TaskStore } from '../tasks.ts';
 import type { PushAuth, PushCredential } from './credential.ts';
 import { type GitRunner, realGit } from './git.ts';
-import { ruleFor } from './policy.ts';
+import { type RepoRule, ruleFor } from './policy.ts';
 import { type RunResult, githubUrlFor, runPush } from './run.ts';
 
 export const PUSH_APPROVE = 'o-push';
@@ -67,6 +71,8 @@ export interface PushRecord {
   sha?: string;
   taskId?: string;
   reviewItemId?: string;
+  /** The paths under `.github/` a held push changes; empty when none. */
+  github?: string[];
   requestedBy: string;
   at: number;
   updatedAt: number;
@@ -190,7 +196,7 @@ export class GitPusher {
       );
       if (cannot) return cannot;
     }
-    return this.hold(record, judged);
+    return this.hold(record, judged, rule);
   }
 
   /** Why `record` cannot be held for a person, or null when it can. */
@@ -260,7 +266,11 @@ export class GitPusher {
     return n;
   }
 
-  private hold(record: PushRecord, judged: Extract<RunResult, { ok: true }>): PushOutcome {
+  private hold(
+    record: PushRecord,
+    judged: Extract<RunResult, { ok: true }>,
+    rule: RepoRule,
+  ): PushOutcome {
     const taskId = record.taskId ?? '';
     // The lead wrote these subjects. In a fenced block they render as text,
     // and every line starts with `- `, so none can close the fence.
@@ -288,6 +298,7 @@ export class GitPusher {
           { id: PUSH_REJECT, label: 'Don’t push', detail: 'Nothing is sent, and the lead is told' },
         ],
         step: 'push',
+        ...(judged.github.length && rule.workflowApprovers === 'owner' ? { ownerOnly: true } : {}),
       },
       { actor: { ...GIT_PUSH_ACTOR } },
     );
@@ -301,6 +312,7 @@ export class GitPusher {
     }
     record.state = 'awaiting-approval';
     record.reviewItemId = res.item.id;
+    record.github = judged.github;
     record.message = `waiting for a person to answer the review item on task ${taskId}`;
     record.error = undefined;
     this.records.set(record.id, record);
@@ -357,8 +369,10 @@ export class GitPusher {
    * choose Push, carry `answeredBy` (written only for a person proved by
    * their own sign-in), name no agent id, and come from a human member of
    * the push's board who may edit it — its owner when the board reserves the
-   * `push` step. A comment or view member can answer the item, and their
-   * Push still sends nothing: publishing code is an edit.
+   * `push` step, or when the push changes `.github/` and the repo's rule
+   * does not let editors approve workflow changes. A comment or view member
+   * can answer the item, and their Push still sends nothing: publishing code
+   * is an edit.
    */
   private approvalRefusal(
     record: PushRecord,
@@ -375,7 +389,21 @@ export class GitPusher {
     if (access !== 'owner' && this.o.taskStore.requireOwnerFor(record.boardId).includes('push')) {
       return "this board reserves pushes for its owner's approval";
     }
+    if (access !== 'owner' && this.workflowNeedsOwner(record)) {
+      return "this push changes .github/, and only the board's owner may approve a workflow change to this repo";
+    }
     return null;
+  }
+
+  /**
+   * A held push changes `.github/` and its repo's rule, read now, does not
+   * say `"workflowApprovers": "editors"`. A record held before `github` was
+   * recorded counts as changing it, and a repo gone from the list counts as
+   * the owner's.
+   */
+  private workflowNeedsOwner(record: PushRecord): boolean {
+    if (record.github && record.github.length === 0) return false;
+    return ruleFor(this.o.dataDir, record.boardId, record.repo)?.workflowApprovers !== 'editors';
   }
 
   /** `answeredBy` is written only for a proven person; an agent id never counts. */
