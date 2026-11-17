@@ -262,6 +262,13 @@ export type WsCtx = {
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
 
+/** One walk's read-ahead (`DocStore.readThreadsAhead`): how many cold docs
+ *  it read, and the call that ends it. */
+export interface ThreadsAhead {
+  readonly read: number;
+  drop(): void;
+}
+
 /** What keeps a doc out of the idle sweep's reach (`evictionHold`). */
 export type EvictionHold =
   | 'connected'
@@ -883,6 +890,7 @@ export class DocStore {
     // 3. Out of memory. Aliases and the index row are deliberately untouched;
     //    `activityMtime` stays too, so a listing still answers without a stat.
     this.docs.delete(docId);
+    this.forgetThreadsAhead(docId);
     this.lastTouchedAt.delete(docId);
     this.lastPersonAt.delete(docId);
     this.hydratedAt.delete(docId);
@@ -1439,6 +1447,7 @@ export class DocStore {
     this.fanout.closeSockets(doc, closeReason);
     this.editSessions.closeDoc(docId);
     this.docs.delete(docId);
+    this.forgetThreadsAhead(docId);
     this.catalog.forgetActivity(docId);
     this.lastTouchedAt.delete(docId);
     this.lastPersonAt.delete(docId);
@@ -2996,10 +3005,11 @@ export class DocStore {
     // Hydrate the doc ourselves first so the provider below finds it resident.
     //
     // Threads live in the `.ydoc`, so a parked binding costs this call
-    // nothing. And the callers are the fan-outs: the home queue, the
-    // workspace listing, the archive route and the stall scan each walk EVERY
-    // docId on a board, none of which reaches a URL for the request prewarm
-    // to find. One bad file among them used to park the whole server.
+    // nothing. And the callers are the fan-outs: the workspace listing and
+    // the archive route each walk EVERY docId on a board, none of which
+    // reaches a URL for the request prewarm to find. One bad file among them
+    // used to park the whole server. (The home queue and the stall scan read
+    // through `peekThreads` now, which loads nothing.)
     //
     // And it costs no BINDING either: the read-only resolve leaves the file
     // alone entirely, so a walk over a board's docs can no longer wake every
@@ -3018,31 +3028,6 @@ export class DocStore {
   }
 
   /**
-   * Load, ahead of a synchronous walk, the docs that walk will read threads
-   * from, handing the loop back between loads.
-   *
-   * Each value is the filter the walk will pass to `listThreads`, so a doc
-   * the walk would answer empty from the index is not loaded here either.
-   * The stall tick reads every task body and board doc in one synchronous
-   * pass; without this, the first tick after a boot or an idle sweep loaded
-   * every cold doc with a thread inside that pass. Resolves to how many docs
-   * it loaded.
-   */
-  async warmForThreadReads(
-    targets: ReadonlyMap<string, 'open' | undefined>,
-    slice: TimeSlice = timeSlice(),
-  ): Promise<number> {
-    let loaded = 0;
-    for (const [docId, status] of targets) {
-      await slice.yieldIfDue();
-      if (this.stopped) break;
-      if (this.docs.has(docId) || this.indexSaysNoThreads(docId, status)) continue;
-      if (this.resolveDocForRead(docId)) loaded++;
-    }
-    return loaded;
-  }
-
-  /**
    * A doc's threads, read WITHOUT making the doc resident.
    *
    * A resident doc answers from memory. A cold one answers empty when its
@@ -3050,14 +3035,19 @@ export class DocStore {
    * throwaway copy that is dropped before this returns: same threads, no
    * entry in the doc map, nothing for the idle sweep to release later.
    *
-   * For the periodic walks (the stall pass) that read every task body and
-   * board doc. Through `listThreads` each read loaded the doc for its thirty
-   * minutes, so a pass every ten minutes kept every doc with a thread
-   * resident for good.
+   * For the walks that read every task body and board doc: the stall pass,
+   * and the review queue Home and the cross-board flow read. Through
+   * `listThreads` each read loaded the doc for its thirty minutes, so a pass
+   * every ten minutes, or a Home read, kept every doc with a thread resident
+   * for good.
    */
   peekThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {
     if (this.peek(docId)) return this.listThreads(docId, filter);
-    let all = this.threadsAhead?.get(docId);
+    let all: Thread[] | undefined;
+    for (const ahead of this.threadsAhead) {
+      all = ahead.get(docId);
+      if (all !== undefined) break;
+    }
     if (all === undefined) {
       if (this.indexSaysNoThreads(docId, filter?.status)) return [];
       all = this.readColdThreads(docId);
@@ -3065,38 +3055,48 @@ export class DocStore {
     return filter?.status ? all.filter((t) => t.status === filter.status) : all;
   }
 
-  /** What `readThreadsAhead` read, until `dropThreadsAhead`. A cold doc
-   *  cannot change without coming into memory, and `peekThreads` asks the
-   *  resident doc first, so nothing here can answer for a doc that moved. */
-  private threadsAhead: Map<string, Thread[]> | null = null;
+  /** What each walk's `readThreadsAhead` read, until that walk drops it.
+   *  One map per walk, so the stall pass and a Home queue read that overlap
+   *  do not end each other's read-ahead. A cold doc cannot change without
+   *  coming into memory, `peekThreads` asks the resident doc first, and a doc
+   *  leaving memory is struck from every map, so nothing here can answer for
+   *  a doc that moved. */
+  private readonly threadsAhead = new Set<Map<string, Thread[]>>();
 
   /**
    * Read, ahead of a synchronous walk, the cold docs that walk will ask
    * `peekThreads` about, handing the loop back between reads. Each value is
    * the filter the walk will pass, so a doc its index row answers empty for
-   * is skipped, and so is a resident one. Held until `dropThreadsAhead`.
-   * Resolves to how many docs it read.
-   *
-   * `warmForThreadReads`' twin for a walk that must not load what it reads.
+   * is skipped, and so is a resident one. Held until the walk calls the
+   * handle's `drop`; `read` is how many docs it read.
    */
   async readThreadsAhead(
     targets: ReadonlyMap<string, 'open' | undefined>,
     slice: TimeSlice = timeSlice(),
-  ): Promise<number> {
+  ): Promise<ThreadsAhead> {
     const ahead = new Map<string, Thread[]>();
-    this.threadsAhead = ahead;
-    for (const [docId, status] of targets) {
-      await slice.yieldIfDue();
-      if (this.stopped || this.threadsAhead !== ahead) break;
-      if (this.peek(docId) || this.indexSaysNoThreads(docId, status)) continue;
-      ahead.set(docId, this.readColdThreads(docId));
+    this.threadsAhead.add(ahead);
+    const drop = () => {
+      this.threadsAhead.delete(ahead);
+    };
+    try {
+      for (const [docId, status] of targets) {
+        await slice.yieldIfDue();
+        if (this.stopped) break;
+        if (this.peek(docId) || this.indexSaysNoThreads(docId, status)) continue;
+        ahead.set(docId, this.readColdThreads(docId));
+      }
+    } catch (err) {
+      drop();
+      throw err;
     }
-    return ahead.size;
+    return { read: ahead.size, drop };
   }
 
-  /** The walk `readThreadsAhead` read for is over. */
-  dropThreadsAhead(): void {
-    this.threadsAhead = null;
+  /** A doc left memory: what a read-ahead held for it may predate what it
+   *  was while resident. */
+  private forgetThreadsAhead(docId: string): void {
+    for (const ahead of this.threadsAhead) ahead.delete(docId);
   }
 
   /** Threads off the `.ydoc` on disk, into a copy nothing keeps. A doc with

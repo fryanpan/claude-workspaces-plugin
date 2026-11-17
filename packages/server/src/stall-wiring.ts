@@ -46,7 +46,7 @@ import { lastBoardActivityAt } from './board-activity.ts';
 import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
-import type { DocStore } from './doc-store.ts';
+import type { DocStore, ThreadsAhead } from './doc-store.ts';
 import { changedFilesInWorktree, changedFilesInWorktreeAsync } from './git-diff.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
@@ -1115,6 +1115,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
   /** What the last `prepare` read, until the snapshot that follows it takes it.
    *  Unset outside the timer's path, so `nudgeStalls` reads git itself. */
   let preparedChangedWork: Map<string, ChangedWork | undefined> | undefined;
+  /** The timed pass's read-ahead, held from `prepare` to `snapshot`. */
+  let preparedThreads: ThreadsAhead | undefined;
   const stallSnapshot = (
     workspace: BoardWorkspace,
     prepared?: ReadonlyMap<string, ChangedWork | undefined>,
@@ -1368,16 +1370,20 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // ~460ms per open dispatch in a local reproduction, on every tick.
     prepare: async () => {
       preparedChangedWork = await readChangedWork();
-      await docStore.readThreadsAhead(stallReadTargets());
+      // A pass that prepared and never ticked leaves its read-ahead here.
+      preparedThreads?.drop();
+      preparedThreads = await docStore.readThreadsAhead(stallReadTargets());
     },
     snapshot: () => {
       const prepared = preparedChangedWork;
       preparedChangedWork = undefined;
+      const threadsAhead = preparedThreads;
+      preparedThreads = undefined;
       let snapshots: StallSnapshot[];
       try {
         snapshots = taskStore.listWorkspaces().map((ws) => stallSnapshot(ws, prepared));
       } finally {
-        docStore.dropThreadsAhead();
+        threadsAhead?.drop();
       }
       keepMoving.observe(snapshots, Date.now());
       doneWhenReady.tick(Date.now());

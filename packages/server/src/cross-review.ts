@@ -13,10 +13,14 @@
  * no reason to wait for, and a failure in it must never fail an answer that
  * was recorded.
  *
- * Every read of the queue loads its cold docs first, a slice at a time
- * (`prepare`). The queue itself is one synchronous pass over every thread on
- * every live board, and on a 5,722-doc corpus the first one after a boot
- * loaded 1,561 docs inside it, holding the loop for over half a second.
+ * Every read of the queue reads its cold docs' threads first, a slice at a
+ * time (`withThreadsAhead`), and loads none of them. The queue itself is one
+ * synchronous pass over every thread on every live board, and on a
+ * 5,722-doc corpus the first one after a boot loaded 1,561 docs inside it,
+ * holding the loop for over half a second. Loading them ahead instead kept
+ * ~2,000 docs resident for good, since Home reads the queue far more often
+ * than the thirty-minute window lets a doc go; the walk reads through
+ * `DocStore.peekThreads` now, which answers a cold doc off its `.ydoc`.
  */
 import { isBlockingAsk } from '@claude-workspaces/core/review-blocks';
 import { classifyActor } from './actor-identity.ts';
@@ -80,11 +84,6 @@ export interface CrossReview {
   plan: ReviewPlanStore;
   /** Every live board in project order, with the plan board they came from. */
   projects(): { planWorkspaceId?: string; projects: RankedProject[] };
-  /**
-   * Load the cold docs a queue read will take threads from, handing the loop
-   * back between loads. Resolves to how many docs it loaded.
-   */
-  prepare(): Promise<number>;
   /** Every open item on every live board, top project first. */
   queue(): Promise<CrossReviewQueue & { planWorkspaceId?: string }>;
   /** One open item by any name it goes by (`review-key.ts`), with the plan
@@ -156,9 +155,6 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     return targets;
   };
 
-  const prepare: CrossReview['prepare'] = () =>
-    docStore.warmForThreadReads(readTargets(liveBoards()));
-
   const projectsOf = (boards: BoardWorkspace[]) => {
     const inputs = boards.map((w) => ({
       id: w.id,
@@ -221,9 +217,22 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     return { ...q, items, ...(planWorkspaceId ? { planWorkspaceId } : {}) };
   };
 
+  /**
+   * `walk`, over the threads of `boards`' cold docs read first, a slice at a
+   * time, WITHOUT loading them (`DocStore.peekThreads` answers from what was
+   * read). Dropped when the walk returns, so nothing is held between reads.
+   */
+  const withThreadsAhead = async <T>(boards: BoardWorkspace[], walk: () => T): Promise<T> => {
+    const ahead = await docStore.readThreadsAhead(readTargets(boards));
+    try {
+      return walk();
+    } finally {
+      ahead.drop();
+    }
+  };
+
   const queue = async () => {
-    await prepare();
-    const q = compute();
+    const q = await withThreadsAhead(liveBoards(), () => compute());
     shown = { at: Date.now(), ranks: new Map(q.projects.map((p) => [p.workspaceId, p.rank])) };
     return q;
   };
@@ -250,8 +259,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
   };
 
   const item: CrossReview['item'] = async (key) => {
-    await prepare();
-    const q = compute();
+    const q = await withThreadsAhead(liveBoards(), () => compute());
     const found = findQueueItem(q.items, key);
     const notQueued = found ? undefined : whyNotQueued(filedItem(key));
     return {
@@ -263,12 +271,15 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
 
   const recordAnswer: CrossReview['recordAnswer'] = async (args) => {
     if (!isLive(args.workspaceId)) return null;
-    await prepare();
-    // Asked again: the board can be retired while the loads hand back.
-    const w = taskStore.getWorkspace(args.workspaceId);
-    if (!w || isRetired(w)) return null;
-    const recent = shown && args.answeredAt - shown.at < SHOWN_FRESH_MS ? shown.ranks : undefined;
-    const q = compute(recent);
+    const read = await withThreadsAhead(liveBoards(), () => {
+      // Asked again: the board can be retired while the reads hand back.
+      const w = taskStore.getWorkspace(args.workspaceId);
+      if (!w || isRetired(w)) return null;
+      const recent = shown && args.answeredAt - shown.at < SHOWN_FRESH_MS ? shown.ranks : undefined;
+      return { w, q: compute(recent) };
+    });
+    if (!read) return null;
+    const { w, q } = read;
     const measured = measureAnswer({
       queue: q,
       workspaceId: w.id,
@@ -354,7 +365,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     if (event.openParts !== undefined && event.openParts.length > 0) return;
     later(async () => {
       const comment = docStore
-        .listThreads(event.docId)
+        .peekThreads(event.docId)
         .find((t) => t.id === event.threadId)
         ?.comments.find((c) => c.id === event.commentId);
       const review = comment?.review;
@@ -391,17 +402,19 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
       const home = threadHome(event.docId);
       const w = home && taskStore.listWorkspaces().find((b) => b.id === home.workspaceId);
       if (!home || !w || isRetired(w)) return;
-      // Both reads below walk this board's threads; they are loaded first so
-      // the pair stays one synchronous stretch over the same state.
-      await docStore.warmForThreadReads(readTargets([w]));
+      // Both reads below walk this board's threads; they are read ahead, not
+      // loaded, so the pair stays one synchronous stretch over the same state.
       const onThread = (r: SizedReviewItemRow) =>
         r.kind !== 'task-review' && r.docId === event.docId && r.threadId === event.threadId;
-      const still = new Set(
-        reviewItemsFor(w)
-          .filter(onThread)
-          .map((r) => r.band),
-      );
-      for (const row of reviewItemsFor(w, event).filter(onThread)) {
+      const { still, before } = await withThreadsAhead([w], () => ({
+        still: new Set(
+          reviewItemsFor(w)
+            .filter(onThread)
+            .map((r) => r.band),
+        ),
+        before: reviewItemsFor(w, event).filter(onThread),
+      }));
+      for (const row of before) {
         if (row.kind === 'task-review' || row.band !== 'unreplied' || still.has(row.band)) continue;
         await recordAnswer({
           workspaceId: w.id,
@@ -419,7 +432,6 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
   return {
     plan,
     projects: () => projectsOf(liveBoards()),
-    prepare,
     queue,
     item,
     ledger,

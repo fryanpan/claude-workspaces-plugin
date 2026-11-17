@@ -1,14 +1,15 @@
 /**
- * The cross-board review queue loads its cold docs before its synchronous
- * pass, not inside it.
+ * The cross-board review queue reads its cold docs' threads without loading
+ * them.
  *
  * The queue reads every thread on every live board in one pass: `/`, the
- * review page's `/api/review-queue`, and the answer ledger after every
- * answer. On a 5,722-doc corpus the first read after a boot loaded 1,561
- * docs inside that pass and held the loop for 534-563ms. Each case here
- * releases every doc, then asserts that no doc is loaded by a `listThreads`
- * call, which is where the synchronous pass loads them. The control case
- * shows the spy does catch a read that skips the warm-up.
+ * review page's `/api/review-queue`, the home feed, and the answer ledger
+ * after every answer. It used to load every cold doc it read ahead of that
+ * pass, which kept ~2,000 docs resident for good on prod: Home is read far
+ * more often than the thirty-minute residency window lets a doc go. Each case
+ * here releases every doc, reads, and asserts the resident count did not
+ * move, and that the answer is the one a read over resident docs gives. The
+ * control shows the count does see a hydrating read.
  *
  * Fixtures are invented; the repo is public.
  */
@@ -133,20 +134,6 @@ async function seed(): Promise<Fixture> {
   };
 }
 
-/** Every doc a `listThreads` call had to load, in call order. */
-function coldReads(h: ServerHandle): string[] {
-  const cold: string[] = [];
-  const ds = h.docStore;
-  const read = ds.listThreads.bind(ds);
-  ds.listThreads = (docId, filter) => {
-    const wasCold = ds.peek(docId) === undefined;
-    const threads = read(docId, filter);
-    if (wasCold && ds.peek(docId) !== undefined) cold.push(docId);
-    return threads;
-  };
-  return cold;
-}
-
 function evictAll(h: ServerHandle): void {
   for (const meta of h.docStore.list()) h.docStore.evictDoc(meta.docId);
 }
@@ -157,7 +144,7 @@ const queue = async (): Promise<CrossReviewQueue> => {
   return (await res.json()) as CrossReviewQueue;
 };
 
-describe('the cross-board queue reads its docs warm', () => {
+describe('the cross-board queue reads its docs without loading them', () => {
   let fx: Fixture;
 
   beforeEach(async () => {
@@ -172,57 +159,64 @@ describe('the cross-board queue reads its docs warm', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('control: a board read that skips the warm-up loads the threaded docs inside the pass', async () => {
+  const resident = (h: ServerHandle) => h.docStore.stats().residentDocs;
+  const queueDocs = () => [
+    fx.threaded.openTask,
+    fx.threaded.resolvedTask,
+    fx.threaded.boardDoc,
+    fx.threaded.goal,
+  ];
+  /** Every doc the fixture threaded that is in memory now. */
+  const loaded = (h: ServerHandle) =>
+    Object.values(fx.threaded).filter((id) => h.docStore.peek(id) !== undefined);
+
+  it('control: a hydrating threads read over the same docs moves the resident count', () => {
     const h = handle as ServerHandle;
     evictAll(h);
-    const cold = coldReads(h);
-    const res = await fetch(`${base}/workspaces/${fx.live}/review-items?user=Riverbend`);
-    expect(res.status).toBe(200);
-    expect(cold).toContain(fx.threaded.openTask);
-    expect(cold).toContain(fx.threaded.boardDoc);
+    const before = resident(h);
+    for (const id of queueDocs()) h.docStore.listThreads(id);
+    expect(resident(h)).toBe(before + queueDocs().length);
   });
 
-  it('/api/review-queue loads nothing inside the pass, and answers what a warm read answers', async () => {
+  it('/api/review-queue loads nothing, and answers what a read over resident docs answers', async () => {
     const h = handle as ServerHandle;
     evictAll(h);
-    const cold = coldReads(h);
-    const first = await queue();
-    expect(cold).toEqual([]);
-    // Every threaded doc the queue reads was loaded, by the warm-up.
-    for (const id of [
-      fx.threaded.openTask,
-      fx.threaded.resolvedTask,
-      fx.threaded.boardDoc,
-      fx.threaded.goal,
-    ]) {
-      expect(h.docStore.peek(id)).toBeDefined();
-    }
-    // The archived row and the retired board are not the queue's, so their
-    // docs stay released.
-    expect(h.docStore.peek(fx.threaded.archivedTask)).toBeUndefined();
-    expect(h.docStore.peek(fx.threaded.retiredTask)).toBeUndefined();
-    const asks = first.items.map((i) => ('ask' in i ? i.ask : ''));
+    const before = resident(h);
+    const cold = await queue();
+    expect(loaded(h)).toEqual([]);
+    expect(resident(h)).toBe(before);
+    const asks = cold.items.map((i) => ('ask' in i ? i.ask : ''));
     expect(asks).toContain(CHOICE.headline);
     expect(asks).toContain('Riverbend, ready to publish?');
-    // Same state read again, every doc now resident: the same answer.
-    expect(await queue()).toEqual(first);
+    expect(asks).toContain('Riverbend, which table?');
+    // The same state with every doc the queue reads in memory: the same answer.
+    for (const id of queueDocs()) h.docStore.listThreads(id);
+    expect(queueDocs().every((id) => h.docStore.peek(id) !== undefined)).toBe(true);
+    expect(await queue()).toEqual(cold);
   });
 
-  it('/ loads nothing inside the pass, and leaves history it only dates on disk', async () => {
+  it("a board's own review items load nothing either", async () => {
     const h = handle as ServerHandle;
     evictAll(h);
-    const cold = coldReads(h);
+    const before = resident(h);
+    const res = await fetch(`${base}/workspaces/${fx.live}/review-items?user=Riverbend`);
+    expect(res.status).toBe(200);
+    expect(loaded(h)).toEqual([]);
+    expect(resident(h)).toBe(before);
+  });
+
+  it('/ loads nothing, and still counts what waits', async () => {
+    const h = handle as ServerHandle;
+    evictAll(h);
+    const before = resident(h);
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('Harborlight board, 3 waiting');
-    expect(cold).toEqual([]);
-    // The activity reading dates the archived row and the retired board from
-    // their index rows, so neither is loaded at all.
-    expect(h.docStore.peek(fx.threaded.archivedTask)).toBeUndefined();
-    expect(h.docStore.peek(fx.threaded.retiredTask)).toBeUndefined();
+    expect(loaded(h)).toEqual([]);
+    expect(resident(h)).toBe(before);
   });
 
-  it('the answer ledger loads nothing inside the pass, and still records the answer', async () => {
+  it('the answer ledger leaves the board doc unloaded, and still records the answer', async () => {
     const h = handle as ServerHandle;
     // Riverbend answers from her own signed-in page, as a person's answer must.
     const riverbend = signedInPerson(h, dataDir, base, {
@@ -230,7 +224,6 @@ describe('the cross-board queue reads its docs warm', () => {
       name: 'Riverbend',
     });
     evictAll(h);
-    const cold = coldReads(h);
     const res = await fetch(
       `${base}/workspaces/${fx.live}/tasks/${fx.itemTask}/review-items/${fx.itemId}/answer`,
       {
@@ -250,15 +243,15 @@ describe('the cross-board queue reads its docs warm', () => {
       return body.answers.length > 0 ? body.answers : null;
     });
     expect(answers.map((a) => a.key)).toEqual([`task-review:${fx.itemTask}:${fx.itemId}`]);
-    // The ledger's read took every board doc warm, so none was loaded cold.
-    expect(cold.filter((id) => Object.values(fx.threaded).includes(id))).toEqual([]);
-    expect(h.docStore.peek(fx.threaded.boardDoc)).toBeDefined();
+    // The board's projection, rebuilt from cold by the answer's task event,
+    // re-creates every task and goal body itself; that is its cost, not the
+    // ledger's. The board doc is read only by the queue, so it stays out.
+    expect(h.docStore.peek(fx.threaded.boardDoc)).toBeUndefined();
   });
 
-  it('a reply that retires an ask loads nothing else inside the pass, and is recorded', async () => {
+  it('a reply that retires an ask loads only the doc it was posted on, and is recorded', async () => {
     const h = handle as ServerHandle;
     evictAll(h);
-    const cold = coldReads(h);
     await h.docStore.postComment(fx.threaded.boardDoc, fx.askThread, PERSON, 'Yes, publish.');
     const answers = await waitFor(async () => {
       const wait = await fetch(`${base}/api/review-wait?since=0`);
@@ -268,8 +261,9 @@ describe('the cross-board queue reads its docs warm', () => {
     expect(answers.map((a) => a.key)).toEqual([
       `doc-thread:${fx.threaded.boardDoc}:${fx.askThread}`,
     ]);
-    const others = Object.values(fx.threaded).filter((id) => id !== fx.threaded.boardDoc);
-    expect(cold.filter((id) => others.includes(id))).toEqual([]);
-    expect(h.docStore.peek(fx.threaded.openTask)).toBeDefined();
+    // The reply itself brought the board doc in; the board walk the
+    // comment-posted handler does, and the ledger read after it, brought
+    // nothing else.
+    expect(loaded(h)).toEqual([fx.threaded.boardDoc]);
   });
 });
