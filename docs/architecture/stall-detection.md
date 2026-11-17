@@ -125,7 +125,9 @@ every ten minutes against a thirty-minute residency window, no doc with a
 thread was ever released. A done task's body is not read at all: the
 classifier judges only `todo` and `in-progress` rows. The timed pass decodes
 the cold docs ahead of the synchronous scan, a slice at a time
-(`readThreadsAhead`), so the scan itself does no disk reads for them.
+(`readThreadsAhead`), so the scan itself does no disk reads for them. Each
+walk holds its own read-ahead until it drops it, so the Home review queue,
+which reads every board's threads the same way, cannot end the pass's.
 
 **Task notes count as movement.** A task's quiet time is measured from the
 newest of: its status change, its last workspace event, its last thread

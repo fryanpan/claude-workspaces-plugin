@@ -1,5 +1,5 @@
 /**
- * Home's cold read loads only the docs whose threads it shows.
+ * Home's cold read reads only the docs whose threads it shows, and loads none.
  *
  * `/` ranks every board by its last real activity and renders the cross-board
  * review queue. The activity reading used to load every task body on every
@@ -9,7 +9,8 @@
  * docs) the first Home read after an idle sweep loaded 4,910 docs, and every
  * one of them then stayed resident for the short window. The newest comment
  * on a doc is already on its index row, so the activity reading needs no load
- * at all, and the queue reads threads only on rows that are not done.
+ * at all, and the queue reads threads only on rows that are not done, off
+ * their `.ydoc`s, without loading them (`DocStore.peekThreads`).
  *
  * Each case boots a second server on the first one's data and releases every
  * resident doc, which is the state an idle sweep leaves.
@@ -137,16 +138,31 @@ describe("Home's cold read", () => {
     }
   });
 
-  it('loads the live rows the queue shows and leaves history on disk', async () => {
+  it('reads the live rows the queue shows without loading them, and leaves history on disk', async () => {
     releaseAll(handle);
-    const res = await fetch(`${base}/`);
-    expect(res.status).toBe(200);
-    await res.text();
+    const decoded: string[] = [];
+    const ds = handle.docStore as unknown as { readColdThreads: (docId: string) => unknown };
+    const decode = ds.readColdThreads.bind(ds);
+    ds.readColdThreads = (docId) => {
+      decoded.push(docId);
+      return decode(docId);
+    };
+    try {
+      const res = await fetch(`${base}/`);
+      expect(res.status).toBe(200);
+      await res.text();
+    } finally {
+      ds.readColdThreads = decode;
+    }
 
-    // Control: the walk ran, and it read the open row's thread.
-    expect(resident(liveTask)).toBe(true);
-    expect(resident(doneTask)).toBe(false);
-    expect(resident(archivedTask)).toBe(false);
-    expect(resident(retiredTask)).toBe(false);
+    // Control: the walk ran, and it read the open row's thread off disk.
+    expect(decoded).toContain(`task:${liveTask}`);
+    expect(decoded).not.toContain(`task:${doneTask}`);
+    expect(decoded).not.toContain(`task:${archivedTask}`);
+    expect(decoded).not.toContain(`task:${retiredTask}`);
+    // And loaded none of them: a queue read leaves the resident set alone.
+    for (const id of [liveTask, doneTask, archivedTask, retiredTask]) {
+      expect(resident(id)).toBe(false);
+    }
   });
 });

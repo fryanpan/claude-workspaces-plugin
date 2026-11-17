@@ -180,10 +180,14 @@ export function createHomePane(ctx: HomePaneContext): HomePane {
           };
         }),
         source: {
-          threadsOf: (docId) => threads(docStore.listThreads(docId, { status: 'open' }), docId),
+          // `peekThreads`: a cold doc answers off its `.ydoc` and stays out
+          // of memory. Home and the cross-board queue walk every row on
+          // every board; loading each doc for its thirty-minute window kept
+          // every doc with a thread resident for as long as Home was read.
+          threadsOf: (docId) => threads(docStore.peekThreads(docId, { status: 'open' }), docId),
           // Unfiltered, and only for the roster: who counts as a person
           // here must not depend on whether their thread is still open.
-          allThreadsOf: (docId) => threads(docStore.listThreads(docId), docId),
+          allThreadsOf: (docId) => threads(docStore.peekThreads(docId), docId),
         },
       }),
     );

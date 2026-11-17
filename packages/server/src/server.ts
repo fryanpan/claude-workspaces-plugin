@@ -2461,7 +2461,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     boardName: (id) => taskStore.getWorkspace(id)?.name,
     feed: async (id) => {
-      await crossReview.prepare();
       const { items } = await crossReview.queue();
       return homeFeedOf(id, taskStore.getWorkspace(id)?.name ?? id, items);
     },
