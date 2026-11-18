@@ -338,3 +338,161 @@ export function planRows(status: number, summary: string): Row[] {
   const changes = summary.split('\n').filter((l) => l.startsWith('- '));
   return changes.map((l) => row('(all)', 'Cloudflare drifted from the config', l.slice(2), false));
 }
+
+/** A GitHub Environment as the report reads it: names and times only, never a value. */
+export interface GithubEnvironment {
+  name: string;
+  /** Its secrets' names and update times, or null when they could not be read. */
+  secrets: Array<{ name: string; updated_at?: string }> | null;
+  /** Deployments from main alone: custom branch policies, one rule `main`. Null when unread. */
+  mainOnly: boolean | null;
+}
+
+export interface GithubView {
+  /** Every environment of the repo, or null when the list could not be read. */
+  environments: GithubEnvironment[] | null;
+  /** The repository's own secret names, or null when unread. */
+  repoSecrets: string[] | null;
+}
+
+/** A cut token older than this missed a monthly `fly:ci-tokens apply`; it expires at 90. */
+export const CI_TOKEN_STALE_DAYS = 45;
+
+/**
+ * CI holds no Fly org token (wall-off review M5): no environment and no
+ * repository secret is named FLY_API_TOKEN. And each app CI deploys has its
+ * own environment (H1), admitting main alone, holding FLY_DEPLOY_TOKEN cut
+ * within CI_TOKEN_STALE_DAYS (`ci-tokens.ts`).
+ */
+export function ciTokenRows(
+  envs: ReadonlyArray<{ project: string; environment: string }>,
+  view: GithubView,
+  nowMs: number,
+): Row[] {
+  const holders = [
+    ...(view.repoSecrets?.includes('FLY_API_TOKEN') ? ['the repository'] : []),
+    ...(view.environments ?? [])
+      .filter((e) => e.secrets?.some((s) => s.name === 'FLY_API_TOKEN'))
+      .map((e) => e.name),
+  ];
+  const unread =
+    view.environments === null ||
+    view.repoSecrets === null ||
+    view.environments.some((e) => e.secrets === null);
+  const rows = [
+    row(
+      '(all)',
+      'no Fly org token in GitHub',
+      holders.length
+        ? `FLY_API_TOKEN in ${holders.join(', ')}`
+        : unread
+          ? 'not every secret list could be read'
+          : 'none',
+      holders.length === 0 && !unread,
+    ),
+  ];
+  for (const { project, environment } of envs) {
+    const e = view.environments?.find((x) => x.name === environment);
+    const check = `${environment} environment`;
+    if (!view.environments) {
+      rows.push(row(project, check, 'could not be read', false));
+      continue;
+    }
+    if (!e) {
+      rows.push(row(project, check, 'missing: run bun run fly:ci-tokens apply', false));
+      continue;
+    }
+    const token = e.secrets?.find((s) => s.name === 'FLY_DEPLOY_TOKEN');
+    const age = token?.updated_at
+      ? Math.floor((nowMs - Date.parse(token.updated_at)) / 86_400_000)
+      : null;
+    const answer =
+      e.mainOnly !== true
+        ? e.mainOnly === null
+          ? 'its branch rule could not be read'
+          : 'admits a branch other than main'
+        : !e.secrets
+          ? 'its secrets could not be read'
+          : !token
+            ? 'holds no FLY_DEPLOY_TOKEN'
+            : age === null || Number.isNaN(age)
+              ? 'FLY_DEPLOY_TOKEN has no update time'
+              : age > CI_TOKEN_STALE_DAYS
+                ? `FLY_DEPLOY_TOKEN is ${age} days old; the monthly fly:ci-tokens apply did not run`
+                : `main alone, FLY_DEPLOY_TOKEN ${age} day(s) old`;
+    rows.push(
+      row(
+        project,
+        check,
+        answer,
+        e.mainOnly === true && token !== undefined && age !== null && age <= CI_TOKEN_STALE_DAYS,
+      ),
+    );
+  }
+  return rows;
+}
+
+/** One Access application as Cloudflare's API lists it, policies inline. */
+export interface LiveAccessApp {
+  name?: string;
+  policies?: Array<{ decision?: string; include?: Array<Record<string, unknown>> }>;
+}
+
+/**
+ * Each project's live Access application admits only whom the Mac's
+ * `access.local.json` lists (wall-off review N1). The config is outside the
+ * repo, so a merge cannot change both sides; a plan alone could not catch a
+ * merge that changed how the policies are rendered. `everyone`, a bypass and
+ * any include kind the config never writes are alarms. Prints counts, never
+ * an address.
+ */
+export function liveAccessRows(
+  config: StaticVars['access_projects'],
+  live: LiveAccessApp[] | null,
+  tokenNames: ReadonlyMap<string, string>,
+  /** The environment's `name_prefix`: "" for prod, "staging " for staging. */
+  prefix = '',
+): Row[] {
+  if (!live) return [row('(all)', 'live Access policies', 'could not be read', false)];
+  const rows: Row[] = [];
+  for (const [project, want] of Object.entries(config)) {
+    const app = live.find((a) => a.name === `${prefix}board ${project}`);
+    if (!app) {
+      rows.push(row(project, 'live Access policies', 'no application', false));
+      continue;
+    }
+    const emails = new Set(want.emails.map((e) => e.toLowerCase()));
+    const domains = new Set(want.email_domains.map((d) => d.toLowerCase()));
+    const tokens = new Set(want.service_tokens.map((t) => `${prefix}${t}`));
+    const extra: string[] = [];
+    let count = 0;
+    for (const p of app.policies ?? []) {
+      if (p.decision === 'bypass') extra.push('a bypass policy');
+      for (const inc of p.include ?? []) {
+        count++;
+        const kind = Object.keys(inc)[0] ?? '?';
+        const body = (inc[kind] ?? {}) as Record<string, unknown>;
+        const listed =
+          kind === 'email'
+            ? emails.has(String(body.email ?? '').toLowerCase())
+            : kind === 'email_domain'
+              ? domains.has(String(body.domain ?? '').toLowerCase())
+              : kind === 'service_token'
+                ? tokens.has(tokenNames.get(String(body.token_id ?? '')) ?? '')
+                : false;
+        if (!listed) extra.push(kind);
+      }
+    }
+    rows.push(
+      row(
+        project,
+        'live Access policies',
+        extra.length
+          ? `admits what access.local.json does not list: ${[...new Set(extra)].join(', ')}`
+          : `${count} include(s), each in access.local.json`,
+        extra.length === 0,
+      ),
+    );
+  }
+  return rows;
+}

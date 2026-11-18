@@ -367,6 +367,18 @@ describe('the reads behind them', () => {
           access_projects: {},
         }) as unknown as StaticVars,
       plan: async () => ({ status: 0, summary: 'No changes.\n' }),
+      // CI's Fly tokens as `fly:ci-tokens` leaves them (wall-ci-tokens.test.ts).
+      github: () => ({
+        repoSecrets: [],
+        environments: ['fly-riverbend', 'fly-appkit-staging'].map((name) => ({
+          name,
+          mainOnly: true,
+          secrets: [{ name: 'FLY_DEPLOY_TOKEN', updated_at: '2026-11-01T00:00:00Z' }],
+        })),
+      }),
+      accessApps: async () => ({ apps: [], tokenNames: new Map() }),
+      namePrefix: '',
+      now: () => Date.UTC(2026, 10, 18),
     };
     return { io: { ...base, ...over }, asked };
   }
