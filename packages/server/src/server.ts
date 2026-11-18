@@ -3962,6 +3962,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   readyNudger.start();
   stallNudger.start();
   taskScheduler.start(opts.schedulerTickMs ?? undefined);
+  // Home's first read after a boot finds its threads already decoded
+  // (`cold-threads-cache.ts`); every later one does anyway, while nothing changed.
+  const homeWarmMs = opts.homeWarmMs === undefined ? 15_000 : opts.homeWarmMs;
+  const homeWarm =
+    homeWarmMs === null
+      ? null
+      : setTimeout(() => {
+          crossReview.warm().catch((err: unknown) => console.error('[home] warm failed:', err));
+        }, homeWarmMs);
+  homeWarm?.unref?.();
 
   // The loop watchdog. Armed with every other running-board timer and for the
   // same reason: a staging server wedges exactly like prod does, and the whole
@@ -4087,6 +4097,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // server that is going away.
       readyNudger.stop();
       stallNudger.stop();
+      if (homeWarm) clearTimeout(homeWarm);
       // `unref` keeps the monitor from holding the process open; it does NOT
       // stop the interval firing. The server suite builds many servers in one
       // process, so a closed server that kept ticking would hold a closure

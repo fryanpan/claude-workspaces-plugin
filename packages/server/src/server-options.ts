@@ -453,6 +453,12 @@ export interface ServerOptions {
   /** How often that loop looks (ms). Unset → SCHEDULER_TICK_DEFAULT_MS. */
   schedulerTickMs?: number;
   /**
+   * How long after boot Home's review queue reads its cold docs' threads
+   * into the cache (`cold-threads-cache.ts`), so the first `/` after a
+   * deploy does not decode every one. Null: never. Unset: 15s.
+   */
+  homeWarmMs?: number | null;
+  /**
    * The agent id the scheduler asks to start a detached owner's session for
    * one run (`task-scheduled-wake.ts`). Unset → `CW_SPAWNER_AGENT_ID`, else
    * the fleet's Team Lead (`agent-team-lead`). `null` sends no spawn requests.
