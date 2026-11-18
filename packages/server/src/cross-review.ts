@@ -20,7 +20,8 @@
  * holding the loop for over half a second. Loading them ahead instead kept
  * ~2,000 docs resident for good, since Home reads the queue far more often
  * than the thirty-minute window lets a doc go; the walk reads through
- * `DocStore.peekThreads` now, which answers a cold doc off its `.ydoc`.
+ * `DocStore.peekThreads` now, which answers a cold doc off its `.ydoc`, and
+ * decodes an unchanged one once (`cold-threads-cache.ts`), not on every read.
  */
 import { isBlockingAsk } from '@claude-workspaces/core/review-blocks';
 import { classifyActor } from './actor-identity.ts';
@@ -86,6 +87,9 @@ export interface CrossReview {
   projects(): { planWorkspaceId?: string; projects: RankedProject[] };
   /** Every open item on every live board, top project first. */
   queue(): Promise<CrossReviewQueue & { planWorkspaceId?: string }>;
+  /** Read every cold doc a queue read takes threads from, so the cold-threads
+   *  cache holds them before the first `/`. Loads none of them. */
+  warm(): Promise<void>;
   /** One open item by any name it goes by (`review-key.ts`), with the plan
    *  board it was read against — or, when a ticket item the name points at
    *  is off the queue, why. Not a read the reader was shown, so the ledger
@@ -433,6 +437,9 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
     plan,
     projects: () => projectsOf(liveBoards()),
     queue,
+    warm: async () => {
+      (await docStore.readThreadsAhead(readTargets(liveBoards()))).drop();
+    },
     item,
     ledger,
     recordAnswer,

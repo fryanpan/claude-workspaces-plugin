@@ -81,7 +81,7 @@
   "GET /api/load-reports/slowest": "200 application/json {budgetMs,pages,windowMs} | by load-reports.ts:handleLoadReportRoutes",
   "GET /api/me/messages": "401 application/json error=not_signed_in {error} | by private-messages.ts:handlePrivateMessageRoutes",
   "GET /api/meeting-engines": "200 application/json {default,engines} | by meetings-calendar.ts:handleMeetingCalendarRoutes",
-  "GET /api/metrics": "200 application/json {activations,activationsTotal,activeBindings,awareness,bindings,blockingWait,loads,loadsTotal,notesQuality,residentBy,residentDocs,rssMb,timers,uptimeSec} | by ops.ts:handleOpsMetricsRoute",
+  "GET /api/metrics": "200 application/json {activations,activationsTotal,activeBindings,awareness,bindings,blockingWait,coldThreads,loads,loadsTotal,notesQuality,residentBy,residentDocs,rssMb,timers,uptimeSec} | by ops.ts:handleOpsMetricsRoute",
   "GET /api/mounts": "200 application/json {projects} | by mounts.ts:handleMountRoutes",
   "GET /api/mounts/conventions": "400 application/json error=path is required {error} | by mounts.ts:handleMountRoutes",
   "GET /api/mounts/files": "400 application/json error=path is required {error} | by mounts.ts:handleMountRoutes",

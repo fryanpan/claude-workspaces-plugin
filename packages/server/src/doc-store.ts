@@ -30,6 +30,7 @@ import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { ColdThreadsCache, type ColdThreadsStats, forgettingWrites } from './cold-threads-cache.ts';
 import { ComponentGrants } from './component-grants.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
@@ -1293,6 +1294,8 @@ export class DocStore {
      *  (`DocLoadSites`): source locations and counts, nothing from a doc. */
     loads: { tag: string; count: number }[];
     loadsTotal: number;
+    /** Cold threads held between walks, and the `.ydoc` decodes paid since boot. */
+    coldThreads: ColdThreadsStats & { decodes: number };
   } {
     const files = this.bindings.stats(Date.now());
     const presence = this.fanout.stats();
@@ -1315,6 +1318,7 @@ export class DocStore {
       activationsTotal: files.activationsTotal,
       residentBy: this.residentBy(),
       ...this.loadSites.stats(),
+      coldThreads: { ...this.coldThreads.stats(), decodes: this.coldThreadDecodes },
     };
   }
 
@@ -3121,12 +3125,22 @@ export class DocStore {
     for (const ahead of this.threadsAhead) ahead.delete(docId);
   }
 
-  /** Threads off the `.ydoc` on disk, into a copy nothing keeps. A doc with
-   *  no saved state, or one that cannot be read, has none — what a load
+  /** Threads off the `.ydoc` on disk, decoded into a copy nothing keeps; the
+   *  threads (never the doc) are kept until its state is next written. A doc
+   *  with no saved state, or one that cannot be read, has none — what a load
    *  through `listThreads` would have answered. */
   private readColdThreads(docId: string): Thread[] {
-    return this.readCold(docId, [], (ydoc) => listThreadsWithLinks(ydoc));
+    const target = this.catalog.aliasTarget(docId) ?? docId;
+    return this.coldThreads.get(target, () => {
+      this.coldThreadDecodes++;
+      return this.readCold(target, [], (ydoc) => listThreadsWithLinks(ydoc));
+    });
   }
+
+  /** Cold threads decoded once per unchanged `.ydoc` (`cold-threads-cache.ts`). */
+  private readonly coldThreads = new ColdThreadsCache();
+  /** `.ydoc` decodes `readColdThreads` has paid for since boot. */
+  private coldThreadDecodes = 0;
 
   /** `read` over the doc's `.ydoc` decoded into a copy nothing keeps;
    *  `missing` when there is no saved state or it cannot be read. */
@@ -4606,7 +4620,11 @@ export class DocStore {
    * Doc ids are validated in the API layer before they get here.
    */
   private get state(): DocStateStore {
-    this.stateStore ??= this.cfg.docState ?? new DiskDocStateStore(this.cfg.dataDir);
+    // Every write forgets the doc's cached cold threads (`cold-threads-cache.ts`).
+    this.stateStore ??= forgettingWrites(
+      this.cfg.docState ?? new DiskDocStateStore(this.cfg.dataDir),
+      (docId) => this.coldThreads.forget(docId),
+    );
     return this.stateStore;
   }
 
