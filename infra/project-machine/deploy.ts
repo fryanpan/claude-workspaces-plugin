@@ -8,7 +8,7 @@
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
  *       [--claude-token <label>]
  *       [--push-repo <owner/name>]... [--refresh-push-keys]
- *       [--refresh-tunnel-token] [--tf-env prod|staging]
+ *       [--refresh-tunnel-token] [--tf-env prod|staging] [--no-terraform-outputs]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -51,9 +51,14 @@
  * `--refresh-tunnel-token` sets it again.
  *
  * With CW_SECRETS_FROM_ENV=1 Keychain entries come from the environment
- * (`mac-ops.ts`) and only a machine the Mac made is updated. CI never runs
- * it: machines install signed releases (`release-cli.ts`). The image records
- * its serial (`image-release.json`) so it beats an older release on the volume.
+ * (`mac-ops.ts`) and only a machine the Mac made is updated. That is how
+ * fly.yml runs it, with a token that reaches the one app (`ci-tokens.ts`):
+ * so the app is found by its own status, not the org's app list, and the
+ * tunnel token, which only a Cloudflare token can read, is set only on the
+ * Mac. `--no-terraform-outputs` (CI's jobs hold no key to the state) reads
+ * no outputs: a named tunnel's id is not looked up, and a setting whose
+ * source is an output is left as it is. The image records its serial
+ * (`image-release.json`) so it beats an older release on the volume.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
@@ -178,8 +183,21 @@ const madeFrom = (cfg: ProjectConfig): Record<string, string> => ({
   [cfg.keychain.writer]: 'BACKUP_S3_ACCESS_KEY_ID',
 });
 
+/**
+ * Whether the app exists. On the Mac, the org's app list; off it, where the
+ * token reaches this one app and listing the org is refused, the app's own
+ * status, which Fly answers "not found" for an app that does not exist.
+ */
+function appExists(app: string): boolean {
+  if (!secretsFromEnv()) return flyJson<Named[]>(['apps', 'list']).some((a) => nameOf(a) === app);
+  const r = fly(['status', '--app', app, '--json']);
+  if (r.status === 0) return true;
+  if (/could not find|not found/i.test(`${r.stderr}\n${r.stdout}`)) return false;
+  throw new Error(`fly status --app ${app} failed: ${r.stderr.trim() || `exit ${r.status}`}`);
+}
+
 async function observe(cfg: ProjectConfig) {
-  const app = flyJson<Named[]>(['apps', 'list']).some((a) => nameOf(a) === cfg.app);
+  const app = appExists(cfg.app);
   const volumes = app
     ? flyJson<FlyVolume[]>(['volumes', 'list', '--app', cfg.app]).filter(
         (v) => v.name === cfg.volumeName && v.region === cfg.region && v.state !== 'destroyed',
@@ -380,7 +398,11 @@ export interface DeployOptions {
   tunnelToken?: (t: AppliedTunnel) => Promise<string>;
   /** Where the browser approval's screen is shown, redacted. Default: this terminal. */
   signInOutput?: ApprovalIo['show'];
+  /** Read no Terraform output: CI's jobs hold no key to the state. */
+  noOutputs?: boolean;
 }
+
+const NO_OUTPUTS = 'this run reads no Terraform outputs (--no-terraform-outputs)';
 
 /** The keeper refuses this read, because its answer is a credential. */
 async function apiTunnelToken(t: AppliedTunnel): Promise<string> {
@@ -409,13 +431,17 @@ export async function deployProject(
 ): Promise<Action[]> {
   let cached: TfOutputs | undefined;
   const outputs = () => {
+    if (opts.noOutputs) throw new Error(NO_OUTPUTS);
     cached ??= (opts.outputs ?? (() => readOutputs(opts.tfEnv ?? 'prod')))();
     return cached;
   };
+  if (opts.noOutputs && opts.refreshTunnelToken) {
+    throw new Error(`--refresh-tunnel-token needs the tunnel's id, and ${NO_OUTPUTS}`);
+  }
   // The outputs are read first: a named tunnel Terraform has not made stops
   // the run before Fly is touched.
   const tunnel: AppliedTunnel | undefined =
-    cfg.tunnel === 'named' ? appliedTunnel(outputs(), cfg) : undefined;
+    cfg.tunnel === 'named' && !opts.noOutputs ? appliedTunnel(outputs(), cfg) : undefined;
   const found = readSettings(cfg.project, { outputs, keychainHas, keychainRead });
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
   // A remade tunnel has a new token, so an existing secret holds the old one.
@@ -485,6 +511,15 @@ export async function deployProject(
       `${cfg.app} needs ${makes.join(', ')}, which only a deploy on the Mac makes; run bun run machine:deploy --project ${cfg.project} there first`,
     );
   }
+  const needsToken = actions.some(
+    (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
+  );
+  // Off the Mac no Cloudflare token can read a tunnel's token.
+  if (needsToken && (secretsFromEnv() || !tunnel)) {
+    throw new Error(
+      `${cfg.app} needs ${TUNNEL_TOKEN_SECRET}, which only a deploy on the Mac sets; run bun run machine:deploy --project ${cfg.project}${opts.refreshTunnelToken ? ' --refresh-tunnel-token' : ''} there`,
+    );
+  }
   if (dryRun) return actions;
   let approval: Promise<string> | undefined;
   const ctx: RunContext = {
@@ -503,9 +538,6 @@ export async function deployProject(
       return approval;
     },
   };
-  const needsToken = actions.some(
-    (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
-  );
   if (tunnel && needsToken) {
     const token = await (opts.tunnelToken ?? apiTunnelToken)(tunnel);
     ctx.tunnelToken = () => token;
@@ -566,6 +598,7 @@ async function main(): Promise<void> {
   const done = await deployProject(cfg, args.includes('--dry-run'), {
     tfEnv,
     refreshTunnelToken: args.includes('--refresh-tunnel-token'),
+    noOutputs: args.includes('--no-terraform-outputs'),
   });
   if (args.includes('--dry-run')) return;
   const state = machines(cfg.app).map(

@@ -118,6 +118,7 @@ exit 0
 echo "$*" >> "${flyCalls}"
 case "$1 $2" in
   "apps list") echo '[{"Name":"${cfg.app}"}]' ;;
+  "status --app") [ -e "${state}/no-app" ] && { echo 'Error: Could not find App' >&2; exit 1; } ;;
   "volumes list") echo '[{"name":"cw_data","region":"sjc","state":"created"}]' ;;
   "secrets list") cat "${state}/secrets.json" ;;
   "machines list") cat "${state}/machines.json" ;;
@@ -207,6 +208,7 @@ beforeEach(() => {
     ]),
   );
   rmSync(securityCalls, { force: true });
+  rmSync(join(state, 'no-app'), { force: true });
   Reflect.deleteProperty(process.env, 'CW_SECRETS_FROM_ENV');
   Reflect.deleteProperty(process.env, 'CW_SECRET_CW_BOARD_OWNER_EMAIL');
   rmSync(flyCalls, { force: true });
@@ -455,6 +457,16 @@ describe('machine:deploy sets the project settings', () => {
     expect(flyCallLines().some((l) => /^(secrets import|deploy|apps create)/.test(l))).toBe(false);
     expect(existsSync(securityCalls)).toBe(false);
   });
+
+  it("off the Mac, finds the app by its own status, never the org's app list", async () => {
+    process.env.CW_SECRETS_FROM_ENV = '1';
+    await run(true);
+    expect(flyCallLines()).toContain(`status --app ${cfg.app} --json`);
+    expect(flyCallLines().some((l) => l.startsWith('apps list'))).toBe(false);
+    writeFileSync(join(state, 'no-app'), '');
+    await expect(run(false)).rejects.toThrow('create-app');
+    expect(flyCallLines().some((l) => /^(secrets import|deploy|apps create)/.test(l))).toBe(false);
+  });
 });
 
 describe('machine:deploy with a named tunnel', () => {
@@ -496,6 +508,41 @@ describe('machine:deploy with a named tunnel', () => {
     const asked: string[] = [];
     await deployNamed(asked);
     expect(asked).toEqual([]);
+  });
+
+  it('off the Mac, with no outputs, deploys a machine that has its token and sets no token', async () => {
+    process.env.CW_SECRETS_FROM_ENV = '1';
+    flySecrets([...requiredSecrets('named'), ...ALL]);
+    // An older image, so the run deploys.
+    writeFileSync(
+      join(state, 'machines.json'),
+      JSON.stringify([{ id: 'm1', state: 'started', image_ref: { tag: 'old' } }]),
+    );
+    const ci = (refreshTunnelToken = false) =>
+      deployProject(named, false, { noOutputs: true, refreshTunnelToken });
+    await ci();
+    expect(flyCallLines().some((l) => l.startsWith('deploy '))).toBe(true);
+    expect(existsSync(imported)).toBe(false);
+    await expect(ci(true)).rejects.toThrow('--refresh-tunnel-token needs');
+  });
+
+  it('off the Mac, refuses a missing tunnel token before any change, naming the Mac', async () => {
+    process.env.CW_SECRETS_FROM_ENV = '1';
+    flySecrets(requiredSecrets('named').filter((n) => n !== 'CLOUDFLARE_TUNNEL_TOKEN'));
+    for (const noOutputs of [true, false]) {
+      const asked: string[] = [];
+      const go = deployProject(named, false, {
+        noOutputs,
+        outputs: tunnelOutputs,
+        tunnelToken: async () => {
+          asked.push('read');
+          return TUNNEL_TOKEN;
+        },
+      });
+      await expect(go).rejects.toThrow('only a deploy on the Mac sets');
+      expect(asked).toEqual([]);
+    }
+    expect(flyCallLines().some((l) => /^(secrets import|deploy)/.test(l))).toBe(false);
   });
 });
 

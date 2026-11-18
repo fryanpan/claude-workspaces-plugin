@@ -186,7 +186,10 @@ export interface RunResult {
 
 let flyToken: string | undefined;
 
-/** The org token: FLY_API_TOKEN when the environment has it (CI), else the Keychain's. */
+/**
+ * FLY_API_TOKEN when the environment has it, else the Keychain's org token.
+ * In CI it is a token for one app alone (`ci-tokens.ts`), not the org's.
+ */
 function orgToken(): string {
   const env = process.env.FLY_API_TOKEN?.trim();
   return env ? env : keychainRead('fly-org-token').trim();

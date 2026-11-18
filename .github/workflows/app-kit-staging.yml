@@ -8,11 +8,14 @@
 # the run's summary, the time from there until https://<app>.fly.dev/health
 # answers 200.
 #
-# Secret, in the `cloudflare-prod` environment (deployments from main only):
-#   FLY_API_TOKEN  the org deploy token fly.yml uses. The org is the one it
-#                  reaches (deploy-staging.ts resolveOrg).
-# The token reaches every app in the org, so deploy-staging.ts refuses an
-# `app` input whose name does not end in `-staging` before any fly command.
+# Secret, in the `fly-appkit-staging` environment (deployments from main
+# only, made by `bun run fly:ci-tokens apply`, infra/cloudflare/fly-ci/):
+#   FLY_DEPLOY_TOKEN  a Fly token cut down to the one trial app,
+#                     cw-appkit-trial-staging, with no WireGuard and so no
+#                     `fly ssh`, valid 90 days. It can reach no other app, so
+#                     the app is fixed here rather than an input, and the Mac
+#                     makes the app once (deploy-staging.ts makes an app only
+#                     when the token can list the org, which this one cannot).
 # It is on the deploy step alone: `bun install`, new-app and the setup
 # actions never see it. The repo and its logs are public: nothing here
 # prints it.
@@ -20,12 +23,7 @@
 name: app-kit-staging
 
 on:
-  workflow_dispatch:
-    inputs:
-      app:
-        description: Fly app name for the trial; must end in -staging (deploy-staging.ts refuses any other)
-        required: false
-        default: cw-appkit-trial-staging
+  workflow_dispatch: {}
 
 permissions: {}
 
@@ -33,7 +31,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: cloudflare-prod
+    environment: fly-appkit-staging
     concurrency:
       group: app-kit-staging
       cancel-in-progress: false
@@ -66,6 +64,7 @@ jobs:
       - name: Deploy to staging and wait for a 200
         working-directory: ${{ runner.temp }}/app
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          APP_NAME: ${{ inputs.app }}
+          FLY_API_TOKEN: ${{ secrets.FLY_DEPLOY_TOKEN }}
+          # The one app FLY_DEPLOY_TOKEN reaches (ci-tokens.ts STAGING_APP).
+          APP_NAME: cw-appkit-trial-staging
         run: bun run deploy:staging "$APP_NAME" --started-at "$STARTED_AT"

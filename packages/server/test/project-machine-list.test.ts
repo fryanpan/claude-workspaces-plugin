@@ -9,7 +9,9 @@ import { readFileSync } from 'node:fs';
 import {
   MACHINES_FILE,
   deployArgs,
+  matrixLine,
   parseMachines,
+  selected,
 } from '../../../infra/project-machine/machines.ts';
 
 const list = (machines: unknown) => JSON.stringify({ machines });
@@ -54,5 +56,17 @@ describe('the machine list', () => {
     );
     expect(() => parseMachines(list([{ project: 'riverbend', tunnel: 'wide' }]))).toThrow('tunnel');
     expect(() => parseMachines(list([{ project: 'riverbend', memory: '2g' }]))).toThrow('memory');
+  });
+
+  it('gives fly.yml one job per project, and a job deploys its own project alone', () => {
+    const machines = parseMachines(list([{ project: 'riverbend' }, { project: 'saltmarsh' }]));
+    expect(matrixLine(machines)).toBe('matrix=["riverbend","saltmarsh"]');
+    expect(selected(machines, 'saltmarsh').map((m) => m.project)).toEqual(['saltmarsh']);
+    expect(selected(machines, undefined)).toHaveLength(2);
+    expect(() => selected(machines, 'harborlight')).toThrow('no project harborlight');
+    // CI's jobs hold no key to the Terraform state, so they read no outputs.
+    expect(deployArgs(machines[0] as never, 'abc123', false, true).at(-1)).toBe(
+      '--no-terraform-outputs',
+    );
   });
 });

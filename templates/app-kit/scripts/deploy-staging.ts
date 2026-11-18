@@ -12,7 +12,10 @@
  *              app-kit-staging workflow passes the time before `new-app`.
  *   --dry-run  print the `fly` commands, run none, read no credential
  *
- * Steps: make the Fly app if the org has none by that name, make its data
+ * Steps: make the Fly app if it does not answer `fly status` and the org has
+ * none by that name (a token cut down to one app, as the app-kit-staging
+ * workflow's is, cannot list the org, so an app that answers is never looked
+ * for there), make its data
  * volume if it has none, set AUTH_SECRET once (made here, sent on stdin,
  * never printed), deploy with APP_URL set to the app's origin, then poll the
  * URL until it answers 200 and print the time since the command started.
@@ -24,8 +27,8 @@
  * either, the org is the one `fly orgs list` returns, when the token reaches
  * exactly one. The token goes into the `fly` child's environment and nowhere
  * else: never an argument, a log line or a file. In the claude-workspaces
- * repo the token lives in CI, so deploys run from the `app-kit-staging`
- * workflow (.github/workflows/app-kit-staging.yml).
+ * repo CI holds a token for the trial app alone, so deploys run from the
+ * `app-kit-staging` workflow (.github/workflows/app-kit-staging.yml).
  */
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -182,12 +185,12 @@ export function realFly(token: string): Fly {
   };
 }
 
-/** Prints each command, runs none; every list it is asked for is empty. */
+/** Prints each command, runs none; no app answers, and every list it is asked for is empty. */
 export function dryRunFly(log: (line: string) => void): Fly {
   return (args, opts = {}) => {
     const stdin = opts.input === undefined ? '' : ` <<< ${redact(opts.input)}`;
     log(`fly ${args.join(' ')}${stdin}`);
-    return { status: 0, stdout: '[]' };
+    return { status: args[0] === 'status' ? 1 : 0, stdout: '[]' };
   };
 }
 
@@ -227,11 +230,14 @@ export async function deployStaging(opts: Options, deps: Deps): Promise<void> {
   const { fly, log } = deps;
   const { app, region } = opts;
   const origin = `https://${app}.fly.dev`;
-  const org = resolveOrg(fly, deps.org);
 
-  if (!names(ok(fly, ['apps', 'list', '--org', org, '--json'])).includes(app)) {
-    log(`making Fly app ${app}`);
-    ok(fly, ['apps', 'create', app, '--org', org]);
+  // Asked of the app first: a token for this app alone cannot list the org.
+  if (fly(['status', '--app', app, '--json']).status !== 0) {
+    const org = resolveOrg(fly, deps.org);
+    if (!names(ok(fly, ['apps', 'list', '--org', org, '--json'])).includes(app)) {
+      log(`making Fly app ${app}`);
+      ok(fly, ['apps', 'create', app, '--org', org]);
+    }
   }
   if (JSON.parse(ok(fly, ['volumes', 'list', '--app', app, '--json']) || '[]').length === 0) {
     ok(fly, [

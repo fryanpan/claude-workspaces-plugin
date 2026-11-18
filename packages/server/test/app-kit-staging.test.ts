@@ -34,6 +34,7 @@ const FLY_STUB = `#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_DIR/fly-args"
 if [ "$FLY_API_TOKEN" = "${FAKE_TOKEN}" ]; then echo token >> "$STUB_DIR/fly-env"; fi
 case "$1 $2" in
+  "status --app") [ -n "$STUB_APP_EXISTS" ] || { echo 'Error: Could not find App' >&2; exit 1; } ;;
   "apps list") echo "\${STUB_APPS:-[]}" ;;
   "volumes list") echo "\${STUB_VOLUMES:-[]}" ;;
   "secrets list") echo "\${STUB_SECRETS:-[]}" ;;
@@ -212,6 +213,7 @@ describe('deploy:staging', () => {
       expect(r.status).toBe(0);
       const calls = read(dir, 'fly-args').trim().split('\n');
       expect(calls.map((c) => c.split(' ').slice(0, 2).join(' '))).toEqual([
+        'status --app',
         'apps list',
         'apps create',
         'volumes list',
@@ -243,7 +245,7 @@ describe('deploy:staging', () => {
       const r = await deploy(['--url', probe.url], dir, {
         FLY_API_TOKEN: FAKE_TOKEN,
         FLY_ORG: 'harborlight',
-        STUB_APPS: '[{"Name":"riverbend-notes-staging"}]',
+        STUB_APP_EXISTS: '1',
         STUB_VOLUMES: '[{"id":"vol_1"}]',
         STUB_SECRETS: '[{"Name":"AUTH_SECRET"}]',
       });
@@ -252,7 +254,8 @@ describe('deploy:staging', () => {
         .trim()
         .split('\n')
         .map((c) => c.split(' ').slice(0, 2).join(' '));
-      expect(verbs).toEqual(['apps list', 'volumes list', 'secrets list', 'deploy --app']);
+      // No org is listed or named: CI's token reaches this one app alone.
+      expect(verbs).toEqual(['status --app', 'volumes list', 'secrets list', 'deploy --app']);
       expect(read(dir, 'fly-stdin')).toBe('');
     } finally {
       probe.stop();
@@ -341,7 +344,7 @@ describe('deploy:staging with no org named', () => {
       );
       expect(r.status).toBe(0);
       const calls = read(dir, 'fly-args').trim().split('\n');
-      expect(calls[0]).toBe('orgs list --json');
+      expect(calls[1]).toBe('orgs list --json');
       expect(calls).toContain('apps create riverbend-notes-staging --org harborlight');
       expect(r.out).toMatch(/answers 200, 2m\d\ds after the command started/);
       expect(read(dir, 'summary.md')).toMatch(/answers 200, 2m\d\ds after/);
@@ -356,7 +359,9 @@ describe('deploy:staging with no org named', () => {
       const r = await run(orgs, dir, 'http://127.0.0.1:9/health');
       expect(r.status).toBe(1);
       expect(r.out).toContain('set FLY_ORG');
-      expect(read(dir, 'fly-args').trim()).toBe('orgs list --json');
+      expect(read(dir, 'fly-args').trim()).toBe(
+        'status --app riverbend-notes-staging --json\norgs list --json',
+      );
     }
   });
 
