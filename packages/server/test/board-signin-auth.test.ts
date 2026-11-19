@@ -53,15 +53,21 @@ describe('the Better Auth instance', () => {
     await migrate(auth);
     const ctx = await auth.$context;
     const bob = await ctx.internalAdapter
-      .createUser({ email: 'bob@saltmarsh.test', name: 'Bob', emailVerified: true })
+      .createUser(
+        { email: 'bob@saltmarsh.test', name: 'Bob', emailVerified: true },
+        { method: 'admin' },
+      )
       .catch(() => null);
     expect(bob).toBeNull();
     // CONTROL: an admitted, verified address gets one.
-    const alice = await ctx.internalAdapter.createUser({
-      email: 'alice@harborlight.test',
-      name: 'Alice',
-      emailVerified: true,
-    });
+    const alice = await ctx.internalAdapter.createUser(
+      {
+        email: 'alice@harborlight.test',
+        name: 'Alice',
+        emailVerified: true,
+      },
+      { method: 'admin' },
+    );
     expect(alice?.email).toBe('alice@harborlight.test');
     db.close();
   });
