@@ -1,8 +1,10 @@
 /**
  * Which events reach `.github/workflows/cloudflare.yml`'s apply job: a merge
- * to main (a push) and the keeper's dispatch on main do, with no step a
+ * to main (a push) and `cf:sync-config`'s dispatch on main do, with no step a
  * person must take; a pull request, and a dispatch on any other branch, do
- * not. The workflow is parsed as YAML and each job's `if` is evaluated
+ * not. The same for the workflows that replaced the keeper (fly-provision,
+ * fly-ci-tokens, cf-rotate-token): main only, each secret on the steps that
+ * use it, and every input through the environment rather than a script. The workflow is parsed as YAML and each job's `if` is evaluated
  * against the context GitHub would give that event, by a small evaluator of
  * the expression syntax the file uses (context paths, string literals, `==`,
  * `!=`, `!`, `&&`, `||`, parentheses), so the test follows the condition's
@@ -15,6 +17,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MAC_ARTIFACT, WORKFLOWS as WORKFLOWS_PULLED } from '../../../infra/handoff/pull.ts';
 import {
   STAGING_APP,
   STAGING_ENVIRONMENT,
@@ -46,6 +49,9 @@ const load = (name: string) =>
 const wf = load('cloudflare.yml');
 const fly = load('fly.yml');
 const appKit = load('app-kit-staging.yml');
+const provision = load('fly-provision.yml');
+const ciTokens = load('fly-ci-tokens.yml');
+const rotate = load('cf-rotate-token.yml');
 
 type Ctx = Record<string, string>;
 
@@ -144,7 +150,7 @@ describe('cloudflare.yml', () => {
     expect(wf.jobs.apply?.environment).toBe('cloudflare-prod');
   });
 
-  it("the keeper's dispatch on main is accepted and reaches the apply job", () => {
+  it("cf:sync-config's dispatch on main is accepted and reaches the apply job", () => {
     expect(Object.keys(wf.on)).toContain('workflow_dispatch');
     expect(runs('apply', event('workflow_dispatch', MAIN))).toBe(true);
   });
@@ -190,12 +196,18 @@ describe('cloudflare.yml', () => {
   it('applies with run.ts apply --ci and has no step that waits on a person', () => {
     const steps = wf.jobs.apply?.steps ?? [];
     expect(
-      steps.some(
-        (s) =>
-          s.run ===
+      steps.some((s) =>
+        s.run?.includes(
           'bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts apply prod --ci',
+        ),
       ),
     ).toBe(true);
+    // A service token it makes is sealed to the Mac and handed on, even after a failure.
+    expect(steps.find((s) => s.name === 'Apply prod')?.env?.CW_HANDOFF_OUT).toContain(
+      'handoff-mac',
+    );
+    const upload = steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
+    expect(upload?.if).toContain('always()');
     expect(JSON.stringify(wf.jobs)).not.toMatch(/manual-approval|wait-for-approval|trstringer/i);
   });
 });
@@ -274,5 +286,81 @@ describe('app-kit-staging.yml', () => {
     expect(at('Start the clock')).toBeGreaterThanOrEqual(0);
     expect(at('Start the clock')).toBeLessThan(at('Make the app'));
     expect(holders[0]?.run).toContain('--started-at "$STARTED_AT"');
+  });
+});
+
+describe('the workflows that replaced the keeper', () => {
+  const values = (env?: Record<string, string>) => Object.values(env ?? {}).join(' ');
+  const secretsOf = (env?: Record<string, string>) =>
+    [...values(env).matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]);
+  /** The steps that hold a secret's value, by name; a presence check holds none. */
+  const holders = (job: Job | undefined) =>
+    (job?.steps ?? [])
+      .filter((st) => /secrets\./.test(values(st.env)) && !/!= ''/.test(values(st.env)))
+      .map((st) => st.name);
+
+  it('run on main only, each job in the environment that holds its secrets', () => {
+    expect(runs('provision', event('workflow_dispatch', MAIN), provision)).toBe(true);
+    expect(runs('provision', event('workflow_dispatch', 'refs/heads/riverbend'), provision)).toBe(
+      false,
+    );
+    expect(provision.jobs.outputs?.environment).toBe('cloudflare-prod');
+    expect(provision.jobs.provision?.environment).toBe('fly-org');
+    expect(provision.jobs.provision?.needs).toBe('outputs');
+    expect(runs('apply', event('schedule', MAIN), ciTokens)).toBe(true);
+    expect(runs('apply', event('workflow_dispatch', 'refs/heads/riverbend'), ciTokens)).toBe(false);
+    expect(ciTokens.jobs.apply?.environment).toBe('fly-org');
+    expect(runs('rotate', event('workflow_dispatch', MAIN), rotate)).toBe(true);
+    expect(runs('rotate', event('workflow_dispatch', 'refs/heads/riverbend'), rotate)).toBe(false);
+    expect(rotate.jobs.rotate?.environment).toBe('cloudflare-prod');
+    for (const w of [provision, ciTokens, rotate]) expect(Object.keys(w.on)).not.toContain('push');
+  });
+
+  it('give the org token and the admin token to the steps that call Fly and GitHub alone', () => {
+    expect(holders(provision.jobs.provision)).toEqual([
+      "Make the project's machine",
+      "Cut the narrow tokens again, the new app's among them",
+    ]);
+    const make = provision.jobs.provision?.steps?.find((st) => st.name?.startsWith('Make'));
+    expect(secretsOf(make?.env).sort()).toEqual([
+      'FLY_API_TOKEN',
+      'GH_ADMIN_TOKEN',
+      'HANDOFF_PRIVATE_KEY',
+    ]);
+    expect(make?.env?.CW_SECRETS_FROM_ENV).toBe('1');
+    expect(make?.env?.CW_HANDOFF_OUT).toContain('handoff-mac');
+    expect(holders(provision.jobs.outputs)).toEqual([
+      'Seal the tunnel token and the Access settings to fly-org',
+    ]);
+    expect(holders(ciTokens.jobs.apply)).toEqual(['Cut and write the tokens']);
+    expect(holders(rotate.jobs.rotate)).toEqual(['Rotate and seal the new pair to the Mac']);
+    for (const w of [provision, ciTokens, rotate]) {
+      for (const job of Object.values(w.jobs)) {
+        expect(values(job.env)).not.toMatch(/secrets\./);
+        const install = job.steps?.find((st) => st.run?.includes('bun install'));
+        if (install) expect(install.env).toBeUndefined();
+      }
+    }
+  });
+
+  it('pass every input and secret through the environment, never a script’s text', () => {
+    for (const w of [provision, ciTokens, rotate]) {
+      for (const job of Object.values(w.jobs)) {
+        for (const st of job.steps ?? []) {
+          expect(st.run ?? '').not.toContain('secrets.');
+          expect(st.run ?? '').not.toContain('inputs.');
+        }
+      }
+    }
+  });
+
+  it('hand the Mac what they made as one artifact name, the one handoff:pull asks for', () => {
+    for (const job of [provision.jobs.provision, ciTokens.jobs.apply, rotate.jobs.rotate]) {
+      const upload = job?.steps?.find((st) => st.uses?.startsWith('actions/upload-artifact'));
+      expect((upload as { with?: { name?: string } } | undefined)?.with?.name).toBe(MAC_ARTIFACT);
+    }
+    expect(WORKFLOWS_PULLED).toEqual(
+      expect.arrayContaining(['fly-provision.yml', 'fly-ci-tokens.yml', 'cf-rotate-token.yml']),
+    );
   });
 });
