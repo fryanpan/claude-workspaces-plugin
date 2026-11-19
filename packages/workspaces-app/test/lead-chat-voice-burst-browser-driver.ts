@@ -261,6 +261,112 @@ const levelVoice: SpokenVoice = {
   },
 };
 
+/** What one size needs from the run `main` set up. */
+interface Burst {
+  opened: TranscriptionOpenOpts[];
+  stream: Awaited<ReturnType<typeof agentStream>>;
+  docUrl: string;
+  ws: string;
+  post: (path: string, body: unknown) => Promise<Response>;
+}
+
+/**
+ * One size, start to end, in a function of its own rather than the body of
+ * `main`'s loop over sizes. Bun 1.3.10's optimising JIT (DFG) can keep
+ * reading the FIRST pass's `cdp` inside a closure made in the second pass of
+ * that loop: `readChunks` at 430 then evaluated in the 1180 browser, whose
+ * socket is closed, and waited out its 20s ("quiet at 430: not all four
+ * finished", then "read what played did not finish"). A scope a call creates
+ * is a new scope each call. The meeting driver hit it first.
+ */
+async function casesAt(width: number, height: number, burst: Burst): Promise<BurstCase[]> {
+  const { opened, stream, docUrl, ws, post } = burst;
+  const cases: BurstCase[] = [];
+  const cdp = await openBrowser(width, height);
+  const state = async () =>
+    (await evaluate(cdp, STATE, 'listening and the panel')) as {
+      listening: boolean;
+      paneOpen: boolean;
+    };
+  for (const way of ['quiet', 'slow', 'talking'] as const) {
+    step(`${way} at ${width}`);
+    chunkGapMs = CHUNK_GAP_MS[way];
+    const loaded = cdp.once('Page.loadEventFired');
+    await bounded(cdp.send('Page.navigate', { url: docUrl }), 'Page.navigate');
+    await bounded(loaded, 'the page load', LOAD_MS);
+    const button = await until(
+      'the agent button',
+      async () => (await evaluate(cdp, BUTTON, 'the agent button')) as XY | null,
+    );
+    const before = opened.length;
+    await tap(cdp, button);
+    await until('listening', async () => ((await state()).listening ? true : null));
+    await until('the listener opened', () => (opened.length > before ? true : null));
+    const bar = await until(
+      'the bar',
+      async () => (await evaluate(cdp, BAR, 'the bar')) as XY | null,
+    );
+    await tap(cdp, bar);
+    await until('the panel open', async () => ((await state()).paneOpen ? true : null));
+
+    const queueIds: string[] = [];
+    for (let n = 1; n <= 4; n++) {
+      const asked = `Question ${n}, ${way} at ${width}?`;
+      const listeners = opened.length;
+      opened.at(-1)?.onTurn({ turn: 0, text: asked, final: true });
+      const frame = await until(
+        'the lead heard it',
+        () => stream.voice.find((v) => v.transcript === asked) ?? null,
+      );
+      queueIds.push(String(frame.queueId));
+      await until('the next listener', () => (opened.length > listeners ? true : null));
+    }
+    const ears = opened.at(-1);
+    if (way === 'talking') ears?.onTurn({ turn: 0, text: 'and while you are', final: false });
+
+    const delivered: boolean[] = [];
+    const t0 = Date.now();
+    let sentWithinMs = 0;
+    for (const [i, queueId] of queueIds.entries()) {
+      if (i > 0) await sleep(ANSWER_GAP_MS);
+      const res = await post(`/workspaces/${ws}/voice-queue/${queueId}/answer`, {
+        agentId: LEAD.agentId,
+        text: `Answer ${i + 1}.`,
+      });
+      if (!res.ok) throw new Error(`answer: ${res.status} ${await res.text()}`);
+      delivered.push(((await res.json()) as { delivered: boolean }).delivered);
+      sentWithinMs = Date.now() - t0;
+    }
+    const listeners = opened.length;
+    if (way === 'talking') {
+      ears?.onTurn({ turn: 0, text: 'and while you are at it, thanks.', final: true });
+    }
+    const readChunks = async (): Promise<BurstChunk[]> =>
+      (await evaluate(
+        cdp,
+        'JSON.parse(JSON.stringify(window.__said))',
+        'what played',
+      )) as BurstChunk[];
+    await until(
+      'all four answers to finish',
+      async () => {
+        const rows = await readChunks();
+        return rows.length >= 4 * CHUNKS && rows.every((r) => r.ended) ? true : null;
+      },
+      PLAY_MS,
+    ).catch(() => step(`${way} at ${width}: not all four finished`));
+    const chunks = await readChunks();
+    const listensAgain = await until(
+      'a listener after the last answer',
+      async () => ((await state()).listening && opened.length > listeners ? true : null),
+      4000,
+    ).catch(() => false);
+    cases.push({ width, way, delivered, sentWithinMs, chunks, listensAgain });
+  }
+  cdp.close();
+  return cases;
+}
+
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lead-chat-voice-burst-'));
   let handle: ServerHandle | undefined;
@@ -325,88 +431,7 @@ async function main(): Promise<void> {
       [1180, 820],
       [430, 932],
     ] as const) {
-      const cdp = await openBrowser(width, height);
-      const state = async () =>
-        (await evaluate(cdp, STATE, 'listening and the panel')) as {
-          listening: boolean;
-          paneOpen: boolean;
-        };
-      for (const way of ['quiet', 'slow', 'talking'] as const) {
-        step(`${way} at ${width}`);
-        chunkGapMs = CHUNK_GAP_MS[way];
-        const loaded = cdp.once('Page.loadEventFired');
-        await bounded(cdp.send('Page.navigate', { url: docUrl }), 'Page.navigate');
-        await bounded(loaded, 'the page load', LOAD_MS);
-        const button = await until(
-          'the agent button',
-          async () => (await evaluate(cdp, BUTTON, 'the agent button')) as XY | null,
-        );
-        const before = opened.length;
-        await tap(cdp, button);
-        await until('listening', async () => ((await state()).listening ? true : null));
-        await until('the listener opened', () => (opened.length > before ? true : null));
-        const bar = await until(
-          'the bar',
-          async () => (await evaluate(cdp, BAR, 'the bar')) as XY | null,
-        );
-        await tap(cdp, bar);
-        await until('the panel open', async () => ((await state()).paneOpen ? true : null));
-
-        const queueIds: string[] = [];
-        for (let n = 1; n <= 4; n++) {
-          const asked = `Question ${n}, ${way} at ${width}?`;
-          const listeners = opened.length;
-          opened.at(-1)?.onTurn({ turn: 0, text: asked, final: true });
-          const frame = await until(
-            'the lead heard it',
-            () => stream.voice.find((v) => v.transcript === asked) ?? null,
-          );
-          queueIds.push(String(frame.queueId));
-          await until('the next listener', () => (opened.length > listeners ? true : null));
-        }
-        const ears = opened.at(-1);
-        if (way === 'talking') ears?.onTurn({ turn: 0, text: 'and while you are', final: false });
-
-        const delivered: boolean[] = [];
-        const t0 = Date.now();
-        let sentWithinMs = 0;
-        for (const [i, queueId] of queueIds.entries()) {
-          if (i > 0) await sleep(ANSWER_GAP_MS);
-          const res = await post(`/workspaces/${ws}/voice-queue/${queueId}/answer`, {
-            agentId: LEAD.agentId,
-            text: `Answer ${i + 1}.`,
-          });
-          if (!res.ok) throw new Error(`answer: ${res.status} ${await res.text()}`);
-          delivered.push(((await res.json()) as { delivered: boolean }).delivered);
-          sentWithinMs = Date.now() - t0;
-        }
-        const listeners = opened.length;
-        if (way === 'talking') {
-          ears?.onTurn({ turn: 0, text: 'and while you are at it, thanks.', final: true });
-        }
-        const readChunks = async (): Promise<BurstChunk[]> =>
-          (await evaluate(
-            cdp,
-            'JSON.parse(JSON.stringify(window.__said))',
-            'what played',
-          )) as BurstChunk[];
-        await until(
-          'all four answers to finish',
-          async () => {
-            const rows = await readChunks();
-            return rows.length >= 4 * CHUNKS && rows.every((r) => r.ended) ? true : null;
-          },
-          PLAY_MS,
-        ).catch(() => step(`${way} at ${width}: not all four finished`));
-        const chunks = await readChunks();
-        const listensAgain = await until(
-          'a listener after the last answer',
-          async () => ((await state()).listening && opened.length > listeners ? true : null),
-          4000,
-        ).catch(() => false);
-        cases.push({ width, way, delivered, sentWithinMs, chunks, listensAgain });
-      }
-      cdp.close();
+      cases.push(...(await casesAt(width, height, { opened, stream, docUrl, ws, post })));
     }
     const run: BurstRun = { chunksPerAnswer: CHUNKS, cases };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

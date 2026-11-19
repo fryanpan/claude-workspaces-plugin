@@ -225,6 +225,124 @@ async function touch(cdp: Cdp, x: number, y: number): Promise<void> {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
+/**
+ * One size, start to end, in a function of its own rather than the body of
+ * `main`'s loop over sizes. Bun 1.3.10's optimising JIT (DFG) can keep
+ * reading the FIRST pass's `cdp` inside a closure made in the second pass of
+ * that loop: the `until` callbacks at 430 then evaluated in the 1180 browser,
+ * whose socket is closed, and waited out their 15s ("page at 1180: CDP
+ * Runtime.evaluate did not finish", raised while tapping at 430). A scope a
+ * call creates is a new scope each call. The meeting driver hit it first.
+ */
+async function casesAt(width: number, height: number, homeUrl: string): Promise<LinkTabCase[]> {
+  const cases: LinkTabCase[] = [];
+  const { cdp, port } = await openBrowser(width, height);
+  const phone = width <= 1100;
+  const plans: Array<[LinkName, Gesture]> = phone
+    ? [
+        ['mock', 'touch'],
+        ['doc', 'touch'],
+        ['external', 'touch'],
+      ]
+    : [
+        ['mock', 'tap'],
+        ['doc', 'tap'],
+        ['doc', 'new-tab-click'],
+        ['external', 'tap'],
+      ];
+  for (const [link, gesture] of plans) {
+    step(`${link} by ${gesture} at ${width}`);
+    for (let i = 0; i < 2; i++) {
+      if (i === 1) await cdp.evaluate(FORGET_TAB);
+      const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
+      await cdp.send('Page.navigate', { url: homeUrl });
+      await loaded;
+    }
+    const btn = await until(
+      'the agent button',
+      async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
+    );
+    // Voice first: the first tap brings the bar out and listens.
+    await (phone ? touch(cdp, btn.x, btn.y) : click(cdp, btn.x, btn.y));
+    await until('listening', async () => ((await cdp.evaluate(LISTENING)) ? true : null));
+    const bar = await until(
+      'the bar',
+      async () => (await cdp.evaluate(centreOf('.lc-bar'))) as { x: number; y: number } | null,
+    );
+    await (phone ? touch(cdp, bar.x, bar.y) : click(cdp, bar.x, bar.y));
+    await until('the panel open', async () => ((await cdp.evaluate(SETTLED_PANE)) ? true : null));
+    const [message, nth] =
+      link === 'external' ? ['ext', 1] : link === 'mock' ? ['reply', 1] : ['reply', 2];
+    const at = await until(
+      `the ${link} link`,
+      async () =>
+        (await cdp.evaluate(linkAt(message, nth))) as {
+          x: number;
+          y: number;
+          href: string;
+          target: string | null;
+        } | null,
+    );
+    const before = new Set((await tabs(port)).map((t) => t.id));
+    if (gesture === 'touch') await touch(cdp, at.x, at.y);
+    else await click(cdp, at.x, at.y, gesture === 'new-tab-click');
+    // A gesture that goes somewhere goes within a few seconds: a new tab,
+    // or this tab leaving Home.
+    await until(
+      'the gesture to go somewhere',
+      async () => {
+        const fresh = (await tabs(port)).filter((t) => !before.has(t.id));
+        if (fresh.length > 0) return true;
+        const here = String(await cdp.evaluate('location.pathname').catch(() => ''));
+        return here.endsWith('/home') ? null : true;
+      },
+      6000,
+    ).catch(() => step(`the ${link} ${gesture} went nowhere`));
+    const opened = (await tabs(port)).filter((t) => !before.has(t.id)).map((t) => t.url);
+    // This tab, once it has loaded whatever it was going to load.
+    const page = await until(
+      'this tab settled',
+      async () => {
+        try {
+          const r = (await cdp.evaluate(PAGE)) as { url: string; notFound: boolean };
+          return (await cdp.evaluate('document.readyState')) === 'complete' ? r : null;
+        } catch {
+          return null;
+        }
+      },
+      10_000,
+    );
+    // Voice on this tab: back on by itself after a same-tab load, or never
+    // off when the link went to another tab. A mock page has no agent
+    // button to read, so it is read only where one is drawn.
+    const listening = page.url.includes('/mockups/')
+      ? false
+      : await until(
+          'listening on this tab',
+          async () => ((await cdp.evaluate(LISTENING).catch(() => false)) ? true : null),
+          8000,
+        ).catch(() => false);
+    for (const t of await tabs(port)) {
+      if (!before.has(t.id)) {
+        await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`, { signal: bound() });
+      }
+    }
+    cases.push({
+      width,
+      link,
+      gesture,
+      href: at.href,
+      target: at.target,
+      opened,
+      pageUrl: page.url,
+      notFound: page.notFound,
+      listening,
+    });
+  }
+  cdp.close();
+  return cases;
+}
+
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lead-chat-link-tabs-'));
   let handle: ServerHandle | undefined;
@@ -349,112 +467,7 @@ async function main(): Promise<void> {
       [1180, 820],
       [430, 932],
     ] as const) {
-      const { cdp, port } = await openBrowser(width, height);
-      const phone = width <= 1100;
-      const plans: Array<[LinkName, Gesture]> = phone
-        ? [
-            ['mock', 'touch'],
-            ['doc', 'touch'],
-            ['external', 'touch'],
-          ]
-        : [
-            ['mock', 'tap'],
-            ['doc', 'tap'],
-            ['doc', 'new-tab-click'],
-            ['external', 'tap'],
-          ];
-      for (const [link, gesture] of plans) {
-        step(`${link} by ${gesture} at ${width}`);
-        for (let i = 0; i < 2; i++) {
-          if (i === 1) await cdp.evaluate(FORGET_TAB);
-          const loaded = onceWithin(cdp, 'Page.loadEventFired', step);
-          await cdp.send('Page.navigate', { url: homeUrl });
-          await loaded;
-        }
-        const btn = await until(
-          'the agent button',
-          async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
-        );
-        // Voice first: the first tap brings the bar out and listens.
-        await (phone ? touch(cdp, btn.x, btn.y) : click(cdp, btn.x, btn.y));
-        await until('listening', async () => ((await cdp.evaluate(LISTENING)) ? true : null));
-        const bar = await until(
-          'the bar',
-          async () => (await cdp.evaluate(centreOf('.lc-bar'))) as { x: number; y: number } | null,
-        );
-        await (phone ? touch(cdp, bar.x, bar.y) : click(cdp, bar.x, bar.y));
-        await until('the panel open', async () =>
-          (await cdp.evaluate(SETTLED_PANE)) ? true : null,
-        );
-        const [message, nth] =
-          link === 'external' ? ['ext', 1] : link === 'mock' ? ['reply', 1] : ['reply', 2];
-        const at = await until(
-          `the ${link} link`,
-          async () =>
-            (await cdp.evaluate(linkAt(message, nth))) as {
-              x: number;
-              y: number;
-              href: string;
-              target: string | null;
-            } | null,
-        );
-        const before = new Set((await tabs(port)).map((t) => t.id));
-        if (gesture === 'touch') await touch(cdp, at.x, at.y);
-        else await click(cdp, at.x, at.y, gesture === 'new-tab-click');
-        // A gesture that goes somewhere goes within a few seconds: a new tab,
-        // or this tab leaving Home.
-        await until(
-          'the gesture to go somewhere',
-          async () => {
-            const fresh = (await tabs(port)).filter((t) => !before.has(t.id));
-            if (fresh.length > 0) return true;
-            const here = String(await cdp.evaluate('location.pathname').catch(() => ''));
-            return here.endsWith('/home') ? null : true;
-          },
-          6000,
-        ).catch(() => step(`the ${link} ${gesture} went nowhere`));
-        const opened = (await tabs(port)).filter((t) => !before.has(t.id)).map((t) => t.url);
-        // This tab, once it has loaded whatever it was going to load.
-        const page = await until(
-          'this tab settled',
-          async () => {
-            try {
-              const r = (await cdp.evaluate(PAGE)) as { url: string; notFound: boolean };
-              return (await cdp.evaluate('document.readyState')) === 'complete' ? r : null;
-            } catch {
-              return null;
-            }
-          },
-          10_000,
-        );
-        // Voice on this tab: back on by itself after a same-tab load, or never
-        // off when the link went to another tab. A mock page has no agent
-        // button to read, so it is read only where one is drawn.
-        const listening = page.url.includes('/mockups/')
-          ? false
-          : await until(
-              'listening on this tab',
-              async () => ((await cdp.evaluate(LISTENING).catch(() => false)) ? true : null),
-              8000,
-            ).catch(() => false);
-        for (const t of await tabs(port)) {
-          if (!before.has(t.id)) {
-            await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`, { signal: bound() });
-          }
-        }
-        cases.push({
-          width,
-          link,
-          gesture,
-          href: at.href,
-          target: at.target,
-          opened,
-          pageUrl: page.url,
-          notFound: page.notFound,
-          listening,
-        });
-      }
-      cdp.close();
+      cases.push(...(await casesAt(width, height, homeUrl)));
     }
     const run: LinkTabsRun = { workspaceId: ws, docPath, mockPath, externalUrl, cases };
     process.stdout.write(`\n${JSON.stringify(run)}\n`);

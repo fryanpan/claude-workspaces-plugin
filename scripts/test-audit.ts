@@ -120,6 +120,27 @@ const read = (rel: string): string[] => {
   return lines;
 };
 
+/**
+ * Every match of a global `re` in `text`, as `text.matchAll(re)` gives them,
+ * without the copy of `re` that `matchAll` makes on every call. The audit
+ * calls it once per line of every test file, and Bun's `RegExp` `flags`
+ * getter, which that copy reads, was 310ms of a 790ms run: the single largest
+ * cost in a script `scripts/test-audit.test.ts` spawns five times. Eager, so a
+ * caller that breaks early or nests another use of the same `re` cannot leave
+ * `lastIndex` mid-string for the next line.
+ */
+function matchesOf(re: RegExp, text: string): RegExpExecArray[] {
+  if (!re.global) throw new Error(`matchesOf needs a global RegExp, got ${re}`);
+  const out: RegExpExecArray[] = [];
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    out.push(m);
+    if (m[0] === '') re.lastIndex++;
+  }
+  re.lastIndex = 0;
+  return out;
+}
+
 const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
 
 /**
@@ -162,7 +183,7 @@ function fixedSleeps(): Check {
     lines.forEach((text, i) => {
       // A sleep NAMED in a comment is prose, not a wait.
       if (COMMENT_LINE.test(text)) return;
-      for (const m of text.matchAll(SLEEP)) {
+      for (const m of matchesOf(SLEEP, text)) {
         const raw = m[1] ?? m[2] ?? '';
         // `.replace` matters: `setTimeout(r, 15_000)` is a legal literal, and
         // `Number('15_000')` is NaN — which read as "below the threshold" and
@@ -233,7 +254,7 @@ function isSourcePath(literal: string): boolean {
 
 /** Source-path literals anywhere on a line. */
 function sourceLiterals(text: string): string[] {
-  return [...text.matchAll(/['"`]([^'"`\n]*)['"`]/g)]
+  return [...matchesOf(/['"`]([^'"`\n]*)['"`]/g, text)]
     .map((m) => m[1] ?? '')
     .filter((l) => isSourcePath(l));
 }
@@ -337,7 +358,7 @@ function readsSource(lines: string[], i: number): boolean {
   const text = lines[i] ?? '';
   if (readsSourceOnLine(text)) return true;
   READ_CALL_G.lastIndex = 0;
-  for (const m of text.matchAll(READ_CALL_G)) {
+  for (const m of matchesOf(READ_CALL_G, text)) {
     const args = readCallArgs(lines, i, (m.index ?? 0) + m[0].length);
     if (args !== undefined && sourceLiterals(args).length > 0) return true;
   }
@@ -502,7 +523,7 @@ function providesTransitively(rel: string, seen = new Set<string>()): boolean {
     answer = providesSourceText(rel);
     if (!answer) {
       const body = readFileSync(join(repoRoot, rel), 'utf8');
-      for (const m of body.matchAll(IMPORT_SPECIFIER)) {
+      for (const m of matchesOf(IMPORT_SPECIFIER, body)) {
         const next = resolveImport(rel, m[1] ?? '');
         if (next && providesTransitively(next, seen)) {
           answer = true;
@@ -592,7 +613,7 @@ function sourceShape(): Check {
         if (!isNotSource(lines, i)) sites.push({ file, line: i + 1, text: text.trim() });
         return;
       }
-      for (const m of text.matchAll(IMPORT_SPECIFIER)) {
+      for (const m of matchesOf(IMPORT_SPECIFIER, text)) {
         const target = resolveImport(file, m[1] ?? '');
         if (target && providesTransitively(target)) {
           sites.push({ file, line: i + 1, text: text.trim() });
@@ -791,10 +812,10 @@ function waitBudget(): Check {
         total += ms;
         sites.push(site);
       };
-      for (const m of text.matchAll(SLEEP)) add(m[1] ?? m[2] ?? '', false);
-      for (const m of text.matchAll(INLINE_WAIT)) add(m[1] ?? '', true);
+      for (const m of matchesOf(SLEEP, text)) add(m[1] ?? m[2] ?? '', false);
+      for (const m of matchesOf(INLINE_WAIT, text)) add(m[1] ?? '', true);
       if (!calls) return;
-      for (const m of text.matchAll(calls)) {
+      for (const m of matchesOf(calls, text)) {
         const passed = m[2];
         add(passed ?? String(wrappers.get(m[1] ?? '') ?? ''), false);
       }
