@@ -86,17 +86,14 @@ const GUIDE = [
   '',
 ].join('\n');
 
-const LINK_WORDS: Record<LinkName, string> = {
-  riverbend: 'Riverbend data',
-  saltmarsh: 'Saltmarsh tides',
-  missing: 'appendix Bob',
-};
+/** Each link by its place in the guide, not its words: the Alt-click case
+ *  types into the Riverbend link's words, and that edit is the doc's. */
+const LINK_INDEX: Record<LinkName, number> = { riverbend: 0, saltmarsh: 1, missing: 2 };
 
 /** Where a link is on the editable doc, once the editor has mounted. */
-const linkAt = (words: string): string => `(() => {
+const linkAt = (index: number): string => `(() => {
   if (!document.querySelector('#editor .ProseMirror[contenteditable="true"]')) return null;
-  const a = Array.from(document.querySelectorAll('#editor .ProseMirror a'))
-    .find((el) => (el.textContent || '').includes(${JSON.stringify(words)}));
+  const a = document.querySelectorAll('#editor .ProseMirror a')[${index}];
   if (!a) return null;
   a.scrollIntoView({ block: 'center' });
   const r = a.getBoundingClientRect();
@@ -104,9 +101,8 @@ const linkAt = (words: string): string => `(() => {
   return { x: r.left + Math.min(r.width / 2, 24), y: r.top + r.height / 2, href: a.getAttribute('href') };
 })()`;
 
-const linkText = (words: string): string => `(() => {
-  const a = Array.from(document.querySelectorAll('#editor .ProseMirror a'))
-    .find((el) => (el.textContent || '').includes(${JSON.stringify(words.split(' ')[0])}));
+const linkText = (index: number): string => `(() => {
+  const a = document.querySelectorAll('#editor .ProseMirror a')[${index}];
   return a ? a.textContent : null;
 })()`;
 
@@ -207,7 +203,7 @@ async function casesAt(
     const at = await until(
       `the ${link} link`,
       async () =>
-        (await cdp.evaluate(linkAt(LINK_WORDS[link]))) as {
+        (await cdp.evaluate(linkAt(LINK_INDEX[link]))) as {
           x: number;
           y: number;
           href: string | null;
@@ -245,7 +241,7 @@ async function casesAt(
       ).catch(() => step('the caret never reached the link'));
       await cdp.send('Input.insertText', { text: 'Z' });
       await until('the typed letter in the link', async () =>
-        String((await cdp.evaluate(linkText(LINK_WORDS[link]))) ?? '').includes('Z') ? true : null,
+        String((await cdp.evaluate(linkText(LINK_INDEX[link]))) ?? '').includes('Z') ? true : null,
       ).catch(() => step('the typed letter never reached the link'));
     } else {
       // A gesture that goes somewhere leaves the guide within a few seconds.
@@ -270,7 +266,7 @@ async function casesAt(
       15_000,
     ).catch(async () => (await cdp.evaluate(PAGE)) as Page);
     const text = page.path.startsWith(guidePath)
-      ? ((await cdp.evaluate(linkText(LINK_WORDS[link]))) as string | null)
+      ? ((await cdp.evaluate(linkText(LINK_INDEX[link]))) as string | null)
       : null;
     for (const t of await tabs(port)) {
       if (!before.has(t.id)) {
@@ -352,19 +348,19 @@ async function main(): Promise<void> {
     const docPath = (id: string) => `/workspaces/${ws}/docs/${encodeURIComponent(id)}`;
     const guideUrl = `${base}${docPath(guide)}`;
 
-    const cases = [
-      ...(await casesAt(1180, 820, guideUrl, [
-        ['riverbend', 'click'],
-        ['saltmarsh', 'click'],
-        ['riverbend', 'new-tab-click'],
-        ['missing', 'click'],
-        ['riverbend', 'alt-click-type'],
-      ])),
-      ...(await casesAt(430, 932, guideUrl, [
-        ['riverbend', 'touch'],
-        ['saltmarsh', 'touch'],
-      ])),
-    ];
+    // The phone first: the last 1180 case edits the guide's words.
+    const phone = await casesAt(430, 932, guideUrl, [
+      ['riverbend', 'touch'],
+      ['saltmarsh', 'touch'],
+    ]);
+    const laptop = await casesAt(1180, 820, guideUrl, [
+      ['riverbend', 'click'],
+      ['saltmarsh', 'click'],
+      ['riverbend', 'new-tab-click'],
+      ['missing', 'click'],
+      ['riverbend', 'alt-click-type'],
+    ]);
+    const cases = [...laptop, ...phone];
     const run: RelativeLinkRun = {
       guidePath: docPath(guide),
       riverbendPath: docPath(riverbend),
