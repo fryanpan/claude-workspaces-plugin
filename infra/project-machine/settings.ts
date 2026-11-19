@@ -17,6 +17,14 @@
  *   CW_GOOGLE_CLIENT_SECRET   the Keychain's `cw-google-signin-client-secret`
  *   CW_SIGNIN_ORIGIN          https:// and the project's first host
  *
+ * And for email and password beside Google (`board-signin-password.ts`),
+ * all four from the Keychain or none:
+ *
+ *   CW_TURNSTILE_SITE_KEY     the Keychain's `cw-turnstile-site-key`
+ *   CW_TURNSTILE_SECRET_KEY   the Keychain's `cw-turnstile-secret-key`
+ *   CW_RESEND_API_KEY         the Keychain's `cw-resend-api-key` (send-only)
+ *   CW_SIGNIN_MAIL_FROM       the Keychain's `cw-signin-mail-from`
+ *
  * These do not switch sign-in on: `CW_SIGNIN` stays unset (Access) until the
  * owner switches it. Google sends a sign-in result only to a return address
  * the client lists, so a run that sets the client prints the one this
@@ -38,6 +46,14 @@ export const OWNER_EMAIL_ENTRY = 'cw-board-owner-email';
 export const GOOGLE_CLIENT_ID_ENTRY = 'cw-google-signin-client-id';
 export const GOOGLE_CLIENT_SECRET_ENTRY = 'cw-google-signin-client-secret';
 
+/** Each password sign-in setting, and the Keychain entry it comes from. */
+export const PASSWORD_ENTRIES = {
+  CW_TURNSTILE_SITE_KEY: 'cw-turnstile-site-key',
+  CW_TURNSTILE_SECRET_KEY: 'cw-turnstile-secret-key',
+  CW_RESEND_API_KEY: 'cw-resend-api-key',
+  CW_SIGNIN_MAIL_FROM: 'cw-signin-mail-from',
+} as const;
+
 export const SETTING_NAMES = [
   'CW_OWNER_EMAIL',
   'CW_PUBLIC_BASE_URL',
@@ -56,6 +72,7 @@ export const SIGNIN_SETTING_NAMES = [
   'CW_GOOGLE_CLIENT_ID',
   'CW_GOOGLE_CLIENT_SECRET',
   'CW_SIGNIN_ORIGIN',
+  ...(Object.keys(PASSWORD_ENTRIES) as (keyof typeof PASSWORD_ENTRIES)[]),
 ] as const;
 
 const ACCESS_NAMES =
@@ -113,6 +130,20 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   } else {
     skipped.push(
       `CW_GOOGLE_CLIENT_ID, CW_GOOGLE_CLIENT_SECRET, CW_SIGNIN_ORIGIN: the Keychain has no ${GOOGLE_CLIENT_ID_ENTRY} and ${GOOGLE_CLIENT_SECRET_ENTRY}`,
+    );
+  }
+  const password = Object.entries(PASSWORD_ENTRIES) as [keyof typeof PASSWORD_ENTRIES, string][];
+  if (password.every(([, entry]) => src.keychainHas(entry))) {
+    for (const [name, entry] of password) {
+      settings.push({
+        name,
+        from: `Keychain ${entry}`,
+        value: () => src.keychainRead(entry).trim(),
+      });
+    }
+  } else {
+    skipped.push(
+      `${password.map(([n]) => n).join(', ')}: the Keychain needs all of ${password.map(([, e]) => e).join(', ')}`,
     );
   }
   const notes: string[] = [];

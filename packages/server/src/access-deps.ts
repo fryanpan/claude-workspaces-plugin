@@ -21,6 +21,7 @@
  * Lifted verbatim out of the top of `createServer`.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import type { PasswordSignIn } from './auth/board-signin-password.ts';
 import { type GoogleClient, createBoardSignIn } from './auth/board-signin.ts';
 import { createOwnerSignInRecord } from './auth/owner-signin-record.ts';
 import { type CfAccessOptions, createCfAccessVerifier } from './middleware/cf-access.ts';
@@ -52,7 +53,7 @@ export interface AccessDepsOptions {
   recallCallbackHost?: string;
   /** `CW_SIGNIN` and what Better Auth needs (`middleware/signin-door.ts`).
    *  Absent is `access`: today's Cloudflare Access sign-in, unchanged. */
-  signIn?: { mode: SignInMode; origin: string; google: GoogleClient };
+  signIn?: { mode: SignInMode; origin: string; google: GoogleClient; password?: PasswordSignIn };
 }
 
 export interface AccessDepsContext {
@@ -246,6 +247,7 @@ export function createAccessDeps(ctx: AccessDepsContext) {
           baseKey: cookieKey(),
           origin: opts.signIn.origin,
           google: opts.signIn.google,
+          ...(opts.signIn.password ? { password: opts.signIn.password } : {}),
           mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
           onSessionCreated: (p) => recordOwner(p.email, p.emailVerified),
         })

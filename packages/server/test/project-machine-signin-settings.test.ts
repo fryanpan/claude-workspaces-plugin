@@ -9,9 +9,11 @@ import {
   GOOGLE_CLIENT_ID_ENTRY,
   GOOGLE_CLIENT_SECRET_ENTRY,
   OWNER_EMAIL_ENTRY,
+  PASSWORD_ENTRIES,
   SETTING_NAMES,
   readSettings,
 } from '../../../infra/project-machine/settings.ts';
+import { passwordSignInFromEnv } from '../src/auth/board-signin-password.ts';
 import { signInFromEnv } from '../src/middleware/signin-door.ts';
 
 const HOST = 'riverbend-workspaces.harborlight.test';
@@ -76,12 +78,48 @@ describe('the sign-in settings machine:deploy derives', () => {
     expect(names).not.toContain('CW_GOOGLE_CLIENT_ID');
     expect(names).not.toContain('CW_SIGNIN_ORIGIN');
     expect(found.notes).toEqual([]);
-    expect(found.skipped).toEqual([expect.stringContaining(GOOGLE_CLIENT_ID_ENTRY)]);
+    expect(found.skipped).toContainEqual(expect.stringContaining(GOOGLE_CLIENT_ID_ENTRY));
     // CONTROL: the Access settings are still all there.
     expect(names).toContain('CF_ACCESS_AUD');
   });
 
   it('keeps the client off the list the wall-drift report reads back', () => {
     expect<readonly string[]>(SETTING_NAMES).not.toContain('CW_GOOGLE_CLIENT_SECRET');
+    expect<readonly string[]>(SETTING_NAMES).not.toContain('CW_TURNSTILE_SECRET_KEY');
+  });
+
+  it('sets password sign-in from the Keychain, and what it sets turns it on', () => {
+    const found = readSettings('riverbend', {
+      outputs,
+      ...keychain({
+        ...WITH_CLIENT,
+        [PASSWORD_ENTRIES.CW_TURNSTILE_SITE_KEY]: 'site-key\n',
+        [PASSWORD_ENTRIES.CW_TURNSTILE_SECRET_KEY]: 'stub-turnstile-secret\n',
+        [PASSWORD_ENTRIES.CW_RESEND_API_KEY]: 'stub-resend-key\n',
+        [PASSWORD_ENTRIES.CW_SIGNIN_MAIL_FROM]: 'sign-in@harborlight.test\n',
+      }),
+    });
+    const env = Object.fromEntries(found.settings.map((s) => [s.name, s.value()]));
+    expect(env.CW_TURNSTILE_SITE_KEY).toBe('site-key');
+    expect(found.settings.find((s) => s.name === 'CW_RESEND_API_KEY')?.from).toBe(
+      `Keychain ${PASSWORD_ENTRIES.CW_RESEND_API_KEY}`,
+    );
+    const password = passwordSignInFromEnv(env);
+    if ('error' in password) throw new Error(password.error);
+    expect(password.setting?.turnstile.siteKey).toBe('site-key');
+  });
+
+  it('skips password sign-in, saying why, unless the Keychain has all four', () => {
+    const found = readSettings('riverbend', {
+      outputs,
+      ...keychain({ ...WITH_CLIENT, [PASSWORD_ENTRIES.CW_TURNSTILE_SITE_KEY]: 'site-key' }),
+    });
+    const names = found.settings.map((s) => s.name);
+    expect(names).not.toContain('CW_TURNSTILE_SITE_KEY');
+    expect(found.skipped).toContainEqual(
+      expect.stringContaining(PASSWORD_ENTRIES.CW_RESEND_API_KEY),
+    );
+    // CONTROL: Google sign-in is still set.
+    expect(names).toContain('CW_GOOGLE_CLIENT_ID');
   });
 });

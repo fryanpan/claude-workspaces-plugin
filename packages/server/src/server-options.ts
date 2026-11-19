@@ -19,6 +19,7 @@ import type { AnswerCoverage } from './answer-coverage.ts';
  * `bin.ts` reads that config and constructs the object below.
  */
 import type { CallerAgent, PeerSocket } from './auth/agent-caller.ts';
+import type { PasswordSignIn } from './auth/board-signin-password.ts';
 import type { GoogleClient } from './auth/board-signin.ts';
 import type { CodeSender } from './auth/code-sender.ts';
 import type { CoachSummarizer } from './coach/summary.ts';
@@ -825,9 +826,10 @@ export interface ServerOptions {
    * This machine's own sign-in (`CW_SIGNIN`, `middleware/signin-door.ts`).
    * Absent, or `mode: 'access'`, is Cloudflare Access alone, as before. In
    * `both` or `better-auth` the server runs Better Auth on `origin` — the one
-   * https address people sign in at — with the shared Google client.
+   * https address people sign in at — with the shared Google client, and
+   * with email and password beside it when `password` is given.
    */
-  signIn?: { mode: SignInMode; origin: string; google: GoogleClient };
+  signIn?: { mode: SignInMode; origin: string; google: GoogleClient; password?: PasswordSignIn };
   /**
    * Cloudflare Access share machinery. When set, the server exposes
    * /api/share routes for creating/listing/revoking shares, instantiates

@@ -32,6 +32,8 @@ export interface AuthInput {
     ): Promise<{ allowed: boolean; retryAfter: number | null }>;
   };
   mayHaveAccount: (email: string, verified: boolean) => boolean;
+  /** Password sign-in's mails, or absent when passwords are off here. */
+  sendMail?: (kind: 'verify-email' | 'reset-password', to: string, url: string) => Promise<void>;
   onSessionCreated?: (person: { email: string; emailVerified: boolean }) => void;
 }
 
@@ -67,6 +69,10 @@ export function createAuth(opts: AuthInput, db: Database) {
       },
     },
     account: { accountLinking: { enabled: false } },
+    // Passwords (`board-signin-password.ts`): kept in this machine's own user
+    // list, usable only once the address follows the link mailed to it, and
+    // every session ended by a reset. Reset links last an hour (the default).
+    ...(opts.sendMail ? passwordOptions(opts.sendMail) : {}),
     databaseHooks: {
       session: {
         create: {
@@ -85,10 +91,14 @@ export function createAuth(opts: AuthInput, db: Database) {
       },
       user: {
         create: {
-          before: async (user) => {
+          before: async (user, context) => {
             const email = normalizeEmail(String(user.email ?? ''));
             if (email === '') return false;
-            return opts.mayHaveAccount(email, user.emailVerified === true) ? undefined : false;
+            // A password sign-up is asked as if verified: the account can do
+            // nothing until the mailed link is followed, so the address is
+            // proved before it opens anything.
+            const vouched = user.emailVerified === true || context?.path === '/sign-up/email';
+            return opts.mayHaveAccount(email, vouched) ? undefined : false;
           },
         },
       },
@@ -119,6 +129,23 @@ export function createAuth(opts: AuthInput, db: Database) {
       }),
     ],
   });
+}
+
+function passwordOptions(send: NonNullable<AuthInput['sendMail']>) {
+  return {
+    emailAndPassword: {
+      enabled: true,
+      requireEmailVerification: true,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: ({ user, url }: { user: { email: string }; url: string }) =>
+        send('reset-password', user.email, url),
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      sendVerificationEmail: ({ user, url }: { user: { email: string }; url: string }) =>
+        send('verify-email', user.email, url),
+    },
+  };
 }
 
 export type Auth = ReturnType<typeof createAuth>;

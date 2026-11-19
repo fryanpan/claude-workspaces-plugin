@@ -33,6 +33,13 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 import type { Auth } from './board-signin-auth.ts';
+import {
+  type PasswordSignIn,
+  composeMail,
+  handlePasswordRoute,
+  noticeFor,
+  passwordFormsHtml,
+} from './board-signin-password.ts';
 import { tokenKey } from './signed-token.ts';
 
 /** The key domain this machine's Better Auth secret is derived under. */
@@ -91,6 +98,8 @@ export interface BoardSignInOptions {
    * session-only request may never come.
    */
   onSessionCreated?: (person: { email: string; emailVerified: boolean }) => void;
+  /** Email and password beside Google (`board-signin-password.ts`), or absent. */
+  password?: PasswordSignIn;
 }
 
 /** Who a request's sign-in cookie names, when it names anyone. */
@@ -202,6 +211,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   }
   const host = new URL(origin).hostname;
   const db = openUserList(opts.dataDir);
+  const password = opts.password;
   // Loaded on first use, so a machine on `access` never loads the library.
   const ready: Promise<Auth> = import('./board-signin-auth.ts').then(async (m) => {
     const auth = m.createAuth(
@@ -213,6 +223,12 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
         google: { ...opts.google, endpoints: opts.google.endpoints ?? GOOGLE_ENDPOINTS },
         rateLimitStore: ownRateLimitStore(),
         mayHaveAccount: opts.mayHaveAccount,
+        ...(password
+          ? {
+              sendMail: (kind: 'verify-email' | 'reset-password', to: string, url: string) =>
+                password.mailer.send(composeMail(kind, to, url)),
+            }
+          : {}),
         ...(opts.onSessionCreated ? { onSessionCreated: opts.onSessionCreated } : {}),
       },
       db,
@@ -233,7 +249,32 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
 
   const handle = async (req: Request, pathname: string): Promise<Response | null> => {
     if (pathname === SIGNIN_PAGE_PATH && req.method === 'GET') {
-      return signInPage(new URL(req.url).searchParams.get('next'));
+      return signInPage(new URL(req.url).searchParams, password?.turnstile.siteKey ?? null);
+    }
+    if (password) {
+      const answer = await handlePasswordRoute(
+        {
+          origin,
+          password,
+          safeNext,
+          call: async (r, path, body) =>
+            (await ready).handler(
+              onOrigin(r, `${SIGNIN_BASE_PATH}${path}`, {
+                method: 'POST',
+                headers: withJson(r.headers),
+                body: JSON.stringify(body),
+              }),
+            ),
+        },
+        req,
+        pathname,
+      );
+      if (answer) return answer;
+      // The two links a mail carries: Better Auth checks the token and sends
+      // the browser on to our page.
+      if (req.method === 'GET' && isMailedLink(pathname)) {
+        return (await ready).handler(onOrigin(req, pathname));
+      }
     }
     if (pathname === SIGNIN_GOOGLE_PATH && req.method === 'POST') {
       if (req.headers.get('origin') !== origin) return refuse(403, 'cross_site_form');
@@ -285,6 +326,14 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   return { origin, host, handle, personOf, close: () => db.close() };
 }
 
+function isMailedLink(pathname: string): boolean {
+  if (pathname === `${SIGNIN_BASE_PATH}/verify-email`) return true;
+  const prefix = `${SIGNIN_BASE_PATH}/reset-password/`;
+  return (
+    pathname.startsWith(prefix) && /^[A-Za-z0-9_-]{1,256}$/.test(pathname.slice(prefix.length))
+  );
+}
+
 function withJson(headers: Headers): Headers {
   const out = new Headers(headers);
   out.set('content-type', 'application/json');
@@ -317,9 +366,14 @@ function refuse(status: number, error: string): Response {
 const escapeAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** The sign-in page: one button, no script, so no CSP exception is needed. */
-function signInPage(rawNext: string | null): Response {
-  const next = escapeAttr(safeNext(rawNext));
+/**
+ * The sign-in page: Google's button, and where passwords are on, their forms
+ * with Cloudflare's Turnstile widget (the page sends no CSP, so its script
+ * needs no exception).
+ */
+function signInPage(query: URLSearchParams, siteKey: string | null): Response {
+  const rawNext = safeNext(query.get('next'));
+  const next = escapeAttr(rawNext);
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -331,6 +385,7 @@ function signInPage(rawNext: string | null): Response {
 <input type="hidden" name="next" value="${next}">
 <button type="submit" style="font-size: 1rem; padding: 0.6rem 1.2rem;">Continue with Google</button>
 </form>
+${siteKey === null ? '' : `${noticeFor(query)}${passwordFormsHtml(rawNext, siteKey)}`}
 </main></body></html>`;
   return new Response(html, {
     status: 200,
