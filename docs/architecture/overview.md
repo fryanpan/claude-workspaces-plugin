@@ -53,7 +53,7 @@ flowchart TB
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · socket-write-gate · server-options · feature-module · hono-env<br/>connector/ (hosted MCP at /mcp)"]
     docs["Doc store and attachments<br/>doc-store.ts · doc-state/ · cold-threads-cache.ts · doc-history/ · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/ · agent-spots.ts · person-presence.ts · presence-identity.ts<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
-    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
+    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts · library-folders.ts · library-lister.ts · library-views.ts · library-stars.ts · library-sets.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes · landing-nav<br/>review-size-prefs · review-ranks · review-key · ask-feed · feedback-owner<br/>home-feed · home-remotes · home-remote-tokens · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts · person-agent-link.ts · addressees.ts · private-messages.ts · direct-messages.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process) · git-push/<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
@@ -263,6 +263,18 @@ doc's own declared thread asks, and ticket items that link the doc), and the
 route cuts the answer to the visitor's scope (`share/ref-scope.ts`). The
 client draws one mark after the link and re-asks on the board stream's
 review, thread and transition events.
+
+**Each machine can run its own sign-in in place of Cloudflare Access.**
+`CW_SIGNIN` (`middleware/signin-door.ts`) picks `access`, `both` or
+`better-auth` per machine. `auth/board-signin.ts` runs Better Auth on
+`<dataDir>/signin.sqlite` with Google, and loads the library only when a
+machine turns it on (`auth/board-signin-auth.ts`).
+`auth/board-signin-password.ts` adds email and password beside Google: four
+form routes under `/auth/`, Turnstile on each, and the verification and
+reset mail, with the mailer and the Turnstile check injected so tests stub
+both. `auth/owner-signin-record.ts` keeps `better-auth` acting as `both`
+until the owner has signed in once, so switching cannot lock the owner out.
+The rules are in [security.md](security.md).
 
 **A destructive action asks for a recent sign-in, decided in one place on
 each side.** `core/src/counted-routes.ts` is the one list of the counted
@@ -3201,6 +3213,13 @@ holds. `landing-remote.ts` draws the rows as escaped text inside
 `#landing-review`, so the page's existing swap redraws them. The feed route
 answers above request admission, with its own gate, because a service token's
 stamp names nobody (security.md).
+A server running `CW_SIGNIN=better-auth` has no Access in front, so the Mac
+pulls its boards with each board's own agent token (`at2`) instead, named in
+the config's `boardTokens`; `home-remote-tokens.ts` renews each one past half
+its life and keeps the renewed value in the data directory, mode 600. The feed
+route admits an `at2` only for the board its path names. The org relay's
+`at2` needs no service token there either: the board agent door skips the
+Access check when no Access is in front.
 
 **The relay between organizations.** `org-relay/` carries agent messages
 between project servers, and runs as a process of its own, not inside the

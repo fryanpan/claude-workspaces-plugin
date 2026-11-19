@@ -91,6 +91,7 @@ import { GithubHub, githubHubPath } from './github-hub.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
+import { HOME_REMOTE_TOKENS_FILE } from './home-remote-tokens.ts';
 import { createHomeRemotes } from './home-remotes.ts';
 import type { HonoBoardAppEnv, HonoOpenAppEnv } from './hono-env.ts';
 import { Identities } from './identities.ts';
@@ -578,6 +579,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         config: opts.homeRemotes.config,
         ...(opts.homeRemotes.fetch ? { fetch: opts.homeRemotes.fetch } : {}),
         ...(opts.homeRemotes.retryMs !== undefined ? { retryMs: opts.homeRemotes.retryMs } : {}),
+        stateFile: join(dataDir, HOME_REMOTE_TOKENS_FILE),
         onChange: () => landingChanges.notify('boards'),
       })
     : null;
@@ -2487,6 +2489,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     verifier: staticAccessVerifier,
     clientId: opts.homeFeedClientId,
     peerAddress: (req) => server.requestIP(req)?.address ?? undefined,
+    // `at2` only: a board-scoped token for the board the feed path names.
+    boardGrantFor: (bearer) => (bearer.startsWith('at2.') ? boardAgentTokens.verify(bearer) : null),
+    accessInFront: () => signInDoor.effectiveMode() !== 'better-auth',
     j,
   };
 

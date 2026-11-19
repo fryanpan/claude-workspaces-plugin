@@ -774,6 +774,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           bearer: boardBearer,
           address: requestAddress(req),
           proxiedVerifier: proxiedTrustedVerifier,
+          accessInFront: signInDoor?.effectiveMode() !== 'better-auth',
           grantFor: boardAgentGrantFor,
           workspacesOf: shareWorkspacesOf,
           held: boardAgentHeld,

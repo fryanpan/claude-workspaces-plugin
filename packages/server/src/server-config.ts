@@ -17,6 +17,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { passwordSignInFromEnv } from './auth/board-signin-password.ts';
 import { boardSocketDirError, defaultBoardSocketDir } from './board-sockets.ts';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
@@ -427,7 +428,17 @@ export function resolveServerConfig(opts: {
     console.error(`[feedback] CW_SIGNIN refused: ${signInResolved.error}.`);
     process.exit(1);
   }
-  const signIn = signInResolved.setting;
+  // Email and password beside Google: all four of its settings or none.
+  const passwordResolved = passwordSignInFromEnv(env);
+  if ('error' in passwordResolved) {
+    console.error(`[feedback] password sign-in refused: ${passwordResolved.error}.`);
+    process.exit(1);
+  }
+  const password = passwordResolved.setting;
+  const signIn =
+    signInResolved.setting && password
+      ? { ...signInResolved.setting, password }
+      : signInResolved.setting;
   // Better Auth stands where an Access application stood: either one is a
   // sign-in in front of the public hostnames below.
   const accessTunnelReady = Boolean(cfAccessTeam && cfAccessAud) || signIn !== null;

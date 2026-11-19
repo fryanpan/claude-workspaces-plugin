@@ -1,5 +1,3 @@
-import type { HomeFeed } from '../home-feed.ts';
-import { LANDING_CHANNEL } from '../landing-changes.ts';
 /**
  * ── The home feed: one board's review items for Bryan's Home elsewhere ──
  *
@@ -28,12 +26,24 @@ import { LANDING_CHANNEL } from '../landing-changes.ts';
  *    (`CW_HOME_FEED_CLIENT_ID`). A person's stamp, a share visitor's, or
  *    another service token's is refused.
  *
- * With no client id configured, only the first caller is admitted. The two
+ *  - through the tunnel under `CW_SIGNIN=better-auth`, where no Access
+ *    application is in front: a board agent token (`at2`,
+ *    `auth/board-agent-token.ts`) minted for the board this path names, from
+ *    no browser. This is how the Mac pulls once Access is gone
+ *    (`home-remotes.ts` `boardTokens`). In `access` and `both` the service
+ *    token above is still the only tunnel caller, with or without an `at2`.
+ *
+ * With no client id configured and no token presented, only the first caller
+ * is admitted. The two
  * answers carry nothing a board member could not read on the board itself,
  * and the stream frames name no board and no content (`landing-changes.ts`).
  */
+import { type BoardAgentClaims, boardAgentBearerOf } from '../auth/board-agent-token.ts';
+import type { HomeFeed } from '../home-feed.ts';
+import { LANDING_CHANNEL } from '../landing-changes.ts';
 import type { CfAccessVerifier } from '../middleware/cf-access.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
+import { isBrowserRequest } from '../middleware/write-gate.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
 
 const FEED_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream)?$/;
@@ -50,15 +60,32 @@ export interface HomeFeedRoutesContext {
   clientId: string | undefined;
   /** The connection's own peer address. */
   peerAddress: (req: Request) => string | undefined;
+  /** The claims an `at2` still attests to, or null. Absent: no token admits. */
+  boardGrantFor?: (bearer: string) => BoardAgentClaims | null;
+  /** Whether an Access application fronts this server's hosts. */
+  accessInFront?: () => boolean;
   j: (status: number, body: unknown) => Response;
 }
 
 /** Whether this caller may read a home feed. Never says which check failed. */
 export async function homeFeedCallerAllowed(
-  ctx: Pick<HomeFeedRoutesContext, 'verifier' | 'clientId' | 'peerAddress'>,
+  ctx: Pick<
+    HomeFeedRoutesContext,
+    'verifier' | 'clientId' | 'peerAddress' | 'boardGrantFor' | 'accessInFront'
+  >,
   req: Request,
+  /** The board the path names; without one, no board token admits. */
+  boardId?: string,
 ): Promise<boolean> {
   if (!req.headers.has('cf-ray')) return isLoopbackAddress(ctx.peerAddress(req));
+  // With no Access in front, the board's own token is the proof. Where Access
+  // is in front, only the feed's service token is, with or without one.
+  if (ctx.accessInFront?.() === false) {
+    const bearer = boardAgentBearerOf(req.headers);
+    if (bearer === null || !boardId || !ctx.boardGrantFor) return false;
+    if (isBrowserRequest(req.headers)) return false;
+    return ctx.boardGrantFor(bearer)?.boardId === boardId;
+  }
   if (!ctx.verifier || !ctx.clientId) return false;
   const result = await ctx.verifier(req);
   return result.ok && result.email === undefined && result.commonName === ctx.clientId;
@@ -71,9 +98,11 @@ export async function handleHomeFeedRoute(
 ): Promise<Response | null> {
   const m = FEED_PATH.exec(pathname);
   if (!m) return null;
-  if (!(await homeFeedCallerAllowed(ctx, req))) return ctx.j(403, { error: 'forbidden' });
-  if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   const boardId = m[1] as string;
+  if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
+    return ctx.j(403, { error: 'forbidden' });
+  }
+  if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
   if (m[2]) return openSseStream(ctx.sse, LANDING_CHANNEL);
   return ctx.j(200, await ctx.feed(boardId));

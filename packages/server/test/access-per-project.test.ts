@@ -288,6 +288,26 @@ describe('one Access application per project', () => {
       expect(((await res.json()) as { boardName: string }).boardName).toBe('Riverbend board');
     });
 
+    it("refuses a person's stamp with the board's own at2: Access mode wants the feed's token", async () => {
+      const minted = await local(cloud, '/api/board-tokens', {
+        method: 'POST',
+        body: JSON.stringify({ agentId: 'home-feed', boardId: cloudBoard, label: 'home-feed' }),
+      });
+      expect(minted.status).toBe(201);
+      const { token } = (await minted.json()) as { token: string };
+      const res = await via(CLOUD_HOST, feedPath(), {
+        'cf-access-jwt-assertion': await person(AUD.cloud),
+        authorization: `Bearer ${token}`,
+      });
+      expect(res.status).toBe(403);
+      // CONTROL: the feed's own service token, with the same at2, is admitted.
+      const control = await via(CLOUD_HOST, feedPath(), {
+        'cf-access-jwt-assertion': await service(AUD.cloud),
+        authorization: `Bearer ${token}`,
+      });
+      expect(control.status).toBe(200);
+    });
+
     it("refuses the same service token stamped by the one address's application", async () => {
       const res = await via(CLOUD_HOST, feedPath(), {
         'cf-access-jwt-assertion': await service(AUD.one),

@@ -33,6 +33,12 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 import type { Auth } from './board-signin-auth.ts';
+import {
+  type PasswordSignIn,
+  handlePasswordRoute,
+  noticeFor,
+  passwordFormsHtml,
+} from './board-signin-password.ts';
 import { tokenKey } from './signed-token.ts';
 
 /** The key domain this machine's Better Auth secret is derived under. */
@@ -91,6 +97,8 @@ export interface BoardSignInOptions {
    * session-only request may never come.
    */
   onSessionCreated?: (person: { email: string; emailVerified: boolean }) => void;
+  /** Email and password beside Google (`board-signin-password.ts`), or absent. */
+  password?: PasswordSignIn;
 }
 
 /** Who a request's sign-in cookie names, when it names anyone. */
@@ -202,8 +210,9 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   }
   const host = new URL(origin).hostname;
   const db = openUserList(opts.dataDir);
+  const password = opts.password;
   // Loaded on first use, so a machine on `access` never loads the library.
-  const ready: Promise<Auth> = import('./board-signin-auth.ts').then(async (m) => {
+  const loaded = import('./board-signin-auth.ts').then(async (m) => {
     const auth = m.createAuth(
       {
         origin,
@@ -213,13 +222,18 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
         google: { ...opts.google, endpoints: opts.google.endpoints ?? GOOGLE_ENDPOINTS },
         rateLimitStore: ownRateLimitStore(),
         mayHaveAccount: opts.mayHaveAccount,
+        ...(password ? { password: true } : {}),
         ...(opts.onSessionCreated ? { onSessionCreated: opts.onSessionCreated } : {}),
       },
       db,
     );
     await m.migrate(auth);
-    return auth;
+    return {
+      auth,
+      accounts: m.createPasswordAccounts(auth, { origin, mayHaveAccount: opts.mayHaveAccount }),
+    };
   });
+  const ready: Promise<Auth> = loaded.then((l) => l.auth);
 
   /** The request as Better Auth must see it: on the sign-in origin. */
   const onOrigin = (req: Request, pathname: string, init: RequestInit = {}): Request => {
@@ -233,7 +247,29 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
 
   const handle = async (req: Request, pathname: string): Promise<Response | null> => {
     if (pathname === SIGNIN_PAGE_PATH && req.method === 'GET') {
-      return signInPage(new URL(req.url).searchParams.get('next'));
+      return signInPage(new URL(req.url).searchParams, password?.turnstile.siteKey ?? null);
+    }
+    if (password) {
+      const answer = await handlePasswordRoute(
+        {
+          origin,
+          host,
+          password,
+          accounts: async () => (await loaded).accounts,
+          safeNext,
+          call: async (r, path, body) =>
+            (await ready).handler(
+              onOrigin(r, `${SIGNIN_BASE_PATH}${path}`, {
+                method: 'POST',
+                headers: withJson(r.headers),
+                body: JSON.stringify(body),
+              }),
+            ),
+        },
+        req,
+        pathname,
+      );
+      if (answer) return answer;
     }
     if (pathname === SIGNIN_GOOGLE_PATH && req.method === 'POST') {
       if (req.headers.get('origin') !== origin) return refuse(403, 'cross_site_form');
@@ -317,9 +353,14 @@ function refuse(status: number, error: string): Response {
 const escapeAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** The sign-in page: one button, no script, so no CSP exception is needed. */
-function signInPage(rawNext: string | null): Response {
-  const next = escapeAttr(safeNext(rawNext));
+/**
+ * The sign-in page: Google's button, and where passwords are on, their forms
+ * with Cloudflare's Turnstile widget (the page sends no CSP, so its script
+ * needs no exception).
+ */
+function signInPage(query: URLSearchParams, siteKey: string | null): Response {
+  const rawNext = safeNext(query.get('next'));
+  const next = escapeAttr(rawNext);
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -331,6 +372,7 @@ function signInPage(rawNext: string | null): Response {
 <input type="hidden" name="next" value="${next}">
 <button type="submit" style="font-size: 1rem; padding: 0.6rem 1.2rem;">Continue with Google</button>
 </form>
+${siteKey === null ? '' : `${noticeFor(query)}${passwordFormsHtml(rawNext, siteKey)}`}
 </main></body></html>`;
   return new Response(html, {
     status: 200,

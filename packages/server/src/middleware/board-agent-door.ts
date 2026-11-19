@@ -13,7 +13,9 @@
  * - **The operator's proxied hostname** (`proxied-local`), through the
  *   tunnel. The Access application in front of it must have admitted the
  *   request — a service token, which names no email, is exactly what is
- *   expected — and then the token, not the email allowlist, says who.
+ *   expected — and then the token, not the email allowlist, says who. Under
+ *   `CW_SIGNIN=better-auth` no Access application is in front, and the
+ *   token is the whole proof (`accessInFront: false`).
  * - **A local hostname from a loopback peer**, off the tunnel. A caller on
  *   this machine could omit the token and be trusted-local; presenting one
  *   only narrows it, which is what a test or a co-located relay wants.
@@ -56,6 +58,12 @@ export interface BoardAgentDoorInput {
   address: string | undefined;
   /** The Access verifier for the operator's proxied hostname, or null. */
   proxiedVerifier: ((req: Request) => Promise<CfAccessResult>) | null;
+  /**
+   * Whether an Access application fronts the proxied hostname. False once
+   * `CW_SIGNIN=better-auth` is in force (`middleware/signin-door.ts`): no
+   * stamp can arrive, so the token alone says who. Absent means true.
+   */
+  accessInFront?: boolean;
   /** The claims a bearer still attests to (MAC, record, not revoked), or null. */
   /** `via` is where the request came from, which an `at3` records as its
    *  last use (`auth/agent-grant-token.ts`). */
@@ -123,9 +131,11 @@ export async function admitBoardAgent(input: BoardAgentDoorInput): Promise<Board
     response: j(status, { error }),
   });
   if (hostKind === 'proxied-local') {
-    if (!input.proxiedVerifier) return refuse(503, 'access_not_configured');
-    const result = await input.proxiedVerifier(req);
-    if (!result.ok) return { ok: false, response: j(result.status, { error: result.error }) };
+    if (input.accessInFront !== false) {
+      if (!input.proxiedVerifier) return refuse(503, 'access_not_configured');
+      const result = await input.proxiedVerifier(req);
+      if (!result.ok) return { ok: false, response: j(result.status, { error: result.error }) };
+    }
   } else if (hostKind === 'local') {
     if (req.headers.has('cf-ray') || !isLoopbackAddress(input.address)) {
       return refuse(403, 'board_token_remote');

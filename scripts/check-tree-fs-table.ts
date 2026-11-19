@@ -128,6 +128,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/google-maps-key.ts': 'owner-checkout',
   'packages/server/src/google-oauth.ts': 'not-in-inventory',
   'packages/server/src/home-brief.ts': 'not-in-inventory',
+  'packages/server/src/home-remote-tokens.ts': 'data-dir',
   'packages/server/src/home-remotes.ts': 'not-in-inventory',
   'packages/server/src/identities.ts': 'not-in-inventory',
   'packages/server/src/identity-links.ts': 'not-in-inventory',

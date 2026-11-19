@@ -335,6 +335,9 @@ export const VENDOR_HOSTS: readonly string[] = [
   'api.elevenlabs.io',
   'api.cloudflare.com',
   'api.postmarkapp.com',
+  // Password sign-in's mail and its Turnstile check (`auth/board-signin-password.ts`).
+  'api.resend.com',
+  'challenges.cloudflare.com',
   'api.github.com',
   'api.assemblyai.com',
   'oauth2.googleapis.com',
