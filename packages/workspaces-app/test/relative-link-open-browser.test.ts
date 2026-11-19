@@ -107,8 +107,9 @@ describe.skipIf(CHROME === null)('a relative link in a doc, in headless Chrome',
     'a link no doc on the board is bound to lands on the not-found page',
     () => {
       const c = find(1180, 'missing', 'click');
-      expect(c.pagePath, JSON.stringify(c)).toMatch(
-        /\/open\?path=part-9%2Fappendix\.md&from=guide$/,
+      const guideId = decodeURIComponent(result().guidePath.split('/').pop() ?? '');
+      expect(c.pagePath, JSON.stringify(c)).toBe(
+        `${result().guidePath.replace(/\/docs\/[^/]+$/, '')}/open?path=part-9%2Fappendix.md&from=${encodeURIComponent(guideId)}`,
       );
       expect(c.notFound, JSON.stringify(c)).toBe(true);
     },
