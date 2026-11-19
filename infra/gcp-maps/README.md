@@ -13,6 +13,7 @@ One apply makes:
 | `google_project_service.apis["apikeys.googleapis.com"]` | The API Keys API, which Terraform uses to make the key |
 | `google_project_service.apis["maps-backend.googleapis.com"]` | The Maps JavaScript API, the only API the key may call |
 | `google_apikeys_key.maps_browser` | The key, named `workspaces maps (browser)`, restricted to the referrers you pass and to the Maps JavaScript API |
+| `google_service_usage_consumer_quota_override.daily[...]` | The $5-a-day spend cap (Bryan, 19 Nov 2026): at most `daily_map_loads` (default 714) 2D map loads a day, at $7 per 1,000, and 0 3D loads. Past it Google refuses loads until midnight Pacific |
 | `local_sensitive_file.maps_browser_key` | The key, written mode 600 to `key_file` on the machine that applies, for the server there to read at boot |
 
 Destroying the root deletes the key and leaves both APIs on
