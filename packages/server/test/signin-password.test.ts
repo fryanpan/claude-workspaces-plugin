@@ -3,14 +3,17 @@
  *
  * The Mac signs people in at the one address, Riverbend at its own. Both
  * share a board with `@harborlight.test`, so Alice may hold an account at
- * either; she makes one at Riverbend only. Mail and Turnstile are injected:
- * every mail lands in an array, and the Turnstile stub passes one token.
+ * either; she makes one at Riverbend only. Mail, Turnstile and Google are
+ * stubbed: every mail lands in an array, the Turnstile stub passes one token
+ * for the right host and form, and Google is a local server.
  *
- * What this proves: Alice's password, set at Riverbend, signs in nowhere
- * else; she reaches the shared board only after following the emailed link
- * (plan step 4, verified by an emailed link); a reset link works once and
- * not after it expires; and a form whose Turnstile check fails reaches
- * neither Better Auth nor the mailer.
+ * No account and no password exist until the address is proved: asking
+ * mails a single-use link, and the account is made only when the person who
+ * followed it sets a password on our own form. What this proves: a sign-up
+ * in somebody else's name makes nothing and blocks nothing; a password set
+ * at Riverbend signs in nowhere else; a link works once and not after it
+ * expires; the answer never waits on the mail; and a form whose Turnstile
+ * check fails reaches neither the account nor the mailer.
  */
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -20,13 +23,15 @@ import { join } from 'node:path';
 import type { SignInMail } from '../src/auth/board-signin-password.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
-import { CookieJar } from './google-stub.ts';
+import { CookieJar, type GoogleStub, signInWithGoogle, startGoogleStub } from './google-stub.ts';
 import { waitFor } from './wait-for.ts';
 
 const MAC_HOST = 'workspaces.harborlight.test';
 const CLOUD_HOST = 'riverbend-workspaces.harborlight.test';
 const OWNER = 'owner@harborlight.test';
 const ALICE = 'alice@harborlight.test';
+const BOB = 'bob@harborlight.test';
+const SALTMARSH = 'saltmarsh@harborlight.test';
 const SESSION = '__Host-cw-ba.session_token';
 const TUNNEL = { 'cf-ray': '8a1b2c3d4e5f-SJC', 'x-forwarded-proto': 'https' };
 const GOOD = 'turnstile-pass';
@@ -37,18 +42,22 @@ interface Machine {
   server: ServerHandle;
   board: string;
   mail: SignInMail[];
-  turnstileAsked: number;
+  /** Each form the Turnstile stub was asked about. */
+  turnstile: string[];
+  /** While set, a mail is accepted and never finishes sending. */
+  hang: boolean;
 }
 
 describe('email and password sign-in, one user list per machine', () => {
   const dirs: string[] = [];
+  let google: GoogleStub;
   let mac: Machine;
   let cloud: Machine;
 
   const start = async (host: string, name: string): Promise<Machine> => {
     const dataDir = mkdtempSync(join(tmpdir(), 'signin-password-'));
     dirs.push(dataDir);
-    const m = { host, dataDir, mail: [] as SignInMail[], turnstileAsked: 0 } as Machine;
+    const m = { host, dataDir, mail: [], turnstile: [], hang: false } as unknown as Machine;
     m.server = createServer({
       port: 0,
       dataDir,
@@ -58,18 +67,23 @@ describe('email and password sign-in, one user list per machine', () => {
       signIn: {
         mode: 'better-auth',
         origin: `https://${host}`,
-        google: { clientId: 'shared-client', clientSecret: 'stub-secret' },
+        google: {
+          clientId: 'shared-client',
+          clientSecret: 'stub-secret',
+          endpoints: google.endpoints,
+        },
         password: {
           mailer: {
-            send: async (mail) => {
+            send: (mail) => {
               m.mail.push(mail);
+              return m.hang ? new Promise<void>(() => {}) : Promise.resolve();
             },
           },
           turnstile: {
             siteKey: 'turnstile-site-key',
-            verify: async (token) => {
-              m.turnstileAsked += 1;
-              return token === GOOD;
+            verify: async (token, _ip, want) => {
+              m.turnstile.push(want.action);
+              return token === GOOD && want.hostname === host;
             },
           },
         },
@@ -106,7 +120,7 @@ describe('email and password sign-in, one user list per machine', () => {
         ...((init.headers as Record<string, string>) ?? {}),
       },
     });
-  /** Submit one of the sign-in page's forms, as the page would. */
+  /** Submit one of the sign-in pages' forms, as the page would. */
   const submit = async (
     m: Machine,
     jar: CookieJar,
@@ -125,23 +139,46 @@ describe('email and password sign-in, one user list per machine', () => {
     jar.take(res);
     return res;
   };
-  const signIn = (m: Machine, jar: CookieJar, password: string, turnstile = GOOD) =>
-    submit(m, jar, '/auth/sign-in/email', { email: ALICE, password, next: '/' }, turnstile);
+  const signIn = (m: Machine, jar: CookieJar, email: string, password: string, ts = GOOD) =>
+    submit(m, jar, '/auth/sign-in/email', { email, password, next: '/' }, ts);
   const board = (m: Machine, jar: CookieJar) => send(m, jar, `/workspaces/${m.board}?format=json`);
-  /** Follow a mailed link the way a mail client opens it. */
-  const follow = async (m: Machine, jar: CookieJar, url: string) => {
+  /** Ask for a link, and wait for the mail it sends. */
+  const askForLink = async (m: Machine, email: string, path = '/auth/sign-up') => {
+    const before = m.mail.length;
+    const res = await submit(m, new CookieJar(), path, { email, password: 'ignored-pass-1' });
+    expect(res.status).toBe(303);
+    const mail = await waitFor(() => m.mail.slice(before).find((x) => x.to === email), {
+      describe: `a set-password mail to ${email}`,
+    });
+    expect(mail.kind).toBe('set-password');
+    return mail;
+  };
+  /** Open the mailed link, then set a password on the page it shows. */
+  const setPassword = async (m: Machine, url: string, password: string, ts = GOOD) => {
+    const jar = new CookieJar();
     const link = new URL(url);
     expect(link.host).toBe(m.host);
-    const res = await send(m, jar, `${link.pathname}${link.search}`);
-    jar.take(res);
-    return res;
+    expect(link.pathname).toBe('/auth/set-password');
+    const page = await send(m, jar, `${link.pathname}${link.search}`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('referrer-policy')).toBe('no-referrer');
+    const token = link.searchParams.get('token') ?? '';
+    return submit(m, jar, '/auth/set-password', { token, password }, ts);
   };
-  const lastMail = (m: Machine, kind: SignInMail['kind']) =>
-    waitFor(() => m.mail.filter((x) => x.kind === kind && x.to === ALICE).at(-1), {
-      describe: `a ${kind} mail to Alice`,
-    });
+  const failed = (res: Response) => (res.headers.get('location') ?? '').includes('error=');
+  const rows = (m: Machine, email: string) => {
+    const db = new Database(join(m.dataDir, 'signin.sqlite'), { readonly: true });
+    try {
+      return (
+        db.query('SELECT COUNT(*) AS n FROM user WHERE email = ?').get(email) as { n: number }
+      ).n;
+    } finally {
+      db.close();
+    }
+  };
 
   beforeAll(async () => {
+    google = startGoogleStub();
     mac = await start(MAC_HOST, 'Harborlight board');
     cloud = await start(CLOUD_HOST, 'Riverbend board');
   });
@@ -149,29 +186,34 @@ describe('email and password sign-in, one user list per machine', () => {
   afterAll(async () => {
     await mac.server.stop();
     await cloud.server.stop();
+    google.stop();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  it('Alice reaches the shared board only after following the emailed link', async () => {
+  it("an attacker's sign-up in the owner's name makes nothing, and the owner's Google still works", async () => {
+    await askForLink(cloud, OWNER);
+    expect(rows(cloud, OWNER)).toBe(0);
     const jar = new CookieJar();
-    const made = await submit(cloud, jar, '/auth/sign-up', {
-      email: ALICE,
-      password: 'riverbend-first-pass',
-      next: '/',
-    });
-    expect(made.status).toBe(303);
-    const verify = await lastMail(cloud, 'verify-email');
-    // Before the link: the password signs nobody in.
-    const early = await signIn(cloud, jar, 'riverbend-first-pass');
-    expect(early.status).toBe(303);
-    expect(early.headers.get('location')).toContain('error=');
-    expect(jar.cookies.has(SESSION)).toBe(false);
-    expect((await board(cloud, jar)).status).toBe(401);
+    await signInWithGoogle(
+      (path, init) => send(cloud, jar, path, init),
+      `https://${CLOUD_HOST}`,
+      jar,
+      google,
+      { sub: 'g-owner', email: OWNER, email_verified: true, name: 'Owner' },
+    );
+    expect(jar.cookies.has(SESSION)).toBe(true);
+    expect((await board(cloud, jar)).status).toBe(200);
+  });
 
-    const followed = await follow(cloud, jar, verify.url);
-    expect([302, 303]).toContain(followed.status);
-    const signed = await signIn(cloud, jar, 'riverbend-first-pass');
-    expect(signed.status).toBe(303);
+  it('Alice reaches the shared board once she sets a password from the mailed link', async () => {
+    const mail = await askForLink(cloud, ALICE);
+    expect(rows(cloud, ALICE)).toBe(0);
+    const early = new CookieJar();
+    expect(failed(await signIn(cloud, early, ALICE, 'ignored-pass-1'))).toBe(true);
+    const set = await setPassword(cloud, mail.url, 'riverbend-first-pass');
+    expect(failed(set)).toBe(false);
+    const jar = new CookieJar();
+    const signed = await signIn(cloud, jar, ALICE, 'riverbend-first-pass');
     expect(signed.headers.get('location')).toBe('/');
     expect(jar.cookies.has(SESSION)).toBe(true);
     const res = await board(cloud, jar);
@@ -181,104 +223,146 @@ describe('email and password sign-in, one user list per machine', () => {
 
   it('a password set at Riverbend does not sign in at the Mac', async () => {
     const atMac = new CookieJar();
-    const res = await signIn(mac, atMac, 'riverbend-first-pass');
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toContain('error=');
+    expect(failed(await signIn(mac, atMac, ALICE, 'riverbend-first-pass'))).toBe(true);
     expect(atMac.cookies.has(SESSION)).toBe(false);
     expect((await board(mac, atMac)).status).toBe(401);
     // CONTROL: the same password, at the machine that holds it.
     const atCloud = new CookieJar();
-    await signIn(cloud, atCloud, 'riverbend-first-pass');
+    await signIn(cloud, atCloud, ALICE, 'riverbend-first-pass');
     expect(atCloud.cookies.has(SESSION)).toBe(true);
   });
 
-  it('a reset link works once', async () => {
-    const jar = new CookieJar();
-    const sent = await submit(cloud, jar, '/auth/forgot', { email: ALICE });
-    expect(sent.status).toBe(303);
-    const mail = await lastMail(cloud, 'reset-password');
-    const opened = await follow(cloud, jar, mail.url);
-    expect(opened.status).toBe(302);
-    const page = new URL(opened.headers.get('location') ?? '', `https://${CLOUD_HOST}`);
-    expect(page.pathname).toBe('/auth/reset');
-    const token = page.searchParams.get('token') ?? '';
-    expect(token).not.toBe('');
-
-    const reset = () =>
-      submit(cloud, jar, '/auth/reset', { token, password: 'riverbend-second-pass' });
-    const first = await reset();
-    expect(first.headers.get('location')).not.toContain('error=');
-    const again = await reset();
-    expect(again.headers.get('location')).toContain('error=');
-
-    const fresh = new CookieJar();
-    await signIn(cloud, fresh, 'riverbend-second-pass');
-    expect(fresh.cookies.has(SESSION)).toBe(true);
-    const stale = new CookieJar();
-    await signIn(cloud, stale, 'riverbend-first-pass');
-    expect(stale.cookies.has(SESSION)).toBe(false);
+  it('a link sets the password its clicker types, not one chosen when it was asked for', async () => {
+    // Somebody asks in Bob's name, with a password of their own in the form.
+    const mail = await askForLink(cloud, BOB);
+    expect(failed(await setPassword(cloud, mail.url, 'bob-own-pass-1'))).toBe(false);
+    const theirs = new CookieJar();
+    expect(failed(await signIn(cloud, theirs, BOB, 'ignored-pass-1'))).toBe(true);
+    const his = new CookieJar();
+    await signIn(cloud, his, BOB, 'bob-own-pass-1');
+    expect(his.cookies.has(SESSION)).toBe(true);
   });
 
-  it('a reset link does not work after it expires', async () => {
+  it('a member who loses the first mail can ask again', async () => {
+    await askForLink(mac, BOB);
+    const second = await askForLink(mac, BOB);
+    expect(failed(await setPassword(mac, second.url, 'harborlight-pass-1'))).toBe(false);
     const jar = new CookieJar();
-    const before = cloud.mail.length;
-    await submit(cloud, jar, '/auth/forgot', { email: ALICE });
-    const mail = await waitFor(
-      () => cloud.mail.slice(before).find((x) => x.kind === 'reset-password'),
-      {
-        describe: 'a second reset mail',
-      },
-    );
-    // An hour passes: move the token's expiry into the past.
+    await signIn(mac, jar, BOB, 'harborlight-pass-1');
+    expect(jar.cookies.has(SESSION)).toBe(true);
+  });
+
+  it('a link works once, and resetting ends the sessions already open', async () => {
+    const open = new CookieJar();
+    await signIn(cloud, open, ALICE, 'riverbend-first-pass');
+    expect((await board(cloud, open)).status).toBe(200);
+    const mail = await askForLink(cloud, ALICE, '/auth/forgot');
+    expect(failed(await setPassword(cloud, mail.url, 'riverbend-second-pass'))).toBe(false);
+    expect(failed(await setPassword(cloud, mail.url, 'riverbend-third-pass'))).toBe(true);
+    expect((await board(cloud, open)).status).toBe(401);
+    const fresh = new CookieJar();
+    await signIn(cloud, fresh, ALICE, 'riverbend-second-pass');
+    expect(fresh.cookies.has(SESSION)).toBe(true);
+    const stale = new CookieJar();
+    expect(failed(await signIn(cloud, stale, ALICE, 'riverbend-first-pass'))).toBe(true);
+  });
+
+  it('a link does not work after it expires', async () => {
+    const mail = await askForLink(cloud, ALICE, '/auth/forgot');
+    // An hour passes: move every set-password link's expiry into the past.
     const db = new Database(join(cloud.dataDir, 'signin.sqlite'));
     try {
       const row = db
-        .query("SELECT expiresAt FROM verification WHERE identifier LIKE 'reset-password:%'")
+        .query("SELECT expiresAt FROM verification WHERE identifier LIKE 'cw-set-password:%'")
         .get() as { expiresAt: unknown } | null;
       expect(row).not.toBeNull();
       const past = typeof row?.expiresAt === 'number' ? 1 : '2020-01-01T00:00:00.000Z';
       db.query(
-        "UPDATE verification SET expiresAt = ? WHERE identifier LIKE 'reset-password:%'",
+        "UPDATE verification SET expiresAt = ? WHERE identifier LIKE 'cw-set-password:%'",
       ).run(past);
     } finally {
       db.close();
     }
-    const opened = await follow(cloud, jar, mail.url);
-    const page = new URL(opened.headers.get('location') ?? '', `https://${CLOUD_HOST}`);
-    expect(page.searchParams.get('error')).toBe('INVALID_TOKEN');
-    const token = new URL(mail.url).pathname.split('/').at(-1) ?? '';
-    const res = await submit(cloud, jar, '/auth/reset', {
-      token,
-      password: 'riverbend-third-pass',
-    });
-    expect(res.headers.get('location')).toContain('error=');
+    expect(failed(await setPassword(cloud, mail.url, 'riverbend-late-pass'))).toBe(true);
     const stale = new CookieJar();
-    await signIn(cloud, stale, 'riverbend-third-pass');
-    expect(stale.cookies.has(SESSION)).toBe(false);
+    expect(failed(await signIn(cloud, stale, ALICE, 'riverbend-late-pass'))).toBe(true);
   });
 
-  it('a failed Turnstile check is refused before Better Auth or the mailer', async () => {
+  it('a verified Google sign-in replaces an unverified password-only row', async () => {
+    // A row an earlier version could leave: a password, never proved.
+    const db = new Database(join(cloud.dataDir, 'signin.sqlite'));
+    try {
+      const at = (db.query('SELECT createdAt FROM user LIMIT 1').get() as { createdAt: unknown })
+        .createdAt;
+      db.query(
+        'INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?)',
+      ).run('stale-user', 'saltmarsh', SALTMARSH, at as string, at as string);
+      db.query(
+        'INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        'stale-account',
+        'stale-user',
+        'credential',
+        'stale-user',
+        'x',
+        at as string,
+        at as string,
+      );
+    } finally {
+      db.close();
+    }
     const jar = new CookieJar();
-    const asked = cloud.turnstileAsked;
+    await signInWithGoogle(
+      (path, init) => send(cloud, jar, path, init),
+      `https://${CLOUD_HOST}`,
+      jar,
+      google,
+      { sub: 'g-saltmarsh', email: SALTMARSH, email_verified: true, name: 'Saltmarsh' },
+    );
+    expect(jar.cookies.has(SESSION)).toBe(true);
+    expect((await board(cloud, jar)).status).toBe(200);
+    expect(rows(cloud, SALTMARSH)).toBe(1);
+  });
+
+  it('answers before the mail is sent, so the wait says nothing about the address', async () => {
+    cloud.hang = true;
+    try {
+      // With a mailer that never finishes, an answer that waited would never come.
+      const res = await submit(cloud, new CookieJar(), '/auth/forgot', { email: ALICE });
+      expect(res.status).toBe(303);
+      await waitFor(() => cloud.mail.at(-1)?.to === ALICE || undefined, {
+        describe: 'the mail, handed to the mailer after the answer',
+      });
+    } finally {
+      cloud.hang = false;
+    }
+  });
+
+  it('a failed Turnstile check is refused before the account or the mailer', async () => {
+    const jar = new CookieJar();
     const mails = cloud.mail.length;
-    const res = await signIn(cloud, jar, 'riverbend-second-pass', 'turnstile-fail');
-    expect(res.status).toBe(303);
+    const res = await signIn(cloud, jar, ALICE, 'riverbend-second-pass', 'turnstile-fail');
     expect(res.headers.get('location')).toContain('error=turnstile');
     expect(jar.cookies.has(SESSION)).toBe(false);
-    const forgot = await submit(cloud, jar, '/auth/forgot', { email: ALICE }, 'turnstile-fail');
-    expect(forgot.headers.get('location')).toContain('error=turnstile');
-    const signUp = await submit(
-      cloud,
-      jar,
-      '/auth/sign-up',
-      { email: 'bob@harborlight.test', password: 'saltmarsh-pass-1' },
-      '',
-    );
-    expect(signUp.headers.get('location')).toContain('error=turnstile');
-    expect(cloud.turnstileAsked).toBe(asked + 3);
-    expect(cloud.mail.length).toBe(mails);
-    // CONTROL: the same sign-in with a passing check.
-    await signIn(cloud, jar, 'riverbend-second-pass');
+    for (const path of ['/auth/forgot', '/auth/sign-up']) {
+      const r = await submit(cloud, jar, path, { email: SALTMARSH }, '');
+      expect(r.headers.get('location')).toContain('error=turnstile');
+    }
+    const mail = await askForLink(cloud, ALICE, '/auth/forgot');
+    const set = await setPassword(cloud, mail.url, 'riverbend-blocked-pass', 'turnstile-fail');
+    expect(set.headers.get('location')).toContain('error=turnstile');
+    expect(cloud.mail.length).toBe(mails + 1);
+    // Each form asked for its own action.
+    expect(cloud.turnstile.slice(-5)).toEqual([
+      'sign-in',
+      'forgot',
+      'sign-up',
+      'forgot',
+      'set-password',
+    ]);
+    // CONTROL: the same link and the same sign-in, with a passing check.
+    expect(failed(await setPassword(cloud, mail.url, 'riverbend-fourth-pass'))).toBe(false);
+    await signIn(cloud, jar, ALICE, 'riverbend-fourth-pass');
     expect(jar.cookies.has(SESSION)).toBe(true);
   });
 
@@ -289,11 +373,7 @@ describe('email and password sign-in, one user list per machine', () => {
         origin: 'https://saltmarsh.example.test',
         'content-type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        email: ALICE,
-        password: 'riverbend-second-pass',
-        'cf-turnstile-response': GOOD,
-      }).toString(),
+      body: new URLSearchParams({ email: ALICE, password: 'x', 'cf-turnstile-response': GOOD }),
     });
     expect(res.status).toBe(403);
   });
@@ -304,5 +384,6 @@ describe('email and password sign-in, one user list per machine', () => {
     const html = await res.text();
     expect(html).toContain('action="/auth/sign-in/email"');
     expect(html).toContain('data-sitekey="turnstile-site-key"');
+    expect(html).toContain('data-action="sign-in"');
   });
 });

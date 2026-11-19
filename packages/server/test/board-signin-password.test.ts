@@ -19,10 +19,13 @@ const recorder = (answer: () => Response) => {
 };
 
 describe('the Turnstile verifier', () => {
+  const want = { hostname: 'riverbend-workspaces.harborlight.test', action: 'sign-in' as const };
+  const yes = { success: true, ...want };
+
   it('asks Cloudflare with the secret, the answer and the address, and takes its yes', async () => {
-    const { calls, fetcher } = recorder(() => Response.json({ success: true }));
+    const { calls, fetcher } = recorder(() => Response.json(yes));
     const check = turnstileVerifier('site', 'stub-secret', fetcher);
-    expect(await check.verify('widget-answer', '198.51.100.7')).toBe(true);
+    expect(await check.verify('widget-answer', '198.51.100.7', want)).toBe(true);
     expect(calls[0]?.url).toBe(TURNSTILE_VERIFY_URL);
     const body = calls[0]?.init.body as URLSearchParams;
     expect(body.get('secret')).toBe('stub-secret');
@@ -30,25 +33,46 @@ describe('the Turnstile verifier', () => {
     expect(body.get('remoteip')).toBe('198.51.100.7');
   });
 
+  it('is a no on a success that names another hostname or another form', async () => {
+    const elsewhere = turnstileVerifier(
+      'site',
+      's',
+      recorder(() => Response.json({ ...yes, hostname: 'saltmarsh.example.test' })).fetcher,
+    );
+    expect(await elsewhere.verify('a', null, want)).toBe(false);
+    const otherForm = turnstileVerifier(
+      'site',
+      's',
+      recorder(() => Response.json({ ...yes, action: 'sign-up' })).fetcher,
+    );
+    expect(await otherForm.verify('a', null, want)).toBe(false);
+    const unnamed = turnstileVerifier(
+      'site',
+      's',
+      recorder(() => Response.json({ success: true })).fetcher,
+    );
+    expect(await unnamed.verify('a', null, want)).toBe(false);
+  });
+
   it('is a no on a refusal, an error, a non-200 or an empty answer', async () => {
     const no = turnstileVerifier(
       'site',
       's',
-      recorder(() => Response.json({ success: false })).fetcher,
+      recorder(() => Response.json({ ...yes, success: false })).fetcher,
     );
-    expect(await no.verify('a', null)).toBe(false);
+    expect(await no.verify('a', null, want)).toBe(false);
     const down = turnstileVerifier(
       'site',
       's',
       recorder(() => new Response('', { status: 500 })).fetcher,
     );
-    expect(await down.verify('a', null)).toBe(false);
+    expect(await down.verify('a', null, want)).toBe(false);
     const thrown = turnstileVerifier('site', 's', async () => {
       throw new Error('offline');
     });
-    expect(await thrown.verify('a', null)).toBe(false);
-    const { calls, fetcher } = recorder(() => Response.json({ success: true }));
-    expect(await turnstileVerifier('site', 's', fetcher).verify('', null)).toBe(false);
+    expect(await thrown.verify('a', null, want)).toBe(false);
+    const { calls, fetcher } = recorder(() => Response.json(yes));
+    expect(await turnstileVerifier('site', 's', fetcher).verify('', null, want)).toBe(false);
     expect(calls).toHaveLength(0);
   });
 });
@@ -56,23 +80,23 @@ describe('the Turnstile verifier', () => {
 describe('the Resend mailer', () => {
   it('sends the mail as plain text to the one address', async () => {
     const { calls, fetcher } = recorder(() => Response.json({ id: 'm1' }));
-    const mail = composeMail('reset-password', 'alice@riverbend.test', 'https://r.test/x');
+    const mail = composeMail('set-password', 'alice@riverbend.test', 'https://r.test/x');
     await resendMailer('stub-key', 'sign-in@riverbend.test', fetcher).send(mail);
     expect(calls[0]?.url).toBe(RESEND_SEND_URL);
     const sent = JSON.parse(String(calls[0]?.init.body));
     expect(sent).toEqual({
       from: 'sign-in@riverbend.test',
       to: ['alice@riverbend.test'],
-      subject: 'Reset your password',
-      text: 'Reset your password: https://r.test/x',
+      subject: 'Set your password',
+      text: 'Set your password: https://r.test/x',
     });
   });
 
   it('throws on a refusal, naming the status only', async () => {
     const { fetcher } = recorder(() => new Response('nope', { status: 403 }));
-    const mail = composeMail('verify-email', 'alice@riverbend.test', 'https://r.test/v');
+    const mail = composeMail('set-password', 'alice@riverbend.test', 'https://r.test/v');
     await expect(resendMailer('stub-key', 'f@riverbend.test', fetcher).send(mail)).rejects.toThrow(
-      'Resend refused the verify-email mail: HTTP 403',
+      'Resend refused the set-password mail: HTTP 403',
     );
   });
 });

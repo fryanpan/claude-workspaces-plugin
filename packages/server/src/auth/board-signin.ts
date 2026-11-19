@@ -35,7 +35,6 @@ import { normalizeEmail } from '@claude-workspaces/core';
 import type { Auth } from './board-signin-auth.ts';
 import {
   type PasswordSignIn,
-  composeMail,
   handlePasswordRoute,
   noticeFor,
   passwordFormsHtml,
@@ -213,7 +212,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   const db = openUserList(opts.dataDir);
   const password = opts.password;
   // Loaded on first use, so a machine on `access` never loads the library.
-  const ready: Promise<Auth> = import('./board-signin-auth.ts').then(async (m) => {
+  const loaded = import('./board-signin-auth.ts').then(async (m) => {
     const auth = m.createAuth(
       {
         origin,
@@ -223,19 +222,18 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
         google: { ...opts.google, endpoints: opts.google.endpoints ?? GOOGLE_ENDPOINTS },
         rateLimitStore: ownRateLimitStore(),
         mayHaveAccount: opts.mayHaveAccount,
-        ...(password
-          ? {
-              sendMail: (kind: 'verify-email' | 'reset-password', to: string, url: string) =>
-                password.mailer.send(composeMail(kind, to, url)),
-            }
-          : {}),
+        ...(password ? { password: true } : {}),
         ...(opts.onSessionCreated ? { onSessionCreated: opts.onSessionCreated } : {}),
       },
       db,
     );
     await m.migrate(auth);
-    return auth;
+    return {
+      auth,
+      accounts: m.createPasswordAccounts(auth, { origin, mayHaveAccount: opts.mayHaveAccount }),
+    };
   });
+  const ready: Promise<Auth> = loaded.then((l) => l.auth);
 
   /** The request as Better Auth must see it: on the sign-in origin. */
   const onOrigin = (req: Request, pathname: string, init: RequestInit = {}): Request => {
@@ -255,7 +253,9 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
       const answer = await handlePasswordRoute(
         {
           origin,
+          host,
           password,
+          accounts: async () => (await loaded).accounts,
           safeNext,
           call: async (r, path, body) =>
             (await ready).handler(
@@ -270,11 +270,6 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
         pathname,
       );
       if (answer) return answer;
-      // The two links a mail carries: Better Auth checks the token and sends
-      // the browser on to our page.
-      if (req.method === 'GET' && isMailedLink(pathname)) {
-        return (await ready).handler(onOrigin(req, pathname));
-      }
     }
     if (pathname === SIGNIN_GOOGLE_PATH && req.method === 'POST') {
       if (req.headers.get('origin') !== origin) return refuse(403, 'cross_site_form');
@@ -324,14 +319,6 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   };
 
   return { origin, host, handle, personOf, close: () => db.close() };
-}
-
-function isMailedLink(pathname: string): boolean {
-  if (pathname === `${SIGNIN_BASE_PATH}/verify-email`) return true;
-  const prefix = `${SIGNIN_BASE_PATH}/reset-password/`;
-  return (
-    pathname.startsWith(prefix) && /^[A-Za-z0-9_-]{1,256}$/.test(pathname.slice(prefix.length))
-  );
 }
 
 function withJson(headers: Headers): Headers {
