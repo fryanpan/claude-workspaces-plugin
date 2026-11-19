@@ -242,7 +242,7 @@ export type Action =
   | { kind: 'deploy' }
   | { kind: 'start-machine'; id: string };
 
-/** The server's push credential, a deploy key per repo: only the keeper sets it (`keeper-push-keys.ts`). */
+/** The server's push credential, a deploy key per repo: only `fly-provision.yml` sets it (`push-keys.ts`). */
 export const PUSH_KEYS_SECRET = 'CW_GITHUB_PUSH_KEYS';
 /** A classic GitHub token, which a project server never holds: unset wherever it is found. */
 export const CLASSIC_PUSH_TOKEN_SECRET = 'CW_GITHUB_PUSH_TOKEN';

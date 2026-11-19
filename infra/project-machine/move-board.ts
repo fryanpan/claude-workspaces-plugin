@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { moveCommands } from '../../packages/server/src/keeper/keeper-move-steps.ts';
+import { moveCommands } from '../../packages/server/src/provisioning/move-steps.ts';
 import { BOARD_ID, type BoardManifest, MoveRefused, exportBoard } from './board-bundle.ts';
 import {
   type BoardLimits,

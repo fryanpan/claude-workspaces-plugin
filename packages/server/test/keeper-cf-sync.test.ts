@@ -7,8 +7,8 @@
  * runner and GitHub; nothing runs terraform or reaches either service.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import type { GithubScopedApi } from '../src/keeper/keeper-github.ts';
 import type { Executors, FlyResult } from '../src/keeper/keeper-requests.ts';
+import type { GithubScopedApi } from '../src/provisioning/github-ci.ts';
 import { type LiveKeeper, startLiveKeeper } from './keeper-live-harness.ts';
 
 const STATE = { accessKeyId: 'fixture-r2-id-Saltmarsh', secretAccessKey: 'fixture-r2-secret-0001' };

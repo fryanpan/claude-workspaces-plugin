@@ -4,13 +4,13 @@
  * A setup grant comes from creating a project and covers its volume and
  * secrets. A move grant is asked for on its own (`POST /v1/move-grant`),
  * names one board on one app the keeper made or adopted, and covers the steps
- * in `keeper-move-steps.ts` on that app, and nothing else. Its request is
+ * in `provisioning/move-steps.ts` on that app, and nothing else. Its request is
  * always a tap, so a live grant cannot renew itself.
  *
  * An Access grant comes from opening an Access application and covers that
  * application's policies.
  */
-import { BOARD_ID, moveSteps } from './keeper-move-steps.ts';
+import { BOARD_ID, moveSteps } from '../provisioning/move-steps.ts';
 import type { Verdict } from './keeper-policy.ts';
 import { APP_NAME } from './keeper-store.ts';
 

@@ -1,5 +1,5 @@
 /**
- * Rotating one existing Access service token (`keeper/keeper-rotate.ts`):
+ * Rotating one existing Access service token (`provisioning/rotate.ts`):
  * the old secret kept for 24 hours, and, through the keeper while it still
  * runs, one tap with the page naming the token and never a secret.
  * cf-rotate-token.yml runs the same function (`cloudflare-rotate-token.test.ts`).
@@ -11,7 +11,7 @@ import {
   PREVIOUS_SECRET_MS,
   classifyRotate,
   rotateServiceToken,
-} from '../src/keeper/keeper-rotate.ts';
+} from '../src/provisioning/rotate.ts';
 import { type LiveKeeper, startLiveKeeper } from './keeper-live-harness.ts';
 
 const ACCOUNT = 'a'.repeat(32);

@@ -14,11 +14,11 @@ import { type MoveOps, flyTarget } from '../../../infra/project-machine/move-boa
 import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
 import { keeperFly, keeperMoveGrant } from '../src/keeper/keeper-client.ts';
 import { MOVE_GRANT_MS, grantCovers } from '../src/keeper/keeper-grants.ts';
-import { machineShell, moveCommands, moveSteps } from '../src/keeper/keeper-move-steps.ts';
 import { classifyFly } from '../src/keeper/keeper-policy.ts';
 import { type Executors, MAX_HELD } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
+import { machineShell, moveCommands, moveSteps } from '../src/provisioning/move-steps.ts';
 import { TestPasskey } from './keeper-authenticator.ts';
 import { waitFor } from './wait-for.ts';
 

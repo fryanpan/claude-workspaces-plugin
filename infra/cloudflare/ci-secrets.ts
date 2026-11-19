@@ -32,7 +32,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { CI_ENVIRONMENT, CI_REPO } from '../../packages/server/src/keeper/keeper-github.ts';
+import { CI_ENVIRONMENT, CI_REPO } from '../../packages/server/src/provisioning/github-ci.ts';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
 import { accountIdOf } from './ci-credentials.ts';
 import { planSummary } from './plan-summary.ts';

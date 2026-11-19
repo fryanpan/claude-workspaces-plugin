@@ -4,7 +4,7 @@
  *
  * - `credentials.json`: the Cloudflare API token and account id, the Fly
  *   org token and org slug, and the GitHub token that registers a project's
- *   push deploy keys (`keeper-push-keys.ts`). The only copy on the Mac once the cutover in
+ *   push deploy keys (`provisioning/push-keys.ts`). The only copy on the Mac once the cutover in
  *   `docs/process/keeper.md` is done.
  * - `passkeys.json`: the public half of each passkey Bryan registered.
  * - `apps.json`: the Fly apps this keeper created (or Bryan adopted). Only
@@ -34,6 +34,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { APP_NAME } from '../provisioning/verdict.ts';
 import type { StoredPasskey } from './webauthn.ts';
 
 export interface KeeperCredentials {
@@ -127,7 +128,7 @@ export function storeModeProblem(path: string, uid: number): string | null {
   return null;
 }
 
-export const APP_NAME = /^[a-z][a-z0-9-]{1,62}$/;
+export { APP_NAME };
 export const ACCESS_APP_ID = /^[A-Za-z0-9-]{1,64}$/;
 const FILES = [
   'credentials.json',

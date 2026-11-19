@@ -11,7 +11,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
-import { CI_REPO } from '../../packages/server/src/keeper/keeper-github.ts';
+import { CI_REPO } from '../../packages/server/src/provisioning/github-ci.ts';
 import type { TfOutputs } from '../cloudflare/outputs.ts';
 import { realIo, runWrapper } from '../cloudflare/run.ts';
 import { configReader } from '../cloudflare/run.ts';

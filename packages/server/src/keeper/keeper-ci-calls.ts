@@ -1,16 +1,26 @@
+import {
+  CREDENTIAL_SECRETS,
+  type GithubSecretsCall,
+  type GithubStatusCall,
+  checkSecretWrites,
+  classifyGithubSecrets,
+  githubStatus,
+  writeGithubSecrets,
+} from '../provisioning/github-ci.ts';
+import { type RotateCall, classifyRotate, rotateServiceToken } from '../provisioning/rotate.ts';
 /**
  * The keeper requests behind Cloudflare's CI, gathered so `keeper-requests.ts`
  * dispatches them in one place:
  *
  * - `github-secrets` (held): write the CI credentials as Actions secrets
- *   (`keeper-github.ts`). `keeper-setup`'s CI credentials step sends it.
+ *   (`provisioning/github-ci.ts`). `keeper-setup`'s CI credentials step sends it.
  * - `github-status` (routine): the GitHub token's scopes and which secrets
  *   are set, names only.
  * - `cf-sync` (held, planned first): the gitignored configs to GitHub, any
  *   missing service token made, and `cloudflare.yml` started
  *   (`keeper-cf-sync.ts`).
  * - `service-token-rotate` (held): a new secret for one existing service
- *   token (`keeper-rotate.ts`).
+ *   token (`provisioning/rotate.ts`).
  *
  * None is ever covered by a grant: each names what it writes, and the owner
  * reads that on the approval page.
@@ -22,18 +32,8 @@ import {
   prepareSync,
   runSync,
 } from './keeper-cf-sync.ts';
-import {
-  CREDENTIAL_SECRETS,
-  type GithubSecretsCall,
-  type GithubStatusCall,
-  checkSecretWrites,
-  classifyGithubSecrets,
-  githubStatus,
-  writeGithubSecrets,
-} from './keeper-github.ts';
 import type { Verdict } from './keeper-policy.ts';
 import type { CloudflareResult, Executors, FlyResult } from './keeper-requests.ts';
-import { type RotateCall, classifyRotate, rotateServiceToken } from './keeper-rotate.ts';
 
 export type CiCall = GithubSecretsCall | GithubStatusCall | CfSyncCall | RotateCall;
 

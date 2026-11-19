@@ -26,15 +26,15 @@
  * machine's previous secret, which held them, is gone.
  *
  * The answer also names, per repo, the Actions secret names a workflow pushed
- * with the new key could read (`keeper-push-exposure.ts`). That report reads
+ * with the new key could read (`push-exposure.ts`). That report reads
  * names only and never fails the run: the keys are already in place.
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { PUSH_KEYS_ENV, encodePushKeys } from '../git-push/credential.ts';
 import { isRepoName } from '../git-push/policy.ts';
-import type { Verdict } from './keeper-policy.ts';
-import { type RepoExposure, repoExposure, unreadExposure } from './keeper-push-exposure.ts';
-import { APP_NAME } from './keeper-store.ts';
+import { type RepoExposure, repoExposure, unreadExposure } from './push-exposure.ts';
+import type { Verdict } from './verdict.ts';
+import { APP_NAME } from './verdict.ts';
 
 export interface PushKeysCall {
   type: 'push-keys';

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /**
- * The keeper's own Terraform run. The keeper (`packages/server/src/keeper/`)
+ * The keeper's own Terraform run. Only the keeper daemon starts it now (CI applies, no other caller).
+ * The keeper (`packages/server/src/keeper/`)
  * starts this file from ITS release, as its own macOS user, with the
  * Cloudflare token in the environment and nowhere else, so `cf:plan` and
  * `cf:sync-config` on the Mac work without any agent's user holding that

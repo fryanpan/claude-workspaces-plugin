@@ -25,7 +25,7 @@ import { spawnSync } from 'node:child_process';
 import {
   classifyRotate,
   rotateServiceToken,
-} from '../../packages/server/src/keeper/keeper-rotate.ts';
+} from '../../packages/server/src/provisioning/rotate.ts';
 import { type HandoffSink, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
 import { HANDOFF_REPO } from '../handoff/mac-store.ts';
 
