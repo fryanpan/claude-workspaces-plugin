@@ -97,6 +97,21 @@ export function keychainCreate(name: string, value: string): void {
     return;
   }
   if (keychainHas(name)) throw new Error(`Keychain already has ${name}; not replacing it`);
+  keychainWrite(name, value);
+}
+
+/**
+ * Store an entry, replacing one that exists. Only for an entry a person
+ * types in (`secret-set.ts`): nothing a deploy made is replaced this way.
+ * On the Mac only, never into a CI run's handoff.
+ */
+export function keychainReplace(name: string, value: string): void {
+  if (secretsFromEnv()) throw new Error(`${name} is stored only on the Mac`);
+  keychainWrite(name, value);
+}
+
+/** Base64 on `security -i`'s stdin, never an argument; `-U` replaces. */
+function keychainWrite(name: string, value: string): void {
   const line = secretAddCommandLine(name, Buffer.from(value, 'utf8').toString('base64'));
   const r = spawnSync('security', ['-i'], {
     input: `${line}\n`,

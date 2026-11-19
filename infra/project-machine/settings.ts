@@ -40,6 +40,7 @@
  * Values are read into memory and handed to `fly secrets import` on stdin.
  * Nothing here prints one; a dry run prints names and sources.
  */
+import { SIGNIN_BASE_PATH } from '../../packages/server/src/auth/board-signin.ts';
 import type { TfOutputs } from '../cloudflare/outputs.ts';
 
 export const OWNER_EMAIL_ENTRY = 'cw-board-owner-email';
@@ -100,6 +101,15 @@ export interface SettingsSources {
   keychainRead: (name: string) => string;
 }
 
+/** A project machine's sign-in host: its Access application's first host. */
+export function signInHost(outputs: TfOutputs, project: string): string | null {
+  return outputs.access[project]?.hosts[0] ?? null;
+}
+
+/** Where Google returns a sign-in at `host`. */
+export const googleRedirectUri = (host: string): string =>
+  `https://${host}${SIGNIN_BASE_PATH}/callback/google`;
+
 /** Read every source. Reads only: Keychain reads and the Terraform outputs. */
 export function readSettings(project: string, src: SettingsSources): SettingsRead {
   const settings: Setting[] = [];
@@ -159,7 +169,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
     return { settings, skipped, notes };
   }
   const p = outputs.access[project];
-  const host = p?.hosts[0];
+  const host = signInHost(outputs, project);
   if (!p || !host) {
     skipped.push(
       `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: the Terraform state has no Access application for ${project} (add it to access.local.json; bun run cf:sync-config)`,
@@ -178,7 +188,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
       value: () => `https://${host}`,
     });
     notes.push(
-      `Google sign-in returns to https://${host}/api/auth/callback/google: add it to the shared client's authorized redirect URIs in Google's console`,
+      `Google sign-in returns to ${googleRedirectUri(host)}: add it to the shared client's authorized redirect URIs in Google's console`,
     );
   }
   const team = outputs.accessTeamDomain;

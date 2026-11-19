@@ -10,6 +10,8 @@
     "dev:bare": "bun run packages/server/src/bin.ts",
     "new-app": "bun run scripts/new-app.ts",
     "machine:deploy": "bun run infra/project-machine/deploy.ts",
+    "secret:set": "bun run infra/project-machine/secret-set.ts",
+    "signin:callbacks": "bun run infra/project-machine/signin-callbacks.ts",
     "machine:restore": "bun run infra/project-machine/restore-machine.ts",
     "machine:drill": "bun run infra/project-machine/drill.ts",
     "machine:network-wall": "bun run infra/project-machine/network-wall.ts",
