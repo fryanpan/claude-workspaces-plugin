@@ -264,6 +264,18 @@ route cuts the answer to the visitor's scope (`share/ref-scope.ts`). The
 client draws one mark after the link and re-asks on the board stream's
 review, thread and transition events.
 
+**Each machine can run its own sign-in in place of Cloudflare Access.**
+`CW_SIGNIN` (`middleware/signin-door.ts`) picks `access`, `both` or
+`better-auth` per machine. `auth/board-signin.ts` runs Better Auth on
+`<dataDir>/signin.sqlite` with Google, and loads the library only when a
+machine turns it on (`auth/board-signin-auth.ts`).
+`auth/board-signin-password.ts` adds email and password beside Google: four
+form routes under `/auth/`, Turnstile on each, and the verification and
+reset mail, with the mailer and the Turnstile check injected so tests stub
+both. `auth/owner-signin-record.ts` keeps `better-auth` acting as `both`
+until the owner has signed in once, so switching cannot lock the owner out.
+The rules are in [security.md](security.md).
+
 **A destructive action asks for a recent sign-in, decided in one place on
 each side.** `core/src/counted-routes.ts` is the one list of the counted
 methods and paths; `server/src/fresh-signin.ts` reads it, decides the
