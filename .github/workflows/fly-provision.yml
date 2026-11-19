@@ -3,8 +3,11 @@
 # the keeper's provisioning holds became (docs/process/keeper.md, "Retired").
 #
 #   dispatch   on main only, naming a project machines.json already lists.
-#              Inputs pass through to `machine:deploy` (`machines.ts
-#              provisionFlags`): push repos, and the two refreshes.
+#              The two refreshes pass through to `machine:deploy`
+#              (`machines.ts provisionFlags`). The repos the server pushes to
+#              are that project's `pushRepos` in machines.json, never an
+#              input: GH_ADMIN_TOKEN can put a write key on any repo it
+#              reaches, so only a merged change names one.
 #
 # Two jobs, because no one environment holds both halves:
 #
@@ -36,13 +39,8 @@ on:
         description: A project machines.json lists
         required: true
         type: string
-      push_repos:
-        description: owner/name repos the server pushes to, space-separated (optional)
-        required: false
-        type: string
-        default: ''
       refresh_push_keys:
-        description: Make the push keys again
+        description: Make the push keys again, for the pushRepos machines.json lists
         required: false
         type: boolean
         default: false
@@ -137,13 +135,11 @@ jobs:
           CW_PROVISION_HANDOFF: ${{ runner.temp }}/provision/provision.json
           CW_HANDOFF_OUT: ${{ runner.temp }}/handoff-mac/handoff.json
           PROJECT: ${{ inputs.project }}
-          PUSH_REPOS: ${{ inputs.push_repos }}
           REFRESH_PUSH_KEYS: ${{ inputs.refresh_push_keys }}
           REFRESH_TUNNEL_TOKEN: ${{ inputs.refresh_tunnel_token }}
         run: |
           mkdir -p "$RUNNER_TEMP/handoff-mac"
           set --
-          for r in $PUSH_REPOS; do set -- "$@" --push-repo "$r"; done
           [ "$REFRESH_PUSH_KEYS" = true ] && set -- "$@" --refresh-push-keys
           [ "$REFRESH_TUNNEL_TOKEN" = true ] && set -- "$@" --refresh-tunnel-token
           bun infra/project-machine/machines.ts deploy --project "$PROJECT" --ref "$GITHUB_SHA" --no-terraform-outputs -- "$@"

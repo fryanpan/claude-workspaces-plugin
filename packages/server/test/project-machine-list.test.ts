@@ -72,32 +72,60 @@ describe('the machine list', () => {
   });
 });
 
-describe('the flags fly-provision.yml passes through', () => {
-  it('passes push repos and the two refreshes, and nothing before the --', () => {
-    expect(provisionFlags(['deploy', '--project', 'riverbend'])).toEqual([]);
-    expect(
-      provisionFlags([
-        'deploy',
-        '--',
-        '--push-repo',
-        'harborlight/riverbend',
-        '--refresh-push-keys',
-        '--refresh-tunnel-token',
+describe('push repos come from the committed list alone', () => {
+  it('a machine pushes to the repos machines.json lists, each its own --push-repo', () => {
+    const [river, salt] = parseMachines(
+      list([
+        { project: 'riverbend', pushRepos: ['harborlight/riverbend', 'harborlight/saltmarsh'] },
+        { project: 'saltmarsh' },
       ]),
-    ).toEqual([
+    );
+    expect(river?.pushRepos).toEqual(['harborlight/riverbend', 'harborlight/saltmarsh']);
+    expect(deployArgs(river as never, 'abc123', false, true)).toEqual([
+      '--project',
+      'riverbend',
+      '--tunnel',
+      'named',
+      '--ref',
+      'abc123',
       '--push-repo',
       'harborlight/riverbend',
-      '--refresh-push-keys',
-      '--refresh-tunnel-token',
+      '--push-repo',
+      'harborlight/saltmarsh',
+      '--no-terraform-outputs',
     ]);
+    // A machine that lists none gets no push key at all.
+    expect(deployArgs(salt as never, 'abc123', false)).not.toContain('--push-repo');
   });
 
-  it('refuses any other flag, and a push repo that is not owner/name', () => {
-    expect(() => provisionFlags(['--', '--lead-board', 'w-x'])).toThrow('not a provisioning flag');
-    expect(() => provisionFlags(['--', '--push-repo', 'harborlight/..'])).toThrow(
+  it('refuses a push repo that is not owner/name, a repeat, or too many', () => {
+    const one = (pushRepos: unknown) => parseMachines(list([{ project: 'riverbend', pushRepos }]));
+    expect(() => one('harborlight/riverbend')).toThrow('pushRepos');
+    expect(() => one(['harborlight/..'])).toThrow('pushRepos');
+    expect(() => one(['harborlight/riverbend', 'harborlight/riverbend'])).toThrow('pushRepos');
+    expect(() => one([])).toThrow('pushRepos');
+    expect(() => one(Array.from({ length: 21 }, (_, i) => `harborlight/r${i}`))).toThrow(
+      'pushRepos',
+    );
+  });
+
+  it('a dispatch cannot name a repo: --push-repo is not a provisioning flag', () => {
+    expect(() => provisionFlags(['--', '--push-repo', 'harborlight/riverbend'])).toThrow(
       'not a provisioning flag',
     );
-    expect(() => provisionFlags(['--', '--push-repo'])).toThrow('not a provisioning flag');
+  });
+});
+
+describe('the flags fly-provision.yml passes through', () => {
+  it('passes the two refreshes, and nothing before the --', () => {
+    expect(provisionFlags(['deploy', '--project', 'riverbend'])).toEqual([]);
+    expect(
+      provisionFlags(['deploy', '--', '--refresh-push-keys', '--refresh-tunnel-token']),
+    ).toEqual(['--refresh-push-keys', '--refresh-tunnel-token']);
+  });
+
+  it('refuses any other flag', () => {
+    expect(() => provisionFlags(['--', '--lead-board', 'w-x'])).toThrow('not a provisioning flag');
     expect(() => provisionFlags(['--', ''])).toThrow('an empty argument');
   });
 });

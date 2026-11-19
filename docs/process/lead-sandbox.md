@@ -402,8 +402,8 @@ commits upstream already has.
 **The credential.** On the Mac, the Keychain item `cw-github-push-token`
 (`security add-generic-password -a "$USER" -s cw-github-push-token -w`, then
 paste the token when asked). On a project machine, one write deploy key per
-repo, in the Fly secret `CW_GITHUB_PUSH_KEYS`, which the keeper makes
-(`machine:deploy --push-repo <owner/name>`, in
+repo, in the Fly secret `CW_GITHUB_PUSH_KEYS`, which `fly-provision.yml`
+makes for the project's `pushRepos` in `machines.json` (in
 [project-machine.md](project-machine.md)); a project machine never holds a
 classic token. Without a credential for the repo, the push is refused with 503.
 Mechanics and limits: [security.md](../architecture/security.md), "A sandboxed

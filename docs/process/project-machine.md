@@ -598,9 +598,12 @@ fly secrets set --app cw-<project> \
 
 The lead pushes through the server, which holds one write deploy key per
 repo as the Fly secret `CW_GITHUB_PUSH_KEYS` and the board's repo list in
-`/data/cw/git-push.json`. `fly-provision.yml` makes the keys: dispatch it
-with `push_repos` (`owner/name`, space-separated) and, to replace them,
-`refresh_push_keys`.
+`/data/cw/git-push.json`. `fly-provision.yml` makes the keys for the repos
+the project's entry in `infra/project-machine/machines.json` lists as
+`pushRepos` (`owner/name` each). The repos are never a dispatch input, so a
+repo gets a write key only through a merged change. Dispatch the workflow
+after that change lands, with `refresh_push_keys` to replace keys the app
+already has.
 
 For each repo the `fly-org` job makes a key pair in memory, registers the
 public half on that repo as a write deploy key with `GH_ADMIN_TOKEN` (a

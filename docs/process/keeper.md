@@ -34,7 +34,7 @@ Each job, and where it runs now:
 | Job | Now | Who acts |
 | --- | --- | --- |
 | Make a project's Fly app, volume, bucket, backup key and tunnel token | `.github/workflows/fly-provision.yml`, dispatched on main with the project (docs/process/project-machine.md, "What the deploy needs") | nobody: a dispatch |
-| Push deploy keys to a project's repos | the same workflow, `push_repos` input | nobody |
+| Push deploy keys to a project's repos | the same workflow, for the project's `pushRepos` in `machines.json`; a merged change names the repos, never a dispatch input | nobody |
 | `fly logs`, `fly ssh`, restarts and board moves on the Mac | `mac-ops.ts` with the app's own token. `fly-ci-tokens.yml` cuts one every Monday: the app, `builder` and `wg`, 14 days | nobody |
 | Make and rotate Access service tokens | `cloudflare.yml`'s apply makes a missing one; `bun run cf:rotate-token` dispatches `cf-rotate-token.yml` | nobody |
 | Sync the Access email lists | retired: sign-in moves to Better Auth. `cf:sync-config` writes only the router and share-link configs | nobody |
