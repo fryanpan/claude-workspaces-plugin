@@ -13,7 +13,7 @@ import { DurationSequencer } from './scripts/vitest-sequencer.ts';
 //
 // A file that needs a DOM and does not get one fails loudly on `document is
 // not defined`, so this cannot silently weaken a test.
-const DOM_PACKAGES = ['workspaces-app', 'widget'];
+const DOM_PACKAGES = ['workspaces-app', 'widget', 'components'];
 
 const testFilesIn = (pkg: string) => [
   `packages/${pkg}/test/**/*.test.{ts,tsx}`,
@@ -133,6 +133,7 @@ export default defineConfig({
         'packages/workspaces-app/src/**/*.{ts,tsx}',
         'packages/mcp/src/**/*.ts',
         'packages/widget/src/**/*.ts',
+        'packages/components/src/**/*.ts',
       ],
       exclude: [
         'packages/*/src/**/*.test.{ts,tsx}',
