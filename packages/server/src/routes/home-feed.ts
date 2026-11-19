@@ -26,12 +26,12 @@
  *    (`CW_HOME_FEED_CLIENT_ID`). A person's stamp, a share visitor's, or
  *    another service token's is refused.
  *
- *  - through the tunnel, a board agent token (`at2`, `auth/board-agent-token.ts`)
- *    minted for the board this path names, from no browser. Where an Access
- *    application is in front, its stamp must also pass; under
- *    `CW_SIGNIN=better-auth` there is none, and the token is the proof. This
- *    is how the Mac pulls once Access is gone (`home-remotes.ts`
- *    `boardTokens`).
+ *  - through the tunnel under `CW_SIGNIN=better-auth`, where no Access
+ *    application is in front: a board agent token (`at2`,
+ *    `auth/board-agent-token.ts`) minted for the board this path names, from
+ *    no browser. This is how the Mac pulls once Access is gone
+ *    (`home-remotes.ts` `boardTokens`). In `access` and `both` the service
+ *    token above is still the only tunnel caller, with or without an `at2`.
  *
  * With no client id configured and no token presented, only the first caller
  * is admitted. The two
@@ -78,12 +78,13 @@ export async function homeFeedCallerAllowed(
   boardId?: string,
 ): Promise<boolean> {
   if (!req.headers.has('cf-ray')) return isLoopbackAddress(ctx.peerAddress(req));
-  const bearer = boardAgentBearerOf(req.headers);
-  if (bearer !== null) {
-    if (!boardId || !ctx.boardGrantFor || isBrowserRequest(req.headers)) return false;
-    if (ctx.boardGrantFor(bearer)?.boardId !== boardId) return false;
-    if (ctx.accessInFront?.() === false) return true;
-    return ctx.verifier !== null && (await ctx.verifier(req)).ok;
+  // With no Access in front, the board's own token is the proof. Where Access
+  // is in front, only the feed's service token is, with or without one.
+  if (ctx.accessInFront?.() === false) {
+    const bearer = boardAgentBearerOf(req.headers);
+    if (bearer === null || !boardId || !ctx.boardGrantFor) return false;
+    if (isBrowserRequest(req.headers)) return false;
+    return ctx.boardGrantFor(bearer)?.boardId === boardId;
   }
   if (!ctx.verifier || !ctx.clientId) return false;
   const result = await ctx.verifier(req);
