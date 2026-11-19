@@ -91,20 +91,31 @@ describe('the relay config', () => {
     });
   });
 
-  it('takes a remote server with no service token, and refuses plain http off loopback', () => {
-    // No Access in front (`CW_SIGNIN=better-auth`): the at2 is the whole proof.
-    const noToken = config({
-      servers: {
-        harbor: {
-          organization: 'harborlight',
-          baseUrl: 'https://h.harborlight.test',
-          bearers: { 'w-harbor': fake() },
+  it('refuses a remote server with no service token unless it says no Access is in front', () => {
+    const noToken = (extra: Record<string, unknown>) =>
+      config({
+        servers: {
+          harbor: {
+            organization: 'harborlight',
+            baseUrl: 'https://h.harborlight.test',
+            bearers: { 'w-harbor': fake() },
+            ...extra,
+          },
         },
-      },
+      });
+    expect(parseRelayConfig(JSON.stringify(noToken({})))).toEqual({
+      error: 'server harbor is remote and carries no service token',
     });
-    const parsed = parseRelayConfig(JSON.stringify(noToken));
+    expect(parseRelayConfig(JSON.stringify(noToken({ accessInFront: 'no' })))).toEqual({
+      error: 'server harbor accessInFront must be true or false',
+    });
+    // A `CW_SIGNIN=better-auth` server: no Access, the at2 is the whole proof.
+    const parsed = parseRelayConfig(JSON.stringify(noToken({ accessInFront: false })));
     if ('error' in parsed) throw new Error(parsed.error);
     expect(parsed.servers.get('harbor')?.serviceToken).toBeNull();
+  });
+
+  it('refuses plain http off loopback', () => {
     const plain = config({
       servers: {
         harbor: {

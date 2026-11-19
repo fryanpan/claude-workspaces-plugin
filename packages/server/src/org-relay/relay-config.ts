@@ -28,9 +28,11 @@
  * ```
  *
  * `baseUrl` may be plain http only on a loopback host (a co-located server,
- * or a test); anything else is https. `serviceToken` is for a server Access
- * still fronts; one running `CW_SIGNIN=better-auth` has no Access in front,
- * admits the `at2` alone (`middleware/board-agent-door.ts`), and needs none.
+ * or a test); anything else is https and carries a service token, unless the
+ * entry says `"accessInFront": false`: a server running
+ * `CW_SIGNIN=better-auth` has no Access in front and admits the `at2` alone
+ * (`middleware/board-agent-door.ts`). The field is explicit so a forgotten
+ * token is still refused at start rather than at the first request.
  *
  * `baseUrl` is the project's own address, not the one address: each project
  * server admits only its own Access application's stamp, and Access stamps
@@ -118,6 +120,14 @@ function parseServer(id: string, raw: unknown): RelayServer | string {
       return `server ${id} serviceToken is malformed`;
     }
     serviceToken = { clientId: t.clientId, clientSecret: t.clientSecret };
+  }
+  if (raw.accessInFront !== undefined && typeof raw.accessInFront !== 'boolean') {
+    return `server ${id} accessInFront must be true or false`;
+  }
+  // Only a server that says no Access stands in front of it may go without
+  // a service token: there the at2 is the whole proof.
+  if (!loopback && !serviceToken && raw.accessInFront !== false) {
+    return `server ${id} is remote and carries no service token`;
   }
   if (!isObject(raw.bearers)) return `server ${id} bearers must be an object`;
   const bearers = new Map<string, string>();
