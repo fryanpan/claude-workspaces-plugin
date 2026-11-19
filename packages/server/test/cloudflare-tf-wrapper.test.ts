@@ -1,6 +1,6 @@
 /**
  * `bun run cf:plan` and CI's apply (infra/cloudflare/run.ts, vars.ts,
- * terraform.ts) with fake configs, a fake Keychain, a fake account and a fake
+ * terraform.ts) with fake configs, a fake Keychain (the state key only), a fake account and a fake
  * terraform: which variables it assembles, where each credential goes, what
  * CI prints, and what it refuses before terraform runs. Nothing here reads
  * the Keychain or calls Cloudflare.
@@ -178,7 +178,6 @@ interface Recorded {
 }
 
 const KEYCHAIN: Record<string, string> = {
-  'cloudflare-api-token': TOKEN,
   'cloudflare-r2-tfstate': JSON.stringify({ accessKeyId: R2_ID, secretAccessKey: R2_SECRET }),
 };
 
@@ -186,7 +185,7 @@ function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
   const r: Recorded = { calls: [], state: {}, out: [], err: [], io: undefined as never };
   r.io = {
     read: files(),
-    env: {},
+    env: { CLOUDFLARE_API_TOKEN: TOKEN },
     keychainHas: (n) => n in KEYCHAIN,
     keychainRead: (n) => KEYCHAIN[n] ?? '',
     api: () => fakeApi(),
@@ -203,6 +202,10 @@ function fakeIo(over: Partial<WrapperIo> = {}): Recorded {
         return { status: 0, stdout: JSON.stringify(a) };
       }
       return { status: 0, stdout: '' };
+    },
+    macSink: null,
+    macKey: () => {
+      throw new Error('no Mac key in this test');
     },
     out: (s) => r.out.push(s),
     err: (s) => r.err.push(s),
@@ -274,7 +277,7 @@ describe('runWrapper', () => {
   it('in CI saves the plan, prints only its summary, and applies exactly that plan', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cf-summary-'));
     const summaryFile = join(dir, 'summary.md');
-    const r = fakeIo({ env: { CF_PLAN_SUMMARY: summaryFile } });
+    const r = fakeIo({ env: { CLOUDFLARE_API_TOKEN: TOKEN, CF_PLAN_SUMMARY: summaryFile } });
     expect(await runWrapper('apply', { env: 'prod', ci: true }, r.io)).toBe(0);
     expect(r.calls.map((c) => c.args[0])).toEqual(['init', 'plan', 'show', 'apply']);
     expect(r.calls.every((c) => c.capture)).toBe(true);
@@ -296,10 +299,12 @@ describe('runWrapper', () => {
     const said = r.err.join('');
     expect(said).toContain('applies when its pull request merges to main');
     expect(said).toContain('bun run cf:sync-config');
+    expect(said).toContain('bun run handoff:pull');
+    expect(said).not.toContain('passkey');
   });
 
-  it('runs no terraform and writes nothing when no token is set anywhere', async () => {
-    const r = fakeIo({ keychainHas: () => false });
+  it('runs no terraform and writes nothing without a token in the environment: the Mac holds none', async () => {
+    const r = fakeIo({ env: {} });
     expect(await runWrapper('plan', PROD, r.io)).toBe(1);
     expect(r.calls).toEqual([]);
     expect(r.state).toEqual({});

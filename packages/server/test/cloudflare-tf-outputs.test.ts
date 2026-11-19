@@ -25,19 +25,34 @@ const keychain = (entries: Record<string, string>) => ({
 });
 
 describe('credentials', () => {
-  it('falls back to the Keychain entries when the environment has none', () => {
+  it('takes the token from the environment and the state key from the Keychain', () => {
     const c = tfCredentials({
-      env: {},
-      ...keychain({
-        'cloudflare-api-token': `${TOKEN}\n`,
-        'cloudflare-r2-tfstate': JSON.stringify(R2),
-      }),
+      env: { CLOUDFLARE_API_TOKEN: `${TOKEN}\n` },
+      ...keychain({ 'cloudflare-r2-tfstate': JSON.stringify(R2) }),
     });
     expect(c.env).toEqual({
       CLOUDFLARE_API_TOKEN: TOKEN,
       AWS_ACCESS_KEY_ID: R2.accessKeyId,
       AWS_SECRET_ACCESS_KEY: R2.secretAccessKey,
     });
+  });
+
+  it('never reads a Cloudflare token from the Keychain: the Mac holds none', () => {
+    const asked: string[] = [];
+    const k = keychain({
+      'cloudflare-api-token': `${TOKEN}\n`,
+      'cloudflare-r2-tfstate': JSON.stringify(R2),
+    });
+    const src = {
+      env: {},
+      keychainHas: (n: string) => {
+        asked.push(n);
+        return k.keychainHas(n);
+      },
+      keychainRead: k.keychainRead,
+    };
+    expect(() => tfCredentials(src)).toThrow('CLOUDFLARE_API_TOKEN is not set');
+    expect(asked).not.toContain('cloudflare-api-token');
   });
 
   it('refuses a malformed state entry without quoting it', () => {

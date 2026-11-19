@@ -1,9 +1,12 @@
 /**
  * The credentials a Terraform run needs, and where each comes from. CI hands
- * them in as environment variables (GitHub secrets); on the Mac each falls
- * back to its Keychain entry. Pure apart from the sources it is handed.
+ * them in as environment variables (GitHub secrets). The state key falls back
+ * to the Mac's Keychain; the Cloudflare token does not, because since the
+ * keeper retired only `cloudflare-prod` holds a write token
+ * (docs/process/keeper.md, "Retired"). Pure apart from the sources it is
+ * handed.
  *
- *   CLOUDFLARE_API_TOKEN                        Keychain `cloudflare-api-token`
+ *   CLOUDFLARE_API_TOKEN                        the environment only
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY    Keychain `cloudflare-r2-tfstate`,
  *                                               JSON {accessKeyId, secretAccessKey};
  *                                               else the board secret card's two
@@ -22,7 +25,6 @@
  * else; an error names the source, never any part of a value.
  */
 
-export const TOKEN_ENTRY = 'cloudflare-api-token';
 export const STATE_ENTRY = 'cloudflare-r2-tfstate';
 /** The board secret card's two entries for the same credential. */
 export const STATE_CARD_ID_ENTRY = 'r2-tfstate-access-key-id';
@@ -43,15 +45,6 @@ export interface TfCredentials {
 }
 
 const set = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
-
-function fromKeychain(src: CredentialSources, entry: string, envName: string): string {
-  if (!src.keychainHas(entry)) {
-    throw new Error(
-      `neither ${envName} nor the Keychain entry ${entry} is set; nothing was changed`,
-    );
-  }
-  return src.keychainRead(entry).trim();
-}
 
 /** The state bucket's credential, as terraform's S3 backend reads it. */
 export function stateCredentials(src: CredentialSources): Record<string, string> {
@@ -98,9 +91,12 @@ function fromCard(src: CredentialSources): Record<string, string> {
 }
 
 export function tfCredentials(src: CredentialSources): TfCredentials {
-  const token = set(src.env.CLOUDFLARE_API_TOKEN)
-    ? src.env.CLOUDFLARE_API_TOKEN.trim()
-    : fromKeychain(src, TOKEN_ENTRY, 'CLOUDFLARE_API_TOKEN');
+  if (!set(src.env.CLOUDFLARE_API_TOKEN)) {
+    throw new Error(
+      'CLOUDFLARE_API_TOKEN is not set. The Mac holds no Cloudflare token: a pull request touching infra/cloudflare/ gets a plan from cloudflare.yml. Nothing was changed',
+    );
+  }
+  const token = src.env.CLOUDFLARE_API_TOKEN.trim();
   return { token, env: { CLOUDFLARE_API_TOKEN: token, ...stateCredentials(src) } };
 }
 

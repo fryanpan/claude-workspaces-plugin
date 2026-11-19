@@ -6,11 +6,17 @@
 #   push to main  the same check, then apply to prod in the GitHub Environment
 #                 `cloudflare-prod`. A merged pull request is the approval: the
 #                 environment has no required reviewer.
-#   dispatch      the same as a push, when run on main. The keeper dispatches
-#                 it after `bun run cf:sync-config` writes the gitignored
-#                 configs' secrets (infra/cloudflare/README.md, "CI"); a
-#                 dispatch on any other branch runs the check and applies
-#                 nothing.
+#   dispatch      the same as a push, when run on main. `bun run
+#                 cf:sync-config` dispatches it after writing the gitignored
+#                 routing configs' secrets with Bryan's `gh` login
+#                 (infra/cloudflare/README.md, "CI"); a dispatch on any other
+#                 branch runs the check and applies nothing.
+#
+# The apply makes any Access service token the config names and the account
+# lacks, and seals its pair to the Mac's committed handoff key
+# (infra/handoff/). The sealed file is uploaded as the artifact `handoff-mac`;
+# only the Mac's private key opens it, and `bun run handoff:pull` stores the
+# pair in the Keychain.
 #
 # No Fly token is used here: a project machine's image deploys from fly.yml.
 # Machines take new server code from the signed releases server-release.yml
@@ -29,7 +35,9 @@
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY                     both; optional
 #   CF_ROUTER_CONFIG, CF_ACCESS_CONFIG, CF_SHARE_LINK_CONFIG   repository
 # `bun run cf:ci-secrets apply` (infra/cloudflare/ci-secrets/) writes the
-# environment's three and the configs; keeper-setup the repository's three.
+# environment's three and the configs; `cf:sync-config` rewrites the router
+# and share-link configs. CF_ACCESS_CONFIG is frozen: the Access email lists
+# retire with Better Auth.
 # Without the R2 pair, ci-credentials.ts derives the state bucket's key from
 # CLOUDFLARE_API_TOKEN (its id, and the SHA-256 of its value), masks it, and
 # hands it to terraform's environment alone. The token then needs R2 write
@@ -190,4 +198,17 @@ jobs:
           CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
           CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
           CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
-        run: bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts apply prod --ci
+          CW_HANDOFF_OUT: ${{ runner.temp }}/handoff-mac/handoff.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/handoff-mac"
+          bun infra/cloudflare/ci-credentials.ts -- bun infra/cloudflare/run.ts apply prod --ci
+      # Also after a failure: a token made before a later step failed is sealed
+      # there, and Cloudflare gives its secret only once.
+      - name: Hand the Mac any new service token
+        if: always() && steps.secrets.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: handoff-mac
+          path: ${{ runner.temp }}/handoff-mac/
+          if-no-files-found: ignore
+          retention-days: 8

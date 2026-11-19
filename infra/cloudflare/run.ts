@@ -11,10 +11,13 @@
  *      (`credentials.ts`);
  *   3. read the account for the ids Terraform cannot know offline, and refuse
  *      what would repoint or shadow something this config did not make
- *      (`discover.ts`); a service token the account lacks is named, and CI's
- *      apply refuses it, because only `cf:sync-config` makes one;
- *   4. write the tfvars and the -backend-config file to `state/<env>/`, 600;
- *   5. `terraform init` against the R2 state, then plan, or (CI) apply.
+ *      (`discover.ts`);
+ *   4. CI's apply only: make each service token the config names and the
+ *      account lacks (`service-tokens.ts`), seal its pair to the Mac
+ *      (CW_HANDOFF_OUT, `infra/handoff/`) and read the account again, so the
+ *      apply adopts it by id;
+ *   5. write the tfvars and the -backend-config file to `state/<env>/`, 600;
+ *   6. `terraform init` against the R2 state, then plan, or (CI) apply.
  *
  * With `--ci` the plan is saved and only its summary is printed
  * (`plan-summary.ts`), and to the file CF_PLAN_SUMMARY names when set; a
@@ -22,27 +25,20 @@
  * shown, because CI logs are public; its errors still are.
  *
  * Credentials reach terraform in the child's environment and nowhere else:
- * never an argument, a file, a variable or a printed line.
- *
- * On the Mac, once the keeper holds the Cloudflare token (`CW_KEEPER_URL`
- * set, `--ci` absent, no `CLOUDFLARE_API_TOKEN` in the environment), the
- * keeper runs the plan from its own release instead, and this process reads
- * no Cloudflare token (`keeper-wrapper.ts`).
+ * never an argument, a file, a variable or a printed line. The Cloudflare
+ * token comes from the environment only: since the keeper retired the Mac
+ * holds none, and a pull request's plan is the way to see a change
+ * (docs/process/keeper.md, "Retired").
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import {
-  announceToBoard,
-  boardUrlFromEnv,
-} from '../../packages/server/src/keeper/keeper-announce.ts';
-import { keeperTerraform } from '../../packages/server/src/keeper/keeper-client.ts';
+import { type HandoffSink, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
 import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
 import { keychainHas, keychainRead } from '../project-machine/mac-ops.ts';
 import { tfCredentials } from './credentials.ts';
-import { type KeeperWrapperIo, runThroughKeeper } from './keeper-wrapper.ts';
 import { planSummary } from './plan-summary.ts';
 import { audienceLines, discoverRun, initArgs, writeRunFiles } from './prepare.ts';
-import { tokenServices } from './service-tokens.ts';
+import { mintServiceTokens, tokenServices } from './service-tokens.ts';
 import {
   TF_DIR,
   type TfEnv,
@@ -62,9 +58,10 @@ export const APPLY_POINTER = [
   'cf:apply no longer runs here: Cloudflare applies run in CI, with nobody at a terminal.',
   '  - A change to infra/cloudflare/ or either Worker applies when its pull request merges to main',
   '    (.github/workflows/cloudflare.yml, job apply).',
-  '  - A change to the gitignored configs (people, domains, session length, a new service token):',
-  '    bun run cf:sync-config, then one passkey tap. The keeper writes the configs to GitHub,',
-  '    makes any missing service token and starts cloudflare.yml on main.',
+  '  - A change to the gitignored routing configs (router.local.json, wrangler.local.toml):',
+  '    bun run cf:sync-config writes them to GitHub and starts cloudflare.yml on main.',
+  '  - A new service token: name it in the config; the apply makes it and seals its pair',
+  '    to this Mac, and bun run handoff:pull stores it in the Keychain.',
   '  - To see what would change first: bun run cf:plan.',
   'Nothing was changed.',
   '',
@@ -83,6 +80,10 @@ export interface WrapperIo {
   statePath: (name: string) => string;
   /** terraform in the env's root, `env` added. `capture` returns stdout instead of showing it. */
   terraform: (args: string[], env: Record<string, string>, capture?: boolean) => TfResult;
+  /** CI's apply: where a new service token's pair goes, sealed to the Mac. */
+  macSink: HandoffSink | null;
+  /** The Mac's public handoff key. */
+  macKey: () => string;
   out: (s: string) => void;
   err: (s: string) => void;
 }
@@ -113,26 +114,28 @@ export async function runWrapper(
   try {
     const creds = tfCredentials(io);
     const api = io.api(creds.token);
-    const found = await discoverRun(opts.env, io.read, api);
+    let found = await discoverRun(opts.env, io.read, api);
     if (!found.ok) {
       for (const r of found.refusals) io.err(`  - ${r}\n`);
       io.err('Refused before terraform ran; nothing was changed.\n');
       return 1;
     }
     const missing = found.missing;
-    for (const name of Object.values(missing)) {
-      if (command === 'apply') {
-        io.err(`  - service token "${name}" does not exist, and CI cannot make one\n`);
-      } else if (!opts.ci) {
+    if (command === 'plan' && !opts.ci) {
+      for (const name of Object.values(missing)) {
         const s = tokenServices(name);
         io.out(
-          `Service token "${name}" does not exist: cf:sync-config makes it and stores its pair in the Keychain (${s.clientId}, ${s.secret}).\n`,
+          `Service token "${name}" does not exist: the apply on main makes it and seals its pair to the Mac, and bun run handoff:pull stores it (${s.clientId}, ${s.secret}).\n`,
         );
       }
     }
     if (command === 'apply' && Object.keys(missing).length > 0) {
-      io.err('Run bun run cf:sync-config on the Mac to make it. Nothing was changed.\n');
-      return 1;
+      if (!(await mintMissing(found.runtime.account_id, missing, api, io))) return 1;
+      found = await discoverRun(opts.env, io.read, api);
+      if (!found.ok || Object.keys(found.missing).length > 0) {
+        io.err('A service token made here is not in the account yet; nothing else was changed.\n');
+        return 1;
+      }
     }
     const { varFile, backend } = writeRunFiles(
       opts.env,
@@ -168,6 +171,49 @@ export async function runWrapper(
   }
 }
 
+/**
+ * Make the missing service tokens and seal each pair to the Mac at once, so a
+ * later failure cannot lose a secret Cloudflare sends only to this call.
+ * True when every token was made and sealed.
+ */
+async function mintMissing(
+  accountId: string,
+  missing: Record<string, string>,
+  api: CloudflareApi,
+  io: WrapperIo,
+): Promise<boolean> {
+  const sink = io.macSink;
+  if (!sink) {
+    io.err(
+      `  - ${Object.values(missing).join(', ')}: a new service token is made only where its pair can be sealed to the Mac (CW_HANDOFF_OUT, cloudflare.yml)\nNothing was changed.\n`,
+    );
+    return false;
+  }
+  // Before anything is made: what is made must be sealable.
+  const key = io.macKey();
+  const nameOf = new Map(Object.values(missing).map((n) => [tokenServices(n).secret, n]));
+  const minted = await mintServiceTokens(api, accountId, missing, {
+    keychainHasService: () => false,
+    storeToken: (services, clientId, secret) =>
+      sink.add({
+        kind: 'service-token',
+        name: nameOf.get(services.secret) ?? '',
+        clientId,
+        secret,
+        replace: false,
+      }),
+    confirm: () => true,
+    // Its lines speak of the Keychain; here the pair goes to the Mac.
+    out: () => {},
+    err: io.err,
+  });
+  if (sink.flush(key)) {
+    for (const line of sink.describe()) io.out(`Made and sealed to the Mac: ${line}\n`);
+    io.out('The Mac stores each pair on its next bun run handoff:pull.\n');
+  }
+  return minted.ok;
+}
+
 /** A config from its CI stand-in when that is set, else from its file. */
 export function configReader(env: Record<string, string | undefined>, repo = REPO): ReadConfig {
   const byPath = new Map<string, string>();
@@ -201,32 +247,8 @@ export function realIo(tfEnv: TfEnv): WrapperIo {
     },
     statePath: (name) => join(dir, name),
     terraform: (args, env, capture) => spawnTerraform(envDir(tfEnv), args, env, capture, dir),
-    out: (s) => process.stdout.write(s),
-    err: (s) => process.stderr.write(s),
-  };
-}
-
-/** Whether a run goes through the keeper rather than reading a token here. */
-export function throughKeeper(env: Record<string, string | undefined>, ci: boolean): boolean {
-  return !ci && !!env.CW_KEEPER_URL?.trim() && !env.CLOUDFLARE_API_TOKEN?.trim();
-}
-
-export function realKeeperWrapperIo(origin: string): KeeperWrapperIo {
-  const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'cf:plan';
-  return {
-    read: configReader(process.env),
-    env: process.env,
-    keychainHas,
-    keychainRead,
-    keeper: (env, input) =>
-      keeperTerraform(origin, 'plan', env, input, {
-        requester,
-        announce: announceToBoard(boardUrlFromEnv(), requester),
-        onHeld: (held) => {
-          process.stderr.write(`[keeper] ${held.summary} waits for Bryan's passkey\n`);
-          process.stderr.write(`[keeper] approve at ${held.approveUrl}\n`);
-        },
-      }),
+    macSink: macSinkFromEnv(process.env),
+    macKey: () => recipientKey('mac'),
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
   };
@@ -243,9 +265,5 @@ if (import.meta.main) {
     process.exit(2);
   }
   const ci = args.includes('--ci');
-  const run =
-    command === 'plan' && throughKeeper(process.env, ci)
-      ? runThroughKeeper(env, realKeeperWrapperIo(process.env.CW_KEEPER_URL?.trim() ?? ''))
-      : runWrapper(command, { env, ci }, realIo(env));
-  run.then((code) => process.exit(code));
+  runWrapper(command, { env, ci }, realIo(env)).then((code) => process.exit(code));
 }

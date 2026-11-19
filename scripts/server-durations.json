@@ -187,7 +187,6 @@
     "packages/server/test/cloudflare-tf-access-changes.test.ts": 0,
     "packages/server/test/cloudflare-tf-discover.test.ts": 0,
     "packages/server/test/cloudflare-tf-keeper-run.test.ts": 0.1,
-    "packages/server/test/cloudflare-tf-keeper-wrapper.test.ts": 0,
     "packages/server/test/cloudflare-tf-lockdown.test.ts": 0,
     "packages/server/test/cloudflare-tf-outputs.test.ts": 0,
     "packages/server/test/cloudflare-tf-service-tokens.test.ts": 0.1,

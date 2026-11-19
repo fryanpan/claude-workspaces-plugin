@@ -1,11 +1,11 @@
 /**
  * Access service tokens under Terraform (`infra/cloudflare/service-tokens.ts`,
  * through `run.ts`): a token the config names and the account lacks is shown
- * by a plan with the command that makes it (`cf:sync-config`), refused by a
- * CI apply, and adopted by id once it exists. The Keychain writer sends a
- * value on stdin only, and replaces an item only when asked to. A fake
- * account and a fake terraform; nothing here calls Cloudflare or reads the
- * real Keychain. Making a token is `keeper-cf-sync.test.ts`.
+ * by a plan, made by CI's apply with its pair sealed to the Mac
+ * (`infra/handoff/`), and adopted by id once it exists. The Keychain writer
+ * (what `handoff:pull` stores with) sends a value on stdin only, and replaces
+ * an item only when asked to. A fake account and a fake terraform; nothing
+ * here calls Cloudflare or reads the real Keychain.
  */
 import { describe, expect, it } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { type WrapperIo, runWrapper } from '../../../infra/cloudflare/run.ts';
 import { keychainAdd, tokenServices } from '../../../infra/cloudflare/service-tokens.ts';
 import { CONFIG_PATHS } from '../../../infra/cloudflare/vars.ts';
+import { HandoffSink, openItems } from '../../../infra/handoff/items.ts';
+import { generateHandoffKeys } from '../../../infra/handoff/seal.ts';
 import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 
 const ZONE = 'harborlight.test';
@@ -56,7 +58,10 @@ interface World {
 function world(opts: {
   tokens: string[];
   existing?: Array<{ id: string; name: string }>;
+  sink?: HandoffSink | null;
+  macKey?: string;
 }): World {
+  const existing = [...(opts.existing ?? [])];
   const w: World = {
     posts: [],
     tf: [],
@@ -72,12 +77,13 @@ function world(opts: {
     if (p.endsWith('/dns_records')) {
       return [{ id: 'm', type: 'CNAME', name: `mac-origin.${ZONE}`, content: 'x', proxied: true }];
     }
-    if (p === `/accounts/${ACCOUNT}/access/service_tokens`) return opts.existing ?? [];
+    if (p === `/accounts/${ACCOUNT}/access/service_tokens`) return existing;
     return [];
   };
   const api = (async (method: string, path: string, body?: unknown) => {
     if (method === 'POST' && path === `/accounts/${ACCOUNT}/access/service_tokens`) {
       w.posts.push({ path, body });
+      existing.push({ id: NEW_ID, name: (body as { name: string }).name });
       return {
         id: NEW_ID,
         name: (body as { name: string }).name,
@@ -91,12 +97,9 @@ function world(opts: {
   api.all = async <T>(path: string) => answer(path) as T[];
   w.io = {
     read: files(opts.tokens),
-    env: {},
-    keychainHas: (n) => n === 'cloudflare-api-token' || n === 'cloudflare-r2-tfstate',
-    keychainRead: (n) =>
-      n === 'cloudflare-api-token'
-        ? TOKEN
-        : JSON.stringify({ accessKeyId: 'k', secretAccessKey: 's' }),
+    env: { CLOUDFLARE_API_TOKEN: TOKEN },
+    keychainHas: (n) => n === 'cloudflare-r2-tfstate',
+    keychainRead: () => JSON.stringify({ accessKeyId: 'k', secretAccessKey: 's' }),
     api: () => api,
     writeState: (name, content) => {
       w.state[name] = content;
@@ -106,6 +109,11 @@ function world(opts: {
     terraform: (args) => {
       w.tf.push(args);
       return { status: 0, stdout: args[0] === 'show' ? '{"resource_changes":[]}' : '{}' };
+    },
+    macSink: opts.sink ?? null,
+    macKey: () => {
+      if (!opts.macKey) throw new Error('recipients.json has no key for mac');
+      return opts.macKey;
     },
     out: (s) => w.out.push(s),
     err: (s) => w.err.push(s),
@@ -122,7 +130,7 @@ describe('service tokens in cf:plan and the CI apply', () => {
     expect(w.tf.map((a) => a[0])).toEqual(['init', 'plan']);
     expect(w.posts).toEqual([]);
     expect(tfvars(w).service_token_ids).toEqual({});
-    expect(w.out.join('')).toContain('"agent moi" does not exist: cf:sync-config makes it');
+    expect(w.out.join('')).toContain('"agent moi" does not exist: the apply on main makes it');
     expect(w.out.join('')).toContain('cw-agent-moi-access-secret');
   });
 
@@ -134,12 +142,44 @@ describe('service tokens in cf:plan and the CI apply', () => {
     expect(w.tf.map((a) => a[0])).toEqual(['init', 'plan', 'show', 'apply']);
   });
 
-  it('a CI apply refuses a missing token and names cf:sync-config: CI has no Keychain', async () => {
-    const w = world({ tokens: ['agent moi'] });
-    expect(await runWrapper('apply', { env: 'prod', ci: true }, w.io)).toBe(1);
-    expect(w.posts).toEqual([]);
-    expect(w.tf).toEqual([]);
-    expect(w.err.join('')).toContain('bun run cf:sync-config');
+  it('a CI apply makes a missing token, seals its pair to the Mac, and adopts it by id', async () => {
+    const mac = generateHandoffKeys();
+    const sealed: string[] = [];
+    const sink = new HandoffSink('mac', '/out/handoff.json');
+    const flush = sink.flush.bind(sink);
+    sink.flush = (key) => flush(key, (_p, t) => sealed.push(t));
+    const w = world({ tokens: ['agent moi'], sink, macKey: mac.publicKey });
+    expect(await runWrapper('apply', { env: 'prod', ci: true }, w.io)).toBe(0);
+    expect(w.posts.map((p) => p.body)).toEqual([{ name: 'agent moi' }]);
+    expect(tfvars(w).service_token_ids).toEqual({ 'agent moi': NEW_ID });
+    expect(w.tf.map((a) => a[0])).toEqual(['init', 'plan', 'show', 'apply']);
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]).not.toContain(NEW_SECRET);
+    expect(openItems(mac.privateKey, sealed[0] ?? '').items).toEqual([
+      {
+        kind: 'service-token',
+        name: 'agent moi',
+        clientId: NEW_CLIENT_ID,
+        secret: NEW_SECRET,
+        replace: false,
+      },
+    ]);
+    const said = [...w.out, ...w.err, ...Object.values(w.state)].join('\n');
+    expect(said).not.toContain(NEW_SECRET);
+    expect(said).toContain('handoff:pull');
+  });
+
+  it('a CI apply makes no token where it cannot seal the pair: no sink, or no Mac key', async () => {
+    const noSink = world({ tokens: ['agent moi'] });
+    expect(await runWrapper('apply', { env: 'prod', ci: true }, noSink.io)).toBe(1);
+    expect(noSink.err.join('')).toContain('CW_HANDOFF_OUT');
+    const noKey = world({ tokens: ['agent moi'], sink: new HandoffSink('mac', '/out/x.json') });
+    expect(await runWrapper('apply', { env: 'prod', ci: true }, noKey.io)).toBe(1);
+    expect(noKey.err.join('')).toContain('no key for mac');
+    for (const w of [noSink, noKey]) {
+      expect(w.posts).toEqual([]);
+      expect(w.tf).toEqual([]);
+    }
   });
 
   it('CONTROL: a CI plan with a missing token still plans', async () => {
