@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  relativeTargetHref,
-  renderCommentMarkdown,
-  renderCommentMarkdownInline,
-} from '../src/comment-markdown.ts';
+import { renderCommentMarkdown, renderCommentMarkdownInline } from '../src/comment-markdown.ts';
+import { relativeTargetHref } from '../src/link-open.ts';
 
 describe('renderCommentMarkdown', () => {
   it('escapes HTML — no XSS passthrough', () => {

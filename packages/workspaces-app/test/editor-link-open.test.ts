@@ -42,13 +42,8 @@ function setViewportWidth(w: number): void {
   ).happyDOM.setInnerWidth(w);
 }
 
-/**
- * No case here uses a RELATIVE href. Tiptap's link extension sanitises one to
- * an empty `href` before it ever reaches the DOM, so a relative link renders
- * as an anchor pointing nowhere — which is true on both sides of this change
- * and is not what this file is about. The in-app branch that a relative href
- * would have taken is covered, without a DOM, by `link-open.test.ts`.
- */
+/** Mount the real editor over `md`. Relative links are the last describe
+ *  block's business; every case above it uses an absolute one. */
 function mount(
   md: string,
   docLink?: { workspaceId: string; relPath: string; navigate: (url: string) => void },
@@ -263,5 +258,126 @@ describe('a link the reader has commented on', () => {
     mount(LINKED);
     click(anchor());
     expect(opened.calls.length).toBe(1);
+  });
+});
+
+/**
+ * A relative link — `[the data](part-1/riverbend-data.mdx)` — names a FILE,
+ * and only the server knows which doc on the board is bound to it. A tap goes
+ * to the board's open route, which answers with that doc's page; Cmd/Ctrl
+ * opens the same address in a new tab, and Alt still puts the caret in it.
+ * Before this, Tiptap drew `notes/…` as `href=""` (its pattern blanks a path
+ * whose first segment has no dash), and the rest resolved against the doc
+ * page's own address, which names nothing.
+ *
+ * The real headless-browser proof, through a real server's redirect, is
+ * `relative-link-open-browser.test.ts`.
+ */
+describe('a relative link opens through the board', () => {
+  const PAGE = 'http://localhost:3000/workspaces/w-harbor/docs/guide';
+  const RELATIVE = [
+    'Read [the Riverbend data](part-1/riverbend-data.mdx) first,',
+    'then [the Saltmarsh tides](notes/saltmarsh-tides.md).',
+  ].join(' ');
+  const openRoute = (path: string): string =>
+    `/workspaces/w-harbor/open?${new URLSearchParams({ path, from: 'guide' }).toString()}`;
+
+  function atPage(): { assigned: string[] } {
+    (window as unknown as { happyDOM: { setURL: (u: string) => void } }).happyDOM.setURL(PAGE);
+    const assigned: string[] = [];
+    vi.spyOn(window.location, 'assign').mockImplementation((u: string | URL) => {
+      assigned.push(String(u));
+    });
+    return { assigned };
+  }
+
+  const links = (): HTMLAnchorElement[] =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>('.ProseMirror a'));
+
+  it('draws every relative link with its own target, not an empty href', () => {
+    atPage();
+    mount(RELATIVE);
+    expect(links().map((a) => a.getAttribute('href'))).toEqual([
+      'part-1/riverbend-data.mdx',
+      'notes/saltmarsh-tides.md',
+    ]);
+  });
+
+  it('still draws a script-bearing href as nothing', () => {
+    atPage();
+    mount('A [trap](javascript:alert(1)) and [another](java\tscript:alert(2)).');
+    for (const a of links()) expect(a.getAttribute('href') ?? '').not.toMatch(/script/i);
+  });
+
+  for (const width of WIDTHS) {
+    it(`a tap at ${width} opens the doc in this tab through the open route`, () => {
+      setViewportWidth(width);
+      const page = atPage();
+      const opened = watchOpen();
+      mount(RELATIVE);
+      const [riverbend, saltmarsh] = links();
+      if (!riverbend || !saltmarsh) throw new Error('two links were not drawn');
+      click(riverbend);
+      click(saltmarsh);
+      expect(page.assigned).toEqual([
+        openRoute('part-1/riverbend-data.mdx'),
+        openRoute('notes/saltmarsh-tides.md'),
+      ]);
+      expect(opened.calls).toEqual([]);
+    });
+  }
+
+  it('Cmd- or Ctrl-click opens the same address in a new tab and leaves this one', () => {
+    setViewportWidth(1180);
+    const page = atPage();
+    const opened = watchOpen();
+    mount(RELATIVE);
+    const a = links()[0];
+    if (!a) throw new Error('no link');
+    click(a, { metaKey: true });
+    click(a, { ctrlKey: true });
+    const want = [openRoute('part-1/riverbend-data.mdx'), '_blank', 'noopener,noreferrer'];
+    expect(opened.calls).toEqual([want, want]);
+    expect(page.assigned).toEqual([]);
+  });
+
+  it('a folder-browse member still opens its sibling in-app, and Cmd-click in a new tab', () => {
+    setViewportWidth(1180);
+    const page = atPage();
+    const opened = watchOpen();
+    const navigated: string[] = [];
+    mount(RELATIVE, {
+      workspaceId: 'set-harbor',
+      relPath: 'guide.md',
+      navigate: (url) => navigated.push(url),
+    });
+    const a = links()[0];
+    if (!a) throw new Error('no link');
+    click(a);
+    click(a, { metaKey: true });
+    expect(navigated.length).toBe(1);
+    expect(navigated[0]).toContain(encodeURIComponent('set-harbor:part-1~riverbend-data.mdx'));
+    expect(opened.calls).toEqual([[navigated[0], '_blank', 'noopener,noreferrer']]);
+    expect(page.assigned).toEqual([]);
+  });
+
+  it('leaves Alt-click to the editor, which is how the link text is edited', () => {
+    setViewportWidth(1180);
+    const page = atPage();
+    const opened = watchOpen();
+    mount(RELATIVE);
+    const a = links()[0];
+    if (!a) throw new Error('no link');
+    const ev = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      detail: 1,
+      altKey: true,
+    });
+    a.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(page.assigned).toEqual([]);
+    expect(opened.calls).toEqual([]);
   });
 });
