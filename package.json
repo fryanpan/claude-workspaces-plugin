@@ -26,6 +26,8 @@
     "cf:ci-secrets": "bun run infra/cloudflare/ci-secrets.ts",
     "cf:app-secrets": "bun run infra/cloudflare/app-secrets.ts",
     "fly:ci-tokens": "bun run infra/project-machine/ci-tokens.ts",
+    "handoff:pull": "bun run infra/handoff/pull.ts",
+    "handoff:keygen": "bun run infra/handoff/keygen.ts",
     "check:cloudflare-tf": "bun run infra/cloudflare/check.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",
