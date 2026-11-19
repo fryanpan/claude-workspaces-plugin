@@ -50,6 +50,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   // `<dataDir>/agent-grant-tokens.json`, a path built from the data dir alone.
   'packages/server/src/auth/agent-grant-token.ts': 'data-dir',
   'packages/server/src/auth/board-agent-token.ts': 'not-in-inventory',
+  'packages/server/src/auth/board-signin.ts': 'data-dir',
+  'packages/server/src/auth/owner-signin-record.ts': 'data-dir',
   'packages/server/src/auth/session-revocations.ts': 'not-in-inventory',
   'packages/server/src/board-socket-roots.ts': 'not-in-inventory',
   'packages/server/src/board-sockets.ts': 'not-in-inventory',

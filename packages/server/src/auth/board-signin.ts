@@ -27,8 +27,9 @@
  * sign-up, which no route offers — an account is made only for an address a
  * board on this machine is shared with (`mayHaveAccount`).
  */
-import { Database } from 'bun:sqlite';
+import type { Database } from 'bun:sqlite';
 import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 import { betterAuth } from 'better-auth';
@@ -135,7 +136,12 @@ function openUserList(dataDir: string): Database {
   mkdirSync(dataDir, { recursive: true });
   const path = join(dataDir, 'signin.sqlite');
   closeSync(openSync(path, 'a', 0o600));
-  const db = new Database(path, { create: true });
+  // Loaded here rather than imported: `server.ts` reaches this module, and
+  // suites that run on node (scripts/*.test.ts) import `server.ts` without
+  // ever turning sign-in on. `bun:sqlite` exists only under Bun.
+  const sqlite = createRequire(import.meta.url)('bun:sqlite') as { Database: typeof Database };
+  const Sqlite = sqlite.Database;
+  const db = new Sqlite(path, { create: true });
   db.exec('PRAGMA journal_mode = WAL');
   return db;
 }
