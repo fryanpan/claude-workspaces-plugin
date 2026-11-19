@@ -27,7 +27,8 @@
  * SHARDING vs JOBS. `--jobs` splits across processes on THIS machine and is
  * how the wall clock comes down. `--shard i/n` takes a slice of the files and
  * is for splitting across machines. CI uses both: two runners, each taking
- * `--shard i/2` and running it across `--jobs 8`.
+ * `--shard i/2` and running it across `--jobs 8`. The shards are balanced on
+ * the measured times in `scripts/server-durations.json`.
  *
  * COVERAGE. Each CHUNK writes its own lcov — not each worker: bun rewrites
  * `<coverage-dir>/lcov.info` on every run, so a worker pointed at one
@@ -50,6 +51,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadServerDurations, serverShard } from './server-durations.ts';
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const SUITE_DIR = 'packages/server/test';
@@ -88,11 +90,6 @@ export function interleave(files: string[]): string[] {
   });
   keyed.sort((a, b) => a.h - b.h || (a.f < b.f ? -1 : 1));
   return keyed.map((k) => k.f);
-}
-
-/** The `i/n` slice of a list, round-robin so slow files spread across shards. */
-export function shardOf(files: string[], index: number, total: number): string[] {
-  return files.filter((_, i) => i % total === index - 1);
 }
 
 /**
@@ -233,7 +230,8 @@ async function main(): Promise<void> {
       console.error(`--shard wants i/n with 1 <= i <= n; got ${shard}`);
       process.exit(2);
     }
-    files = shardOf(files, i, n);
+    // Balanced on measured time, not every other file: why, scripts/server-durations.ts.
+    files = serverShard(files, i, n, loadServerDurations());
   }
   if (files.length === 0) {
     console.error(

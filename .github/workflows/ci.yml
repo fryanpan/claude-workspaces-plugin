@@ -376,7 +376,17 @@ jobs:
   #
   # One runner was enough at 412 files. At 1,300 the eight processes were busy
   # end to end (933s of chunk time inside 120s), so it is two runners now,
-  # each taking every other file of the same interleaved list (`--shard`).
+  # each taking half of the same interleaved list (`--shard`).
+  #
+  # Half by measured time, not every other file (2026-11-18). Twelve green
+  # runs' case times put 436s in one half and 365s in the other at main's
+  # usual split, and adding one file flips which half each later file joins.
+  # A shard's wall clock is about a fifth of its case time, so the heavy half
+  # ended ~14s after the light one, and `server` was the run's last job in 21
+  # of 50. The table is scripts/server-durations.json; refresh it with
+  # `bun run scripts/server-durations.ts <run-id>...`. Three shards were
+  # replayed too: they take the run's mean from 120.3s to 119.6s against two
+  # balanced ones, because the slowest browser shard is the path by then.
   server:
     runs-on: ubuntu-latest
     permissions:
