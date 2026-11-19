@@ -179,6 +179,12 @@ describe('the audit enumerates untracked files', () => {
   // locally. The explicit number is per this case, not a global bump
   // (.claude/rules/testing-standards.md standard 5), and it is a ceiling on a
   // hang rather than a target — nothing here should approach it.
+  //
+  // The two cases after it spawn the audit once each and carried vitest's 5s
+  // default, until `still names tracked files` timed out at 5000ms in the
+  // `client (1)` shard of main's run 44490610665 (16 Nov's run 43821437268
+  // too), where one audit run cost ~3.7s. So they carry the same ceiling, and
+  // the audit itself got cheaper (`matchesOf` in scripts/test-audit.ts).
   it('names an untracked test file, and fails on the sleep inside it', () => {
     // CONTROL, in the same run: with no probe planted the audit is clean and
     // does not name the path. Without this, "the audit named it" could be a
@@ -208,7 +214,7 @@ describe('the audit enumerates untracked files', () => {
     // could in principle have replaced the tracked list rather than extended
     // it, and every "the audit did not name it" assertion would still pass.
     expect(runAudit('--list').stdout).toContain(TRACKED_SITE);
-  });
+  }, 30_000);
 
   it('does not name a file .gitignore ignores', () => {
     // `--others` without `--exclude-standard` drags in node_modules and build
@@ -224,7 +230,7 @@ describe('the audit enumerates untracked files', () => {
     const run = runAudit('--list');
     expect(run.stdout).not.toContain(IGNORED_REL);
     expect(run.code, `audit went red on an ignored file:\n${run.stderr}`).toBe(0);
-  });
+  }, 30_000);
 });
 
 /**
