@@ -40,6 +40,21 @@
  * Deploying it: merge the change; CI applies it (infra/cloudflare/README.md).
  */
 
+/**
+ * The sign-in paths on the one address (`packages/server/src/auth/board-signin.ts`).
+ * They name no board, so the board table cannot place them; they belong to the
+ * machine that owns the one address (`ONE_ADDRESS_ORIGIN`), which is the only
+ * machine that signs people in there. Exact paths, so nothing else rides along.
+ */
+const SIGNIN_PATHS = new Set([
+  '/auth/sign-in',
+  '/auth/sign-in/google',
+  '/api/auth/sign-in/social',
+  '/api/auth/callback/google',
+  '/api/auth/get-session',
+  '/api/auth/sign-out',
+]);
+
 /** A board id is one path segment of id characters, compared undecoded. */
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** A hostname as Cloudflare DNS holds it: lower-case labels, no port. */
@@ -259,6 +274,13 @@ export function routeRequest(url, referer, env) {
     const project = projectOfHost(url.hostname, oneAddress);
     const origin = project ? parseProjectOrigins(env?.PROJECT_ORIGINS)?.get(project) : undefined;
     return origin ? { kind: 'forward', project, origin } : { kind: 'not_found' };
+  }
+  if (oneAddress && SIGNIN_PATHS.has(url.pathname)) {
+    // Fail closed: with no owner named, no machine gets the sign-in.
+    const home = env?.ONE_ADDRESS_ORIGIN;
+    return typeof home === 'string' && ORIGIN_HOST.test(home)
+      ? { kind: 'forward', origin: home, signIn: true }
+      : { kind: 'not_found' };
   }
   const route = routeBoardRequest(url, referer, parseBoardOrigins(env?.BOARD_ORIGINS));
   return oneAddress ? keepOneAddressStampHome(route, url, oneAddress, env) : route;
