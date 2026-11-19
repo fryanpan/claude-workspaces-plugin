@@ -71,16 +71,15 @@ any other name is refused before any `fly` command runs, so a deploy cannot
 overwrite an app in the org that is not a staging app.
 
 It needs `fly` on the PATH and reads `FLY_API_TOKEN` and `FLY_ORG` from the
-environment. On a Mac, an unset one is read from the Keychain entries
-`fly-org-token` and `fly-org-slug`. With no org from either, it uses the one
+environment, never from the Keychain. With no `FLY_ORG`, it uses the one
 org the token reaches, and refuses if there are several. The token goes only
 into the `fly` process's environment. When the app already exists, the deploy
 asks Fly for that one app and never lists or creates apps, so a token cut
 down to the app is enough. In the claude-workspaces repo CI holds such a
 token, for `cw-appkit-trial-staging` alone: run the `app-kit-staging`
 workflow on main, which deploys a fresh `new-app` to that app and reports the
-time from `new-app` to the first 200 on the run's summary. The app is made
-once from the Mac, by a first run of this command with the org token.
+time from `new-app` to the first 200 on the run's summary. The app was made
+once, by a first run of this command with a token that could list the org.
 
 The machine (`fly.toml`, built from `Dockerfile`) is the smallest shared CPU
 with 256 MB. It stops when idle and starts on the next request, so the first

@@ -20,11 +20,10 @@
  * never printed), deploy with APP_URL set to the app's origin, then poll the
  * URL until it answers 200 and print the time since the command started.
  *
- * Credentials: FLY_API_TOKEN and FLY_ORG from the environment. On a Mac,
- * either one that is missing is read from the Keychain entries
- * `fly-org-token` and `fly-org-slug`, stored the way the claude-workspaces
- * repo stores them (`packages/core/src/secret-name.ts`). With no org from
- * either, the org is the one `fly orgs list` returns, when the token reaches
+ * Credentials: FLY_API_TOKEN and FLY_ORG from the environment, and nowhere
+ * else: the Keychain is never read, because the Fly org token now lives only
+ * in CI (claude-workspaces' docs/process/keeper.md, "Retired"). With no
+ * FLY_ORG, the org is the one `fly orgs list` returns, when the token reaches
  * exactly one. The token goes into the `fly` child's environment and nowhere
  * else: never an argument, a log line or a file. In the claude-workspaces
  * repo CI holds a token for the trial app alone, so deploys run from the
@@ -46,10 +45,6 @@ const REGION = /^[a-z]{3}$/;
 export const VOLUME = 'app_data';
 const POLL_EVERY_MS = 2_000;
 const POLL_FOR_MS = 15 * 60_000;
-
-/** Where the claude-workspaces repo stores a Keychain secret (secret-name.ts). */
-export const KEYCHAIN_ACCOUNT = 'claude-workspaces';
-export const keychainService = (name: string): string => `claude-workspaces-secret.${name}`;
 
 export interface Options {
   app: string;
@@ -89,55 +84,20 @@ export function parseArgs(argv: string[], pkgName: string): Options {
   return { app, region, url: url || `https://${app}.fly.dev/health`, dryRun, startedAt };
 }
 
-/** A Keychain entry as the repo stores it: base64 under one account. */
-export function keychainRead(name: string, security = 'security'): string {
-  const r = spawnSync(
-    security,
-    ['find-generic-password', '-a', KEYCHAIN_ACCOUNT, '-s', keychainService(name), '-w'],
-    { encoding: 'utf8', env: process.env },
-  );
-  if (r.status !== 0) throw new Error(`the Keychain has no entry ${name}`);
-  return Buffer.from(r.stdout.trim(), 'base64').toString('utf8').trim();
-}
-
 export interface Credentials {
   token: string;
-  /** Undefined when neither FLY_ORG nor the Keychain names one: see `resolveOrg`. */
+  /** Undefined when FLY_ORG is unset: see `resolveOrg`. */
   org?: string;
 }
 
 const WHERE_DEPLOYS_RUN =
   'set FLY_API_TOKEN, or deploy from the app-kit-staging workflow in the claude-workspaces repo';
 
-/** FLY_API_TOKEN and FLY_ORG, each from the Keychain on a Mac when unset. */
-export function credentials(
-  env: Record<string, string | undefined>,
-  platform: string = process.platform,
-  security?: string,
-): Credentials {
-  const envToken = env.FLY_API_TOKEN?.trim();
-  const envOrg = env.FLY_ORG?.trim();
-  if (platform !== 'darwin') {
-    if (!envToken) throw new Error(WHERE_DEPLOYS_RUN);
-    return { token: envToken, org: envOrg || undefined };
-  }
-  let token = envToken;
-  if (!token) {
-    try {
-      token = keychainRead('fly-org-token', security);
-    } catch (err) {
-      throw new Error(`${(err as Error).message}: ${WHERE_DEPLOYS_RUN}`);
-    }
-  }
-  let org = envOrg;
-  if (!org) {
-    try {
-      org = keychainRead('fly-org-slug', security);
-    } catch {
-      org = undefined;
-    }
-  }
-  return { token, org: org || undefined };
+/** FLY_API_TOKEN and FLY_ORG from the environment; the token is required. */
+export function credentials(env: Record<string, string | undefined>): Credentials {
+  const token = env.FLY_API_TOKEN?.trim();
+  if (!token) throw new Error(WHERE_DEPLOYS_RUN);
+  return { token, org: env.FLY_ORG?.trim() || undefined };
 }
 
 /** The org slugs in `fly orgs list --json`: a slug-to-name map, or rows with a slug. */
