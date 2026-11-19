@@ -75,9 +75,17 @@ export function startGoogleStub(): GoogleStub {
   };
 }
 
+let browsers = 0;
+
 /** `name=value` pairs a browser would hold, from the responses it saw. */
 export class CookieJar {
   readonly cookies = new Map<string, string>();
+  /**
+   * This browser's own address, as Cloudflare names it (`cf-connecting-ip`),
+   * from a documentation range. One per browser, as in life, so one suite's
+   * sign-ins do not share a rate-limit bucket.
+   */
+  readonly ip = `198.51.100.${(browsers++ % 250) + 1}`;
   /** Every raw `Set-Cookie` header seen, in order. */
   readonly seen: string[] = [];
 
@@ -121,6 +129,7 @@ export async function signInWithGoogle(
     headers: {
       origin,
       'content-type': 'application/x-www-form-urlencoded',
+      'cf-connecting-ip': jar.ip,
       cookie: jar.header(),
     },
     body: new URLSearchParams({ next }).toString(),
@@ -134,7 +143,7 @@ export async function signInWithGoogle(
   back.searchParams.set('code', google.issueCode(profile));
   back.searchParams.set('state', authorize.searchParams.get('state') ?? '');
   const callback = await send(`${back.pathname}${back.search}`, {
-    headers: { cookie: jar.header() },
+    headers: { cookie: jar.header(), 'cf-connecting-ip': jar.ip },
   });
   jar.take(callback);
   return { authorize, callback };
