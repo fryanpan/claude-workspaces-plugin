@@ -86,6 +86,9 @@ describe('email and password sign-in, one user list per machine', () => {
               return token === GOOD && want.hostname === host;
             },
           },
+          // These cases ask for Alice's link more often than an hour allows;
+          // the limit itself is `board-signin-password.test.ts`.
+          linkLimits: { perAddress: 50, perIp: 50 },
         },
       },
     });
@@ -159,10 +162,12 @@ describe('email and password sign-in, one user list per machine', () => {
     const link = new URL(url);
     expect(link.host).toBe(m.host);
     expect(link.pathname).toBe('/auth/set-password');
-    const page = await send(m, jar, `${link.pathname}${link.search}`);
+    expect(link.search).toBe('');
+    // The browser sends no fragment: the page is the same for every link.
+    const page = await send(m, jar, link.pathname);
     expect(page.status).toBe(200);
     expect(page.headers.get('referrer-policy')).toBe('no-referrer');
-    const token = link.searchParams.get('token') ?? '';
+    const token = link.hash.replace('#token=', '');
     return submit(m, jar, '/auth/set-password', { token, password }, ts);
   };
   const failed = (res: Response) => (res.headers.get('location') ?? '').includes('error=');

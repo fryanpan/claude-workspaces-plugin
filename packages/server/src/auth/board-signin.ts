@@ -35,6 +35,7 @@ import { normalizeEmail } from '@claude-workspaces/core';
 import type { Auth } from './board-signin-auth.ts';
 import {
   type PasswordSignIn,
+  createLinkThrottle,
   handlePasswordRoute,
   noticeFor,
   passwordFormsHtml,
@@ -211,6 +212,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   const host = new URL(origin).hostname;
   const db = openUserList(opts.dataDir);
   const password = opts.password;
+  const throttle = createLinkThrottle(password?.linkLimits);
   // Loaded on first use, so a machine on `access` never loads the library.
   const loaded = import('./board-signin-auth.ts').then(async (m) => {
     const auth = m.createAuth(
@@ -230,7 +232,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     await m.migrate(auth);
     return {
       auth,
-      accounts: m.createPasswordAccounts(auth, { origin, mayHaveAccount: opts.mayHaveAccount }),
+      accounts: m.createPasswordAccounts(auth, db, { origin, mayHaveAccount: opts.mayHaveAccount }),
     };
   });
   const ready: Promise<Auth> = loaded.then((l) => l.auth);
@@ -256,6 +258,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
           host,
           password,
           accounts: async () => (await loaded).accounts,
+          throttle,
           safeNext,
           call: async (r, path, body) =>
             (await ready).handler(
