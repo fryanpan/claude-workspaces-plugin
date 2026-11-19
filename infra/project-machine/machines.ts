@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
- * The project machines, read from the committed `machines.json`. CI no
- * longer runs this: machines install signed releases themselves
- * (`release-cli.ts`), and an image deploy runs from the keeper.
+ * The project machines, read from the committed `machines.json`. Machines
+ * install signed releases themselves (`release-cli.ts`); `fly.yml` runs this
+ * to update each one's image, one job per project, each in its own GitHub
+ * Environment holding a token for that project's app alone (`ci-tokens.ts`).
  *
  *   { "machines": [ { "project": "<name>", "tunnel": "named",
  *                     "memory": 2048, "leadBoard": "<board id>" } ] }
@@ -11,10 +12,16 @@
  * secret: the app is `cw-<project>` (`deploy-plan.ts`), and every credential
  * comes from the Keychain, or from the environment with CW_SECRETS_FROM_ENV=1.
  *
- *   bun infra/project-machine/machines.ts deploy [--ref <commit>] [--dry-run]
+ *   bun infra/project-machine/machines.ts deploy [--project <name>] [--ref <commit>]
+ *       [--dry-run] [--no-terraform-outputs]
+ *   bun infra/project-machine/machines.ts matrix
  *
- * runs `machine:deploy` for each machine in order and stops at the first
- * failure. A machine the Mac never made is refused there, before any change.
+ * `deploy` runs `machine:deploy` for each machine in order (or the one
+ * `--project` names) and stops at the first failure. A machine the Mac never
+ * made is refused there, before any change. `--no-terraform-outputs` is CI's:
+ * its jobs hold no key to the state (`deploy.ts`). `matrix` prints
+ * `matrix=<JSON list of projects>`, the line fly.yml appends to
+ * `$GITHUB_OUTPUT`.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -62,7 +69,7 @@ export function parseMachines(raw: string): Machine[] {
 }
 
 /** The `machine:deploy` arguments for one machine. */
-export function deployArgs(m: Machine, ref: string, dryRun: boolean): string[] {
+export function deployArgs(m: Machine, ref: string, dryRun: boolean, noOutputs = false): string[] {
   return [
     '--project',
     m.project,
@@ -73,26 +80,50 @@ export function deployArgs(m: Machine, ref: string, dryRun: boolean): string[] {
     ...(m.memory !== undefined ? ['--memory', String(m.memory)] : []),
     ...(m.leadBoard !== undefined ? ['--lead-board', m.leadBoard] : []),
     ...(dryRun ? ['--dry-run'] : []),
+    ...(noOutputs ? ['--no-terraform-outputs'] : []),
   ];
+}
+
+/** fly.yml's job matrix: every project, in the file's order. */
+export const matrixLine = (machines: readonly Machine[]): string =>
+  `matrix=${JSON.stringify(machines.map((m) => m.project))}`;
+
+/** The machines one run deploys: all, or the one `--project` names. */
+export function selected(machines: Machine[], project: string | undefined): Machine[] {
+  if (project === undefined) return machines;
+  const one = machines.filter((m) => m.project === project);
+  if (one.length === 0) throw new Error(`machines.json lists no project ${project}`);
+  return one;
 }
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
+  const usage =
+    'usage: bun infra/project-machine/machines.ts deploy [--project <name>] [--ref <commit>] [--dry-run] [--no-terraform-outputs] | matrix';
+  const all = parseMachines(readFileSync(MACHINES_FILE, 'utf8'));
+  if (args[0] === 'matrix') {
+    console.log(matrixLine(all));
+    process.exit(0);
+  }
   if (args[0] !== 'deploy') {
-    console.error(
-      'usage: bun infra/project-machine/machines.ts deploy [--ref <commit>] [--dry-run]',
-    );
+    console.error(usage);
     process.exit(2);
   }
-  const i = args.indexOf('--ref');
-  const ref = i >= 0 ? (args[i + 1] ?? 'HEAD') : 'HEAD';
-  const machines = parseMachines(readFileSync(MACHINES_FILE, 'utf8'));
+  const value = (name: string) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const ref = value('--ref') ?? 'HEAD';
+  const machines = selected(all, value('--project'));
   if (machines.length === 0) console.log('[machines] machines.json lists no project machine');
   for (const m of machines) {
     console.log(`[machines] ${m.project}`);
     const r = spawnSync(
       process.execPath,
-      [join(HERE, 'deploy.ts'), ...deployArgs(m, ref, args.includes('--dry-run'))],
+      [
+        join(HERE, 'deploy.ts'),
+        ...deployArgs(m, ref, args.includes('--dry-run'), args.includes('--no-terraform-outputs')),
+      ],
       { stdio: 'inherit' },
     );
     if (r.status !== 0) {

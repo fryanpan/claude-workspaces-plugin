@@ -14,6 +14,7 @@ bun run cf:rotate-token NAME # a new secret for one service token; one passkey t
 bun run cf:ci-secrets plan    # CI's deploy token and GitHub secrets: what would change
 bun run cf:ci-secrets apply   # make the token and write the secrets ("CI's credentials" below)
 bun run cf:app-secrets apply  # apps' secrets in cloudflare-prod; a GitHub token alone ("Apps' secrets" below)
+bun run fly:ci-tokens apply   # one Fly token per app, each in its own environment ("Fly's CI tokens" below)
 ```
 
 `bun run cf:apply` only prints where applies run now, and changes nothing.
@@ -31,6 +32,7 @@ bun run cf:app-secrets apply  # apps' secrets in cloudflare-prod; a GitHub token
 | `deploys/staging` | Staging's root: the same modules, no imports. Validated on every run, never applied yet |
 | `ci-secrets` | CI's deploy token, and the GitHub Actions secrets that carry it. Local state, applied by hand ("CI's credentials") |
 | `app-secrets` | The secrets apps' workflows read from `cloudflare-prod` (the GitHub provider alone). Local state, applied by hand ("Apps' secrets") |
+| `fly-ci` | One GitHub Environment per Fly app CI deploys, main-only, each holding a token for that app alone (the GitHub provider alone). Local state, applied by `fly:ci-tokens` ("Fly's CI tokens") |
 | `apps/signin-test` | One app's own root: the sign-in test app's D1, Turnstile widget, custom domain and mail DNS records. Applied by its own workflow ("An app's own root") |
 
 The layout is HashiCorp's standard module structure. Each module has
@@ -71,7 +73,8 @@ Staging reads the same three configs from `deploys/staging/*.local.*`
 - **Fly.** The Fly Terraform provider is archived, and a `local-exec` keeps no
   state, so Fly stays on `machine:deploy`. `.github/workflows/fly.yml` runs it
   on main for each machine's image; a project's first deploy still runs on the
-  Mac (`docs/process/project-machine.md`).
+  Mac (`docs/process/project-machine.md`). The provider could not make Fly's
+  CI tokens either, so `fly:ci-tokens` cuts them and `fly-ci/` writes them.
 - **CI's plan credentials.** The repository's read-only `CLOUDFLARE_API_TOKEN`
   and R2 pair, for pull request plans, are made by `keeper-setup`'s `CI
   credentials` step and written through the keeper
@@ -220,14 +223,15 @@ install` never sees them.
 | `CLOUDFLARE_API_TOKEN` | `cloudflare-prod` | the deploy token |
 | `R2_ACCESS_KEY_ID` | `cloudflare-prod` | the token's id |
 | `R2_SECRET_ACCESS_KEY` | `cloudflare-prod` | the SHA-256 of the token's value |
-| `FLY_API_TOKEN` | `cloudflare-prod` | `FLY_API_TOKEN` from the runner's environment, when set |
-| `CW_SECRET_CW_BOARD_OWNER_EMAIL` | `cloudflare-prod` | `CW_OWNER_EMAIL` from the runner's environment, when set; `fly.yml` hands it to `machine:deploy` as the Keychain's `cw-board-owner-email` |
 | `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG`, `CF_SHARE_LINK_CONFIG` | repository | the three gitignored configs, each when present |
 
 The token gets the apply permissions below plus Workers R2 Storage Bucket
 Item Write on the state bucket alone, and no API Tokens permission, so it
 cannot make a wider token. CI never runs this root, so the token never
-manages itself.
+manages itself. It writes no Fly token and no owner address: `fly.yml` runs in
+`fly-<project>` environments that hold one app's token each ("Fly's CI
+tokens"). An apply after an earlier one wrote them deletes `FLY_API_TOKEN` and
+`CW_SECRET_CW_BOARD_OWNER_EMAIL` from `cloudflare-prod`, with `--drop`.
 
 ```bash
 CLOUDFLARE_API_TOKEN=… GITHUB_TOKEN=… bun run cf:ci-secrets apply
@@ -252,9 +256,9 @@ active, so delete the old one in the dashboard if that happens. The saved
 plan holds the values too and is removed when the run ends.
 
 **An apply that deletes anything is refused** unless `--drop` is given. A
-missing input deletes what an earlier apply wrote: run without
-`FLY_API_TOKEN`, or from a checkout without the configs, and the plan drops
-that secret, after which the workflows skip their deploys rather than fail.
+missing input deletes what an earlier apply wrote: run from a checkout without
+the configs and the plan drops that secret, after which the workflows skip
+their deploys rather than fail.
 The token also refuses to be made unless `cloudflare-prod` allows
 deployments from `main` alone (the check the keeper makes), and an apply that
 finds the token with no value in its state stops before writing anything.
@@ -262,15 +266,15 @@ finds the token with no value in its state stops before writing anything.
 The deploy token and R2 pair in `cloudflare-prod` today were written by the
 keeper's `CI credentials` step (`packages/server/src/keeper/keeper-setup-ci.ts`),
 not by this root, which needs a token with Account API Tokens Edit that
-nobody on the Mac holds. Apps' secrets are therefore a root of their own.
+nobody on the Mac holds. Apps' secrets and Fly's CI tokens are therefore
+roots of their own.
 
 ## Apps' secrets
 
 `app-secrets/` writes the secrets an app's workflow reads from
 `cloudflare-prod`, through the GitHub provider alone. It needs only
 `GITHUB_TOKEN`, a classic token with `repo` scope: no Cloudflare token, and
-nothing in it can change or delete the deploy token, the R2 pair or
-`FLY_API_TOKEN`.
+nothing in it can change or delete the deploy token or the R2 pair.
 
 | Secret | Read by | Value, the first found |
 | --- | --- | --- |
@@ -301,6 +305,49 @@ earlier apply wrote, so **an apply whose plan deletes anything is refused**
 unless `--drop` is given. A secret is refused unless `cloudflare-prod` allows
 deployments from `main` alone, as above, and an empty value or a lower-case
 name fails the variable's validation.
+
+## Fly's CI tokens
+
+`fly-ci/` makes one GitHub Environment per Fly app CI deploys and writes one
+secret to each, `FLY_DEPLOY_TOKEN`, through the GitHub provider alone:
+
+| Environment | App | Read by |
+| --- | --- | --- |
+| `fly-<project>`, each project in `infra/project-machine/machines.json` | `cw-<project>` | `fly.yml`'s deploy job for that project |
+| `fly-appkit-staging` | `cw-appkit-trial-staging` | `app-kit-staging.yml` |
+
+Each environment admits deployments from `main` alone (custom branch
+policies, one rule `main`), set by the root itself, with no required reviewer
+and no wait timer. Each token is cut on the Mac from the org token by
+`fly tokens attenuate`, which works offline: the app's id with the actions a
+deploy takes, the org feature `builder` and no other (so no `wg`, which
+`fly ssh` needs, and no `deletion` or `membership`), valid 90 days
+(`infra/project-machine/ci-tokens.ts`). A job holds one app's token and
+nothing else from Cloudflare or Fly.
+
+```bash
+GITHUB_TOKEN=… bun run fly:ci-tokens plan    # what would change; cuts tokens, writes nothing
+GITHUB_TOKEN=… bun run fly:ci-tokens apply
+```
+
+The org token is `FLY_API_TOKEN` when set, else the Keychain's
+`fly-org-token`; once the keeper holds it, the run refuses until the keeper
+can cut tokens itself. It reaches `fly` and Fly's API (each app's numeric id)
+only. Each cut token goes from `fly`'s stdout into terraform's environment
+(`TF_VAR_deploy_tokens`) and nowhere else; the run refuses an attenuate that
+printed nothing, more than one line, or the org token. The state holds the
+tokens, so it is local, in `~/.local/state/claude-workspaces/fly-ci/` (mode
+700, files 600), and the saved plan is removed when the run ends. An app the
+org does not have is skipped, which deletes its environment, so **an apply
+whose plan deletes anything is refused** unless `--drop` is given.
+
+Every apply cuts new tokens, so a monthly run keeps each one inside its
+90-day window; it runs from the board's scheduled tasks. An attenuated token
+cannot be revoked alone: revoking means revoking the org token it was cut
+from, and the window bounds a leaked one until then. The daily wall report
+(`machine:wall-report`) fails if a `fly-<project>` environment is missing,
+admits another branch, or holds no token or one older than 45 days, and if
+any GitHub secret is named `FLY_API_TOKEN`.
 
 ## State
 
@@ -357,9 +404,10 @@ new app gets its sign-in live):
 ## Fly
 
 `.github/workflows/fly.yml` deploys each project machine's image from main
-with `machine:deploy`, using the `cloudflare-prod` environment's
-`FLY_API_TOKEN` and the deploy token. Server code still reaches machines as
-the signed releases `.github/workflows/server-release.yml` publishes.
+with `machine:deploy`, one job per project in that project's `fly-<project>`
+environment, with its `FLY_DEPLOY_TOKEN` and no Cloudflare credential ("Fly's
+CI tokens"). Server code still reaches machines as the signed releases
+`.github/workflows/server-release.yml` publishes.
 
 ## Tests
 
@@ -371,10 +419,13 @@ which plans the root and each module from a fixture against a mock provider
 `ci-secrets/tests/apply.tftest.hcl`, which applies the CI credentials root
 against mock Cloudflare and GitHub providers,
 `app-secrets/tests/apply.tftest.hcl`, which applies the apps' secrets root
-against a mock GitHub provider, and each app root's `tests/plan.tftest.hcl`.
+against a mock GitHub provider, `fly-ci/tests/apply.tftest.hcl`, which
+applies the Fly environments root the same way, and each app root's
+`tests/plan.tftest.hcl`.
 In `packages/server/test`: `cloudflare-ci-secrets.test.ts` checks what
 `cf:ci-secrets` hands terraform and prints; `cloudflare-app-secrets.test.ts`
-the same for `cf:app-secrets`, and the order it looks for each value in; `cloudflare-ci-credentials.test.ts`
+the same for `cf:app-secrets`, and the order it looks for each value in; `fly-ci-tokens.test.ts`
+what `fly:ci-tokens` cuts and where each token goes; `cloudflare-ci-credentials.test.ts`
 the R2 key and account id CI's steps take from the token; `cloudflare-tf-discover.test.ts` runs the adoption
 and the refusals against a fake account; `cloudflare-tf-service-tokens.test.ts`
 a missing token through plan and CI apply; `cloudflare-tf-wrapper.test.ts` the

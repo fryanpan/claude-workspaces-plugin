@@ -70,16 +70,9 @@ variable "share_link_config" {
   sensitive   = true
 }
 
-variable "owner_email" {
-  description = "The board owner's address for fly.yml, written to CW_SECRET_CW_BOARD_OWNER_EMAIL in the environment when set (machine:deploy reads it as the Keychain's cw-board-owner-email); null deletes an earlier apply's copy."
-  type        = string
-  default     = null
-  sensitive   = true
-}
-
-variable "fly_api_token" {
-  description = "A Fly deploy token for fly.yml, written to FLY_API_TOKEN in the environment when set; null deletes an earlier apply's copy. Fly has no maintained provider, so Terraform cannot make it."
-  type        = string
-  default     = null
-  sensitive   = true
-}
+# No Fly token and no owner address here any more: fly.yml's jobs run in
+# `fly-<project>` environments holding a token for one app alone, which
+# `../fly-ci/` writes (`bun run fly:ci-tokens apply`). Leaving them out
+# deletes an earlier apply's FLY_API_TOKEN and
+# CW_SECRET_CW_BOARD_OWNER_EMAIL from `cloudflare-prod` (with --drop), so
+# the org token cannot come back by accident.

@@ -15,6 +15,11 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  STAGING_APP,
+  STAGING_ENVIRONMENT,
+  environmentFor,
+} from '../../../infra/project-machine/ci-tokens.ts';
 
 const WORKFLOWS = join(import.meta.dir, '..', '..', '..', '.github', 'workflows');
 
@@ -32,7 +37,7 @@ interface Job {
   }[];
 }
 interface Workflow {
-  on: Record<string, { paths?: string[]; branches?: string[] } | null>;
+  on: Record<string, { paths?: string[]; branches?: string[]; inputs?: unknown } | null>;
   jobs: Record<string, Job>;
 }
 
@@ -196,30 +201,47 @@ describe('cloudflare.yml', () => {
 });
 
 describe('fly.yml', () => {
-  it('deploys on a push to main and a dispatch on main, in cloudflare-prod, and nowhere else', () => {
-    expect(runs('deploy', event('push', MAIN), fly)).toBe(true);
-    expect(runs('deploy', event('workflow_dispatch', MAIN), fly)).toBe(true);
-    expect(runs('deploy', event('workflow_dispatch', 'refs/heads/riverbend'), fly)).toBe(false);
+  const MATRIX = { 'needs.projects.outputs.matrix': '["harborlight"]' };
+
+  it('deploys on a push to main and a dispatch on main, one job per project in its own environment', () => {
+    expect(runs('deploy', { ...event('push', MAIN), ...MATRIX }, fly)).toBe(true);
+    expect(runs('deploy', { ...event('workflow_dispatch', MAIN), ...MATRIX }, fly)).toBe(true);
+    expect(
+      runs('deploy', { ...event('workflow_dispatch', 'refs/heads/riverbend'), ...MATRIX }, fly),
+    ).toBe(false);
+    // An empty matrix is an error to GitHub, so no project means no job.
+    expect(
+      runs('deploy', { ...event('push', MAIN), 'needs.projects.outputs.matrix': '[]' }, fly),
+    ).toBe(false);
     expect(Object.keys(fly.on)).not.toContain('pull_request');
-    expect(fly.jobs.deploy?.environment).toBe('cloudflare-prod');
+    expect(fly.jobs.deploy?.environment).toBe(`${environmentFor('${{ matrix.project }}')}`);
+    expect(fly.jobs.projects?.environment).toBeUndefined();
   });
 
-  it('hands the Fly and Cloudflare tokens to the deploy step alone', () => {
+  it("hands the project's own token to the deploy step alone, and nothing else", () => {
     const steps = fly.jobs.deploy?.steps ?? [];
     const values = (env?: Record<string, string>) => Object.values(env ?? {}).join(' ');
     expect(values(fly.jobs.deploy?.env)).not.toMatch(/secrets\./);
     const holders = steps.filter(
-      (st) =>
-        /secrets\.(FLY_API_TOKEN|CLOUDFLARE_API_TOKEN|R2_SECRET)/.test(values(st.env)) &&
-        !/!= ''/.test(values(st.env)),
+      (st) => /secrets\./.test(values(st.env)) && !/!= ''/.test(values(st.env)),
     );
-    expect(holders.map((st) => st.name)).toEqual(['Deploy each project machine']);
-    // machine:deploy reads the Keychain's cw-board-owner-email from this name
-    // in CI (mac-ops.ts secretEnvName); without it the server has no owner.
-    expect(holders[0]?.env?.CW_SECRET_CW_BOARD_OWNER_EMAIL).toBe(
-      '${{ secrets.CW_SECRET_CW_BOARD_OWNER_EMAIL }}',
-    );
+    expect(holders.map((st) => st.name)).toEqual(['Deploy the project machine']);
+    // The app-scoped token, and no org token, Cloudflare token, state key or address.
+    const used = [...values(holders[0]?.env).matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]);
+    expect(used).toEqual(['FLY_DEPLOY_TOKEN']);
+    const all = JSON.stringify(fly);
+    for (const gone of [
+      'FLY_API_TOKEN }}',
+      'CLOUDFLARE_API_TOKEN',
+      'R2_SECRET_ACCESS_KEY',
+      'CW_SECRET_',
+      'cloudflare-prod',
+    ])
+      expect(all).not.toContain(gone);
+    expect(holders[0]?.run).toContain('--no-terraform-outputs');
     expect(steps.find((st) => st.run?.includes('bun install'))?.env).toBeUndefined();
+    for (const st of fly.jobs.projects?.steps ?? [])
+      expect(values(st.env)).not.toMatch(/secrets\./);
     // A secret spelled inside a script would reach the log's command echo.
     for (const w of [fly, wf, appKit]) {
       for (const job of Object.values(w.jobs)) {
@@ -230,11 +252,16 @@ describe('fly.yml', () => {
 });
 
 describe('app-kit-staging.yml', () => {
-  it('deploys on a dispatch on main, in cloudflare-prod, and on nothing else', () => {
+  it('deploys the one trial app on a dispatch on main, in its own environment, and on nothing else', () => {
     expect(Object.keys(appKit.on)).toEqual(['workflow_dispatch']);
+    // No input: the token reaches one app, so the app is not the caller's to name.
+    expect(appKit.on.workflow_dispatch).toEqual({});
     expect(runs('deploy', event('workflow_dispatch', MAIN), appKit)).toBe(true);
     expect(runs('deploy', event('workflow_dispatch', 'refs/heads/riverbend'), appKit)).toBe(false);
-    expect(appKit.jobs.deploy?.environment).toBe('cloudflare-prod');
+    expect(appKit.jobs.deploy?.environment).toBe(STAGING_ENVIRONMENT);
+    const deploy = appKit.jobs.deploy?.steps?.find((st) => st.run?.includes('deploy:staging'));
+    expect(deploy?.env?.APP_NAME).toBe(STAGING_APP);
+    expect(deploy?.env?.FLY_API_TOKEN).toBe('${{ secrets.FLY_DEPLOY_TOKEN }}');
   });
 
   it('hands the Fly token to the deploy step alone, and the clock starts before new-app', () => {

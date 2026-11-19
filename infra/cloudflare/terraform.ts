@@ -24,6 +24,8 @@ export const stateDir = (env: TfEnv): string => join(TF_DIR, 'state', env);
 export const CI_SECRETS_DIR = join(TF_DIR, 'ci-secrets');
 /** Apps' secrets in `cloudflare-prod`: GitHub alone, local state (`app-secrets.ts`). */
 export const APP_SECRETS_DIR = join(TF_DIR, 'app-secrets');
+/** Fly's CI environments and app-scoped tokens (`fly-ci/`, `fly:ci-tokens`). */
+export const FLY_CI_DIR = join(TF_DIR, 'fly-ci');
 /** Roots of single apps, each applied by its own workflow (`apps/<name>/`). */
 export const APP_DIRS = { 'signin-test': join(TF_DIR, 'apps', 'signin-test') } as const;
 
