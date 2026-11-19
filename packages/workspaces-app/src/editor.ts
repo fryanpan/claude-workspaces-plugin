@@ -30,7 +30,14 @@ import { boardEmbedFramesFor } from './doc/board-embed-frames.ts';
 import { FootnoteDecorations } from './doc/footnote-decorations.ts';
 import { FIRST_PAINT_CLASS } from './doc/prose-paint.ts';
 import { RemoteEditsKeepScroll } from './doc/remote-edit-scroll.ts';
-import { currentPageHref, followedLinkHref, isAppPageHref, resolveDocLink } from './link-open.ts';
+import {
+  currentPageHref,
+  followedLinkHref,
+  isAppPageHref,
+  isSchemelessHref,
+  relativeTargetHref,
+  resolveDocLink,
+} from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MassDeleteUndo } from './mass-delete-undo.ts';
 import { MathInline } from './math-inline.ts';
@@ -187,6 +194,9 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
           // declared here. Clicking one still goes nowhere: `safeLinkHref`
           // refuses it, which is the half that decides what may be opened.
           protocols: [SPEAKER_TAG_SCHEME.replace(':', '')],
+          // A relative path is a link to a sibling file, and Tiptap's own
+          // pattern blanks some of them (`isSchemelessHref` says which).
+          isAllowedUri: (url, ctx) => ctx.defaultValidate(url) || isSchemelessHref(url),
           HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' },
         },
       }),
@@ -346,7 +356,12 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     if (!href) return;
     ev.preventDefault();
     ev.stopPropagation();
-    // A sibling doc navigates in-app; any other app page opens in this tab.
+    const newTab = ev.metaKey || ev.ctrlKey;
+    // A member of a diff review or folder browse names its siblings by path
+    // (`resolveDocLink`), and they open in-app. Any other relative path names
+    // a FILE only the server can match to a doc on the board: the board's
+    // open route answers with its page or a not-found page, the two ends a
+    // board link has.
     const inApp = opts.docLink
       ? resolveDocLink({
           href,
@@ -355,16 +370,12 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
           workspaceId: workspaceIdFromPath(location.pathname),
         })
       : null;
-    if (inApp && opts.docLink) {
-      opts.docLink.navigate(inApp);
-      return;
-    }
-    // Keeping chat and voice; Cmd/Ctrl-click still asks for a new tab.
-    if (!ev.metaKey && !ev.ctrlKey && isAppPageHref(href, currentPageHref())) {
-      window.location.assign(href);
-      return;
-    }
-    window.open(href, '_blank', 'noopener,noreferrer');
+    if (inApp && opts.docLink && !newTab) return opts.docLink.navigate(inApp);
+    const to = inApp ?? relativeTargetHref(href, location.pathname) ?? href;
+    // An app page opens in this tab, keeping chat and voice; Cmd/Ctrl-click
+    // still asks for a new one.
+    if (!newTab && isAppPageHref(to, currentPageHref())) return window.location.assign(to);
+    window.open(to, '_blank', 'noopener,noreferrer');
   };
   editor.view.dom.addEventListener('click', onLinkClick);
   keepComposerFocusThroughEdits(editor);

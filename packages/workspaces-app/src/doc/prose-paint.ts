@@ -25,7 +25,12 @@ import {
   followImageVersions,
   imageVersionLookup,
 } from '../doc-image-versions.ts';
-import { currentPageHref, isAppPageHref, paintedLinkHref } from '../link-open.ts';
+import {
+  currentPageHref,
+  isAppPageHref,
+  paintedLinkHref,
+  relativeTargetHref,
+} from '../link-open.ts';
 import type { MountScope } from '../mount-scope.ts';
 
 /** Marks the root while it is still the paint; the editor removes it. */
@@ -65,7 +70,14 @@ function renderText(text: Y.XmlText, doc: Document): DocumentFragment {
       const tag = MARK_TAGS[mark];
       let wrap: HTMLElement | null = tag ? doc.createElement(tag) : null;
       if (mark === 'link') {
-        const href = paintedLinkHref((value as Attrs | null)?.href as string | undefined);
+        const painted = paintedLinkHref((value as Attrs | null)?.href as string | undefined);
+        // A relative path goes through the board's open route, as it does
+        // once the editor has loaded (editor.ts) — tapped before that, the raw
+        // path resolved against this page's address and named nothing.
+        const href =
+          painted && typeof location !== 'undefined'
+            ? (relativeTargetHref(painted, location.pathname) ?? painted)
+            : painted;
         wrap = doc.createElement(href ? 'a' : 'span');
         if (href) {
           wrap.setAttribute('href', href);

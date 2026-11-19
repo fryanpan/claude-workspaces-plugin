@@ -25,7 +25,7 @@
  * as a target leaves the label as text.
  */
 import { type WorkspaceLink, parseWorkspaceLink } from '@claude-workspaces/core';
-import { currentPageHref, isAppPageHref } from './link-open.ts';
+import { currentPageHref, isAppPageHref, relativeTargetHref } from './link-open.ts';
 import { withLinkStatus } from './link-status-html.ts';
 import {
   cachedLinkStatus,
@@ -110,39 +110,6 @@ const REDACTION_MARKER = /^\[(?:url|redacted|token|email)\]$/;
 
 function currentPathname(): string {
   return typeof window !== 'undefined' ? window.location.pathname : '';
-}
-
-/**
- * The board's open route for a RELATIVE link target, or null.
- *
- * An agent writes `[note](../dir/plan.md)` from its own checkout, where the
- * path is right. On a page it is wrong: the browser resolves it against the
- * page's address and lands on `/dir/plan.md`, which nothing serves. The
- * server holds what the browser does not — which docs this board has, and the
- * file each one is bound to — so the link goes to
- * `/workspaces/<ws>/open?path=…`, which redirects to that doc or says it has
- * none. On a doc's own page `from` names the doc, so a path relative to it
- * resolves against its file first.
- *
- * Null for a scheme, a root-relative path, an anchor or a query (each already
- * means something on a page), and off a board's pages, where no board can
- * answer.
- */
-export function relativeTargetHref(target: string, pathname: string): string | null {
-  const t = target.trim();
-  if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t)) return null;
-  if (t.startsWith('/') || t.startsWith('#') || t.startsWith('?')) return null;
-  const m = /^\/workspaces\/([^/]+)(?:\/(?:docs|mockups)\/([^/]+))?/.exec(pathname);
-  if (!m?.[1]) return null;
-  const params = new URLSearchParams({ path: t });
-  if (m[2]) {
-    try {
-      params.set('from', decodeURIComponent(m[2]));
-    } catch {
-      // A malformed id names no doc; the path alone still resolves.
-    }
-  }
-  return `/workspaces/${m[1]}/open?${params.toString()}`;
 }
 
 /** Inline marks on an ALREADY-escaped string. Order matters: code first so

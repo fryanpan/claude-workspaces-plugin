@@ -47,6 +47,25 @@ export function followedLinkHref(href: string | null | undefined): string | null
   return safe ? reviewLandingHref(safe) : null;
 }
 
+/**
+ * Whether an href names no scheme at all: a path (`notes/plan.md`,
+ * `../part-1/data.mdx`), an anchor or a query. Tiptap's own allow-list keeps
+ * only some of these — `[^a-z+.-:]` in its pattern is a RANGE that holds `/`
+ * and the digits, so `notes/plan.md` renders as `href=""` while
+ * `part-1/plan.md` survives on the strength of its dash. The editor passes
+ * these through so every relative link renders with its target, and
+ * `followedLinkHref` still decides what a click may open. A colon before the
+ * first `/`, `?` or `#` is a scheme, and is left to the allow-list.
+ */
+export function isSchemelessHref(href: string | null | undefined): boolean {
+  if (!href) return false;
+  let stripped = '';
+  for (const ch of href) {
+    if (ch.charCodeAt(0) > 0x20) stripped += ch;
+  }
+  return stripped !== '' && !/^[^/?#]*:/.test(stripped);
+}
+
 const ANY_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const PAINTED_SCHEME = /^(?:https?|mailto):/i;
 
@@ -154,4 +173,37 @@ export function isAppPageHref(href: string | null | undefined, base: string): bo
  *  there is no window, so the answer there is "external". */
 export function currentPageHref(): string {
   return typeof window !== 'undefined' ? window.location.href : 'http://localhost.invalid/';
+}
+
+/**
+ * The board's open route for a RELATIVE link target, or null.
+ *
+ * An agent writes `[note](../dir/plan.md)` from its own checkout, where the
+ * path is right. On a page it is wrong: the browser resolves it against the
+ * page's address and lands on `/dir/plan.md`, which nothing serves. The
+ * server holds what the browser does not — which docs this board has, and the
+ * file each one is bound to — so the link goes to
+ * `/workspaces/<ws>/open?path=…`, which redirects to that doc or says it has
+ * none. On a doc's own page `from` names the doc, so a path relative to it
+ * resolves against its file first.
+ *
+ * Null for a scheme, a root-relative path, an anchor or a query (each already
+ * means something on a page), and off a board's pages, where no board can
+ * answer.
+ */
+export function relativeTargetHref(target: string, pathname: string): string | null {
+  const t = target.trim();
+  if (t === '' || /^[a-z][a-z0-9+.-]*:/i.test(t)) return null;
+  if (t.startsWith('/') || t.startsWith('#') || t.startsWith('?')) return null;
+  const m = /^\/workspaces\/([^/]+)(?:\/(?:docs|mockups)\/([^/]+))?/.exec(pathname);
+  if (!m?.[1]) return null;
+  const params = new URLSearchParams({ path: t });
+  if (m[2]) {
+    try {
+      params.set('from', decodeURIComponent(m[2]));
+    } catch {
+      // A malformed id names no doc; the path alone still resolves.
+    }
+  }
+  return `/workspaces/${m[1]}/open?${params.toString()}`;
 }

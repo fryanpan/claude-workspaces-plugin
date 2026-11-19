@@ -61,3 +61,24 @@ describe('first paint links', () => {
     expect(a?.getAttribute('rel')).toBeNull();
   });
 });
+
+/**
+ * On a board's doc page a relative path names a file, and the board's open
+ * route finds the doc bound to it — as the editor does once it has loaded.
+ * Drawn raw, it resolved against the page's own address and named nothing.
+ */
+describe('first paint relative links on a doc page', () => {
+  it('sends a relative path through the board, in this tab', () => {
+    const happy = (window as unknown as { happyDOM: { setURL: (u: string) => void } }).happyDOM;
+    happy.setURL('http://localhost:3000/workspaces/w-harbor/docs/guide');
+    try {
+      const a = paintLink('part-1/riverbend-data.mdx').querySelector('a');
+      expect(a?.getAttribute('href')).toBe(
+        '/workspaces/w-harbor/open?path=part-1%2Friverbend-data.mdx&from=guide',
+      );
+      expect(a?.getAttribute('target')).toBeNull();
+    } finally {
+      happy.setURL('http://localhost:3000/');
+    }
+  });
+});
