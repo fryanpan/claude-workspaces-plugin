@@ -471,6 +471,7 @@ export async function deployProject(
     }
   }
   for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
+  for (const line of found.notes) console.log(`[deploy] ${line}`);
   const tooSmall = leadMemoryError(cfg, observed);
   if (tooSmall) throw new Error(tooSmall);
   const lead = leadSecrets(cfg, observed);

@@ -83,7 +83,7 @@ export async function provisionOutputs(
     });
     for (const s of found.settings) secrets[s.name] = s.value();
     for (const line of found.skipped)
-      if (!line.startsWith('CW_OWNER_EMAIL')) say(`not sealed: ${line}`);
+      if (!/^CW_(OWNER_EMAIL|GOOGLE_CLIENT_ID)/.test(line)) say(`not sealed: ${line}`);
     const sink = new HandoffSink('fly-org', outPath);
     sink.add({ kind: 'fly-secrets', app: cfg.app, secrets });
     sink.flush(key, io.write);

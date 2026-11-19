@@ -58,6 +58,9 @@ describe('one Better Auth sign-in per machine', () => {
   /** The owner's browser after signing in at each machine. */
   const atMac = new CookieJar();
   const atCloud = new CookieJar();
+  /** Where each machine sent the browser to sign in at Google. */
+  let macAuthorize: URL;
+  let cloudAuthorize: URL;
 
   const tmp = () => {
     const d = mkdtempSync(join(tmpdir(), 'signin-per-project-'));
@@ -144,14 +147,24 @@ describe('one Better Auth sign-in per machine', () => {
       PROJECT_ORIGINS: JSON.stringify({ harborlight: MAC_ORIGIN, riverbend: CLOUD_ORIGIN }),
       BOARD_ORIGINS: JSON.stringify({ [MAC_ORIGIN]: [macBoard], [CLOUD_ORIGIN]: [cloudBoard] }),
     };
-    await signInWithGoogle(browserOn(ONE_HOST), `https://${ONE_HOST}`, atMac, google, ownerProfile);
-    await signInWithGoogle(
-      browserOn(CLOUD_HOST),
-      `https://${CLOUD_HOST}`,
-      atCloud,
-      google,
-      ownerProfile,
-    );
+    macAuthorize = (
+      await signInWithGoogle(
+        browserOn(ONE_HOST),
+        `https://${ONE_HOST}`,
+        atMac,
+        google,
+        ownerProfile,
+      )
+    ).authorize;
+    cloudAuthorize = (
+      await signInWithGoogle(
+        browserOn(CLOUD_HOST),
+        `https://${CLOUD_HOST}`,
+        atCloud,
+        google,
+        ownerProfile,
+      )
+    ).authorize;
     expect(atMac.cookies.has(SESSION)).toBe(true);
     expect(atCloud.cookies.has(SESSION)).toBe(true);
   });
@@ -257,10 +270,24 @@ describe('one Better Auth sign-in per machine', () => {
     });
   });
 
-  describe('one Google client', () => {
-    it('both machines sent the same client id and asked for their own return address', () => {
+  describe('one Google client (plan step 5)', () => {
+    it('both machines send the same client id and ask for the account picker', () => {
+      for (const authorize of [macAuthorize, cloudAuthorize]) {
+        expect(authorize.searchParams.get('client_id')).toBe('shared-client');
+        expect(authorize.searchParams.get('prompt')).toBe('select_account');
+      }
+      // And the code exchange named it too, from each machine.
       expect(new Set(google.clientIds)).toEqual(new Set(['shared-client']));
       expect(google.clientIds.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('each names its own return address, which is all Google will send a result to', () => {
+      expect(macAuthorize.searchParams.get('redirect_uri')).toBe(
+        `https://${ONE_HOST}/api/auth/callback/google`,
+      );
+      expect(cloudAuthorize.searchParams.get('redirect_uri')).toBe(
+        `https://${CLOUD_HOST}/api/auth/callback/google`,
+      );
     });
   });
 });
