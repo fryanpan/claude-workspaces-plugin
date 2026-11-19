@@ -28,7 +28,7 @@
  * board on this machine is shared with (`mayHaveAccount`).
  */
 import type { Database } from 'bun:sqlite';
-import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
@@ -138,11 +138,17 @@ const BETTER_AUTH_PATHS: ReadonlySet<string> = new Set([
   `${SIGNIN_BASE_PATH}/sign-out`,
 ]);
 
-/** `<dataDir>/signin.sqlite`, created mode 600 before SQLite opens it. */
+/**
+ * `<dataDir>/signin.sqlite`, created mode 600 before SQLite opens it. The
+ * WAL and its index hold session rows in plain text; SQLite creates them
+ * with the main file's mode, and a pair an earlier run left looser is
+ * tightened here, before and after the open.
+ */
 function openUserList(dataDir: string): Database {
   mkdirSync(dataDir, { recursive: true });
   const path = join(dataDir, 'signin.sqlite');
   closeSync(openSync(path, 'a', 0o600));
+  tighten(path);
   // Loaded here rather than imported: `server.ts` reaches this module, and
   // suites that run on node (scripts/*.test.ts) import `server.ts` without
   // ever turning sign-in on. `bun:sqlite` exists only under Bun.
@@ -150,7 +156,14 @@ function openUserList(dataDir: string): Database {
   const Sqlite = sqlite.Database;
   const db = new Sqlite(path, { create: true });
   db.exec('PRAGMA journal_mode = WAL');
+  tighten(path);
   return db;
+}
+
+function tighten(path: string): void {
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(file)) chmodSync(file, 0o600);
+  }
 }
 
 function createAuth(opts: BoardSignInOptions, db: Database) {

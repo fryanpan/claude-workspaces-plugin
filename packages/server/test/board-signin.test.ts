@@ -3,7 +3,7 @@
  * through its own request handler against a local Google stub.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keptCookies, setsDomainCookie } from '../../../infra/board-router-worker/worker.js';
@@ -187,8 +187,37 @@ describe('Better Auth inside the server', () => {
     expect((await store.consume('a', rule)).allowed).toBe(true);
   });
 
-  it('keeps its user list readable only by the server', () => {
-    expect(statSync(join(dataDir, 'signin.sqlite')).mode & 0o777).toBe(0o600);
+  it('keeps its user list readable only by the server, sessions in the WAL included', () => {
+    // Signed in above, so the WAL and its index exist and hold session rows.
+    for (const name of ['signin.sqlite', 'signin.sqlite-wal', 'signin.sqlite-shm']) {
+      expect({ name, mode: statSync(join(dataDir, name)).mode & 0o777 }).toEqual({
+        name,
+        mode: 0o600,
+      });
+    }
+  });
+
+  it('tightens a user list an earlier run left readable by others', async () => {
+    const dir = tmp();
+    for (const name of ['signin.sqlite', 'signin.sqlite-wal', 'signin.sqlite-shm']) {
+      writeFileSync(join(dir, name), '', { mode: 0o644 });
+      chmodSync(join(dir, name), 0o644);
+    }
+    const loose = createBoardSignIn({
+      dataDir: dir,
+      baseKey: loadCookieKey(dir),
+      origin: ORIGIN,
+      google: { clientId: 'shared-client', clientSecret: 'stub-secret' },
+      mayHaveAccount: () => false,
+    });
+    await loose.personOf(new Request(ORIGIN, { headers: { cookie: '__Host-cw-ba.x=y' } }));
+    loose.close();
+    for (const name of ['signin.sqlite', 'signin.sqlite-wal', 'signin.sqlite-shm']) {
+      expect({ name, mode: statSync(join(dir, name)).mode & 0o777 }).toEqual({
+        name,
+        mode: 0o600,
+      });
+    }
   });
 
   it('two data directories derive two different secrets', () => {
