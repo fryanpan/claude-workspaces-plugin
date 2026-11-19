@@ -51,13 +51,26 @@ adds; a project without one runs with Claude off.
 
 ## What the deploy needs
 
-- `flyctl` (`brew install flyctl`). No `fly auth login`: the scripts read the
-  shared org's token from the Keychain (`fly-org-token`, `fly-org-slug`) into
-  each `fly` command's environment.
-- For a named tunnel, a `cloudflare-api-token` Keychain entry, and the board
-  router's `router.local.json` (`infra/board-router-worker/README.md`,
-  "Deploying"), which names the zone and the one address. Without them the
-  deploy takes `--tunnel quick` only (below).
+Since the keeper retired ([keeper.md](keeper.md), "Retired"), the Mac holds
+no Fly org token and no Cloudflare token. Two workflows hold them:
+
+- **Making a project** (its app, volume, bucket, backup key, push keys and
+  tunnel token) is `.github/workflows/fly-provision.yml`, dispatched on main
+  with the project's name once `machines.json` lists it. Its `outputs` job,
+  in `cloudflare-prod`, reads the tunnel token and the Access settings and
+  seals them to `fly-org`. Its `provision` job, in `fly-org` with the org
+  token, runs `machine:deploy`. What that run makes for the Mac (the backup
+  identity, the bucket's admin key, the Mac's token for the app) is sealed to
+  the Mac and stored by `bun run handoff:pull` (`infra/handoff/`).
+- **Every other `fly` call on the Mac** runs with that app's own token, which
+  `.github/workflows/fly-ci-tokens.yml` cuts every Monday (the app, Fly's
+  builder and WireGuard, so `fly ssh` and `fly logs` work; 14 days). A
+  missing or expiring token is pulled on the first `fly` call that needs it.
+  A command that names no app, or makes one, is refused with a pointer to
+  `fly-provision.yml`.
+
+So the Mac needs `flyctl` (`brew install flyctl`, no `fly auth login`), its
+handoff key (`bun run handoff:keygen mac`, once), and `gh` signed in.
 
 ## Deploy
 
@@ -66,15 +79,19 @@ bun run machine:deploy --project <project> [--memory 512] [--volume-gb 1] [--reg
     [--tunnel quick|named] [--tf-env prod|staging] [--dry-run]
 ```
 
-It reads what exists and does only what is missing:
+It reads what exists and does only what is missing. Steps 1 to 5 and the
+push keys run only inside `fly-provision.yml`; on the Mac a run that would
+make one is refused before anything changes, naming the workflow.
 
 1. The app `cw-<project>` in the shared org, on a private network of the same
    name, so no other project's machine can reach it.
 2. The volume `cw_data`.
-3. The backup key pair. The identity goes into the Keychain and is never
-   replaced: a new one would orphan every snapshot.
-4. The Tigris bucket `cw-<project>-backups`. Its admin credential goes into
-   the Keychain as `cw-<project>-bucket-admin`; the machine never gets it.
+3. The backup key pair. The identity is sealed to the Mac, which stores it
+   in the Keychain and never replaces it: a new one would orphan every
+   snapshot.
+4. The Tigris bucket `cw-<project>-backups`. Its admin credential is sealed
+   to the Mac, which stores it as `cw-<project>-bucket-admin`; the machine
+   never gets it.
 5. The machine's write-only credential (`cw-<project>-backup-writer`), and
    the bucket made a Tigris snapshot bucket, so a snapshot the machine
    overwrites stays readable at its earlier version. A snapshot bucket cannot
@@ -148,9 +165,9 @@ Cloudflare call; Terraform (`infra/cloudflare/README.md`, applied by CI on
 main) makes the tunnel, for every project in `router.local.json` whose origin is
 `<project>-origin.<zone>`. So the order is: add
 `"<project>": "<project>-origin.<zone>"` to the router's `projects`, run
-`bun run cf:plan`, read it, run `bun run cf:sync-config` and tap, wait for
-CI's apply, then `machine:deploy
---tunnel named`. The apply makes:
+`bun run cf:sync-config` (it writes the config to GitHub and starts the
+apply; the plan is in the run's log), wait for CI's apply, then dispatch
+`fly-provision.yml` for the project. The apply makes:
 
 1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a
    file on the machine.
@@ -171,12 +188,12 @@ application covering the origin hostname.
 `machine:deploy` then reads the tunnel's account and id from `terraform
 output`, refusing with the origin to give it when the state has none. When
 the machine's `CLOUDFLARE_TUNNEL_TOKEN` is missing or `--refresh-tunnel-token`
-asks for it, it reads the token from Cloudflare's API
-(`cfd_tunnel/<id>/token`, with the Keychain's `cloudflare-api-token`, or
-`CLOUDFLARE_API_TOKEN` when set) and sets it through `fly secrets import` on
-stdin. The token is never in the Terraform state, and the keeper refuses
-this read, because its answer is a credential. A tunnel Terraform remade has a new token: pass
-`--refresh-tunnel-token` to set it again. A machine that ran a quick tunnel
+asks for it, it sets the token `fly-provision.yml`'s `outputs` job read from
+Cloudflare's API (`cfd_tunnel/<id>/token`, with `cloudflare-prod`'s token)
+and sealed to `fly-org`. It goes through `fly secrets import` on stdin. The
+token is never in the Terraform state, and no other run reads it: a run on
+the Mac or in `fly.yml` that would set it is refused, naming the workflow. A tunnel Terraform remade has a new token: dispatch `fly-provision.yml` with
+`refresh_tunnel_token` to set it again. A machine that ran a quick tunnel
 loses its `CW_TUNNEL_MODE` secret, so it starts the named one.
 
 ### Releases: how new code reaches a machine
@@ -184,7 +201,7 @@ loses its `CW_TUNNEL_MODE` secret, so it starts the named one.
 CI holds no credential for any machine. It publishes a signed release for
 every commit on main that CI passed, and each machine installs it itself.
 An image change (the Dockerfile, Bun, `bun.lock`, the release key,
-`entrypoint.sh`) is still `machine:deploy`, run from the keeper.
+`entrypoint.sh`) deploys from `fly.yml` when it merges.
 
 1. **CI builds and signs.** `.github/workflows/server-release.yml` runs after
    CI passes on a push to main. It installs and builds the checkout the way the
@@ -233,8 +250,8 @@ bun infra/project-machine/release-publish.ts keygen --private-key <new file outs
 That writes the private key (mode 600) and `release-signing-key.pub`. Put the
 private key's text in the `server-release` environment as
 `CW_RELEASE_SIGNING_KEY` (deployments from main only), commit the public key
-through a PR, and run `machine:deploy` from the keeper once for each machine,
-so each image carries the key. Rotating the key is the same steps.
+through a PR; `fly.yml` deploys each machine's image when it merges, so each
+image carries the key. Rotating the key is the same steps.
 
 `infra/project-machine/machines.ts` still runs `machine:deploy` for every
 machine in `machines.json`; nothing runs it on a schedule.
@@ -490,9 +507,7 @@ label, never a value:
   restarts the machine in one call. The board is down for a boot and the lead
   resumes its conversation. The move then waits until the machine reports the
   new label. That shows the machine took the token, not that Claude accepted
-  it. Through the keeper that is two taps on an app the keeper created: the
-  import and the `fly ssh console`. A live setup grant covers the import, and
-  on any other app the two reads before it are a tap each. It refuses, before
+  it. Both calls run with the app's own token on the Mac, with no tap. It refuses, before
   any change, a project with no lead or a machine on an image older than this
   code, whose entrypoint would read the marker as another org's and start no
   lead. Deploy that project first. A move off a token made for one org leaves
@@ -501,7 +516,8 @@ label, never a value:
   `lead-usage.ts` as the lead's status line command, which keeps
   `rate_limits` (5-hour and 7-day percentages and end times) in
   `/data/lead/usage.json`. `machine:tokens usage` reads that file as the `lead`
-  user over `fly ssh console`, one tap per project through the keeper. It shows
+  user over `fly ssh console`, with each app's own token, for every project
+  `machines.json` lists. It shows
   each listed token's newest reading from the projects on it now, so a token
   no project runs on has no reading. The file is the lead's to write, so a
   steered lead can misreport its own token.
@@ -582,22 +598,19 @@ fly secrets set --app cw-<project> \
 
 The lead pushes through the server, which holds one write deploy key per
 repo as the Fly secret `CW_GITHUB_PUSH_KEYS` and the board's repo list in
-`/data/cw/git-push.json`. The keeper makes the keys:
+`/data/cw/git-push.json`. `fly-provision.yml` makes the keys: dispatch it
+with `push_repos` (`owner/name`, space-separated) and, to replace them,
+`refresh_push_keys`.
 
-```bash
-bun run machine:deploy --project <project> \
-  --push-repo <owner/name> [--push-repo <owner/other>] [--refresh-push-keys]
-```
-
-For each repo the keeper makes a key pair, registers the public half on
-that repo as a write deploy key with the GitHub token in its store, and sets
-the private halves on the app. It waits for your passkey and lists every
-repo on the approval page. The keys are made once; `--refresh-push-keys`
-makes new ones and removes the keeper's older keys for the app. A deploy
+For each repo the `fly-org` job makes a key pair in memory, registers the
+public half on that repo as a write deploy key with `GH_ADMIN_TOKEN` (a
+classic token with `repo` scope), and sets the private halves on the app.
+Its log names each repo and the Actions secret names a workflow pushed with
+the key could read. The keys are made once; `refresh_push_keys` makes new
+ones and removes the older keys for the app. A deploy
 key reaches its one repo, so the machine can push nowhere else. The deploy
 also unsets `CW_GITHUB_PUSH_TOKEN` if the app still has one: a project
-machine holds no classic token. The keeper needs the token once, from you:
-[keeper.md](keeper.md), "The GitHub token". The request and the file are in
+machine holds no classic token. The request and the file are in
 [lead-sandbox.md](lead-sandbox.md), "A lead pushes through its board server".
 
 ## GitHub events for a board here
@@ -676,10 +689,8 @@ bun run machine:move-board --board <id> --project <project> [--dry-run]
 ```
 
 Run on the Mac, after `machine:deploy` has put this commit's image on the
-machine (the importer, `board-probe.ts`, ships in the image). With the keeper,
-`bun run machine:approve-move --board <id> --project <project>` first asks one
-passkey for the wall check and the move; a deploy is its own tap ("One passkey
-for a board move" in [keeper.md](keeper.md)). It keeps every
+machine (the importer, `board-probe.ts`, ships in the image). Its `fly ssh`
+and `fly ssh sftp` calls run with the app's own token, with no tap. It keeps every
 id, so `/workspaces/<id>/…` links work once the router sends the board to the
 machine. In order:
 
@@ -739,7 +750,7 @@ The MCP child and the plugin's hooks then send both `cf-access-client-*`
 headers on their requests to that URL's origin, and to no other. The launcher
 uses the node relay, because the compiled relay cannot read Keychain.
 
-### Without the keeper: `machine:push-board`
+### Without `fly ssh`: `machine:push-board`
 
 ```bash
 bun run machine:push-board --board <id> --project <project> [--dry-run]
@@ -749,7 +760,7 @@ bun run machine:push-board --board <id> --project <project> [--dry-run]
 
 Run on the Mac. It takes the same steps as `machine:move-board`, in the same
 order, with the same checks. Only the transport is different: it uses no
-`fly ssh` and no keeper tap.
+`fly ssh`.
 
 1. The bundle goes over HTTPS to the project's own hostname, which the board
    router sends to the project's machine. The request is
