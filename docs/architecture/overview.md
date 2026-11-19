@@ -2458,7 +2458,10 @@ keeps the threads `DocStore.peekThreads` decoded off a cold doc's `.ydoc`, so
 Home's review queue and the stall pass decode an unchanged doc once rather
 than on every read, and it wraps the `doc-state/` store so every write, move or
 removal forgets that doc's entry. It holds `Thread[]` only, never a `Y.Doc`,
-bounded by doc count and by estimated text.
+bounded by doc count and by estimated text. It outlives a restart: shutdown
+and the boot warm write it to `cold-threads.json` in the data dir, and the next
+start reads it back, trusting an entry only while its `.ydoc` still has the
+mtime it was decoded at. On the disk backend only.
 
 `doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
 `doc-*.ts` glob draws it. It decides whether a create naming an existing doc

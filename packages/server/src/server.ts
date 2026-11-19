@@ -3969,7 +3969,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     homeWarmMs === null
       ? null
       : setTimeout(() => {
-          crossReview.warm().catch((err: unknown) => console.error('[home] warm failed:', err));
+          crossReview
+            .warm()
+            // Saved as soon as it is full, so a start after a crash finds it too.
+            .then(() => docStore.saveColdThreads())
+            .catch((err: unknown) => console.error('[home] warm failed:', err));
         }, homeWarmMs);
   homeWarm?.unref?.();
 
@@ -4178,6 +4182,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // drop a doc the flush is about to write.
       docStore.stop();
       docStore.flush();
+      // After the flush, so no entry names a state the flush then replaced.
+      docStore.saveColdThreads();
       // Hand the next process each channel's final event id. Without it every
       // subscriber's cursor is unrecognisable after the restart and every
       // stream opens with a `replay.gap` that has nothing behind it.
