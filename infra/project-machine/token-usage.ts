@@ -7,10 +7,13 @@
  * already read. Only a label and numbers are parsed out of the answer, and
  * the answer itself is never printed.
  *
- * Through the keeper `fly ssh console` is a `token.move` hold, so each
- * project read is one passkey tap. No route on the project's server reports
- * this, and adding one is not free: it is a new path to reach from outside.
+ * Each read runs with the app's own token, which fly-ci-tokens.yml hands the
+ * Mac (`mac-ops.ts flyTokenFor`); the Mac holds no org token, so the projects
+ * come from machines.json rather than the org's app list. No route on the
+ * project's server reports this, and adding one is not free: it is a new path
+ * to reach from outside.
  */
+import { readFileSync } from 'node:fs';
 import { LEAD_BOARD_SECRET, PROJECT_NAME } from './deploy-plan.ts';
 import {
   TOKEN_LABEL,
@@ -20,6 +23,7 @@ import {
   percent,
 } from './lead-usage.ts';
 import { flyJson, onMachine } from './mac-ops.ts';
+import { MACHINES_FILE, parseMachines } from './machines.ts';
 
 export const LEAD_ROOT = '/data/lead';
 /** The image's PATH (oven/bun's debian base). */
@@ -62,22 +66,19 @@ export function parseLeadRead(stdout: string): LeadRead {
   };
 }
 
-/** The projects to read: those named, or every `cw-` app on Fly with a lead. */
-function projectsToRead(named: readonly string[]): string[] {
-  if (named.length > 0) {
-    const bad = named.find((p) => !PROJECT_NAME.test(p));
-    if (bad !== undefined) throw new Error(`${bad} is not a project name`);
-    return [...named];
-  }
-  return flyJson<{ Name?: string; name?: string }[]>(['apps', 'list'])
-    .map((a) => a.Name ?? a.name ?? '')
-    .filter((n) => n.startsWith('cw-') && PROJECT_NAME.test(n.slice(3)))
-    .filter(hasLead)
-    .map((n) => n.slice(3))
-    .sort();
+/** The projects machines.json declares. */
+export const declaredProjects = (): string[] =>
+  parseMachines(readFileSync(MACHINES_FILE, 'utf8')).map((m) => m.project);
+
+/** The projects to read: those named, or every declared project whose app has a lead. */
+function projectsToRead(named: readonly string[], declared: () => string[]): string[] {
+  const projects = named.length > 0 ? [...named] : declared();
+  const bad = projects.find((p) => !PROJECT_NAME.test(p));
+  if (bad !== undefined) throw new Error(`${bad} is not a project name`);
+  return named.length > 0 ? projects : projects.filter((p) => hasLead(`cw-${p}`)).sort();
 }
 
-/** A routine read, so an app with no lead costs no tap. Unknown counts as having one. */
+/** A secrets read, so an app with no lead gets no ssh. Unknown counts as having one. */
 function hasLead(app: string): boolean {
   try {
     const secrets = flyJson<{ Name?: string; name?: string }[]>(['secrets', 'list', '--app', app]);
@@ -87,8 +88,11 @@ function hasLead(app: string): boolean {
   }
 }
 
-export function usageReport(named: readonly string[]): ProjectUsage[] {
-  return projectsToRead(named).map((project) => {
+export function usageReport(
+  named: readonly string[],
+  declared: () => string[] = declaredProjects,
+): ProjectUsage[] {
+  return projectsToRead(named, declared).map((project) => {
     try {
       return { project, ...parseLeadRead(onMachine(`cw-${project}`, leadReadCommand())) };
     } catch {

@@ -11,6 +11,7 @@ import {
   deployArgs,
   matrixLine,
   parseMachines,
+  provisionFlags,
   selected,
 } from '../../../infra/project-machine/machines.ts';
 
@@ -68,5 +69,35 @@ describe('the machine list', () => {
     expect(deployArgs(machines[0] as never, 'abc123', false, true).at(-1)).toBe(
       '--no-terraform-outputs',
     );
+  });
+});
+
+describe('the flags fly-provision.yml passes through', () => {
+  it('passes push repos and the two refreshes, and nothing before the --', () => {
+    expect(provisionFlags(['deploy', '--project', 'riverbend'])).toEqual([]);
+    expect(
+      provisionFlags([
+        'deploy',
+        '--',
+        '--push-repo',
+        'harborlight/riverbend',
+        '--refresh-push-keys',
+        '--refresh-tunnel-token',
+      ]),
+    ).toEqual([
+      '--push-repo',
+      'harborlight/riverbend',
+      '--refresh-push-keys',
+      '--refresh-tunnel-token',
+    ]);
+  });
+
+  it('refuses any other flag, and a push repo that is not owner/name', () => {
+    expect(() => provisionFlags(['--', '--lead-board', 'w-x'])).toThrow('not a provisioning flag');
+    expect(() => provisionFlags(['--', '--push-repo', 'harborlight/..'])).toThrow(
+      'not a provisioning flag',
+    );
+    expect(() => provisionFlags(['--', '--push-repo'])).toThrow('not a provisioning flag');
+    expect(() => provisionFlags(['--', ''])).toThrow('an empty argument');
   });
 });

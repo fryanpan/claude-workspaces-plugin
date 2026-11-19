@@ -16,20 +16,29 @@
  * and nothing else, so no `wg` (WireGuard, which `fly ssh` rides),
  * `deletion` or `membership`, and expire it after VALID_DAYS. Fly needs the
  * app's numeric id for that, read once per app from Fly's API with the org
- * token; an app the org does not have is skipped, and a run on the Mac makes
- * it first.
+ * token; an app the org does not have is skipped until fly-provision.yml
+ * makes it.
+ *
+ * With CW_HANDOFF_OUT set (an apply in fly-ci-tokens.yml) it also cuts one
+ * token per project app for the Mac's own `fly` calls (`macCaveats`: the app
+ * with `builder` and `wg`, so `fly ssh` works, for MAC_VALID_DAYS) and seals
+ * them to the Mac (`infra/handoff/`), which stores them on its next
+ * `handoff:pull`. This is what replaced the keeper's routine `fly` calls,
+ * its `fly logs` and its board moves.
  *
  *   GITHUB_TOKEN   a classic token with repo scope, for the GitHub provider
- *   FLY_API_TOKEN  optional: the org token; else the Keychain's fly-org-token
+ *                  (fly-org's GH_ADMIN_TOKEN)
+ *   FLY_API_TOKEN  the org token: only fly-org holds it since the keeper retired
  *
  * The org token goes to `fly`'s environment and to Fly's API, and nowhere
  * else. Each cut token goes from `fly`'s stdout into terraform's environment
  * (TF_VAR_deploy_tokens) and nowhere else: never an argument, a file this
  * writes, or a printed line. The state and the saved plan hold them, so the
- * state is local, in `~/.local/state/claude-workspaces/fly-ci/` (or
- * `$CW_TF_WORK_DIR/fly-ci`), mode 700, and the plan is removed when the run
- * ends. Every apply cuts new tokens, so running it monthly keeps each inside
- * its window; nothing needs a person.
+ * state is local, in `$CW_TF_WORK_DIR/fly-ci` (the runner's temp folder in
+ * CI, so each run starts from none and GitHub's upsert writes every secret
+ * again) or `~/.local/state/claude-workspaces/fly-ci/`, mode 700, and the
+ * plan is removed when the run ends. fly-ci-tokens.yml applies weekly, so
+ * every token is cut fresh well inside its window; nothing needs a person.
  *
  * An apply whose plan deletes anything is refused unless `--drop` is given:
  * an app missing from this run would otherwise delete its environment.
@@ -38,11 +47,11 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { CI_REPO } from '../../packages/server/src/keeper/keeper-github.ts';
 import { deletions } from '../cloudflare/ci-secrets.ts';
 import { planSummary } from '../cloudflare/plan-summary.ts';
 import { FLY_CI_DIR, type TfResult, spawnTerraform } from '../cloudflare/terraform.ts';
-import { keychainRead } from './mac-ops.ts';
+import { type HandoffSink, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
+import { HANDOFF_REPO as CI_REPO } from '../handoff/mac-store.ts';
 import { MACHINES_FILE, parseMachines } from './machines.ts';
 
 /** The app-kit-staging trial's one app, and its environment. */
@@ -71,6 +80,10 @@ export const FEATURES = ['builder'] as const;
 /** Org features a CI token must never carry: `wg` is the door `fly ssh` uses. */
 export const NEVER_FEATURES = ['wg', 'deletion', 'membership', 'billing'] as const;
 export const VALID_DAYS = 90;
+/** The Mac's tokens are cut weekly, so two weeks leaves one missed run of slack. */
+export const MAC_VALID_DAYS = 14;
+/** What the Mac's token adds: `wg`, the door `fly ssh` (board moves, restores) uses. */
+export const MAC_FEATURES = ['builder', 'wg'] as const;
 
 export interface Caveat {
   type: string;
@@ -98,6 +111,20 @@ export function caveats(appId: string, nowMs: number): Caveat[] {
   ];
 }
 
+/** The Mac's token for one app: the app, the builder and `wg`, for MAC_VALID_DAYS. */
+export function macCaveats(appId: string, nowMs: number): Caveat[] {
+  const [apps, , window] = caveats(appId, nowMs) as [Caveat, Caveat, Caveat];
+  const now = Math.floor(nowMs / 1000);
+  return [
+    apps,
+    {
+      type: 'FeatureSet',
+      body: { features: Object.fromEntries(MAC_FEATURES.map((f) => [f, DEPLOY_ACTIONS])) },
+    },
+    { ...window, body: { not_before: now - 60, not_after: now + MAC_VALID_DAYS * 86_400 } },
+  ];
+}
+
 export interface RunResult {
   status: number;
   stdout: string;
@@ -114,6 +141,10 @@ export interface CiTokensIo {
   /** `fly tokens attenuate`, caveats on stdin, the org token in its environment. */
   attenuate: (caveatsJson: string, orgToken: string) => RunResult;
   now: () => number;
+  /** Where an apply seals the Mac's tokens; null cuts none. */
+  macSink: HandoffSink | null;
+  /** The Mac's committed public key (`infra/handoff/recipients.json`). */
+  macKey: () => string;
   /** Where the state and the saved plan go, mode 700, each file 600. */
   stateDir: string;
   /** terraform's own folder (providers, backend), beside `stateDir`. */
@@ -154,6 +185,15 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     return 1;
   }
   const tokens: Record<string, string> = {};
+  let macKey = '';
+  if (mode === 'apply' && io.macSink) {
+    try {
+      macKey = io.macKey();
+    } catch (e) {
+      say(`${e instanceof Error ? e.message : String(e)}; nothing was run`);
+      return 1;
+    }
+  }
   for (const t of list) {
     let id: string | null;
     try {
@@ -164,7 +204,7 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     }
     if (id === null) {
       say(
-        `${t.app}: the org has no such app, so ${t.environment} gets no token (and loses one an earlier apply wrote, which apply refuses without --drop); make the app on the Mac first`,
+        `${t.app}: the org has no such app, so ${t.environment} gets no token (and loses one an earlier apply wrote, which apply refuses without --drop); dispatch fly-provision.yml for it first`,
       );
       continue;
     }
@@ -178,6 +218,16 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
       return 1;
     }
     tokens[t.environment] = token;
+    if (mode === 'apply' && io.macSink && t.app !== STAGING_APP) {
+      const forMac = io.attenuate(JSON.stringify(macCaveats(id, io.now())), org);
+      const macToken = forMac.stdout.trim();
+      if (forMac.status !== 0 || !TOKEN_LINE.test(macToken) || macToken === org.trim()) {
+        say(`${t.app}: fly tokens attenuate for the Mac printed no token; nothing was run`);
+        return 1;
+      }
+      const notAfter = Math.floor(io.now() / 1000) + MAC_VALID_DAYS * 86_400;
+      io.macSink.add({ kind: 'fly-app-token', app: t.app, token: macToken, notAfter });
+    }
     say(
       `${t.environment}: a token for ${t.app} alone, features ${FEATURES.join(', ')}, valid ${VALID_DAYS} days`,
     );
@@ -234,6 +284,9 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
       return 1;
     }
     io.out('Applied. GitHub holds the tokens the plan above names; no value was printed.\n');
+    if (io.macSink?.flush(macKey)) {
+      io.out(`Sealed to the Mac: ${io.macSink.describe().join('; ')}.\n`);
+    }
     return 0;
   } finally {
     io.removeFile(plan);
@@ -279,19 +332,13 @@ export function attenuateWithFly(caveatsJson: string, orgToken: string, bin = 'f
   return { status: r.status ?? 1, stdout: r.stdout ?? '' };
 }
 
-/** FLY_API_TOKEN when set, else the Keychain's. The keeper does not cut tokens yet. */
-export function orgTokenFrom(
-  env: Record<string, string | undefined>,
-  keychain: (name: string) => string = keychainRead,
-): string {
+/** FLY_API_TOKEN: the org token, which only the fly-org environment holds. */
+export function orgTokenFrom(env: Record<string, string | undefined>): string {
   const set = env.FLY_API_TOKEN?.trim();
   if (set) return set;
-  if (env.CW_KEEPER_URL?.trim()) {
-    throw new Error(
-      'the keeper holds the org token and does not cut CI tokens yet; set FLY_API_TOKEN for this run',
-    );
-  }
-  return keychain('fly-org-token').trim();
+  throw new Error(
+    'FLY_API_TOKEN is not set: the org token lives only in the fly-org environment, so this runs in fly-ci-tokens.yml',
+  );
 }
 
 if (import.meta.main) {
@@ -306,6 +353,8 @@ if (import.meta.main) {
     env: process.env,
     projects: () => parseMachines(readFileSync(MACHINES_FILE, 'utf8')).map((m) => m.project),
     orgToken: () => orgTokenFrom(process.env),
+    macSink: macSinkFromEnv(process.env),
+    macKey: () => recipientKey('mac'),
     appId: (app, token) => flyAppId(app, token),
     attenuate: (json, token) => attenuateWithFly(json, token),
     now: Date.now,

@@ -34,6 +34,7 @@ import {
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { SETTING_NAMES } from '../../../infra/project-machine/settings.ts';
+import { giveMacFlyTokens } from './mac-fly-tokens.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..');
 const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
@@ -79,6 +80,8 @@ const saved = {
   owner: process.env.CW_SECRET_CW_BOARD_OWNER_EMAIL,
 };
 
+let restoreTokens = () => {};
+
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
@@ -117,7 +120,6 @@ exit 0
     `#!/bin/sh
 echo "$*" >> "${flyCalls}"
 case "$1 $2" in
-  "apps list") echo '[{"Name":"${cfg.app}"}]' ;;
   "status --app") [ -e "${state}/no-app" ] && { echo 'Error: Could not find App' >&2; exit 1; } ;;
   "volumes list") echo '[{"name":"cw_data","region":"sjc","state":"created"}]' ;;
   "secrets list") cat "${state}/secrets.json" ;;
@@ -154,9 +156,11 @@ cat "$f"
   chmodSync(join(bin, 'fly'), 0o755);
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
   Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
+  restoreTokens = giveMacFlyTokens(tmp, [cfg.app]);
 });
 
 afterAll(() => {
+  restoreTokens();
   process.env.PATH = saved.path;
   if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
   for (const [name, value] of [
@@ -182,7 +186,6 @@ let spies: Array<{ mockRestore(): void }> = [];
 beforeEach(() => {
   rmSync(kc, { recursive: true, force: true });
   mkdirSync(kc);
-  keychain('fly-org-token', 'fo-fixture-token');
   keychain('fly-org-slug', 'harborlight');
   keychain(cfg.keychain.identity, 'AGE-SECRET-KEY-FIXTURE');
   keychain(
@@ -450,10 +453,10 @@ describe('machine:deploy sets the project settings', () => {
     expect(existsSync(securityCalls)).toBe(false);
   });
 
-  it('off the Mac, refuses a machine the Mac never made, before any change', async () => {
+  it('off the Mac, outside fly-provision.yml, refuses a machine the Mac never made, before any change', async () => {
     process.env.CW_SECRETS_FROM_ENV = '1';
     flySecrets([]);
-    await expect(run(false)).rejects.toThrow('only a deploy on the Mac makes');
+    await expect(run(false)).rejects.toThrow('only fly-provision.yml makes');
     expect(flyCallLines().some((l) => /^(secrets import|deploy|apps create)/.test(l))).toBe(false);
     expect(existsSync(securityCalls)).toBe(false);
   });
@@ -484,30 +487,23 @@ describe('machine:deploy with a named tunnel', () => {
       },
     },
   });
-  const deployNamed = (asked: string[]) =>
-    deployProject(named, false, {
-      outputs: tunnelOutputs,
-      tunnelToken: async (t) => {
-        asked.push(`${t.accountId}/${t.id}`);
-        return TUNNEL_TOKEN;
-      },
-    });
+  const deployNamed = (presets?: Record<string, string>) =>
+    deployProject(named, false, { outputs: tunnelOutputs, ...(presets ? { presets } : {}) });
 
-  it('reads the token from the API by the output id, onto stdin only, when the secret is missing', async () => {
+  it('sets the token cloudflare-prod sealed, onto stdin only, when the secret is missing', async () => {
     flySecrets(requiredSecrets('named').filter((n) => n !== 'CLOUDFLARE_TUNNEL_TOKEN'));
-    const asked: string[] = [];
-    await deployNamed(asked);
-    expect(asked).toEqual([`${'f'.repeat(32)}/11111111-2222-4333-8444-555555555555`]);
+    await deployNamed({ CLOUDFLARE_TUNNEL_TOKEN: TUNNEL_TOKEN });
     expect(readFileSync(imported, 'utf8')).toContain(`CLOUDFLARE_TUNNEL_TOKEN=${TUNNEL_TOKEN}\n`);
     expect(output.join('\n')).not.toContain(TUNNEL_TOKEN);
     expect(flyCallLines().join('\n')).not.toContain(TUNNEL_TOKEN);
   });
 
-  it('reads no token when the secret is already set', async () => {
+  it('sets no token when the secret is already set', async () => {
     flySecrets(requiredSecrets('named'));
-    const asked: string[] = [];
-    await deployNamed(asked);
-    expect(asked).toEqual([]);
+    await deployNamed();
+    expect(existsSync(imported) ? readFileSync(imported, 'utf8') : '').not.toContain(
+      'CLOUDFLARE_TUNNEL_TOKEN',
+    );
   });
 
   it('off the Mac, with no outputs, deploys a machine that has its token and sets no token', async () => {
@@ -526,21 +522,13 @@ describe('machine:deploy with a named tunnel', () => {
     await expect(ci(true)).rejects.toThrow('--refresh-tunnel-token needs');
   });
 
-  it('off the Mac, refuses a missing tunnel token before any change, naming the Mac', async () => {
-    process.env.CW_SECRETS_FROM_ENV = '1';
+  it('refuses a missing tunnel token cloudflare-prod did not seal, before any change, on the Mac or off it', async () => {
     flySecrets(requiredSecrets('named').filter((n) => n !== 'CLOUDFLARE_TUNNEL_TOKEN'));
+    await expect(deployNamed()).rejects.toThrow('only fly-provision.yml sets');
+    process.env.CW_SECRETS_FROM_ENV = '1';
     for (const noOutputs of [true, false]) {
-      const asked: string[] = [];
-      const go = deployProject(named, false, {
-        noOutputs,
-        outputs: tunnelOutputs,
-        tunnelToken: async () => {
-          asked.push('read');
-          return TUNNEL_TOKEN;
-        },
-      });
-      await expect(go).rejects.toThrow('only a deploy on the Mac sets');
-      expect(asked).toEqual([]);
+      const go = deployProject(named, false, { noOutputs, outputs: tunnelOutputs });
+      await expect(go).rejects.toThrow('only fly-provision.yml sets');
     }
     expect(flyCallLines().some((l) => /^(secrets import|deploy)/.test(l))).toBe(false);
   });

@@ -891,7 +891,6 @@
     "packages/server/test/project-machine-deploy.test.ts": 0,
     "packages/server/test/project-machine-entrypoint.test.ts": 1.3,
     "packages/server/test/project-machine-image-install.test.ts": 1.2,
-    "packages/server/test/project-machine-keeper.test.ts": 0,
     "packages/server/test/project-machine-lead-egress-nft.test.ts": 0,
     "packages/server/test/project-machine-lead-egress.test.ts": 0,
     "packages/server/test/project-machine-lead-key.test.ts": 0,

@@ -12,14 +12,15 @@
  * fails. Prints a table and exits 1 unless every control connected, every
  * wall probe was refused, and nothing was left behind.
  *
- * `fly` runs with the org token the way `machine:deploy` runs it
- * (`mac-ops.ts`): FLY_API_TOKEN when set, else the Keychain's
- * `fly-org-token`, in the child's environment only. A dry run reads neither
- * the token nor the org.
+ * It makes apps, so it needs the Fly org token, which only CI's `fly-org`
+ * environment holds since the keeper retired: run it there with
+ * FLY_API_TOKEN set (`mac-ops.ts flyTokenFor`). On the Mac a real run is
+ * refused at its first `fly` command. A dry run reads neither the token nor
+ * the org.
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type RunResult, fly, keeperStage, keychainRead } from './mac-ops.ts';
+import { type RunResult, fly, keychainRead, privateStage } from './mac-ops.ts';
 import {
   PROBES,
   type Row,
@@ -193,7 +194,7 @@ async function main(): Promise<void> {
   const dryRun = args.includes('--dry-run');
   const region = arg(args, 'region') ?? 'sjc';
   if (!/^[a-z]{3}$/.test(region)) throw new Error(`--region is a Fly region code, not ${region}`);
-  const stage = dryRun ? null : keeperStage('cw-network-wall-');
+  const stage = dryRun ? null : privateStage('cw-network-wall-');
   try {
     let probeFile = '<probe-file>';
     if (stage) {

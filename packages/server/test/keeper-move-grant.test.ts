@@ -22,7 +22,6 @@ import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keep
 import { TestPasskey } from './keeper-authenticator.ts';
 import { waitFor } from './wait-for.ts';
 
-const REPO = join(import.meta.dir, '../../..');
 const APP = 'cw-harborlight';
 const OTHER = 'cw-riverbend';
 const BOARD = 'w-fixture1';
@@ -410,54 +409,6 @@ describe('a covered call that takes long', () => {
   });
 });
 
-describe('the real helpers, in their own process, under one grant', () => {
-  it('onMachine and the wall report reach the end with nothing held', async () => {
-    await granted();
-    const tokenFile = join(tmp, 'caller-token');
-    writeFileSync(tokenFile, CALLER, { mode: 0o600 });
-    const script = join(tmp, 'drive.ts');
-    writeFileSync(
-      script,
-      `import { onMachine } from '${REPO}/infra/project-machine/mac-ops.ts';
-import { crossRows } from '${REPO}/infra/project-machine/wall-report.ts';
-import { moveCommands } from '${REPO}/packages/server/src/keeper/keeper-move-steps.ts';
-onMachine('${APP}', moveCommands('${BOARD}').holdOff);
-crossRows(['harborlight'], onMachine);
-console.log('finished');
-`,
-    );
-    const child = Bun.spawn(['bun', script], {
-      cwd: REPO,
-      env: {
-        ...process.env,
-        CW_KEEPER_URL: ORIGIN(),
-        CW_KEEPER_CALLER_TOKEN_FILE: tokenFile,
-      },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    let exited = false;
-    void child.exited.then(() => {
-      exited = true;
-    });
-    const before = keeper.requests.pending().length;
-    await waitFor(() => exited || keeper.requests.pending().length > before, {
-      timeout: 30_000,
-    });
-    const heldNow = keeper.requests
-      .pending()
-      .slice(before)
-      .map((r) => r.summary);
-    if (!exited) child.kill();
-    expect(heldNow).toEqual([]);
-    expect(await new Response(child.stdout).text()).toContain('finished');
-    const sent = ran.filter((a) => a[1] === 'console').map((a) => a[5]);
-    expect(sent).toContain(machineShell(c.holdOff));
-    expect(sent.some((s) => s?.includes('wall-probe.ts mint'))).toBe(true);
-    expect(sent.some((s) => s?.includes('wall-probe.ts verify'))).toBe(true);
-  }, 60_000);
-});
-
 describe('the move script under one grant', () => {
   it('reaches the end of a move with no held request', async () => {
     const asked = keeperMoveGrant(ORIGIN(), APP, BOARD, {
@@ -482,7 +433,7 @@ describe('the move script under one grant', () => {
         pending.push(flySync(consoleCall(command, app)));
         return '{"holds":false}\n200';
       },
-      keeperStage: () => ({ dir: join(tmp), share: () => {}, done: () => {} }),
+      privateStage: () => ({ dir: join(tmp), share: () => {}, done: () => {} }),
       machines: () => [{ id: 'm1', state: 'started' }],
       pack: (_, tgz) => writeFileSync(tgz, 'bundle'),
       sleep: async () => {},

@@ -13,12 +13,14 @@
  * comes from the Keychain, or from the environment with CW_SECRETS_FROM_ENV=1.
  *
  *   bun infra/project-machine/machines.ts deploy [--project <name>] [--ref <commit>]
- *       [--dry-run] [--no-terraform-outputs]
+ *       [--dry-run] [--no-terraform-outputs] [-- <provisioning flags>]
  *   bun infra/project-machine/machines.ts matrix
  *
  * `deploy` runs `machine:deploy` for each machine in order (or the one
- * `--project` names) and stops at the first failure. A machine the Mac never
- * made is refused there, before any change. `--no-terraform-outputs` is CI's:
+ * `--project` names) and stops at the first failure. A machine not yet made
+ * is refused there, before any change, outside fly-provision.yml. After `--`,
+ * fly-provision.yml passes `--push-repo <owner/name>`, `--refresh-push-keys`
+ * and `--refresh-tunnel-token` through (`provisionFlags`); nothing else. `--no-terraform-outputs` is CI's:
  * its jobs hold no key to the state (`deploy.ts`). `matrix` prints
  * `matrix=<JSON list of projects>`, the line fly.yml appends to
  * `$GITHUB_OUTPUT`.
@@ -26,6 +28,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { PROJECT_NAME } from './deploy-plan.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -84,6 +87,25 @@ export function deployArgs(m: Machine, ref: string, dryRun: boolean, noOutputs =
   ];
 }
 
+const PASSED = new Set(['--refresh-push-keys', '--refresh-tunnel-token']);
+
+/** The flags after `--` that pass through to `machine:deploy`. Throws on any other. */
+export function provisionFlags(args: readonly string[]): string[] {
+  const at = args.indexOf('--');
+  if (at < 0) return [];
+  const rest = args.slice(at + 1);
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i] ?? '';
+    if (PASSED.has(a)) out.push(a);
+    else if (a === '--push-repo' && isRepoName(rest[i + 1] ?? '')) {
+      out.push(a, rest[i + 1] ?? '');
+      i++;
+    } else throw new Error(`${a || 'an empty argument'} is not a provisioning flag`);
+  }
+  return out;
+}
+
 /** fly.yml's job matrix: every project, in the file's order. */
 export const matrixLine = (machines: readonly Machine[]): string =>
   `matrix=${JSON.stringify(machines.map((m) => m.project))}`;
@@ -97,9 +119,12 @@ export function selected(machines: Machine[], project: string | undefined): Mach
 }
 
 if (import.meta.main) {
-  const args = process.argv.slice(2);
+  const allArgs = process.argv.slice(2);
+  const cut = allArgs.indexOf('--');
+  const args = cut < 0 ? allArgs : allArgs.slice(0, cut);
+  const extra = provisionFlags(allArgs);
   const usage =
-    'usage: bun infra/project-machine/machines.ts deploy [--project <name>] [--ref <commit>] [--dry-run] [--no-terraform-outputs] | matrix';
+    'usage: bun infra/project-machine/machines.ts deploy [--project <name>] [--ref <commit>] [--dry-run] [--no-terraform-outputs] [-- --push-repo <owner/name>... --refresh-push-keys --refresh-tunnel-token] | matrix';
   const all = parseMachines(readFileSync(MACHINES_FILE, 'utf8'));
   if (args[0] === 'matrix') {
     console.log(matrixLine(all));
@@ -123,6 +148,7 @@ if (import.meta.main) {
       [
         join(HERE, 'deploy.ts'),
         ...deployArgs(m, ref, args.includes('--dry-run'), args.includes('--no-terraform-outputs')),
+        ...extra,
       ],
       { stdio: 'inherit' },
     );

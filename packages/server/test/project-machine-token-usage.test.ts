@@ -278,15 +278,15 @@ describe('the report', () => {
     expect(lines).not.toContain('own sign-in');
   });
 
-  it('skips an app with no lead, which costs no tap', () => {
+  it('skips an app with no lead, which gets no ssh', () => {
     for (const org of ORGS) writeFileSync(join(appDir(org), 'ssh-out'), lead('', ''));
     flySecrets('harborlight', [...requiredSecrets('quick'), 'CW_LEAD_BOARD']);
     flySecrets('riverbend', requiredSecrets('quick'));
-    expect(usageReport([]).map((r) => r.project)).toEqual(['harborlight']);
+    expect(usageReport([], () => [...ORGS]).map((r) => r.project)).toEqual(['harborlight']);
     expect(flyCalls()).not.toContain('ssh console --app cw-riverbend');
   });
 
-  it('usageReport reads every cw- app, or only the projects named, and prints no token', async () => {
+  it('usageReport reads every project machines.json declares, or only those named, and prints no token', async () => {
     listed(1, 'first-account', FIRST);
     for (const org of ORGS) {
       flySecrets(org, [...requiredSecrets('quick'), 'CW_LEAD_BOARD']);
@@ -296,7 +296,7 @@ describe('the report', () => {
       );
     }
     writeFileSync(join(appDir('riverbend'), 'ssh-fails'), '');
-    const all = usageReport([]);
+    const all = usageReport([], () => [...ORGS]);
     expect(all.map((r) => r.project)).toEqual(['harborlight', 'riverbend']);
     expect(all[0]?.usage?.fiveHour?.usedPercent).toBe(7);
     expect(all[1]?.error).toContain('could not read');

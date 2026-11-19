@@ -2,7 +2,7 @@
 /**
  * `bun run handoff:pull`: take what CI sealed to the Mac and store it.
  *
- * For each workflow that hands off (`WORKFLOWS`), the successful runs on main
+ * For each workflow that hands off (`WORKFLOWS`), the finished runs on main
  * this Mac has not pulled yet, oldest first, so a rotated secret lands after
  * the one it replaces. `gh run download` fetches the run's `handoff-mac`
  * artifact with Bryan's own `gh` login; the artifact is public in a public
@@ -22,7 +22,7 @@
  * `mac-ops.ts` runs this itself when it needs an app's token and has none.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type HandoffItem, describeItem, openItems } from './items.ts';
@@ -43,7 +43,11 @@ export const WORKFLOWS = [
   'cf-rotate-token.yml',
 ] as const;
 export const MAC_ARTIFACT = 'handoff-mac';
-/** The file the artifact holds (`HandoffSink`'s output). */
+/**
+ * The usual name of a sealed file in the artifact (`HandoffSink`'s output).
+ * A run with two steps that hand off writes two (fly-provision.yml's deploy
+ * and its token apply), and every `.json` file in the artifact is read.
+ */
 export const HANDOFF_FILE = 'handoff.json';
 
 export interface Run {
@@ -60,6 +64,8 @@ export interface PullIo {
   /** A fresh folder for one download. */
   tempDir: () => string;
   readFile: (p: string) => string;
+  /** The file names in a folder. */
+  listFiles: (dir: string) => string[];
   remove: (p: string) => void;
   store: (item: HandoffItem) => 'stored' | 'kept';
   err: (s: string) => void;
@@ -80,8 +86,10 @@ function listRuns(io: PullIo, workflow: string): { id: string; at: string }[] {
     workflow,
     '--branch',
     'main',
+    // Finished, not only successful: a provisioning run that failed part way
+    // still sealed what it made before it stopped.
     '--status',
-    'success',
+    'completed',
     '--limit',
     '20',
     '--json',
@@ -140,15 +148,22 @@ export function pull(io: PullIo): number {
         failed = true;
         continue;
       }
-      const opened = openItems(key, io.readFile(join(dir, HANDOFF_FILE)));
-      if (opened.recipient !== 'mac')
-        throw new Error(`sealed to ${opened.recipient}, not this Mac`);
-      for (const item of opened.items) {
-        if (item.kind === 'fly-secrets') throw new Error('a fly-secrets item is not for the Mac');
-        const r = io.store(item);
-        say(
-          `${run.workflow} run ${run.id}: ${describeItem(item)} ${r === 'stored' ? 'stored' : 'kept the newer one already here'}`,
-        );
+      const names = io
+        .listFiles(dir)
+        .filter((f) => f.endsWith('.json'))
+        .sort();
+      if (names.length === 0) throw new Error('the artifact holds no sealed file');
+      for (const name of names) {
+        const opened = openItems(key, io.readFile(join(dir, name)));
+        if (opened.recipient !== 'mac')
+          throw new Error(`sealed to ${opened.recipient}, not this Mac`);
+        for (const item of opened.items) {
+          if (item.kind === 'fly-secrets') throw new Error('a fly-secrets item is not for the Mac');
+          const r = io.store(item);
+          say(
+            `${run.workflow} run ${run.id}: ${describeItem(item)} ${r === 'stored' ? 'stored' : 'kept the newer one already here'}`,
+          );
+        }
       }
       seen.add(run.id);
     } catch (e) {
@@ -206,6 +221,7 @@ export async function realPullIo(): Promise<PullIo> {
     saveSeen: (s) => writeSeen(dir, s),
     tempDir: () => mkdtempSync(join(tmpdir(), 'cw-handoff-')),
     readFile: (p) => readFileSync(p, 'utf8'),
+    listFiles: (d) => readdirSync(d),
     remove: (p) => rmSync(p, { recursive: true, force: true }),
     store: await realStore(dir),
     err: (s) => process.stderr.write(s),

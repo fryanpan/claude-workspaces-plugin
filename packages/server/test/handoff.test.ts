@@ -147,6 +147,8 @@ interface FakeRun {
   workflow: string;
   /** The sealed file, or null for a run with no artifact. */
   file: string | null;
+  /** A second sealed file in the same artifact, as tokens.json. */
+  tokens?: string;
 }
 
 function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
@@ -169,7 +171,9 @@ function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
       const run = runs.find((r) => String(r.id) === args[2]);
       if (!run?.file)
         return { status: 1, stdout: '', stderr: 'no valid artifacts found to download' };
-      files.set(join(args[args.indexOf('--dir') + 1] ?? '', HANDOFF_FILE), run.file);
+      const dir = args[args.indexOf('--dir') + 1] ?? '';
+      files.set(join(dir, HANDOFF_FILE), run.file);
+      if (run.tokens !== undefined) files.set(join(dir, 'tokens.json'), run.tokens);
       return { status: 0, stdout: '', stderr: '' };
     },
     privateKey: () => key,
@@ -183,6 +187,8 @@ function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
       if (f === undefined) throw new Error(`no file ${p}`);
       return f;
     },
+    listFiles: (d) =>
+      [...files.keys()].filter((k) => k.startsWith(`${d}/`)).map((k) => k.slice(d.length + 1)),
     remove: () => {},
     store: (item) => {
       stored.push(item);
@@ -237,6 +243,28 @@ describe('handoff:pull', () => {
     expect([...(w.saved() ?? [])].sort()).toEqual(['10', '20', '30']);
     expect(w.said.join('')).not.toContain(SECRET);
     expect(w.said.join('')).toContain('service token "agent riverbend" (rotated) stored');
+  });
+
+  it('reads every sealed file a run left, so a provisioning run hands over its keys and its token', () => {
+    const mac = generateHandoffKeys();
+    const sealed = (items: HandoffItem[]) => JSON.stringify(sealItems('mac', mac.publicKey, items));
+    const w = pullWorld(
+      [
+        {
+          id: 7,
+          at: '2026-11-18T12:00:00Z',
+          workflow: 'fly-provision.yml',
+          file: sealed([{ kind: 'keychain', name: 'cw-riverbend-backup-identity', value: SECRET }]),
+          tokens: sealed([
+            { kind: 'fly-app-token', app: 'cw-riverbend', token: SECRET, notAfter: 2_000_000_000 },
+          ]),
+        },
+      ],
+      mac.privateKey,
+    );
+    expect(pull(w.io)).toBe(0);
+    expect(w.stored.map((i) => i.kind)).toEqual(['keychain', 'fly-app-token']);
+    expect(w.said.join('')).not.toContain(SECRET);
   });
 
   it('skips a run already pulled', () => {

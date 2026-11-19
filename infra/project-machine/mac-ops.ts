@@ -1,13 +1,15 @@
 /**
- * The Mac side of the deploy scripts: the Keychain, and `fly` run with the
- * org token in its environment.
+ * The Mac side of the deploy scripts: the Keychain, and `fly` run with a
+ * token in its environment (`flyTokenFor`).
  *
- * Off the Mac (the keeper, or a shell with no Keychain) every Keychain entry
- * can be handed in instead as the environment variable `secretEnvName(entry)`
- * (`fly-org-slug` -> CW_SECRET_FLY_ORG_SLUG), plain rather than base64, and
- * the org token as FLY_API_TOKEN. With CW_SECRETS_FROM_ENV=1 the Keychain is
- * never asked at all, and no entry can be made, so a project's first deploy,
- * which makes its backup key and bucket credential, has to run on the Mac.
+ * Off the Mac every Keychain entry can be handed in instead as the
+ * environment variable `secretEnvName(entry)` (`fly-org-slug` ->
+ * CW_SECRET_FLY_ORG_SLUG), plain rather than base64, and the Fly token as
+ * FLY_API_TOKEN. With CW_SECRETS_FROM_ENV=1 the Keychain is never asked at
+ * all. An entry made in such a run (a project's backup identity and bucket
+ * credentials, in `fly-provision.yml`) goes to the run's handoff sink
+ * (CW_HANDOFF_OUT, `infra/handoff/`), sealed to the Mac, which stores it in
+ * its Keychain on the next `handoff:pull`; without a sink it is refused.
  *
  * Every value read from the Keychain goes into a child's environment or
  * stdin and nowhere else: never an argument (`ps` shows arguments to every
@@ -23,13 +25,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretAddCommandLine } from '../../packages/core/src/secret-line.ts';
 import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/secret-name.ts';
-import {
-  announceToBoard,
-  boardUrlFromEnv,
-} from '../../packages/server/src/keeper/keeper-announce.ts';
-import { keeperFetch } from '../../packages/server/src/keeper/keeper-client.ts';
 import { asCw, machineShell } from '../../packages/server/src/keeper/keeper-move-steps.ts';
-import { type CloudflareApi, cloudflareApi } from './cloudflare.ts';
+import { type HandoffSink, macSinkFromEnv } from '../handoff/items.ts';
+import { handoffDir, readAppToken } from '../handoff/mac-store.ts';
 
 /** The environment variable that stands in for the Keychain entry `name`. */
 export const secretEnvName = (name: string): string =>
@@ -38,7 +36,24 @@ export const secretEnvName = (name: string): string =>
 /** Whether this run takes its secrets from the environment only (CI). */
 export const secretsFromEnv = (): boolean => process.env.CW_SECRETS_FROM_ENV === '1';
 
+/** Entries this CI run made, sealed to the Mac at its end and readable until then. */
+const madeHere = new Map<string, string>();
+let sink: HandoffSink | null = null;
+
+/**
+ * The run's handoff sink (CW_HANDOFF_OUT), or null when it has none. One per
+ * file, so everything one run makes lands in the same sink.
+ */
+export function handoffSink(): HandoffSink | null {
+  const want = macSinkFromEnv(process.env);
+  if (want === null) return null;
+  if (sink?.outPath !== want.outPath) sink = want;
+  return sink;
+}
+
 function fromEnv(name: string): string | undefined {
+  const made = madeHere.get(name);
+  if (made !== undefined) return made;
   const v = process.env[secretEnvName(name)];
   return v !== undefined && v !== '' ? v : undefined;
 }
@@ -70,7 +85,16 @@ export function keychainRead(name: string): string {
 /** Store a NEW entry. Refuses to replace one, because an entry may guard snapshots. */
 export function keychainCreate(name: string, value: string): void {
   if (secretsFromEnv()) {
-    throw new Error(`${name} can only be made in the Mac's Keychain; run this deploy on the Mac`);
+    const out = handoffSink();
+    if (!out) {
+      throw new Error(
+        `${name} is made only in a run that hands it to the Mac (CW_HANDOFF_OUT, fly-provision.yml)`,
+      );
+    }
+    if (keychainHas(name)) throw new Error(`${name} already exists; not replacing it`);
+    out.add({ kind: 'keychain', name, value });
+    madeHere.set(name, value);
+    return;
   }
   if (keychainHas(name)) throw new Error(`Keychain already has ${name}; not replacing it`);
   const line = secretAddCommandLine(name, Buffer.from(value, 'utf8').toString('base64'));
@@ -83,98 +107,22 @@ export function keychainCreate(name: string, value: string): void {
     throw new Error(`could not store ${name} in the Keychain`);
 }
 
-/**
- * The Cloudflare API token, for a deploy script's API calls without the
- * keeper: CLOUDFLARE_API_TOKEN when set (CI), else the Keychain. `cf:plan`
- * without the keeper reads it through `infra/cloudflare/credentials.ts`; with
- * it, the keeper runs terraform (`infra/cloudflare/keeper-wrapper.ts`).
- * Held in memory only.
- */
-export function cloudflareApiToken(): string {
-  const env = process.env.CLOUDFLARE_API_TOKEN?.trim();
-  if (env) return env;
-  const entry = 'cloudflare-api-token';
-  if (!keychainHas(entry)) throw new Error(`the Keychain has no ${entry}; nothing was changed`);
-  return keychainRead(entry).trim();
-}
-
-/**
- * The deploy scripts' Cloudflare API: through the keeper once it holds the
- * token (`CW_KEEPER_URL`, `docs/process/keeper.md`), which prints the
- * approval link for a held call and reads nothing from the Keychain; with
- * the Keychain's token before that.
- */
-export function cloudflareClient(requester: string): CloudflareApi {
-  const keeper = process.env.CW_KEEPER_URL?.trim();
-  if (!keeper) return cloudflareApi(cloudflareApiToken());
-  return cloudflareApi(null, {
-    base: `${keeper}/v1/cloudflare`,
-    fetchImpl: keeperFetch(keeper, {
-      requester,
-      announce: announceToBoard(boardUrlFromEnv(), requester),
-      onHeld: (held) => {
-        console.error(`[keeper] ${held.hold} waits for Bryan's passkey: ${held.summary}`);
-        console.error(`[keeper] approve at ${held.approveUrl}`);
-      },
-    }),
-  });
-}
-
-/** The keeper's macOS user (`docs/process/keeper.md`). */
-const keeperUser = (): string => process.env.CW_KEEPER_USER?.trim() || 'cw-relay';
-
-export interface KeeperStage {
+/** A private temp folder for files `fly` uploads (`fly ssh sftp`). */
+export interface PrivateStage {
   dir: string;
-  /** Let the keeper's user read one file in `dir`. */
+  /** Make one file in `dir` readable by this user alone. */
   share(path: string): void;
   done(): void;
 }
 
-/**
- * A folder for files the keeper's `fly` uploads. Through the keeper `fly`
- * runs as the keeper's user, which cannot open this user's temp folder. The
- * folder goes in `/tmp`, mode 700, with one ACL entry letting the keeper's
- * user list it, and each shared file is mode 600 with one entry letting it
- * read: no other user can open either. Without the keeper it is a plain
- * private temp folder.
- */
-export function keeperStage(prefix: string): KeeperStage {
-  if (!viaKeeper()) {
-    const dir = mkdtempSync(join(tmpdir(), prefix));
-    return { dir, share: () => {}, done: () => rmSync(dir, { recursive: true, force: true }) };
-  }
-  const user = keeperUser();
-  const grant = (path: string, rights: string) => {
-    const r = spawnSync('/bin/chmod', ['+a', `${user} allow ${rights}`, path], {
-      encoding: 'utf8',
-    });
-    if (r.status !== 0) {
-      throw new Error(
-        `could not let the keeper's user ${user} read ${path}: ${r.stderr.trim() || `chmod exited ${r.status}`}`,
-      );
-    }
-  };
-  // Checked before anything is made: chmod names an unknown user.
-  const probe = spawnSync('/usr/bin/id', ['-u', user], { stdio: 'ignore' });
-  if (probe.status !== 0) {
-    throw new Error(`the keeper's user ${user} does not exist; set CW_KEEPER_USER`);
-  }
-  const dir = mkdtempSync(join('/tmp', prefix));
-  const done = () => rmSync(dir, { recursive: true, force: true });
-  try {
-    chmodSync(dir, 0o700);
-    grant(dir, 'list,search,readattr,readextattr,readsecurity');
-  } catch (err) {
-    done();
-    throw err;
-  }
+/** A folder only this user can open, removed by `done`. */
+export function privateStage(prefix: string): PrivateStage {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  chmodSync(dir, 0o700);
   return {
     dir,
-    share(path) {
-      chmodSync(path, 0o600);
-      grant(path, 'read,readattr,readextattr,readsecurity');
-    },
-    done,
+    share: (path) => chmodSync(path, 0o600),
+    done: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
 
@@ -184,46 +132,77 @@ export interface RunResult {
   stderr: string;
 }
 
-let flyToken: string | undefined;
-
-/**
- * FLY_API_TOKEN when the environment has it, else the Keychain's org token.
- * In CI it is a token for one app alone (`ci-tokens.ts`), not the org's.
- */
-function orgToken(): string {
-  const env = process.env.FLY_API_TOKEN?.trim();
-  return env ? env : keychainRead('fly-org-token').trim();
+/** The app a `fly` command names with `--app`/`-a`, if any. */
+export function appOf(args: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? '';
+    if ((a === '--app' || a === '-a') && i + 1 < args.length) return args[i + 1];
+    if (a.startsWith('--app=')) return a.slice('--app='.length);
+  }
+  return undefined;
 }
 
-const KEEPER_FLY_CLI = join(import.meta.dir, '../../packages/server/src/keeper/keeper-fly-cli.ts');
-
-/**
- * Once the keeper holds the org token (`CW_KEEPER_URL` set,
- * `docs/process/keeper.md`), every `fly` call is asked of the keeper
- * instead: a routine one runs at once, a held one prints its approval link
- * and waits for Bryan's passkey. No token is read here.
- */
-function keeperFlySync(args: string[], input: string | undefined): RunResult {
-  const r = spawnSync(process.execPath, [KEEPER_FLY_CLI], {
-    input: JSON.stringify({ args, ...(input !== undefined ? { input } : {}) }),
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'inherit'],
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (r.status !== 0) return { status: 1, stdout: '', stderr: 'could not reach the keeper' };
-  return JSON.parse(r.stdout) as RunResult;
+export interface FlyTokenSource {
+  env: Record<string, string | undefined>;
+  /** The Mac's token for one app (`infra/handoff/mac-store.ts`), or null. */
+  appToken: (app: string) => string | null;
+  /** `bun run handoff:pull`, once, when the Mac has no token for the app. */
+  pull: () => void;
 }
 
-const viaKeeper = (): boolean => Boolean(process.env.CW_KEEPER_URL?.trim());
+/**
+ * The token a `fly` command runs with. FLY_API_TOKEN when set: in CI that is
+ * the org token in `fly-org`, or one app's token in `fly-<project>`
+ * (`ci-tokens.ts`). On the Mac, which holds no org token since the keeper
+ * retired, the token CI cut for the one app the command names, pulled from
+ * CI's handoff if it is missing or near its end. A command that names no
+ * app needs the org token and runs only in CI.
+ */
+export function flyTokenFor(args: readonly string[], src: FlyTokenSource): string {
+  const env = src.env.FLY_API_TOKEN?.trim();
+  if (env) return env;
+  const app = appOf(args);
+  if (!app || !app.startsWith('cw-')) {
+    throw new Error(
+      `fly ${args.slice(0, 2).join(' ')} needs the Fly org token, which only CI holds: run it in .github/workflows/fly-provision.yml (docs/process/project-machine.md)`,
+    );
+  }
+  const have = src.appToken(app);
+  if (have) return have;
+  src.pull();
+  const pulled = src.appToken(app);
+  if (pulled) return pulled;
+  throw new Error(
+    `this Mac has no Fly token for ${app}: dispatch .github/workflows/fly-ci-tokens.yml, then bun run handoff:pull`,
+  );
+}
 
-/** Run `fly` with the org token in its environment. Output is returned, not shown. */
+let pulled = false;
+function realTokenSource(): FlyTokenSource {
+  return {
+    env: process.env,
+    appToken: (app) => readAppToken(handoffDir(), app, Date.now()),
+    pull: () => {
+      if (pulled) return;
+      pulled = true;
+      spawnSync(process.execPath, [join(import.meta.dir, '..', 'handoff', 'pull.ts')], {
+        stdio: ['ignore', 'inherit', 'inherit'],
+      });
+    },
+  };
+}
+
+const tokenEnv = (args: string[]) => ({
+  ...process.env,
+  FLY_API_TOKEN: flyTokenFor(args, realTokenSource()),
+});
+
+/** Run `fly` with its token in its environment. Output is returned, not shown. */
 export function fly(args: string[], opts: { input?: string; quiet?: boolean } = {}): RunResult {
-  if (viaKeeper()) return keeperFlySync(args, opts.input);
-  flyToken ??= orgToken();
   const r = spawnSync('fly', args, {
     encoding: 'utf8',
     input: opts.input,
-    env: { ...process.env, FLY_API_TOKEN: flyToken },
+    env: tokenEnv(args),
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
@@ -247,19 +226,7 @@ export function flyJson<T>(args: string[]): T {
 
 /** Run `fly` with its output going straight to this terminal (builds, deploys). */
 export function flyLive(args: string[]): void {
-  if (viaKeeper()) {
-    // The keeper returns output when the command ends, not as it runs.
-    const r = keeperFlySync(args, undefined);
-    process.stdout.write(r.stdout);
-    process.stderr.write(r.stderr);
-    if (r.status !== 0) throw new Error(`fly ${args.slice(0, 2).join(' ')} exited ${r.status}`);
-    return;
-  }
-  flyToken ??= orgToken();
-  const r = spawnSync('fly', args, {
-    stdio: 'inherit',
-    env: { ...process.env, FLY_API_TOKEN: flyToken },
-  });
+  const r = spawnSync('fly', args, { stdio: 'inherit', env: tokenEnv(args) });
   if (r.status !== 0) throw new Error(`fly ${args.slice(0, 2).join(' ')} exited ${r.status}`);
 }
 

@@ -35,8 +35,8 @@
  *   Each is set once, like every secret, except that a run naming its source
  *   sets it again, and `--refresh-lead` sets all of them again, the sign-in
  *   with a new approval
- *   the server's push keys, one write deploy key per `--push-repo`, which
- *   the keeper makes and sets as CW_GITHUB_PUSH_KEYS (`push-keys.ts`); a
+ *   the server's push keys, one write deploy key per `--push-repo`, made
+ *   in fly-provision.yml and set as CW_GITHUB_PUSH_KEYS (`push-keys.ts`); a
  *   classic CW_GITHUB_PUSH_TOKEN found on the app is unset
  *   the owner's address, the public address and the Access settings
  *   (`settings.ts`), from the Keychain and the Terraform outputs; each one
@@ -45,17 +45,18 @@
  * With `--tunnel named` it gives the machine the token of the tunnel
  * `cw-<name>` as CLOUDFLARE_TUNNEL_TOKEN. Terraform makes the tunnel, its
  * ingress and its origin hostname (`infra/cloudflare/modules/tunnel`). This
- * reads the tunnel's id from `terraform output` and, only when the secret is
- * to be set, its token from Cloudflare's API (`tunnel-plan.ts`); the token is
- * kept out of the state. A tunnel Terraform remade has a new token:
- * `--refresh-tunnel-token` sets it again.
+ * token is read in fly-provision.yml's `cloudflare-prod` job, the one
+ * holder of a Cloudflare token that can, and sealed to its `fly-org` job,
+ * which hands it in as a preset (`provision.ts`); it is kept out of the
+ * state. A tunnel Terraform remade has a new token: dispatch fly-provision
+ * again with refresh_tunnel_token.
  *
- * With CW_SECRETS_FROM_ENV=1 Keychain entries come from the environment
- * (`mac-ops.ts`) and only a machine the Mac made is updated. That is how
- * fly.yml runs it, with a token that reaches the one app (`ci-tokens.ts`):
- * so the app is found by its own status, not the org's app list, and the
- * tunnel token, which only a Cloudflare token can read, is set only on the
- * Mac. `--no-terraform-outputs` (CI's jobs hold no key to the state) reads
+ * Every run finds the app by its own status, not the org's app list, so it
+ * works with a token for that one app: CI's (`ci-tokens.ts`) or the Mac's
+ * (`mac-ops.ts`). With CW_SECRETS_FROM_ENV=1 Keychain entries come from the
+ * environment. Only fly-provision.yml, which holds the org token and a
+ * handoff sink, makes an app, a volume, a bucket or a credential; what it
+ * makes for the Mac is sealed to it (`infra/handoff/`). `--no-terraform-outputs` (CI's jobs hold no key to the state) reads
  * no outputs: a named tunnel's id is not looked up, and a setting whose
  * source is an output is left as it is. The image records its serial
  * (`image-release.json`) so it beats an older release on the volume.
@@ -67,11 +68,12 @@
  * Why Tigris: README.md.
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
 import { type TfEnv, isEnv } from '../cloudflare/terraform.ts';
+import { recipientKey } from '../handoff/items.ts';
 import {
   type Action,
   LEAD_BOARD_SECRET,
@@ -93,18 +95,19 @@ import {
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
 import {
-  cloudflareClient,
   fly,
   flyJson,
   flyLive,
   flyOk,
+  handoffSink,
   keychainCreate,
   keychainHas,
   keychainRead,
   secretsFromEnv,
 } from './mac-ops.ts';
 import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
-import { makePushKeysThroughKeeper } from './push-keys.ts';
+import { flushMacHandoff, provisionPresets } from './provision.ts';
+import { makePushKeys } from './push-keys.ts';
 import { writeImageRelease } from './release-publish.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
@@ -124,12 +127,7 @@ import {
   readTokenList,
   tokenMarker,
 } from './token-list.ts';
-import {
-  type AppliedTunnel,
-  TUNNEL_TOKEN_SECRET,
-  appliedTunnel,
-  readTunnelToken,
-} from './tunnel-plan.ts';
+import { type AppliedTunnel, TUNNEL_TOKEN_SECRET, appliedTunnel } from './tunnel-plan.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
@@ -184,12 +182,11 @@ const madeFrom = (cfg: ProjectConfig): Record<string, string> => ({
 });
 
 /**
- * Whether the app exists. On the Mac, the org's app list; off it, where the
- * token reaches this one app and listing the org is refused, the app's own
- * status, which Fly answers "not found" for an app that does not exist.
+ * Whether the app exists: the app's own status, which Fly answers "not
+ * found" for an app that does not exist. A token for this one app may not
+ * list the org, and only CI holds the org token.
  */
 function appExists(app: string): boolean {
-  if (!secretsFromEnv()) return flyJson<Named[]>(['apps', 'list']).some((a) => nameOf(a) === app);
   const r = fly(['status', '--app', app, '--json']);
   if (r.status === 0) return true;
   if (/could not find|not found/i.test(`${r.stderr}\n${r.stdout}`)) return false;
@@ -237,12 +234,7 @@ async function observe(cfg: ProjectConfig) {
 }
 
 function deploy(cfg: ProjectConfig): void {
-  // Through the keeper, `fly deploy` runs as the keeper's user, which cannot
-  // open this user's temp folder; the context is the public repo at one
-  // commit, so it is built where any user may read it.
-  const viaKeeper = Boolean(process.env.CW_KEEPER_URL?.trim());
-  const ctx = mkdtempSync(join(viaKeeper ? '/tmp' : tmpdir(), `${cfg.app}-build-`));
-  if (viaKeeper) chmodSync(ctx, 0o755);
+  const ctx = mkdtempSync(join(tmpdir(), `${cfg.app}-build-`));
   try {
     const archive = spawnSync(
       'sh',
@@ -359,8 +351,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       return;
     }
     case 'make-push-keys':
-      for (const line of await makePushKeysThroughKeeper(cfg.app, a.repos))
-        console.log(`[deploy]   ${line}`);
+      for (const line of await makePushKeys(cfg.app, a.repos)) console.log(`[deploy]   ${line}`);
       return;
     case 'unset-secrets':
       flyOk(['secrets', 'unset', ...a.names, '--app', cfg.app, '--stage']);
@@ -394,27 +385,20 @@ export interface DeployOptions {
   tfEnv?: TfEnv;
   /** Set CLOUDFLARE_TUNNEL_TOKEN again, after Terraform remade the tunnel. */
   refreshTunnelToken?: boolean;
-  /** Reads a tunnel's token; a test's stand-in. Default: Cloudflare's API. */
-  tunnelToken?: (t: AppliedTunnel) => Promise<string>;
   /** Where the browser approval's screen is shown, redacted. Default: this terminal. */
   signInOutput?: ApprovalIo['show'];
   /** Read no Terraform output: CI's jobs hold no key to the state. */
   noOutputs?: boolean;
+  /**
+   * Secrets `cloudflare-prod` read for this app and sealed to `fly-org`
+   * (`provision.ts`): the tunnel's token and the Access settings, by name.
+   */
+  presets?: Record<string, string>;
 }
 
 const NO_OUTPUTS = 'this run reads no Terraform outputs (--no-terraform-outputs)';
 
-/** The keeper refuses this read, because its answer is a credential. */
-async function apiTunnelToken(t: AppliedTunnel): Promise<string> {
-  if (process.env.CW_KEEPER_URL?.trim()) {
-    throw new Error(
-      "the keeper does not hand out a tunnel's token, so a named tunnel's token cannot be set through it (docs/process/keeper.md)",
-    );
-  }
-  return readTunnelToken(cloudflareClient('machine:deploy (named tunnel)'), t);
-}
-
-/** The steps that make an app, a volume or a credential: the Mac's alone. */
+/** The steps that make an app, a volume or a credential: fly-provision.yml's alone. */
 const MAKES = new Set([
   'create-app',
   'create-volume',
@@ -435,7 +419,9 @@ export async function deployProject(
     cached ??= (opts.outputs ?? (() => readOutputs(opts.tfEnv ?? 'prod')))();
     return cached;
   };
-  if (opts.noOutputs && opts.refreshTunnelToken) {
+  // fly-provision.yml reads no outputs; the token it sets again comes sealed.
+  const presetTunnel = opts.presets?.[TUNNEL_TOKEN_SECRET];
+  if (opts.noOutputs && opts.refreshTunnelToken && !presetTunnel) {
     throw new Error(`--refresh-tunnel-token needs the tunnel's id, and ${NO_OUTPUTS}`);
   }
   // The outputs are read first: a named tunnel Terraform has not made stops
@@ -444,8 +430,17 @@ export async function deployProject(
     cfg.tunnel === 'named' && !opts.noOutputs ? appliedTunnel(outputs(), cfg) : undefined;
   const found = readSettings(cfg.project, { outputs, keychainHas, keychainRead });
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
+  const presets = { ...opts.presets };
+  delete presets[TUNNEL_TOKEN_SECRET];
+  for (const [name, v] of Object.entries(presets)) {
+    settings.set(name, {
+      name: name as Setting['name'],
+      from: 'fly-provision.yml',
+      value: () => v,
+    });
+  }
   // A remade tunnel has a new token, so an existing secret holds the old one.
-  const refresh = tunnel && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
+  const refresh = (tunnel || presetTunnel) && opts.refreshTunnelToken ? [TUNNEL_TOKEN_SECRET] : [];
   const seen = await observe(cfg);
   // Before anything is changed: a label that is not listed stops the run.
   const tokens = leadTokenDue(cfg, seen) ? readTokenList() : [];
@@ -506,18 +501,22 @@ export async function deployProject(
       `[deploy] not set: ${LEAD_DEPLOY_KEY_SECRET}: the Keychain has no ${cfg.keychain.deployKey}`,
     );
   const makes = actions.filter((a) => MAKES.has(a.kind)).map((a) => a.kind);
-  if (secretsFromEnv() && makes.length > 0) {
+  // Only fly-provision.yml holds the org token and hands what it makes to the Mac.
+  if (makes.length > 0 && !(secretsFromEnv() && handoffSink())) {
     throw new Error(
-      `${cfg.app} needs ${makes.join(', ')}, which only a deploy on the Mac makes; run bun run machine:deploy --project ${cfg.project} there first`,
+      `${cfg.app} needs ${makes.join(', ')}, which only fly-provision.yml makes; dispatch it for ${cfg.project} (docs/process/project-machine.md)`,
     );
   }
+  // Checked before anything is made: what is made for the Mac must be sealable to it.
+  if (makes.length > 0) recipientKey('mac');
   const needsToken = actions.some(
     (a) => a.kind === 'set-secrets' && a.names.includes(TUNNEL_TOKEN_SECRET),
   );
-  // Off the Mac no Cloudflare token can read a tunnel's token.
-  if (needsToken && (secretsFromEnv() || !tunnel)) {
+  // Only cloudflare-prod's token can read a tunnel's token, so it comes from
+  // fly-provision.yml's sealed presets and from nowhere else.
+  if (needsToken && !presetTunnel) {
     throw new Error(
-      `${cfg.app} needs ${TUNNEL_TOKEN_SECRET}, which only a deploy on the Mac sets; run bun run machine:deploy --project ${cfg.project}${opts.refreshTunnelToken ? ' --refresh-tunnel-token' : ''} there`,
+      `${cfg.app} needs ${TUNNEL_TOKEN_SECRET}, which only fly-provision.yml sets; dispatch it for ${cfg.project}`,
     );
   }
   if (dryRun) return actions;
@@ -538,10 +537,7 @@ export async function deployProject(
       return approval;
     },
   };
-  if (tunnel && needsToken) {
-    const token = await (opts.tunnelToken ?? apiTunnelToken)(tunnel);
-    ctx.tunnelToken = () => token;
-  }
+  if (needsToken && presetTunnel) ctx.tunnelToken = () => presetTunnel;
   for (const a of actions) {
     console.log(`[deploy] ${describe(a)}`);
     await act(cfg, a, ctx);
@@ -595,11 +591,18 @@ async function main(): Promise<void> {
   });
   const tfEnv = arg(args, 'tf-env') ?? 'prod';
   if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);
-  const done = await deployProject(cfg, args.includes('--dry-run'), {
-    tfEnv,
-    refreshTunnelToken: args.includes('--refresh-tunnel-token'),
-    noOutputs: args.includes('--no-terraform-outputs'),
-  });
+  let done: Action[];
+  try {
+    done = await deployProject(cfg, args.includes('--dry-run'), {
+      tfEnv,
+      refreshTunnelToken: args.includes('--refresh-tunnel-token'),
+      noOutputs: args.includes('--no-terraform-outputs'),
+      presets: provisionPresets(process.env, cfg.app),
+    });
+  } finally {
+    // What a provisioning run made reaches the Mac even when a later step failed.
+    flushMacHandoff(handoffSink());
+  }
   if (args.includes('--dry-run')) return;
   const state = machines(cfg.app).map(
     (m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)} ${m.memoryMb}MB`,

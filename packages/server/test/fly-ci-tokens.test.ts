@@ -9,9 +9,12 @@ import { describe, expect, it } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HandoffSink, openItems } from '../../../infra/handoff/items.ts';
+import { generateHandoffKeys } from '../../../infra/handoff/seal.ts';
 import {
   type Caveat,
   type CiTokensIo,
+  MAC_VALID_DAYS,
   NEVER_FEATURES,
   STAGING_APP,
   STAGING_ENVIRONMENT,
@@ -89,6 +92,8 @@ function fake(
       return { status: 0, stdout: `${cutFor(Object.keys(apps)[0] ?? '?')}\n` };
     },
     now: () => NOW,
+    macSink: null,
+    macKey: () => '',
     stateDir: '/fixture/state/fly-ci',
     dataDir: '/fixture/state/fly-ci-data',
     terraform: (args, env) => {
@@ -244,17 +249,61 @@ describe('attenuate and the org token', () => {
     expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(json);
   });
 
-  it('takes FLY_API_TOKEN first, refuses the keeper, and else reads the Keychain', () => {
-    const asked: string[] = [];
-    const kc = (n: string) => {
-      asked.push(n);
-      return 'fixture-keychain-token\n';
-    };
-    expect(orgTokenFrom({ FLY_API_TOKEN: ORG }, kc)).toBe(ORG);
-    expect(() => orgTokenFrom({ CW_KEEPER_URL: 'http://127.0.0.1:8799' }, kc)).toThrow(
-      'does not cut CI tokens yet',
+  it('takes the org token from FLY_API_TOKEN alone: no Keychain, no keeper', () => {
+    expect(orgTokenFrom({ FLY_API_TOKEN: ORG })).toBe(ORG);
+    expect(() => orgTokenFrom({})).toThrow('only in the fly-org environment');
+    expect(() => orgTokenFrom({ CW_KEEPER_URL: 'http://127.0.0.1:8799' })).toThrow('fly-org');
+  });
+});
+
+describe('fly:ci-tokens, the Mac’s tokens', () => {
+  const MAC_KEY = generateHandoffKeys();
+  const withSink = (mode: 'apply' | 'plan') => {
+    const r = fake();
+    const written: string[] = [];
+    const sink = new HandoffSink('mac', '/fixture/handoff.json');
+    r.io.macSink = sink;
+    r.io.macKey = () => MAC_KEY.publicKey;
+    const origFlush = sink.flush.bind(sink);
+    sink.flush = (key) => origFlush(key, (_p, text) => written.push(text));
+    return { r, written, mode };
+  };
+
+  it('an apply cuts one token per project app for the Mac, with wg, for 14 days, sealed to it', async () => {
+    const { r, written } = withSink('apply');
+    expect(await ciTokens(['apply'], r.io)).toBe(0);
+    const macCuts = r.cut.filter(
+      (c) => c[1]?.body.features && 'wg' in (c[1].body.features as object),
     );
-    expect(orgTokenFrom({}, kc)).toBe('fixture-keychain-token');
-    expect(asked).toEqual(['fly-org-token']);
+    expect(macCuts.map((c) => Object.keys(c[0]?.body.apps as object))).toEqual([['101'], ['202']]);
+    const window = macCuts[0]?.[2]?.body as { not_after: number };
+    expect(window.not_after - Math.floor(NOW / 1000)).toBe(MAC_VALID_DAYS * 86_400);
+    // CI's own tokens still carry no wg.
+    expect(caveats('101', NOW)[1]?.body.features).not.toHaveProperty('wg');
+    expect(written).toHaveLength(1);
+    expect(written[0]).not.toContain('fixture-cut');
+    const opened = openItems(MAC_KEY.privateKey, written[0] ?? '');
+    expect(opened.items.map((i) => (i.kind === 'fly-app-token' ? i.app : i.kind))).toEqual([
+      'cw-harborlight',
+      'cw-riverbend',
+    ]);
+    expect(r.printed()).not.toContain('fixture-cut');
+  });
+
+  it('a plan cuts none for the Mac and seals nothing', async () => {
+    const { r, written } = withSink('plan');
+    expect(await ciTokens(['plan'], r.io)).toBe(0);
+    expect(r.cut).toHaveLength(3);
+    expect(written).toEqual([]);
+  });
+
+  it('an apply with no Mac key committed runs nothing', async () => {
+    const { r } = withSink('apply');
+    r.io.macKey = () => {
+      throw new Error('infra/handoff/recipients.json has no key for mac');
+    };
+    expect(await ciTokens(['apply'], r.io)).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.cut).toEqual([]);
   });
 });
