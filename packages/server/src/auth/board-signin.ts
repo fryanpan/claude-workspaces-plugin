@@ -367,10 +367,18 @@ function withJson(headers: Headers): Headers {
   return out;
 }
 
-/** A same-site path to come back to, or `/`. Never another origin. */
+/**
+ * A same-site path to come back to, or `/`. Never another origin. Refuses
+ * control characters, because a browser strips tab, CR and LF from a URL
+ * (`/\t/x` would become `//x`), and encoded slashes, which a later decode
+ * could turn into the same thing.
+ */
 export function safeNext(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length > 2048) return '/';
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/';
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing them is the point
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return '/';
+  if (/%(2f|5c)/i.test(raw)) return '/';
   return raw;
 }
 

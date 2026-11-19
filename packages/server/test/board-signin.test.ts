@@ -236,5 +236,17 @@ describe('Better Auth inside the server', () => {
     expect(safeNext('https://saltmarsh.test/')).toBe('/');
     expect(safeNext('/\\saltmarsh.test')).toBe('/');
     expect(safeNext(undefined)).toBe('/');
+    // A browser drops tab, CR and LF from a URL, so `/\t/x` becomes `//x`.
+    expect(safeNext('/\t/evil.example')).toBe('/');
+    expect(safeNext('/\r\n/evil.example')).toBe('/');
+    expect(safeNext('/\n/evil.example')).toBe('/');
+    expect(safeNext('/workspaces\u0000')).toBe('/');
+    // Encoded slashes a later decode would turn into another origin.
+    expect(safeNext('/%2fevil.example')).toBe('/');
+    expect(safeNext('/%2Fevil.example')).toBe('/');
+    expect(safeNext('/%5cevil.example')).toBe('/');
+    expect(safeNext('/%5Cevil.example')).toBe('/');
+    // CONTROL: an ordinary query and fragment survive.
+    expect(safeNext('/workspaces/w1?task=t-1#c')).toBe('/workspaces/w1?task=t-1#c');
   });
 });
