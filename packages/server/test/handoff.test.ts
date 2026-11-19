@@ -20,6 +20,7 @@ import {
 } from '../../../infra/handoff/items.ts';
 import { type KeygenIo, keygen } from '../../../infra/handoff/keygen.ts';
 import {
+  HANDOFF_REPO,
   readAppToken,
   readSeen,
   storeAppToken,
@@ -149,6 +150,15 @@ interface FakeRun {
   file: string | null;
   /** A second sealed file in the same artifact, as tokens.json. */
   tokens?: string;
+  /** What started the run; workflow_dispatch when unset. */
+  event?: string;
+  /** The repository the run's head came from; this one when unset. */
+  repo?: string;
+}
+
+/** The workflow a `gh api` list call names in its path. */
+function workflowOf(args: string[]): string {
+  return args.find((a) => a.includes('/workflows/'))?.match(/workflows\/([^/]+)\/runs/)?.[1] ?? '';
 }
 
 function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
@@ -159,12 +169,17 @@ function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
   let n = 0;
   const io: PullIo = {
     gh: (args) => {
-      if (args[1] === 'list') {
-        const wf = args[args.indexOf('--workflow') + 1];
+      if (args[0] === 'api') {
         const rows = runs
-          .filter((r) => r.workflow === wf)
-          .map((r) => ({ databaseId: r.id, createdAt: r.at }));
-        return { status: 0, stdout: JSON.stringify(rows), stderr: '' };
+          .filter((r) => r.workflow === workflowOf(args))
+          .map((r) => ({
+            id: r.id,
+            created_at: r.at,
+            event: r.event ?? 'workflow_dispatch',
+            head_branch: 'main',
+            head_repository: { full_name: r.repo ?? HANDOFF_REPO },
+          }));
+        return { status: 0, stdout: JSON.stringify({ workflow_runs: rows }), stderr: '' };
       }
       expect(args.slice(0, 2)).toEqual(['run', 'download']);
       expect(args[args.indexOf('--name') + 1]).toBe(MAC_ARTIFACT);
@@ -309,12 +324,44 @@ describe('handoff:pull', () => {
     expect(w.said.join('')).toContain('sealed to fly-org');
   });
 
+  it('opens only runs that main itself started, never a pull request or a fork', () => {
+    const mac = generateHandoffKeys();
+    // Each envelope is sealed to the real Mac key: a fork that edits a
+    // workflow can make one, so the seal proves nothing about who sent it.
+    const sealed = () =>
+      JSON.stringify(
+        sealItems('mac', mac.publicKey, [
+          { kind: 'fly-app-token', app: 'cw-harborlight', token: SECRET, notAfter: 2_000_000_000 },
+        ]),
+      );
+    const runs: FakeRun[] = [
+      { id: 1, at: 'a', workflow: 'fly-provision.yml', file: sealed(), event: 'pull_request' },
+      {
+        id: 2,
+        at: 'b',
+        workflow: 'fly-provision.yml',
+        file: sealed(),
+        event: 'pull_request_target',
+      },
+      { id: 3, at: 'c', workflow: 'cloudflare.yml', file: sealed(), repo: 'saltmarsh/fork' },
+      { id: 4, at: 'd', workflow: 'cloudflare.yml', file: sealed(), event: 'push' },
+      { id: 5, at: 'e', workflow: 'fly-ci-tokens.yml', file: sealed(), event: 'schedule' },
+      { id: 6, at: 'f', workflow: 'fly-provision.yml', file: sealed() },
+    ];
+    const w = pullWorld(runs, mac.privateKey);
+    expect(pull(w.io)).toBe(0);
+    expect(w.stored).toHaveLength(3);
+    expect([...(w.saved() ?? [])].sort()).toEqual(['4', '5', '6']);
+    expect(w.said.join('')).not.toContain(' run 1:');
+    expect(w.said.join('')).not.toContain(' run 3:');
+  });
+
   it('asks every workflow that hands off', () => {
     const asked: string[] = [];
     const w = pullWorld([], generateHandoffKeys().privateKey);
     const gh = w.io.gh;
     w.io.gh = (args) => {
-      asked.push(args[args.indexOf('--workflow') + 1] ?? '');
+      asked.push(workflowOf(args));
       return gh(args);
     };
     expect(pull(w.io)).toBe(0);

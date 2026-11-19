@@ -3,7 +3,8 @@
  * `bun run handoff:pull`: take what CI sealed to the Mac and store it.
  *
  * For each workflow that hands off (`WORKFLOWS`), the finished runs on main
- * this Mac has not pulled yet, oldest first, so a rotated secret lands after
+ * that a push, a schedule or a dispatch started in this repository
+ * (`TRUSTED_EVENTS`) and this Mac has not pulled yet, oldest first, so a rotated secret lands after
  * the one it replaces. `gh run download` fetches the run's `handoff-mac`
  * artifact with Bryan's own `gh` login; the artifact is public in a public
  * repository, which is why it is sealed. Each item is stored (`storeItem`):
@@ -71,36 +72,55 @@ export interface PullIo {
   err: (s: string) => void;
 }
 
+/**
+ * The events a run may start from and still be trusted to have run main's
+ * own workflow file. A pull request's run executes the workflow as the pull
+ * request edited it, and a fork's head branch may be named `main`; the
+ * envelope carries no sender, so such a run could hand the Mac anything
+ * sealed to its public key. server-release.yml makes the same check.
+ */
+export const TRUSTED_EVENTS: ReadonlySet<string> = new Set([
+  'push',
+  'schedule',
+  'workflow_dispatch',
+]);
+
 interface RunRow {
-  databaseId?: unknown;
-  createdAt?: unknown;
+  id?: unknown;
+  created_at?: unknown;
+  event?: unknown;
+  head_branch?: unknown;
+  head_repository?: { full_name?: unknown } | null;
 }
 
 function listRuns(io: PullIo, workflow: string): { id: string; at: string }[] {
+  // The REST list, not `gh run list`: only it names the head repository.
   const r = io.gh([
-    'run',
-    'list',
-    '--repo',
-    HANDOFF_REPO,
-    '--workflow',
-    workflow,
-    '--branch',
-    'main',
+    'api',
+    '-X',
+    'GET',
+    `repos/${HANDOFF_REPO}/actions/workflows/${workflow}/runs`,
+    '-f',
+    'branch=main',
     // Finished, not only successful: a provisioning run that failed part way
     // still sealed what it made before it stopped.
-    '--status',
-    'completed',
-    '--limit',
-    '20',
-    '--json',
-    'databaseId,createdAt',
+    '-f',
+    'status=completed',
+    '-f',
+    'per_page=20',
   ]);
-  if (r.status !== 0)
-    throw new Error(`gh run list --workflow ${workflow} failed: ${r.stderr.trim()}`);
-  const rows = JSON.parse(r.stdout || '[]') as RunRow[];
-  return rows
-    .filter((x) => typeof x.databaseId === 'number' || typeof x.databaseId === 'string')
-    .map((x) => ({ id: String(x.databaseId), at: String(x.createdAt ?? '') }));
+  if (r.status !== 0) throw new Error(`listing ${workflow} runs failed: ${r.stderr.trim()}`);
+  const body = JSON.parse(r.stdout || '{}') as { workflow_runs?: RunRow[] };
+  return (body.workflow_runs ?? [])
+    .filter(
+      (x) =>
+        (typeof x.id === 'number' || typeof x.id === 'string') &&
+        typeof x.event === 'string' &&
+        TRUSTED_EVENTS.has(x.event) &&
+        x.head_branch === 'main' &&
+        x.head_repository?.full_name === HANDOFF_REPO,
+    )
+    .map((x) => ({ id: String(x.id), at: String(x.created_at ?? '') }));
 }
 
 /** Exit code: 0 when every new run was pulled, 1 when one failed. */
