@@ -91,7 +91,8 @@ describe('the relay config', () => {
     });
   });
 
-  it('refuses a remote server with no service token, and plain http off loopback', () => {
+  it('takes a remote server with no service token, and refuses plain http off loopback', () => {
+    // No Access in front (`CW_SIGNIN=better-auth`): the at2 is the whole proof.
     const noToken = config({
       servers: {
         harbor: {
@@ -101,9 +102,9 @@ describe('the relay config', () => {
         },
       },
     });
-    expect(parseRelayConfig(JSON.stringify(noToken))).toEqual({
-      error: 'server harbor is remote and carries no service token',
-    });
+    const parsed = parseRelayConfig(JSON.stringify(noToken));
+    if ('error' in parsed) throw new Error(parsed.error);
+    expect(parsed.servers.get('harbor')?.serviceToken).toBeNull();
     const plain = config({
       servers: {
         harbor: {

@@ -29,11 +29,18 @@
  * missed while it was down stays missed. A stream that drops is reopened
  * with a doubling wait, 1s to 30s.
  *
+ * **Without Access.** A server running `CW_SIGNIN=better-auth` has no Access
+ * application in front of it, so a service token proves nothing there. A
+ * board named in `boardTokens` is pulled with that board's own agent token
+ * instead (`Authorization: Bearer at2…`), renewed before it runs out and
+ * kept in the data directory (`home-remote-tokens.ts`).
+ *
  * Everything a remote answers goes through `readHomeFeed` before it is kept.
  */
 import { readFileSync, statSync } from 'node:fs';
 import { parseBoardOrigins } from '../../../infra/board-router-worker/worker.js';
 import { type HomeFeedRow, readHomeFeed } from './home-feed.ts';
+import { BOARD_TOKEN, createHomeRemoteTokens } from './home-remote-tokens.ts';
 import { configuredHostFetch } from './outbound-fetch.ts';
 
 export interface ServiceToken {
@@ -50,6 +57,8 @@ export interface HomeRemotesConfig {
   table: Map<string, string>;
   /** Origin hostname → the Access service token the Mac sends it. */
   tokens: Map<string, ServiceToken>;
+  /** Board id → the board agent token (`at2`) the Mac pulls it with. */
+  boardTokens: Map<string, string>;
   /** Origin hostname → its project's own address, as an https origin. */
   addresses: Map<string, string>;
 }
@@ -87,8 +96,13 @@ const FEED_TIMEOUT_MS = 10_000;
  *  "self": "<this machine's origin hostname>",
  *  "boardOrigins": {"<origin hostname>": ["<board id>", ...]},
  *  "serviceTokens": {"<origin hostname>": {"clientId": "…", "clientSecret": "…"}},
+ *  "boardTokens": {"<board id>": "at2.…"},
  *  "addresses": {"<origin hostname>": "https://<its project's host>"}}
  * ```
+ *
+ * Every remote board needs a service token for its origin, a board token of
+ * its own, or both. Either map may be left out when the other covers every
+ * board.
  *
  * `addresses` is optional, and so is each entry: an origin it does not name is
  * pulled through the one address.
@@ -116,14 +130,27 @@ export function parseHomeRemotesConfig(raw: string): HomeRemotesConfig | { error
   const self = typeof c.self === 'string' ? c.self : '';
   const table = parseBoardOrigins(JSON.stringify(c.boardOrigins ?? null));
   if (!table) return { error: 'boardOrigins is not a valid routing table' };
-  const tokens = new Map<string, ServiceToken>();
-  const rawTokens = c.serviceTokens;
-  if (rawTokens === null || typeof rawTokens !== 'object' || Array.isArray(rawTokens)) {
-    return { error: 'serviceTokens must be an object' };
+  const boardTokens = new Map<string, string>();
+  const rawBoardTokens = c.boardTokens ?? {};
+  if (!isPlainObject(rawBoardTokens)) return { error: 'boardTokens must be an object' };
+  for (const [boardId, value] of Object.entries(rawBoardTokens)) {
+    const origin = table.get(boardId);
+    if (origin === undefined || origin === self) {
+      return { error: `boardTokens names ${boardId}, which no other server holds` };
+    }
+    if (typeof value !== 'string' || !BOARD_TOKEN.test(value)) {
+      return { error: `the board token for ${boardId} is not an at2 token` };
+    }
+    boardTokens.set(boardId, value);
   }
+  const tokens = new Map<string, ServiceToken>();
+  const rawTokens = c.serviceTokens ?? {};
+  if (!isPlainObject(rawTokens)) return { error: 'serviceTokens must be an object' };
   for (const origin of new Set(table.values())) {
     if (origin === self) continue;
-    const t = (rawTokens as Record<string, unknown>)[origin] as Record<string, unknown> | undefined;
+    const t = rawTokens[origin] as Record<string, unknown> | undefined;
+    const covered = [...table].every(([b, o]) => o !== origin || boardTokens.has(b));
+    if (t === undefined && covered) continue;
     const clientId = t?.clientId;
     const clientSecret = t?.clientSecret;
     if (
@@ -148,7 +175,11 @@ export function parseHomeRemotesConfig(raw: string): HomeRemotesConfig | { error
     if (!own) return { error: `the address for ${origin} must be a bare https origin` };
     addresses.set(origin, own);
   }
-  return { address: address.origin, self, table, tokens, addresses };
+  return { address: address.origin, self, table, tokens, boardTokens, addresses };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** The value as an https origin with nothing after it, or null. */
@@ -216,6 +247,9 @@ export function createHomeRemotes(opts: {
   onChange: () => void;
   retryMs?: number;
   maxRetryMs?: number;
+  /** Where renewed board tokens are kept (`home-remote-tokens.ts`). */
+  stateFile?: string;
+  now?: () => number;
 }): HomeRemotes {
   const { config, onChange } = opts;
   const fetchFn: FetchLike =
@@ -225,7 +259,8 @@ export function createHomeRemotes(opts: {
   const held = boardsByOrigin(config.table);
   const views = new Map<string, RemoteBoardView>();
   for (const [boardId, origin] of config.table) {
-    if (origin === config.self || !config.tokens.has(origin)) continue;
+    if (origin === config.self) continue;
+    if (!config.tokens.has(origin) && !config.boardTokens.has(boardId)) continue;
     views.set(boardId, {
       boardId,
       boardName: boardId,
@@ -239,18 +274,40 @@ export function createHomeRemotes(opts: {
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let disposed = false;
 
-  const headersFor = (boardId: string, accept: string): Record<string, string> => {
+  const boardTokens = createHomeRemoteTokens({
+    tokens: config.boardTokens,
+    ...(opts.stateFile ? { stateFile: opts.stateFile } : {}),
+    ...(opts.now ? { now: opts.now } : {}),
+  });
+  const baseFor = (boardId: string): string =>
+    config.addresses.get(config.table.get(boardId) ?? '') ?? config.address;
+  const accessHeaders = (boardId: string): Record<string, string> => {
     const token = config.tokens.get(config.table.get(boardId) ?? '');
+    return token
+      ? { 'cf-access-client-id': token.clientId, 'cf-access-client-secret': token.clientSecret }
+      : {};
+  };
+  const renew = async (boardId: string, token: string): Promise<string | null> => {
+    const res = await fetchFn(`${baseFor(boardId)}/api/board-tokens/refresh`, {
+      method: 'POST',
+      headers: { ...accessHeaders(boardId), authorization: `Bearer ${token}` },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+    });
+    if (res.status !== 200) return null;
+    const body = (await res.json()) as { token?: unknown };
+    return typeof body.token === 'string' ? body.token : null;
+  };
+  const headersFor = async (boardId: string, accept: string): Promise<Record<string, string>> => {
+    const bearer = await boardTokens.fresh(boardId, renew);
     return {
       accept,
-      ...(token
-        ? { 'cf-access-client-id': token.clientId, 'cf-access-client-secret': token.clientSecret }
-        : {}),
+      ...accessHeaders(boardId),
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
     };
   };
   const feedUrl = (boardId: string, tail = ''): string =>
-    `${config.addresses.get(config.table.get(boardId) ?? '') ?? config.address}` +
-    `/workspaces/${encodeURIComponent(boardId)}/home-feed${tail}`;
+    `${baseFor(boardId)}/workspaces/${encodeURIComponent(boardId)}/home-feed${tail}`;
 
   const keep = (boardId: string, next: RemoteBoardView): void => {
     const was = views.get(boardId);
@@ -264,7 +321,7 @@ export function createHomeRemotes(opts: {
     const origin = config.table.get(boardId) ?? '';
     try {
       const res = await fetchFn(feedUrl(boardId), {
-        headers: headersFor(boardId, 'application/json'),
+        headers: await headersFor(boardId, 'application/json'),
         redirect: 'manual',
         signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
       });
@@ -345,7 +402,7 @@ export function createHomeRemotes(opts: {
       controllers.add(ctrl);
       try {
         const res = await fetchFn(feedUrl(boardId, '/events:stream'), {
-          headers: headersFor(boardId, 'text/event-stream'),
+          headers: await headersFor(boardId, 'text/event-stream'),
           redirect: 'manual',
           signal: ctrl.signal,
         });

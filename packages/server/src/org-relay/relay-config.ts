@@ -28,7 +28,9 @@
  * ```
  *
  * `baseUrl` may be plain http only on a loopback host (a co-located server,
- * or a test); anything else is https and must carry a service token.
+ * or a test); anything else is https. `serviceToken` is for a server Access
+ * still fronts; one running `CW_SIGNIN=better-auth` has no Access in front,
+ * admits the `at2` alone (`middleware/board-agent-door.ts`), and needs none.
  *
  * `baseUrl` is the project's own address, not the one address: each project
  * server admits only its own Access application's stamp, and Access stamps
@@ -117,7 +119,6 @@ function parseServer(id: string, raw: unknown): RelayServer | string {
     }
     serviceToken = { clientId: t.clientId, clientSecret: t.clientSecret };
   }
-  if (!loopback && !serviceToken) return `server ${id} is remote and carries no service token`;
   if (!isObject(raw.bearers)) return `server ${id} bearers must be an object`;
   const bearers = new Map<string, string>();
   for (const [board, value] of Object.entries(raw.bearers)) {
