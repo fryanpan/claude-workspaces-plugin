@@ -290,6 +290,19 @@ describe('fly:ci-tokens, the Mac’s tokens', () => {
     expect(r.printed()).not.toContain('fixture-cut');
   });
 
+  it('in a GitHub Actions run, every token it cuts is masked before it is used', async () => {
+    const { r } = withSink('apply');
+    r.io.env = { GITHUB_TOKEN: GH_TOKEN, GITHUB_ACTIONS: 'true' };
+    expect(await ciTokens(['apply'], r.io)).toBe(0);
+    const masks = r
+      .printed()
+      .split('\n')
+      .filter((l) => l.startsWith('::add-mask::'));
+    for (const id of ['101', '202', '303']) expect(masks).toContain(`::add-mask::${cutFor(id)}`);
+    // Every value cut: CI's three and the Mac's two.
+    expect(masks).toHaveLength(r.cut.length);
+  });
+
   it('a plan cuts none for the Mac and seals nothing', async () => {
     const { r, written } = withSink('plan');
     expect(await ciTokens(['plan'], r.io)).toBe(0);

@@ -50,7 +50,7 @@ import { join } from 'node:path';
 import { deletions } from '../cloudflare/ci-secrets.ts';
 import { planSummary } from '../cloudflare/plan-summary.ts';
 import { FLY_CI_DIR, type TfResult, spawnTerraform } from '../cloudflare/terraform.ts';
-import { type HandoffSink, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
+import { type HandoffSink, actionsMask, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
 import { HANDOFF_REPO as CI_REPO } from '../handoff/mac-store.ts';
 import { MACHINES_FILE, parseMachines } from './machines.ts';
 
@@ -185,6 +185,8 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     return 1;
   }
   const tokens: Record<string, string> = {};
+  // Each cut token is a secret GitHub did not hand the job: mask it at once.
+  const mask = actionsMask(io.env, io.out);
   let macKey = '';
   if (mode === 'apply' && io.macSink) {
     try {
@@ -210,6 +212,7 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     }
     const cut = io.attenuate(JSON.stringify(caveats(id, io.now())), org);
     const token = cut.stdout.trim();
+    if (token !== '') mask(token);
     // An attenuate that printed its input would hand CI the org token.
     if (cut.status !== 0 || !TOKEN_LINE.test(token) || token === org.trim()) {
       say(
@@ -221,6 +224,7 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     if (mode === 'apply' && io.macSink && t.app !== STAGING_APP) {
       const forMac = io.attenuate(JSON.stringify(macCaveats(id, io.now())), org);
       const macToken = forMac.stdout.trim();
+      if (macToken !== '') mask(macToken);
       if (forMac.status !== 0 || !TOKEN_LINE.test(macToken) || macToken === org.trim()) {
         say(`${t.app}: fly tokens attenuate for the Mac printed no token; nothing was run`);
         return 1;

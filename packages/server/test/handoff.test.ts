@@ -104,6 +104,39 @@ describe('items', () => {
     ]);
   });
 
+  it('in a GitHub Actions run, a sink masks every value it is handed before anything else', () => {
+    const lines: string[] = [];
+    const actions = { GITHUB_ACTIONS: 'true' };
+    const sink = new HandoffSink('mac', '/out/handoff.json', actions, (s) => lines.push(s));
+    sink.add({ kind: 'keychain', name: 'cw-saltmarsh-bucket-admin', value: `${SECRET}\nline2` });
+    sink.add({ kind: 'fly-app-token', app: 'cw-riverbend', token: 'FlyV1 fixture-x', notAfter: 1 });
+    sink.add({ kind: 'fly-secrets', app: 'cw-riverbend', secrets: { A: 'fixture-a1' } });
+    sink.add({
+      kind: 'service-token',
+      name: 'agent riverbend',
+      clientId: 'id.access',
+      secret: 'fixture-s1',
+      replace: false,
+    });
+    expect(lines).toEqual([
+      `::add-mask::${SECRET}\n`,
+      '::add-mask::line2\n',
+      '::add-mask::FlyV1 fixture-x\n',
+      '::add-mask::fixture-a1\n',
+      '::add-mask::id.access\n',
+      '::add-mask::fixture-s1\n',
+    ]);
+    // CONTROL: outside Actions the sink prints nothing.
+    const quiet: string[] = [];
+    new HandoffSink('mac', '/out/x.json', {}, (s) => quiet.push(s)).add({
+      kind: 'keychain',
+      name: 'cw-x',
+      value: SECRET,
+    });
+    expect(quiet).toEqual([]);
+    expect(macSinkFromEnv({ CW_HANDOFF_OUT: '/x.json', ...actions })).not.toBeNull();
+  });
+
   it('a sink exists only when CW_HANDOFF_OUT names a file', () => {
     expect(macSinkFromEnv({})).toBeNull();
     expect(macSinkFromEnv({ CW_HANDOFF_OUT: '/tmp/x.json' })?.outPath).toBe('/tmp/x.json');

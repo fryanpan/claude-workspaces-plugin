@@ -152,18 +152,56 @@ export function openItems(
 }
 
 /**
+ * In a GitHub Actions run (GITHUB_ACTIONS set), a function that registers a
+ * value made at runtime as a secret, one `::add-mask::` line per line of it,
+ * so the runner blanks it in every later log line. GitHub masks the secrets
+ * it handed the job, not the ones a step made. Elsewhere, a no-op.
+ */
+export function actionsMask(
+  env: Record<string, string | undefined>,
+  out: (s: string) => void,
+): (value: string) => void {
+  if (!env.GITHUB_ACTIONS) return () => {};
+  return (value) => {
+    for (const line of value.split(/\r?\n/)) if (line.trim() !== '') out(`::add-mask::${line}\n`);
+  };
+}
+
+/** The values an item carries, for masking. */
+function secretValues(i: HandoffItem): string[] {
+  switch (i.kind) {
+    case 'keychain':
+      return [i.value];
+    case 'service-token':
+      return [i.clientId, i.secret];
+    case 'fly-app-token':
+      return [i.token];
+    case 'fly-secrets':
+      return Object.values(i.secrets);
+  }
+}
+
+/**
  * Items gathered during one CI run, sealed to one holder at the end. A CI
  * script adds to it; `flush` writes the file the workflow uploads, or
  * nothing when no item was added.
  */
 export class HandoffSink {
   private readonly items: HandoffItem[] = [];
+  private readonly mask: (value: string) => void;
   constructor(
     readonly who: Recipient,
     readonly outPath: string,
-  ) {}
+    env: Record<string, string | undefined> = process.env,
+    out: (s: string) => void = (s) => process.stdout.write(s),
+  ) {
+    this.mask = actionsMask(env, out);
+  }
+  /** Masks each value first in a GitHub Actions run (`actionsMask`). */
   add(item: HandoffItem): void {
-    this.items.push(checkItem(item));
+    const checked = checkItem(item);
+    for (const v of secretValues(checked)) this.mask(v);
+    this.items.push(checked);
   }
   get size(): number {
     return this.items.length;
@@ -182,5 +220,5 @@ export class HandoffSink {
 /** The sink CW_HANDOFF_OUT names, for the Mac; null outside a CI run that hands off. */
 export function macSinkFromEnv(env: Record<string, string | undefined>): HandoffSink | null {
   const out = env.CW_HANDOFF_OUT?.trim();
-  return out ? new HandoffSink('mac', out) : null;
+  return out ? new HandoffSink('mac', out, env) : null;
 }
