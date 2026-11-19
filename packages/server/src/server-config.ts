@@ -23,6 +23,7 @@ import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
 import { parseUidList } from './middleware/loopback-uid-door.ts';
+import { signInFromEnv } from './middleware/signin-door.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -419,7 +420,17 @@ export function resolveServerConfig(opts: {
     .split(',')
     .map((h) => h.trim())
     .filter((h) => h !== '');
-  const accessTunnelReady = Boolean(cfAccessTeam && cfAccessAud);
+  // This machine's own sign-in (`CW_SIGNIN`, middleware/signin-door.ts).
+  // FATAL when a mode other than `access` is asked for without what it needs.
+  const signInResolved = signInFromEnv(env);
+  if ('error' in signInResolved) {
+    console.error(`[feedback] CW_SIGNIN refused: ${signInResolved.error}.`);
+    process.exit(1);
+  }
+  const signIn = signInResolved.setting;
+  // Better Auth stands where an Access application stood: either one is a
+  // sign-in in front of the public hostnames below.
+  const accessTunnelReady = Boolean(cfAccessTeam && cfAccessAud) || signIn !== null;
   if (accessTunnelHosts.length && !accessTunnelReady) {
     console.error(
       `[feedback] IGNORING CF_ACCESS_TUNNEL_HOSTS (${accessTunnelHosts.join(', ')}): ` +
@@ -735,6 +746,7 @@ export function resolveServerConfig(opts: {
     ownerEmail,
     trustedHosts,
     cfAccess,
+    signIn,
     accessTunnelHosts,
     accessTunnelReady,
     proxiedTrustedHosts,

@@ -149,8 +149,10 @@ function createAuth(opts: BoardSignInOptions, db: Database) {
     trustedOrigins: [opts.origin],
     database: db,
     telemetry: { enabled: false },
-    // One process holds every count, so the library's own limiter is exact.
-    rateLimit: { enabled: true, storage: 'memory', window: 60, max: 20 },
+    // One process holds every count, so an in-memory limiter is exact. Its
+    // own, not the library's `memory` store: that one is a module-level map,
+    // which two instances in one process (the test suites) would share.
+    rateLimit: { enabled: true, window: 60, max: 20, customStorage: ownRateLimitStore() },
     advanced: {
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
       // `__Host-` rather than the library's `__Secure-`: it makes the browser
@@ -211,6 +213,36 @@ function createAuth(opts: BoardSignInOptions, db: Database) {
 }
 
 type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Better Auth's rate limits, counted per instance: a fixed window per key
+ * (client address and path), keyed as the library keys them. Its stricter
+ * built-in rules for the sign-in paths still apply; this only holds the
+ * counts.
+ */
+export function ownRateLimitStore(now: () => number = Date.now) {
+  const hits = new Map<string, { count: number; start: number }>();
+  const MAX_KEYS = 10_000;
+  return {
+    async consume(key: string, rule: { window: number; max: number }) {
+      const at = now();
+      const windowMs = rule.window * 1000;
+      if (hits.size > MAX_KEYS) {
+        for (const [k, e] of hits) if (at - e.start >= windowMs) hits.delete(k);
+      }
+      const entry = hits.get(key);
+      if (!entry || at - entry.start >= windowMs) {
+        hits.set(key, { count: 1, start: at });
+        return { allowed: true, retryAfter: null };
+      }
+      if (entry.count >= rule.max) {
+        return { allowed: false, retryAfter: Math.ceil((entry.start + windowMs - at) / 1000) };
+      }
+      entry.count += 1;
+      return { allowed: true, retryAfter: null };
+    },
+  };
+}
 
 /** Build this machine's sign-in. The tables are made on first use. */
 export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {

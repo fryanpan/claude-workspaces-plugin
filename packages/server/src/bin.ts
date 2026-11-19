@@ -109,6 +109,7 @@ const {
   ownerEmail,
   trustedHosts,
   cfAccess,
+  signIn,
   accessTunnelHosts,
   accessTunnelReady,
   proxiedTrustedHosts,
@@ -326,6 +327,7 @@ while (!handle) {
       // …and the environment it runs in, the same string the server stamps.
       ...(sentryDsn ? { sentryEnvironment } : {}),
       cfAccess,
+      ...(signIn ? { signIn } : {}),
       // The share hostname and the audience of the ONE Access application in
       // front of it. Passed only when BOTH resolved: `resolveServerConfig`
       // already said loudly why it refused, and handing the list over without

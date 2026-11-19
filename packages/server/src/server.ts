@@ -531,12 +531,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     proxiedTrustedVerifier,
     proxiedTrustedHosts,
     recallCallbackHost,
+    boardSignIn,
+    signInDoor,
   } = createAccessDeps({
     dataDir,
     opts,
     // Forward reference on purpose: the task store is built below, and
     // `boardShareTarget` is only ever asked at request time.
     isBoard: (workspaceId) => taskStore.getWorkspace(workspaceId) !== undefined,
+    // Forward references too, asked only when Better Auth is about to write a
+    // user row (`auth/board-signin.ts`).
+    mayHaveAccount: (email, verified) =>
+      verified &&
+      (proxiedTrustedEmails.has(email) ||
+        taskStore
+          .listWorkspaces()
+          .some((b) => collabMemberOf(b.id, email) || shareLinkMemberOf(b.id, email))),
   });
   /** Anyone besides the owner can reach the board: a share link, a member
    *  who redeemed one, or a share. Read by the sharing notice. */
@@ -2308,6 +2318,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // the agent-token key is derived further down.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
     agentOfToken: (bearer) => verifyAgentToken(bearer, agentTokenKeyFor())?.agentId ?? null,
+    signInDoor,
   });
 
   /**
@@ -4108,6 +4119,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // onto its dead registry and write `[loop]` lines into unrelated tests'
       // output for the rest of the run.
       loopLag.stop();
+      boardSignIn?.close();
       taskScheduler.stop();
       features.stop();
       landingChanges.dispose();

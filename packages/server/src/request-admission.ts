@@ -64,6 +64,7 @@ import {
   shareScopeAllows,
 } from './middleware/host-guard.ts';
 import { recallCallbackAllows } from './middleware/recall-callback-gate.ts';
+import type { SignInDoor } from './middleware/signin-door.ts';
 import { widgetDoorRoute, widgetDoorSignInBody } from './middleware/widget-door.ts';
 import { isPageDoc } from './page-thread.ts';
 import { localHostnames } from './public-host.ts';
@@ -287,6 +288,9 @@ export interface RequestAdmissionContext {
   boardOfSocket: (req: Request) => string | null;
   /** The agent an `at1` bearer names, or null when it does not verify. */
   agentOfToken: (bearer: string) => string | null;
+  /** This machine's own sign-in (`CW_SIGNIN`): its routes, and where a page
+   *  with no proof is sent. Absent behaves as `access`. */
+  signInDoor?: SignInDoor;
 }
 
 /** Doc metadata as one caller may see it — the full record on the tailnet,
@@ -426,6 +430,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     boardAgentHeld,
     boardOfSocket,
     agentOfToken,
+    signInDoor,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -690,6 +695,15 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       if (decision.kind === 'deny') {
         return j(403, { error: 'unknown_host' });
       }
+      // The sign-in routes, on the sign-in address only, ahead of the master
+      // switch and of every proof: they are what a person with no session
+      // reaches to get one, and the owner needs them to reach the sharing
+      // notice's door while sharing is off. A session grants nothing by
+      // itself; everything below still decides what it opens.
+      if (signInDoor && (decision.kind === 'proxied-local' || decision.kind === 'collab')) {
+        const signInRoute = await signInDoor.claim(req, pathname);
+        if (signInRoute) return signInRoute;
+      }
       // Ahead of every door below: the frame of any reader may land here,
       // and these fixed bytes tell nobody anything (`frame-host.ts`).
       if (leftBoardDoor(req, pathname)) return frameLeftResponse("'self'");
@@ -853,7 +867,12 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           return j(503, { error: 'access_not_configured' });
         }
         const result = await collabAccessVerifier(req);
-        if (!result.ok) return j(result.status, { error: result.error });
+        if (!result.ok) {
+          return (
+            signInDoor?.redirectFor(req, pathname, wantsPage(req)) ??
+            j(result.status, { error: result.error })
+          );
+        }
         accessEmail = result.email ?? null;
         accessIssuedAt = result.issuedAt ?? null;
         // Access proves an identity Bryan admitted, not what they may
@@ -976,7 +995,12 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           return j(503, { error: 'access_not_configured' });
         }
         const result = await proxiedTrustedVerifier(req);
-        if (!result.ok) return j(result.status, { error: result.error });
+        if (!result.ok) {
+          return (
+            signInDoor?.redirectFor(req, pathname, wantsPage(req)) ??
+            j(result.status, { error: result.error })
+          );
+        }
         // A token is admission, not identity. The Access policy this
         // server cannot read may admit collaborators through the same
         // application, and their tokens verify exactly as the operator's

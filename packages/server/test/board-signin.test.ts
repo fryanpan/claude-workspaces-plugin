@@ -10,6 +10,7 @@ import { keptCookies, setsDomainCookie } from '../../../infra/board-router-worke
 import {
   type BoardSignIn,
   createBoardSignIn,
+  ownRateLimitStore,
   safeNext,
   signInSecret,
 } from '../src/auth/board-signin.ts';
@@ -154,6 +155,36 @@ describe('Better Auth inside the server', () => {
       '/api/auth/sign-up/email',
     );
     expect(admin).toBeNull();
+  });
+
+  it('limits how often one address may start a sign-in', async () => {
+    const start = () =>
+      sendTo(signIn)('/auth/sign-in/google', {
+        method: 'POST',
+        headers: {
+          origin: ORIGIN,
+          'content-type': 'application/x-www-form-urlencoded',
+          // A documentation address (TEST-NET-3), as Cloudflare would set it.
+          'cf-connecting-ip': '203.0.113.7',
+        },
+        body: 'next=%2F',
+      });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) statuses.push((await start()).status);
+    expect(statuses.slice(0, 3)).toEqual([303, 303, 303]);
+    expect(statuses[3]).toBe(429);
+  });
+
+  it('counts each key in its own window', async () => {
+    let t = 0;
+    const store = ownRateLimitStore(() => t);
+    const rule = { window: 10, max: 2 };
+    expect((await store.consume('a', rule)).allowed).toBe(true);
+    expect((await store.consume('a', rule)).allowed).toBe(true);
+    expect(await store.consume('a', rule)).toEqual({ allowed: false, retryAfter: 10 });
+    expect((await store.consume('b', rule)).allowed).toBe(true);
+    t = 10_000;
+    expect((await store.consume('a', rule)).allowed).toBe(true);
   });
 
   it('keeps its user list readable only by the server', () => {
