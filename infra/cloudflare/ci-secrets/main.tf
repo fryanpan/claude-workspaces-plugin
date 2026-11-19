@@ -1,6 +1,7 @@
 # CI's credentials, made and handed to GitHub in one apply, so nobody pastes
 # a value (README.md, "CI's credentials"). One Cloudflare token does
-# everything `cloudflare.yml` and `fly.yml` do; the state bucket's S3 key is
+# everything `cloudflare.yml` does (`fly.yml` holds no Cloudflare token, and
+# its Fly tokens are `../fly-ci/`'s); the state bucket's S3 key is
 # derived from it, the way Cloudflare documents an R2 key made from an API
 # token: the access key id is the token's id, the secret is the SHA-256 of
 # its value.
@@ -130,10 +131,8 @@ locals {
       R2_ACCESS_KEY_ID     = local.r2_access_key_id
       R2_SECRET_ACCESS_KEY = local.r2_secret_access_key
     },
-    nonsensitive(var.fly_api_token != null) ? { FLY_API_TOKEN = var.fly_api_token } : {},
-    # infra/project-machine/mac-ops.ts secretEnvName("cw-board-owner-email").
-    nonsensitive(var.owner_email != null) ? { CW_SECRET_CW_BOARD_OWNER_EMAIL = var.owner_email } : {},
-    # Apps' secrets (signin-test.yml's three) are `../app-secrets/`'s.
+    # Apps' secrets (signin-test.yml's three) are `../app-secrets/`'s; the
+    # Fly deploy tokens, one per app in an environment of its own, `../fly-ci/`'s.
   )
 
   # Names only, so the set can key for_each; the values stay sensitive.

@@ -164,7 +164,7 @@ export function syncConfig(manifest: BoardManifest, baseUrl: string, project: st
 export interface MoveOps {
   flyOk(args: string[]): string;
   onMachine(app: string, command: string): string;
-  keeperStage(prefix: string): { dir: string; share(path: string): void; done(): void };
+  privateStage(prefix: string): { dir: string; share(path: string): void; done(): void };
   machines(app: string): { id: string; state: string }[];
   /** Packs `bundleDir` into the file `tgz`. */
   pack(bundleDir: string, tgz: string): void;
@@ -173,11 +173,11 @@ export interface MoveOps {
 
 async function realOps(): Promise<MoveOps> {
   const { machines } = await import('./deploy.ts');
-  const { flyOk, keeperStage, onMachine } = await import('./mac-ops.ts');
+  const { flyOk, privateStage, onMachine } = await import('./mac-ops.ts');
   return {
     flyOk: (args) => flyOk(args),
     onMachine,
-    keeperStage,
+    privateStage,
     machines,
     pack(bundleDir, tgz) {
       const tar = spawnSync(
@@ -193,7 +193,7 @@ async function realOps(): Promise<MoveOps> {
 
 /** The project machine, over `fly ssh`. Every command is a step of the move grant. */
 export function flyTarget(app: string, ops: MoveOps): MoveTarget {
-  const { flyOk, onMachine, keeperStage, machines } = ops;
+  const { flyOk, onMachine, privateStage, machines } = ops;
   const lastJson = <T>(out: string): T => {
     const line = out
       .trim()
@@ -231,7 +231,7 @@ export function flyTarget(app: string, ops: MoveOps): MoveTarget {
     async importBundle(bundleDir, boardId) {
       const c = moveCommands(boardId);
       const m = machine();
-      const stage = keeperStage(`${app}-move-`);
+      const stage = privateStage(`${app}-move-`);
       try {
         const tgz = join(stage.dir, 'bundle.tgz');
         ops.pack(bundleDir, tgz);

@@ -37,6 +37,7 @@ import {
 } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { approveOrgSignIn, testRefusal } from '../../../infra/project-machine/org-signin.ts';
+import { giveMacFlyTokens } from './mac-fly-tokens.ts';
 import { BASH, machineDir, machineEnv, readRecords, stubs } from './project-machine-harness.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -75,6 +76,7 @@ const securityCalls = join(tmp, 'security-calls');
 
 let server: ReturnType<typeof Bun.serve>;
 const saved = { path: process.env.PATH, keeper: process.env.CW_KEEPER_URL };
+let restoreTokens = () => {};
 
 const exe = (name: string, body: string) => {
   writeFileSync(join(bin, name), body);
@@ -122,7 +124,6 @@ echo "$*" >> "${fs}/calls"
 app=""; prev=""
 for a in "$@"; do [ "$prev" = "--app" ] && app="$a"; prev="$a"; done
 case "$1 $2" in
-  "apps list") echo '[{"Name":"cw-harborlight"},{"Name":"cw-riverbend"}]' ;;
   "volumes list") echo '[{"name":"cw_data","region":"sjc","state":"created"}]' ;;
   "secrets list") cat "${fs}/$app/secrets.json" ;;
   "machines list") echo '[{"id":"m1","state":"started","image_ref":{"tag":"${HEAD}"},"config":{"guest":{"memory_mb":2048}}}]' ;;
@@ -159,9 +160,11 @@ printf '\\r\\nStore this token securely. You will not be able to see it again.\\
   );
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
   Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
+  restoreTokens = giveMacFlyTokens(tmp, ['cw-harborlight', 'cw-riverbend']);
 });
 
 afterAll(() => {
+  restoreTokens();
   process.env.PATH = saved.path;
   if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
   server.stop(true);
@@ -194,7 +197,6 @@ let spies: Array<{ mockRestore(): void }> = [];
 beforeEach(() => {
   rmSync(kc, { recursive: true, force: true });
   mkdirSync(kc);
-  keychain('fly-org-token', 'fo-fixture-token');
   keychain('fly-org-slug', 'harborlight');
   // The Mac's own walled lead's sign-in is in the Keychain. No org gets it.
   keychain('claude-lead-oauth-token', `${SHARED}\n`);

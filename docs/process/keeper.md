@@ -1,5 +1,13 @@
 # The keeper: Cloudflare and Fly credentials behind your passkey
 
+> **Retired.** Workflows now do the keeper's jobs, with no tap (Bryan,
+> 19 Nov 2026). The Fly org token is in the GitHub Environment `fly-org`.
+> The Cloudflare write token is in `cloudflare-prod`. The Mac holds neither.
+> "Retired" below says where each job went and how to cut over. The rest of
+> this page describes the keeper as it ran, for as long as an installed one
+> still runs. The server still asks it for share credentials until the
+> follow-up removes `packages/server/src/keeper/`.
+
 The keeper is a separate process that holds the Cloudflare and Fly tokens.
 It runs as the relay's macOS user, `cw-relay`, so agents running as you can't
 read the tokens. Agents ask it to act instead:
@@ -18,6 +26,58 @@ You run every step on this page, because each one needs your admin password.
 Sections 1 to 4 are one command.
 If an agent could install or update the keeper, it could replace it.
 `cw-relay` must already exist ([mac-lead-users.md](mac-lead-users.md)).
+
+## Retired
+
+Each job, and where it runs now:
+
+| Job | Now | Who acts |
+| --- | --- | --- |
+| Make a project's Fly app, volume, bucket, backup key and tunnel token | `.github/workflows/fly-provision.yml`, dispatched on main with the project (docs/process/project-machine.md, "What the deploy needs") | nobody: a dispatch |
+| Push deploy keys to a project's repos | the same workflow, for the project's `pushRepos` in `machines.json`; a merged change names the repos, never a dispatch input | nobody |
+| `fly logs`, `fly ssh`, restarts and board moves on the Mac | `mac-ops.ts` with the app's own token. `fly-ci-tokens.yml` cuts one every Monday: the app, `builder` and `wg`, 14 days | nobody |
+| Make and rotate Access service tokens | `cloudflare.yml`'s apply makes a missing one; `bun run cf:rotate-token` dispatches `cf-rotate-token.yml` | nobody |
+| Sync the Access email lists | retired: sign-in moves to Better Auth. `cf:sync-config` writes only the router and share-link configs | nobody |
+
+**How a secret made in CI reaches the Mac.** A workflow seals it with the
+Mac's public key (`infra/handoff/recipients.json`). The workflow uploads it
+as the artifact `handoff-mac`, which is kept 8 days. The repository is
+public, so the artifact is too, and only the Mac's private key opens it.
+That key is in prod's folder,
+`~/Library/Application Support/claude-workspaces/handoff/key`, mode 600.
+`bun run handoff:pull` downloads each new run's artifact with your `gh`
+login and stores what it holds:
+
+- Keychain entries: a backup identity, a bucket key, a service token's pair.
+- The Mac's Fly app tokens: `handoff/fly-tokens/<app>.json`.
+
+`mac-ops.ts` pulls by itself when it needs an app token it does not have.
+
+**What a compromise reaches now.**
+
+- **`fly-org`:** every Fly app, plus a write deploy key on any repo the admin
+  token reaches. Before, this needed your passkey. Now it needs a merge to
+  main, or a compromised step in one of its jobs. You accepted this trade on
+  19 Nov.
+- **A Mac app token:** root on that one machine for up to 14 days. Any
+  agent running as you can use it, with no tap. This is the main widening.
+
+### Cut-over, in order
+
+1. Merge this change. An installed keeper keeps running and is not touched.
+2. Create the GitHub Environment `fly-org`. It takes deployments from `main`
+   only and has no reviewer. Add the variable `FLY_ORG_SLUG`.
+3. Run `bun run handoff:keygen mac` and `bun run handoff:keygen fly-org`.
+   The second writes `HANDOFF_PRIVATE_KEY` into `fly-org` through `gh`, on
+   stdin. Commit `infra/handoff/recipients.json` through a pull request.
+4. Make a new org token and pipe it into the environment:
+   `fly tokens create org | gh secret set FLY_API_TOKEN --env fly-org`.
+   Do the same for a classic `repo` token as `GH_ADMIN_TOKEN`.
+5. Dispatch `fly-ci-tokens.yml`, then run `bun run handoff:pull`. Check that
+   `fly status --app cw-<project>` works on the Mac and that `fly.yml`
+   deploys.
+6. Uninstall the keeper and revoke its Fly and Cloudflare tokens. Delete the
+   Keychain entries in section 5.
 
 ## 1. Install, or update
 

@@ -21,6 +21,7 @@ import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import { projectConfig, requiredSecrets } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { tokenSlot } from '../../../infra/project-machine/token-list.ts';
+import { giveMacFlyTokens } from './mac-fly-tokens.ts';
 import { BASH, machineDir, machineEnv, readRecords, stubs } from './project-machine-harness.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -62,6 +63,7 @@ const exe = (name: string, body: string) => {
 
 let server: ReturnType<typeof Bun.serve>;
 const children: ChildProcess[] = [];
+let restoreTokens = () => {};
 
 export function useTokenStandIns(): void {
   beforeAll(() => {
@@ -111,7 +113,6 @@ echo "$*" >> "${fs}/calls"
 app=""; prev=""
 for a in "$@"; do [ "$prev" = "--app" ] && app="$a"; prev="$a"; done
 case "$1 $2" in
-  "apps list") cat "${fs}/apps.json" ;;
   "volumes list") echo '[{"name":"cw_data","region":"sjc","state":"created"}]' ;;
   "secrets list") cat "${fs}/$app/secrets.json" ;;
   "machines list") cat "${fs}/$app/machines.json" ;;
@@ -137,9 +138,14 @@ printf 'Your OAuth token (valid for 1 year):\\r\\n\\r\\n%s\\r\\n' '${APPROVED}'
     );
     process.env.PATH = `${bin}:${saved.path ?? ''}`;
     Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
+    restoreTokens = giveMacFlyTokens(
+      tmp,
+      ORGS.map((o) => `cw-${o}`),
+    );
   });
 
   afterAll(() => {
+    restoreTokens();
     for (const c of children.splice(0)) {
       try {
         if (c.pid && c.exitCode === null) process.kill(-c.pid, 'SIGKILL');
@@ -156,16 +162,11 @@ printf 'Your OAuth token (valid for 1 year):\\r\\n\\r\\n%s\\r\\n' '${APPROVED}'
   beforeEach(() => {
     rmSync(kc, { recursive: true, force: true });
     mkdirSync(kc);
-    keychain('fly-org-token', 'fo-fixture-token');
     keychain('fly-org-slug', 'harborlight');
     keychain('claude-lead-oauth-token', `${SHARED}\n`);
     rmSync(join(fs, 'argv'), { force: true });
     rmSync(join(fs, 'calls'), { force: true });
     rmSync(approvals, { force: true });
-    writeFileSync(
-      join(fs, 'apps.json'),
-      '[{"Name":"cw-harborlight"},{"Name":"cw-riverbend"},{"Name":"other-app"}]',
-    );
     for (const org of ORGS) {
       const cfg = cfgOf(org);
       keychain(cfg.keychain.identity, 'AGE-SECRET-KEY-FIXTURE');

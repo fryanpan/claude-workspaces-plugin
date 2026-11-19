@@ -1,162 +1,86 @@
 #!/usr/bin/env bun
 /**
- * `bun run cf:sync-config`: send prod's gitignored configs (router, Access,
- * share link) to CI through the keeper, on one passkey tap. An agent runs it;
- * Bryan taps.
+ * `bun run cf:sync-config`: send prod's gitignored routing configs to CI and
+ * start the apply. No keeper and no tap: Bryan's own `gh` login writes the
+ * repository secrets, and a merge-free dispatch of cloudflare.yml on main
+ * applies them (its environment has no reviewer).
  *
- *   1. Plan through the keeper (routine, as `cf:plan`), to learn which
- *      service tokens the account lacks, and refuse before anything is asked
- *      for if the Keychain already holds one's services.
- *   2. Ask the keeper for the sync (`keeper-cf-sync.ts`). Its approval page
- *      shows who each project's sign-in list gains or loses and which tokens
- *      it makes; the tap makes them, writes the CF_*_CONFIG repository
- *      secrets, and starts `cloudflare.yml` on main, whose apply job applies.
- *   3. Put each new token's client id and secret straight into the Keychain
- *      (`service-tokens.ts`), even when a later step failed: Cloudflare
- *      returns a secret once. Never printed, never written to a file.
+ *   CF_ROUTER_CONFIG       infra/board-router-worker/router.local.json (required)
+ *   CF_SHARE_LINK_CONFIG   infra/share-link-worker/wrangler.local.toml, when present
  *
- * Sends what `cf:plan` sends (`keeper-wrapper.ts` `keeperInput`): the configs
- * and the state bucket's credential. Reads no Cloudflare or GitHub token.
+ * CF_ACCESS_CONFIG is not written. The Access email lists retire with Better
+ * Auth (Bryan, 19 Nov 2026), so the secret keeps the value it has and this
+ * command no longer moves who may sign in (docs/process/keeper.md, "Retired").
+ *
+ * The configs are checked the way a plan reads them (`staticVars`) before
+ * anything is written. Each value goes to `gh secret set` on stdin: never an
+ * argument, a file or a printed line.
  */
-import {
-  announceToBoard,
-  boardUrlFromEnv,
-} from '../../packages/server/src/keeper/keeper-announce.ts';
-import { keeperHeld, keeperTerraform } from '../../packages/server/src/keeper/keeper-client.ts';
-import type {
-  CloudflareResult,
-  FlyResult,
-} from '../../packages/server/src/keeper/keeper-requests.ts';
-import { keychainHas, keychainRead } from '../project-machine/mac-ops.ts';
-import { type KeeperInputIo, failed, keeperInput, reportOf } from './keeper-wrapper.ts';
+import { spawnSync } from 'node:child_process';
+import { HANDOFF_REPO } from '../handoff/mac-store.ts';
 import { configReader } from './run.ts';
-import {
-  type TokenServices,
-  keychainHasService,
-  storeTokenInKeychain,
-  tokenServices,
-} from './service-tokens.ts';
+import { CONFIG_ENV, CONFIG_PATHS, type ReadConfig, staticVars } from './vars.ts';
 
-export interface SyncIo extends KeeperInputIo {
-  keychainHasService: (service: string) => boolean;
-  storeToken: (services: TokenServices, clientId: string, secret: string) => void;
-  /** A routine plan through the keeper. */
-  plan: (input: string) => Promise<FlyResult>;
-  /** The held sync; resolves once the owner approved or denied. */
-  sync: (input: string) => Promise<CloudflareResult>;
+export const SYNCED = ['router', 'shareLink'] as const;
+
+export interface SyncIo {
+  read: ReadConfig;
+  /** `gh <args>`, `input` on stdin; the exit status and stderr. */
+  gh: (args: string[], input?: string) => { status: number; stderr: string };
   out: (s: string) => void;
   err: (s: string) => void;
 }
 
-interface Minted {
-  name?: unknown;
-  id?: unknown;
-  clientId?: unknown;
-  secret?: unknown;
-}
-
-interface SyncAnswer {
-  error?: string;
-  written?: string[];
-  dispatched?: string;
-  minted?: Minted[];
-}
-
-/** Put each new pair in the Keychain. False, naming what was lost, when one cannot be. */
-function storeMinted(io: SyncIo, minted: Minted[]): boolean {
-  let ok = true;
-  for (const t of minted) {
-    const name = typeof t.name === 'string' ? t.name : '';
-    const services = tokenServices(name || 'unnamed');
-    try {
-      if (typeof t.clientId !== 'string' || typeof t.secret !== 'string') throw new Error();
-      io.storeToken(services, t.clientId, t.secret);
-      io.out(`Made service token "${name}"; its pair is in the Keychain.\n`);
-    } catch {
-      // Never the caught message: it was raised next to the secret.
-      io.err(
-        `Made service token "${name}"${typeof t.id === 'string' ? ` (${t.id})` : ''} but could not store its pair in ${services.secret}. Its secret is lost: run bun run cf:rotate-token "${name}" to give it a new one.\n`,
-      );
-      ok = false;
-    }
-  }
-  return ok;
-}
-
-/** Exit code: 0 once CI was started with the new configs, 1 otherwise. */
-export async function syncConfig(io: SyncIo): Promise<number> {
+/** Exit code: 0 once cloudflare.yml was started with the configs written. */
+export function syncConfig(io: SyncIo): number {
+  const paths = CONFIG_PATHS.prod;
   try {
-    const input = keeperInput('prod', io);
-    const planned = await io.plan(input);
-    const plan = reportOf(planned);
-    if (planned.status !== 0 || !plan?.ok) return failed(io, planned, plan);
-    const refusals: string[] = [];
-    const seen = new Map<string, string>();
-    for (const name of Object.values(plan.missing ?? {})) {
-      const s = tokenServices(name);
-      const prior = seen.get(s.secret);
-      if (prior) refusals.push(`"${prior}" and "${name}" would share ${s.secret}`);
-      seen.set(s.secret, name);
-      for (const x of [s.clientId, s.secret]) {
-        if (io.keychainHasService(x)) refusals.push(`the Keychain already holds ${x}`);
-      }
-    }
-    if (refusals.length > 0) {
-      for (const t of refusals) io.err(`  - ${t}\n`);
-      io.err('Refused before anything was asked of the keeper; nothing was changed.\n');
-      return 1;
-    }
-    const r = await io.sync(input);
-    let answer: SyncAnswer = {};
-    try {
-      answer = JSON.parse(r.body) as SyncAnswer;
-    } catch {}
-    const stored = storeMinted(io, Array.isArray(answer.minted) ? answer.minted : []);
-    if (r.status !== 200) {
-      io.err(`${answer.error ?? `the keeper answered ${r.status}`}\n`);
-      return 1;
-    }
-    io.out(`Wrote ${(answer.written ?? []).join(', ')}.\n`);
-    io.out(
-      `Started ${answer.dispatched ?? 'cloudflare.yml'}; its apply job applies the configs (gh run list --workflow cloudflare.yml).\n`,
-    );
-    return stored ? 0 : 1;
+    staticVars(io.read, paths);
   } catch (e) {
-    io.err(`${e instanceof Error ? e.message : String(e)}\n`);
+    io.err(`${e instanceof Error ? e.message : String(e)}\nNothing was written.\n`);
     return 1;
   }
+  const written: string[] = [];
+  for (const key of SYNCED) {
+    const text = io.read(paths[key]);
+    if (text === null) {
+      io.out(`${paths[key]} is not here; ${CONFIG_ENV[key]} keeps the value it has.\n`);
+      continue;
+    }
+    const r = io.gh(['secret', 'set', CONFIG_ENV[key], '--repo', HANDOFF_REPO], text);
+    if (r.status !== 0) {
+      io.err(`gh secret set ${CONFIG_ENV[key]} failed: ${r.stderr.trim()}\n`);
+      if (written.length > 0) io.err(`Already written: ${written.join(', ')}.\n`);
+      return 1;
+    }
+    written.push(CONFIG_ENV[key]);
+  }
+  io.out(`Wrote ${written.join(', ')}. ${CONFIG_ENV.access} is not synced any more.\n`);
+  const run = io.gh(['workflow', 'run', 'cloudflare.yml', '--repo', HANDOFF_REPO, '--ref', 'main']);
+  if (run.status !== 0) {
+    io.err(`gh workflow run cloudflare.yml failed: ${run.stderr.trim()}\n`);
+    return 1;
+  }
+  io.out(
+    'Started cloudflare.yml on main; its apply job applies the configs (gh run list --workflow cloudflare.yml).\n',
+  );
+  return 0;
 }
 
 if (import.meta.main) {
-  const origin = process.env.CW_KEEPER_URL?.trim() ?? '';
-  if (!origin) {
-    process.stderr.write(
-      'cf:sync-config needs the keeper: CW_KEEPER_URL is not set (docs/process/keeper.md).\n',
-    );
-    process.exit(2);
-  }
-  const requester = process.env.FEEDBACK_AGENT_NAME?.trim() || 'cf:sync-config';
-  const opts = {
-    requester,
-    // A tap can take a while to reach; the run that follows makes tokens and writes secrets.
-    waitMs: 30 * 60_000,
-    announce: announceToBoard(boardUrlFromEnv(), requester),
-    onHeld: (held: { summary: string; approveUrl: string }) => {
-      process.stderr.write(`[keeper] ${held.summary} waits for Bryan's passkey\n`);
-      process.stderr.write(`[keeper] approve at ${held.approveUrl}\n`);
-    },
-  };
-  const code = await syncConfig({
-    read: configReader(process.env),
-    env: process.env,
-    keychainHas,
-    keychainRead,
-    keychainHasService: (s) => keychainHasService(s),
-    storeToken: storeTokenInKeychain,
-    plan: (input) => keeperTerraform(origin, 'plan', 'prod', input, opts),
-    sync: (input) => keeperHeld(origin, '/v1/cf-sync', { input }, opts),
-    out: (s) => process.stdout.write(s),
-    err: (s) => process.stderr.write(s),
-  });
-  process.exit(code);
+  process.exit(
+    syncConfig({
+      // The files, never a CI stand-in a shell happened to export.
+      read: configReader({}),
+      gh: (args, input) => {
+        const r = spawnSync('gh', args, {
+          encoding: 'utf8',
+          ...(input === undefined ? {} : { input }),
+        });
+        return { status: r.status ?? 1, stderr: r.stderr ?? '' };
+      },
+      out: (s) => process.stdout.write(s),
+      err: (s) => process.stderr.write(s),
+    }),
+  );
 }

@@ -2,8 +2,9 @@
  * The secrets a project machine's deploy gives it for pushing
  * (`infra/project-machine/deploy-plan.ts`, `push-keys.ts`).
  *
- * The server pushes with a write deploy key per repo, which the keeper
- * makes and sets; it never holds a classic GitHub token. So no plan ever
+ * The server pushes with a write deploy key per repo, which fly-provision.yml
+ * makes and sets (`project-machine-provision.test.ts`); it never holds a
+ * classic GitHub token. So no plan ever
  * sets `CW_GITHUB_PUSH_TOKEN`, and a plan over an app that has one unsets it.
  */
 import { describe, expect, it } from 'bun:test';
@@ -16,7 +17,6 @@ import {
   projectConfig,
   requiredSecrets,
 } from '../../../infra/project-machine/deploy-plan.ts';
-import { makePushKeysThroughKeeper } from '../../../infra/project-machine/push-keys.ts';
 
 const SHA = 'a'.repeat(40);
 const REPOS = ['Riverbend/notes', 'Riverbend/app'];
@@ -71,7 +71,7 @@ describe('the deploy plan’s secret list', () => {
     expect(plan(base, complete(base))).toEqual([]);
   });
 
-  it('asks the keeper for a deploy key per repo once, and again only when told to', () => {
+  it('makes a deploy key per repo once, and again only when told to', () => {
     const cfg = projectConfig({ project: 'riverbend-test', imageLabel: SHA, pushRepos: REPOS });
     expect(plan(cfg, complete(cfg))).toEqual([
       { kind: 'make-push-keys', repos: REPOS },
@@ -97,93 +97,5 @@ describe('the deploy plan’s secret list', () => {
     expect(() =>
       projectConfig({ project: 'riverbend-test', imageLabel: SHA, refreshPushKeys: true }),
     ).toThrow('--push-repo');
-  });
-});
-
-describe('the deploy’s make-push-keys step', () => {
-  it('refuses without a keeper, since nothing else holds the GitHub token', async () => {
-    let asked = false;
-    const ask = async () => {
-      asked = true;
-      return { status: 200, body: '{}' };
-    };
-    await expect(makePushKeysThroughKeeper('cw-riverbend-test', REPOS, ask, {})).rejects.toThrow(
-      'CW_KEEPER_URL',
-    );
-    expect(asked).toBe(false);
-  });
-
-  it('asks the keeper for the app’s repos and reports each key it made', async () => {
-    const seen: unknown[] = [];
-    const lines = await makePushKeysThroughKeeper(
-      'cw-riverbend-test',
-      REPOS,
-      async (origin, app, repos) => {
-        seen.push({ origin, app, repos });
-        return {
-          status: 200,
-          body: JSON.stringify({
-            keys: [
-              { repo: 'Riverbend/notes', id: 11 },
-              { repo: 'Riverbend/app', id: 12 },
-            ],
-            retired: ['Riverbend/notes#3'],
-          }),
-        };
-      },
-      { CW_KEEPER_URL: 'http://localhost:9' },
-    );
-    expect(seen).toEqual([
-      { origin: 'http://localhost:9', app: 'cw-riverbend-test', repos: REPOS },
-    ]);
-    expect(lines).toEqual([
-      'Riverbend/notes: write deploy key 11',
-      'Riverbend/app: write deploy key 12',
-      'Riverbend/notes#3: older key removed',
-      'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
-    ]);
-    await expect(
-      makePushKeysThroughKeeper(
-        'cw-riverbend-test',
-        REPOS,
-        async () => ({ status: 403, body: '{"error":"denied"}' }),
-        { CW_KEEPER_URL: 'http://localhost:9' },
-      ),
-    ).rejects.toThrow('denied');
-  });
-
-  it('prints which secrets a workflow pushed with each key could read', async () => {
-    const ask = (exposure: unknown) => async () => ({
-      status: 200,
-      body: JSON.stringify({ keys: [{ repo: 'Riverbend/app', id: 12 }], exposure }),
-    });
-    const env = { CW_KEEPER_URL: 'http://localhost:9' };
-    const lines = await makePushKeysThroughKeeper(
-      'cw-riverbend-test',
-      REPOS,
-      ask([
-        {
-          repo: 'Riverbend/app',
-          defaultBranch: 'main',
-          defaultBranchProtected: false,
-          repoSecrets: { items: ['FLY_API_TOKEN'], complete: true },
-          orgSecrets: { items: [], complete: true },
-          openEnvironments: { items: [], complete: true },
-        },
-      ]),
-      env,
-    );
-    expect(lines).toEqual([
-      'Riverbend/app: write deploy key 12',
-      'Riverbend/app: a workflow on any branch can read FLY_API_TOKEN (repository secrets)',
-      'Riverbend/app: default branch main does not refuse the deploy key, so it can push a workflow there and reach every secret, environment ones too',
-    ]);
-    // A keeper that sends no report says so, rather than printing nothing.
-    expect(
-      await makePushKeysThroughKeeper('cw-riverbend-test', REPOS, ask(undefined), env),
-    ).toEqual([
-      'Riverbend/app: write deploy key 12',
-      'could not read which secrets a workflow pushed with these keys can reach: the keeper sent no report',
-    ]);
   });
 });

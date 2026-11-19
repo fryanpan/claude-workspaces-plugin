@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import { projectConfig, requiredSecrets } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
+import { giveMacFlyTokens } from './mac-fly-tokens.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..');
 const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
@@ -50,6 +51,7 @@ const bucket = {
 let server: ReturnType<typeof Bun.serve>;
 const savedPath = process.env.PATH;
 const savedKeeper = process.env.CW_KEEPER_URL;
+let restoreTokens = () => {};
 
 beforeAll(() => {
   server = Bun.serve({
@@ -107,7 +109,6 @@ exit 0
     `#!/bin/sh
 echo "$*" >> "${flyCalls}"
 case "$1 $2" in
-  "apps list") echo '[{"Name":"${cfg.app}"}]' ;;
   "volumes list") echo '[{"name":"cw_data","region":"sjc","state":"created"}]' ;;
   "secrets list") cat "${state}/secrets.json" ;;
   "machines list") cat "${state}/machines.json" ;;
@@ -120,9 +121,11 @@ exit 0
   chmodSync(join(bin, 'fly'), 0o755);
   process.env.PATH = `${bin}:${savedPath ?? ''}`;
   Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
+  restoreTokens = giveMacFlyTokens(tmp, [cfg.app]);
 });
 
 afterAll(() => {
+  restoreTokens();
   process.env.PATH = savedPath;
   if (savedKeeper !== undefined) process.env.CW_KEEPER_URL = savedKeeper;
   server.stop(true);
@@ -137,7 +140,6 @@ let spies: Array<{ mockRestore(): void }> = [];
 
 beforeEach(() => {
   Object.assign(bucket, { type: 0, rule: true, refuse: null, writes: [] });
-  keychain('fly-org-token', 'fo-fixture-token');
   keychain('fly-org-slug', 'harborlight');
   keychain(cfg.keychain.identity, 'AGE-SECRET-KEY-FIXTURE');
   keychain(

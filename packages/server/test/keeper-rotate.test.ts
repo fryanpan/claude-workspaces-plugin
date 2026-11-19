@@ -1,13 +1,11 @@
 /**
- * Rotating one existing Access service token through the keeper
- * (`keeper/keeper-rotate.ts`), and storing the new pair over the old one
- * (`infra/cloudflare/rotate-token.ts`): one tap, the old secret kept for 24
- * hours, the page naming the token and never a secret, and the secret
- * reaching only the requester. A stand-in Cloudflare; nothing leaves.
+ * Rotating one existing Access service token (`keeper/keeper-rotate.ts`):
+ * the old secret kept for 24 hours, and, through the keeper while it still
+ * runs, one tap with the page naming the token and never a secret.
+ * cf-rotate-token.yml runs the same function (`cloudflare-rotate-token.test.ts`).
+ * A stand-in Cloudflare; nothing leaves.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { rotateToken } from '../../../infra/cloudflare/rotate-token.ts';
-import type { TokenServices } from '../../../infra/cloudflare/service-tokens.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import {
   PREVIOUS_SECRET_MS,
@@ -114,61 +112,5 @@ describe('service-token-rotate through the keeper', () => {
       {},
     );
     expect(r.status).toBe(403);
-  });
-});
-
-describe('cf:rotate-token', () => {
-  const io = (status: number, body: unknown, fails = false) => {
-    const w = {
-      replaced: [] as Array<{ services: TokenServices; clientId: string; secret: string }>,
-      printed: [] as string[],
-    };
-    return {
-      w,
-      io: {
-        rotate: async () => ({ status, body: JSON.stringify(body) }),
-        replaceToken: (services: TokenServices, clientId: string, secret: string) => {
-          if (fails) throw new Error(`refused ${secret}`);
-          w.replaced.push({ services, clientId, secret });
-        },
-        out: (s: string) => w.printed.push(s),
-        err: (s: string) => w.printed.push(s),
-      },
-    };
-  };
-
-  it('puts the new pair over the old one under the token services, never printing it', async () => {
-    const { w, io: x } = io(200, {
-      clientId: 'c0ffee.access',
-      secret: SECRET,
-      previousSecretExpiresAt: 'later',
-    });
-    expect(await rotateToken('agent moi', x)).toBe(0);
-    expect(w.replaced).toEqual([
-      {
-        services: {
-          clientId: 'cw-agent-moi-access-client-id',
-          secret: 'cw-agent-moi-access-secret',
-        },
-        clientId: 'c0ffee.access',
-        secret: SECRET,
-      },
-    ]);
-    expect(w.printed.join('')).not.toContain(SECRET);
-    expect(w.printed.join('')).toContain('a second rotation ends the old secret at once');
-  });
-
-  it('says the secret is lost, without printing it, when the Keychain refuses it', async () => {
-    const { w, io: x } = io(200, { clientId: 'c0ffee.access', secret: SECRET }, true);
-    expect(await rotateToken('agent moi', x)).toBe(1);
-    expect(w.printed.join('')).toContain('it is lost');
-    expect(w.printed.join('')).not.toContain(SECRET);
-  });
-
-  it("prints the keeper's refusal and stores nothing", async () => {
-    const { w, io: x } = io(403, { error: 'request was denied' });
-    expect(await rotateToken('agent moi', x)).toBe(1);
-    expect(w.replaced).toEqual([]);
-    expect(w.printed.join('')).toContain('request was denied');
   });
 });

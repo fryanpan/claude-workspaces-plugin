@@ -27,7 +27,10 @@
  * against the deploy's, trusted emails, the loopback uid policy,
  * `git-push.json`'s approval flags, the deploy key's read-only flag and the
  * tunnel's ingress; across the account, ONE_ADDRESS_ORIGIN, shared service
- * tokens, and a Cloudflare plan with no changes. `--no-drift` leaves it out.
+ * tokens, each project's live Access policies against `access.local.json`,
+ * and a Cloudflare plan with no changes; in GitHub, no secret named
+ * FLY_API_TOKEN anywhere and each `fly-<project>` environment admitting main
+ * alone with a FLY_DEPLOY_TOKEN under 45 days old. `--no-drift` leaves it out.
  *
  * The projects are `--projects`, else every project the outputs give a
  * tunnel (a project machine). Exits 1 unless every row passes. A dry run
@@ -270,6 +273,11 @@ async function main(): Promise<void> {
       console.log(`gh api repos/<each repo the lead of ${p} clones or may push>/keys`);
       console.log(`GET /accounts/<account>/cfd_tunnel/<${appFor(p)} id>/configurations`);
     }
+    console.log(
+      "gh api repos/<this repo>/environments, each one's secrets (names and times) and branch rules",
+    );
+    console.log('gh api repos/<this repo>/actions/secrets (names only)');
+    console.log('GET /accounts/<account>/access/apps and /access/service_tokens');
     console.log(`bun run cf:plan ${tfEnv} (CI mode: no lock, nothing applied)`);
     console.log('[wall-report] DRY RUN: nothing was run');
     return;

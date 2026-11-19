@@ -12,7 +12,6 @@ import type { CloudflareApi } from '../../../infra/project-machine/cloudflare.ts
 const CF_TOKEN = 'fixture-cf-token-Riverbend';
 const GH_TOKEN = 'fixture-gh-token-Harborlight';
 const FLY_TOKEN = 'fixture-fly-token-Saltmarsh';
-const OWNER = 'alice@harborlight.test';
 const ACCOUNT = 'c'.repeat(32);
 
 const SHOW = JSON.stringify({
@@ -123,13 +122,14 @@ describe('cf:ci-secrets', () => {
   });
 
   it('hands every credential and config to terraform in its environment only', async () => {
-    const r = fake({ ...BOTH, FLY_API_TOKEN: FLY_TOKEN, CW_OWNER_EMAIL: OWNER }, { configs: true });
+    const r = fake({ ...BOTH, FLY_API_TOKEN: FLY_TOKEN }, { configs: true });
     await ciSecrets(['apply'], r.io);
     const env = r.calls[0]?.env ?? {};
-    expect(env.TF_VAR_owner_email).toBe(OWNER);
     expect(env.CLOUDFLARE_API_TOKEN).toBe(CF_TOKEN);
     expect(env.GITHUB_TOKEN).toBe(GH_TOKEN);
-    expect(env.TF_VAR_fly_api_token).toBe(FLY_TOKEN);
+    // The org token is fly:ci-tokens' to cut, never cloudflare-prod's to hold.
+    expect(JSON.stringify(env)).not.toContain(FLY_TOKEN);
+    expect(Object.keys(env).filter((k) => /fly|owner_email/i.test(k))).toEqual([]);
     expect(env.TF_VAR_account_id).toBe(ACCOUNT);
     expect(env.TF_VAR_router_config).toBe('{"zone":"harborlight.test"}');
     expect(env.TF_VAR_access_config).toBe('{"projects":{}}');

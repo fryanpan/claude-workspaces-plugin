@@ -7,9 +7,7 @@
  * The decrypt happens on the Mac, so the identity never goes near the
  * machine: download with the bucket's admin credential, restore into a
  * private temp dir with `restoreSnapshot`, pack it, and copy it up. The
- * tarballs are packed where `fly` can read them: through the keeper it runs
- * as the keeper's user, so they go in a folder only this user and that one
- * can open (`keeperStage`). They are copied up before anything on the
+ * tarballs are packed in a folder only this user can open (`privateStage`). They are copied up before anything on the
  * machine changes, so a copy that fails leaves the machine as it was. On the
  * machine the services are held off with `/data/maintenance`, the current
  * data dir and transcripts dir are moved aside (never deleted) to
@@ -23,7 +21,7 @@ import { join } from 'node:path';
 import { type ProjectConfig, newestSnapshot, projectConfig } from './deploy-plan.ts';
 import { bucketAdmin } from './deploy-secrets.ts';
 import { machines } from './deploy.ts';
-import { flyOk, keeperStage, keychainRead, onMachine } from './mac-ops.ts';
+import { flyOk, keychainRead, onMachine, privateStage } from './mac-ops.ts';
 import { restoreSnapshot } from './snapshot.ts';
 
 const ZERO_SHA = '0'.repeat(40);
@@ -57,9 +55,9 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
   const machine = machines(cfg.app).find((m) => m.state !== 'destroyed');
   if (!machine) throw new Error(`${cfg.app} has no machine; run machine:deploy first`);
 
-  // The decrypted copy stays in this user's own temp folder; only the
-  // tarballs fly uploads are staged for the keeper.
-  const stage = keeperStage(`${cfg.app}-restore-upload-`);
+  // The decrypted copy and the tarballs fly uploads stay in folders only
+  // this user can open.
+  const stage = privateStage(`${cfg.app}-restore-upload-`);
   const work = mkdtempSync(join(tmpdir(), `${cfg.app}-restore-`));
   try {
     const snap = join(work, 'snapshot.cwsnap');
