@@ -14,7 +14,7 @@
  *   1. makes each missing service token (`keeper-run.ts tokens`, which checks
  *      the account still lacks exactly those);
  *   2. writes `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG` and `CF_SHARE_LINK_CONFIG`
- *      for each config sent, as repository secrets (`keeper-github.ts`);
+ *      for each config sent, as repository secrets (`provisioning/github-ci.ts`);
  *   3. dispatches `cloudflare.yml` on main, whose apply imports the new token
  *      by id.
  * A token's pair goes back to the requester in the answer, even when a later
@@ -29,7 +29,7 @@ import {
   checkSecretWrites,
   dispatchCloudflareWorkflow,
   writeGithubSecrets,
-} from './keeper-github.ts';
+} from '../provisioning/github-ci.ts';
 import type { Verdict } from './keeper-policy.ts';
 import type { CloudflareResult, FlyResult } from './keeper-requests.ts';
 import {

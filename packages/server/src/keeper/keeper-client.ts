@@ -297,7 +297,7 @@ export async function keeperGet(
 
 /**
  * Ask the keeper to make `app`'s push deploy keys on `repos`
- * (`keeper-push-keys.ts`). Always a tap. The answer names each key's id and
+ * (`provisioning/push-keys.ts`). Always a tap. The answer names each key's id and
  * public half; the private halves went to the app's secret and are not in it.
  */
 export function keeperPushKeys(

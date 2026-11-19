@@ -7,8 +7,8 @@
  * not be framed, so no other page can lay a button over "Approve".
  */
 import { randomBytes } from 'node:crypto';
-import { CI_REPO, namesByTarget } from './keeper-github.ts';
-import { moveSteps } from './keeper-move-steps.ts';
+import { CI_REPO, namesByTarget } from '../provisioning/github-ci.ts';
+import { moveSteps } from '../provisioning/move-steps.ts';
 import { type HoldKind, shellQuote } from './keeper-policy.ts';
 import type { HeldRequest } from './keeper-requests.ts';
 import type { SignInChange } from './keeper-terraform.ts';

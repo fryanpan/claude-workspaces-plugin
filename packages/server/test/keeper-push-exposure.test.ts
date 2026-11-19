@@ -1,7 +1,7 @@
 /**
  * What a workflow pushed with a repo's new write deploy key could read
- * (`keeper/keeper-push-exposure.ts`), that the keeper's push-key answer
- * carries it (`keeper/keeper-push-keys.ts`), and that the keeper's GitHub
+ * (`provisioning/push-exposure.ts`), that the keeper's push-key answer
+ * carries it (`provisioning/push-keys.ts`), and that the keeper's GitHub
  * calls give up on a hung request (`keeper/keeper-exec.ts`).
  *
  * GitHub is an in-memory stand-in that records every call; no request leaves
@@ -13,14 +13,14 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keeperExecutors } from '../src/keeper/keeper-exec.ts';
+import { openKeeperStore } from '../src/keeper/keeper-store.ts';
+import type { GuardedFetch } from '../src/outbound-fetch.ts';
 import {
   type RepoExposure,
   exposureLines,
   repoExposure,
-} from '../src/keeper/keeper-push-exposure.ts';
-import { type GithubApi, ed25519Pair, makePushKeys } from '../src/keeper/keeper-push-keys.ts';
-import { openKeeperStore } from '../src/keeper/keeper-store.ts';
-import type { GuardedFetch } from '../src/outbound-fetch.ts';
+} from '../src/provisioning/push-exposure.ts';
+import { type GithubApi, ed25519Pair, makePushKeys } from '../src/provisioning/push-keys.ts';
 
 type Answer = { status: number; body: unknown };
 

@@ -16,7 +16,7 @@
  * approval page's own answer does not carry the result
  * (`resultIsSecret` in `keeper-ci-calls.ts`).
  */
-import type { Verdict } from './keeper-policy.ts';
+import type { Verdict } from './verdict.ts';
 
 export interface RotateCall {
   type: 'service-token-rotate';

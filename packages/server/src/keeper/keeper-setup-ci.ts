@@ -30,14 +30,14 @@
  * Actions secrets needs.
  */
 import { createHash } from 'node:crypto';
-import { keeperGet, keeperHeld } from './keeper-client.ts';
 import {
   CI_ENVIRONMENT,
   CI_REPO,
   CREDENTIAL_SECRETS,
   type SecretTarget,
   type SecretWrite,
-} from './keeper-github.ts';
+} from '../provisioning/github-ci.ts';
+import { keeperGet, keeperHeld } from './keeper-client.ts';
 import { type CfAccount, cfCall, oneAccount } from './keeper-setup-cloudflare.ts';
 
 type Scope = 'account' | 'zone' | 'bucket';

@@ -468,6 +468,8 @@ export function createServerDeps(
 export type ServerDeps = ReturnType<typeof createServerDeps>;
 
 /**
+ * The keeper's last caller in the server; it retires when shares move to Better Auth.
+ *
  * How the share module reaches Cloudflare: through the keeper when
  * `CW_KEEPER_URL` names one, else with the Keychain's token. A held call
  * waits under the board server's 120s idle timeout for the tap.

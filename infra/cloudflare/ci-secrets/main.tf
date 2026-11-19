@@ -150,7 +150,7 @@ locals {
 
 # The environment's write credentials are safe only while a run from main
 # alone can deploy to it: the keeper checks the same before its own write
-# (packages/server/src/keeper/keeper-github.ts). The token's precondition
+# (packages/server/src/provisioning/github-ci.ts). The token's precondition
 # reads this.
 data "github_repository_environment_deployment_policies" "deploy" {
   repository  = var.repository

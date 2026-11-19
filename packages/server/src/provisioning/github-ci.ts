@@ -1,3 +1,4 @@
+import { sealedBox } from './sealed-box.ts';
 /**
  * The keeper's writes to this repository's GitHub Actions settings, made with
  * the GitHub token only the keeper holds (`github-token`, the classic token
@@ -15,7 +16,7 @@
  * **`github-status`** is routine: the token's scope names and the names of
  * the secrets already set. Neither is a credential.
  *
- * Each value is sealed to the target's public key (`keeper-sealed-box.ts`)
+ * Each value is sealed to the target's public key (`sealed-box.ts`)
  * before it leaves the keeper, so the request body carries no value GitHub
  * itself did not ask for. Before any write the token's scopes are read from
  * `X-OAuth-Scopes`; without `repo` (the scope GitHub asks of a classic token
@@ -25,8 +26,7 @@
  * The repository is fixed here rather than named by the requester: a secret
  * the keeper writes goes to this repository and nowhere else.
  */
-import type { Verdict } from './keeper-policy.ts';
-import { sealedBox } from './keeper-sealed-box.ts';
+import type { Verdict } from './verdict.ts';
 
 export const CI_REPO = 'fryanpan/claude-workspaces-plugin';
 export const CI_ENVIRONMENT = 'cloudflare-prod';

@@ -30,7 +30,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/secret-name.ts';
-import { CI_ENVIRONMENT, CI_REPO } from '../../packages/server/src/keeper/keeper-github.ts';
+import { CI_ENVIRONMENT, CI_REPO } from '../../packages/server/src/provisioning/github-ci.ts';
 import { deletions } from './ci-secrets.ts';
 import { planSummary } from './plan-summary.ts';
 import { APP_SECRETS_DIR, type TfResult, spawnTerraform } from './terraform.ts';

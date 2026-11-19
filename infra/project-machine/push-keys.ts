@@ -8,21 +8,21 @@
  * `CW_GITHUB_PUSH_KEYS`. Each pair is made in memory (`ed25519Pair`); a
  * private half goes to that Fly secret and nowhere else, and a failed run
  * deletes every key it registered (`makePushKeys` in
- * `packages/server/src/keeper/keeper-push-keys.ts`, the function the keeper
+ * `packages/server/src/provisioning/push-keys.ts`, the function the keeper
  * ran, run here as it is).
  *
  * Its lines also name, per repo, the Actions secret names a workflow pushed
- * with the new key could read (`keeper-push-exposure.ts`), names only.
+ * with the new key could read (`provisioning/push-exposure.ts`), names only.
  */
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
-import { exposureLines } from '../../packages/server/src/keeper/keeper-push-exposure.ts';
+import { exposureLines } from '../../packages/server/src/provisioning/push-exposure.ts';
 import {
   type GithubApi,
   MAX_PUSH_REPOS,
   type PushKeysDeps,
   ed25519Pair,
   makePushKeys as makeAndRegister,
-} from '../../packages/server/src/keeper/keeper-push-keys.ts';
+} from '../../packages/server/src/provisioning/push-keys.ts';
 import { fly } from './mac-ops.ts';
 
 /** GitHub's REST API with one token, under https://api.github.com. */

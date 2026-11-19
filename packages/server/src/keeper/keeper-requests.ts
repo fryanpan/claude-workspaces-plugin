@@ -32,12 +32,14 @@
  * the new Access application (so revoking it later needs no tap) and opens a
  * 10-minute grant on it, so its policy can be written. A `move.grant` runs
  * nothing itself and opens a 30-minute grant on one app for one board's listed
- * steps (`keeper-move-steps.ts`). Every other held request is one tap each; a
+ * steps (`provisioning/move-steps.ts`). Every other held request is one tap each; a
  * config sync is planned before it is held, so its page shows who it lets
  * sign in (`keeper-cf-sync.ts`). The CI requests are `keeper-ci-calls.ts`.
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
+import type { GithubScopedApi } from '../provisioning/github-ci.ts';
+import { type PushKeysCall, classifyPushKeys } from '../provisioning/push-keys.ts';
 import type { SyncHold } from './keeper-cf-sync.ts';
 import {
   type CiCall,
@@ -48,7 +50,6 @@ import {
   stripCiInput,
 } from './keeper-ci-calls.ts';
 import { flyConfigFiles, flyConfigsOf } from './keeper-flyconfig.ts';
-import type { GithubScopedApi } from './keeper-github.ts';
 import {
   ACCESS_GRANT_MS,
   type Grant,
@@ -61,7 +62,6 @@ import {
 } from './keeper-grants.ts';
 import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import { type HoldKind, type Verdict, classifyCloudflare, classifyFly } from './keeper-policy.ts';
-import { type PushKeysCall, classifyPushKeys } from './keeper-push-keys.ts';
 import { stageFlyPaths } from './keeper-stage.ts';
 import type { KeeperStore } from './keeper-store.ts';
 import {
@@ -114,11 +114,11 @@ export type KeeperResult = FlyResult | CloudflareResult;
 export interface Executors {
   fly(args: string[], input: string | undefined): Promise<FlyResult>;
   cloudflare(method: string, path: string, body: string | undefined): Promise<CloudflareResult>;
-  /** Make and register a project's push deploy keys (`keeper-push-keys.ts`). */
+  /** Make and register a project's push deploy keys (`provisioning/push-keys.ts`). */
   pushKeys?(app: string, repos: readonly string[]): Promise<CloudflareResult>;
   /** The keeper's own Terraform run (`keeper-exec.ts`, `runTerraform`). */
   terraform?: TerraformRunner;
-  /** GitHub's REST API with the keeper's GitHub token (`keeper-github.ts`). */
+  /** GitHub's REST API with the keeper's GitHub token (`provisioning/github-ci.ts`). */
   github?: GithubScopedApi;
 }
 

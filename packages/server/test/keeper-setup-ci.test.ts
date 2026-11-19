@@ -9,15 +9,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import nacl from 'tweetnacl';
-import { CI_REPO, type GithubScopedApi } from '../src/keeper/keeper-github.ts';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
-import { sealNonce } from '../src/keeper/keeper-sealed-box.ts';
 import {
   CF_APPLY_PERMISSIONS,
   CF_PLAN_PERMISSIONS,
   type CiStepIo,
   ciCredentials,
 } from '../src/keeper/keeper-setup-ci.ts';
+import { CI_REPO, type GithubScopedApi } from '../src/provisioning/github-ci.ts';
+import { sealNonce } from '../src/provisioning/sealed-box.ts';
 import { type LiveKeeper, startLiveKeeper } from './keeper-live-harness.ts';
 import { waitFor } from './wait-for.ts';
 
