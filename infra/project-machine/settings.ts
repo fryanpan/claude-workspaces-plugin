@@ -9,6 +9,19 @@
  *   CF_ACCESS_HOST_AUDS       each of the project's hosts, to that audience
  *   CW_PROXIED_TRUSTED_HOSTS  the project's hosts, so the owner is admitted on them
  *
+ * And, for Better Auth sign-in (`packages/server/src/auth/board-signin.ts`),
+ * the one Google client every machine shares, from the Keychain, plus this
+ * machine's own sign-in origin:
+ *
+ *   CW_GOOGLE_CLIENT_ID       the Keychain's `cw-google-signin-client-id`
+ *   CW_GOOGLE_CLIENT_SECRET   the Keychain's `cw-google-signin-client-secret`
+ *   CW_SIGNIN_ORIGIN          https:// and the project's first host
+ *
+ * These do not switch sign-in on: `CW_SIGNIN` stays unset (Access) until the
+ * owner switches it. Google sends a sign-in result only to a return address
+ * the client lists, so a run that sets the client prints the one this
+ * machine names (`notes`), for the owner to add in Google's console.
+ *
  * All but the first come from the Terraform outputs (`infra/cloudflare/outputs.ts`),
  * so this asks Cloudflare nothing. The server admits the owner on a proxied
  * host only with all four Access settings and an owner address
@@ -22,6 +35,8 @@
 import type { TfOutputs } from '../cloudflare/outputs.ts';
 
 export const OWNER_EMAIL_ENTRY = 'cw-board-owner-email';
+export const GOOGLE_CLIENT_ID_ENTRY = 'cw-google-signin-client-id';
+export const GOOGLE_CLIENT_SECRET_ENTRY = 'cw-google-signin-client-secret';
 
 export const SETTING_NAMES = [
   'CW_OWNER_EMAIL',
@@ -32,11 +47,22 @@ export const SETTING_NAMES = [
   'CW_PROXIED_TRUSTED_HOSTS',
 ] as const;
 
+/**
+ * The sign-in settings. Kept off `SETTING_NAMES`, which the wall-drift report
+ * compares against a server's environment: a client secret is not a value
+ * that report should read back.
+ */
+export const SIGNIN_SETTING_NAMES = [
+  'CW_GOOGLE_CLIENT_ID',
+  'CW_GOOGLE_CLIENT_SECRET',
+  'CW_SIGNIN_ORIGIN',
+] as const;
+
 const ACCESS_NAMES =
   'CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CF_ACCESS_HOST_AUDS and CW_PROXIED_TRUSTED_HOSTS';
 
 export interface Setting {
-  name: (typeof SETTING_NAMES)[number];
+  name: (typeof SETTING_NAMES)[number] | (typeof SIGNIN_SETTING_NAMES)[number];
   /** Where the value comes from, for the dry run. Never the value. */
   from: string;
   value: () => string;
@@ -46,6 +72,8 @@ export interface SettingsRead {
   settings: Setting[];
   /** One line per setting left unset, and why. */
   skipped: string[];
+  /** Lines for the owner to act on: the Google return address to register. */
+  notes: string[];
 }
 
 export interface SettingsSources {
@@ -68,6 +96,26 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   } else {
     skipped.push(`CW_OWNER_EMAIL: the Keychain has no ${OWNER_EMAIL_ENTRY}`);
   }
+  const google = [GOOGLE_CLIENT_ID_ENTRY, GOOGLE_CLIENT_SECRET_ENTRY].every(src.keychainHas);
+  if (google) {
+    settings.push(
+      {
+        name: 'CW_GOOGLE_CLIENT_ID',
+        from: `Keychain ${GOOGLE_CLIENT_ID_ENTRY}`,
+        value: () => src.keychainRead(GOOGLE_CLIENT_ID_ENTRY).trim(),
+      },
+      {
+        name: 'CW_GOOGLE_CLIENT_SECRET',
+        from: `Keychain ${GOOGLE_CLIENT_SECRET_ENTRY}`,
+        value: () => src.keychainRead(GOOGLE_CLIENT_SECRET_ENTRY).trim(),
+      },
+    );
+  } else {
+    skipped.push(
+      `CW_GOOGLE_CLIENT_ID, CW_GOOGLE_CLIENT_SECRET, CW_SIGNIN_ORIGIN: the Keychain has no ${GOOGLE_CLIENT_ID_ENTRY} and ${GOOGLE_CLIENT_SECRET_ENTRY}`,
+    );
+  }
+  const notes: string[] = [];
 
   let outputs: TfOutputs;
   try {
@@ -77,7 +125,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
     skipped.push(
       `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: could not read the Terraform outputs (${why})`,
     );
-    return { settings, skipped };
+    return { settings, skipped, notes };
   }
   const p = outputs.access[project];
   const host = p?.hosts[0];
@@ -85,17 +133,27 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
     skipped.push(
       `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: the Terraform state has no Access application for ${project} (add it to access.local.json; bun run cf:sync-config)`,
     );
-    return { settings, skipped };
+    return { settings, skipped, notes };
   }
   settings.push({
     name: 'CW_PUBLIC_BASE_URL',
     from: `Terraform output access, ${project}'s first host`,
     value: () => `https://${host}`,
   });
+  if (google) {
+    settings.push({
+      name: 'CW_SIGNIN_ORIGIN',
+      from: `Terraform output access, ${project}'s first host`,
+      value: () => `https://${host}`,
+    });
+    notes.push(
+      `Google sign-in returns to https://${host}/api/auth/callback/google: add it to the shared client's authorized redirect URIs in Google's console`,
+    );
+  }
   const team = outputs.accessTeamDomain;
   if (!team) {
     skipped.push(`${ACCESS_NAMES}: the Terraform output access_team_domain is empty`);
-    return { settings, skipped };
+    return { settings, skipped, notes };
   }
   const hostAuds = JSON.stringify(Object.fromEntries(p.hosts.map((h) => [h, p.aud])));
   const from = `Terraform output access, board ${project}`;
@@ -113,5 +171,5 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
     },
     { name: 'CW_PROXIED_TRUSTED_HOSTS', from: `${from}'s hosts`, value: () => p.hosts.join(',') },
   );
-  return { settings, skipped };
+  return { settings, skipped, notes };
 }

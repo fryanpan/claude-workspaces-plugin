@@ -9,6 +9,7 @@ export type BoardRoute =
 export type Route =
   | BoardRoute
   | { kind: 'forward'; project: string; origin: string; frame?: true }
+  | { kind: 'forward'; origin: string; signIn: true }
   | { kind: 'redirect'; location: string };
 
 export interface RouterEnv {

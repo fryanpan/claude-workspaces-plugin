@@ -21,8 +21,11 @@
  * Lifted verbatim out of the top of `createServer`.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import { type GoogleClient, createBoardSignIn } from './auth/board-signin.ts';
+import { createOwnerSignInRecord } from './auth/owner-signin-record.ts';
 import { type CfAccessOptions, createCfAccessVerifier } from './middleware/cf-access.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
+import { type SignInMode, createSignInDoor } from './middleware/signin-door.ts';
 import { CfApi } from './share/cf-api.ts';
 import { loadCookieKey } from './share/link-session.ts';
 import { ShareLinks } from './share/share-links.ts';
@@ -47,6 +50,9 @@ export interface AccessDepsOptions {
   proxiedTrustedHosts?: string[];
   proxiedTrustedEmails?: string[];
   recallCallbackHost?: string;
+  /** `CW_SIGNIN` and what Better Auth needs (`middleware/signin-door.ts`).
+   *  Absent is `access`: today's Cloudflare Access sign-in, unchanged. */
+  signIn?: { mode: SignInMode; origin: string; google: GoogleClient };
 }
 
 export interface AccessDepsContext {
@@ -62,6 +68,14 @@ export interface AccessDepsContext {
    * reference it was when both lived in one closure.
    */
   isBoard: (workspaceId: string) => boolean;
+  /**
+   * May this address hold a Better Auth account here: the owner, or an
+   * address a board on this machine is shared with. A thunk for the reason
+   * `isBoard` is: membership is built after these adapters.
+   */
+  mayHaveAccount?: (email: string, verified: boolean) => boolean;
+  /** Told each address a Better Auth session admitted. */
+  onSignInPerson?: (email: string) => void;
 }
 
 /** Build the sharing and Access adapters once per server. */
@@ -205,10 +219,51 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * because only this one is in the request path: an embedded caller that
    * never goes through bin.ts must fail closed too.
    */
-  const staticAccessVerifier =
+  /**
+   * This machine's own sign-in (`CW_SIGNIN`), when it runs Better Auth. The
+   * static verifier below is the one every door that asks "who is this?"
+   * runs, so composing it here is the whole wiring: in `both` it takes an
+   * Access stamp or a session, in `better-auth` only a session, and in
+   * `access` it is the Access verifier it always was.
+   */
+  const proxiedTrustedEmails = new Set(
+    (opts.proxiedTrustedEmails ?? []).map((e) => normalizeEmail(e)).filter((e) => e !== ''),
+  );
+  const signInMode: SignInMode = opts.signIn?.mode ?? 'access';
+  // The lock-out guard: `better-auth` runs as `both` until the owner has
+  // signed in here once. The record is written when the session is made, at
+  // Google's callback — not on a later request, because while Access is
+  // still in front its stamp admits every later request before a session is
+  // read.
+  const ownerSignIn = createOwnerSignInRecord(dataDir);
+  const recordOwner = (email: string, verified: boolean) => {
+    if (verified && proxiedTrustedEmails.has(email)) ownerSignIn.record(email);
+  };
+  const boardSignIn =
+    opts.signIn && signInMode !== 'access'
+      ? createBoardSignIn({
+          dataDir,
+          baseKey: cookieKey(),
+          origin: opts.signIn.origin,
+          google: opts.signIn.google,
+          mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
+          onSessionCreated: (p) => recordOwner(p.email, p.emailVerified),
+        })
+      : null;
+  const signInDoor = createSignInDoor({
+    mode: signInMode,
+    signIn: boardSignIn,
+    onPerson: (email) => {
+      recordOwner(email, true);
+      ctx.onSignInPerson?.(email);
+    },
+    ownerSignedIn: () => ownerSignIn.read() !== null,
+  });
+  const staticAccessVerifier = signInDoor.verifier(
     opts.cfAccess && typeof opts.cfAccess.audience === 'string'
       ? createCfAccessVerifier(opts.cfAccess)
-      : null;
+      : null,
+  );
   const accessTunnelHosts = opts.accessTunnelHosts ?? [];
   const collabAccessVerifier = accessTunnelHosts.length > 0 ? staticAccessVerifier : null;
   /**
@@ -219,9 +274,6 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * is named as the operator; bin.ts also refuses at boot, but this check is
    * the one in the request path.
    */
-  const proxiedTrustedEmails = new Set(
-    (opts.proxiedTrustedEmails ?? []).map((e) => normalizeEmail(e)).filter((e) => e !== ''),
-  );
   const proxiedTrustedVerifier =
     (opts.proxiedTrustedHosts ?? []).length > 0 && proxiedTrustedEmails.size > 0
       ? staticAccessVerifier
@@ -260,5 +312,8 @@ export function createAccessDeps(ctx: AccessDepsContext) {
     proxiedTrustedVerifier,
     proxiedTrustedHosts,
     recallCallbackHost,
+    boardSignIn,
+    signInDoor,
+    ownerSignIn,
   };
 }

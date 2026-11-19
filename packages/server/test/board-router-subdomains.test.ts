@@ -379,3 +379,35 @@ describe('ONE_ADDRESS_ORIGIN keeps the one address’s stamp on its own machine'
     expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
   });
 });
+
+describe('the sign-in paths on the one address go to the machine that owns it', () => {
+  const STRICT = { ...ENV, ONE_ADDRESS_ORIGIN: MAC };
+  const SIGNIN = ['/auth/sign-in?next=%2F', '/api/auth/callback/google?code=c&state=s'];
+
+  it('forwards each to ONE_ADDRESS_ORIGIN, with its __Host- cookie', async () => {
+    for (const path of SIGNIN) {
+      const { res, calls } = await send(
+        `${ONE}${path}`,
+        { headers: { cookie: '__Host-cw-ba.state=s1; theirs=x' } },
+        STRICT,
+      );
+      expect(res.status).toBe(200);
+      expect(calls.map((c) => c.origin)).toEqual([MAC]);
+      expect(calls[0]?.request.headers.get('cookie')).toBe('__Host-cw-ba.state=s1');
+    }
+  });
+
+  it('with no owner named, forwards them nowhere', async () => {
+    for (const path of SIGNIN) {
+      const { res, calls } = await send(`${ONE}${path}`);
+      expect(res.status).toBe(404);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('CONTROL: a path beside them that names no board still goes nowhere', async () => {
+    const { res, calls } = await send(`${ONE}/api/auth/update-user`, {}, STRICT);
+    expect(res.status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+});

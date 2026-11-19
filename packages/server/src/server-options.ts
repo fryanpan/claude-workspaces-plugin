@@ -19,6 +19,7 @@ import type { AnswerCoverage } from './answer-coverage.ts';
  * `bin.ts` reads that config and constructs the object below.
  */
 import type { CallerAgent, PeerSocket } from './auth/agent-caller.ts';
+import type { GoogleClient } from './auth/board-signin.ts';
 import type { CodeSender } from './auth/code-sender.ts';
 import type { CoachSummarizer } from './coach/summary.ts';
 import type { Deployer } from './deploy.ts';
@@ -35,6 +36,7 @@ import type { LeadHoldSetting } from './lead-chat/lead-line-holds.ts';
 import type { LeadPaneDeps } from './lead-chat/pane.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
+import type { SignInMode } from './middleware/signin-door.ts';
 import type { PluginRefresher } from './plugin-refresh.ts';
 import type { FeaturesOff } from './project-profile.ts';
 import type { PromptStore } from './prompt-store.ts';
@@ -819,6 +821,13 @@ export interface ServerOptions {
    * canonical hostname stays unauthenticated.
    */
   cfAccess?: CfAccessOptions;
+  /**
+   * This machine's own sign-in (`CW_SIGNIN`, `middleware/signin-door.ts`).
+   * Absent, or `mode: 'access'`, is Cloudflare Access alone, as before. In
+   * `both` or `better-auth` the server runs Better Auth on `origin` — the one
+   * https address people sign in at — with the shared Google client.
+   */
+  signIn?: { mode: SignInMode; origin: string; google: GoogleClient };
   /**
    * Cloudflare Access share machinery. When set, the server exposes
    * /api/share routes for creating/listing/revoking shares, instantiates
