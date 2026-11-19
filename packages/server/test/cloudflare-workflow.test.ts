@@ -385,4 +385,11 @@ describe('the workflows that replaced the keeper', () => {
       expect(last?.run).toContain('rm -rf "$RUNNER_TEMP/tf"');
     }
   });
+
+  it('never cut the narrow tokens in two runs at once: provisioning queues behind fly-ci-tokens', () => {
+    const group = (j: Job | undefined) =>
+      typeof j?.concurrency === 'string' ? j.concurrency : j?.concurrency?.group;
+    expect(group(ciTokens.jobs.apply)).toBe('fly-org');
+    expect(group(provision.jobs.provision)).toBe(group(ciTokens.jobs.apply));
+  });
 });

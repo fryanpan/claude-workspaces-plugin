@@ -98,6 +98,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: fly-org
+    # fly-ci-tokens.yml's key: this job cuts and writes the same tokens, and
+    # two applies at once would race on every fly-<project> environment.
+    concurrency:
+      group: fly-org
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
