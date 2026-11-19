@@ -150,6 +150,15 @@ export async function migrate(auth: Auth): Promise<void> {
  * sign-in for good.
  */
 function dropUnproven(db: Database, email: string): void {
+  removeUnverified(db, email, { passwordOnly: true });
+}
+
+/**
+ * Delete the unverified user for this address, with its sessions and
+ * sign-ins, in one transaction. `passwordOnly` keeps one that also signs in
+ * some other way.
+ */
+function removeUnverified(db: Database, email: string, opts: { passwordOnly: boolean }): void {
   if (email === '') return;
   db.transaction(() => {
     const row = db
@@ -159,7 +168,7 @@ function dropUnproven(db: Database, email: string): void {
     const other = db
       .query(`SELECT 1 FROM account WHERE userId = ? AND providerId != 'credential' LIMIT 1`)
       .get(row.id);
-    if (other) return;
+    if (opts.passwordOnly && other) return;
     for (const table of ['session', 'account']) {
       db.query(`DELETE FROM ${table} WHERE userId = ?`).run(row.id);
     }
@@ -181,8 +190,52 @@ const linkId = (token: string): string =>
  */
 export function createPasswordAccounts(
   auth: Auth,
+  db: Database,
   opts: { origin: string; mayHaveAccount: (email: string, verified: boolean) => boolean },
 ) {
+  // One account change at a time: the user list has no unique email, so two
+  // links used at once must not both find no account and both make one.
+  let queue: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = queue.then(work, work);
+    queue = run.catch(() => undefined);
+    return run;
+  };
+
+  const save = async (email: string, hash: string): Promise<boolean> => {
+    const adapter = (await auth.$context).internalAdapter;
+    // The link proved the address: whatever an unproved row carried was
+    // never proved, so it goes, and a verified account is made fresh.
+    removeUnverified(db, email, { passwordOnly: false });
+    const found = await adapter.findUserByEmail(email, { includeAccounts: true });
+    let userId: string;
+    let accounts: { providerId: string }[] = [];
+    if (found?.user.emailVerified) {
+      userId = found.user.id;
+      accounts = found.accounts;
+    } else {
+      const user = await adapter.createUser(
+        { email, name: '', emailVerified: true },
+        { method: 'admin' },
+      );
+      if (!user) return false;
+      userId = user.id;
+    }
+    if (accounts.some((a) => a.providerId === 'credential')) {
+      await adapter.updatePassword(userId, hash);
+    } else {
+      await adapter.linkAccount({
+        userId,
+        providerId: 'credential',
+        accountId: userId,
+        password: hash,
+      });
+    }
+    // A new password ends every session the old one, or a thief, opened.
+    await adapter.deleteUserSessions(userId);
+    return true;
+  };
+
   return {
     async issueLink(raw: string): Promise<string | null> {
       const email = normalizeEmail(raw);
@@ -195,51 +248,31 @@ export function createPasswordAccounts(
         value: email,
         expiresAt: new Date(Date.now() + LINK_TTL_MS),
       });
-      return `${opts.origin}/auth/set-password?token=${token}`;
+      // In the fragment, which no request carries: not to our server, not in
+      // a Referer, and the page clears it before any other script loads.
+      return `${opts.origin}/auth/set-password#token=${token}`;
     },
 
     async setPassword(token: string, password: string): Promise<boolean> {
       if (!TOKEN_SHAPE.test(token)) return false;
-      const ctx = await auth.$context;
-      const adapter = ctx.internalAdapter;
-      // Single-use and atomic; an expired row is consumed and answers null.
-      const link = await adapter.consumeVerificationValue(linkId(token));
-      if (!link) return false;
-      const email = link.value;
-      // Who may hold an account can change within the hour.
-      if (!opts.mayHaveAccount(email, true)) return false;
-      const hash = await ctx.password.hash(password);
-      const found = await adapter.findUserByEmail(email, { includeAccounts: true });
-      let userId: string;
-      if (!found) {
-        const user = await adapter.createUser(
-          { email, name: '', emailVerified: true },
-          { method: 'admin' },
-        );
-        if (!user) return false;
-        userId = user.id;
-      } else {
-        userId = found.user.id;
-        if (!found.user.emailVerified) {
-          // Whatever sign-ins an unproved row carried were never proved.
-          await adapter.deleteAccounts(userId);
-          await adapter.updateUser(userId, { emailVerified: true });
-        }
+      try {
+        const ctx = await auth.$context;
+        // Single-use and atomic; an expired row is consumed and answers null.
+        const link = await ctx.internalAdapter.consumeVerificationValue(linkId(token));
+        if (!link) return false;
+        const email = link.value;
+        // Using one link retires every other one mailed to the address.
+        db.query(
+          `DELETE FROM verification WHERE identifier LIKE '${LINK_PREFIX}%' AND value = ?`,
+        ).run(email);
+        // Who may hold an account can change within the hour.
+        if (!opts.mayHaveAccount(email, true)) return false;
+        const hash = await ctx.password.hash(password);
+        return await oneAtATime(() => save(email, hash));
+      } catch (e) {
+        console.error(`[signin] setting a password failed: ${e instanceof Error ? e.message : e}`);
+        return false;
       }
-      const accounts = found?.user.emailVerified ? found.accounts : [];
-      if (accounts.some((a) => a.providerId === 'credential')) {
-        await adapter.updatePassword(userId, hash);
-      } else {
-        await adapter.linkAccount({
-          userId,
-          providerId: 'credential',
-          accountId: userId,
-          password: hash,
-        });
-      }
-      // A new password ends every session the old one, or a thief, opened.
-      await adapter.deleteUserSessions(userId);
-      return true;
     },
   };
 }

@@ -29,6 +29,7 @@
  * answers the same page whatever happened, and a failed sign-in says only
  * that it failed.
  */
+import { normalizeEmail } from '@claude-workspaces/core';
 import { fixedHostFetch } from '../outbound-fetch.ts';
 
 export type MailKind = 'set-password';
@@ -62,6 +63,58 @@ export interface TurnstileCheck {
 export interface PasswordSignIn {
   mailer: SignInMailer;
   turnstile: TurnstileCheck;
+  /** How many set-password links may be mailed an hour. Tests widen them. */
+  linkLimits?: Partial<LinkLimits>;
+}
+
+export interface LinkLimits {
+  /** To one address. */
+  perAddress: number;
+  /** Asked for from one client address (`cf-connecting-ip`). */
+  perIp: number;
+}
+
+export interface LinkThrottle {
+  /** Whether a link may be mailed now; a yes is counted. */
+  allow(email: string, ip: string | null): boolean;
+}
+
+const LINK_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Counts set-password mails per address and per client in a fixed hour
+ * window, in memory: one process answers every form. Better Auth's own rate
+ * limiter never sees these forms, since they do not reach its routes.
+ */
+export function createLinkThrottle(
+  limits: Partial<LinkLimits> = {},
+  now: () => number = Date.now,
+): LinkThrottle {
+  const max = { perAddress: 3, perIp: 10, ...limits };
+  const windows = new Map<string, { start: number; count: number }>();
+  const used = (key: string, t: number) => {
+    const w = windows.get(key);
+    return w && t - w.start < LINK_WINDOW_MS ? w : null;
+  };
+  return {
+    allow(email, ip) {
+      const t = now();
+      if (windows.size > 10_000) {
+        for (const [k, w] of windows) if (t - w.start >= LINK_WINDOW_MS) windows.delete(k);
+      }
+      const keys: [string, number][] = [
+        [`a:${email}`, max.perAddress],
+        [`i:${ip ?? 'none'}`, max.perIp],
+      ];
+      if (keys.some(([k, limit]) => (used(k, t)?.count ?? 0) >= limit)) return false;
+      for (const [k] of keys) {
+        const w = used(k, t);
+        if (w) w.count += 1;
+        else windows.set(k, { start: t, count: 1 });
+      }
+      return true;
+    },
+  };
 }
 
 /**
@@ -194,6 +247,8 @@ export interface PasswordRouteContext {
   host: string;
   password: PasswordSignIn;
   accounts: () => Promise<PasswordAccounts>;
+  /** Shared by every request, so it counts across them. */
+  throttle: LinkThrottle;
   /** A same-site path to come back to (`board-signin.ts` `safeNext`). */
   safeNext(raw: unknown): string;
   /** POST a JSON body to a Better Auth route, as this request's browser. */
@@ -219,10 +274,19 @@ export async function handlePasswordRoute(
   pathname: string,
 ): Promise<Response | null> {
   if (pathname === PASSWORD_PATHS.setPassword && req.method === 'GET') {
-    return setPasswordPage(
-      new URL(req.url).searchParams.get('token'),
-      ctx.password.turnstile.siteKey,
-    );
+    // A link mailed before the token moved to the fragment: move it there,
+    // so it is never in the URL a page script can read.
+    const old = new URL(req.url).searchParams.get('token');
+    if (old !== null) {
+      const location = /^[A-Za-z0-9_-]{1,64}$/.test(old)
+        ? `${PASSWORD_PATHS.setPassword}#token=${old}`
+        : PASSWORD_PATHS.setPassword;
+      return new Response(null, {
+        status: 303,
+        headers: { location, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' },
+      });
+    }
+    return setPasswordPage(ctx.password.turnstile.siteKey);
   }
   if (!isAction(pathname) || req.method !== 'POST') return null;
   if (req.headers.get('origin') !== ctx.origin) {
@@ -248,10 +312,10 @@ export async function handlePasswordRoute(
       return toPage({ error: 'password_rules' });
     }
     const accounts = await ctx.accounts();
-    const ok = await accounts.setPassword(field('token'), password);
+    const ok = await accounts.setPassword(field('token'), password).catch(() => false);
     return toPage(ok ? { sent: 'password-set' } : { error: 'link_failed' });
   }
-  const email = field('email').trim();
+  const email = normalizeEmail(field('email'));
   if (pathname === PASSWORD_PATHS.signIn) {
     const res = await ctx.call(req, '/sign-in/email', {
       email,
@@ -267,8 +331,8 @@ export async function handlePasswordRoute(
   // Sign-up and forgot are one act: mail a link to set a password. Answered
   // first, the same page whatever happens, and the link and the mail made
   // after, so neither the answer nor its timing says whether an account
-  // exists or the address may hold one.
-  void mailLink(ctx, email);
+  // exists or the address may hold one. A throttled ask gets the same page.
+  if (ctx.throttle.allow(email, ip)) void mailLink(ctx, email);
   return toPage({ next, sent: 'link' });
 }
 
@@ -329,14 +393,25 @@ ${form(PASSWORD_PATHS.signUp, field('email', 'email', 'Email', 'username'), 'Ema
 </details>`;
 }
 
-function setPasswordPage(token: string | null, siteKey: string): Response {
-  const body = token
-    ? `${TURNSTILE_SCRIPT}
-<form method="post" action="${PASSWORD_PATHS.setPassword}" style="display: grid; gap: 0.5rem;">
-<input type="hidden" name="token" value="${escapeAttr(token)}">
+/**
+ * Reads the token from the link's fragment into the form, then clears it
+ * from the address bar and history. It runs before Turnstile's script is
+ * even in the page, so that script never sees the token in `location`.
+ */
+const TAKE_TOKEN = `<script>(function () {
+  var m = /^#token=([A-Za-z0-9_-]{1,64})$/.exec(location.hash);
+  history.replaceState(null, '', location.pathname);
+  var f = document.getElementById('set-password-token');
+  if (m && f) f.value = m[1];
+})();</script>`;
+
+function setPasswordPage(siteKey: string): Response {
+  const body = `<form method="post" action="${PASSWORD_PATHS.setPassword}" style="display: grid; gap: 0.5rem;">
+<input type="hidden" name="token" id="set-password-token" value="">
+${TAKE_TOKEN}
 <label>New password <input name="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" maxlength="${MAX_PASSWORD}" required></label>
-${widget(siteKey, 'set-password')}<button type="submit">Set password</button></form>`
-    : `<p role="status">${NOTICES.link_failed}</p><p><a href="/auth/sign-in">Back to sign in</a></p>`;
+${widget(siteKey, 'set-password')}<button type="submit">Set password</button></form>
+${TURNSTILE_SCRIPT}`;
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -350,7 +425,8 @@ ${body}
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      // The token rides in this page's URL: keep it out of any Referer.
+      // Belt and braces: the token is only ever in the fragment, which no
+      // Referer carries anyway.
       'referrer-policy': 'no-referrer',
     },
   });
