@@ -1,0 +1,8 @@
+{
+  "title": "Harborlight sites, from the doc's state",
+  "markers": [
+    { "lat": 37.761, "lng": -122.441, "label": "Harborlight hall", "category": "Library" },
+    { "lat": 37.772, "lng": -122.432, "label": "Riverbend school", "category": "School" },
+    { "lat": 37.755, "lng": -122.45, "label": "Saltmarsh pier", "category": "Library" }
+  ]
+}

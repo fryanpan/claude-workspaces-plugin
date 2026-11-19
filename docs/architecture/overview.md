@@ -85,6 +85,7 @@ flowchart TB
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
 | `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract. Every tool, and the plumbing that attaches, heartbeats, acks a queued row, restores watches and declares a lead, sends through it, so a renamed server field fails typecheck there. Two things stay raw on purpose: `http-client.ts` and `server-client.ts` themselves, because they are the transport `hc` sends through, and `read_doc_outline`'s GET, which waits on its route-table row (its read mints block ids). Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
+| `components` | `@claude-workspaces/components`: components that run unchanged in a doc and on a site, packed into a tarball (`scripts/pack.ts`) a site installs with no Workspaces server. Today the street map: `map.ts` is the mount a doc tag or a site calls, over live doc state or a JSON snapshot; `draw.ts` is the Leaflet renderer, the board's `<StreetMap>` chunk included (`workspaces-app/src/map-entry.ts` re-exports it). | The packed tarball names no dependency (Leaflet is bundled in) and nothing in this repo. Its source imports `core` and nothing else here. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
 
 **A traced request is named by its route, and the table of routes is
@@ -2935,8 +2936,11 @@ entries); core's `map-basemaps.ts` is the list of street maps a tag may name
 by key, with the origins each loads tiles from, and is the one place a
 provider is added. `mdx-street-map.ts` reads the `src` file through the
 doc's files route, draws the legend, and fetches Leaflet from
-`/app/map/map.js` (built from `map-entry.ts`) and its stylesheet the first
-time a doc shows a map; markers and rings are SVG paths, points one canvas.
+`/app/map/map.js` (built from `map-entry.ts`, which re-exports the components
+package's `draw.ts`) and its stylesheet the first time a doc shows a map;
+markers and rings are SVG paths, points one canvas. The package's map
+component draws through the same `draw.ts`, so a site's map and a doc's are
+one renderer.
 The files route serves a `src` file only when a `<StreetMap>` in the doc's
 live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
 `google` is the one keyed basemap and the default for a tag that names
@@ -2946,10 +2950,10 @@ on that basemap (`doc-file-scope.ts` `mapBasemapsNamed`), and draws on
 OpenStreetMap when it gets none, with a line saying why if the tag named
 Google itself. The server reads that key once at boot in `google-maps-key.ts`,
 from `CW_GOOGLE_MAPS_KEY` or else the mode-600 file `infra/gcp-maps` writes
-under prod's boot-disk root. `map-google.ts`, in the same chunk, loads
-Google's Maps JavaScript API with that key and puts its tiles under the
-Leaflet layers through GoogleMutant, which reads the global `L` that
-`leaflet-global.ts` sets.
+under prod's boot-disk root. The components package's `google.ts`, in the
+same chunk, loads Google's Maps JavaScript API with that key and puts its
+tiles under the Leaflet layers through GoogleMutant, which reads the global
+`L` that its `leaflet-global.ts` sets.
 
 An agent reaches a doc's components through `doc-components-agent.ts`, in the
 doc-store group's `doc-*.ts` glob, and so does not move the picture. It lists

@@ -1,10 +1,11 @@
 /**
- * Google's roadmap under a `<StreetMap basemap="google">`, built into the map
- * chunk beside Leaflet (`map-entry.ts`), so a page with no Google map loads
- * none of it and asks Google for nothing.
+ * Google's roadmap under a map on the `google` basemap, built beside Leaflet
+ * (`draw.ts`). Nothing asks Google for anything until a map on that basemap
+ * is drawn with a key.
  *
  * The map is drawn by Google's Maps JavaScript API, loaded once per page with
- * the browser key the server handed this doc (`routes/doc-map-key.ts`).
+ * the browser key the host passed: on a board doc, the one the server handed
+ * the doc (`routes/doc-map-key.ts`); on a site, the page's own `basemapKey`.
  * GoogleMutant moves the tiles the API draws into a Leaflet layer, so the
  * markers, rings, points, popups and legend are the same Leaflet code every
  * other basemap uses, and Google's logo and terms link are moved into the

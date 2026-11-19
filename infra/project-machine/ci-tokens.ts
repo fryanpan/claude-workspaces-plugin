@@ -12,9 +12,9 @@
  *
  * Each token is made by `fly tokens attenuate`, which works offline: no API
  * call and no login. Its caveats (`caveats`) allow the one app with the
- * actions a deploy takes, the org feature `builder` (Fly's remote builder)
- * and nothing else, so no `wg` (WireGuard, which `fly ssh` rides),
- * `deletion` or `membership`, and expire it after VALID_DAYS. Fly needs the
+ * actions a deploy takes, the org feature `builder` (Fly's remote builder),
+ * read on what names neither, and nothing else, so no `wg` (WireGuard, which
+ * `fly ssh` rides), `deletion` or `membership`, and expire it after VALID_DAYS. Fly needs the
  * app's numeric id for that, read once per app from Fly's API with the org
  * token; an app the org does not have is skipped until fly-provision.yml
  * makes it.
@@ -91,38 +91,58 @@ export interface Caveat {
 }
 
 /**
+ * What an access naming neither an app nor an org feature may do: read. The
+ * same `Else` flyctl gives its own wireguard and machine-exec tokens
+ * (superfly/flyctl internal/command/tokens/create.go).
+ */
+export const ELSE_ACTIONS = 'r';
+
+/**
+ * The app and its features as ONE `IfPresent` caveat (superfly/macaroon,
+ * `resset/if_present.go`), never as a bare `Apps` beside a bare `FeatureSet`.
+ * An access names an app or an org feature, never both (`flyio/access.go`
+ * `Validate`), and a bare resource caveat refuses an access that names none
+ * of its kind (`resset/resource_set.go`, `ErrResourceUnspecified`), so the
+ * bare pair refused every access: Fly answered "Not authorized to access
+ * this firecrackerapp". `IfPresent` skips a caveat whose kind the access does
+ * not name, so an app access meets `Apps` alone and a builder access meets
+ * `FeatureSet` alone; an access naming neither gets ELSE_ACTIONS.
+ */
+function scope(appId: string, features: readonly string[]): Caveat {
+  return {
+    type: 'IfPresent',
+    body: {
+      ifs: [
+        { type: 'Apps', body: { apps: { [appId]: DEPLOY_ACTIONS } } },
+        {
+          type: 'FeatureSet',
+          body: { features: Object.fromEntries(features.map((f) => [f, DEPLOY_ACTIONS])) },
+        },
+      ],
+      else: ELSE_ACTIONS,
+    },
+  };
+}
+
+/** A window from a minute ago (a clock a little behind Fly's) to `days` on. */
+function window(nowMs: number, days: number): Caveat {
+  const now = Math.floor(nowMs / 1000);
+  return { type: 'ValidityWindow', body: { not_before: now - 60, not_after: now + days * 86_400 } };
+}
+
+/**
  * The caveats `fly tokens attenuate` adds (superfly/macaroon,
- * `flyio/caveats.go`): this app alone, the listed features alone, and a
- * window from a minute ago (a clock a little behind Fly's) to VALID_DAYS on.
+ * `flyio/caveats.go`): this app alone, the builder alone, for VALID_DAYS.
  */
 export function caveats(appId: string, nowMs: number): Caveat[] {
   if (!/^\d+$/.test(appId)) throw new Error('a Fly app id is a number');
-  const now = Math.floor(nowMs / 1000);
-  return [
-    { type: 'Apps', body: { apps: { [appId]: DEPLOY_ACTIONS } } },
-    {
-      type: 'FeatureSet',
-      body: { features: Object.fromEntries(FEATURES.map((f) => [f, DEPLOY_ACTIONS])) },
-    },
-    {
-      type: 'ValidityWindow',
-      body: { not_before: now - 60, not_after: now + VALID_DAYS * 86_400 },
-    },
-  ];
+  return [scope(appId, FEATURES), window(nowMs, VALID_DAYS)];
 }
 
 /** The Mac's token for one app: the app, the builder and `wg`, for MAC_VALID_DAYS. */
 export function macCaveats(appId: string, nowMs: number): Caveat[] {
-  const [apps, , window] = caveats(appId, nowMs) as [Caveat, Caveat, Caveat];
-  const now = Math.floor(nowMs / 1000);
-  return [
-    apps,
-    {
-      type: 'FeatureSet',
-      body: { features: Object.fromEntries(MAC_FEATURES.map((f) => [f, DEPLOY_ACTIONS])) },
-    },
-    { ...window, body: { not_before: now - 60, not_after: now + MAC_VALID_DAYS * 86_400 } },
-  ];
+  if (!/^\d+$/.test(appId)) throw new Error('a Fly app id is a number');
+  return [scope(appId, MAC_FEATURES), window(nowMs, MAC_VALID_DAYS)];
 }
 
 export interface RunResult {

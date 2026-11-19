@@ -48,6 +48,18 @@
         "@awesome.me/webawesome",
       ],
     },
+    "packages/components": {
+      "name": "@claude-workspaces/components",
+      "version": "0.1.0",
+      "dependencies": {
+        "@claude-workspaces/core": "workspace:*",
+        "leaflet": "1.9.4",
+        "leaflet.gridlayer.googlemutant": "0.15.0",
+      },
+      "devDependencies": {
+        "@types/leaflet": "1.9.21",
+      },
+    },
     "packages/core": {
       "name": "@claude-workspaces/core",
       "version": "0.0.0",
@@ -108,6 +120,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@awesome.me/webawesome": "3.14.0",
+        "@claude-workspaces/components": "workspace:*",
         "@claude-workspaces/core": "workspace:*",
         "@claude-workspaces/widget": "workspace:*",
         "@codemirror/commands": "^6.7.1",
@@ -187,6 +200,7 @@
       "name": "astro-chart-fixture",
       "version": "0.0.0",
       "dependencies": {
+        "@claude-workspaces/components": "workspace:*",
         "@claude-workspaces/core": "workspace:*",
         "@observablehq/plot": "0.6.17",
         "astro": "7.4.12",
@@ -354,6 +368,8 @@
     "@clack/prompts": ["@clack/prompts@1.9.0", "", { "dependencies": { "@clack/core": "1.6.0", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^2.0.0" } }, "sha512-tEj8X2No2A1c9NDnZECxiiJ8TP3vmFlN9tLlLeSaMqVW4tUmVG2R4qpv/eP4zymWxnymYLkLcIYVV0VcWj3RCQ=="],
 
     "@claude-workspaces/app-kit": ["@claude-workspaces/app-kit@workspace:packages/app-kit"],
+
+    "@claude-workspaces/components": ["@claude-workspaces/components@workspace:packages/components"],
 
     "@claude-workspaces/core": ["@claude-workspaces/core@workspace:packages/core"],
 
