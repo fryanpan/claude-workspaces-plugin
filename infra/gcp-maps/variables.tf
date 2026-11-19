@@ -24,3 +24,14 @@ variable "key_file" {
   type        = string
   default     = "~/Library/Application Support/claude-workspaces/google-maps-key"
 }
+
+variable "daily_map_loads" {
+  description = "The most 2D map loads Google serves the project in a day. 714 at $7 per 1,000 is Bryan's $5-a-day cap."
+  type        = number
+  default     = 714
+
+  validation {
+    condition     = var.daily_map_loads >= 0 && floor(var.daily_map_loads) == var.daily_map_loads
+    error_message = "daily_map_loads must be a whole number of loads, 0 or more."
+  }
+}
