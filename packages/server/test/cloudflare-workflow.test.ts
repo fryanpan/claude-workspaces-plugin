@@ -28,6 +28,7 @@ const WORKFLOWS = join(import.meta.dir, '..', '..', '..', '.github', 'workflows'
 
 interface Job {
   if?: string;
+  concurrency?: { group?: string } | string;
   needs?: string | string[];
   environment?: string;
   env?: Record<string, string>;
@@ -362,5 +363,26 @@ describe('the workflows that replaced the keeper', () => {
     expect(WORKFLOWS_PULLED).toEqual(
       expect.arrayContaining(['fly-provision.yml', 'fly-ci-tokens.yml', 'cf-rotate-token.yml']),
     );
+  });
+
+  it('pin every action by commit, so a moved tag cannot run in a job that holds a secret', () => {
+    for (const w of [wf, provision, ciTokens, rotate]) {
+      for (const job of Object.values(w.jobs)) {
+        for (const st of job.steps ?? []) {
+          if (st.uses) expect(st.uses).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+        }
+      }
+    }
+  });
+
+  it('remove the Terraform work folder at the end of every job that writes one, even on a failure', () => {
+    const writers = [provision.jobs.provision, ciTokens.jobs.apply];
+    for (const job of writers) {
+      const steps = job?.steps ?? [];
+      expect(steps.some((st) => st.env?.CW_TF_WORK_DIR?.includes('runner.temp'))).toBe(true);
+      const last = steps.at(-1);
+      expect(last?.if).toBe('always()');
+      expect(last?.run).toContain('rm -rf "$RUNNER_TEMP/tf"');
+    }
   });
 });

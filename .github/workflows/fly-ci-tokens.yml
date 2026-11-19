@@ -98,9 +98,13 @@ jobs:
           bun infra/project-machine/ci-tokens.ts apply
       - name: Hand the Mac its tokens
         if: steps.secrets.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: handoff-mac
           path: ${{ runner.temp }}/handoff-mac/
           if-no-files-found: ignore
           retention-days: 8
+      # The state and the saved plan hold every token this run cut.
+      - name: Remove the Terraform work folder
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/tf"
