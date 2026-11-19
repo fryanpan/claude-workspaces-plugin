@@ -126,7 +126,10 @@ describe('a switch to better-auth waits for the owner’s own sign-in', () => {
     expect(await res.text()).toContain('Harborlight board');
   });
 
-  it('the owner’s Google sign-in writes the record, and the switch takes', async () => {
+  it('the owner’s Google sign-in writes the record, though Access still stamps every request', async () => {
+    // Prod as it is while Access is in front: every request after the
+    // sign-in carries an Access stamp AND the new session cookie. The stamp
+    // admits first, so the record cannot wait for a session-only request.
     const jar = new CookieJar();
     await signInWithGoogle(viaTunnel, ORIGIN, jar, google, {
       sub: 'g-owner',
@@ -135,7 +138,7 @@ describe('a switch to better-auth waits for the owner’s own sign-in', () => {
       name: 'Owner',
     });
     const res = await viaTunnel(`/workspaces/${board}?format=json`, {
-      headers: { cookie: jar.header() },
+      headers: { cookie: jar.header(), 'cf-access-jwt-assertion': await stamp() },
     });
     expect(res.status).toBe(200);
     const body = await ownerRecord();

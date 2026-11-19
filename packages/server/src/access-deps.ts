@@ -230,6 +230,15 @@ export function createAccessDeps(ctx: AccessDepsContext) {
     (opts.proxiedTrustedEmails ?? []).map((e) => normalizeEmail(e)).filter((e) => e !== ''),
   );
   const signInMode: SignInMode = opts.signIn?.mode ?? 'access';
+  // The lock-out guard: `better-auth` runs as `both` until the owner has
+  // signed in here once. The record is written when the session is made, at
+  // Google's callback — not on a later request, because while Access is
+  // still in front its stamp admits every later request before a session is
+  // read.
+  const ownerSignIn = createOwnerSignInRecord(dataDir);
+  const recordOwner = (email: string, verified: boolean) => {
+    if (verified && proxiedTrustedEmails.has(email)) ownerSignIn.record(email);
+  };
   const boardSignIn =
     opts.signIn && signInMode !== 'access'
       ? createBoardSignIn({
@@ -238,16 +247,14 @@ export function createAccessDeps(ctx: AccessDepsContext) {
           origin: opts.signIn.origin,
           google: opts.signIn.google,
           mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
+          onSessionCreated: (p) => recordOwner(p.email, p.emailVerified),
         })
       : null;
-  // The lock-out guard: `better-auth` runs as `both` until the owner has
-  // signed in here once, and that sign-in is what writes the record.
-  const ownerSignIn = createOwnerSignInRecord(dataDir);
   const signInDoor = createSignInDoor({
     mode: signInMode,
     signIn: boardSignIn,
     onPerson: (email) => {
-      if (proxiedTrustedEmails.has(email)) ownerSignIn.record(email);
+      recordOwner(email, true);
       ctx.onSignInPerson?.(email);
     },
     ownerSignedIn: () => ownerSignIn.read() !== null,

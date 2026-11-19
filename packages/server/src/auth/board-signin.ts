@@ -86,6 +86,13 @@ export interface BoardSignInOptions {
    * machine is shared with; `verified` is whether the provider vouched for it.
    */
   mayHaveAccount: (email: string, verified: boolean) => boolean;
+  /**
+   * Told each session the moment it is created, at the Google callback. The
+   * lock-out guard records the owner here: while Access is still in front,
+   * every later request carries an Access stamp that admits first, so a
+   * session-only request may never come.
+   */
+  onSessionCreated?: (person: { email: string; emailVerified: boolean }) => void;
 }
 
 /** Who a request's sign-in cookie names, when it names anyone. */
@@ -180,6 +187,21 @@ function createAuth(opts: BoardSignInOptions, db: Database) {
     },
     account: { accountLinking: { enabled: false } },
     databaseHooks: {
+      session: {
+        create: {
+          after: async (session) => {
+            if (!opts.onSessionCreated) return;
+            const row = db
+              .query('SELECT email, emailVerified FROM "user" WHERE id = ?')
+              .get(String(session.userId)) as { email: string; emailVerified: number } | null;
+            if (!row) return;
+            opts.onSessionCreated({
+              email: normalizeEmail(row.email),
+              emailVerified: row.emailVerified === 1,
+            });
+          },
+        },
+      },
       user: {
         create: {
           before: async (user) => {
