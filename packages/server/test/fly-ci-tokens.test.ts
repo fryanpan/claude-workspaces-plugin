@@ -26,6 +26,7 @@ import {
   flyAppId,
   orgTokenFrom,
 } from '../../../infra/project-machine/ci-tokens.ts';
+import { allows } from './fly-macaroon.ts';
 
 const GH_TOKEN = 'fixture-gh-token-Harborlight';
 const ORG = 'FlyV1 fm2_fixture-org-token-Saltmarsh';
@@ -36,6 +37,16 @@ const IDS: Record<string, string> = {
   [STAGING_APP]: '303',
 };
 const cutFor = (id: string) => `FlyV1 fm2_fixture-cut-${id}`;
+/** The app ids a cut set names: they sit inside its IfPresent caveat. */
+const appsOf = (set: Caveat[]): string[] =>
+  set.flatMap((c) =>
+    c.type === 'IfPresent'
+      ? (c.body.ifs as Caveat[]).flatMap((i) =>
+          i.type === 'Apps' ? Object.keys(i.body.apps as object) : [],
+        )
+      : [],
+  );
+const nowS = Math.floor(NOW / 1000);
 
 const SHOW = JSON.stringify({
   resource_changes: [
@@ -88,8 +99,7 @@ function fake(
       const parsed = JSON.parse(json) as Caveat[];
       cut.push(parsed);
       if (opts.attenuate) return opts.attenuate(json);
-      const apps = (parsed[0]?.body.apps ?? {}) as Record<string, string>;
-      return { status: 0, stdout: `${cutFor(Object.keys(apps)[0] ?? '?')}\n` };
+      return { status: 0, stdout: `${cutFor(appsOf(parsed)[0] ?? '?')}\n` };
     },
     now: () => NOW,
     macSink: null,
@@ -136,16 +146,19 @@ describe('fly:ci-tokens', () => {
     const r = fake();
     await ciTokens(['plan'], r.io);
     expect(r.cut).toHaveLength(3);
+    const ids = ['101', '202', '303'];
     for (const [i, set] of r.cut.entries()) {
-      const byType = Object.fromEntries(set.map((c) => [c.type, c.body]));
-      expect(Object.keys(byType).sort()).toEqual(['Apps', 'FeatureSet', 'ValidityWindow']);
-      expect(byType.Apps).toEqual({ apps: { [['101', '202', '303'][i] as string]: 'rwcdC' } });
-      const features = Object.keys((byType.FeatureSet as { features: object }).features);
-      expect(features).toEqual(['builder']);
-      for (const never of NEVER_FEATURES) expect(features).not.toContain(never);
-      const w = byType.ValidityWindow as { not_before: number; not_after: number };
-      expect(w.not_before).toBeLessThanOrEqual(NOW / 1000);
-      expect(w.not_after - NOW / 1000).toBe(VALID_DAYS * 86_400);
+      const appId = ids[i] as string;
+      expect(appsOf(set)).toEqual([appId]);
+      expect(allows(set, { appId, action: 'rwcdC', now: nowS })).toBe(true);
+      expect(allows(set, { feature: 'builder', action: 'rwcdC', now: nowS })).toBe(true);
+      for (const other of ids.filter((x) => x !== appId))
+        expect(allows(set, { appId: other, action: 'r', now: nowS })).toBe(false);
+      for (const feature of NEVER_FEATURES)
+        expect(allows(set, { feature, action: 'r', now: nowS })).toBe(false);
+      const last = nowS + VALID_DAYS * 86_400;
+      expect(allows(set, { appId, action: 'r', now: last })).toBe(true);
+      expect(allows(set, { appId, action: 'r', now: last + 1 })).toBe(false);
     }
   });
 
@@ -272,14 +285,14 @@ describe('fly:ci-tokens, the Mac’s tokens', () => {
   it('an apply cuts one token per project app for the Mac, with wg, for 14 days, sealed to it', async () => {
     const { r, written } = withSink('apply');
     expect(await ciTokens(['apply'], r.io)).toBe(0);
-    const macCuts = r.cut.filter(
-      (c) => c[1]?.body.features && 'wg' in (c[1].body.features as object),
-    );
-    expect(macCuts.map((c) => Object.keys(c[0]?.body.apps as object))).toEqual([['101'], ['202']]);
-    const window = macCuts[0]?.[2]?.body as { not_after: number };
-    expect(window.not_after - Math.floor(NOW / 1000)).toBe(MAC_VALID_DAYS * 86_400);
+    const wg = { feature: 'wg', action: 'rwcdC', now: nowS };
+    const macCuts = r.cut.filter((c) => allows(c, wg));
+    expect(macCuts.map(appsOf)).toEqual([['101'], ['202']]);
+    const last = nowS + MAC_VALID_DAYS * 86_400;
+    expect(allows(macCuts[0] ?? [], { appId: '101', action: 'r', now: last })).toBe(true);
+    expect(allows(macCuts[0] ?? [], { appId: '101', action: 'r', now: last + 1 })).toBe(false);
     // CI's own tokens still carry no wg.
-    expect(caveats('101', NOW)[1]?.body.features).not.toHaveProperty('wg');
+    expect(allows(caveats('101', NOW), wg)).toBe(false);
     expect(written).toHaveLength(1);
     expect(written[0]).not.toContain('fixture-cut');
     const opened = openItems(MAC_KEY.privateKey, written[0] ?? '');

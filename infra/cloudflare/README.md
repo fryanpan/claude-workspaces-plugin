@@ -311,7 +311,9 @@ and no wait timer. Each token is cut in `fly-ci-tokens.yml` from the org token b
 `fly tokens attenuate`, which works offline: the app's id with the actions a
 deploy takes, the org feature `builder` and no other (so no `wg`, which
 `fly ssh` needs, and no `deletion` or `membership`), valid 90 days
-(`infra/project-machine/ci-tokens.ts`). A job holds one app's token and
+(`infra/project-machine/ci-tokens.ts`). The app and the feature sit in one
+`IfPresent` caveat: an access names an app or a feature, never both, and a
+bare `Apps` beside a bare `FeatureSet` refuses every access. A job holds one app's token and
 nothing else from Cloudflare or Fly.
 
 ```bash
