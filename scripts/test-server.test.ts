@@ -3,7 +3,7 @@
  *
  * The three things that could go silently wrong here are all "ran less than
  * you think": a file the enumerator never found, a shard split that drops
- * one, and a coverage merge that keeps only the last chunk. The last of those
+ * one (scripts/server-durations.test.ts), and a coverage merge that keeps only the last chunk. The last of those
  * was a real bug in this file's first draft — every worker pointed at one
  * coverage directory, bun rewrote it per chunk, and the merged number came
  * out at 35.7% against a floor of 95 because it had measured a fraction of
@@ -23,7 +23,6 @@ import {
   mergeLcov,
   nextChunkSize,
   planChunks,
-  shardOf,
 } from './test-server.ts';
 
 const temps: string[] = [];
@@ -100,23 +99,6 @@ describe('interleave', () => {
       return i > 0 && Math.abs((n(f) ?? 0) - (n(order[i - 1] ?? '') ?? 0)) === 1;
     });
     expect(adjacent.length).toBeLessThan(files.length / 3);
-  });
-});
-
-describe('shardOf', () => {
-  const files = Array.from({ length: 17 }, (_, i) => `f${i}.ts`);
-
-  it('puts every file in exactly one shard', () => {
-    const seen = [1, 2, 3].flatMap((i) => shardOf(files, i, 3));
-    expect(seen.slice().sort()).toEqual(files.slice().sort());
-  });
-
-  it('spreads neighbours across shards rather than cutting the list in blocks', () => {
-    expect(shardOf(files, 1, 3).slice(0, 3)).toEqual(['f0.ts', 'f3.ts', 'f6.ts']);
-  });
-
-  it('is empty, not wrong, when there are fewer files than shards', () => {
-    expect(shardOf(['only.ts'], 2, 3)).toEqual([]);
   });
 });
 
