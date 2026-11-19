@@ -32,9 +32,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
-import { betterAuth } from 'better-auth';
-import { getMigrations } from 'better-auth/db/migration';
-import { genericOAuth } from 'better-auth/plugins';
+import type { Auth } from './board-signin-auth.ts';
 import { tokenKey } from './signed-token.ts';
 
 /** The key domain this machine's Better Auth secret is derived under. */
@@ -166,95 +164,6 @@ function tighten(path: string): void {
   }
 }
 
-function createAuth(opts: BoardSignInOptions, db: Database) {
-  const endpoints = opts.google.endpoints ?? GOOGLE_ENDPOINTS;
-  return betterAuth({
-    baseURL: opts.origin,
-    basePath: SIGNIN_BASE_PATH,
-    secret: signInSecret(opts.baseKey),
-    trustedOrigins: [opts.origin],
-    database: db,
-    telemetry: { enabled: false },
-    // One process holds every count, so an in-memory limiter is exact. Its
-    // own, not the library's `memory` store: that one is a module-level map,
-    // which two instances in one process (the test suites) would share.
-    rateLimit: { enabled: true, window: 60, max: 20, customStorage: ownRateLimitStore() },
-    advanced: {
-      ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
-      // `__Host-` rather than the library's `__Secure-`: it makes the browser
-      // refuse any Domain, so the cookie cannot reach a sibling host. The
-      // library's own prefix is switched off and ours written into the name.
-      useSecureCookies: false,
-      cookiePrefix: SIGNIN_COOKIE_PREFIX,
-      defaultCookieAttributes: { secure: true, path: '/', sameSite: 'lax', httpOnly: true },
-    },
-    user: {
-      additionalFields: {
-        // Recorded at every Google sign-in, read by nothing yet: a stricter
-        // domain-share rule could require it later (plan 3.4). An input field
-        // only because the library drops a non-input field from the provider
-        // profile; the one route that takes user input, `/update-user`, is
-        // not in `BETTER_AUTH_PATHS`, so a person cannot write it.
-        hd: { type: 'string', required: false },
-      },
-    },
-    account: { accountLinking: { enabled: false } },
-    databaseHooks: {
-      session: {
-        create: {
-          after: async (session) => {
-            if (!opts.onSessionCreated) return;
-            const row = db
-              .query('SELECT email, emailVerified FROM "user" WHERE id = ?')
-              .get(String(session.userId)) as { email: string; emailVerified: number } | null;
-            if (!row) return;
-            opts.onSessionCreated({
-              email: normalizeEmail(row.email),
-              emailVerified: row.emailVerified === 1,
-            });
-          },
-        },
-      },
-      user: {
-        create: {
-          before: async (user) => {
-            const email = normalizeEmail(String(user.email ?? ''));
-            if (email === '') return false;
-            return opts.mayHaveAccount(email, user.emailVerified === true) ? undefined : false;
-          },
-        },
-      },
-    },
-    plugins: [
-      genericOAuth({
-        config: [
-          {
-            providerId: 'google',
-            clientId: opts.google.clientId,
-            clientSecret: opts.google.clientSecret,
-            ...endpoints,
-            scopes: ['openid', 'email', 'profile'],
-            pkce: true,
-            // The account picker, never the consent screen again (plan 3.3).
-            prompt: 'select_account',
-            // Google's stable account id. Never the email: an address can
-            // change hands, a subject cannot.
-            accountSubject: ({ profile }) => String(profile.sub ?? ''),
-            mapProfileToUser: (profile) => ({
-              emailVerified: profile.email_verified === true,
-              hd: typeof profile.hd === 'string' ? profile.hd : null,
-            }),
-            // So `emailVerified` and `hd` follow Google at every sign-in.
-            overrideUserInfo: true,
-          },
-        ],
-      }),
-    ],
-  });
-}
-
-type Auth = ReturnType<typeof createAuth>;
-
 /**
  * Better Auth's rate limits, counted per instance: a fixed window per key
  * (client address and path), keyed as the library keys them. Its stricter
@@ -293,8 +202,24 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   }
   const host = new URL(origin).hostname;
   const db = openUserList(opts.dataDir);
-  const auth: Auth = createAuth({ ...opts, origin }, db);
-  const ready = getMigrations(auth.options).then(({ runMigrations }) => runMigrations());
+  // Loaded on first use, so a machine on `access` never loads the library.
+  const ready: Promise<Auth> = import('./board-signin-auth.ts').then(async (m) => {
+    const auth = m.createAuth(
+      {
+        origin,
+        basePath: SIGNIN_BASE_PATH,
+        secret: signInSecret(opts.baseKey),
+        cookiePrefix: SIGNIN_COOKIE_PREFIX,
+        google: { ...opts.google, endpoints: opts.google.endpoints ?? GOOGLE_ENDPOINTS },
+        rateLimitStore: ownRateLimitStore(),
+        mayHaveAccount: opts.mayHaveAccount,
+        ...(opts.onSessionCreated ? { onSessionCreated: opts.onSessionCreated } : {}),
+      },
+      db,
+    );
+    await m.migrate(auth);
+    return auth;
+  });
 
   /** The request as Better Auth must see it: on the sign-in origin. */
   const onOrigin = (req: Request, pathname: string, init: RequestInit = {}): Request => {
@@ -314,7 +239,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
       if (req.headers.get('origin') !== origin) return refuse(403, 'cross_site_form');
       const form = await req.formData().catch(() => null);
       const next = safeNext(form?.get('next'));
-      await ready;
+      const auth = await ready;
       const res = await auth.handler(
         onOrigin(req, `${SIGNIN_BASE_PATH}/sign-in/social`, {
           method: 'POST',
@@ -338,14 +263,14 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
         .catch(() => null)) as { idToken?: unknown } | null;
       if (body && body.idToken !== undefined) return refuse(400, 'id_token_sign_in_disabled');
     }
-    await ready;
+    const auth = await ready;
     return auth.handler(onOrigin(req, pathname, { body: req.body }));
   };
 
   const personOf = async (req: Request): Promise<SignedInPerson | null> => {
     const cookie = req.headers.get('cookie');
     if (!cookie?.includes(SIGNIN_COOKIE_PREFIX)) return null;
-    await ready;
+    const auth = await ready;
     const found = await auth.api.getSession({ headers: new Headers({ cookie }) }).catch(() => null);
     if (!found) return null;
     const user = found.user as { email: string; emailVerified: boolean; hd?: string | null };
