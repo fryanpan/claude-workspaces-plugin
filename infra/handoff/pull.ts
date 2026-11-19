@@ -123,6 +123,23 @@ function listRuns(io: PullIo, workflow: string): { id: string; at: string }[] {
     .map((x) => ({ id: String(x.id), at: String(x.created_at ?? '') }));
 }
 
+/**
+ * gh's own words for a run with no `handoff-mac` artifact: the run has none
+ * at all, or none by that name. Matched whole, so an unrelated 404 (a run
+ * that is gone, a lost login) is a failure to retry, not a run marked pulled.
+ */
+const NO_ARTIFACT = [
+  'no valid artifacts found to download',
+  'no artifact matches any of the names or patterns provided',
+];
+
+function noArtifact(stderr: string): boolean {
+  return stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .some((l) => NO_ARTIFACT.includes(l));
+}
+
 /** Exit code: 0 when every new run was pulled, 1 when one failed. */
 export function pull(io: PullIo): number {
   const say = (s: string) => io.err(`[handoff:pull] ${s}\n`);
@@ -160,7 +177,7 @@ export function pull(io: PullIo): number {
         dir,
       ]);
       if (d.status !== 0) {
-        if (/no (valid )?artifacts? (found|matches)|not found/i.test(d.stderr)) {
+        if (noArtifact(d.stderr)) {
           seen.add(run.id);
           continue;
         }

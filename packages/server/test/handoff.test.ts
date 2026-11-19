@@ -148,6 +148,8 @@ interface FakeRun {
   workflow: string;
   /** The sealed file, or null for a run with no artifact. */
   file: string | null;
+  /** gh's stderr for a failed download, in place of the file. */
+  downloadError?: string;
   /** A second sealed file in the same artifact, as tokens.json. */
   tokens?: string;
   /** What started the run; workflow_dispatch when unset. */
@@ -184,6 +186,7 @@ function pullWorld(runs: FakeRun[], key: string, seen = new Set<string>()) {
       expect(args.slice(0, 2)).toEqual(['run', 'download']);
       expect(args[args.indexOf('--name') + 1]).toBe(MAC_ARTIFACT);
       const run = runs.find((r) => String(r.id) === args[2]);
+      if (run?.downloadError) return { status: 1, stdout: '', stderr: run.downloadError };
       if (!run?.file)
         return { status: 1, stdout: '', stderr: 'no valid artifacts found to download' };
       const dir = args[args.indexOf('--dir') + 1] ?? '';
@@ -354,6 +357,36 @@ describe('handoff:pull', () => {
     expect([...(w.saved() ?? [])].sort()).toEqual(['4', '5', '6']);
     expect(w.said.join('')).not.toContain(' run 1:');
     expect(w.said.join('')).not.toContain(' run 3:');
+  });
+
+  it('marks a run pulled only when gh says it has no such artifact, not on any 404', () => {
+    const runs: FakeRun[] = [
+      {
+        id: 1,
+        at: 'a',
+        workflow: 'cloudflare.yml',
+        file: null,
+        downloadError: 'no artifact matches any of the names or patterns provided',
+      },
+      {
+        id: 2,
+        at: 'b',
+        workflow: 'cloudflare.yml',
+        file: null,
+        downloadError: 'HTTP 404: Not Found (https://api.github.com/repos/x/y/actions/runs/2)',
+      },
+      {
+        id: 3,
+        at: 'c',
+        workflow: 'cloudflare.yml',
+        file: null,
+        downloadError: 'error downloading handoff-mac: artifact not found',
+      },
+    ];
+    const w = pullWorld(runs, generateHandoffKeys().privateKey);
+    expect(pull(w.io)).toBe(1);
+    expect([...(w.saved() ?? [])].sort()).toEqual(['1']);
+    expect(w.said.join('')).toContain('run 2: gh run download failed');
   });
 
   it('asks every workflow that hands off', () => {
