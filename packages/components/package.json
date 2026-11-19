@@ -1,0 +1,25 @@
+{
+  "name": "@claude-workspaces/components",
+  "version": "0.1.0",
+  "description": "Components that run unchanged in a Claude Workspaces doc and on any site: the street map, mounted from live doc state or from a JSON snapshot.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./map": "./src/map.ts",
+    "./draw": "./src/draw.ts",
+    "./placed": "./src/placed.ts"
+  },
+  "scripts": {
+    "pack": "bun run scripts/pack.ts",
+    "leaflet-css": "bun run scripts/leaflet-css.ts"
+  },
+  "dependencies": {
+    "@claude-workspaces/core": "workspace:*",
+    "leaflet": "1.9.4",
+    "leaflet.gridlayer.googlemutant": "0.15.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "1.9.21"
+  }
+}
