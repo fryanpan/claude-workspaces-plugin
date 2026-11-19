@@ -7,7 +7,7 @@
  * `docs/process/project-machine.md`), and the router deploy and
  * `access:apply`, which `infra/cloudflare/` has since replaced. Access:
  * Service Tokens Edit is there for `cf:sync-config`'s token step
- * (`keeper-cf-sync.ts`) and `cf:rotate-token` (`keeper-rotate.ts`), the one path that makes a service token: every
+ * (`keeper-cf-sync.ts`) and `cf:rotate-token` (`provisioning/rotate.ts`), the one path that makes a service token: every
  * other write under `service_tokens` is refused (`classifyCloudflare`),
  * because its answer is the new secret. The new token
  * gets no API Tokens permission: the keeper refuses every token write

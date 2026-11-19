@@ -9,7 +9,7 @@
  * exists, so a changed Access audience, a widened CW_PROXIED_TRUSTED_EMAILS
  * or a hand-set `fly secrets` value would otherwise drift with nobody told.
  */
-import { WALL_PROBE } from '../../packages/server/src/keeper/keeper-move-steps.ts';
+import { WALL_PROBE } from '../../packages/server/src/provisioning/move-steps.ts';
 import type { StaticVars } from '../cloudflare/vars.ts';
 import type { MachineFacts } from './machine-facts.ts';
 import { SETTING_NAMES } from './settings.ts';

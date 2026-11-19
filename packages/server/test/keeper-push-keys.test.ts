@@ -1,6 +1,6 @@
 /**
  * The keeper makes a project's push credential: one write deploy key per
- * repo (`keeper/keeper-push-keys.ts`).
+ * repo (`provisioning/push-keys.ts`).
  *
  * GitHub is a stand-in that records every call; no request leaves the
  * machine. The key pairs are real ones from `ssh-keygen`, so the test can
@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PUSH_KEYS_ENV, pushCredentialFor } from '../src/git-push/credential.ts';
 import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
+import type { Executors } from '../src/keeper/keeper-requests.ts';
+import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
+import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
 import {
   type GithubApi,
   type KeyPair,
@@ -21,10 +24,7 @@ import {
   ed25519Pair,
   makePushKeys,
   pushKeyTitle,
-} from '../src/keeper/keeper-push-keys.ts';
-import type { Executors } from '../src/keeper/keeper-requests.ts';
-import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
-import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
+} from '../src/provisioning/push-keys.ts';
 import { TestPasskey } from './keeper-authenticator.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'keeper-push-keys-'));

@@ -1,7 +1,7 @@
 /**
  * The keeper writes Cloudflare CI's credentials as GitHub Actions secrets
- * (`keeper/keeper-github.ts`), sealed to each target's public key
- * (`keeper-sealed-box.ts`), on one passkey tap whose page lists names only.
+ * (`provisioning/github-ci.ts`), sealed to each target's public key
+ * (`provisioning/sealed-box.ts`), on one passkey tap whose page lists names only.
  *
  * GitHub is a stand-in holding a real X25519 key pair per target, so the test
  * opens each sealed value the way libsodium's `crypto_box_seal_open` does and
@@ -9,6 +9,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import nacl from 'tweetnacl';
+import type { Executors } from '../src/keeper/keeper-requests.ts';
 import {
   CI_REPO,
   type GithubScopedApi,
@@ -17,9 +18,8 @@ import {
   classifyGithubSecrets,
   githubStatus,
   writeGithubSecrets,
-} from '../src/keeper/keeper-github.ts';
-import type { Executors } from '../src/keeper/keeper-requests.ts';
-import { sealNonce, sealedBox } from '../src/keeper/keeper-sealed-box.ts';
+} from '../src/provisioning/github-ci.ts';
+import { sealNonce, sealedBox } from '../src/provisioning/sealed-box.ts';
 import { type LiveKeeper, startLiveKeeper } from './keeper-live-harness.ts';
 
 const APPLY = 'fixture-apply-token-Harborlight-000001';

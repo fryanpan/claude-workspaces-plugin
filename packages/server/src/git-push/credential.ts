@@ -4,10 +4,11 @@
  * server pushes.
  *
  * - **A project server** (Fly, or anything `isProjectServer` names): one
- *   write deploy key per repo, from the Fly secret `CW_GITHUB_PUSH_KEYS`. The
- *   keeper makes each key pair during project setup, registers the public
- *   half on its one repo, and sets this secret with the private halves
- *   (`keeper/keeper-push-keys.ts`). A deploy key reaches one repo, so a
+ *   write deploy key per repo, from the Fly secret `CW_GITHUB_PUSH_KEYS`.
+ *   `fly-provision.yml` makes each key pair during project setup, registers
+ *   the public half on its one repo, and sets this secret with the private
+ *   halves (`infra/project-machine/push-keys.ts` over
+ *   `provisioning/push-keys.ts`). A deploy key reaches one repo, so a
  *   project server can push to the repos it was given keys for and nothing
  *   else Bryan's account can reach. It holds no classic token: a
  *   `CW_GITHUB_PUSH_TOKEN` there is removed from the environment and never

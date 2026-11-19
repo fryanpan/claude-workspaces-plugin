@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secretAddCommandLine } from '../../packages/core/src/secret-line.ts';
 import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/secret-name.ts';
-import { asCw, machineShell } from '../../packages/server/src/keeper/keeper-move-steps.ts';
+import { asCw, machineShell } from '../../packages/server/src/provisioning/move-steps.ts';
 import { type HandoffSink, macSinkFromEnv } from '../handoff/items.ts';
 import { handoffDir, readAppToken } from '../handoff/mac-store.ts';
 

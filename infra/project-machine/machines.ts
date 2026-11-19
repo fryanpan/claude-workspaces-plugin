@@ -33,7 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
-import { MAX_PUSH_REPOS } from '../../packages/server/src/keeper/keeper-push-keys.ts';
+import { MAX_PUSH_REPOS } from '../../packages/server/src/provisioning/push-keys.ts';
 import { PROJECT_NAME } from './deploy-plan.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);

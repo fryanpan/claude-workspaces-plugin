@@ -1,7 +1,7 @@
 /**
  * Which Actions secrets a workflow pushed with a repo's write deploy key
  * could read, reported after the keeper makes the key
- * (`keeper-push-keys.ts`).
+ * (`push-keys.ts`).
  *
  * A deploy key with write access can push a workflow file to any branch, and
  * GitHub cannot stop it. The server's push path holds every `.github/` change
@@ -31,7 +31,7 @@
  * Moving a secret into an environment needs its value, which the keeper does
  * not hold, so this module only reports.
  */
-import type { GithubApi } from './keeper-push-keys.ts';
+import type { GithubApi } from './push-keys.ts';
 
 const PAGE = 100;
 

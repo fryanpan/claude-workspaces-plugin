@@ -34,29 +34,9 @@
  */
 import { APP_NAME } from './keeper-store.ts';
 
-export type HoldKind =
-  | 'project.create'
-  | 'token.move'
-  | 'access.open'
-  | 'move.grant'
-  | 'github.secrets'
-  | 'cloudflare.sync'
-  | 'service-token.rotate'
-  | 'other';
+import type { HoldKind, Verdict } from '../provisioning/verdict.ts';
 
-export type Verdict =
-  | { kind: 'routine'; app: string | null; summary: string }
-  | {
-      kind: 'held';
-      hold: HoldKind;
-      app: string | null;
-      summary: string;
-      /** A project-setup command a setup grant on `app` may run without a tap. */
-      setup?: boolean;
-      /** A fly call's argv, which a move grant reads (`keeper-grants.ts`). */
-      args?: readonly string[];
-    }
-  | { kind: 'refused'; reason: string };
+export type { HoldKind, Verdict };
 
 const MAX_ARGS = 64;
 const MAX_ARG = 4096;
@@ -461,7 +441,7 @@ export function classifyCloudflare(
   }
   // Making, rotating or refreshing an Access service token answers with its
   // secret. Only a config sync makes one (`keeper-cf-sync.ts`) and only the
-  // rotate request rotates one (`keeper-rotate.ts`), each on its own tap.
+  // rotate request rotates one (`provisioning/rotate.ts`), each on its own tap.
   if (segments.some((s) => s.toLowerCase() === 'service_tokens')) {
     return {
       kind: 'refused',

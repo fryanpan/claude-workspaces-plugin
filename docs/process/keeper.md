@@ -299,8 +299,8 @@ yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from
 ## The GitHub token
 
 The keeper uses a GitHub token of yours for two things: each project's push
-deploy keys (`packages/server/src/keeper/keeper-push-keys.ts`), and Cloudflare
-CI's Actions secrets and its dispatch (`keeper-github.ts`). It only ever
+deploy keys (`packages/server/src/provisioning/push-keys.ts`), and Cloudflare
+CI's Actions secrets and its dispatch (`provisioning/github-ci.ts`). It only ever
 names one repository for the secrets, `fryanpan/claude-workspaces-plugin`,
 and never sends the token to a project machine. Writing Actions secrets needs
 a classic token with the `repo` scope; the keeper checks the scope GitHub
@@ -326,7 +326,7 @@ not name deploy keys. When it does not refuse, the key can push the workflow
 to the default branch and reach environment secrets too, and the deploy says
 so. A read that fails prints "could not read", and a list longer than one page
 says it is incomplete. It reads names only, never values, and writes nothing
-(`packages/server/src/keeper/keeper-push-exposure.ts`). Two gaps: an
+(`packages/server/src/provisioning/push-exposure.ts`). Two gaps: an
 environment with any branch policy counts as closed whatever its patterns,
 and a 404 on the branch's protection counts as unprotected even when the
 branch itself does not exist.
@@ -357,7 +357,7 @@ and the upload to that board's folder. For 30 minutes those steps run on that
 one app without another tap, one at a time, and a step still queued when the
 30 minutes end does not start. Run `machine:wall-report --projects
 <project>` and `machine:move-board` inside that window. The steps are in
-`packages/server/src/keeper/keeper-move-steps.ts`, which the scripts also build
+`packages/server/src/provisioning/move-steps.ts`, which the scripts also build
 their commands from.
 
 **A deploy is not part of it, so a move that needs a new image takes two

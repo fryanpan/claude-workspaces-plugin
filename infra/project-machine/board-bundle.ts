@@ -45,8 +45,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BOARD_ID } from '../../packages/server/src/keeper/keeper-move-steps.ts';
 import { withoutPrivateMeta } from '../../packages/server/src/private-meta.ts';
+import { BOARD_ID } from '../../packages/server/src/provisioning/move-steps.ts';
 
 export const BUNDLE_FORMAT = 'cw-board-bundle-1';
 
