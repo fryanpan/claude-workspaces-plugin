@@ -30,7 +30,12 @@ import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
-import { ColdThreadsCache, type ColdThreadsStats, forgettingWrites } from './cold-threads-cache.ts';
+import {
+  ColdThreadsCache,
+  type ColdThreadsStats,
+  coldThreadsPath,
+  forgettingWrites,
+} from './cold-threads-cache.ts';
 import { ComponentGrants } from './component-grants.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
@@ -3131,14 +3136,44 @@ export class DocStore {
    *  through `listThreads` would have answered. */
   private readColdThreads(docId: string): Thread[] {
     const target = this.catalog.aliasTarget(docId) ?? docId;
-    return this.coldThreads.get(target, () => {
-      this.coldThreadDecodes++;
-      return this.readCold(target, [], (ydoc) => listThreadsWithLinks(ydoc));
-    });
+    if (!this.coldThreadsLoaded) {
+      // What the last process saved, on the first read that could use it.
+      this.coldThreadsLoaded = true;
+      const path = this.coldThreadsPath();
+      if (path) this.coldThreads.load(path);
+    }
+    return this.coldThreads.get(
+      target,
+      () => {
+        this.coldThreadDecodes++;
+        return this.readCold(target, [], (ydoc) => listThreadsWithLinks(ydoc));
+      },
+      () => {
+        try {
+          return this.state.savedAt(target);
+        } catch {
+          return undefined;
+        }
+      },
+    );
+  }
+
+  /** Write the cold threads for the next start to read back; shutdown and the
+   *  boot warm call it. Answers how many docs it wrote. */
+  saveColdThreads(): number {
+    const path = this.coldThreadsPath();
+    return path ? this.coldThreads.save(path) : 0;
+  }
+
+  /** Disk only: a `.ydoc`'s mtime is what proves a saved entry still holds,
+   *  and the memory backend's clock is not a fingerprint across instances. */
+  private coldThreadsPath(): string | null {
+    return this.state.kind === 'disk' ? coldThreadsPath(this.cfg.dataDir) : null;
   }
 
   /** Cold threads decoded once per unchanged `.ydoc` (`cold-threads-cache.ts`). */
   private readonly coldThreads = new ColdThreadsCache();
+  private coldThreadsLoaded = false;
   /** `.ydoc` decodes `readColdThreads` has paid for since boot. */
   private coldThreadDecodes = 0;
 

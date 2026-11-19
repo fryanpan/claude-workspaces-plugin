@@ -11,13 +11,18 @@
  * resident docs, never time; and every case boots a second server on the
  * first one's data, which is the state an idle sweep or a deploy leaves.
  *
+ * The decoded threads also outlive the process: a server that stopped saves
+ * them, and the next start's first Home reads them back instead of decoding.
+ * `boot` starts from no saved copy, `restart` from the one the last stop left.
+ *
  * Fixtures are invented; the repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { User } from '@claude-workspaces/core';
+import { coldThreadsPath } from '../src/cold-threads-cache.ts';
 import type { CrossReviewQueue } from '../src/cross-review-queue.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { taskBodyDocId } from '../src/task-projection.ts';
@@ -54,8 +59,12 @@ afterAll(() => {
   taskDocs = [];
 });
 
-const boot = (homeWarmMs: number | null) =>
+const restart = (homeWarmMs: number | null = null) =>
   createServer({ port: 0, dataDir, spawnerAgentId: null, homeWarmMs });
+const boot = (homeWarmMs: number | null) => {
+  rmSync(coldThreadsPath(dataDir), { force: true });
+  return restart(homeWarmMs);
+};
 const decodes = (h: ServerHandle) => h.docStore.stats().coldThreads.decodes;
 const home = async (h: ServerHandle) => {
   const res = await fetch(`http://127.0.0.1:${h.port}/`);
@@ -126,6 +135,73 @@ describe("Home's cold threads", () => {
       await home(h);
       expect(decodes(h)).toBe(before);
       for (const id of taskDocs) expect(h.docStore.peek(id)).toBeUndefined();
+    } finally {
+      await h.stop();
+    }
+  });
+});
+
+describe("Home's cold threads across a restart", () => {
+  it('the first Home after a restart decodes nothing, and shows what a decoding one shows', async () => {
+    const first = boot(null);
+    evictAll(first);
+    await home(first);
+    await first.stop();
+    expect(existsSync(coldThreadsPath(dataDir))).toBe(true);
+
+    const h = restart();
+    let restored: CrossReviewQueue;
+    try {
+      evictAll(h);
+      await home(h);
+      expect(decodes(h)).toBe(0);
+      restored = await queue(h);
+      for (const id of taskDocs) expect(h.docStore.peek(id)).toBeUndefined();
+    } finally {
+      await h.stop();
+    }
+    // Control: with no saved copy, the same first Home decodes every row.
+    const fresh = boot(null);
+    try {
+      evictAll(fresh);
+      await home(fresh);
+      expect(decodes(fresh)).toBeGreaterThanOrEqual(taskDocs.length);
+      expect(await queue(fresh)).toEqual(restored);
+    } finally {
+      await fresh.stop();
+    }
+  });
+
+  it('a doc written after the save is decoded again, and Home shows the change', async () => {
+    const first = boot(null);
+    evictAll(first);
+    await home(first);
+    await first.stop();
+    const stale = `${coldThreadsPath(dataDir)}.stale`;
+    copyFileSync(coldThreadsPath(dataDir), stale);
+
+    // A process that changed one doc, and whose own save is then lost.
+    const target = taskDocs[2] as string;
+    const writer = restart();
+    const made = await writer.docStore.createThreadByFind(
+      target,
+      { find: 'map Riverbend' },
+      AGENT,
+      'Bob, does the Riverbend map need the new ferry stop?',
+    );
+    expect(made.ok).toBe(true);
+    expect(writer.docStore.evictDoc(target)).toBe(true);
+    await writer.stop();
+    copyFileSync(stale, coldThreadsPath(dataDir));
+    rmSync(stale);
+
+    const h = restart();
+    try {
+      evictAll(h);
+      await home(h);
+      expect(decodes(h)).toBe(1);
+      const texts = h.docStore.peekThreads(target).flatMap((t) => t.comments.map((c) => c.text));
+      expect(texts).toContain('Bob, does the Riverbend map need the new ferry stop?');
     } finally {
       await h.stop();
     }
