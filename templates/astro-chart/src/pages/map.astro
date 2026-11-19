@@ -1,0 +1,37 @@
+---
+// The components package's map on an Astro page, drawn from a JSON snapshot
+// of its state (what get_component_state returns for the doc's "sites" map).
+// The map file is packages/components/src/map.ts itself, imported unchanged.
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harborlight sites</title>
+  </head>
+  <body>
+    <main>
+      <h1>Harborlight sites</h1>
+      <div id="sites"></div>
+    </main>
+    <script>
+      import { mountWithSnapshot } from '@claude-workspaces/components/map';
+      import snapshot from '../harborlight-map-state.json';
+
+      const el = document.getElementById('sites');
+      if (el) {
+        mountWithSnapshot(
+          el,
+          {
+            id: 'sites',
+            title: 'Harborlight sites',
+            markers: [{ lat: 37.761, lng: -122.441, label: 'Harborlight hall' }],
+            rings: [150],
+            height: 360,
+          },
+          snapshot,
+        );
+      }
+    </script>
+  </body>
+</html>
