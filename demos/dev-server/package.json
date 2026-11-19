@@ -7,6 +7,6 @@
     "dev": "vite"
   },
   "devDependencies": {
-    "vite": "6.4.4"
+    "vite": "6.4.5"
   }
 }
