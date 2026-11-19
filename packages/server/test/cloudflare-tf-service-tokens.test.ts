@@ -60,6 +60,8 @@ function world(opts: {
   existing?: Array<{ id: string; name: string }>;
   sink?: HandoffSink | null;
   macKey?: string;
+  /** The create that throws, counted from 1: Cloudflare failing part way. */
+  failPost?: number;
 }): World {
   const existing = [...(opts.existing ?? [])];
   const w: World = {
@@ -83,6 +85,7 @@ function world(opts: {
   const api = (async (method: string, path: string, body?: unknown) => {
     if (method === 'POST' && path === `/accounts/${ACCOUNT}/access/service_tokens`) {
       w.posts.push({ path, body });
+      if (w.posts.length === opts.failPost) throw new Error('Cloudflare API 500');
       existing.push({ id: NEW_ID, name: (body as { name: string }).name });
       return {
         id: NEW_ID,
@@ -167,6 +170,35 @@ describe('service tokens in cf:plan and the CI apply', () => {
     const said = [...w.out, ...w.err, ...Object.values(w.state)].join('\n');
     expect(said).not.toContain(NEW_SECRET);
     expect(said).toContain('handoff:pull');
+  });
+
+  it('a create that throws part way still seals the pairs already made', async () => {
+    const mac = generateHandoffKeys();
+    const sealed: string[] = [];
+    const sink = new HandoffSink('mac', '/out/handoff.json');
+    const flush = sink.flush.bind(sink);
+    sink.flush = (key) => flush(key, (_p, t) => sealed.push(t));
+    const w = world({
+      tokens: ['agent moi', 'agent riverbend'],
+      sink,
+      macKey: mac.publicKey,
+      failPost: 2,
+    });
+    expect(await runWrapper('apply', { env: 'prod', ci: true }, w.io)).toBe(1);
+    expect(w.posts).toHaveLength(2);
+    expect(w.tf).toEqual([]);
+    // Cloudflare sent the first token's secret once; it must reach the Mac.
+    expect(sealed).toHaveLength(1);
+    expect(openItems(mac.privateKey, sealed[0] ?? '').items).toEqual([
+      {
+        kind: 'service-token',
+        name: 'agent moi',
+        clientId: NEW_CLIENT_ID,
+        secret: NEW_SECRET,
+        replace: false,
+      },
+    ]);
+    expect([...w.out, ...w.err].join('\n')).not.toContain(NEW_SECRET);
   });
 
   it('a CI apply makes no token where it cannot seal the pair: no sink, or no Mac key', async () => {

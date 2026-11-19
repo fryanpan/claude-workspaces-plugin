@@ -192,26 +192,31 @@ async function mintMissing(
   // Before anything is made: what is made must be sealable.
   const key = io.macKey();
   const nameOf = new Map(Object.values(missing).map((n) => [tokenServices(n).secret, n]));
-  const minted = await mintServiceTokens(api, accountId, missing, {
-    keychainHasService: () => false,
-    storeToken: (services, clientId, secret) =>
-      sink.add({
-        kind: 'service-token',
-        name: nameOf.get(services.secret) ?? '',
-        clientId,
-        secret,
-        replace: false,
-      }),
-    confirm: () => true,
-    // Its lines speak of the Keychain; here the pair goes to the Mac.
-    out: () => {},
-    err: io.err,
-  });
-  if (sink.flush(key)) {
-    for (const line of sink.describe()) io.out(`Made and sealed to the Mac: ${line}\n`);
-    io.out('The Mac stores each pair on its next bun run handoff:pull.\n');
+  // The seal is in a finally: a create that throws part way must not lose
+  // the pairs already made, whose secrets Cloudflare sent this call alone.
+  try {
+    const minted = await mintServiceTokens(api, accountId, missing, {
+      keychainHasService: () => false,
+      storeToken: (services, clientId, secret) =>
+        sink.add({
+          kind: 'service-token',
+          name: nameOf.get(services.secret) ?? '',
+          clientId,
+          secret,
+          replace: false,
+        }),
+      confirm: () => true,
+      // Its lines speak of the Keychain; here the pair goes to the Mac.
+      out: () => {},
+      err: io.err,
+    });
+    return minted.ok;
+  } finally {
+    if (sink.flush(key)) {
+      for (const line of sink.describe()) io.out(`Made and sealed to the Mac: ${line}\n`);
+      io.out('The Mac stores each pair on its next bun run handoff:pull.\n');
+    }
   }
-  return minted.ok;
 }
 
 /** A config from its CI stand-in when that is set, else from its file. */
