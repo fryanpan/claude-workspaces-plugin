@@ -276,6 +276,7 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
           '/api/push/subscriptions',
           '/api/deploy',
           '/api/sentry',
+          '/api/signin/owner',
         ],
         (v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
       );

@@ -1,4 +1,5 @@
 import type { User } from '@claude-workspaces/core';
+import type { OwnerSignIn } from '../auth/owner-signin-record.ts';
 /**
  * The operator block: metrics, plugin refresh, push subscriptions and
  * deploy, in the order it is matched.
@@ -81,6 +82,13 @@ export interface OpsRoutesContext {
    * `liveness.ts` for why the route carries it at all.
    */
   liveness: () => ServerLiveness;
+  /**
+   * The lock-out guard's record (`auth/owner-signin-record.ts`): the owner's
+   * first Better Auth sign-in here, or null. Read by `GET /api/signin/owner`.
+   */
+  ownerSignIn: () => OwnerSignIn | null;
+  /** `CW_SIGNIN` as configured, and the mode the guard lets run now. */
+  signInModes: () => { configured: string; effective: string };
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -397,6 +405,25 @@ export async function handleOpsRoutes(
     if (req.method === 'GET') return j(200, { sentry: serverSentryTelemetry() });
     if (req.method === 'POST') return j(200, { sentry: await selfTestServerSentry() });
     return j(405, { error: 'method not allowed' });
+  }
+
+  // --- REST: the lock-out guard's record (plan 3.5) ---
+  // Whether the owner has signed in here through Better Auth, so a script can
+  // refuse to remove Cloudflare Access before that is proved. The deploy
+  // route's gates, for its reason: it is the machine's own fact, for the
+  // machine's own scripts.
+  if (pathname === '/api/signin/owner') {
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (!isLoopbackAddress(requestAddress(req))) {
+      return j(403, { error: 'the sign-in record is read from this machine only (loopback)' });
+    }
+    if (req.headers.has('cf-ray')) {
+      return j(403, { error: 'the sign-in record cannot be read through the edge' });
+    }
+    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
+    const owner = ctx.ownerSignIn();
+    return j(200, { recorded: owner !== null, ...(owner ? { owner } : {}), ...ctx.signInModes() });
   }
 
   return undefined;

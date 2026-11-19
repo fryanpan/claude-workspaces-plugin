@@ -167,6 +167,14 @@ describe('one Better Auth sign-in per machine', () => {
     ).authorize;
     expect(atMac.cookies.has(SESSION)).toBe(true);
     expect(atCloud.cookies.has(SESSION)).toBe(true);
+    // The browser lands on a page after signing in. On each machine that
+    // first admitted page is what records the owner's sign-in and opens the
+    // lock-out guard (`signin-lockout-guard.test.ts`); until then
+    // `better-auth` runs as `both`.
+    expect((await browserOn(ONE_HOST)(boardJson(macBoard), withCookie(atMac))).status).toBe(200);
+    expect((await browserOn(CLOUD_HOST)(boardJson(cloudBoard), withCookie(atCloud))).status).toBe(
+      200,
+    );
   });
 
   afterAll(async () => {

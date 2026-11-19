@@ -22,6 +22,7 @@
  */
 import { normalizeEmail } from '@claude-workspaces/core';
 import { type GoogleClient, createBoardSignIn } from './auth/board-signin.ts';
+import { createOwnerSignInRecord } from './auth/owner-signin-record.ts';
 import { type CfAccessOptions, createCfAccessVerifier } from './middleware/cf-access.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
 import { type SignInMode, createSignInDoor } from './middleware/signin-door.ts';
@@ -225,6 +226,9 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * Access stamp or a session, in `better-auth` only a session, and in
    * `access` it is the Access verifier it always was.
    */
+  const proxiedTrustedEmails = new Set(
+    (opts.proxiedTrustedEmails ?? []).map((e) => normalizeEmail(e)).filter((e) => e !== ''),
+  );
   const signInMode: SignInMode = opts.signIn?.mode ?? 'access';
   const boardSignIn =
     opts.signIn && signInMode !== 'access'
@@ -236,10 +240,17 @@ export function createAccessDeps(ctx: AccessDepsContext) {
           mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
         })
       : null;
+  // The lock-out guard: `better-auth` runs as `both` until the owner has
+  // signed in here once, and that sign-in is what writes the record.
+  const ownerSignIn = createOwnerSignInRecord(dataDir);
   const signInDoor = createSignInDoor({
     mode: signInMode,
     signIn: boardSignIn,
-    ...(ctx.onSignInPerson ? { onPerson: ctx.onSignInPerson } : {}),
+    onPerson: (email) => {
+      if (proxiedTrustedEmails.has(email)) ownerSignIn.record(email);
+      ctx.onSignInPerson?.(email);
+    },
+    ownerSignedIn: () => ownerSignIn.read() !== null,
   });
   const staticAccessVerifier = signInDoor.verifier(
     opts.cfAccess && typeof opts.cfAccess.audience === 'string'
@@ -256,9 +267,6 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * is named as the operator; bin.ts also refuses at boot, but this check is
    * the one in the request path.
    */
-  const proxiedTrustedEmails = new Set(
-    (opts.proxiedTrustedEmails ?? []).map((e) => normalizeEmail(e)).filter((e) => e !== ''),
-  );
   const proxiedTrustedVerifier =
     (opts.proxiedTrustedHosts ?? []).length > 0 && proxiedTrustedEmails.size > 0
       ? staticAccessVerifier
@@ -299,5 +307,6 @@ export function createAccessDeps(ctx: AccessDepsContext) {
     recallCallbackHost,
     boardSignIn,
     signInDoor,
+    ownerSignIn,
   };
 }

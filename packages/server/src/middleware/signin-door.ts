@@ -82,10 +82,19 @@ export interface SignInDoorOptions {
   signIn: BoardSignIn | null;
   /** Told each address a Better Auth session admitted (the owner record). */
   onPerson?: (email: string) => void;
+  /**
+   * The lock-out guard (`auth/owner-signin-record.ts`): has the owner signed
+   * in here through Better Auth? Until it answers yes, `better-auth` runs as
+   * `both`, so the Access stamp still opens the board. Absent means yes.
+   */
+  ownerSignedIn?: () => boolean;
 }
 
 export interface SignInDoor {
+  /** The configured mode. */
   mode: SignInMode;
+  /** The mode in force now: `both` for `better-auth` until the guard opens. */
+  effectiveMode(): SignInMode;
   /**
    * The verifier a door runs: the Access verifier given, Better Auth's, or
    * either, by mode. Null when neither half exists.
@@ -112,6 +121,8 @@ const noSession: CfAccessResult = { ok: false, status: 401, error: 'missing_sess
 export function createSignInDoor(opts: SignInDoorOptions): SignInDoor {
   const { mode, signIn } = opts;
   const active = mode !== 'access' && signIn !== null;
+  const effectiveMode = (): SignInMode =>
+    mode === 'better-auth' && opts.ownerSignedIn && !opts.ownerSignedIn() ? 'both' : mode;
 
   const viaSession = async (req: Request): Promise<CfAccessResult> => {
     if (!signIn) return noSession;
@@ -127,8 +138,8 @@ export function createSignInDoor(opts: SignInDoorOptions): SignInDoor {
 
   const verifier = (access: CfAccessVerifier | null): CfAccessVerifier | null => {
     if (!active) return access;
-    if (mode === 'better-auth') return viaSession;
     return async (req) => {
+      if (effectiveMode() === 'better-auth') return viaSession(req);
       if (access) {
         const stamped = await access(req);
         if (stamped.ok) return stamped;
@@ -154,11 +165,11 @@ export function createSignInDoor(opts: SignInDoorOptions): SignInDoor {
     }
     // In `both`, Access still fronts the other host and its stamp still
     // works there; only `better-auth` moves every page to the one address.
-    if (mode !== 'better-auth') return null;
+    if (effectiveMode() !== 'better-auth') return null;
     return redirect(308, `${signIn.origin}${pathname}${search}`);
   };
 
-  return { mode, verifier, claim, redirectFor };
+  return { mode, effectiveMode, verifier, claim, redirectFor };
 }
 
 function redirect(status: number, location: string): Response {

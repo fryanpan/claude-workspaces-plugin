@@ -163,3 +163,30 @@ describe('the sign-in routes and redirects', () => {
     expect(both.redirectFor(at(SUBDOMAIN), '/', true)).toBeNull();
   });
 });
+
+describe('the lock-out guard', () => {
+  it('runs better-auth as both until the owner has signed in, then switches', async () => {
+    let recorded = false;
+    const door = createSignInDoor({
+      mode: 'better-auth',
+      signIn: fakeSignIn(null),
+      ownerSignedIn: () => recorded,
+    });
+    const verify = door.verifier(stamped);
+    const withStamp = at(HOST, { 'cf-access-jwt-assertion': 'x' });
+    expect(door.effectiveMode()).toBe('both');
+    expect((await verify?.(withStamp))?.ok).toBe(true);
+    expect(door.redirectFor(at(SUBDOMAIN), '/', true)).toBeNull();
+    recorded = true;
+    expect(door.effectiveMode()).toBe('better-auth');
+    expect((await verify?.(withStamp))?.ok).toBe(false);
+    expect(door.redirectFor(at(SUBDOMAIN), '/', true)?.status).toBe(308);
+  });
+
+  it('leaves both and access as they are', () => {
+    for (const mode of ['both', 'access'] as const) {
+      const door = createSignInDoor({ mode, signIn: fakeSignIn(null), ownerSignedIn: () => false });
+      expect(door.effectiveMode()).toBe(mode);
+    }
+  });
+});

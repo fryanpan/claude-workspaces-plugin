@@ -533,6 +533,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     boardSignIn,
     signInDoor,
+    ownerSignIn,
   } = createAccessDeps({
     dataDir,
     opts,
@@ -2613,6 +2614,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         pid: process.pid,
         discovery: readDiscoveryEntry(),
       }),
+    ownerSignIn: () => ownerSignIn.read(),
+    signInModes: () => ({ configured: signInDoor.mode, effective: signInDoor.effectiveMode() }),
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,

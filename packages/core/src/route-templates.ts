@@ -322,6 +322,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'review-wait'],
   ['api', 'reviews'],
   ['api', 'sentry'],
+  ['api', 'signin', 'owner'],
   ['api', 'share', 'member', 'remove'],
   ['api', 'tasks'],
   ['api', 'threads'],
