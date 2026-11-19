@@ -9,6 +9,10 @@ provider "google" {
   project = var.project
 }
 
+provider "google-beta" {
+  project = var.project
+}
+
 resource "google_project_service" "apis" {
   for_each = toset([
     "apikeys.googleapis.com",
@@ -47,4 +51,33 @@ resource "local_sensitive_file" "maps_browser_key" {
   content              = google_apikeys_key.maps_browser.key_string
   file_permission      = "0600"
   directory_permission = "0700"
+}
+
+# Bryan's spend cap (19 Nov 2026): at most $5 a day on Maps. A key cannot
+# carry a dollar limit, so the cap is a daily quota on the project. The doc
+# map loads the Maps JavaScript API in 2D, which Google bills per map load
+# under the `billable_default` metric at $7 per 1,000 (Dynamic Maps SKU);
+# 714 loads is $5.00. Past it Google refuses further loads until the quota
+# resets at midnight Pacific, and the page shows its map error. 3D maps bill
+# under their own metric; nothing here uses them, so their quota is 0.
+locals {
+  daily_quota = {
+    "maps-backend.googleapis.com/billable_default"    = var.daily_map_loads
+    "maps-backend.googleapis.com/3d_billable_default" = 0
+  }
+}
+
+resource "google_service_usage_consumer_quota_override" "daily" {
+  for_each = local.daily_quota
+  provider = google-beta
+
+  project        = var.project
+  service        = "maps-backend.googleapis.com"
+  metric         = urlencode(each.key)
+  limit          = urlencode("/d/project")
+  override_value = tostring(each.value)
+  # Google refuses a cut of more than 10% below the current limit without it.
+  force = true
+
+  depends_on = [google_project_service.apis]
 }
