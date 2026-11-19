@@ -154,7 +154,11 @@ export function killAndRemove(proc: ChildProcess | undefined, profile: string): 
     const deadline = Date.now() + KILL_WAIT_MS;
     while (Date.now() < deadline && isAlive(pid)) sleepSync(20);
   }
-  rmSync(profile, { recursive: true, force: true });
+  // A helper Chrome left behind can write into the profile while it is being
+  // removed, which fails the walk with ENOTEMPTY; the second pass is for that.
+  try {
+    rmSync(profile, { recursive: true, force: true });
+  } catch {}
   if (!existsSync(profile)) return;
   sleepSync(200);
   rmSync(profile, { recursive: true, force: true });
