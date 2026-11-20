@@ -7,9 +7,9 @@
  *   bun infra/project-machine/wall-read.ts cloudflare --out <file>
  *   bun infra/project-machine/wall-read.ts fly --out <file>
  *
- * `cloudflare` runs under `ci-credentials.ts --account-id` with the
- * repository's read-only CLOUDFLARE_API_TOKEN and state key, the same pair a
- * pull request's plan holds. It reads prod's Terraform outputs, each tunnel's
+ * `cloudflare` runs under `ci-credentials.ts --account-id` in
+ * `cloudflare-prod`, with the token and state key cloudflare.yml's apply
+ * uses (the repository holds no Cloudflare token of its own). It reads prod's Terraform outputs, each tunnel's
  * ingress, the live Access applications and service token names, and a plan
  * in CI mode (no lock, nothing applied). `fly` runs in `fly-org` and reads
  * `fly apps list` (each `cw-` app's name and network): a command that names

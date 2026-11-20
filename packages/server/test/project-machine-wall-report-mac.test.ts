@@ -224,8 +224,8 @@ describe('wall-read.yml', () => {
     }
   });
 
-  it('reads Cloudflare with the repository read-only token, and Fly in fly-org', () => {
-    expect(wf.jobs.cloudflare?.environment).toBeUndefined();
+  it('reads Cloudflare in cloudflare-prod, and Fly in fly-org', () => {
+    expect(wf.jobs.cloudflare?.environment).toBe('cloudflare-prod');
     expect(wf.jobs.fly?.environment).toBe('fly-org');
   });
 

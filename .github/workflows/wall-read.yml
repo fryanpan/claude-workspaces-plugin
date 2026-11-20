@@ -10,9 +10,11 @@
 #
 # Two jobs, because no one place holds both credentials:
 #
-#   cloudflare  no environment: the repository's READ-ONLY CLOUDFLARE_API_TOKEN
-#               and R2 pair, the ones a pull request's plan holds and the same
-#               token the Mac's Keychain held for this report. It reads prod's
+#   cloudflare  in `cloudflare-prod` (deployments from main only), whose
+#               token, R2 pair and routing configs cloudflare.yml's apply
+#               uses. The repository holds no Cloudflare token of its own, so
+#               a job outside that environment has nothing to read with (the
+#               first run failed that way). It only reads: prod's
 #               Terraform outputs, each tunnel's configuration, the live Access
 #               applications and service token names, and a plan in CI mode
 #               (no lock, nothing applied). The plan needs the routing configs.
@@ -38,6 +40,7 @@ jobs:
   cloudflare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: cloudflare-prod
     permissions:
       contents: read
     steps:

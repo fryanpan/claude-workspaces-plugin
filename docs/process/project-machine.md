@@ -986,9 +986,8 @@ It runs on the Mac, which holds no Cloudflare token and not the Fly org
 token. Two reads need one, so CI makes them: `.github/workflows/wall-read.yml`
 runs every day and on a dispatch from main.
 
-- **Cloudflare.** A job with the repository's read-only
-  `CLOUDFLARE_API_TOKEN` and state key, the pair a pull request's plan
-  holds, reads prod's Terraform outputs, each tunnel's configuration, the
+- **Cloudflare.** A job in `cloudflare-prod`, with the token and state
+  key cloudflare.yml's apply uses, reads prod's Terraform outputs, each tunnel's configuration, the
   live Access applications and service token names, and a plan in CI mode.
 - **`fly apps list`.** A job in `fly-org` reads each project app's name and
   network with the org token. A Fly command that names no app needs that
