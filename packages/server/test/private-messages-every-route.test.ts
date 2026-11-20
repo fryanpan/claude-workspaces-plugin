@@ -13,6 +13,10 @@
  *     restart or reconfigure the server.
  *   - The board's lead agent with its board token, the bearer an MCP call
  *     carries. Reads only, for the same reason.
+ *   - A page in the owner's browser on this machine (`localhost`, a loopback
+ *     peer, browser headers, no proof of any agent). Reads only. Alice's
+ *     agent watches the board, so `/events/agent/<id>` would carry her
+ *     private messages to anyone it let in.
  *
  * Each read is sent twice, bare and with a query naming both people, the
  * agent and a word of the message, so a search, an export or a filtered
@@ -142,6 +146,7 @@ describe('no route returns a private message between two other people', () => {
   let docId = '';
   let taskId = '';
   let bobPage: FrameListener;
+  let agentMux: FrameListener;
   let alicePerson: ReturnType<typeof signedInPerson>;
   const callers: Record<string, Caller> = {};
   const probes: Record<string, Probe[]> = {};
@@ -294,6 +299,21 @@ describe('no route returns a private message between two other people', () => {
     });
     expect(await linked.json()).toMatchObject({ state: 'linked' });
 
+    // Alice's agent watches the board, as an MCP child does, so every stream
+    // keyed on that agent carries what is sent to it.
+    const watched = await s.local(`/api/agents/${ALICE_AGENT}/watches`, {
+      ...post({ add: [`ws:${s.board}`], name: 'Harborlight' }),
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1}` },
+    });
+    expect(watched.status, await watched.clone().text()).toBe(200);
+    // Her agent's own process, proven with its token: the positive control
+    // for the page caller below.
+    agentMux = listenFrames(
+      await s.local(`/events/agent/${ALICE_AGENT}`, {
+        headers: { accept: 'text/event-stream', authorization: `Bearer ${at1}` },
+      }),
+    );
+
     await sendDm(`Bob, the tide table: ${STORED_DM}`);
     await sendPm(`A1, the tide table: ${STORED_PM}`);
 
@@ -327,6 +347,20 @@ describe('no route returns a private message between two other people', () => {
       socket: (path) => ({
         url: `ws://127.0.0.1:${port}${path}`,
         headers: { host: `localhost:${port}`, authorization: `Bearer ${leadToken}` },
+      }),
+      writes: false,
+    };
+    const page = { origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' };
+    callers.page = {
+      name: 'page',
+      send: (path, init) =>
+        s.local(path, {
+          ...init,
+          headers: { ...((init?.headers as Record<string, string>) ?? {}), ...page },
+        }),
+      socket: (path) => ({
+        url: `ws://127.0.0.1:${port}${path}`,
+        headers: { host: `localhost:${port}`, ...page },
       }),
       writes: false,
     };
@@ -369,22 +403,38 @@ describe('no route returns a private message between two other people', () => {
   afterAll(async () => {
     for (const list of Object.values(probes)) await Promise.all(list.map((p) => p.stop()));
     await bobPage?.stop();
+    await agentMux?.stop();
     await s?.stop();
   });
 
   it('calls every row of the route table, for each caller', () => {
     const table = new Set(ROUTE_TABLE.map((r) => r.pattern));
-    for (const name of ['riverbend', 'owner', 'lead']) {
+    for (const name of ['riverbend', 'owner', 'lead', 'page']) {
       expect([...(probed[name] ?? [])].sort()).toEqual([...table].sort());
     }
     // Riverbend's read of her own stream is among the probes, and it is live.
     expect((probes.riverbend ?? []).some((p) => p.live)).toBe(true);
   });
 
-  it('a board member, the owner and the lead agent read none of it', () => {
+  it('a board member, the owner, the lead agent and a local page read none of it', () => {
     expect(hits('riverbend')).toEqual([]);
     expect(hits('owner')).toEqual([]);
     expect(hits('lead')).toEqual([]);
+    expect(hits('page')).toEqual([]);
+  });
+
+  it("refuses a page on this machine that opens an agent's own stream", async () => {
+    const res = await callers.page?.send(`/events/agent/${ALICE_AGENT}`, {
+      headers: { accept: 'text/event-stream' },
+    });
+    expect(res?.status).toBe(403);
+    expect(await res?.json()).toMatchObject({ error: 'agent-stream-browser' });
+  });
+
+  it("the agent's own stream carries her private message to it (positive control)", async () => {
+    await waitFor(() => agentMux.frames.some((f) => JSON.stringify(f.data).includes(LIVE_PM)), {
+      describe: "the live private message on the agent's own stream",
+    });
   });
 
   it("refuses a page that names an agent on the board's stream", async () => {
