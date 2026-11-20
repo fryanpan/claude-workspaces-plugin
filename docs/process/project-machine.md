@@ -989,9 +989,11 @@ runs every day and on a dispatch from main.
 - **Cloudflare.** A job in `cloudflare-prod`, with the token and state
   key cloudflare.yml's apply uses, reads prod's Terraform outputs, each tunnel's configuration, the
   live Access applications and service token names, and a plan in CI mode.
-- **`fly apps list`.** A job in `fly-org` reads each project app's name and
-  network with the org token. A Fly command that names no app needs that
-  token.
+- **`fly apps list`.** A job in `fly-org-read` reads each project app's name
+  and network with `FLY_READ_TOKEN`, which reads every app and the org and
+  can change nothing: no deploy, no machine control and no WireGuard, so no
+  `fly ssh`. `fly-ci-tokens.yml` cuts it from the org token every week for
+  14 days, so the daily job never holds the org token.
 
 Each job seals what it read to the Mac's handoff key (`infra/handoff/`),
 because the artifacts of a public repository are public, and uploads it as

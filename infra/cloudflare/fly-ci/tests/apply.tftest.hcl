@@ -11,6 +11,7 @@ variables {
     fly-harborlight    = "fixture-fly-token-harborlight"
     fly-appkit-staging = "fixture-fly-token-staging"
   }
+  read_token = "fixture-fly-read-token"
 }
 
 run "each_environment_holds_its_own_token" {
@@ -104,4 +105,49 @@ run "a_name_that_is_not_fly_project_is_refused" {
   }
 
   expect_failures = [var.deploy_tokens]
+}
+
+run "the_read_token_has_its_own_main_only_environment" {
+  command = apply
+
+  assert {
+    condition     = output.read_environments == tolist(["fly-org-read"])
+    error_message = "the read token gets fly-org-read"
+  }
+
+  assert {
+    condition = (
+      github_actions_environment_secret.read_token["fly-org-read"].value == "fixture-fly-read-token" &&
+      github_actions_environment_secret.read_token["fly-org-read"].secret_name == "FLY_READ_TOKEN" &&
+      github_actions_environment_secret.read_token["fly-org-read"].environment == "fly-org-read"
+    )
+    error_message = "the read token is FLY_READ_TOKEN in fly-org-read alone"
+  }
+
+  assert {
+    condition     = !contains(output.environments, "fly-org-read")
+    error_message = "the read token is never one of the deploy tokens"
+  }
+
+  assert {
+    condition = (
+      github_repository_environment.read["fly-org-read"].deployment_branch_policy[0].custom_branch_policies == true &&
+      github_repository_environment.read["fly-org-read"].deployment_branch_policy[0].protected_branches == false &&
+      github_repository_environment_deployment_policy.read_main["fly-org-read"].branch_pattern == "main"
+    )
+    error_message = "fly-org-read admits main alone"
+  }
+}
+
+run "no_read_token_makes_no_read_environment" {
+  command = apply
+
+  variables {
+    read_token = ""
+  }
+
+  assert {
+    condition     = length(output.read_environments) == 0 && length(github_actions_environment_secret.read_token) == 0
+    error_message = "an empty read token makes nothing"
+  }
 }
