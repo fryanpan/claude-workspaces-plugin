@@ -16,6 +16,7 @@ import {
   CollabCoreSwitch,
   collabCoreBoardsPath,
   collabCoreServerPath,
+  parseCollabCoreDefault,
   parseCollabCoreEnv,
 } from '../src/collab-core-switch.ts';
 
@@ -158,5 +159,68 @@ describe('CollabCoreSwitch.onChange', () => {
     sw.set('harborlight', false);
     expect(told).toBe(1);
     expect(sw.anyBoardOn()).toBe(false);
+  });
+});
+
+describe('the default-on mode (CW_COLLAB_CORE_DEFAULT, the core-mode test runs)', () => {
+  it('reads the variable as on only for on, 1 or true', () => {
+    expect(parseCollabCoreDefault(undefined)).toBe(false);
+    expect(parseCollabCoreDefault('')).toBe(false);
+    expect(parseCollabCoreDefault('off')).toBe(false);
+    expect(parseCollabCoreDefault(' On ')).toBe(true);
+    expect(parseCollabCoreDefault('1')).toBe(true);
+    expect(parseCollabCoreDefault('true')).toBe(true);
+  });
+
+  it('puts every board and the server-wide setting on, with nothing written', () => {
+    const dataDir = fresh();
+    const sw = new CollabCoreSwitch({ dataDir, defaultOn: true });
+    expect(sw.serverWide).toBe(true);
+    expect(sw.boardOn('harborlight')).toBe(true);
+    expect(sw.usesCore('riverbend')).toBe(true);
+    expect(sw.anyBoardOn()).toBe(true);
+    // Not a board id, so never on.
+    expect(sw.boardOn('../etc')).toBe(false);
+  });
+
+  it('still lets a board and the server-wide setting be turned off, across a restart', () => {
+    const dataDir = fresh();
+    const sw = new CollabCoreSwitch({ dataDir, defaultOn: true });
+    const told: string[] = [];
+    sw.onChange((ws) => told.push(ws));
+    sw.set('saltmarsh', false);
+    expect(sw.usesCore('saltmarsh')).toBe(false);
+    expect(sw.usesCore('harborlight')).toBe(true);
+    expect(told).toEqual(['saltmarsh']);
+    const again = new CollabCoreSwitch({ dataDir, defaultOn: true });
+    expect(again.usesCore('saltmarsh')).toBe(false);
+    again.set('saltmarsh', true);
+    expect(again.usesCore('saltmarsh')).toBe(true);
+    again.setServerWide(false);
+    const third = new CollabCoreSwitch({ dataDir, defaultOn: true });
+    expect(third.serverWide).toBe(false);
+    expect(third.usesCore('saltmarsh')).toBe(false);
+  });
+
+  it('loses to an environment that fixes the core off', () => {
+    const sw = new CollabCoreSwitch({ dataDir: fresh(), defaultOn: true, fixed: false });
+    expect(sw.boardOn('harborlight')).toBe(true);
+    expect(sw.usesCore('harborlight')).toBe(false);
+  });
+
+  it('leaves the file in the shape the current code reads when no board is turned off', () => {
+    const dataDir = fresh();
+    const sw = new CollabCoreSwitch({ dataDir, defaultOn: true });
+    // Already on by default: nothing to save.
+    sw.set('harborlight', true);
+    sw.set('riverbend', false);
+    expect(JSON.parse(readFileSync(collabCoreBoardsPath(dataDir), 'utf8'))).toEqual({
+      boards: [],
+      off: ['riverbend'],
+    });
+    sw.set('riverbend', true);
+    expect(JSON.parse(readFileSync(collabCoreBoardsPath(dataDir), 'utf8'))).toEqual({
+      boards: ['riverbend'],
+    });
   });
 });

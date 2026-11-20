@@ -65,7 +65,12 @@ import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
 import { CollabCorePath } from './collab-core-path.ts';
-import { CollabCoreSwitch, collabCoreView, parseCollabCoreEnv } from './collab-core-switch.ts';
+import {
+  CollabCoreSwitch,
+  collabCoreView,
+  parseCollabCoreDefault,
+  parseCollabCoreEnv,
+} from './collab-core-switch.ts';
 import { CollabRooms } from './collab-rooms.ts';
 import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
@@ -2221,6 +2226,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // Set, the environment fixes the server-wide setting; unset, the owner's
     // runtime switch in the data folder decides (`collab-core-switch.ts`).
     fixed: opts.collabCore ?? parseCollabCoreEnv(process.env.CW_COLLAB_CORE),
+    defaultOn: opts.collabCoreDefault ?? parseCollabCoreDefault(process.env.CW_COLLAB_CORE_DEFAULT),
   });
   const collabCorePath = new CollabCorePath({
     getDoc: (id) => docStore.peek(id),
