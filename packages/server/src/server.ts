@@ -686,6 +686,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       docHistory.attach(doc);
       armLoadedBody?.(doc);
     },
+    onDocPurged: (docId) => docHistory.forget(docId),
     sse,
     webhooks,
     decorateDocMeta: withReviewUrl,

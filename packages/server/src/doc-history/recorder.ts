@@ -153,6 +153,16 @@ export class DocHistory {
     this.scopes = new WeakMap();
   }
 
+  /**
+   * Remove a doc's history, because the doc itself was destroyed (a purge, or
+   * a board delete's committed teardown). Never for an archive: an archived
+   * doc keeps its history, as it keeps its `.ydoc`.
+   */
+  forget(docId: string): void {
+    this.logs.delete(docId);
+    this.store.remove(docId);
+  }
+
   /** Bytes of history stored for a doc. */
   sizeOf(docId: string): number {
     return this.store.size(docId);

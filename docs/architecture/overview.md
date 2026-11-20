@@ -209,7 +209,7 @@ doc store persists to the same `.ydoc`, so switching loses nothing.
 `CW_COLLAB_CORE_DEFAULT=on` starts every board and the server-wide setting
 on instead of off; it is how core mode runs the suites with every test board
 on the core and no test changed (`bun run test:server --core`, which leaves
-out the switch's own four test files, `scripts/server-core-mode.ts`; ci.yml's
+out the switch's own three test files, `scripts/server-core-mode.ts`; ci.yml's
 `server-core` and `client-browser-core` jobs).
 `server/test/collab-core-mode.test.ts` is the control that the mode reached
 the test servers, `collab-core-edit-latency.test.ts` measures an edit
@@ -239,7 +239,9 @@ current code reads nothing new and switching a board off loses nothing.
 each part since; `restore.ts` puts a past version back as one forward edit,
 which `recorder.ts` records as a change of its own. `recorder.ts` attaches to
 every doc the store wires (`DocStore`'s `onDocWired`) and records nothing
-for a board on the current code. No route serves it yet; `ServerHandle`'s
+for a board on the current code. A doc destroyed (a purge, a forced board
+delete) takes its log with it (`onDocPurged`); an archived doc keeps it, as it
+keeps its `.ydoc`. No route serves it yet; `ServerHandle`'s
 `docHistory` is the server function.
 
 Presence and follow sit in the same folder. `presence.ts` is the server
