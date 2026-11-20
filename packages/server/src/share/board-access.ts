@@ -28,12 +28,13 @@ export type MemberAccess = 'comment' | 'view';
 
 /**
  * Whether a board's narrow roles are enforced (`enforce`) or only logged
- * (`report-only`). Every board is `report-only` until its owner turns it on,
- * so a deploy changes no behaviour, and turning it back off is one call.
+ * (`report-only`). Every board enforces, including one whose mode was never
+ * set (the owner, 2026-11-20: "All boards"); the owner can set one board
+ * back to report-only, and that opt-out is what the registry stores.
  */
 export type RolesMode = 'report-only' | 'enforce';
 
-export const DEFAULT_ROLES_MODE: RolesMode = 'report-only';
+export const DEFAULT_ROLES_MODE: RolesMode = 'enforce';
 
 /** The four-word role a seat and a stored access level make. */
 export function accessRoleOf(seat: BoardRole, access: MemberAccess | undefined): AccessRole {

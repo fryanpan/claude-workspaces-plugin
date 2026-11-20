@@ -20,6 +20,40 @@ export async function defaultSetups(workspaceId: string): Promise<SpokenSetup[]>
   }
 }
 
+/** What a websocket's close event says, as far as a fake or a browser gives it. */
+export interface SocketCloseFacts {
+  code?: number;
+  reason?: string;
+  wasClean?: boolean;
+}
+
+/**
+ * One socket's clock, for the line a drop is reported with: the close code,
+ * the reason, whether it was clean, and how long after it opened. A server
+ * close carries a code and a reason; a path that went away (a tunnel, a
+ * network) reads 1006, not clean, with none.
+ */
+export function closeClock(now: () => number = Date.now) {
+  const made = now();
+  let opened: number | null = null;
+  return {
+    opened: (): void => {
+      opened = now();
+    },
+    detail: (ev?: SocketCloseFacts): string => {
+      const secs = (from: number): number => Math.round((now() - from) / 1000);
+      return [
+        `code ${ev?.code ?? '?'}`,
+        `reason ${ev?.reason ? JSON.stringify(ev.reason) : 'none'}`,
+        `wasClean ${ev?.wasClean ?? '?'}`,
+        opened === null
+          ? `before it opened, ${secs(made)}s after it was made`
+          : `${secs(opened)}s after it opened`,
+      ].join(', ');
+    },
+  };
+}
+
 export function socketUrl(workspaceId: string): string {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${scheme}://${location.host}${voiceBase(workspaceId)}/converse`;

@@ -8,6 +8,7 @@ import { describe, expect, it, spyOn } from 'bun:test';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
+import { summarise } from '../../../scripts/roles-would-refuse.ts';
 import type { AccessRole, RolesMode, SocketAccess } from '../src/share/board-access.ts';
 import { judgeSocketWrite, refuseSocketWrite, rootsTouched } from '../src/socket-write-gate.ts';
 
@@ -114,11 +115,16 @@ describe('judgeSocketWrite', () => {
     expect(judgeSocketWrite(server, access('owner'), thread)).toBe('threads');
   });
 
-  it('refuses any change from a comment or view socket, and never an empty step 2', () => {
+  it('refuses a content change from a comment or view socket, and never an empty step 2', () => {
     const { server, client } = pair();
     const text = frame(diff(client, (d) => d.getText('content').insert(0, 'Bob: ')));
     expect(judgeSocketWrite(server, access('comment'), text)).toBe('role');
     expect(judgeSocketWrite(server, access('view'), text)).toBe('role');
+    // A comment socket's write to threads alone is a threads write, not a
+    // role one: the role allows comments. A view socket's is a role write.
+    const thread = frame(diff(client, (d) => d.getMap('threads').set('t-2', new Y.Map())));
+    expect(judgeSocketWrite(server, access('comment'), thread)).toBe('threads');
+    expect(judgeSocketWrite(server, access('view'), thread)).toBe('role');
     const empty = frame(Y.encodeStateAsUpdate(client, Y.encodeStateVector(client)), 'step2');
     expect(judgeSocketWrite(server, access('view'), empty)).toBeNull();
   });
@@ -177,6 +183,61 @@ describe('judgeSocketWrite', () => {
 });
 
 describe('refuseSocketWrite', () => {
+  it('under enforce drops only what the role does not allow', () => {
+    const { server, client } = pair();
+    const text = frame(diff(client, (d) => d.getText('content').insert(0, 'Riverbend: ')));
+    const thread = frame(diff(client, (d) => d.getMap('threads').set('t-3', new Y.Map())));
+    const both = frame(
+      diff(client, (d) => {
+        d.getText('content').insert(0, 'Harborlight: ');
+        d.getMap('threads').set('t-4', new Y.Map());
+      }),
+    );
+    // Neighbours this doc never had: the `unresolved` kind.
+    const unplaced = frame(diff(pair().client, (d) => d.getText('content').insert(3, 'x')));
+    const drops = (role: AccessRole, f: Uint8Array) =>
+      refuseSocketWrite({}, 'd-1', server, access(role, 'enforce'), f);
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const role of ['owner', 'edit'] as const) {
+        expect(judgeSocketWrite(server, access(role), thread)).toBe('threads');
+        expect(judgeSocketWrite(server, access(role), unplaced)).toBe('unresolved');
+        for (const f of [text, thread, both, unplaced]) expect(drops(role, f)).toBe(false);
+      }
+      expect(drops('comment', thread)).toBe(false);
+      expect(drops('comment', text)).toBe(true);
+      expect(drops('comment', both)).toBe(true);
+      expect(drops('comment', unplaced)).toBe(true);
+      for (const f of [text, thread, both, unplaced]) expect(drops('view', f)).toBe(true);
+      // No stamped access is never enforced.
+      expect(refuseSocketWrite({}, 'd-1', server, undefined, thread)).toBe(false);
+      const lines = warn.mock.calls.map((args) => String(args[0]));
+      expect(lines.filter((l) => l.includes('refused a threads write'))).toEqual([]);
+      expect(lines.some((l) => /allowed a threads write .*role owner/.test(l))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('under report-only logs as would-refuse only what enforce would drop', () => {
+    const { server, client } = pair();
+    const thread = frame(diff(client, (d) => d.getMap('threads').set('t-5', new Y.Map())));
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(refuseSocketWrite({}, 'd-1', server, access('owner', 'report-only'), thread)).toBe(
+        false,
+      );
+      expect(refuseSocketWrite({}, 'd-1', server, access('view', 'report-only'), thread)).toBe(
+        false,
+      );
+      const lines = warn.mock.calls.map((args) => String(args[0]));
+      expect(lines[0]).toMatch(/allowed a threads write .*role owner/);
+      expect(lines[1]).toMatch(/report-only, would refuse a role write .*role view/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('drops under enforce, applies under report-only, and logs once per socket', () => {
     const { server, client } = pair();
     const text = frame(diff(client, (d) => d.getText('content').insert(0, 'Bob: ')));
@@ -192,6 +253,33 @@ describe('refuseSocketWrite', () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(refuseSocketWrite({}, 'd-1', server, access('view', 'enforce'), text)).toBe(true);
       expect(String(warn.mock.calls[1]?.[0])).toMatch(/refused a role write on d-1/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('writes lines scripts/roles-would-refuse.ts counts, per board, role and reason', () => {
+    const { server, client } = pair();
+    const text = frame(diff(client, (d) => d.getText('content').insert(0, 'Alice: ')));
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      refuseSocketWrite({}, 'd-1', server, access('comment', 'report-only'), text);
+      refuseSocketWrite({}, 'd-2', server, access('comment', 'report-only'), text);
+      refuseSocketWrite({}, 'd-1', server, access('view', 'enforce'), text);
+      const lines = warn.mock.calls.map((args) => String(args[0]));
+      expect(summarise([lines]).rows).toEqual([
+        {
+          board: 'ws-harborlight',
+          role: 'comment',
+          operation: 'role',
+          count: 2,
+          unplaced: 0,
+          docs: 2,
+        },
+      ]);
+      expect(summarise([lines], { verdict: 'refused' }).rows).toMatchObject([
+        { board: 'ws-harborlight', role: 'view', operation: 'role', count: 1 },
+      ]);
     } finally {
       warn.mockRestore();
     }

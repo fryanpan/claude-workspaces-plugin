@@ -17,6 +17,7 @@
 import type { Basemap } from '@claude-workspaces/core/map-basemaps';
 import type { MapSpec } from '@claude-workspaces/core/map-spec';
 import L from 'leaflet';
+import { LayerStack, type ReadyLayer } from './draw-layers.ts';
 import { addGoogleLayer } from './google.ts';
 
 /** What the slot carries once drawn: how many of each layer went on. */
@@ -53,6 +54,13 @@ function tilesOf(base: Basemap): L.TileLayer {
 export interface LiveMap {
   /** Replace every layer with `spec`'s; with `refit`, move the view to it. */
   draw(spec: MapSpec, refit: boolean): MapDrawn;
+  /** Replace the GeoJSON layers (`draw-layers.ts`), the ones `hidden` names
+   *  switched off; with `refit`, frame the last spec drawn and them. */
+  setLayers(ready: readonly ReadyLayer[], hidden: ReadonlySet<string>, refit: boolean): void;
+  /** Switch one GeoJSON layer on or off. */
+  showLayer(id: string, on: boolean): void;
+  /** Cells the visible heatmaps stamped on their last redraw. */
+  heatCells(): number;
   remove(): void;
 }
 
@@ -88,6 +96,9 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
     : L.svg({ pane: 'cw-points' });
   const svg = L.svg();
   let layers: L.LayerGroup | null = null;
+  // The GeoJSON layers draw on the points' renderer, beneath the points.
+  const stack = new LayerStack(map, canvas);
+  let last: MapSpec | null = null;
 
   // The column can change width after the first draw (a sidebar opens, the
   // phone turns), and Leaflet sizes itself only when told.
@@ -154,30 +165,46 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
       }
       // Leaflet holds back a layer added to a map with no view yet, so on a
       // first draw the view goes first and the layers are placed in it.
-      if (refit) fitView(map, spec);
+      if (refit) fitView(map, spec, stack.bounds());
       group.addTo(map);
       layers = group;
+      last = spec;
       return {
         markers: spec.markers.length,
         rings: spec.markers.length * spec.rings.length,
         points: spec.points.length,
       };
     },
+    setLayers(ready, hidden, refit) {
+      stack.set(ready, hidden);
+      if (refit && last) fitView(map, last, stack.bounds());
+    },
+    showLayer(id, on) {
+      stack.show(id, on);
+    },
+    heatCells: () => stack.heatCells(),
     remove() {
       resized?.disconnect();
+      stack.remove();
       map.remove();
     },
   };
 }
 
-function fitView(map: L.Map, spec: MapSpec): void {
+function fitView(map: L.Map, spec: MapSpec, extra: L.LatLngBounds | null = null): void {
   if (spec.center) {
     map.setView(spec.center, spec.zoom ?? 15);
     return;
   }
   const all = [...spec.markers, ...spec.points].map((p) => L.latLng(p.lat, p.lng));
+  if (all.length === 0 && !extra) {
+    // Nothing to frame and no view named: the whole world.
+    map.setView([20, 0], 1);
+    return;
+  }
   const reach = Math.max(0, ...spec.rings.map((r) => r.meters));
   let bounds = L.latLngBounds(all);
+  if (extra) bounds = bounds.extend(extra);
   for (const m of spec.markers) {
     bounds = bounds.extend(L.latLng(m.lat, m.lng).toBounds(reach * 2));
   }
