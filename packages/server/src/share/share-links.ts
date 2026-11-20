@@ -180,7 +180,11 @@ interface Persisted {
   /** Absent on a registry written before audiences existed: `load` seeds
    *  them from the members (`board-audience.ts`). */
   audiences?: BoardAudience[];
-  /** Boards whose narrow roles are enforced. Absent = every board report-only. */
+  /** Boards their owner set back to report-only. Absent = every board
+   *  enforces. */
+  rolesReportOnly?: string[];
+  /** The opt-in list a registry carried while report-only was the default.
+   *  Read and dropped: every board it named enforces, as does every other. */
   rolesEnforced?: string[];
 }
 
@@ -195,7 +199,7 @@ export class ShareLinks {
   private migratedThisBoot = false;
   private members: ShareLinkMember[] = [];
   private audiences: BoardAudience[] = [];
-  private rolesEnforced = new Set<string>();
+  private rolesReportOnly = new Set<string>();
   /**
    * Set when the registry file exists and could not be read. Everything then
    * stays empty, which admits nobody, and nothing is written: a save would
@@ -552,15 +556,15 @@ export class ShareLinks {
 
   /** Whether this board's narrow roles are enforced or only logged. */
   rolesModeOf(workspaceId: string): RolesMode {
-    return this.rolesEnforced.has(workspaceId) ? 'enforce' : DEFAULT_ROLES_MODE;
+    return this.rolesReportOnly.has(workspaceId) ? 'report-only' : DEFAULT_ROLES_MODE;
   }
 
   /** Turn a board's role enforcement on or off. */
   setRolesMode(workspaceId: string, mode: RolesMode): void {
     this.refuseWhileUnreadable();
     if (this.rolesModeOf(workspaceId) === mode) return;
-    if (mode === 'enforce') this.rolesEnforced.add(workspaceId);
-    else this.rolesEnforced.delete(workspaceId);
+    if (mode === 'report-only') this.rolesReportOnly.add(workspaceId);
+    else this.rolesReportOnly.delete(workspaceId);
     this.save();
   }
 
@@ -736,9 +740,11 @@ export class ShareLinks {
           return row;
         })
         .filter((m) => m.email !== '');
-      this.rolesEnforced = new Set(
-        Array.isArray(parsed.rolesEnforced)
-          ? parsed.rolesEnforced.filter((w): w is string => typeof w === 'string' && w !== '')
+      // `rolesEnforced`, the old opt-in list, needs nothing: enforce is the
+      // default now, and the next save leaves it out.
+      this.rolesReportOnly = new Set(
+        Array.isArray(parsed.rolesReportOnly)
+          ? parsed.rolesReportOnly.filter((w): w is string => typeof w === 'string' && w !== '')
           : [],
       );
       if (Array.isArray(parsed?.audiences)) {
@@ -756,7 +762,7 @@ export class ShareLinks {
     this.links = [];
     this.members = [];
     this.audiences = [];
-    this.rolesEnforced = new Set();
+    this.rolesReportOnly = new Set();
     this.loadFailed = true;
     console.error(
       `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
@@ -816,7 +822,7 @@ export class ShareLinks {
       links: this.links,
       members: this.members,
       audiences: this.audiences,
-      ...(this.rolesEnforced.size > 0 ? { rolesEnforced: [...this.rolesEnforced] } : {}),
+      ...(this.rolesReportOnly.size > 0 ? { rolesReportOnly: [...this.rolesReportOnly] } : {}),
     };
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE });

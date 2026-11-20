@@ -2,7 +2,8 @@
 
 Components that run unchanged in a Claude Workspaces doc and on any site.
 Today there is one: the street map a board doc's `<StreetMap>` draws, with
-markers, popups, radius rings, category-coloured points and a legend.
+markers, popups, radius rings, category-coloured points and a legend, plus
+GeoJSON line, polygon and heatmap layers a reader can switch on and off.
 
 A site mounts it from a JSON snapshot of its state and needs no Workspaces
 server. In a board doc the same file runs with live state, so a write from an
@@ -14,12 +15,12 @@ The package is a tarball. It has no dependencies (Leaflet is bundled in), so
 it installs offline from the file alone:
 
 ```bash
-mkdir -p vendor && cp claude-workspaces-components-0.1.0.tgz vendor/
-bun add ./vendor/claude-workspaces-components-0.1.0.tgz   # or npm install
+mkdir -p vendor && cp claude-workspaces-components-0.2.0.tgz vendor/
+bun add ./vendor/claude-workspaces-components-0.2.0.tgz   # or npm install
 ```
 
 Your `package.json` then names it as
-`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.1.0.tgz"`.
+`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.2.0.tgz"`.
 
 ## Mount the map
 
@@ -65,7 +66,9 @@ To switch a page whose map is drawn some other way:
    stylesheet and script tags it needed.
 2. Move the old map's data into props: each pin becomes a `markers` row
    (`{ lat, lng, label?, popup?, category? }`), each dot of a dense layer a
-   `points` row, and any radius circles a `rings` entry in feet.
+   `points` row, and any radius circles a `rings` entry in feet. Each GeoJSON
+   source the old map drew as a line, fill or heatmap layer becomes a
+   `layers` entry (below), keeping its file: pass its path as `url`.
 3. Call `mountWithSnapshot(el, props, snapshot)` on that element. Pass the
    snapshot when the doc's map has state you want shown; leave it out to draw
    the props alone.
@@ -82,6 +85,7 @@ needed on the element.
 | --- | --- |
 | `markers` | `[{ lat, lng, label?, popup?, category? }]`, at most 2,000. Each is a dot with a popup and every ring around it. |
 | `points` | `[{ lat, lng, popup?, category? }]`, at most 50,000, small dots on one canvas. |
+| `layers` | GeoJSON layers, at most 24, drawn in the order given beneath the points and markers. See [Layers](#layers). |
 | `rings` | Distances in feet (`150`), or `{ feet \| meters, color?, label? }`, at most 6. |
 | `categories` | `{ name: "#hex" }` or `[{ name, color }]`: the legend's order and colours. |
 | `center`, `zoom` | `[lat, lng]` and 1 to 20; without them the map fits its data. |
@@ -93,13 +97,106 @@ needed on the element.
 | `id` | The state's id, which a refused write names. |
 
 `lat`/`latitude` and `lng`/`lon`/`longitude` are all read. A map needs
-`markers` or `points`, in its props or its state; a prop it cannot read
-draws a message in the map's place, not an exception.
+`markers`, `points` or `layers`, in its props or its state; a prop it cannot
+read draws a message in the map's place, not an exception.
+
+## Layers
+
+Each entry of `layers` is one GeoJSON layer. Its data is inline (`data`: a
+FeatureCollection, a Feature, a list of Features or a bare geometry) or a
+GeoJSON file the page fetches (`url`, a path on your site or an http(s)
+URL, which your Content Security Policy's `connect-src` must allow). Every
+layer takes:
+
+| Field | What it is |
+| --- | --- |
+| `type` | `line`, `polygon` or `heatmap`. |
+| `data` or `url` | One of the two. |
+| `id` | Unique on the map; `layer-<index>` without. |
+| `name` | The words beside its switch under the map; its id without. |
+| `visible` | `false` starts it switched off. |
+| `popup` | Line and polygon only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`. Without it the layer takes no taps. |
+
+A switch per layer sits under the map, in the order given, and the reader's
+choice holds through every redraw. `legend: false` hides the switches with
+the legend. A file that fails to load, or data that breaks a rule, is named
+in that layer's row and the other layers still draw. A null geometry is
+skipped; a geometry of another kind is refused, naming the feature.
+
+**Line** (`LineString`, `MultiLineString`):
+
+```ts
+{
+  type: 'line',
+  id: 'paths',
+  name: 'Riverbend paths',
+  url: './riverbend-paths.geojson',
+  color: '#ff725c',   // default #4269d0
+  width: 3,           // pixels, 0.5 to 20; default 2
+  opacity: 0.9,       // 0 to 1; default 0.9
+  dash: [6, 4],       // optional; or "6 4"
+  popup: '{name}: {speed} mph',
+}
+```
+
+**Polygon** (`Polygon`, `MultiPolygon`):
+
+```ts
+{
+  type: 'polygon',
+  name: 'Saltmarsh quarter',
+  data: { type: 'FeatureCollection', features: [/* … */] },
+  fill: '#a463f2',     // default #4269d0
+  fillOpacity: 0.25,   // 0 to 1; default 0.25
+  outline: '#6d28d9',  // default: the fill
+  outlineWidth: 1,     // pixels, 0 to 20; 0 draws no outline
+  outlineOpacity: 0.9, // 0 to 1; default 0.9
+  popup: 'Quarter: {name}',
+}
+```
+
+**Heatmap** (`Point`, `MultiPoint`):
+
+```ts
+{
+  type: 'heatmap',
+  name: 'Harborlight reports',
+  url: './harborlight-reports.geojson',
+  weight: 'count',     // optional property; without it every point weighs 1,
+                       // with it a missing or non-positive value weighs 0
+  radius: 18,          // pixels, 2 to 80; default 18
+  intensity: 1,        // 0.05 to 10; above 1 reaches the hot end sooner
+  colors: ['#2563eb', '#22d3ee', '#a3e635', '#facc15', '#ef4444'], // 2 to 8, cold to hot
+  opacity: 0.8,        // 0 to 1; default 0.8
+}
+```
+
+Colours are hex, a CSS colour name, or `rgb()`/`hsl()`. Numbers past their
+range are held at its edge.
+
+**Order.** Line and polygon layers draw in the order given, beneath the
+points and markers, and a tap opens the popup of the topmost one under it. A
+heatmap takes no taps. One listed before every line and polygon layer draws
+beneath them; one listed after any draws above all of them and the points,
+still under the markers. A heatmap between two path layers cannot sit
+between them.
+
+**Caps.** A map draws at most 50,000 line and polygon features with
+1,000,000 vertices between them, and 200,000 heatmap points. Paths draw on
+one canvas and go on in chunks of 2,000 features a frame, so a big layer
+fills in over a few frames rather than holding the page; heatmap points are
+binned into cells half a radius wide before they are drawn. In headless
+Chromium on an M-series Mac, 20,000 five-vertex lines and 18,523 heatmap
+points drew with no task longer than 135 ms, including a zoom.
+
+**In the state.** `layers` is a state key like `markers`. The state's limits
+(eight levels deep, 256 KB) leave no room for GeoJSON inline, so a layer
+written to the state names its file with `url`.
 
 ## State
 
 Each of `markers`, `points`, `rings`, `categories`, `center`, `zoom`,
-`title`, `subtitle` and `note` that the state holds replaces the prop of the
+`title`, `subtitle`, `note` and `layers` that the state holds replaces the prop of the
 same name, and the map redraws whenever the state changes. The view moves
 only when what it frames changes, so a title edit leaves a reader's pan
 alone. Layout and basemap stay props.
@@ -146,6 +243,11 @@ built from the claude-workspaces repo with
 `package.json` and moves to a new version by replacing the tarball and that
 line.
 
+- 0.2.0: GeoJSON `layers` on the street map: `line`, `polygon` and
+  `heatmap`, inline or by `url`, each with a switch under the map, popups
+  from feature properties, and `layers` as a state key. Every 0.1.0 prop
+  draws as before. The markers' SVG no longer takes a tap that lands between markers,
+  so it reaches the points and layers beneath.
 - 0.1.0: the street map (`./map`: default `mount`, `mountWithSnapshot`), the
   snapshot host (`mountFromSnapshot`, `snapshotState`), compiled `.js` with
   Leaflet 1.9.4 and GoogleMutant 0.15.0 bundled in, and `.d.ts`.
@@ -155,6 +257,7 @@ line.
 ```bash
 bunx vitest run packages/components                          # unit and pack tests
 CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/static-page-browser.test.ts
+CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/layers-browser.test.ts
 ```
 
 The browser test packs the tarball, installs it into a temporary folder and

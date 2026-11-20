@@ -13,7 +13,7 @@ export class FakeSocket implements SpokenSocket {
   readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: SpokenSocket['onclose'] = null;
   sent: Array<string | ArrayBufferLike | ArrayBufferView> = [];
   closed = false;
   constructor(readonly url: string) {}

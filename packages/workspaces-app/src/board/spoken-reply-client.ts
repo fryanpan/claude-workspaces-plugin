@@ -58,7 +58,7 @@ export interface SpokenSocket {
   readyState: number;
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((ev?: { code?: number; reason?: string; wasClean?: boolean }) => void) | null;
   send(data: string | ArrayBufferLike | ArrayBufferView): void;
   close(): void;
 }

@@ -202,9 +202,10 @@ export async function handleWorkspaceMembers(
 
   // ── Turn comment and view enforcement on or off ───────────────────────
   //
-  // Every board starts report-only: a comment or view socket's edit is
-  // applied and logged. `enforce` drops it (`socket-write-gate.ts`). The
-  // mode is read per frame, so open sockets follow it without a reconnect.
+  // Every board enforces: a comment or view socket's edit is dropped
+  // (`socket-write-gate.ts`). `report-only`, an opt-out the owner sets per
+  // board, applies it and logs it. The mode is read per frame, so open
+  // sockets follow it without a reconnect.
   if (scope.rest === 'roles-mode' && req.method === 'POST') {
     const denied = refuseVisitor();
     if (denied) return denied;
