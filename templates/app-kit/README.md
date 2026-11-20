@@ -14,21 +14,23 @@ bun run start                        # http://127.0.0.1:3000
 Make an account at `/auth/sign-up`. Until a mail provider is wired, the
 verification link is printed in the terminal running the app; open it, then
 sign in. Open the same doc in two tabs and type: each tab shows the other's
-edits as they are made. Docs and accounts are saved to `data/` and kept
-across restarts.
+edits as they are made, and each doc page shows who else has it open. Docs,
+accounts and roles are saved to `data/` and kept across restarts.
 
 ## What is in it
 
 | File | What it does |
 | --- | --- |
 | `src/server.ts` | Starts the app. `PORT` (0 picks a free port), `HOST`, `DATA_DIR`, `APP_URL`, `AUTH_SECRET`, `APP_ENV`. |
-| `src/app.ts` | The Hono routes for pages and assets, and the doc socket at `/docs/<id>/ws`. `role` there says who may open which doc. |
+| `src/app.ts` | The Hono routes for pages and assets, the doc socket at `/docs/<id>/ws`, the presence socket at `/docs/<id>/presence`, and the owner's `POST /docs/<id>/roles`. |
+| `src/doc-roles.ts` | Who may do what to each doc, in `data/roles.sqlite`: the core asks it on every connect. |
+| `src/presence.ts` | Who else has a doc open, on the core's presence hub. |
 | `src/sign-in.ts` | The sign-in slot: `SignIn.principal(request)` says who sent a request. |
 | `src/password-sign-in.ts` | Password sign-in on Better Auth, accounts and sessions in `data/auth.sqlite`. |
 | `src/mail.ts` | Where verification and reset mails go: printed to the terminal until you wire a provider. |
 | `src/file-storage.ts` | Saves each doc as `data/docs/<id>.ydoc`. |
 | `src/page.ts` | The HTML for each page. |
-| `src/client/` | The page script: the Web Awesome components, the doc socket (`sync.ts`) and the textarea binding. |
+| `src/client/` | The page script: the Web Awesome components, the doc socket (`sync.ts`), the presence socket (`presence.ts`) and the textarea binding. |
 | `src/theme.css` | Imports the shared theme from the app kit package. |
 | `vendor/` | The app kit package, `@claude-workspaces/app-kit`, as a tarball: the collaboration core (`@claude-workspaces/app-kit/collab`, rooms that sync a Yjs doc between pages), the shared theme, and the shared password sign-in rules (`@claude-workspaces/app-kit/auth`). |
 | `src/app.css` | The app's own styles, every value a `--wa-*` token. |
@@ -89,9 +91,24 @@ with `fly logs --app <app>`.
 
 ## Who may open a doc
 
-`role` in `src/app.ts` gives every signed-in person edit on every doc. Change
-it to give owners, viewers or nobody: the core asks it on every connect, and
-a `view` socket receives the doc but its edits are dropped.
+The first signed-in person to open a doc owns it. On the doc page the owner
+gives somebody a role by their account's email: `edit`, `view` (reads, and
+the server drops every edit their socket sends) or `owner`. Everybody with
+no role on a doc gets `edit`; pass another default to `openDocRoles` in
+`src/server.ts`, or `null` to make docs invite-only. The table is
+`src/doc-roles.ts`, its roles the four the claude-workspaces board uses
+(`owner`, `edit`, `comment`, `view`).
+
+The core asks the table on every connect, every presence update and again
+after every role change, so an open page of somebody made `view` stops
+writing at once, and nothing the page does gets an edit past the server.
+
+## Who else is here
+
+Each doc page shows the people who have that doc open, as avatars beside the
+status line. The page says only "I am on this doc"; who it is and which doc
+come from the socket, and the same role table decides who is shown, so
+somebody with no role on a doc neither sees nor appears on it.
 
 ## Updating the app kit
 

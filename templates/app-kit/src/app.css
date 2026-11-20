@@ -61,6 +61,38 @@ body {
   font-size: var(--wa-font-size-s);
 }
 
+/* Who else has the doc open. Held at one avatar's height, so the row
+ * does not move when somebody arrives or leaves. */
+.app-here {
+  display: inline-flex;
+  gap: var(--wa-space-2xs);
+  min-height: 1.75rem;
+  margin-inline-start: auto;
+}
+
+.app-here wa-avatar {
+  --size: 1.75rem;
+}
+
+/* The owner's "give access" form: one line where it fits. */
+.app-share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--wa-space-s);
+  margin-block: var(--wa-space-s);
+}
+
+.app-share input {
+  flex: 1 1 14rem;
+  width: auto;
+}
+
+.app-share select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 #body {
   width: 100%;
   box-sizing: border-box;
