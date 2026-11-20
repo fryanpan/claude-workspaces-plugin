@@ -918,7 +918,7 @@ reads neither the token nor the org.
 ### The daily wall report
 
 ```bash
-bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--no-drift] [--dry-run]
+bun run machine:wall-report [--projects a,b] [--no-drift] [--dry-run]
 ```
 
 The daily prod check runs this. It reports three things.
@@ -938,9 +938,9 @@ the session cookie) are not minted, because a minted one would be a live
 credential. Their keys are derived from the same key file. The probe reads
 the key file and never writes it.
 
-**Cloudflare's config**, per project, from `terraform output` (the state
-bucket's credential only). Each project must have its own Access application
-with an audience no other project has, and hosts no other project's
+**Cloudflare's config**, per project, from `terraform output` (read in
+CI with the state bucket's read-only key, below). Each project must have
+its own Access application with an audience no other project has, and hosts no other project's
 application lists. Its tunnel must be `cw-<project>` with its own origin, and
 the tunnel's public host must be one its own application gates. Its board
 router route must point at a host its own application gates. The Access
@@ -952,7 +952,7 @@ changes nothing. Per machine:
 
 | Check | Passes when | Read from |
 | --- | --- | --- |
-| Fly network | the app `cw-<project>` is on the network of that name, and no other project shares it | `fly apps list` |
+| Fly network | the app `cw-<project>` is on the network of that name, and no other project shares it | `fly apps list`, read in CI |
 | No public address, no Fly service | the app holds no public IP and no machine publishes a service | `fly ips list`, `fly machine list` |
 | Admission settings | each setting `settings.ts` names matches what the deploy would set now | the server's environment, through `wall-probe.ts machine` |
 | Trusted emails | `CW_PROXIED_TRUSTED_EMAILS` is unset or holds the owner alone | the same |
@@ -971,7 +971,7 @@ Per project it also checks two things off the machine:
 Across the account it checks four more things. No secret in the repository
 or any of its environments is named `FLY_API_TOKEN`: CI deploys with one
 token per app (`bun run fly:ci-tokens apply`, `infra/cloudflare/README.md`
-"Fly's CI tokens"), and the org token stays on the Mac. The staging app's
+"Fly's CI tokens"), and the org token stays in `fly-org`. The staging app's
 environment, `fly-appkit-staging`, gets the same row as a project's. When
 the router config has more than one origin, `ONE_ADDRESS_ORIGIN` must be set to one of them. No
 service token may be admitted by two projects' Access applications. A
@@ -982,16 +982,33 @@ probe's output carries addresses, hostnames, audiences and uids and no
 secret, and the report prints only whether each one matches. `--no-drift`
 leaves this part out.
 
-It runs on the Mac and reads Cloudflare with read-only credentials only: the
-Keychain entries `cloudflare-api-token-read` (an API token with read
-permissions on the zone, Access, tunnels and Workers, the same token as the
-repository's read-only `CLOUDFLARE_API_TOKEN` secret) and
-`cloudflare-r2-tfstate-read` (JSON `{accessKeyId, secretAccessKey}`, the
-state bucket's Object Read key). It uses them for the outputs, the plan and
-the tunnel ingress. Without both entries it stops; it never falls back to
-`cloudflare-api-token` or `cloudflare-r2-tfstate`, which can write. Fly reads
-use the org token the way `machine:deploy` does, and the deploy-key and
-GitHub Environment reads use the Mac's `gh` login.
+It runs on the Mac, which holds no Cloudflare token and not the Fly org
+token. Two reads need one, so CI makes them: `.github/workflows/wall-read.yml`
+runs every day and on a dispatch from main.
+
+- **Cloudflare.** A job with the repository's read-only
+  `CLOUDFLARE_API_TOKEN` and state key, the pair a pull request's plan
+  holds, reads prod's Terraform outputs, each tunnel's configuration, the
+  live Access applications and service token names, and a plan in CI mode.
+- **`fly apps list`.** A job in `fly-org` reads each project app's name and
+  network with the org token. A Fly command that names no app needs that
+  token.
+
+Each job seals what it read to the Mac's handoff key (`infra/handoff/`),
+because the artifacts of a public repository are public, and uploads it as
+`wall-read-cloudflare` or `wall-read-fly`. The report downloads the newest
+run's artifacts with your `gh` login and opens them with the handoff key
+(`wall-read-pull.ts`). It reads only runs on main that a schedule, a push or
+a dispatch started. Each read gets a row that names its run and fails when
+the read is over 36 hours old or missing; to make a new one, run
+`gh workflow run wall-read.yml --ref main`. The read is prod's, so the
+report has no `--tf-env staging`.
+
+Everything else runs on the Mac. `fly ips list`, `fly machine list` and
+`fly ssh` use each app's own token (`mac-ops.ts`). The deploy-key and GitHub
+Environment reads use your `gh` login. The admission settings compare
+against the Terraform outputs and the owner's address, and that address is
+the one Keychain entry the report reads.
 
 The projects are `--projects`, or else every project the outputs give a
 tunnel. With fewer than two project machines there is no pair to compare,
