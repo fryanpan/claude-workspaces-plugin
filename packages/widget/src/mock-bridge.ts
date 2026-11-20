@@ -105,6 +105,15 @@ export function installBridge(window: Window & typeof globalThis): void {
     here.origin;
   delete seed[BOARD_ORIGIN];
 
+  // --- The load report's stamps (`reportMockLoad` in `mock-host.ts`) ---
+  // Words only: the host reads its own clock when each arrives. Ready is the
+  // document parsed, before the mock's images and async scripts finish.
+  const tell = (cw: string): void => window.parent.postMessage({ cw }, boardOrigin, []);
+  tell('frame-start');
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => tell('frame-ready'), { once: true });
+  } else tell('frame-ready');
+
   /** A URL on this board, or null for anywhere else. */
   const onBoard = (raw: string | URL): URL | null => {
     try {
