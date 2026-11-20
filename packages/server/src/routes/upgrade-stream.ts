@@ -61,7 +61,7 @@ import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { crossOriginCredentials, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
-import { signInRequiredBody } from '../middleware/write-gate.ts';
+import { isBrowserRequest, signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
 import { type PresenceRoster, type PresenceStamp, presenceUserFor } from '../presence-identity.ts';
@@ -905,6 +905,11 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // share, and letting a share-bearer claim an agentId would let an
         // outside tab impersonate the agent whose work it can see.
         const streamAgentId = visitor ? undefined : (url.searchParams.get('agentId') ?? undefined);
+        // A page never names an agent, so a browser that does is reading
+        // frames addressed to that agent alone: its private messages (M10).
+        if (streamAgentId !== undefined && isBrowserRequest(req.headers)) {
+          return j(403, { error: 'agent-stream-browser' });
+        }
         return openSseStream(
           sse,
           `ws~${workspaceId}`,

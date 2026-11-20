@@ -267,7 +267,10 @@ describe('the plan lead and a local-only board', () => {
   }, 30_000);
 
   it('does not hear them on a stream through the tunnel, which still hears other boards', async () => {
-    const stream = await leadStream(plan, await owner());
+    // A session elsewhere is a process through the tunnel, not a page: the
+    // owner's Access proof without the headers only a browser sends.
+    const { origin: _o, 'sec-fetch-site': _s, ...tunnel } = await owner();
+    const stream = await leadStream(plan, tunnel);
     try {
       const localKey = await ticketItem(localOnly, 'Slipway ledger', 'Slipway ledger right?');
       // The positive control, in the same window: an ordinary board's ask.

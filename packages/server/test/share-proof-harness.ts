@@ -32,6 +32,8 @@ export const AGENT = { id: 'agent-riverbend', name: 'Riverbend Bot', kind: 'agen
 
 export interface ShareProofServer {
   handle: ServerHandle;
+  /** The server's data folder, for a test that reads what was written. */
+  dataDir: string;
   board: string;
   /** `/workspaces/<board>`. */
   scope: string;
@@ -153,6 +155,7 @@ export async function startShareProofServer(
   };
   return {
     handle,
+    dataDir: join(root, 'data'),
     board,
     scope,
     local,
