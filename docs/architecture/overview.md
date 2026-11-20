@@ -165,6 +165,16 @@ Worker on D1, spreads into its own Better Auth config too, so hashing,
 verification and session rules have one source. `server/test/app-kit.test.ts` makes,
 builds and runs an app outside the repo and syncs a doc between two of its
 pages; `scripts/app-kit-browser.test.ts` does the same in two browser tabs.
+A made app also carries a role table and presence, with no board:
+`templates/app-kit/src/doc-roles.ts` is the app's `RoleFn`, one row per doc
+and person in its own SQLite (the first to open a doc owns it; the owner
+sets the rest at `POST /docs/<id>/roles`), and `src/presence.ts` runs the
+core's presence hub on `/docs/<id>/presence`, scoped by the same function.
+Its four words are the board's `AccessRole`, so an app reached through a
+board swaps the table for a read of that board's membership and nothing that
+calls it changes. `server/test/app-kit-roles.test.ts` signs two people in,
+shows each on the other's doc page, and shows a view-only person's edit
+dropped before it reaches the other page or the stored doc.
 
 **A Cloudflare Worker app hosts the same core in its own Durable Objects**
 (kit 0.3.0). `packages/app-kit/src/do/` wraps the room host for the
