@@ -3,7 +3,8 @@
 Components that run unchanged in a Claude Workspaces doc and on any site.
 Today there is one: the street map a board doc's `<StreetMap>` draws, with
 markers, popups, radius rings, category-coloured points and a legend, plus
-GeoJSON line, polygon and heatmap layers a reader can switch on and off.
+GeoJSON line, polygon, circle and heatmap layers that a reader or the host
+page can switch on and off.
 
 A site mounts it from a JSON snapshot of its state and needs no Workspaces
 server. In a board doc the same file runs with live state, so a write from an
@@ -15,12 +16,12 @@ The package is a tarball. It has no dependencies (Leaflet is bundled in), so
 it installs offline from the file alone:
 
 ```bash
-mkdir -p vendor && cp claude-workspaces-components-0.2.0.tgz vendor/
-bun add ./vendor/claude-workspaces-components-0.2.0.tgz   # or npm install
+mkdir -p vendor && cp claude-workspaces-components-0.3.0.tgz vendor/
+bun add ./vendor/claude-workspaces-components-0.3.0.tgz   # or npm install
 ```
 
 Your `package.json` then names it as
-`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.2.0.tgz"`.
+`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.3.0.tgz"`.
 
 ## Mount the map
 
@@ -38,7 +39,7 @@ if (el) {
     markers: [{ lat: 37.761, lng: -122.441, label: 'Harborlight hall' }],
     rings: [150, 300],
   }, snapshot);
-  // cleanup() removes the map.
+  // cleanup() removes the map; cleanup.setVisible(id, on) switches a layer.
 }
 ```
 
@@ -110,12 +111,12 @@ layer takes:
 
 | Field | What it is |
 | --- | --- |
-| `type` | `line`, `polygon` or `heatmap`. |
+| `type` | `line`, `polygon`, `circle` or `heatmap`. |
 | `data` or `url` | One of the two. |
 | `id` | Unique on the map; `layer-<index>` without. |
 | `name` | The words beside its switch under the map; its id without. |
 | `visible` | `false` starts it switched off. |
-| `popup` | Line and polygon only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`. Without it the layer takes no taps. |
+| `popup` | Line, polygon and circle only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`. Without it the layer takes no taps. |
 
 A switch per layer sits under the map, in the order given, and the reader's
 choice holds through every redraw. `legend: false` hides the switches with
@@ -155,6 +156,26 @@ skipped; a geometry of another kind is refused, naming the feature.
 }
 ```
 
+**Circle** (`Point`, `MultiPoint`): one dot per position, a fixed number
+of pixels across at every zoom.
+
+```ts
+{
+  type: 'circle',
+  id: 'reports',
+  name: 'Riverbend reports',
+  url: './riverbend-reports.geojson',
+  fill: '#e11d48',     // default #4269d0
+  fillOpacity: 0.8,    // 0 to 1; default 0.8
+  stroke: '#ffffff',   // default #ffffff
+  strokeWidth: 1,      // pixels, 0 to 20; 0 draws no stroke
+  strokeOpacity: 1,    // 0 to 1; default 1
+  radius: 5,           // pixels, 1 to 40; default 5
+  popup: '{kind} on {date}',
+  visible: false,      // starts switched off
+}
+```
+
 **Heatmap** (`Point`, `MultiPoint`):
 
 ```ts
@@ -174,15 +195,31 @@ skipped; a geometry of another kind is refused, naming the feature.
 Colours are hex, a CSS colour name, or `rgb()`/`hsl()`. Numbers past their
 range are held at its edge.
 
-**Order.** Line and polygon layers draw in the order given, beneath the
-points and markers, and a tap opens the popup of the topmost one under it. A
-heatmap takes no taps. One listed before every line and polygon layer draws
-beneath them; one listed after any draws above all of them and the points,
-still under the markers. A heatmap between two path layers cannot sit
-between them.
+**Switching from the page.** The handle `mount` and `mountWithSnapshot`
+return is the cleanup function, and it also carries `setVisible(id, on)`.
+It switches the layer with that `id` as the reader's switch would, for
+every type and for inline data as well as `url` data, and the switch under
+the map shows the new state. It works whether or not the switches are shown
+(`legend: false`), and the choice holds through redraws until either the
+reader or the page changes it. An id the map does not draw changes nothing
+now; if a layer with that id arrives later, it starts the way the last call
+said.
+
+```ts
+const map = mountWithSnapshot(el, { layers: [/* … { id: 'reports', … } */] });
+toggle.addEventListener('change', () => map.setVisible('reports', toggle.checked));
+```
+
+**Order.** Line, polygon and circle layers draw in the order given, beneath
+the points and markers, and a tap opens the popup of the topmost one under
+it. A heatmap takes no taps. One listed before every line, polygon and
+circle layer draws beneath them; one listed after any draws above all of
+them and the points, still under the markers. A heatmap between two such
+layers cannot sit between them.
 
 **Caps.** A map draws at most 50,000 line and polygon features with
-1,000,000 vertices between them, and 200,000 heatmap points. Paths draw on
+1,000,000 vertices between them, 20,000 circles (each position of a
+`MultiPoint` counts) and 200,000 heatmap points. Paths draw on
 one canvas and go on in chunks of 2,000 features a frame, so a big layer
 fills in over a few frames rather than holding the page; heatmap points are
 binned into cells half a radius wide before they are drawn. In headless
@@ -243,6 +280,10 @@ built from the claude-workspaces repo with
 `package.json` and moves to a new version by replacing the tarball and that
 line.
 
+- 0.3.0: `circle` layers (a dot per point, with fill, stroke, radius,
+  popup and `visible`), and `setVisible(id, on)` on the handle the map
+  returns, which switches any layer from the host page and moves its switch
+  under the map to match. Every 0.2.0 prop draws as before.
 - 0.2.0: GeoJSON `layers` on the street map: `line`, `polygon` and
   `heatmap`, inline or by `url`, each with a switch under the map, popups
   from feature properties, and `layers` as a state key. Every 0.1.0 prop

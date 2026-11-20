@@ -1,12 +1,14 @@
 /**
  * The map's `layers` prop, read and judged before anything draws: GeoJSON
- * line, polygon and heatmap layers over the basemap, under the map's own
- * points and markers.
+ * line, polygon, circle and heatmap layers over the basemap, under the map's
+ * own points and markers.
  *
  *   layers: [
  *     { type: 'polygon', name: 'Saltmarsh quarter', data, fill: '#a463f2' },
  *     { type: 'line', name: 'Riverbend paths', url: './paths.geojson',
  *       color: '#ff725c', width: 3, popup: '{name}: {speed} mph' },
+ *     { type: 'circle', name: 'Riverbend reports', data, fill: '#e11d48',
+ *       radius: 5, popup: '{kind}' },
  *     { type: 'heatmap', name: 'Harborlight reports', data, weight: 'count' },
  *   ]
  *
@@ -20,11 +22,12 @@
  * `{key}` names a feature property, filled as text (`popupText`).
  */
 
-export type LayerType = 'line' | 'polygon' | 'heatmap';
+export type LayerType = 'line' | 'polygon' | 'circle' | 'heatmap';
 
 /** The most a map's layers hold, so one page cannot stall a reader's. Lines
  *  and polygons are canvas paths Leaflet reprojects on every zoom, so their
- *  cap counts vertices; heatmap points are binned into cells per redraw. */
+ *  cap counts vertices; a circle is one canvas path per position, so its cap
+ *  counts positions; heatmap points are binned into cells per redraw. */
 export const LAYER_LIMITS = {
   layers: 24,
   /** Line and polygon features across every layer of a map. */
@@ -33,6 +36,9 @@ export const LAYER_LIMITS = {
   vertices: 1_000_000,
   /** Heatmap points across every layer of a map. */
   heatPoints: 200_000,
+  /** Circle positions across every layer of a map: each is a path of its
+   *  own, held to the same order as the map's 50,000 `points`. */
+  circles: 20_000,
 } as const;
 
 /** Heatmap colours, cold to hot, when a layer names none. */
@@ -76,6 +82,19 @@ export interface PolygonLayer extends LayerBase {
   popup?: string;
 }
 
+export interface CircleLayer extends LayerBase {
+  type: 'circle';
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  /** Pixels; 0 draws no stroke. */
+  strokeWidth: number;
+  strokeOpacity: number;
+  /** Pixels, the same at every zoom. */
+  radius: number;
+  popup?: string;
+}
+
 export interface HeatmapLayer extends LayerBase {
   type: 'heatmap';
   /** The feature property each point's weight is read from; 1 without. */
@@ -87,7 +106,7 @@ export interface HeatmapLayer extends LayerBase {
   opacity: number;
 }
 
-export type MapLayer = LineLayer | PolygonLayer | HeatmapLayer;
+export type MapLayer = LineLayer | PolygonLayer | CircleLayer | HeatmapLayer;
 
 /** One GeoJSON feature as the renderer takes it: a geometry of the layer's
  *  kind, and its properties. Coordinates are GeoJSON's `[lng, lat]`. */
@@ -123,6 +142,7 @@ const COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20}|(?:rgb|hsl)a?\([\d\s.,%/a-z]{1,60}
 const GEOMETRIES: Record<LayerType, readonly string[]> = {
   line: ['LineString', 'MultiLineString'],
   polygon: ['Polygon', 'MultiPolygon'],
+  circle: ['Point', 'MultiPoint'],
   heatmap: ['Point', 'MultiPoint'],
 };
 
@@ -236,8 +256,8 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
   const at = `layers[${i}]`;
   if (!isRecord(raw)) return { ok: false, error: `${at} must be an object` };
   const type = raw.type;
-  if (type !== 'line' && type !== 'polygon' && type !== 'heatmap') {
-    return { ok: false, error: `${at}.type must be "line", "polygon" or "heatmap"` };
+  if (type !== 'line' && type !== 'polygon' && type !== 'circle' && type !== 'heatmap') {
+    return { ok: false, error: `${at}.type must be "line", "polygon", "circle" or "heatmap"` };
   }
   const hasData = raw.data !== undefined;
   const hasUrl = raw.url !== undefined;
@@ -287,6 +307,20 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     const popup = f.text('popup');
     if (popup !== undefined) polygon.popup = popup;
     layer = polygon;
+  } else if (type === 'circle') {
+    const circle: CircleLayer = {
+      ...base,
+      type,
+      fill: f.color('fill', DEFAULT_COLOR),
+      fillOpacity: f.number('fillOpacity', 0.8, 0, 1),
+      stroke: f.color('stroke', '#ffffff'),
+      strokeWidth: f.number('strokeWidth', 1, 0, 20),
+      strokeOpacity: f.number('strokeOpacity', 1, 0, 1),
+      radius: f.number('radius', 5, 1, 40),
+    };
+    const popup = f.text('popup');
+    if (popup !== undefined) circle.popup = popup;
+    layer = circle;
   } else {
     const heat: HeatmapLayer = {
       ...base,
@@ -352,9 +386,15 @@ export interface LayerBudget {
   features: number;
   vertices: number;
   heatPoints: number;
+  circles: number;
 }
 
-export const emptyBudget = (): LayerBudget => ({ features: 0, vertices: 0, heatPoints: 0 });
+export const emptyBudget = (): LayerBudget => ({
+  features: 0,
+  vertices: 0,
+  heatPoints: 0,
+  circles: 0,
+});
 
 /**
  * Judge a layer's GeoJSON: every feature's geometry must be of the layer's
@@ -425,6 +465,17 @@ export function readLayerData(
     }
     budget.heatPoints = total;
     return { ok: true, value: { kind: 'heat', points, bbox } };
+  }
+  if (layer.type === 'circle') {
+    const total = budget.circles + vertices;
+    if (total > LAYER_LIMITS.circles) {
+      return {
+        ok: false,
+        error: `${name} brings the map's circles to ${total}; a map draws at most ${LAYER_LIMITS.circles}`,
+      };
+    }
+    budget.circles = total;
+    return { ok: true, value: { kind: 'paths', features, vertices, bbox } };
   }
   const featureTotal = budget.features + features.length;
   if (featureTotal > LAYER_LIMITS.features) {

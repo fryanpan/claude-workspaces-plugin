@@ -14,10 +14,11 @@
  * moves only when what it frames changed, so a title edit leaves a reader's
  * pan alone.
  *
- * `layers` adds GeoJSON line, polygon and heatmap layers beneath the points
- * and markers, each switched on and off from a list under the map
- * (`layers.ts` reads them, `layer-control.ts` loads them, `draw-layers.ts`
- * draws them). A map of layers alone needs no markers or points.
+ * `layers` adds GeoJSON line, polygon, circle and heatmap layers beneath the
+ * points and markers, each switched on and off from a list under the map or
+ * by the host through the handle's `setVisible` (`layers.ts` reads them,
+ * `layer-control.ts` loads them, `draw-layers.ts` draws them). A map of
+ * layers alone needs no markers or points.
  *
  * The basemap is a prop. With none named it is OpenStreetMap, which needs no
  * key, or Google's roadmap when the host passes `basemapKey`. A host that
@@ -105,7 +106,26 @@ export type MapLayerProp = {
       colors?: string[];
       opacity?: number;
     }
+  | {
+      type: 'circle';
+      fill?: string;
+      fillOpacity?: number;
+      stroke?: string;
+      /** Pixels, 0 to 20; 0 draws no stroke. */
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      /** Pixels, 1 to 40, the same at every zoom. */
+      radius?: number;
+    }
 );
+
+/** What `mount` returns: call it to remove the map. */
+export type MapHandle = (() => void) & {
+  /** Switch the layer with this id on or off, as its row's switch would;
+   *  the row shows the change. An id the map does not draw changes nothing
+   *  now and holds if a layer with that id arrives later. */
+  setVisible(id: string, on: boolean): void;
+};
 
 /** What a host passes the map. Every field is optional except that a map
  *  needs `markers` or `points`, here or in its state. */
@@ -182,7 +202,7 @@ export default function mount(
   el: HTMLElement,
   props: Record<string, unknown>,
   state?: StateHook,
-): () => void {
+): MapHandle {
   const doc = el.ownerDocument;
   const make = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string) => {
     const node = doc.createElement(tag);
@@ -332,13 +352,18 @@ export default function mount(
     pending = null;
   });
   const off = state?.on(draw);
-  return () => {
+  const cleanup = (): void => {
     gone = true;
     off?.();
     control.remove();
     live?.remove();
     live = null;
   };
+  return Object.assign(cleanup, {
+    setVisible: (id: string, on: boolean): void => {
+      if (!gone) control.setVisible(id, on);
+    },
+  });
 }
 
 /** The legend: a swatch per category, then a ring swatch per ring. */
@@ -364,13 +389,18 @@ function legendOf(doc: Document, spec: MapSpec): HTMLElement[] {
 /**
  * Mount the map on a page that is not a doc, with a state hook over
  * `snapshot`: the JSON `get_component_state` returned for the doc's map.
- * Writes change this page's copy only. Returns the cleanup.
+ * Writes change this page's copy only. Returns the map's handle: the
+ * cleanup, with `setVisible`.
  */
 export function mountWithSnapshot(
   el: HTMLElement,
   props: MapProps,
   snapshot?: unknown,
   opts: SnapshotOptions = {},
-): () => void {
-  return mountFromSnapshot(el, mount, props, snapshot, { id: props.id ?? 'map', ...opts });
+): MapHandle {
+  // `mountFromSnapshot` hands back what `mount` returned, the handle itself.
+  return mountFromSnapshot(el, mount, props, snapshot, {
+    id: props.id ?? 'map',
+    ...opts,
+  }) as MapHandle;
 }

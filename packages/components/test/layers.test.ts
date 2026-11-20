@@ -106,6 +106,52 @@ describe('readLayers', () => {
     });
   });
 
+  it('reads a circle layer with its defaults, and the fields it is given', () => {
+    const [plain, styled] = only(
+      readLayers([
+        { type: 'circle', data: [] },
+        {
+          type: 'circle',
+          id: 'reports',
+          name: 'Harborlight reports',
+          data: [],
+          fill: '#e11d48',
+          fillOpacity: 0.6,
+          stroke: '#7f1d1d',
+          strokeWidth: 2,
+          strokeOpacity: 0.5,
+          radius: 400,
+          popup: '{kind}',
+          visible: false,
+        },
+      ]),
+    );
+    expect(plain).toMatchObject({
+      type: 'circle',
+      fill: '#4269d0',
+      fillOpacity: 0.8,
+      stroke: '#ffffff',
+      strokeWidth: 1,
+      strokeOpacity: 1,
+      radius: 5,
+      visible: true,
+    });
+    expect(plain?.type === 'circle' && plain.popup).toBeFalsy();
+    // A radius past the range is held at its edge, not refused.
+    expect(styled).toMatchObject({
+      type: 'circle',
+      id: 'reports',
+      fill: '#e11d48',
+      fillOpacity: 0.6,
+      stroke: '#7f1d1d',
+      strokeWidth: 2,
+      strokeOpacity: 0.5,
+      radius: 40,
+      popup: '{kind}',
+      visible: false,
+    });
+  });
+
   it.each([
     ['not a list', { type: 'line' }, 'layers must be a list'],
     ['an unknown type', [{ type: 'raster', data: [] }], 'layers[0].type must be'],
@@ -116,6 +162,11 @@ describe('readLayers', () => {
       'a colour that is markup',
       [{ type: 'line', data: [], color: '"><b>' }],
       'layers[0].color must be a colour',
+    ],
+    [
+      'a circle stroke that is markup',
+      [{ type: 'circle', data: [], stroke: '"><b>' }],
+      'layers[0].stroke must be a colour',
     ],
     [
       'a width that is text',
@@ -163,7 +214,7 @@ describe('readLayerData', () => {
     const data = only(readLayerData(lineLayer, RIVERBEND_PATHS, budget));
     expect(data.kind).toBe('paths');
     expect(data.kind === 'paths' && data.features).toHaveLength(1);
-    expect(budget).toEqual({ features: 1, vertices: 2, heatPoints: 0 });
+    expect(budget).toEqual({ features: 1, vertices: 2, heatPoints: 0, circles: 0 });
   });
 
   it('takes a bare geometry and a list of features', () => {
@@ -265,13 +316,87 @@ describe('readLayerData', () => {
   });
 
   it('refuses a layer that takes the map past its cap, counting earlier layers', () => {
-    const budget = { features: LAYER_LIMITS.features, vertices: 0, heatPoints: 0 };
+    const budget = { ...emptyBudget(), features: LAYER_LIMITS.features };
     const r = readLayerData(lineLayer, RIVERBEND_PATHS, budget);
     expect(r).toEqual({
       ok: false,
       error: `layer "Riverbend paths" brings the map's line and polygon features to 50001; a map draws at most 50000`,
     });
     expect(budget.features).toBe(LAYER_LIMITS.features);
+  });
+});
+
+describe('readLayerData for circles', () => {
+  const circleLayer = only(
+    readLayers([{ type: 'circle', name: 'Harborlight reports', data: null }]),
+  )[0];
+  if (!circleLayer) throw new Error('layer did not read');
+  const point = (lng: number, lat: number, properties: Record<string, unknown> = {}) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [lng, lat] },
+    properties,
+  });
+
+  it('takes points and multipoints, and counts each position against the circle cap', () => {
+    const budget = emptyBudget();
+    const read = only(
+      readLayerData(
+        circleLayer,
+        [
+          point(-122.44, 37.76, { kind: 'bike' }),
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'MultiPoint',
+              coordinates: [
+                [-122.43, 37.77],
+                [-122.42, 37.78],
+              ],
+            },
+            properties: {},
+          },
+        ],
+        budget,
+      ),
+    );
+    expect(read).toMatchObject({ kind: 'paths', bbox: [-122.44, 37.76, -122.42, 37.78] });
+    expect(read.kind === 'paths' && read.features).toHaveLength(2);
+    expect(budget).toEqual({ features: 0, vertices: 0, heatPoints: 0, circles: 3 });
+  });
+
+  it('refuses a line in a circle layer, naming the feature', () => {
+    const r = readLayerData(
+      circleLayer,
+      [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [-122.44, 37.76],
+              [-122.43, 37.77],
+            ],
+          },
+          properties: {},
+        },
+      ],
+      emptyBudget(),
+    );
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'layer "Harborlight reports": feature 0 is a LineString; a circle layer draws Point and MultiPoint',
+    });
+  });
+
+  it('refuses a layer that takes the map past its circle cap, counting earlier layers', () => {
+    const budget = { ...emptyBudget(), circles: LAYER_LIMITS.circles };
+    const r = readLayerData(circleLayer, [point(-122.44, 37.76)], budget);
+    expect(r).toEqual({
+      ok: false,
+      error: `layer "Harborlight reports" brings the map's circles to ${LAYER_LIMITS.circles + 1}; a map draws at most ${LAYER_LIMITS.circles}`,
+    });
+    expect(budget.circles).toBe(LAYER_LIMITS.circles);
   });
 });
 

@@ -11,7 +11,7 @@
  */
 import { snapshotState } from '@claude-workspaces/core/component-snapshot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import mount from '../src/map.ts';
+import mount, { mountWithSnapshot } from '../src/map.ts';
 
 const square = (lng: number, lat: number, d: number) => [
   [
@@ -231,5 +231,143 @@ describe('the map with layers', () => {
     cleanups.push(mount(el, { legend: false, layers: [{ type: 'line', data: PATHS }] }));
     await until(() => drawn(el) === '1');
     expect(el.querySelector<HTMLElement>('.cw-map-layers')?.hidden).toBe(true);
+  });
+});
+
+/** 300 reports in a grid around the centre, as one FeatureCollection. */
+const REPORTS = {
+  type: 'FeatureCollection',
+  features: Array.from({ length: 300 }, (_, i) => ({
+    type: 'Feature',
+    geometry: {
+      type: 'Point',
+      coordinates: [-122.45 + (i % 20) * 0.001, 37.75 + Math.floor(i / 20) * 0.001],
+    },
+    properties: { kind: i % 2 ? 'bike' : 'walk' },
+  })),
+};
+
+const circles = (el: HTMLElement) => el.querySelectorAll('path.cw-map-circle').length;
+
+describe("the map's circle layers and setVisible", () => {
+  it('draws no circles from a layer marked visible:false until the host calls setVisible', async () => {
+    const el = host();
+    const handle = mountWithSnapshot(el, {
+      layers: [
+        {
+          type: 'circle',
+          id: 'reports',
+          name: 'Harborlight reports',
+          data: REPORTS,
+          fill: '#e11d48',
+          stroke: '#ffffff',
+          strokeWidth: 1,
+          radius: 4,
+          visible: false,
+        },
+      ],
+    });
+    cleanups.push(handle);
+    await until(() => drawn(el) === '1');
+    expect(circles(el)).toBe(0);
+    expect(rows(el)).toEqual([
+      { id: 'reports', state: 'off', features: 300, text: 'Harborlight reports' },
+    ]);
+
+    handle.setVisible('reports', true);
+    expect(circles(el)).toBe(300);
+    expect(box(el, 'reports')?.checked).toBe(true);
+    expect(rows(el)[0]?.state).toBe('drawn');
+  });
+
+  it('styles each circle from the layer and opens its popup from the feature', async () => {
+    const el = host();
+    cleanups.push(
+      mount(el, {
+        layers: [
+          {
+            type: 'circle',
+            id: 'reports',
+            data: REPORTS,
+            fill: '#e11d48',
+            stroke: '#7f1d1d',
+            strokeWidth: 2,
+            radius: 6,
+            popup: 'Report: {kind}',
+          },
+        ],
+      }),
+    );
+    await until(() => circles(el) === 300);
+    const first = el.querySelector<SVGPathElement>('path.cw-map-circle');
+    expect(first?.getAttribute('fill')).toBe('#e11d48');
+    expect(first?.getAttribute('stroke')).toBe('#7f1d1d');
+    expect(first?.getAttribute('stroke-width')).toBe('2');
+    first?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    const popup = await until(() => el.querySelector<HTMLElement>('.cw-map-popup'));
+    expect(popup.textContent).toBe('Report: walk');
+  });
+
+  const POINT_DATA = {
+    type: 'FeatureCollection',
+    features: REPORTS.features.slice(0, 5),
+  };
+  /** Each layer type, inline, and how many of its elements the page holds. */
+  const TYPES = [
+    {
+      layer: { type: 'line', id: 'it', data: PATHS },
+      count: (el: HTMLElement) => el.querySelectorAll('path.cw-map-line').length,
+      on: 1,
+    },
+    {
+      layer: { type: 'polygon', id: 'it', data: QUARTERS },
+      count: (el: HTMLElement) => el.querySelectorAll('path.cw-map-polygon').length,
+      on: 2,
+    },
+    {
+      layer: { type: 'heatmap', id: 'it', data: POINT_DATA },
+      count: (el: HTMLElement) => el.querySelectorAll('canvas.cw-map-heat[data-layer="it"]').length,
+      on: 1,
+    },
+    {
+      layer: { type: 'circle', id: 'it', data: POINT_DATA },
+      count: circles,
+      on: 5,
+    },
+  ] as const;
+
+  it.each(TYPES)(
+    'switches an inline $layer.type layer with setVisible, and its row follows',
+    async ({ layer, count, on }) => {
+      const el = host();
+      const handle = mount(el, { layers: [layer] });
+      cleanups.push(handle);
+      await until(() => drawn(el) === '1');
+      expect(count(el)).toBe(on);
+
+      handle.setVisible('it', false);
+      expect(count(el)).toBe(0);
+      expect(box(el, 'it')?.checked).toBe(false);
+      expect(rows(el)[0]?.state).toBe('off');
+
+      handle.setVisible('it', true);
+      expect(count(el)).toBe(on);
+      expect(box(el, 'it')?.checked).toBe(true);
+      expect(rows(el)[0]?.state).toBe('drawn');
+    },
+  );
+
+  it("keeps the host's choice through a redraw, and ignores an id it does not draw", async () => {
+    const el = host();
+    const state = snapshotState({});
+    const handle = mount(el, { layers: [{ type: 'circle', id: 'reports', data: REPORTS }] }, state);
+    cleanups.push(handle);
+    await until(() => circles(el) === 300);
+    handle.setVisible('reports', false);
+    handle.setVisible('nowhere', false);
+    state.set('title', 'Riverbend, retitled');
+    await until(() => el.querySelector('.cw-map-title')?.textContent === 'Riverbend, retitled');
+    expect(circles(el)).toBe(0);
+    expect(box(el, 'reports')?.checked).toBe(false);
   });
 });

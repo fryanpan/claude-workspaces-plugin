@@ -56,6 +56,24 @@ export class LayerControl {
     this.pass();
   }
 
+  /** Switch a layer from the host page, as its row's switch would. An id
+   *  not yet drawn is remembered, so it starts that way when it arrives. */
+  setVisible(id: string, on: boolean): void {
+    this.seen.add(id);
+    if (on === !this.hidden.has(id)) return;
+    if (on) this.hidden.delete(id);
+    else this.hidden.add(id);
+    const li = [...this.list.children].find(
+      (n): n is HTMLElement => n instanceof HTMLElement && n.dataset.layer === id,
+    );
+    const box = li?.querySelector('input');
+    if (li && box && (li.dataset.state === 'drawn' || li.dataset.state === 'off')) {
+      box.checked = on;
+      li.dataset.state = on ? 'drawn' : 'off';
+    }
+    this.toggled(id, on);
+  }
+
   current(): LayersNow {
     return this.now;
   }
@@ -137,7 +155,7 @@ export class LayerControl {
     const color =
       layer.type === 'line'
         ? layer.color
-        : layer.type === 'polygon'
+        : layer.type === 'polygon' || layer.type === 'circle'
           ? layer.fill
           : (layer.colors.at(-1) ?? '#ef4444');
     swatch.style.setProperty('background-color', color);

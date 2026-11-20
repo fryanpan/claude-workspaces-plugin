@@ -21,6 +21,7 @@ export type {
 export {
   type BasemapChoice,
   MAP_STATE_KEYS,
+  type MapHandle,
   type MapLayerProp,
   type MapProps,
   type MapRingProp,
