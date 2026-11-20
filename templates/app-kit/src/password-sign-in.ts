@@ -136,10 +136,19 @@ export async function passwordSignIn(opts: PasswordSignInOptions): Promise<SignI
       return redirectWithCookies(res, '/auth/sign-in');
     });
 
+  // Better Auth's own user table, which it keeps emails lower case in.
+  const byEmail = db.query<{ id: string; name: string }, [string]>(
+    'SELECT id, name FROM user WHERE email = ?',
+  );
+
   return {
     async principal(req) {
       const session = await auth.api.getSession({ headers: req.headers });
       return session ? { id: session.user.id, name: session.user.name } : null;
+    },
+    personByEmail(email) {
+      const row = byEmail.get(email.trim().toLowerCase());
+      return row ? { id: row.id, name: row.name } : null;
     },
     routes,
     signInPath: '/auth/sign-in',

@@ -3,7 +3,7 @@
  *
  *   PORT         default 3000; 0 picks a free port
  *   HOST         default 127.0.0.1
- *   DATA_DIR     where docs and accounts are saved, default ./data
+ *   DATA_DIR     where docs, accounts and doc roles are saved, default ./data
  *   APP_URL      the app's public origin; default the address it listens on
  *   AUTH_SECRET  signs session cookies; default a secret made in DATA_DIR
  *   APP_ENV      `production` refuses to start until mail is wired (src/mail.ts)
@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import { createApp } from './app.ts';
+import { openDocRoles } from './doc-roles.ts';
 import { FileCollabStorage } from './file-storage.ts';
 import { mailerFromEnv } from './mail.ts';
 import { passwordSignIn } from './password-sign-in.ts';
@@ -46,6 +47,7 @@ const { fetch, websocket, host } = createApp({
   appName: pkg.name,
   signIn: await passwordSignIn({ dataDir, baseURL, mailer, secret: process.env.AUTH_SECRET }),
   storage: new FileCollabStorage(join(dataDir, 'docs')),
+  roles: openDocRoles(join(dataDir, 'roles.sqlite')),
   distDir: join(root, 'dist'),
 });
 // The placeholder server was typed without socket data; the app's handlers

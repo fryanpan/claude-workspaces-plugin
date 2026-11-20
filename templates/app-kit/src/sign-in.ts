@@ -11,6 +11,9 @@ import type { Hono } from 'hono';
 export interface SignIn {
   /** Who sent this request, or null when nobody is signed in. */
   principal(req: Request): Principal | null | Promise<Principal | null>;
+  /** The person with this email, for a doc's owner giving them a role; null
+   *  when there is no such account. */
+  personByEmail(email: string): Principal | null | Promise<Principal | null>;
   /** The provider's own pages and callbacks. The app mounts them at `/auth`. */
   routes: Hono;
   /** Where a signed-out page is sent. */

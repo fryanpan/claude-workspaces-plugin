@@ -3,7 +3,7 @@
  * styles, then the one script; the script reads what to do from `data-*`
  * attributes on <body>.
  */
-import type { Principal } from '@claude-workspaces/app-kit/collab';
+import type { CollabRole, Principal } from '@claude-workspaces/app-kit/collab';
 
 const esc = (s: string): string =>
   s.replace(
@@ -46,14 +46,37 @@ export function homePage(appName: string, who: Principal): string {
   );
 }
 
-export function docPage(appName: string, who: Principal, docId: string): string {
+const ROLE_TEXT: Record<CollabRole, string> = {
+  owner: 'You own this doc',
+  edit: 'You can edit',
+  comment: 'You can read',
+  view: 'You can read',
+};
+
+/** The owner's form for giving somebody a role on the doc. */
+function shareForm(docId: string): string {
+  return `<form method="post" action="/docs/${esc(docId)}/roles" class="app-share" id="share">
+<input name="email" type="email" aria-label="Their account's email" placeholder="Their account's email" required>
+<select name="role" aria-label="Role">
+<option value="edit">Can edit</option><option value="view">Can read</option><option value="owner">Owner</option>
+</select>
+<wa-button type="submit" size="small">Give access</wa-button>
+</form>`;
+}
+
+export function docPage(appName: string, who: Principal, docId: string, role: CollabRole): string {
   return shell(
     `${docId} · ${appName}`,
     `${header(appName, who)}
 <h2>${esc(docId)}</h2>
-<p class="app-quiet" id="status" role="status">Connecting…</p>
+<div class="app-row app-quiet">
+<span>${ROLE_TEXT[role]}</span>
+<span id="status" role="status">Connecting…</span>
+<span id="here" class="app-here" aria-label="Also here"></span>
+</div>
+${role === 'owner' ? shareForm(docId) : ''}
 <textarea id="body" aria-label="Doc text" rows="16" disabled></textarea>`,
-    { page: 'doc', doc: docId },
+    { page: 'doc', doc: docId, role },
   );
 }
 
