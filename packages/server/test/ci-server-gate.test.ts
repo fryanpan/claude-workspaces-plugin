@@ -97,7 +97,13 @@ function needsOf(block: string[]): string[] {
 
 describe('the CI server gate', () => {
   const yaml = readFileSync(WORKFLOW, 'utf8');
-  const serverJobs = jobsRunning(yaml, /\bbun run test:server\b/);
+  // Every job running the server suite, and the core-mode twin among them
+  // (`server-core`, `--core`: the same suite with every board on the collab
+  // core). The twin is a second run of the suite, not a second home for it,
+  // so "one job" counts the others; every property below holds for both.
+  const allServerJobs = jobsRunning(yaml, /\bbun run test:server\b/);
+  const coreServerJobs = jobsRunning(yaml, /\bbun run test:server\b[^\n]*\s--core\b/);
+  const serverJobs = allServerJobs.filter((j) => !coreServerJobs.includes(j));
   const clientJobs = jobsRunning(yaml, /\bbun run test:vitest\b/);
 
   it('runs the server suite in a step of its own', () => {
@@ -106,6 +112,11 @@ describe('the CI server gate', () => {
       'no job in ci.yml runs `bun run test:server`, so nothing in CI reads ' +
         'packages/server/test on its own terms',
     ).toHaveLength(1);
+  });
+
+  it('runs the core-mode twin as a job of its own, beside the ordinary one', () => {
+    expect(coreServerJobs, 'no job runs `bun run test:server --core`').toHaveLength(1);
+    expect(coreServerJobs).not.toContain(serverJobs[0]);
   });
 
   it('does not reach the server suite through the chained `bun run test`', () => {
@@ -124,7 +135,7 @@ describe('the CI server gate', () => {
   });
 
   it('does not swallow the suite exit code', () => {
-    for (const name of [...serverJobs, ...clientJobs]) {
+    for (const name of [...allServerJobs, ...clientJobs]) {
       for (const run of runPayloads(jobBlock(yaml, name))) {
         if (!/bun run test(:server|:vitest)?\b/.test(run)) continue;
         expect(run, `a test step swallows its exit code: ${run}`).not.toMatch(
@@ -138,7 +149,7 @@ describe('the CI server gate', () => {
     // The one place `continue-on-error` is legitimate in this workflow is the
     // notes-eval smoke job, which spends money and reaches the network. On a
     // suite job it would turn the suite into a suggestion.
-    for (const name of [...serverJobs, ...clientJobs]) {
+    for (const name of [...allServerJobs, ...clientJobs]) {
       expect(jobBlock(yaml, name).join('\n'), `${name} is continue-on-error`).not.toMatch(
         /continue-on-error/,
       );
@@ -149,13 +160,11 @@ describe('the CI server gate', () => {
     // The property, not the mechanism: neither suite may be downstream of the
     // other, because a `needs:` edge is a skip when the upstream job fails.
     expect(clientJobs.length, 'no job runs `bun run test:vitest`').toBeGreaterThan(0);
-    const [server] = serverJobs;
-    expect(server).toBeDefined();
-    expect(clientJobs, 'the two suites must not be steps of one job').not.toContain(server);
-    expect(
-      needsOf(jobBlock(yaml, server as string)),
-      'the server suite waits on another job',
-    ).toEqual([]);
+    expect(serverJobs[0]).toBeDefined();
+    for (const server of allServerJobs) {
+      expect(clientJobs, 'the two suites must not be steps of one job').not.toContain(server);
+      expect(needsOf(jobBlock(yaml, server)), `${server} waits on another job`).toEqual([]);
+    }
     for (const client of clientJobs) {
       expect(needsOf(jobBlock(yaml, client)), `${client} waits on another job`).toEqual([]);
     }
