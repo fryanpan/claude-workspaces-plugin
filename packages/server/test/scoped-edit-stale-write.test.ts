@@ -52,10 +52,12 @@ function connectDoc(url: string): { ws: WebSocket; ydoc: Y.Doc; ready: Promise<v
     encoding.writeVarUint(enc, MSG_SYNC);
     const type = syncProtocol.readSyncMessage(dec, enc, ydoc, ws);
     if (encoding.length(enc) > 1) ws.send(encoding.toUint8Array(enc));
-    if (
-      !synced &&
-      (type === syncProtocol.messageYjsSyncStep2 || type === syncProtocol.messageYjsUpdate)
-    ) {
+    // Ready only on the server's sync step 2, which carries the whole doc. A
+    // socket joins the doc's broadcast at connect, so a change the server
+    // makes before it answers our step 1 (a write-back's re-read, say)
+    // arrives first as a plain update holding none of the table. Counting
+    // that as ready failed in CI's core-mode run (run 44712670059).
+    if (!synced && type === syncProtocol.messageYjsSyncStep2) {
       synced = true;
       resolveReady?.();
     }

@@ -239,6 +239,7 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/sse-marks.ts': 'not-in-inventory',
   'packages/server/src/stall-escalation.ts': 'not-in-inventory',
   'packages/server/src/stall-nudge.ts': 'not-in-inventory',
+  'packages/server/src/supervisor-boot-steps.ts': 'not-in-inventory',
   'packages/server/src/supervisor-hang-capture.ts': 'not-in-inventory',
   'packages/server/src/supervisor-reap.ts': 'not-in-inventory',
   'packages/server/src/supervisor-restarts.ts': 'not-in-inventory',
