@@ -54,7 +54,7 @@ const bin = join(tmp, 'bin');
 export const kc = join(tmp, 'keychain');
 export const fs = join(tmp, 'fly');
 export const approvals = join(tmp, 'approvals');
-const saved = { path: process.env.PATH, keeper: process.env.CW_KEEPER_URL };
+const saved = { path: process.env.PATH };
 
 const exe = (name: string, body: string) => {
   writeFileSync(join(bin, name), body);
@@ -137,7 +137,6 @@ printf 'Your OAuth token (valid for 1 year):\\r\\n\\r\\n%s\\r\\n' '${APPROVED}'
 `,
     );
     process.env.PATH = `${bin}:${saved.path ?? ''}`;
-    Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
     restoreTokens = giveMacFlyTokens(
       tmp,
       ORGS.map((o) => `cw-${o}`),
@@ -154,7 +153,6 @@ printf 'Your OAuth token (valid for 1 year):\\r\\n\\r\\n%s\\r\\n' '${APPROVED}'
       }
     }
     process.env.PATH = saved.path;
-    if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
     server.stop(true);
     rmSync(tmp, { recursive: true, force: true });
   });

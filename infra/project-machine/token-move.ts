@@ -3,16 +3,15 @@
  *
  * `fly secrets import` without `--stage` sets the token and its marker in one
  * call and restarts the machine on them, so the lead cannot run on the new
- * token with the old marker. Through the keeper the import is a `token.move`
- * hold, one passkey tap. The restart takes the board down for as long as a
- * boot takes, and the lead resumes its conversation (`lead.sh`).
+ * token with the old marker. It runs with the app's own Fly token
+ * (`mac-ops.ts` `flyTokenFor`). The restart takes the board down for as long
+ * as a boot takes, and the lead resumes its conversation (`lead.sh`).
  *
  * The move then waits on the machine until `lead.sh` writes the new label,
  * which it does as it starts a lead the entrypoint accepted the marker for.
  * That shows the machine took the token, not that Claude accepted it: a
- * revoked token passes. The wait is one `fly ssh console`, a second tap
- * through the keeper, and runs in one shell on the machine so waiting costs
- * no more taps.
+ * revoked token passes. The wait is one `fly ssh console`, run in one shell
+ * on the machine.
  *
  * An image older than this code cannot use a listed marker, so the move
  * refuses it before changing anything (`imageHasTokenList`).

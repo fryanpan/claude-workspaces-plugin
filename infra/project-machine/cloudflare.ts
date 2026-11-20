@@ -34,8 +34,8 @@ export interface CloudflareApi {
 }
 
 /**
- * `token` is null when the calls go through the keeper (`base` its
- * `/v1/cloudflare`, `fetchImpl` its client), which adds the token itself.
+ * `token` null sends no authorization header, for a `fetchImpl` that adds
+ * its own; no script passes null since the keeper retired.
  */
 export function cloudflareApi(
   token: string | null,
