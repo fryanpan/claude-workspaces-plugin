@@ -185,8 +185,9 @@ export class FeedbackWidgetEl extends HTMLElement {
   private observer: MutationObserver | null = null;
   private statusEl: HTMLElement | null = null;
   private rafId: number | null = null;
-  private resizeHandler: (() => void) | null = null;
-  private scrollHandler: (() => void) | null = null;
+  /** When the position loop may stop: `SETTLE_MS` after the last sign that
+   *  something on the page moved. */
+  private settleUntil = 0;
   private vvHandler: (() => void) | null = null;
   private barStop: (() => void) | null = null;
   showResolved = false;
@@ -347,6 +348,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
+      this.kickPositions();
       const overlap = Math.max(0, innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap) + pageBarHeight(vv)}px`);
       // The screen's edges, for --cw-edge in styles.ts.
@@ -401,8 +403,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
-    if (this.resizeHandler) window.removeEventListener('resize', this.resizeHandler);
-    if (this.scrollHandler) window.removeEventListener('scroll', this.scrollHandler);
+    for (const t of MOVE_EVENTS) window.removeEventListener(t, this.kickPositions, true);
     if (this.authMsgHandler) {
       window.removeEventListener('message', this.authMsgHandler);
       this.authMsgHandler = null;
@@ -675,7 +676,27 @@ export class FeedbackWidgetEl extends HTMLElement {
   renderThreads(): void {
     renderThreadsInto(this);
     renderDockInto(this);
+    this.kickPositions();
   }
+
+  /**
+   * Keep pins and cards on their elements, every frame, until `SETTLE_MS`
+   * pass with nothing moving. The loop used to run every frame for as long as
+   * the page was open, which woke an idle board or doc on every frame of the
+   * display. Every sign of movement the old loop existed for
+   * restarts it: a page mutation, a scroll in any container, a resize, a
+   * transition or animation starting or ending, an image loading, input.
+   */
+  kickPositions = (): void => {
+    this.settleUntil = performance.now() + SETTLE_MS;
+    if (this.rafId != null || !this.isConnected) return;
+    const tick = () => {
+      positionPins(this);
+      placeCards(this);
+      this.rafId = performance.now() < this.settleUntil ? requestAnimationFrame(tick) : null;
+    };
+    this.rafId = requestAnimationFrame(tick);
+  };
 
   scheduleRender(): void {
     if (this.pendingRender) return;
@@ -693,38 +714,41 @@ export class FeedbackWidgetEl extends HTMLElement {
       // own writes re-enter renderThreads → infinite loop on any host that
       // also mutates the DOM (HMR, animations, etc).
       for (const r of records) {
-        const target = r.target as Node;
-        if (!target) continue;
-        if (isInOwnChrome(target)) continue;
-        this.scheduleRender();
-        return;
+        if (!r.target || isInOwnChrome(r.target)) continue;
+        this.kickPositions();
+        // Only an added or removed node re-renders: class, style and text
+        // changes on the host page don't change anchor resolvability, but
+        // they can move an element, so they restart the position loop.
+        if (r.type === 'childList') {
+          this.scheduleRender();
+          return;
+        }
       }
     });
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
-      // NOTE: attributes are deliberately OFF — class/style flips on the host
-      // page don't change anchor resolvability. Enable only if we find a real
-      // case where it matters.
-      attributes: false,
-      characterData: false,
+      attributes: true,
+      characterData: true,
     });
-    this.resizeHandler = () => positionPins(this);
-    this.scrollHandler = () => positionPins(this);
-    window.addEventListener('resize', this.resizeHandler);
-    window.addEventListener('scroll', this.scrollHandler, { passive: true, capture: true });
-    // A gentle rAF loop keeps pins attached during layout animations where
-    // MutationObserver doesn't fire (e.g. CSS transitions, scroll in
-    // overflow containers). Position-only, no render. The comment card and
-    // its line ride the same loop, so they keep up with their element.
-    const tick = () => {
-      positionPins(this);
-      placeCards(this);
-      this.rafId = requestAnimationFrame(tick);
-    };
-    this.rafId = requestAnimationFrame(tick);
+    // A scroll in any container, captured: the loop's frame runs after the
+    // scroll steps of the same frame, so a pin keeps up with its element.
+    for (const t of MOVE_EVENTS) {
+      window.addEventListener(t, this.kickPositions, { passive: true, capture: true });
+    }
+    this.kickPositions();
   }
 }
+
+/** How long the position loop runs after the last sign of movement. */
+const SETTLE_MS = 1000;
+
+/** Window events, captured from anywhere on the page, that can move an
+ *  element a pin or card stands on. `load` captures every image's. */
+const MOVE_EVENTS =
+  'resize scroll load transitionrun transitionend animationstart animationend pointerdown pointermove keydown input'.split(
+    ' ',
+  );
 
 // --- Public FeedbackWidget global ---
 
