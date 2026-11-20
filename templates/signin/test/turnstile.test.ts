@@ -6,6 +6,7 @@ const GUARDED: Array<[string, (email: string) => Record<string, string>]> = [
   ['/api/auth/sign-up/email', (email) => ({ email, password: PASSWORD, name: 'Alice' })],
   ['/api/auth/sign-in/magic-link', (email) => ({ email, callbackURL: '/' })],
   ['/api/auth/sign-in/email', (email) => ({ email, password: PASSWORD })],
+  ['/api/auth/request-password-reset', (email) => ({ email, redirectTo: '/reset' })],
 ];
 
 describe('Turnstile with the always-pass test secret', () => {
@@ -21,7 +22,8 @@ describe('Turnstile with the always-pass test secret', () => {
     expect((await h.client().post(...route(0, 'alice@example.com'))).status).toBe(200);
     expect((await h.client().post(...route(1, 'riverbend@example.com'))).status).toBe(200);
     expect((await h.client().post(...route(2, 'bob@example.com'))).status).toBe(200);
-    expect(h.stubs.turnstileCalls - before).toBe(3);
+    expect((await h.client().post(...route(3, 'bob@example.com'))).status).toBe(200);
+    expect(h.stubs.turnstileCalls - before).toBe(4);
   });
 
   it('refuses a request with no token at all', async () => {
