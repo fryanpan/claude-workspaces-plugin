@@ -1,27 +1,27 @@
 /**
  * Reads what the drift checks judge (`wall-drift.ts`), for `wall-report.ts`.
- * Every read is a read: `fly apps|ips|machine list`, `fly ssh console`
- * running `wall-probe.ts machine`, GitHub's deploy-key list, this repo's
- * environments with their secret names, update times and branch rules (never
- * a value), the tunnel's configuration and the live Access applications and
- * service token names from Cloudflare's API (read-only token,
- * `readOnlyCloudflare`), the deploy's settings (`settings.ts`, Keychain and
- * Terraform outputs), the router config, and a Cloudflare plan that holds no
+ * Every read is a read. On the Mac: `fly ips|machine list` and `fly ssh
+ * console` running `wall-probe.ts machine`, each with the app's own token;
+ * GitHub's deploy-key list and this repo's environments with their secret
+ * names, update times and branch rules (never a value), through `gh`; the
+ * deploy's settings (`settings.ts`: the Terraform outputs and the owner's
+ * address, the one Keychain entry read); and the router config. From CI's
+ * sealed read (`wall-read.ts`), because each needs a credential only CI
+ * holds: `fly apps list`, the tunnels' configurations, the live Access
+ * applications and service token names, and a Cloudflare plan that holds no
  * lock and applies nothing.
  */
 import { spawnSync } from 'node:child_process';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { CI_REPO } from '../../packages/server/src/provisioning/github-ci.ts';
 import type { TfOutputs } from '../cloudflare/outputs.ts';
-import { realIo, runWrapper } from '../cloudflare/run.ts';
 import { configReader } from '../cloudflare/run.ts';
 import type { TfEnv } from '../cloudflare/terraform.ts';
 import { CONFIG_PATHS, type StaticVars, staticVars } from '../cloudflare/vars.ts';
 import { STAGING_ENVIRONMENT, environmentFor } from './ci-tokens.ts';
-import { cloudflareApi } from './cloudflare.ts';
 import { flyJson, keychainHas, keychainRead, onMachine } from './mac-ops.ts';
 import type { MachineFacts } from './machine-facts.ts';
-import { readSettings } from './settings.ts';
+import { OWNER_EMAIL_ENTRY, SETTING_NAMES, readSettings } from './settings.ts';
 import {
   type FlyView,
   type GithubEnvironment,
@@ -46,9 +46,13 @@ import {
   settingsRows,
   uidRows,
 } from './wall-drift.ts';
+import type { CloudflareRead, FlyRead } from './wall-read.ts';
 
 export interface DriftIo {
+  /** `fly ips|machine list --app <app>`, with that app's own token. */
   fly: <T>(args: string[]) => T;
+  /** `fly apps list`, as CI read it with the org token; null when there is no read. */
+  apps: () => FlyView['apps'] | null;
   exec: (app: string, command: string) => string;
   repoKeys: (repo: string) => RepoKeys;
   ingress: (tunnel: TfOutputs['tunnels'][string]) => Promise<Ingress | null>;
@@ -71,7 +75,15 @@ export async function driftRows(
   io: DriftIo,
 ): Promise<Row[]> {
   const rows: Row[] = [];
-  const view: FlyView = { apps: io.fly(['apps', 'list']), ips: {}, machines: {} };
+  const apps = io.apps();
+  if (apps === null)
+    rows.push({
+      project: '(all)',
+      check: 'fly apps list',
+      answer: 'no CI read of it, so no app is found in it',
+      ok: false,
+    });
+  const view: FlyView = { apps: apps ?? [], ips: {}, machines: {} };
   for (const p of projects) {
     const app = appFor(p);
     try {
@@ -206,48 +218,35 @@ function ghJson(path: string): unknown {
 }
 
 /**
- * The daily report's Cloudflare credentials: a read-only API token and the
- * state bucket's read-only key, the same pair CI's pull request plans hold
- * (infra/cloudflare/README.md, "CI"). There is no fallback to the apply
- * token or the read-write state key: a missing entry stops the report.
+ * Settings the report compares (`SETTING_NAMES`) come from the Terraform
+ * outputs and the owner's address. The Keychain is asked for that one entry
+ * and no other: the sign-in secrets are never compared, so never read.
  */
-export const READ_TOKEN_ENTRY = 'cloudflare-api-token-read';
-export const READ_STATE_ENTRY = 'cloudflare-r2-tfstate-read';
-
-export interface ReadOnlyCloudflare {
-  token: string;
-  /** The state bucket's read-only key, as terraform's S3 backend reads it. */
-  state: { AWS_ACCESS_KEY_ID: string; AWS_SECRET_ACCESS_KEY: string };
-}
-
-export function readOnlyCloudflare(src: {
+export const ownerEmailOnly = (src: {
   keychainHas: (name: string) => boolean;
   keychainRead: (name: string) => string;
-}): ReadOnlyCloudflare {
-  for (const entry of [READ_TOKEN_ENTRY, READ_STATE_ENTRY])
-    if (!src.keychainHas(entry))
-      throw new Error(
-        `the Keychain has no ${entry}; the wall report reads Cloudflare with read-only credentials only`,
-      );
-  let pair: { accessKeyId?: unknown; secretAccessKey?: unknown } = {};
-  try {
-    pair = JSON.parse(src.keychainRead(READ_STATE_ENTRY));
-  } catch {
-    // Refused below.
-  }
-  if (typeof pair.accessKeyId !== 'string' || typeof pair.secretAccessKey !== 'string')
-    throw new Error(
-      `the Keychain entry ${READ_STATE_ENTRY} has no accessKeyId and secretAccessKey`,
-    );
-  return {
-    token: src.keychainRead(READ_TOKEN_ENTRY).trim(),
-    state: { AWS_ACCESS_KEY_ID: pair.accessKeyId, AWS_SECRET_ACCESS_KEY: pair.secretAccessKey },
-  };
-}
+}) => ({
+  keychainHas: (name: string) => name === OWNER_EMAIL_ENTRY && src.keychainHas(name),
+  keychainRead: (name: string) => {
+    if (name !== OWNER_EMAIL_ENTRY) throw new Error(`the wall report does not read ${name}`);
+    return src.keychainRead(name);
+  },
+});
 
-export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs, ro: ReadOnlyCloudflare): DriftIo {
+/**
+ * The Mac's reads. Cloudflare's half, and `fly apps list`, come from CI's
+ * sealed read (`wall-read.ts`, `wall-read-pull.ts`); `fly` per app and
+ * `fly ssh` use the app's own token (`mac-ops.ts`); GitHub uses `gh`.
+ */
+export function realDriftIo(
+  tfEnv: TfEnv,
+  outputs: TfOutputs,
+  cf: CloudflareRead,
+  fly: FlyRead | null,
+): DriftIo {
   return {
     fly: (args) => flyJson(args),
+    apps: () => fly?.apps ?? null,
     exec: onMachine,
     repoKeys: (repo) => {
       if (!isRepoName(repo)) return null;
@@ -259,53 +258,24 @@ export function realDriftIo(tfEnv: TfEnv, outputs: TfOutputs, ro: ReadOnlyCloudf
         return null;
       }
     },
-    ingress: async (t) => {
-      try {
-        const res = await cloudflareApi(ro.token)<{ config?: Ingress }>(
-          'GET',
-          `/accounts/${t.account_id}/cfd_tunnel/${t.id}/configurations`,
-        );
-        return res.config ?? null;
-      } catch {
-        return null;
-      }
-    },
+    ingress: async (t) => cf.ingress[t.id] ?? null,
     expected: (project) => {
-      const found = readSettings(project, { outputs: () => outputs, keychainHas, keychainRead });
-      return new Map(found.settings.map((s) => [s.name, s.value()]));
+      const found = readSettings(project, {
+        outputs: () => outputs,
+        ...ownerEmailOnly({ keychainHas, keychainRead }),
+      });
+      return new Map(
+        found.settings
+          .filter((s) => (SETTING_NAMES as readonly string[]).includes(s.name))
+          .map((s) => [s.name, s.value()]),
+      );
     },
     routerVars: () => staticVars(configReader(process.env), CONFIG_PATHS[tfEnv]),
     github: () => readGithub(CI_REPO, ghJson),
-    accessApps: async () => {
-      const account = Object.values(outputs.tunnels)[0]?.account_id;
-      if (!account || !/^[0-9a-f]{32}$/.test(account)) return null;
-      try {
-        const api = cloudflareApi(ro.token);
-        const apps = await api.all<LiveAccessApp>(`/accounts/${account}/access/apps`);
-        const tokens = await api.all<{ id?: unknown; name?: unknown }>(
-          `/accounts/${account}/access/service_tokens`,
-        );
-        return { apps, tokenNames: new Map(tokens.map((t) => [String(t.id), String(t.name)])) };
-      } catch {
-        return null;
-      }
-    },
+    accessApps: async () =>
+      cf.access ? { apps: cf.access.apps, tokenNames: new Map(cf.access.tokenNames) } : null,
     namePrefix: tfEnv === 'staging' ? 'staging ' : '',
     now: Date.now,
-    plan: async () => {
-      let out = '';
-      const status = await runWrapper(
-        'plan',
-        { env: tfEnv, ci: true },
-        {
-          ...realIo(tfEnv),
-          // tfCredentials takes these before any Keychain entry.
-          env: { ...process.env, CLOUDFLARE_API_TOKEN: ro.token, ...ro.state },
-          out: (s) => (out += s),
-          err: (s) => process.stderr.write(s),
-        },
-      );
-      return { status, summary: out };
-    },
+    plan: async () => cf.plan,
   };
 }

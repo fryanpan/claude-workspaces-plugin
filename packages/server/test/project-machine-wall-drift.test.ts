@@ -15,10 +15,8 @@ import {
 } from '../../../infra/project-machine/machine-facts.ts';
 import {
   type DriftIo,
-  READ_STATE_ENTRY,
-  READ_TOKEN_ENTRY,
   driftRows,
-  readOnlyCloudflare,
+  ownerEmailOnly,
 } from '../../../infra/project-machine/wall-drift-read.ts';
 import {
   deployKeyRows,
@@ -341,9 +339,9 @@ describe('the reads behind them', () => {
     const base: DriftIo = {
       fly: <T>(args: string[]) => {
         asked.push(`fly ${args.join(' ')}`);
-        if (args[0] === 'apps') return [{ Name: 'cw-riverbend', Network: 'cw-riverbend' }] as T;
         return [] as T;
       },
+      apps: () => [{ Name: 'cw-riverbend', Network: 'cw-riverbend' }],
       exec: (app, command) => {
         asked.push(`${app}: ${command.split(' ').at(-1)}`);
         return `Connecting...\n${JSON.stringify(facts())}\n`;
@@ -388,11 +386,18 @@ describe('the reads behind them', () => {
     const rows = await driftRows(['riverbend'], outputs, i);
     expect(failing(rows)).toEqual([]);
     expect(asked).toEqual([
-      'fly apps list',
       'fly ips list --app cw-riverbend',
       'fly machine list --app cw-riverbend',
       'cw-riverbend: machine',
       'keys alice/riverbend',
+    ]);
+  });
+
+  it('no CI read of fly apps list fails its own row and finds no app in it', async () => {
+    const { io: i } = io({ apps: () => null });
+    expect(failing(await driftRows(['riverbend'], outputs, i))).toEqual([
+      'fly apps list: no CI read of it, so no app is found in it',
+      'Fly app: cw-riverbend not in fly apps list',
     ]);
   });
 
@@ -414,39 +419,24 @@ describe('the reads behind them', () => {
   });
 });
 
-describe('the Cloudflare credentials the report reads with', () => {
-  const kc = (entries: Record<string, string>) => ({
-    keychainHas: (n: string) => n in entries,
-    keychainRead: (n: string) => entries[n] ?? '',
-  });
-
-  it('takes only the read-only token and state key', () => {
-    const ro = readOnlyCloudflare(
-      kc({
-        [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend\n',
-        [READ_STATE_ENTRY]: JSON.stringify({ accessKeyId: 'ro-id', secretAccessKey: 'ro-secret' }),
-        'cloudflare-api-token': 'fixture-apply-token-harborlight',
-      }),
-    );
-    expect(ro).toEqual({
-      token: 'fixture-read-token-riverbend',
-      state: { AWS_ACCESS_KEY_ID: 'ro-id', AWS_SECRET_ACCESS_KEY: 'ro-secret' },
+describe('the Keychain the drift read may touch', () => {
+  it('answers for the owner address alone, so no token is ever read', () => {
+    const asked: string[] = [];
+    const src = ownerEmailOnly({
+      keychainHas: (n) => {
+        asked.push(`has ${n}`);
+        return true;
+      },
+      keychainRead: (n) => {
+        asked.push(`read ${n}`);
+        return 'owner-value';
+      },
     });
-  });
-
-  it('never falls back to the apply token or the read-write state key', () => {
-    const apply = {
-      'cloudflare-api-token': 'fixture-apply-token-harborlight',
-      'cloudflare-r2-tfstate': JSON.stringify({ accessKeyId: 'rw', secretAccessKey: 'rw' }),
-    };
-    expect(() => readOnlyCloudflare(kc(apply))).toThrow(`the Keychain has no ${READ_TOKEN_ENTRY}`);
-    expect(() =>
-      readOnlyCloudflare(kc({ ...apply, [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend' })),
-    ).toThrow(`the Keychain has no ${READ_STATE_ENTRY}`);
-    expect(() =>
-      readOnlyCloudflare(
-        kc({ [READ_TOKEN_ENTRY]: 'fixture-read-token-riverbend', [READ_STATE_ENTRY]: 'not json' }),
-      ),
-    ).toThrow('has no accessKeyId and secretAccessKey');
+    expect(src.keychainHas('cw-board-owner-email')).toBe(true);
+    expect(src.keychainRead('cw-board-owner-email')).toBe('owner-value');
+    expect(src.keychainHas('cloudflare-api-token-read')).toBe(false);
+    expect(src.keychainHas('cw-google-signin-client-secret')).toBe(false);
+    expect(() => src.keychainRead('cloudflare-r2-tfstate-read')).toThrow('does not read');
+    expect(asked).toEqual(['has cw-board-owner-email', 'read cw-board-owner-email']);
   });
 });

@@ -1,0 +1,111 @@
+# The daily wall report's reads that need a Cloudflare or Fly org credential
+# (infra/project-machine/wall-read.ts). The report itself runs on the Mac
+# (`bun run machine:wall-report`), which holds neither credential since the
+# keeper retired: it downloads the newest run's artifacts with Bryan's `gh`
+# login and opens them with its handoff key (wall-read-pull.ts).
+#
+#   schedule   every day, before the Mac's daily check. The report fails a
+#              read older than 36 hours, so one late run does not fail it.
+#   dispatch   the same, on main only.
+#
+# Two jobs, because no one place holds both credentials:
+#
+#   cloudflare  no environment: the repository's READ-ONLY CLOUDFLARE_API_TOKEN
+#               and R2 pair, the ones a pull request's plan holds and the same
+#               token the Mac's Keychain held for this report. It reads prod's
+#               Terraform outputs, each tunnel's configuration, the live Access
+#               applications and service token names, and a plan in CI mode
+#               (no lock, nothing applied). The plan needs the routing configs.
+#   fly         in `fly-org` (deployments from main only): `fly apps list`
+#               with the org token, each project app's name and network.
+#
+# What either reads holds hostnames, ids and Access policy rules and no
+# credential. The repository is public and so are these logs and artifacts,
+# so each read is sealed to the Mac's committed key (infra/handoff/) and the
+# log names counts only. These artifacts are not `handoff-mac`: nothing here
+# is stored, and `handoff:pull` never reads them.
+
+name: wall-read
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  cloudflare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      # The token and the state key are on this step alone: `bun install`
+      # and the setup actions never see them.
+      - name: Read Cloudflare and seal it to the Mac
+        env:
+          CW_SECRETS_FROM_ENV: '1'
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ROUTER_CONFIG: ${{ secrets.CF_ROUTER_CONFIG }}
+          CF_ACCESS_CONFIG: ${{ secrets.CF_ACCESS_CONFIG }}
+          CF_SHARE_LINK_CONFIG: ${{ secrets.CF_SHARE_LINK_CONFIG }}
+          CF_TFSTATE_BUCKET: ${{ vars.CF_TFSTATE_BUCKET }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wall-read"
+          bun infra/cloudflare/ci-credentials.ts --account-id -- bun infra/project-machine/wall-read.ts cloudflare --out "$RUNNER_TEMP/wall-read/cloudflare.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wall-read-cloudflare
+          path: ${{ runner.temp }}/wall-read/cloudflare.json
+          if-no-files-found: error
+          retention-days: 8
+
+  fly:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: fly-org
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      - name: fly on the PATH
+        run: |
+          if ! command -v fly >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/flybin"
+            ln -s "$(command -v flyctl)" "$RUNNER_TEMP/flybin/fly"
+            echo "$RUNNER_TEMP/flybin" >> "$GITHUB_PATH"
+          fi
+      - name: Read fly apps list and seal it to the Mac
+        env:
+          CW_SECRETS_FROM_ENV: '1'
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wall-read"
+          bun infra/project-machine/wall-read.ts fly --out "$RUNNER_TEMP/wall-read/fly.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wall-read-fly
+          path: ${{ runner.temp }}/wall-read/fly.json
+          if-no-files-found: error
+          retention-days: 8
