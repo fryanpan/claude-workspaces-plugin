@@ -240,87 +240,127 @@ const deploy = (
   extra: Partial<Parameters<typeof projectConfig>[0]> = {},
 ) => deployProject(cfgOf(org, extra), dryRun, { outputs, signInOutput: (t) => shown.push(t) });
 
+/**
+ * The budget for a case that runs `machine:deploy`. Each real deploy extracts
+ * the whole repository with `git archive | tar -x` (about 54 MB) and spawns
+ * the stand-ins a few dozen times, so the two-deploy case took 2.8-3.0s on an
+ * ordinary CI runner: most of bun's 5s default. On a slower runner it went
+ * over (run 44712670059, both attempts), and a deploy cut off inside its
+ * `spawnSync` left this file's loopback bucket server unanswered, so every
+ * later case hung on its fetch, one for 275s. A local `--timeout 1200` run
+ * shows the same: one timeout, then every case after it hangs.
+ */
+const DEPLOY_CASE_MS = 30_000;
+
 describe('machine:deploy gives each org a sign-in of its own', () => {
-  it('asks for one browser approval per org and sets each token on its own org’s app only', async () => {
-    await deploy('harborlight');
-    expect(approvalCount()).toBe(1);
-    await deploy('riverbend');
-    expect(approvalCount()).toBe(2);
+  it(
+    'asks for one browser approval per org and sets each token on its own org’s app only',
+    async () => {
+      await deploy('harborlight');
+      expect(approvalCount()).toBe(1);
+      await deploy('riverbend');
+      expect(approvalCount()).toBe(2);
 
-    for (const [org, other] of [
-      ['harborlight', 'riverbend'],
-      ['riverbend', 'harborlight'],
-    ] as const) {
-      const env = appEnv(org);
-      expect(env[LEAD_TOKEN_SECRET]).toBe(TOKEN[org]);
-      expect(env[LEAD_TOKEN_ORG_SECRET]).toBe(org);
-      expect(env.CW_LEAD_BOARD).toBe(BOARD[org]);
-      // The other org's token, and Bryan's shared one, are nowhere on this app.
-      const all = imported(org).join('\n');
-      expect(all).not.toContain(TOKEN[other]);
-      expect(all).not.toContain(SHARED);
-    }
-    // The token went on stdin and nowhere else: not an argument, not the
-    // output, not the screen Bryan approves from, not the Mac's Keychain.
-    const args = readFileSync(join(fs, 'calls'), 'utf8');
-    const said = [...output, ...shown].join('\n');
-    for (const t of Object.values(TOKEN)) {
-      expect(args).not.toContain(t);
-      expect(said).not.toContain(t);
-      expect(said).not.toContain(t.slice(0, 20));
-    }
-    expect(shown.join('')).toContain('Your OAuth token (valid for 1 year)');
-    expect(output.join('\n')).toContain('one browser approval');
-    expect(readFileSync(securityCalls, 'utf8')).not.toMatch(/^-i|add-generic-password/m);
-  });
+      for (const [org, other] of [
+        ['harborlight', 'riverbend'],
+        ['riverbend', 'harborlight'],
+      ] as const) {
+        const env = appEnv(org);
+        expect(env[LEAD_TOKEN_SECRET]).toBe(TOKEN[org]);
+        expect(env[LEAD_TOKEN_ORG_SECRET]).toBe(org);
+        expect(env.CW_LEAD_BOARD).toBe(BOARD[org]);
+        // The other org's token, and Bryan's shared one, are nowhere on this app.
+        const all = imported(org).join('\n');
+        expect(all).not.toContain(TOKEN[other]);
+        expect(all).not.toContain(SHARED);
+      }
+      // The token went on stdin and nowhere else: not an argument, not the
+      // output, not the screen Bryan approves from, not the Mac's Keychain.
+      const args = readFileSync(join(fs, 'calls'), 'utf8');
+      const said = [...output, ...shown].join('\n');
+      for (const t of Object.values(TOKEN)) {
+        expect(args).not.toContain(t);
+        expect(said).not.toContain(t);
+        expect(said).not.toContain(t.slice(0, 20));
+      }
+      expect(shown.join('')).toContain('Your OAuth token (valid for 1 year)');
+      expect(output.join('\n')).toContain('one browser approval');
+      expect(readFileSync(securityCalls, 'utf8')).not.toMatch(/^-i|add-generic-password/m);
+    },
+    DEPLOY_CASE_MS,
+  );
 
-  it('asks again for nothing once the org holds its own token', async () => {
-    await deploy('riverbend');
-    expect(approvalCount()).toBe(1);
-    flySecrets('riverbend', [
-      ...requiredSecrets('quick'),
-      LEAD_TOKEN_SECRET,
-      LEAD_TOKEN_ORG_SECRET,
-      'CW_LEAD_BOARD',
-    ]);
-    rmSync(join(fs, 'cw-riverbend', 'imported'));
-    expect(await deploy('riverbend', false, { leadBoard: undefined })).toEqual([]);
-    expect(approvalCount()).toBe(1);
-    expect(imported('riverbend')).toEqual([]);
-  });
+  it(
+    'asks again for nothing once the org holds its own token',
+    async () => {
+      await deploy('riverbend');
+      expect(approvalCount()).toBe(1);
+      flySecrets('riverbend', [
+        ...requiredSecrets('quick'),
+        LEAD_TOKEN_SECRET,
+        LEAD_TOKEN_ORG_SECRET,
+        'CW_LEAD_BOARD',
+      ]);
+      rmSync(join(fs, 'cw-riverbend', 'imported'));
+      expect(await deploy('riverbend', false, { leadBoard: undefined })).toEqual([]);
+      expect(approvalCount()).toBe(1);
+      expect(imported('riverbend')).toEqual([]);
+    },
+    DEPLOY_CASE_MS,
+  );
 
-  it('replaces a sign-in the org did not get its own, such as the shared one', async () => {
-    // Set before this change: a token, but no record it was made for this org.
-    flySecrets('harborlight', [...requiredSecrets('quick'), LEAD_TOKEN_SECRET, 'CW_LEAD_BOARD']);
-    await deploy('harborlight', false, { leadBoard: undefined });
-    expect(approvalCount()).toBe(1);
-    expect(appEnv('harborlight')[LEAD_TOKEN_SECRET]).toBe(TOKEN.harborlight);
-    expect(appEnv('harborlight')[LEAD_TOKEN_ORG_SECRET]).toBe('harborlight');
-  });
+  it(
+    'replaces a sign-in the org did not get its own, such as the shared one',
+    async () => {
+      // Set before this change: a token, but no record it was made for this org.
+      flySecrets('harborlight', [...requiredSecrets('quick'), LEAD_TOKEN_SECRET, 'CW_LEAD_BOARD']);
+      await deploy('harborlight', false, { leadBoard: undefined });
+      expect(approvalCount()).toBe(1);
+      expect(appEnv('harborlight')[LEAD_TOKEN_SECRET]).toBe(TOKEN.harborlight);
+      expect(appEnv('harborlight')[LEAD_TOKEN_ORG_SECRET]).toBe('harborlight');
+    },
+    DEPLOY_CASE_MS,
+  );
 
-  it('makes a new sign-in when the app holds the org’s marker but no token', async () => {
-    flySecrets('riverbend', [...requiredSecrets('quick'), LEAD_TOKEN_ORG_SECRET, 'CW_LEAD_BOARD']);
-    queue(TOKEN.riverbend);
-    await deploy('riverbend', false, { leadBoard: undefined });
-    expect(approvalCount()).toBe(1);
-    expect(appEnv('riverbend')[LEAD_TOKEN_SECRET]).toBe(TOKEN.riverbend);
-  });
+  it(
+    'makes a new sign-in when the app holds the org’s marker but no token',
+    async () => {
+      flySecrets('riverbend', [
+        ...requiredSecrets('quick'),
+        LEAD_TOKEN_ORG_SECRET,
+        'CW_LEAD_BOARD',
+      ]);
+      queue(TOKEN.riverbend);
+      await deploy('riverbend', false, { leadBoard: undefined });
+      expect(approvalCount()).toBe(1);
+      expect(appEnv('riverbend')[LEAD_TOKEN_SECRET]).toBe(TOKEN.riverbend);
+    },
+    DEPLOY_CASE_MS,
+  );
 
-  it('a dry run asks for no approval and says one is due', async () => {
-    const actions = await deploy('harborlight', true);
-    expect(approvalCount()).toBe(0);
-    expect(actions.find((a) => a.kind === 'set-secrets')).toMatchObject({
-      names: expect.arrayContaining([LEAD_TOKEN_SECRET, LEAD_TOKEN_ORG_SECRET]),
-    });
-    expect(output.join('\n')).toContain('one browser approval');
-  });
+  it(
+    'a dry run asks for no approval and says one is due',
+    async () => {
+      const actions = await deploy('harborlight', true);
+      expect(approvalCount()).toBe(0);
+      expect(actions.find((a) => a.kind === 'set-secrets')).toMatchObject({
+        names: expect.arrayContaining([LEAD_TOKEN_SECRET, LEAD_TOKEN_ORG_SECRET]),
+      });
+      expect(output.join('\n')).toContain('one browser approval');
+    },
+    DEPLOY_CASE_MS,
+  );
 
-  it('sets nothing when the approval prints no token', async () => {
-    queue();
-    await expect(deploy('riverbend')).rejects.toThrow('printed no token');
-    expect(approvalCount()).toBe(1);
-    expect(imported('riverbend')).toEqual([]);
-  });
+  it(
+    'sets nothing when the approval prints no token',
+    async () => {
+      queue();
+      await expect(deploy('riverbend')).rejects.toThrow('printed no token');
+      expect(approvalCount()).toBe(1);
+      expect(imported('riverbend')).toEqual([]);
+    },
+    DEPLOY_CASE_MS,
+  );
 
   it('never plans an approval where nobody can give one (CI)', () => {
     const cfg = cfgOf('riverbend');
