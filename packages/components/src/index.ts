@@ -1,6 +1,7 @@
 /**
  * `@claude-workspaces/components`: components that run unchanged in a Claude
- * Workspaces doc and on any site. Today, the street map.
+ * Workspaces doc and on any site. Today, the street map and its GeoJSON
+ * layers.
  *
  * `./map` is the component file itself (its default export is the mount a
  * doc tag calls); this entry names it `mountMap` beside the snapshot host and
@@ -20,6 +21,7 @@ export type {
 export {
   type BasemapChoice,
   MAP_STATE_KEYS,
+  type MapLayerProp,
   type MapProps,
   type MapRingProp,
   type MapRow,
@@ -27,3 +29,4 @@ export {
   default as mountMap,
   mountWithSnapshot,
 } from './map.ts';
+export { HEAT_COLORS, LAYER_LIMITS } from './layers.ts';
