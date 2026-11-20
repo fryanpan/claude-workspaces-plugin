@@ -178,3 +178,34 @@ describe('per-IP limit: 20 per minute from CF-Connecting-IP', () => {
     expect(res.status).toBe(429);
   });
 });
+
+describe('magic links: 3 per address per 15 minutes, 20 per IP per minute', () => {
+  const ask = (c: ReturnType<Harness['client']>, email: string) =>
+    c.post('/api/auth/sign-in/magic-link', { email, callbackURL: '/' });
+  const linksTo = (email: string) =>
+    h.mails.filter((m) => m.kind === 'magic-link' && m.to === email).length;
+
+  it('mails 3 links to one address, refuses the 4th from any IP, and mails nothing for it', async () => {
+    h.clock.advance(15 * MINUTE);
+    const email = 'riverbend-links@example.com';
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) statuses.push((await ask(h.client(), email)).status);
+    expect(statuses).toEqual([200, 200, 200, 429]);
+    expect(linksTo(email)).toBe(3);
+  });
+
+  it('refuses the 21st magic-link request from one CF-Connecting-IP and mails nothing for it', async () => {
+    h.clock.advance(15 * MINUTE);
+    const c = h.client({ ip: '198.51.100.20' });
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) {
+      statuses.push((await ask(c, `saltmarsh-link${i}@example.com`)).status);
+    }
+    expect(statuses.slice(0, 20)).toEqual(Array(20).fill(200));
+    expect(statuses[20]).toBe(429);
+    expect(linksTo('saltmarsh-link20@example.com')).toBe(0);
+
+    // The count is keyed on CF-Connecting-IP, so another client IP is served.
+    expect((await ask(h.client({ ip: '198.51.100.21' }), 'bob-link@example.com')).status).toBe(200);
+  }, 30_000);
+});

@@ -64,6 +64,11 @@ Secrets never go in `wrangler.jsonc` or in git. `.dev.vars` is gitignored.
   session that person has.
 - A person has to verify their email before they can sign in with a
   password. Sign-up sends the verification link.
+- A second sign-in method joins an existing person only once that
+  person's email is verified. If someone signed up with an address and
+  never verified it, the owner's first magic link proves the inbox and
+  removes that unverified password, so it can never open the account.
+  `test/linking.test.ts` and `test/google.test.ts` hold this.
 
 ## Rate limits
 
