@@ -340,7 +340,7 @@ cannot be revoked alone: revoking means revoking the org token it was cut
 from, and the window bounds a leaked one until then. The daily wall report
 (`machine:wall-report`) fails if a `fly-<project>` environment is missing,
 admits another branch, or holds no token or one older than 45 days, and if
-any GitHub secret is named `FLY_API_TOKEN`.
+any GitHub secret outside the `fly-org` environment is named `FLY_API_TOKEN`.
 
 ## State
 

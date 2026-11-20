@@ -359,8 +359,17 @@ export interface GithubView {
 export const CI_TOKEN_STALE_DAYS = 45;
 
 /**
- * CI holds no Fly org token (wall-off review M5): no environment and no
- * repository secret is named FLY_API_TOKEN. And each app CI deploys has its
+ * The one environment that holds the Fly org token, by design since the
+ * keeper retired (docs/architecture/security.md, the keeper paragraph):
+ * deployments from main only, used by fly-provision.yml, fly-ci-tokens.yml
+ * and wall-read.yml.
+ */
+export const ORG_TOKEN_ENVIRONMENT = 'fly-org';
+
+/**
+ * The Fly org token is in `fly-org` and nowhere else in CI (wall-off review
+ * M5): no other environment and no repository secret is named
+ * FLY_API_TOKEN. And each app CI deploys has its
  * own environment (H1), admitting main alone, holding FLY_DEPLOY_TOKEN cut
  * within CI_TOKEN_STALE_DAYS (`ci-tokens.ts`).
  */
@@ -372,7 +381,10 @@ export function ciTokenRows(
   const holders = [
     ...(view.repoSecrets?.includes('FLY_API_TOKEN') ? ['the repository'] : []),
     ...(view.environments ?? [])
-      .filter((e) => e.secrets?.some((s) => s.name === 'FLY_API_TOKEN'))
+      .filter(
+        (e) =>
+          e.name !== ORG_TOKEN_ENVIRONMENT && e.secrets?.some((s) => s.name === 'FLY_API_TOKEN'),
+      )
       .map((e) => e.name),
   ];
   const unread =
@@ -382,7 +394,7 @@ export function ciTokenRows(
   const rows = [
     row(
       '(all)',
-      'no Fly org token in GitHub',
+      `no Fly org token in GitHub outside ${ORG_TOKEN_ENVIRONMENT}`,
       holders.length
         ? `FLY_API_TOKEN in ${holders.join(', ')}`
         : unread

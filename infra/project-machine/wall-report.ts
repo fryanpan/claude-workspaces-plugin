@@ -30,7 +30,7 @@
  * tunnel's ingress; across the account, ONE_ADDRESS_ORIGIN, shared service
  * tokens, each project's live Access policies against `access.local.json`,
  * and a Cloudflare plan with no changes; in GitHub, no secret named
- * FLY_API_TOKEN anywhere and each `fly-<project>` environment admitting main
+ * FLY_API_TOKEN outside the `fly-org` environment and each `fly-<project>` environment admitting main
  * alone with a FLY_DEPLOY_TOKEN under 45 days old. `--no-drift` leaves it out.
  *
  * The projects are `--projects`, else every project the outputs give a

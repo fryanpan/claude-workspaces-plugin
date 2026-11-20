@@ -969,7 +969,7 @@ Per project it also checks two things off the machine:
 | Live Access policies | the project's Access application admits only the emails, domains and service tokens `access.local.json` lists, with no bypass and no `everyone` | Cloudflare's API |
 
 Across the account it checks four more things. No secret in the repository
-or any of its environments is named `FLY_API_TOKEN`: CI deploys with one
+or any environment other than `fly-org` is named `FLY_API_TOKEN`: CI deploys with one
 token per app (`bun run fly:ci-tokens apply`, `infra/cloudflare/README.md`
 "Fly's CI tokens"), and the org token stays in `fly-org`. The staging app's
 environment, `fly-appkit-staging`, gets the same row as a project's. When
