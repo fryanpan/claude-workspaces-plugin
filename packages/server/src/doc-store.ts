@@ -518,6 +518,10 @@ export interface DocStoreConfig {
    *  store's own listeners: where the doc history attaches
    *  (`doc-history/recorder.ts`). */
   onDocWired?: (doc: LiveDoc) => void;
+  /** Called with a docId whose persisted state was destroyed (`purgePersisted`,
+   *  `dropStaged`): where the doc history removes its log, so nothing about a
+   *  destroyed doc outlives it in the data dir. Not called on an archive. */
+  onDocPurged?: (docId: string) => void;
 }
 
 /** How long a doc must go quiet before an authoring burst commits one
@@ -1541,6 +1545,7 @@ export class DocStore {
   dropStaged(docId: string): void {
     dropStagedDocIndex(this.cfg.dataDir, docId);
     this.state.dropStaged(docId);
+    this.cfg.onDocPurged?.(docId);
   }
 
   purgePersisted(docId: string): boolean {
@@ -1568,6 +1573,8 @@ export class DocStore {
       // …and what was said about it by voice, which is ABOUT this doc and has
       // no reader once the doc is gone.
       deleteVoiceFeedback(this.cfg.dataDir, docId);
+      // …and its history, which replays nothing once the doc is gone.
+      this.cfg.onDocPurged?.(docId);
       return gone;
     } catch (err) {
       console.error(`[doc-store] failed to remove persisted ${docId}:`, err);

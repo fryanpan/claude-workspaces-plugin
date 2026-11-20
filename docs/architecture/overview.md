@@ -216,6 +216,16 @@ write gate; presence, the access frame and the probe stay in
 share sweeps and eviction holds see it. Both paths sync the same Y.Doc the
 doc store persists to the same `.ydoc`, so switching loses nothing.
 `server/test/collab-core-board.test.ts` drives both paths side by side.
+`CW_COLLAB_CORE_DEFAULT=on` starts every board and the server-wide setting
+on instead of off; it is how core mode runs the suites with every test board
+on the core and no test changed (`bun run test:server --core`, which leaves
+out the switch's own three test files, `scripts/server-core-mode.ts`; ci.yml's
+`server-core` and `client-browser-core` jobs).
+`server/test/collab-core-mode.test.ts` is the control that the mode reached
+the test servers, `collab-core-edit-latency.test.ts` measures an edit
+reaching a second page's stored state, and
+`workspaces-app/test/core-edit-latency-browser.test.ts` measures the board's
+doc page's screen and has a page on another origin join a room on the core.
 
 **A board on the core draws its presence strip from Web Awesome** (D1 step
 10). The board record (`GET /workspaces/<id>?format=json`) carries
@@ -239,7 +249,9 @@ current code reads nothing new and switching a board off loses nothing.
 each part since; `restore.ts` puts a past version back as one forward edit,
 which `recorder.ts` records as a change of its own. `recorder.ts` attaches to
 every doc the store wires (`DocStore`'s `onDocWired`) and records nothing
-for a board on the current code. No route serves it yet; `ServerHandle`'s
+for a board on the current code. A doc destroyed (a purge, a forced board
+delete) takes its log with it (`onDocPurged`); an archived doc keeps it, as it
+keeps its `.ydoc`. No route serves it yet; `ServerHandle`'s
 `docHistory` is the server function.
 
 Presence and follow sit in the same folder. `presence.ts` is the server

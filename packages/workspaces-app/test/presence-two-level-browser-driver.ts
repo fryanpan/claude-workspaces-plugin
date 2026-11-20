@@ -151,11 +151,16 @@ const boxOf = (selector: string) => `(() => {
 })()`;
 const DECK_BOX = boxOf('.board-presence-deck');
 
-/** The lead's circle in the deck: its fill and its initials. */
+/** The lead's circle in the deck: its fill and its initials. On a board on
+ *  the collab core the circle is a \`<wa-avatar>\` inside the button, painted
+ *  on the avatar and lettered in its shadow root, so read what is drawn. */
 const LEAD_FACE = `(() => {
   const c = document.querySelector('.board-presence-deck .board-presence-agent');
   if (!c) return null;
-  return { fill: getComputedStyle(c).backgroundColor, initials: c.textContent.trim() };
+  const wa = c.querySelector('wa-avatar');
+  if (!wa) return { fill: getComputedStyle(c).backgroundColor, initials: c.textContent.trim() };
+  const letters = wa.shadowRoot?.querySelector('[part=initials]')?.textContent ?? '';
+  return { fill: getComputedStyle(wa).backgroundColor, initials: letters.trim() };
 })()`;
 
 /** The open card: whose, the where-line, and its buttons' words. */

@@ -27,6 +27,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
   truncateSync,
 } from 'node:fs';
@@ -70,6 +71,8 @@ export interface HistoryStore {
   truncate(docId: string, length: number): void;
   /** Bytes stored for this doc, for the size report. */
   size(docId: string): number;
+  /** Remove the doc's whole history: the doc itself was destroyed. */
+  remove(docId: string): void;
 }
 
 export function historyDir(dataDir: string): string {
@@ -104,6 +107,10 @@ export class DiskHistoryStore implements HistoryStore {
     const path = this.pathOf(docId);
     return existsSync(path) ? statSync(path).size : 0;
   }
+
+  remove(docId: string): void {
+    rmSync(this.pathOf(docId), { force: true });
+  }
 }
 
 /** History in a map: for tests. A restart is a new recorder handed the same instance. */
@@ -130,6 +137,10 @@ export class MemoryHistoryStore implements HistoryStore {
 
   size(docId: string): number {
     return this.files.get(docId)?.length ?? 0;
+  }
+
+  remove(docId: string): void {
+    this.files.delete(docId);
   }
 }
 
