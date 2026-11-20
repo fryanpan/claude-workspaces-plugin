@@ -2,7 +2,7 @@
  * The map's GeoJSON layers on a Leaflet map (`layers.ts` reads them; this
  * draws them), under the map's points and markers.
  *
- * Line and polygon layers share the canvas the points draw on, in the order
+ * Line, polygon and circle layers share the canvas the points draw on, in the order
  * the props declare them and beneath every point. One canvas, because a
  * Leaflet canvas answers taps for its own paths only: a second canvas above
  * it would swallow every tap meant for a path below. After any change the
@@ -10,7 +10,7 @@
  * its place rather than on top.
  *
  * A heatmap is a canvas of its own that takes no taps (`heat.ts`). One
- * declared before every line and polygon layer draws beneath them; one
+ * declared before every line, polygon and circle layer draws beneath them; one
  * declared after any draws above them and the points, still under the
  * markers.
  *
@@ -145,27 +145,49 @@ export class LayerStack {
   private pathsOf(layer: Exclude<MapLayer, { type: 'heatmap' }>): L.GeoJSON {
     const template = layer.popup;
     const style: L.PathOptions =
-      layer.type === 'line'
+      layer.type === 'circle'
         ? {
-            color: layer.color,
-            weight: layer.width,
-            opacity: layer.opacity,
-            fill: false,
-            ...(layer.dash ? { dashArray: layer.dash } : {}),
-          }
-        : {
             fillColor: layer.fill,
             fillOpacity: layer.fillOpacity,
-            color: layer.outline,
-            weight: layer.outlineWidth,
-            opacity: layer.outlineOpacity,
-            stroke: layer.outlineWidth > 0,
-          };
+            color: layer.stroke,
+            weight: layer.strokeWidth,
+            opacity: layer.strokeOpacity,
+            stroke: layer.strokeWidth > 0,
+          }
+        : layer.type === 'line'
+          ? {
+              color: layer.color,
+              weight: layer.width,
+              opacity: layer.opacity,
+              fill: false,
+              ...(layer.dash ? { dashArray: layer.dash } : {}),
+            }
+          : {
+              fillColor: layer.fill,
+              fillOpacity: layer.fillOpacity,
+              color: layer.outline,
+              weight: layer.outlineWidth,
+              opacity: layer.outlineOpacity,
+              stroke: layer.outlineWidth > 0,
+            };
     const paths = L.geoJSON(undefined, {
       renderer: this.renderer,
       interactive: template !== undefined,
       className: `cw-map-${layer.type}`,
       style: () => style,
+      // A circle keeps its pixel radius at every zoom, on the shared canvas.
+      ...(layer.type === 'circle'
+        ? {
+            pointToLayer: (_: unknown, at: L.LatLng) =>
+              L.circleMarker(at, {
+                renderer: this.renderer,
+                interactive: template !== undefined,
+                className: 'cw-map-circle',
+                radius: layer.radius,
+                ...style,
+              }),
+          }
+        : {}),
     } as L.GeoJSONOptions);
     if (template !== undefined) {
       paths.on('click', (e: L.LeafletMouseEvent) => {
