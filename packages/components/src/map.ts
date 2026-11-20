@@ -14,6 +14,11 @@
  * moves only when what it frames changed, so a title edit leaves a reader's
  * pan alone.
  *
+ * `layers` adds GeoJSON line, polygon and heatmap layers beneath the points
+ * and markers, each switched on and off from a list under the map
+ * (`layers.ts` reads them, `layer-control.ts` loads them, `draw-layers.ts`
+ * draws them). A map of layers alone needs no markers or points.
+ *
  * The basemap is a prop. With none named it is OpenStreetMap, which needs no
  * key, or Google's roadmap when the host passes `basemapKey`. A host that
  * names a keyed basemap and passes no key gets its fallback and a line
@@ -31,6 +36,8 @@ import { type Basemap, basemapOf } from '@claude-workspaces/core/map-basemaps';
 import { type MapSpec, readMapSpec } from '@claude-workspaces/core/map-spec';
 import type { StateHook } from '@claude-workspaces/core/mdx-component-runtime';
 import { type KeyedBase, type LiveMap, createLiveMap } from './draw.ts';
+import { LayerControl, type LayersNow } from './layer-control.ts';
+import { readLayers } from './layers.ts';
 import { whenPlaced } from './placed.ts';
 import { ensureStyles } from './styles.ts';
 
@@ -45,6 +52,7 @@ export const MAP_STATE_KEYS = [
   'title',
   'subtitle',
   'note',
+  'layers',
 ] as const;
 
 /** A marker or a point. `latitude`, `lon` and `longitude` are read too. */
@@ -62,6 +70,43 @@ export type MapRingProp =
   | { feet: number; color?: string; label?: string }
   | { meters: number; color?: string; label?: string };
 
+/** A GeoJSON layer: `data` inline or a `url` to fetch, and how to draw it.
+ *  `layers.ts` holds the defaults and ranges each field is read with. */
+export type MapLayerProp = {
+  /** Unique on the map; `layer-<index>` without. */
+  id?: string;
+  /** The words beside its switch. */
+  name?: string;
+  /** A FeatureCollection, a Feature, a list of Features or a geometry. */
+  data?: unknown;
+  /** A GeoJSON file, relative to the page or http(s). */
+  url?: string;
+  /** `false` starts it switched off. */
+  visible?: boolean;
+  /** `{key}` is filled from each feature's properties, as text. */
+  popup?: string;
+} & (
+  | { type: 'line'; color?: string; width?: number; opacity?: number; dash?: number[] | string }
+  | {
+      type: 'polygon';
+      fill?: string;
+      fillOpacity?: number;
+      outline?: string;
+      outlineWidth?: number;
+      outlineOpacity?: number;
+    }
+  | {
+      type: 'heatmap';
+      /** The property each point's weight is read from. */
+      weight?: string;
+      radius?: number;
+      intensity?: number;
+      /** 2 to 8 colours, cold to hot. */
+      colors?: string[];
+      opacity?: number;
+    }
+);
+
 /** What a host passes the map. Every field is optional except that a map
  *  needs `markers` or `points`, here or in its state. */
 export type MapProps = {
@@ -70,6 +115,8 @@ export type MapProps = {
   markers?: MapRow[];
   points?: MapRow[];
   rings?: MapRingProp[];
+  /** GeoJSON layers beneath the points and markers, in drawing order. */
+  layers?: MapLayerProp[];
   /** `{ name: "#hex" }` or `[{ name, color }]`: the legend's order and colours. */
   categories?: Record<string, string> | Array<{ name: string; color?: string }>;
   center?: [number, number];
@@ -123,8 +170,8 @@ export function withState(props: Record<string, unknown>, state: unknown): Recor
 }
 
 /** What the view frames: a change here moves it. */
-const viewOf = (spec: MapSpec): string =>
-  JSON.stringify([spec.center, spec.zoom, spec.markers, spec.points, spec.rings]);
+const viewOf = (spec: MapSpec, layers: string): string =>
+  JSON.stringify([spec.center, spec.zoom, spec.markers, spec.points, spec.rings, layers]);
 
 const FELL_BACK: Record<'refused' | 'unloaded', string> = {
   refused: 'refused this key',
@@ -151,9 +198,11 @@ export default function mount(
   // Says so when a keyed basemap is drawn on its fallback instead.
   const notice = make('p', 'cw-map-notice');
   notice.setAttribute('role', 'status');
+  const layersAt = make('ul', 'cw-map-layers');
+  layersAt.hidden = true;
   const legendAt = make('div', 'cw-map-legend-at');
   const note = make('p', 'cw-map-note');
-  figure.append(title, subtitle, error, slot, notice, legendAt, note);
+  figure.append(title, subtitle, error, slot, notice, layersAt, legendAt, note);
   el.replaceChildren(figure);
 
   const choice = chooseBasemap(props);
@@ -167,11 +216,29 @@ export default function mount(
   let placed = false;
   let pending: MapSpec | null = null;
   let framed = '';
+  let drawnSpec: MapSpec | null = null;
   let gone = false;
+  // Set while `draw` runs, whose own paint puts the layers.
+  let drawing = false;
+
+  // The layers redraw on their own when a file arrives or a switch flips.
+  const putLayers = (now: LayersNow): void => {
+    if (drawing || !live || !drawnSpec) return;
+    const view = viewOf(drawnSpec, now.frame);
+    live.setLayers(now.ready, now.hidden, view !== framed);
+    framed = view;
+    slot.dataset.layers = String(now.ready.length);
+    slot.dataset.heatCells = String(live.heatCells());
+  };
+  const control = new LayerControl(layersAt, putLayers, (id, on) => {
+    live?.showLayer(id, on);
+    if (live) slot.dataset.heatCells = String(live.heatCells());
+  });
 
   const fail = (message: string): void => {
     say(error, message);
     slot.hidden = true;
+    layersAt.hidden = true;
   };
 
   const paint = (spec: MapSpec): void => {
@@ -197,12 +264,18 @@ export default function mount(
         slot.dataset.basemap = choice.name;
         live = createLiveMap(slot, choice.base, keyed);
       }
-      const view = viewOf(spec);
+      const layers = control.current();
+      const view = viewOf(spec, layers.frame);
+      // The layers go first, so the first view frames them too.
+      live.setLayers(layers.ready, layers.hidden, false);
       const drawn = live.draw(spec, view !== framed);
       framed = view;
+      drawnSpec = spec;
       slot.dataset.markers = String(drawn.markers);
       slot.dataset.rings = String(drawn.rings);
       slot.dataset.points = String(drawn.points);
+      slot.dataset.layers = String(layers.ready.length);
+      slot.dataset.heatCells = String(live.heatCells());
     } catch (err) {
       fail(err instanceof Error ? err.message : String(err));
     }
@@ -219,20 +292,33 @@ export default function mount(
       fail(choice.error);
       return;
     }
-    const read = readMapSpec({ ...merged, basemap: choice.name });
+    const layers = readLayers(merged.layers);
+    if (!layers.ok) {
+      fail(layers.error);
+      return;
+    }
+    // A map of layers alone has no markers or points to require.
+    const bare = merged.markers === undefined && merged.points === undefined;
+    const read = readMapSpec({
+      ...merged,
+      ...(bare && layers.value.length > 0 ? { markers: [] } : {}),
+      basemap: choice.name,
+    });
     if (!read.ok) {
       fail(read.error);
       return;
     }
-    let spec = read.spec;
-    // Nothing to frame and no view named: the whole world, not an error.
-    if (!spec.center && spec.markers.length + spec.points.length === 0) {
-      spec = { ...spec, center: [20, 0], zoom: 1 };
-    }
+    // Nothing to frame and no view named draws the whole world (`draw.ts`).
+    const spec = read.spec;
     say(error, '');
     slot.hidden = false;
     slot.style.height = `${spec.height}px`;
     legendAt.replaceChildren(...legendOf(doc, spec));
+    // Before the paint, so it draws the layers already here; one still
+    // loading arrives through `putLayers`.
+    drawing = true;
+    control.update(layers.value, spec.legend);
+    drawing = false;
     if (placed) paint(spec);
     else pending = spec;
   };
@@ -249,6 +335,7 @@ export default function mount(
   return () => {
     gone = true;
     off?.();
+    control.remove();
     live?.remove();
     live = null;
   };
