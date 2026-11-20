@@ -364,23 +364,46 @@ export function hostMock(env: HostEnv): void {
 const LOAD_DEADLINE_MS = 15_000;
 
 /**
- * The mock page's load report: one per page load, its content stamp the
- * frame's `load` event. The shape is the app's (`page-load-report.ts` in
- * workspaces-app), written out here because this bundle cannot import the
- * app; the server judges it like every other page's (`slow-load-alarm.ts`).
+ * The mock page's load report: one per page load. The shape is the app's
+ * (`page-load-report.ts` in workspaces-app), written out here because this
+ * bundle cannot import the app; the server judges it like every other page's
+ * (`slow-load-alarm.ts`).
+ *
+ * Its content stamp is the mock document's DOMContentLoaded, which the bridge
+ * (`mock-bridge.ts`, the frame's first script) announces as `frame-ready`.
+ * That covers our whole path — this page, the frame's HTML with the widget
+ * inlined into it, and the widget running — and stops before the mock's own
+ * images, fonts, map tiles and async scripts, which are the mock author's
+ * and come from servers we do not run. The frame's `load` event, which waits
+ * for all of those, used to be the stamp: measured on staging, a mock whose
+ * two images took 3s from another server reported 3,051ms against 52ms to
+ * DOMContentLoaded. It is still sent, as `msToFrameLoad`, so the extra time
+ * stays in the board's log. `msToFrameStart` is when the bridge first ran:
+ * the frame's HTML had arrived, so a gap from there to the content stamp is
+ * the mock's own parser-blocking scripts or our widget.
+ *
+ * Every stamp is this page's clock read when the word arrives; the frame
+ * sends no numbers. A frame that never says `frame-ready` (no bridge) is
+ * stamped at its `load`, as before.
  */
 export function reportMockLoad(
   frame: HTMLIFrameElement | null,
   workspaceId: string,
   post: (path: string, init: RequestInit) => Promise<Response>,
+  listen: (fn: (ev: MessageEvent) => void) => void = () => {},
+  now: () => number = () => performance.now(),
 ): void {
   if (!frame || !workspaceId) return;
-  const msToBoot = Math.round(performance.now());
+  const msToBoot = Math.round(now());
+  let frameStart: number | null = null;
+  let ready: number | null = null;
+  let loaded: number | null = null;
   let sent = false;
-  const send = (msToContent: number | null): void => {
+  const send = (): void => {
     if (sent) return;
     sent = true;
     clearTimeout(deadline);
+    const content = ready ?? loaded;
     post(`/workspaces/${encodeURIComponent(workspaceId)}/load-reports`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -388,12 +411,27 @@ export function reportMockLoad(
       body: JSON.stringify({
         page: 'mock',
         msToBoot,
-        ...(msToContent === null ? {} : { msToContent }),
+        ...(content === null ? {} : { msToContent: content }),
+        ...(frameStart === null ? {} : { msToFrameStart: frameStart }),
+        ...(loaded === null ? {} : { msToFrameLoad: loaded }),
       }),
     }).catch(() => {});
   };
-  const deadline = setTimeout(() => send(null), LOAD_DEADLINE_MS);
-  frame.addEventListener('load', () => send(Math.round(performance.now())), { once: true });
+  const deadline = setTimeout(send, LOAD_DEADLINE_MS);
+  listen((ev) => {
+    if (sent || ev.source !== frame.contentWindow) return;
+    const cw = (ev.data as { cw?: unknown } | null)?.cw;
+    if (cw === 'frame-start' && frameStart === null) frameStart = Math.round(now());
+    if (cw === 'frame-ready' && ready === null) ready = Math.round(now());
+  });
+  frame.addEventListener(
+    'load',
+    () => {
+      loaded = Math.round(now());
+      send();
+    },
+    { once: true },
+  );
 }
 
 const hostScript = document.currentScript as HTMLScriptElement | null;
@@ -423,4 +461,5 @@ reportMockLoad(
   document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
   hostScript?.dataset.workspaceId ?? '',
   (path, init) => window.fetch(path, init),
+  (fn) => window.addEventListener('message', fn),
 );
