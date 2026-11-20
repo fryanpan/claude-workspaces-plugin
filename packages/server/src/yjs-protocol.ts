@@ -408,9 +408,9 @@ export function onMessage(doc: LiveDoc, ws: FeedbackWs, data: Uint8Array, core?:
             syncProtocol.readSyncStep1(dec, enc, doc.ydoc);
           }
         } else {
-          // The role and threads gate (`socket-write-gate.ts`): a comment or
-          // view socket's edit, or any socket's write to `threads`, is dropped
-          // under enforce and logged under report-only.
+          // The role gate (`socket-write-gate.ts`): a write the socket's role
+          // does not allow is dropped under enforce and logged under
+          // report-only.
           // A dropped frame leaves the client holding items the doc never
           // took, so it is told to drop its state rather than diverge in
           // silence. The board reloads on it; a page that does not handle
