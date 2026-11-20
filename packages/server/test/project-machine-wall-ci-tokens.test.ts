@@ -47,13 +47,31 @@ describe("CI's Fly tokens", () => {
     v.environments?.[0]?.secrets?.push({ name: 'FLY_API_TOKEN' });
     v.repoSecrets?.push('FLY_API_TOKEN');
     expect(failing(ciTokenRows(ENVS, v, NOW))).toEqual([
-      'no Fly org token in GitHub: FLY_API_TOKEN in the repository, cloudflare-prod',
+      'no Fly org token in GitHub outside fly-org: FLY_API_TOKEN in the repository, cloudflare-prod',
+    ]);
+  });
+
+  it('allows the org token in fly-org by name, and in no environment named like it', () => {
+    const v = good();
+    v.environments?.push({
+      name: 'fly-org',
+      mainOnly: true,
+      secrets: [{ name: 'FLY_API_TOKEN' }, { name: 'GH_ADMIN_TOKEN' }],
+    });
+    expect(failing(ciTokenRows(ENVS, v, NOW))).toEqual([]);
+    v.environments?.push(
+      { name: 'fly-org-riverbend', mainOnly: true, secrets: [{ name: 'FLY_API_TOKEN' }] },
+      { name: 'Fly-Org', mainOnly: true, secrets: [{ name: 'FLY_API_TOKEN' }] },
+    );
+    v.environments?.[1]?.secrets?.push({ name: 'FLY_API_TOKEN' });
+    expect(failing(ciTokenRows(ENVS, v, NOW))).toEqual([
+      'no Fly org token in GitHub outside fly-org: FLY_API_TOKEN in fly-riverbend, fly-org-riverbend, Fly-Org',
     ]);
   });
 
   it('fails what it could not read rather than reading it as clean', () => {
     expect(failing(ciTokenRows(ENVS, { environments: null, repoSecrets: [] }, NOW))).toEqual([
-      'no Fly org token in GitHub: not every secret list could be read',
+      'no Fly org token in GitHub outside fly-org: not every secret list could be read',
       'fly-riverbend environment: could not be read',
       'fly-appkit-staging environment: could not be read',
     ]);

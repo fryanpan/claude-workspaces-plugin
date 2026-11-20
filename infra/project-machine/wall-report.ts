@@ -4,7 +4,7 @@
  * other's credentials, and how Cloudflare walls each project, as the
  * Terraform outputs say.
  *
- *   bun run machine:wall-report [--projects a,b] [--tf-env prod|staging] [--no-drift] [--dry-run]
+ *   bun run machine:wall-report [--projects a,b] [--no-drift] [--dry-run]
  *
  * Cross-project refusals, in the terms of `cross-server-walls.test.ts`: on
  * each project machine `wall-probe.ts mint` signs one value of each expiring
@@ -15,8 +15,9 @@
  * before they are made, so nothing carried between machines is a credential
  * (`wall-probe.ts`).
  *
- * Cloudflare, per project, from `terraform output` (`infra/cloudflare/outputs.ts`,
- * the state bucket's read-only key, Keychain `cloudflare-r2-tfstate-read`): its own Access
+ * Cloudflare, per project, from `terraform output` (`infra/cloudflare/outputs.ts`),
+ * which CI reads and seals to the Mac (`wall-read.ts`; the Mac holds no
+ * Cloudflare credential and reads the newest read with `gh`): its own Access
  * application with an audience no other project shares, hosts no other
  * project's application lists, its tunnel `cw-<project>` with its own origin
  * and a public host its own application gates, and the router route for
@@ -29,20 +30,23 @@
  * tunnel's ingress; across the account, ONE_ADDRESS_ORIGIN, shared service
  * tokens, each project's live Access policies against `access.local.json`,
  * and a Cloudflare plan with no changes; in GitHub, no secret named
- * FLY_API_TOKEN anywhere and each `fly-<project>` environment admitting main
+ * FLY_API_TOKEN outside the `fly-org` environment and each `fly-<project>` environment admitting main
  * alone with a FLY_DEPLOY_TOKEN under 45 days old. `--no-drift` leaves it out.
  *
  * The projects are `--projects`, else every project the outputs give a
- * tunnel (a project machine). Exits 1 unless every row passes. A dry run
+ * tunnel (a project machine). CI's read is prod's (`--tf-env prod`, the
+ * default, is the only one). Each CI read gets a row of its own that fails
+ * when it is over 36 hours old. Exits 1 unless every row passes. A dry run
  * prints what it would run and runs nothing.
  */
-import { type TfOutputs, readOutputs, realOutputIo } from '../cloudflare/outputs.ts';
-import { isEnv } from '../cloudflare/terraform.ts';
-import { keychainHas, keychainRead, onMachine } from './mac-ops.ts';
-import { driftRows, readOnlyCloudflare, realDriftIo } from './wall-drift-read.ts';
+import type { TfOutputs } from '../cloudflare/outputs.ts';
+import { onMachine } from './mac-ops.ts';
+import { driftRows, realDriftIo } from './wall-drift-read.ts';
 import { type Row as DriftRow, PROBE, appFor, lastJson } from './wall-drift.ts';
 import type { Answer, Batch, WallType } from './wall-probe.ts';
 import { WALL_TYPES } from './wall-probe.ts';
+import { type Pulled, ciReadRow, pullWallRead, realWallReadPullIo } from './wall-read-pull.ts';
+import type { FlyRead } from './wall-read.ts';
 
 export { PROBE, appFor, lastJson };
 
@@ -256,44 +260,64 @@ async function main(): Promise<void> {
     .filter(Boolean);
   for (const p of named ?? [])
     if (!PROJECT.test(p)) throw new Error(`--projects: ${p} is not a project name`);
+  if (tfEnv !== 'prod')
+    throw new Error(
+      `--tf-env ${tfEnv}: CI reads prod's Cloudflare state only (wall-read.yml); there is no ${tfEnv} read to report on`,
+    );
   if (dryRun) {
     const projects = named ?? ['<each project with a tunnel>'];
-    console.log(`terraform output -json  (the ${tfEnv} state, via infra/cloudflare/outputs.ts)`);
+    console.log(
+      `gh run download <newest wall-read.yml run on main> --name wall-read-cloudflare  (sealed to this Mac: prod's Terraform outputs, each tunnel's configuration, the live Access applications and service token names, a plan in CI mode)`,
+    );
+    console.log(
+      'gh run download <newest wall-read.yml run on main> --name wall-read-fly  (sealed to this Mac: fly apps list)',
+    );
     for (const p of projects)
       console.log(`fly ssh console --app ${appFor(p)} --command '${PROBE} mint'`);
     for (const p of projects)
       console.log(
         `fly ssh console --app ${appFor(p)} --command '${PROBE} verify <each project's batch>'`,
       );
-    console.log('fly apps list --json');
     for (const p of projects) {
       console.log(`fly ips list --app ${appFor(p)} --json`);
       console.log(`fly machine list --app ${appFor(p)} --json`);
       console.log(`fly ssh console --app ${appFor(p)} --command '${PROBE} machine'`);
       console.log(`gh api repos/<each repo the lead of ${p} clones or may push>/keys`);
-      console.log(`GET /accounts/<account>/cfd_tunnel/<${appFor(p)} id>/configurations`);
     }
     console.log(
       "gh api repos/<this repo>/environments, each one's secrets (names and times) and branch rules",
     );
     console.log('gh api repos/<this repo>/actions/secrets (names only)');
-    console.log('GET /accounts/<account>/access/apps and /access/service_tokens');
-    console.log(`bun run cf:plan ${tfEnv} (CI mode: no lock, nothing applied)`);
     console.log('[wall-report] DRY RUN: nothing was run');
     return;
   }
-  if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);
-  const ro = readOnlyCloudflare({ keychainHas, keychainRead });
-  const outputs = readOutputs(tfEnv, {
-    ...realOutputIo(tfEnv),
-    env: { ...process.env, ...ro.state },
-  });
+  // Cloudflare, and `fly apps list`, come from CI's sealed read: the Mac
+  // holds neither a Cloudflare token nor the Fly org token (wall-read.ts).
+  const pullIo = realWallReadPullIo();
+  const cfRead = pullWallRead(pullIo, 'cloudflare');
+  const outputs = cfRead.read.outputs;
   const projects = named ?? Object.keys(outputs.tunnels).sort();
   const cross = crossRows(projects, onMachine);
-  const drift = args.includes('--no-drift')
-    ? []
-    : await driftRows(projects, outputs, realDriftIo(tfEnv, outputs, ro));
-  const r = report(projects, cross, cloudflareRows(outputs, projects), drift);
+  const now = Date.now();
+  let drift: DriftRow[] = [];
+  if (!args.includes('--no-drift')) {
+    let flyRead: Pulled<FlyRead> | Error;
+    try {
+      flyRead = pullWallRead(pullIo, 'fly');
+    } catch (e) {
+      flyRead = e instanceof Error ? e : new Error(String(e));
+    }
+    drift = [
+      ciReadRow('fly', flyRead, now),
+      ...(await driftRows(
+        projects,
+        outputs,
+        realDriftIo(tfEnv, outputs, cfRead.read, flyRead instanceof Error ? null : flyRead.read),
+      )),
+    ];
+  }
+  const cf = [ciReadRow('cloudflare', cfRead, now), ...cloudflareRows(outputs, projects)];
+  const r = report(projects, cross, cf, drift);
   console.log(r.text);
   if (!r.ok) process.exitCode = 1;
 }

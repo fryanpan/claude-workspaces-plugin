@@ -93,9 +93,10 @@ interface RunRow {
   head_repository?: { full_name?: unknown } | null;
 }
 
-function listRuns(io: PullIo, workflow: string): { id: string; at: string }[] {
+/** A workflow's finished runs on main that a trusted event started here (`TRUSTED_EVENTS`). */
+export function listRuns(gh: PullIo['gh'], workflow: string): { id: string; at: string }[] {
   // The REST list, not `gh run list`: only it names the head repository.
-  const r = io.gh([
+  const r = gh([
     'api',
     '-X',
     'GET',
@@ -133,7 +134,7 @@ const NO_ARTIFACT = [
   'no artifact matches any of the names or patterns provided',
 ];
 
-function noArtifact(stderr: string): boolean {
+export function noArtifact(stderr: string): boolean {
   return stderr
     .split('\n')
     .map((l) => l.trim())
@@ -155,7 +156,7 @@ export function pull(io: PullIo): number {
   let failed = false;
   for (const workflow of WORKFLOWS) {
     try {
-      for (const r of listRuns(io, workflow)) if (!seen.has(r.id)) runs.push({ ...r, workflow });
+      for (const r of listRuns(io.gh, workflow)) if (!seen.has(r.id)) runs.push({ ...r, workflow });
     } catch (e) {
       say(e instanceof Error ? e.message : String(e));
       failed = true;
