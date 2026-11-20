@@ -809,6 +809,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     membersChanged: () => membersChanged?.(),
     estimatesChanged: () => estimatesChanged?.(),
     location,
+    tabStorage: localStorage,
     // A followed spot on this board: the place it names, as Back would.
     showPath: (path) => {
       if (`${location.pathname}${location.search}` !== path) history.pushState(null, '', path);

@@ -21,7 +21,12 @@ const storage0 = (): Storage =>
   ({ getItem: () => null, setItem: () => {}, removeItem: () => {} }) as never;
 const fakeClient = () => {
   const doc = new Y.Doc();
-  return { awareness: new Awareness(doc), ydoc: doc, destroy: () => {} } as never;
+  return {
+    awareness: new Awareness(doc),
+    ydoc: doc,
+    destroy: () => {},
+    onReady: () => {},
+  } as never;
 };
 
 describe('a follow carried off the board', () => {

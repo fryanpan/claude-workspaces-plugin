@@ -13,6 +13,12 @@
  * moved nothing" is read as the NEXT point arriving at exactly one more than
  * the last, rather than as a silence.
  *
+ * Every case runs twice: with the collab core switched off, the presence
+ * and follow path every board had before the core (M10's "the old path still
+ * works with its switch off"), and with it on for the board. Which path served
+ * the board's socket is read from the core's own open rooms, so the off run
+ * cannot pass on the core and the on run cannot pass without it.
+ *
  * Real server, real `/y` sockets, port 0, a temp data dir, invented names.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
@@ -110,7 +116,10 @@ function agentSpot(page: ReturnType<typeof joinRoom>, agentId: string): AgentSpo
   return undefined;
 }
 
-describe('the workspace presence room', () => {
+describe.each([
+  ['off', false],
+  ['on', true],
+] as const)('the workspace presence room, collab core switched %s', (_label, core) => {
   let handle: ServerHandle | null = null;
   let dataDir = '';
   const closers: Array<{ close: () => void }> = [];
@@ -124,9 +133,13 @@ describe('the workspace presence room', () => {
 
   async function boot() {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-presence-room-'));
-    handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
+    // Fixed by the option, as `CW_COLLAB_CORE` fixes it: off means no board
+    // can be switched on at runtime.
+    handle = createServer({ port: 0, dataDir, requireSignInToWrite: false, collabCore: core });
     const base = `http://127.0.0.1:${handle.port}`;
     const ws = await seedBoard(base);
+    if (core) handle.collabCore.switch.set(ws, true);
+    expect(handle.collabCore.switch.usesCore(ws)).toBe(core);
     const post = (path: string, body: unknown) =>
       fetch(`${base}${path}`, {
         method: 'POST',
@@ -154,6 +167,8 @@ describe('the workspace presence room', () => {
     const docPage = joinRoom(room(true), base);
     closers.push(board, docPage);
     await Promise.all([board.ready, docPage.ready]);
+    // The board's socket took the path the switch names.
+    expect(handle?.collabCore.path.openRooms().includes(`ws:${ws}`)).toBe(core);
 
     docPage.awareness.setLocalState({
       user: { id: PERSON.id, name: PERSON.name, color: PERSON.color },

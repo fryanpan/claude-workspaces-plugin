@@ -131,6 +131,22 @@ export function samePage(a: PresenceSpot, b: PresenceSpot): boolean {
 export const ATTENDING_FIELD = 'attending';
 
 /**
+ * Who a tab is following: the participant key the strip uses (`p-<id>` or
+ * `a-<agentId>`), absent while it follows nobody. Announced so the person
+ * being followed can tell, in a tab they open later, that somebody would
+ * come along (`workspaces-app/src/presence/bring-along.ts`).
+ */
+export const FOLLOWING_FIELD = 'following';
+
+/**
+ * `false` on a tab whose person's followers stay where they are: a tab
+ * opened while they were followed elsewhere, until its person brings them
+ * along. A follow goes to the person's newest tab that leads, and to their
+ * newest tab when none does, so a page that never sets this leads.
+ */
+export const LEADS_FIELD = 'leads';
+
+/**
  * The server's instruction to ONE page, by its awareness client id: go to
  * this spot. An agent asks for it (`show_person`, MCP) and the server
  * addresses it to the page its person is attending to on that board, so a
