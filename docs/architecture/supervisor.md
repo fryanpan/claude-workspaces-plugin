@@ -235,6 +235,15 @@ changed inputs still refuse and back off (`dependency-install.ts`). A restart wh
 survives now logs that pid and its `ps` state (`supervisor-reap.ts`), because past that point the
 kernel, not the supervisor, is what keeps the port held.
 
+**Every step before the spawn names itself** (`supervisor-boot-steps.ts`). On 20 November a
+watchdog restart spent 14 minutes between launchd starting the supervisor (09:59:38Z) and the
+server's spawn (10:13:42Z) with nothing in the log; deploy restarts take 3 to 8 seconds over the
+same steps. Each step now logs `boot: <step> started` before it runs and `boot: <step> took Ns`
+after, and the two client builds, which run asynchronously, log `still running after Ns` every
+minute. The install and `git describe` are synchronous, so their start line is what names them
+if they never return. A `git describe` that fails or passes its 5s limit is logged, because the
+release then carries no source ref.
+
 ## A stop signal nobody asked for
 
 launchd relaunches this job only on a non-zero exit, so a supervisor that exits
