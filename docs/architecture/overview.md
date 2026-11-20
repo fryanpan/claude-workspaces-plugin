@@ -994,7 +994,12 @@ have no blocks, so a spot there is a scroll, a phrase or a thread, and
 queue and the workspaces list belong to no board, so
 `carried-follow.ts` checks `sessionStorage` for a follow arriving at that
 address, and only then loads the room (`off-board-presence.ts`). The board's own
-follow is the same follower.
+follow is the same follower. Each page also announces `following` (whom it
+follows) and `leads`: a follow goes to the newest of a person's tabs that
+leads, so a tab they open while followed elsewhere starts not leading and,
+once its room syncs, offers "Bring them here" (`bring-along.ts`; a browser's
+tabs find each other through a list of client ids in `localStorage`, because
+the server writes the proven name over the one a page announces).
 
 **An agent can hear where the owner is and move the one tab they are
 attending to.** Each page also announces `attending` (visible and focused,
@@ -1521,7 +1526,12 @@ under `direct-messages/`, the private-message store's format) behind
 `routes/direct-messages.ts` at `/workspaces/<ws>/me/dm`, which only a proven
 person on the board reaches; a send is framed `direct.message` to the two
 people's own streams and to no agent. The shapes are
-`core/src/direct-messages.ts` (a new top-level core module).
+`core/src/direct-messages.ts` (a new top-level core module). The board's
+stream refuses a browser that names an agent (`?agentId=`), since frames
+addressed to an agent carry a person's private messages to it;
+`server/test/private-messages-every-route.test.ts` calls every route-table
+row as a member, the owner's browser and the lead agent and finds neither
+conversation.
 
 **Tab titles.** Every page's browser tab starts with its workspace's name,
 then the page's own name (`Harborlight · tides.md · Workspaces`), so several
