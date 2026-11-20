@@ -2,7 +2,8 @@
  * The four-word role and the per-board mode, as the store keeps them
  * (`share/board-access.ts`, `share/share-links.ts`). A row written before
  * the access field reads as edit; a hand-edited level that is not one of
- * the two narrow ones reads as edit too; the mode survives a reload.
+ * the two narrow ones reads as edit too; every board enforces unless its
+ * owner set it back to report-only, and that opt-out survives a reload.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,13 +58,54 @@ describe('the four roles', () => {
 });
 
 describe('the roles mode', () => {
-  it('is report-only until set, and survives a reload', () => {
+  it('enforces until set to report-only, and survives a reload', () => {
     const { store, ws } = storeWithAlice();
-    expect(store.rolesModeOf(ws)).toBe('report-only');
-    store.setRolesMode(ws, 'enforce');
-    expect(new ShareLinks({ dataDir: dir }).rolesModeOf(ws)).toBe('enforce');
-    expect(store.rolesModeOf('ws-riverbend')).toBe('report-only');
+    expect(store.rolesModeOf(ws)).toBe('enforce');
+    expect(store.rolesModeOf('ws-riverbend')).toBe('enforce');
     store.setRolesMode(ws, 'report-only');
     expect(new ShareLinks({ dataDir: dir }).rolesModeOf(ws)).toBe('report-only');
+    expect(new ShareLinks({ dataDir: dir }).rolesModeOf('ws-riverbend')).toBe('enforce');
+    store.setRolesMode(ws, 'enforce');
+    expect(new ShareLinks({ dataDir: dir }).rolesModeOf(ws)).toBe('enforce');
+  });
+
+  it('stores the opt-out, not an opt-in list', () => {
+    const { store, ws } = storeWithAlice();
+    const path = join(dir, 'share-links.json');
+    store.setRolesMode(ws, 'report-only');
+    const saved = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(saved.rolesReportOnly).toEqual([ws]);
+    expect(saved.rolesEnforced).toBeUndefined();
+    store.setRolesMode(ws, 'enforce');
+    const after = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(after.rolesReportOnly).toBeUndefined();
+  });
+
+  it('reads a registry written under the old opt-in list: every board enforces', () => {
+    const { ws } = storeWithAlice();
+    const path = join(dir, 'share-links.json');
+    const legacy = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    // The old shape: only the boards listed enforced, and the rest reported.
+    legacy.rolesEnforced = ['ws-saltmarsh'];
+    writeFileSync(path, JSON.stringify(legacy));
+    const reloaded = new ShareLinks({ dataDir: dir });
+    expect(reloaded.rolesModeOf('ws-saltmarsh')).toBe('enforce');
+    expect(reloaded.rolesModeOf(ws)).toBe('enforce');
+    // The next write drops the old field rather than carrying it forward.
+    reloaded.setRolesMode(ws, 'report-only');
+    const saved = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(saved.rolesEnforced).toBeUndefined();
+    expect(saved.rolesReportOnly).toEqual([ws]);
+  });
+
+  it('drops a hand-edited opt-out entry that is not a board id', () => {
+    const { ws } = storeWithAlice();
+    const path = join(dir, 'share-links.json');
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    raw.rolesReportOnly = [ws, '', 7, null];
+    writeFileSync(path, JSON.stringify(raw));
+    const reloaded = new ShareLinks({ dataDir: dir });
+    expect(reloaded.rolesModeOf(ws)).toBe('report-only');
+    expect(reloaded.rolesModeOf('')).toBe('enforce');
   });
 });

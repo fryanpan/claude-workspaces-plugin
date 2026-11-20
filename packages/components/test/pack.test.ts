@@ -41,7 +41,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('the packed components', () => {
   it('is named for its version and holds a module and types for every export', () => {
-    expect(tarball.endsWith('claude-workspaces-components-0.1.0.tgz')).toBe(true);
+    expect(tarball.endsWith('claude-workspaces-components-0.2.0.tgz')).toBe(true);
     const manifest = JSON.parse(fromTarball('package.json')) as {
       exports: Record<string, Record<string, string>>;
     };
