@@ -23,6 +23,8 @@
  *   bun run test:server board doc            only files matching a substring
  *   bun run test:server --coverage --coverage-dir .coverage/server
  *   bun run test:server --shard 2/3          this third of the files only
+ *   bun run test:server --core               every test board on the collab core
+ *                                            (scripts/server-core-mode.ts)
  *
  * SHARDING vs JOBS. `--jobs` splits across processes on THIS machine and is
  * how the wall clock comes down. `--shard i/n` takes a slice of the files and
@@ -51,6 +53,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CORE_MODE_ENV, CORE_MODE_SKIPS, coreModeFiles } from './server-core-mode.ts';
 import { loadServerDurations, serverShard } from './server-durations.ts';
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -219,11 +222,20 @@ async function main(): Promise<void> {
   const coverage = argv.includes('--coverage');
   const coverageDir = flagValue(argv, '--coverage-dir');
   const bail = argv.includes('--bail');
+  const core = argv.includes('--core');
 
   const filters = filterArgs(argv);
 
-  let files = interleave(discover(REPO_ROOT, SUITE_DIR));
+  const all = discover(REPO_ROOT, SUITE_DIR);
+  let files = interleave(all);
   if (filters.length > 0) files = files.filter((f) => filters.some((s) => f.includes(s)));
+  if (core) {
+    files = coreModeFiles(files, all);
+    console.log('CORE MODE: every test board on the collab core (CW_COLLAB_CORE_DEFAULT=on).');
+    for (const [f, why] of Object.entries(CORE_MODE_SKIPS))
+      console.log(`  left out: ${f} — ${why}`);
+    console.log('');
+  }
   if (shard) {
     const [i, n] = shard.split('/').map(Number);
     if (!i || !n || i < 1 || i > n) {
@@ -270,6 +282,7 @@ async function main(): Promise<void> {
       const started = Date.now();
       const proc = Bun.spawn(['bun', ...args, ...chunk], {
         cwd: REPO_ROOT,
+        ...(core ? { env: { ...process.env, ...CORE_MODE_ENV } } : {}),
         stdout: 'pipe',
         stderr: 'pipe',
       });

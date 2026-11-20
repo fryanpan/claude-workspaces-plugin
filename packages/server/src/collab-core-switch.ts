@@ -19,6 +19,13 @@
  * runtime. So an operator can always force the core off with one variable.
  * Unset, the file decides.
  *
+ * `CW_COLLAB_CORE_DEFAULT` (or `ServerOptions.collabCoreDefault`) turns both
+ * DEFAULTS on: every board not turned off starts on, and the server-wide
+ * setting starts on until somebody saves it. It is how the core-mode test
+ * runs put every test board on the core (`server-core` and
+ * `client-browser-core` in ci.yml) without a test changing; a board turned
+ * off under it is remembered in the file's `off` list.
+ *
  * Read at connect: a socket keeps the path it opened on for its life, so a
  * change reaches a board's pages at their next reconnect. Both paths sync the
  * same live doc the doc store persists, so switching loses nothing
@@ -48,6 +55,13 @@ export function parseCollabCoreEnv(value: string | undefined): boolean | undefin
   return v === 'on' || v === '1' || v === 'true';
 }
 
+/** `CW_COLLAB_CORE_DEFAULT`: `on`, `1` or `true` turns the defaults on;
+ *  anything else, unset included, leaves them off. */
+export function parseCollabCoreDefault(value: string | undefined): boolean {
+  const v = (value ?? '').trim().toLowerCase();
+  return v === 'on' || v === '1' || v === 'true';
+}
+
 /** The server-wide setting was fixed by the environment and cannot change. */
 export class CollabCoreFixedError extends Error {
   constructor(readonly fixedOn: boolean) {
@@ -60,6 +74,12 @@ export interface CollabCoreSwitchOptions {
   /** The server-wide setting as the environment fixes it, or `undefined`
    *  when it leaves it to the runtime switch. */
   fixed?: boolean | undefined;
+  /** Every board, and the server-wide setting, start on rather than off. */
+  defaultOn?: boolean | undefined;
+  /** Every board the server has. Under the default-on mode a flip of the
+   *  server-wide setting tells each of these that is on, since no list names
+   *  the boards that are on only by default. */
+  knownBoards?: (() => Iterable<string>) | undefined;
 }
 
 export class CollabCoreSwitch {
@@ -67,7 +87,11 @@ export class CollabCoreSwitch {
   readonly fixed: boolean | undefined;
   private readonly path: string;
   private readonly serverPath: string;
+  private readonly defaultOn: boolean;
+  private readonly knownBoards: () => Iterable<string>;
   private readonly boards: Set<string>;
+  /** Boards turned off while the default is on. Empty otherwise. */
+  private readonly off: Set<string>;
   private runtimeOn: boolean;
   private readonly listeners = new Set<(workspaceId: string) => void>();
 
@@ -75,8 +99,12 @@ export class CollabCoreSwitch {
     this.fixed = opts.fixed;
     this.path = collabCoreBoardsPath(opts.dataDir);
     this.serverPath = collabCoreServerPath(opts.dataDir);
-    this.boards = new Set(readBoards(this.path));
-    this.runtimeOn = readServerWide(this.serverPath);
+    this.defaultOn = opts.defaultOn === true;
+    this.knownBoards = opts.knownBoards ?? (() => []);
+    const file = readBoards(this.path);
+    this.boards = new Set(file.boards);
+    this.off = new Set(this.defaultOn ? file.off : []);
+    this.runtimeOn = readServerWide(this.serverPath) ?? this.defaultOn;
   }
 
   /** The server-wide setting in force: the environment's, else the runtime one. */
@@ -86,20 +114,22 @@ export class CollabCoreSwitch {
 
   /** The board's own setting, whatever the server-wide one is. */
   boardOn(workspaceId: string): boolean {
-    return this.boards.has(workspaceId);
+    if (this.boards.has(workspaceId)) return true;
+    return this.defaultOn && !this.off.has(workspaceId) && BOARD_ID.test(workspaceId);
   }
 
   /** Whether a socket opened now on this board takes the core path. */
   usesCore(workspaceId: string): boolean {
-    return this.serverWide && this.boards.has(workspaceId);
+    return this.serverWide && this.boardOn(workspaceId);
   }
 
   /** Whether any board is switched on, whatever the server-wide setting. */
   anyBoardOn(): boolean {
-    return this.boards.size > 0;
+    return this.defaultOn || this.boards.size > 0;
   }
 
-  /** Every board switched on, sorted. */
+  /** Every board switched on by name, sorted. Under the default-on mode a
+   *  board on only by default is not listed: there is no list of them. */
   boardsOn(): string[] {
     return [...this.boards].sort();
   }
@@ -107,21 +137,33 @@ export class CollabCoreSwitch {
   /** Switch one board on or off, and save. Throws on a bad id or a failed save. */
   set(workspaceId: string, on: boolean): void {
     if (!BOARD_ID.test(workspaceId)) throw new Error(`not a board id: ${workspaceId}`);
-    if (this.boards.has(workspaceId) === on) return;
+    if (this.boardOn(workspaceId) === on && (on || !this.defaultOn || this.off.has(workspaceId)))
+      return;
     const next = new Set(this.boards);
-    if (on) next.add(workspaceId);
-    else next.delete(workspaceId);
-    replaceFile(this.path, `${JSON.stringify({ boards: [...next].sort() })}\n`, 0o600);
+    const nextOff = new Set(this.off);
+    if (on) {
+      next.add(workspaceId);
+      nextOff.delete(workspaceId);
+    } else {
+      next.delete(workspaceId);
+      if (this.defaultOn) nextOff.add(workspaceId);
+    }
+    const body: { boards: string[]; off?: string[] } = { boards: [...next].sort() };
+    if (nextOff.size > 0) body.off = [...nextOff].sort();
+    replaceFile(this.path, `${JSON.stringify(body)}\n`, 0o600);
     const before = this.usesCore(workspaceId);
     if (on) this.boards.add(workspaceId);
     else this.boards.delete(workspaceId);
+    if (on) this.off.delete(workspaceId);
+    else if (this.defaultOn) this.off.add(workspaceId);
     if (this.usesCore(workspaceId) !== before) this.tell(workspaceId);
   }
 
   /**
    * Turn the server-wide setting on or off, and save. Throws
    * `CollabCoreFixedError` when the environment fixed it to the other value,
-   * and on a failed save. Every board switched on hears the change.
+   * and on a failed save. Every board switched on hears the change, by name
+   * or (default-on mode) by default among `knownBoards`.
    */
   setServerWide(on: boolean): void {
     if (this.fixed !== undefined) {
@@ -131,7 +173,11 @@ export class CollabCoreSwitch {
     if (this.runtimeOn === on) return;
     replaceFile(this.serverPath, `${JSON.stringify({ on })}\n`, 0o600);
     this.runtimeOn = on;
-    for (const ws of this.boardsOn()) this.tell(ws);
+    const affected = new Set(this.boardsOn());
+    if (this.defaultOn) {
+      for (const ws of this.knownBoards()) if (this.boardOn(ws)) affected.add(ws);
+    }
+    for (const ws of affected) this.tell(ws);
   }
 
   /** Be told which board's path changed, after it does. Returns the
@@ -165,25 +211,32 @@ export function collabCoreView(sw: CollabCoreSwitch, workspaceId: string): Colla
   };
 }
 
-/** The ids the file names. A missing, unreadable or malformed file is every
- *  board off, which is the current code: the safe reading. */
-function readBoards(path: string): string[] {
+/** The ids the file names, on and (default-on mode only) off. A missing,
+ *  unreadable or malformed file is every board off, which is the current
+ *  code: the safe reading. */
+function readBoards(path: string): { boards: string[]; off: string[] } {
+  const none = { boards: [], off: [] };
   const text = readSmallFile(path);
-  if (text === null) return [];
+  if (text === null) return none;
   try {
-    const parsed = JSON.parse(text) as { boards?: unknown };
-    if (!Array.isArray(parsed.boards)) return [];
-    return parsed.boards.filter((b): b is string => typeof b === 'string' && BOARD_ID.test(b));
+    const parsed = JSON.parse(text) as { boards?: unknown; off?: unknown };
+    return { boards: boardIds(parsed.boards), off: boardIds(parsed.off) };
   } catch {
     console.error(`[collab-core] ${path} is not JSON; every board takes the current code`);
-    return [];
+    return none;
   }
 }
 
-/** On only when the file says exactly `{"on": true}`; anything else is off. */
-function readServerWide(path: string): boolean {
+function boardIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((b): b is string => typeof b === 'string' && BOARD_ID.test(b));
+}
+
+/** On only when the file says exactly `{"on": true}`; anything else saved is
+ *  off; no file is `null`, which the default decides. */
+function readServerWide(path: string): boolean | null {
   const text = readSmallFile(path);
-  if (text === null) return false;
+  if (text === null) return null;
   try {
     return (JSON.parse(text) as { on?: unknown }).on === true;
   } catch {

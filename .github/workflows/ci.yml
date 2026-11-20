@@ -417,6 +417,58 @@ jobs:
           path: .coverage/server/lcov.info
           if-no-files-found: error
 
+  # CORE MODE (M8 cutover trial): the same server suite with every test board
+  # on the collab core. `--core` sets CW_COLLAB_CORE_DEFAULT=on for the test
+  # processes and leaves out the three files that test the switch itself
+  # (scripts/server-core-mode.ts names them and why); no test changes.
+  # `collab-core-mode.test.ts` fails here if the variable stopped reaching the
+  # test servers. No coverage: the `server` job already measures these lines,
+  # and a second lcov would change the `ci` job's expected count.
+  server-core:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Test (server, every board on the collab core)
+        env:
+          CW_KEEPER_SUDO_TESTS: '1'
+        run: bun run test:server --core --shard ${{ matrix.shard }}/${{ strategy.job-total }} --jobs 8
+
+  # CORE MODE for the browser files: the drivers boot real servers and drive
+  # the real board and doc pages, so with CW_COLLAB_CORE_DEFAULT=on every page
+  # they open syncs through the collab core. Half the runners of
+  # `client-browser`, no coverage, for the reason `server-core` gives.
+  client-browser-core:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Test (browser, every board on the collab core)
+        env:
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_BROWSER_TESTS: '1'
+          CW_VITEST_KIND: browser
+          CW_COLLAB_CORE_DEFAULT: 'on'
+        run: bun run test:vitest --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=2
+
   # The one check branch protection on main requires. It fails unless every
   # job it needs succeeded, so a cancelled, skipped or failed job fails it
   # too. Requiring this one name instead of each job's means adding a job or a
@@ -434,7 +486,7 @@ jobs:
   # per-file gap so it can be worked down.
   ci:
     runs-on: ubuntu-latest
-    needs: [gates, gates-build, client, client-browser, server]
+    needs: [gates, gates-build, client, client-browser, server, server-core, client-browser-core]
     if: always()
     permissions:
       contents: read

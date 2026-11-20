@@ -156,6 +156,12 @@ export interface ServerOptions {
    */
   collabCore?: boolean;
   /**
+   * Starts every board, and the server-wide setting, ON rather than off
+   * (`collab-core-switch.ts`): the core-mode test runs. Unset reads
+   * `CW_COLLAB_CORE_DEFAULT`. A fixed `collabCore: false` still wins.
+   */
+  collabCoreDefault?: boolean;
+  /**
    * How a component build reaches esm.sh (`component-cdn.ts`). Tests hand in
    * a fake so no build leaves the machine; absent, the real host.
    */

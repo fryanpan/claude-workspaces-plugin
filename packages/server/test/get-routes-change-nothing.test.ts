@@ -44,6 +44,10 @@ const NOT_STATE: ReadonlyArray<readonly [RegExp, string]> = [
     /^[^/]+:[^/]+\.(ydoc|index\.json|private\.json)$/,
     'A folder member opened for the first time. Its id is `<setId>:<relPath>`, the only ids with a colon, and its doc is made from the file the folder already lists, so the open records what was on disk rather than anything a caller chose (`openUnopenedMember`, `routes/hono-gates.ts`).',
   ],
+  [
+    /^_history\/[^/]+:[^/]+\.yhist$/,
+    "The same first open on a board on the collab core (the core-mode run, M8). Making the doc from its file is the first change the doc history sees, so it writes the log's base: the state just read from disk, which the `.ydoc` above also holds. Decided rather than suppressed, because a later edit would have to write that same base before its own record (`catchUp`, `doc-history/recorder.ts`). Only the colon ids: a GET that adds history to any other doc still fails here.",
+  ],
 ];
 
 function fingerprint(roots: string[]): Map<string, string> {

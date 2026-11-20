@@ -340,3 +340,47 @@ describe('switching off loses nothing', () => {
     expect(readFileSync(join(dataDir, 'harborlight-notes.md'), 'utf8')).toContain('Kept');
   }, 60_000);
 });
+
+describe('a delete that destroys a doc takes its history with it', () => {
+  it('a forced board delete leaves no history file for the board doc', async () => {
+    const dataDir = freshDir();
+    const handle = createServer({ port: 0, dataDir, collabCoreDefault: true });
+    handles.push(handle);
+    const base = `http://127.0.0.1:${handle.port}`;
+    const ws = await seedBoard(base, { name: 'Harborlight' });
+    // A task filed projects onto the board doc: a change the core records.
+    const filed = await post(base, `/workspaces/${ws}/tasks`, {
+      title: 'Saltmarsh survey',
+      author: { id: 'agent-bob', name: 'Bob', kind: 'agent' },
+      owner: 'Bob',
+    });
+    expect(filed.status).toBe(200);
+    const yhist = join(historyDir(dataDir), `ws:${ws}.yhist`);
+    await waitFor(() => existsSync(yhist), { describe: 'the board doc to have history' });
+
+    const del = await fetch(`${base}/workspaces/${ws}?force=true`, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    expect(existsSync(yhist)).toBe(false);
+  });
+
+  it('archiving a doc keeps its history (soft delete)', async () => {
+    const dataDir = freshDir();
+    const handle = createServer({ port: 0, dataDir, collabCoreDefault: true });
+    handles.push(handle);
+    const base = `http://127.0.0.1:${handle.port}`;
+    const ws = await seedBoard(base, { name: 'Harborlight' });
+    const docId = await addDoc(base, dataDir, ws, 'riverbend-notes');
+    const r = await post(base, `/workspaces/${ws}/docs/${docId}/threads`, {
+      anchor: { kind: 'subject' },
+      text: 'A question for Alice.',
+      author: { id: 'agent-bob', name: 'Bob', kind: 'agent' },
+    });
+    expect(r.status).toBe(200);
+    const yhist = join(historyDir(dataDir), `${docId}.yhist`);
+    await waitFor(() => existsSync(yhist), { describe: 'the doc to have history' });
+    expect(handle.docStore.archiveDoc(docId, { archivedBy: 'Alice', reason: 'done' }).ok).toBe(
+      true,
+    );
+    expect(existsSync(yhist)).toBe(true);
+  });
+});
