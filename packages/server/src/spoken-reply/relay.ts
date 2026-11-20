@@ -6,7 +6,11 @@
  * in a test server that injects none — every setup then reads as not set up
  * and the page keeps the plain mic).
  */
-import type { SpokenHeldSetups, SpokenServerMessage } from '@claude-workspaces/core/spoken-reply';
+import {
+  SPOKEN_KEEPALIVE_FRAME,
+  type SpokenHeldSetups,
+  type SpokenServerMessage,
+} from '@claude-workspaces/core/spoken-reply';
 import { cryptoId } from '../task-fields.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import type { VoiceActor } from '../voice-action.ts';
@@ -60,6 +64,30 @@ export interface SpokenReplyRelayDeps {
   conversationLog?: AgentConversationLog;
   /** A fresh id for a conversation or a turn. */
   newId?: () => string;
+  /** How often each socket gets a keepalive frame; `SPOKEN_KEEPALIVE_MS`. */
+  keepaliveMs?: number;
+  /** Runs `tick` every `ms` until the returned stop is called; a test
+   *  passes a fake so it can tick by hand. */
+  every?: (tick: () => void, ms: number) => () => void;
+  /** Where the one line per close goes; `console.error`, as the meeting
+   *  relay's close line does, so a process whose stdout is its result (a
+   *  browser test driver) keeps it clean. */
+  log?: (line: string) => void;
+  now?: () => number;
+}
+
+/**
+ * Well inside Cloudflare's 100s idle cut on a proxied websocket. The lead
+ * chat's socket can sit silent for minutes while the lead works on an answer,
+ * and Bun's own pings only start after its 120s `idleTimeout`, too late: the
+ * reports read code 1006 at about 98s.
+ */
+export const SPOKEN_KEEPALIVE_MS = 30_000;
+
+function everyInterval(tick: () => void, ms: number): () => void {
+  const timer = setInterval(tick, ms);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 /**
@@ -84,6 +112,8 @@ export class SpokenReplyRelay {
   private readonly sayOn = new WeakMap<object, { session: SpokenSession }>();
   /** Which socket waits for which lead answer. */
   private readonly leads: LeadAnswers;
+  /** Each open socket's heartbeat stop and the time it opened. */
+  private readonly beats = new WeakMap<SpokenWs, { stop: () => void; openedAt: number }>();
 
   constructor(private readonly deps: SpokenReplyRelayDeps) {
     this.leads = deps.leads ?? new LeadAnswers();
@@ -172,6 +202,14 @@ export class SpokenReplyRelay {
     });
     this.sessions.set(ws, session);
     this.open.add(ws);
+    const stop = (this.deps.every ?? everyInterval)(() => {
+      try {
+        ws.send(SPOKEN_KEEPALIVE_FRAME);
+      } catch {
+        // As above.
+      }
+    }, this.deps.keepaliveMs ?? SPOKEN_KEEPALIVE_MS);
+    this.beats.set(ws, { stop, openedAt: (this.deps.now ?? Date.now)() });
     session.open();
     // A page change: what this person's last page was waiting for is said here.
     const heir = heirOf(ws);
@@ -186,7 +224,17 @@ export class SpokenReplyRelay {
     this.sessions.get(ws)?.onAudio(pcm);
   }
 
-  onClose(ws: SpokenWs): void {
+  /** `code` is the close code Bun reports: 1006 when the path went away. */
+  onClose(ws: SpokenWs, code?: number): void {
+    const beat = this.beats.get(ws);
+    if (beat) {
+      beat.stop();
+      this.beats.delete(ws);
+      const open = Math.round(((this.deps.now ?? Date.now)() - beat.openedAt) / 1000);
+      (this.deps.log ?? console.error)(
+        `[spoken] socket closed workspace=${ws.data.workspaceId ?? ''} code=${code ?? 'none'} open=${open}s`,
+      );
+    }
     const session = this.sessions.get(ws);
     session?.close();
     const heir = heirOf(ws);

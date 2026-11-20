@@ -910,6 +910,9 @@ export interface ServerOptions {
    * offers no setup and the board keeps its plain mic.
    */
   spokenReply?: SpokenEngines;
+  /** How often a converse socket gets a keepalive frame. Tests shorten it;
+   *  the default is `SPOKEN_KEEPALIVE_MS` (30s, inside Cloudflare's 100s). */
+  spokenKeepaliveMs?: number;
   /**
    * The features this server's profile turned off, as the lines the pages
    * show (`project-profile.ts`). Built by `server-deps.ts`; absent on the Mac

@@ -344,6 +344,15 @@ export function parseSpokenClientMessage(text: string): SpokenClientMessage | nu
   }
 }
 
+/**
+ * The server's heartbeat on every converse socket. Cloudflare closes a
+ * proxied websocket that carries nothing for 100s, so the server sends this
+ * well inside that. It is not a `SpokenServerMessage`: the parser below
+ * returns null for it, so a page drops it without a case, a log line or a
+ * report — and a page built before it existed does the same.
+ */
+export const SPOKEN_KEEPALIVE_FRAME = '{"type":"keepalive"}';
+
 /** A server frame, or null — the page's half of the same check. */
 export function parseSpokenServerMessage(text: string): SpokenServerMessage | null {
   let raw: unknown;
