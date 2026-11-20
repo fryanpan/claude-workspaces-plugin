@@ -19,6 +19,8 @@ import { estimatesShown } from '@claude-workspaces/core/show-estimates';
  */
 import {
   ATTENDING_FIELD,
+  FOLLOWING_FIELD,
+  LEADS_FIELD,
   PERSON_SPOT_FIELD,
   type PresenceSpot,
 } from '@claude-workspaces/core/workspace-presence';
@@ -27,6 +29,11 @@ import { renderLiveStaleNotice, watchConnection, watchLiveSync } from '../connec
 import { messageLinkOf } from '../lead-chat/lead-chat-link.ts';
 import { LINK_REVIEW_EVENTS, staleLinkReviewMarks } from '../link-titles.ts';
 import { watchAttention } from '../presence/attention.ts';
+import {
+  type BringAlongStorage,
+  createBringAlong,
+  mountBringAlongOffer,
+} from '../presence/bring-along.ts';
 import {
   type FollowStorage,
   type Follower,
@@ -97,6 +104,9 @@ export interface BoardLiveDeps {
   location: Pick<BootLocation, 'assign' | 'pathname' | 'search'>;
   /** Where a follow is kept across pages; `sessionStorage` on the page. */
   followStorage?: FollowStorage;
+  /** Shared by this browser's tabs; `localStorage` on the page. A second
+   *  tab of a followed person finds the first through it (`bring-along.ts`). */
+  tabStorage?: BringAlongStorage;
   /** Open `path`, a page of this board, in place: the tab, panel, thread or
    *  review item it names, as Back and Forward do. */
   showPath: (path: string) => void;
@@ -214,8 +224,15 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     surface: 'board',
     [PERSON_SPOT_FIELD]: here(),
     [ATTENDING_FIELD]: attention.attending(),
+    // Not yet: `bring-along.ts` decides once the room has synced.
+    [LEADS_FIELD]: false,
     lastActive: Date.now(),
   });
+  /** One field of this tab's presence, or none with `undefined`. */
+  const announceField = (field: string, value: unknown): void => {
+    const { [field]: _was, ...cur } = client.awareness.getLocalState() ?? {};
+    client.awareness.setLocalState(value === undefined ? cur : { ...cur, [field]: value });
+  };
   const moved = (): void => {
     const cur = client.awareness.getLocalState() ?? {};
     const spot = here();
@@ -250,10 +267,24 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     storage: deps.followStorage ?? sessionStorage,
     onChange: (key) => {
       state.followedKey = key;
+      announceField(FOLLOWING_FIELD, key ?? undefined);
       renderPresenceRegion();
     },
   });
   state.followedKey = follower.key();
+  if (state.followedKey) announceField(FOLLOWING_FIELD, state.followedKey);
+  // A second tab of a followed person offers to bring them along.
+  const bring = createBringAlong({
+    room: client.awareness,
+    workspaceId,
+    storage: deps.tabStorage ?? localStorage,
+    setLeads: (leads) => announceField(LEADS_FIELD, leads),
+    onOffer: mountBringAlongOffer(document, {
+      accept: () => bring.accept(),
+      dismiss: () => bring.dismiss(),
+    }),
+  });
+  client.onReady(() => bring.ready());
   // The room may have answered before this ran; no later change would say so.
   follower.refresh();
   stopOnOwnInput(
@@ -279,6 +310,7 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   window.addEventListener('beforeunload', () => {
     clearInterval(presenceTick);
     stopHomeClock();
+    bring.close();
     client.close();
   });
 

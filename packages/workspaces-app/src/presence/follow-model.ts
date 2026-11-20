@@ -4,7 +4,9 @@
  *
  * The rule is `@claude-workspaces/core/workspace-presence`'s: a person is ONE
  * spot (the most recently active of their tabs), an agent is the spot it
- * last pointed at. A chip's key names the participant — `p-<identity>` or
+ * last pointed at. A follow goes to the newest of the person's tabs that
+ * leads (`LEADS_FIELD`), so a tab they opened without bringing their
+ * followers along does not take them. A chip's key names the participant — `p-<identity>` or
  * `a-<agentId>` — exactly as the board's strip always has, so a follow armed
  * on any page means the same participant on every other.
  */
@@ -12,6 +14,7 @@ import { agentIdForName } from '@claude-workspaces/core/identity';
 import {
   AGENT_SPOTS_FIELD,
   type AgentSpot,
+  LEADS_FIELD,
   PERSON_SPOT_FIELD,
   type PresenceSpot,
   parseAgentSpots,
@@ -26,6 +29,8 @@ import {
 /** A person's row as the room carries it, with the spot their page set. */
 export interface RoomPerson extends PresencePerson {
   spot: PresenceSpot;
+  /** False on a tab its person has not brought their followers to. */
+  leads: boolean;
 }
 
 /** Awareness states, as `Awareness.getStates()` hands them over. */
@@ -47,6 +52,7 @@ export function peopleFromStates(states: RoomStates, selfClientId: number): Room
           docId?: string;
           lastActive?: number;
           [PERSON_SPOT_FIELD]?: unknown;
+          [LEADS_FIELD]?: unknown;
         }
       | undefined;
     if (!s?.user?.name) return;
@@ -64,6 +70,7 @@ export function peopleFromStates(states: RoomStates, selfClientId: number): Room
       lastActive: s.lastActive ?? Date.now(),
       self: clientId === selfClientId,
       spot,
+      leads: s[LEADS_FIELD] !== false,
     });
   });
   return people;
@@ -95,9 +102,12 @@ export function spotOfParticipant(
 ): PresenceSpot | null {
   if (key.startsWith('p-')) {
     const identity = key.slice(2);
-    const [latest] = peopleFromStates(states, selfClientId)
-      .filter((p) => !p.self && presenceIdentity(p) === identity)
-      .sort((a, b) => b.lastActive - a.lastActive);
+    const tabs = peopleFromStates(states, selfClientId).filter(
+      (p) => !p.self && presenceIdentity(p) === identity,
+    );
+    // Their newest tab that leads; their newest tab when none does.
+    const leading = tabs.filter((p) => p.leads);
+    const [latest] = (leading.length ? leading : tabs).sort((a, b) => b.lastActive - a.lastActive);
     return latest?.spot ?? null;
   }
   if (key.startsWith('a-')) {

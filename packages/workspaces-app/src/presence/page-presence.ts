@@ -11,12 +11,15 @@
 import type { FeedbackClient } from '@claude-workspaces/core';
 import {
   ATTENDING_FIELD,
+  FOLLOWING_FIELD,
+  LEADS_FIELD,
   PERSON_SPOT_FIELD,
   type PresenceSpot,
 } from '@claude-workspaces/core/workspace-presence';
 import { mountPresenceIsland, presenceData } from '../board/presence-island.tsx';
 import { boardSocketUrl } from '../doc-path.ts';
 import { type AttentionHost, watchAttention } from './attention.ts';
+import { type BringAlongStorage, createBringAlong, mountBringAlongOffer } from './bring-along.ts';
 import { roomChips } from './follow-model.ts';
 import { type FollowStorage, type Follower, createFollower, stopOnOwnInput } from './follower.ts';
 import { PAGE_TITLE_FIELD, placeChips, spotLabel } from './presence-places.ts';
@@ -35,6 +38,9 @@ export interface PagePresenceDeps {
   go: (href: string) => void;
   show: (spot: PresenceSpot) => void;
   storage: FollowStorage;
+  /** Shared by this browser's tabs (`localStorage`), so a tab can tell its
+   *  person's other tabs apart from everybody else's (`bring-along.ts`). */
+  tabs?: BringAlongStorage;
   /** Where the reader's own input is heard; the window on a page. */
   inputTarget: Pick<EventTarget, 'addEventListener'>;
   /** A short notice — the board's toast says the same words. */
@@ -63,6 +69,10 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
   const client = deps.connect(`${boardSocketUrl(deps.origin, deps.workspaceId)}&presence=1`);
   const { awareness } = client;
   let here = deps.here;
+  // Who this tab follows, and whether it takes its person's followers: no
+  // until the room has said whether another of their tabs has them.
+  let following: string | null = null;
+  let leads = false;
   const attention = watchAttention(deps.attention ?? { win: window, doc: document }, () =>
     announce(),
   );
@@ -75,6 +85,8 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
       [PERSON_SPOT_FIELD]: here,
       [ATTENDING_FIELD]: attention.attending(),
       ...(title ? { [PAGE_TITLE_FIELD]: title } : {}),
+      ...(following ? { [FOLLOWING_FIELD]: following } : {}),
+      [LEADS_FIELD]: leads,
       lastActive: Date.now(),
     });
   };
@@ -88,8 +100,29 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     go: deps.go,
     show: deps.show,
     storage: deps.storage,
-    onChange: () => paint(),
+    onChange: (key) => {
+      following = key;
+      announce();
+      paint();
+    },
   });
+  following = follower.key();
+  if (following) announce();
+  const offer = mountBringAlongOffer(document, {
+    accept: () => bring.accept(),
+    dismiss: () => bring.dismiss(),
+  });
+  const bring = createBringAlong({
+    room: awareness,
+    workspaceId: deps.workspaceId,
+    storage: deps.tabs ?? localStorage,
+    setLeads: (v) => {
+      leads = v;
+      announce();
+    },
+    onOffer: offer,
+  });
+  client.onReady(() => bring.ready());
   const paint = (): void => {
     const states = awareness.getStates();
     const title = deps.title?.()?.trim();
@@ -156,6 +189,8 @@ export function joinPagePresence(deps: PagePresenceDeps): PagePresence {
     },
     close() {
       if (timer) clearTimeout(timer);
+      bring.close();
+      offer(null);
       unmount();
       client.close();
     },
