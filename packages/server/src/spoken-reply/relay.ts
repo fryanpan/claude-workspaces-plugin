@@ -69,7 +69,9 @@ export interface SpokenReplyRelayDeps {
   /** Runs `tick` every `ms` until the returned stop is called; a test
    *  passes a fake so it can tick by hand. */
   every?: (tick: () => void, ms: number) => () => void;
-  /** Where the one line per close goes; `console.log`. */
+  /** Where the one line per close goes; `console.error`, as the meeting
+   *  relay's close line does, so a process whose stdout is its result (a
+   *  browser test driver) keeps it clean. */
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -229,7 +231,7 @@ export class SpokenReplyRelay {
       beat.stop();
       this.beats.delete(ws);
       const open = Math.round(((this.deps.now ?? Date.now)() - beat.openedAt) / 1000);
-      (this.deps.log ?? console.log)(
+      (this.deps.log ?? console.error)(
         `[spoken] socket closed workspace=${ws.data.workspaceId ?? ''} code=${code ?? 'none'} open=${open}s`,
       );
     }
