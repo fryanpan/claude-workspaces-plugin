@@ -73,7 +73,13 @@ const READ_DECK = `(() => [...document.querySelectorAll('.board-presence-deck [d
       key: c.dataset.key,
       kind: c.classList.contains('board-presence-agent') ? 'agent' : 'person',
       fill: s.backgroundColor,
-      letters: (face.getAttribute('initials') ?? c.innerText).trim(),
+      // On the Web Awesome face (a board on the collab core) the letters are
+      // drawn in the avatar's shadow root: its \`initials\` is a property,
+      // not a reflected attribute, and innerText does not reach a shadow.
+      letters: (face === c
+        ? c.innerText
+        : (face.shadowRoot?.querySelector('[part=initials]')?.textContent ?? '')
+      ).trim(),
       letterPx: Number.parseFloat(s.fontSize),
       onTop: !!hit && (hit === c || c.contains(hit)),
       radius: s.borderRadius,
