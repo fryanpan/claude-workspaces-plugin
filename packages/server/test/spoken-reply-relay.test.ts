@@ -3,7 +3,11 @@
  * verdict carried into it, and a closed socket's session dropped.
  */
 import { describe, expect, it } from 'bun:test';
-import { SpokenReplyRelay, type SpokenWs } from '../src/spoken-reply/relay.ts';
+import {
+  SpokenReplyRelay,
+  type SpokenReplyRelayDeps,
+  type SpokenWs,
+} from '../src/spoken-reply/relay.ts';
 import type { SpokenEngines } from '../src/spoken-reply/session.ts';
 import { SpokenTimings } from '../src/spoken-reply/timings.ts';
 import type { SpokenVoice } from '../src/spoken-reply/tts.ts';
@@ -16,8 +20,9 @@ const SOME: SpokenEngines = {
   gemini: null,
 };
 
-function relay(engines: SpokenEngines) {
+function relay(engines: SpokenEngines, extra: Partial<SpokenReplyRelayDeps> = {}) {
   return new SpokenReplyRelay({
+    ...extra,
     engines,
     board: {
       handle: async () => {
@@ -70,5 +75,43 @@ describe('SpokenReplyRelay', () => {
     const before = sent.length;
     r.onText(ws, JSON.stringify({ type: 'start', setup: 2, mode: 'hold' }));
     expect(sent.length).toBe(before);
+  });
+
+  it('beats on each open socket at the interval it is given, and stops at close', () => {
+    // The scheduler is a fake: each tick is a call the test makes.
+    const timers: Array<{ ms: number; tick: () => void; stopped: boolean }> = [];
+    const r = relay(SOME, {
+      keepaliveMs: 30_000,
+      every: (tick, ms) => {
+        const t = { ms, tick, stopped: false };
+        timers.push(t);
+        return () => {
+          t.stopped = true;
+        };
+      },
+      log: () => {},
+    });
+    const { ws, sent } = socket({ workspaceId: 'w-1' });
+    r.onOpen(ws);
+    expect(timers.map((t) => t.ms)).toEqual([30_000]);
+    const greeted = sent.length;
+    timers[0]?.tick();
+    timers[0]?.tick();
+    expect(sent.slice(greeted)).toEqual([{ type: 'keepalive' }, { type: 'keepalive' }]);
+    r.onClose(ws, 1006);
+    expect(timers[0]?.stopped).toBe(true);
+  });
+
+  it('logs one line per close, naming the code and how long the socket was open', () => {
+    const lines: string[] = [];
+    let at = 1_000;
+    const r = relay(SOME, { every: () => () => {}, log: (l) => lines.push(l), now: () => at });
+    const { ws } = socket({ workspaceId: 'w-harbor' });
+    r.onOpen(ws);
+    at += 98_400;
+    r.onClose(ws, 1006);
+    expect(lines).toEqual(['[spoken] socket closed workspace=w-harbor code=1006 open=98s']);
+    r.onClose(ws, 1006);
+    expect(lines.length).toBe(1);
   });
 });

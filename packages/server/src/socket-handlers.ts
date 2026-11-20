@@ -298,7 +298,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       }
       if (ws.data.kind === 'spoken') {
         docStore.untrackShareSocket(ws);
-        spokenRelay.onClose(ws);
+        spokenRelay.onClose(ws, code);
         return;
       }
       if (ws.data.kind === 'app-voice') {

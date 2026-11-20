@@ -1752,6 +1752,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     timings: spokenTimings,
     agentCallbacks,
     parseContext: parseVoiceContext,
+    ...(opts.spokenKeepaliveMs !== undefined ? { keepaliveMs: opts.spokenKeepaliveMs } : {}),
     // The planning voice: a plan read at each pause, answers written in.
     interview: {
       // Its cursor is also its spot in the board's presence room.
