@@ -49,6 +49,7 @@ import {
 import { DEPLOY_RESTART_EXIT_CODE } from '../packages/server/src/deploy-restart.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
 import { resolveStartContract } from '../packages/server/src/start-contract.ts';
+import { runInherited, supervisorBootSteps } from '../packages/server/src/supervisor-boot-steps.ts';
 import { STOP_SIGNALS, stopExitCode, stopLogLine } from '../packages/server/src/supervisor-stop.ts';
 
 /**
@@ -126,7 +127,13 @@ const dataDir = resolve(start.dataDir);
 // neither boots over changed inputs nor exits into a launchd respawn loop. The health watchdog below is armed only after
 // this returns; before it, it would find nothing listening and exit into
 // that same loop.
-if (noWatch) await installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note));
+// Each pre-spawn step names itself and its duration (supervisor-boot-steps.ts):
+// on 20 Nov a restart spent 14 silent minutes in them.
+const boot = supervisorBootSteps(note);
+if (noWatch)
+  await boot.step('bun install', () =>
+    installBeforeBoot(supervisorInstallGate(repoRoot, dataDir, note)),
+  );
 
 const { publishDiscovery, releaseDiscovery } = await import(
   '../packages/core/src/discovery-file.ts'
@@ -160,7 +167,14 @@ const { captureHang, spawnCommand } = await import(
 //
 // Best-effort: no git, no repo, a slow filesystem, and the publish carries on
 // with a timestamp alone rather than failing a deploy over a label.
-const deploySource = noWatch ? readDeploySource(repoRoot) : null;
+const deploySource = noWatch
+  ? await boot.step('git describe', () => {
+      const source = readDeploySource(repoRoot);
+      if (!source)
+        note('[supervisor] git describe failed or ran past 5s; the release carries no source ref');
+      return source;
+    })
+  : null;
 
 // No start moves to another port (port-bind.ts says why). Under launchd the
 // port is part of the contract — the discovery file, peers' CW_BASE_URL, the
@@ -194,7 +208,7 @@ async function resolvePort(): Promise<number> {
   });
   return requestedPort;
 }
-const port = await resolvePort();
+const port = await boot.step(`port :${requestedPort}`, resolvePort);
 
 // PROD deploy step. Two problems, one sequence:
 //
@@ -227,10 +241,10 @@ if (!noWatch) {
 if (noWatch) {
   const failures: string[] = [];
   for (const pkg of ['widget', 'workspaces-app']) {
-    const r = spawnSync('bun', ['run', join(repoRoot, 'packages', pkg, 'scripts', 'build.ts')], {
-      stdio: 'inherit',
-    });
-    if (r.status !== 0) {
+    const status = await boot.step(`${pkg} build`, () =>
+      runInherited('bun', ['run', join(repoRoot, 'packages', pkg, 'scripts', 'build.ts')]),
+    );
+    if (status !== 0) {
       failures.push(pkg);
       note(`[supervisor] ${pkg} build FAILED`);
     }
