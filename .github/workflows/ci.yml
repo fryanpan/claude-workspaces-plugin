@@ -419,7 +419,7 @@ jobs:
 
   # CORE MODE (M8 cutover trial): the same server suite with every test board
   # on the collab core. `--core` sets CW_COLLAB_CORE_DEFAULT=on for the test
-  # processes and leaves out the four files that test the switch itself
+  # processes and leaves out the three files that test the switch itself
   # (scripts/server-core-mode.ts names them and why); no test changes.
   # `collab-core-mode.test.ts` fails here if the variable stopped reaching the
   # test servers. No coverage: the `server` job already measures these lines,

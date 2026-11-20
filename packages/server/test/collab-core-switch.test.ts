@@ -202,6 +202,39 @@ describe('the default-on mode (CW_COLLAB_CORE_DEFAULT, the core-mode test runs)'
     expect(third.usesCore('saltmarsh')).toBe(false);
   });
 
+  it('tells every board on only by default when the server-wide setting flips', () => {
+    // Under the default there is no list of boards that are on, so the
+    // switch asks the server which boards exist. A board turned off hears
+    // nothing: its path did not change.
+    const sw = new CollabCoreSwitch({
+      dataDir: fresh(),
+      defaultOn: true,
+      knownBoards: () => ['harborlight', 'riverbend', 'saltmarsh'],
+    });
+    sw.set('saltmarsh', false);
+    const told: string[] = [];
+    sw.onChange((ws) => told.push(ws));
+    sw.setServerWide(false);
+    expect(told.sort()).toEqual(['harborlight', 'riverbend']);
+    told.length = 0;
+    sw.setServerWide(true);
+    expect(told.sort()).toEqual(['harborlight', 'riverbend']);
+  });
+
+  it('tells a board named on and on by default once each', () => {
+    const sw = new CollabCoreSwitch({
+      dataDir: fresh(),
+      defaultOn: true,
+      knownBoards: () => ['harborlight', 'riverbend'],
+    });
+    sw.set('harborlight', false);
+    sw.set('harborlight', true);
+    const told: string[] = [];
+    sw.onChange((ws) => told.push(ws));
+    sw.setServerWide(false);
+    expect(told.sort()).toEqual(['harborlight', 'riverbend']);
+  });
+
   it('loses to an environment that fixes the core off', () => {
     const sw = new CollabCoreSwitch({ dataDir: fresh(), defaultOn: true, fixed: false });
     expect(sw.boardOn('harborlight')).toBe(true);

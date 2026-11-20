@@ -8,12 +8,14 @@
  * ci.yml's `server-core` job runs it; `collab-core-mode.test.ts` is the
  * control that fails if the variable stopped reaching the test servers.
  *
- * Four files are left out, each for the same kind of reason: they test the
+ * Three files are left out, each for the same kind of reason: they test the
  * SWITCH, so each starts from a board on the current code or from the
  * default being off, which core mode by definition removes. They still run,
  * unchanged, in the ordinary `server` job. A file belongs here only for that
  * reason; a test that fails in core mode for any other reason is a core bug
- * to fix, not a row to add.
+ * to fix, not a row to add. A switch test that can say so itself passes
+ * `collabCoreDefault: false` instead and stays in the run
+ * (`collab-core-strip-signal.test.ts`, `owner-proof-widenings.test.ts`).
  */
 
 export const CORE_MODE_ENV = { CW_COLLAB_CORE_DEFAULT: 'on' } as const;
@@ -26,8 +28,6 @@ export const CORE_MODE_SKIPS: Readonly<Record<string, string>> = {
     'moves a board from the current code onto the core and back: the board has to start off',
   'packages/server/test/collab-core-runtime-route.test.ts':
     'asserts the server-wide setting starts off and that an owner request turns it on',
-  'packages/server/test/collab-core-strip-signal.test.ts':
-    'asserts a board starts inactive and that switching it on tells its open pages',
 };
 
 /**

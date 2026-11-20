@@ -24,7 +24,9 @@ describe('a widening needs the owner’s own proof; a narrowing does not', () =>
   const accessOf = (email: string) => s.handle.shareLinks.accessRoleOf(s.board, email);
 
   beforeAll(async () => {
-    s = await startShareProofServer('Harborlight', { collabCore: true });
+    // The board starts off even in core mode (CW_COLLAB_CORE_DEFAULT): the
+    // collab-core cases below test turning it on.
+    s = await startShareProofServer('Harborlight', { collabCore: true, collabCoreDefault: false });
     s.handle.shareLinks.addToAudience(s.board, ['@harborlight.example'], 'Alice');
     expect(await s.join(COMMENTER)).toBe(302);
     expect(await s.join(VIEWER)).toBe(302);

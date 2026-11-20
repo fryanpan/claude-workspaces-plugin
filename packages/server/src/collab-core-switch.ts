@@ -76,6 +76,10 @@ export interface CollabCoreSwitchOptions {
   fixed?: boolean | undefined;
   /** Every board, and the server-wide setting, start on rather than off. */
   defaultOn?: boolean | undefined;
+  /** Every board the server has. Under the default-on mode a flip of the
+   *  server-wide setting tells each of these that is on, since no list names
+   *  the boards that are on only by default. */
+  knownBoards?: (() => Iterable<string>) | undefined;
 }
 
 export class CollabCoreSwitch {
@@ -84,6 +88,7 @@ export class CollabCoreSwitch {
   private readonly path: string;
   private readonly serverPath: string;
   private readonly defaultOn: boolean;
+  private readonly knownBoards: () => Iterable<string>;
   private readonly boards: Set<string>;
   /** Boards turned off while the default is on. Empty otherwise. */
   private readonly off: Set<string>;
@@ -95,6 +100,7 @@ export class CollabCoreSwitch {
     this.path = collabCoreBoardsPath(opts.dataDir);
     this.serverPath = collabCoreServerPath(opts.dataDir);
     this.defaultOn = opts.defaultOn === true;
+    this.knownBoards = opts.knownBoards ?? (() => []);
     const file = readBoards(this.path);
     this.boards = new Set(file.boards);
     this.off = new Set(this.defaultOn ? file.off : []);
@@ -156,7 +162,8 @@ export class CollabCoreSwitch {
   /**
    * Turn the server-wide setting on or off, and save. Throws
    * `CollabCoreFixedError` when the environment fixed it to the other value,
-   * and on a failed save. Every board switched on hears the change.
+   * and on a failed save. Every board switched on hears the change, by name
+   * or (default-on mode) by default among `knownBoards`.
    */
   setServerWide(on: boolean): void {
     if (this.fixed !== undefined) {
@@ -166,7 +173,11 @@ export class CollabCoreSwitch {
     if (this.runtimeOn === on) return;
     replaceFile(this.serverPath, `${JSON.stringify({ on })}\n`, 0o600);
     this.runtimeOn = on;
-    for (const ws of this.boardsOn()) this.tell(ws);
+    const affected = new Set(this.boardsOn());
+    if (this.defaultOn) {
+      for (const ws of this.knownBoards()) if (this.boardOn(ws)) affected.add(ws);
+    }
+    for (const ws of affected) this.tell(ws);
   }
 
   /** Be told which board's path changed, after it does. Returns the

@@ -20,8 +20,16 @@ afterEach(async () => {
 
 /** Switching the core on needs the owner's own browser
  *  (`owner-proof-widenings.test.ts`), so the flips here come from it. */
-async function boot(collabCore: boolean): Promise<{ base: string; ws: string }> {
-  const s = await startShareProofServer('Harborlight', { collabCore });
+async function boot(
+  collabCore: boolean | undefined,
+  collabCoreDefault = false,
+): Promise<{ base: string; ws: string }> {
+  // `collabCoreDefault` is passed either way, so core mode's
+  // CW_COLLAB_CORE_DEFAULT cannot start these boards on.
+  const s = await startShareProofServer('Harborlight', {
+    ...(collabCore !== undefined ? { collabCore } : {}),
+    collabCoreDefault,
+  });
   servers.push(s);
   return { base: `http://127.0.0.1:${s.handle.port}`, ws: s.board };
 }
@@ -38,8 +46,8 @@ async function record(base: string, ws: string): Promise<unknown> {
   return ((await r.json()) as { collabCore?: unknown }).collabCore;
 }
 
-async function flip(ws: string, on: boolean): Promise<void> {
-  const r = await serverFor(ws).owner(`/workspaces/${ws}/collab-core`, post({ on }));
+async function flip(ws: string, body: { on?: boolean; serverWide?: boolean }): Promise<void> {
+  const r = await serverFor(ws).owner(`/workspaces/${ws}/collab-core`, post(body));
   expect(r.status, await r.clone().text()).toBe(200);
 }
 
@@ -62,7 +70,7 @@ describe('the board record and frame that pick the presence strip', () => {
     expect(await record(base, ws)).toMatchObject({ active: false });
     const { page, agent } = await streamsFor(base, ws);
 
-    await flip(ws, true);
+    await flip(ws, { on: true });
     await waitFor(() => flips(page.frames).length === 1, { describe: 'the page hears the flip' });
     expect(flips(page.frames)).toEqual([true]);
     expect(await record(base, ws)).toMatchObject({ active: true });
@@ -83,7 +91,7 @@ describe('the board record and frame that pick the presence strip', () => {
     });
     expect(agent.events).not.toContain('collab-core.changed');
 
-    await flip(ws, false);
+    await flip(ws, { on: false });
     await waitFor(() => flips(page.frames).length === 2, {
       describe: 'the page hears the flip back',
     });
@@ -91,9 +99,27 @@ describe('the board record and frame that pick the presence strip', () => {
     expect(await record(base, ws)).toMatchObject({ active: false });
   });
 
+  it('tells a board on only by default when the server-wide setting flips', async () => {
+    // Under CW_COLLAB_CORE_DEFAULT no list names this board, so the switch
+    // has to find it among the server's boards to tell its open pages.
+    const { base, ws } = await boot(undefined, true);
+    expect(await record(base, ws)).toMatchObject({ active: true });
+    const { page } = await streamsFor(base, ws);
+
+    await flip(ws, { serverWide: false });
+    await waitFor(() => flips(page.frames).length === 1, { describe: 'the page hears it off' });
+    expect(flips(page.frames)).toEqual([false]);
+
+    // The board row's own request: both settings in one, the board already
+    // on by default. The server-wide half is the change, and it is heard.
+    await flip(ws, { on: true, serverWide: true });
+    await waitFor(() => flips(page.frames).length === 2, { describe: 'the page hears it on' });
+    expect(flips(page.frames)).toEqual([false, true]);
+  });
+
   it('stays inactive on a server started with the collab core off', async () => {
     const { base, ws } = await boot(false);
-    await flip(ws, true);
+    await flip(ws, { on: true });
     expect(await record(base, ws)).toMatchObject({ active: false });
   });
 });

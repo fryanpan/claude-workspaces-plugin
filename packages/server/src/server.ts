@@ -2227,6 +2227,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // runtime switch in the data folder decides (`collab-core-switch.ts`).
     fixed: opts.collabCore ?? parseCollabCoreEnv(process.env.CW_COLLAB_CORE),
     defaultOn: opts.collabCoreDefault ?? parseCollabCoreDefault(process.env.CW_COLLAB_CORE_DEFAULT),
+    knownBoards: () => taskStore.listWorkspaces().map((w) => w.id),
   });
   const collabCorePath = new CollabCorePath({
     getDoc: (id) => docStore.peek(id),
