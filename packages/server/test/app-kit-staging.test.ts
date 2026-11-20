@@ -6,6 +6,7 @@
  * running app is in `app-kit.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -19,7 +20,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeApp } from '../../../scripts/new-app.ts';
 import { credentials } from '../../../templates/app-kit/scripts/deploy-staging.ts';
-import { SECRET_ACCOUNT, storedSecretService } from '../../core/src/secret-name.ts';
 
 const FAKE_TOKEN = 'stub-token-riverbend';
 
@@ -60,8 +60,6 @@ beforeAll(() => {
   for (const [name, body] of [
     ['fly', FLY_STUB],
     ['security', SECURITY_STUB],
-    // A Keychain with no such entry: `security` exits 44.
-    ['security-empty', '#!/bin/sh\nexit 44\n'],
   ] as const) {
     writeFileSync(join(bin, name), body);
     chmodSync(join(bin, name), 0o755);
@@ -281,39 +279,28 @@ describe('deploy:staging with a name that is not a staging app', () => {
 });
 
 describe('credentials', () => {
-  it('reads an unset token and org from the Keychain entries the repo stores, on a Mac', () => {
+  it('takes the token and org from the environment, and never runs security', () => {
     const dir = stubDir();
+    const path = process.env.PATH;
     process.env.STUB_DIR = dir;
+    // The recording `security` first on the PATH: a Keychain read would log here.
+    process.env.PATH = `${bin}:${path}`;
     try {
-      const got = credentials({}, 'darwin', join(bin, 'security'));
-      expect(got).toEqual({
-        token: `value-of-${storedSecretService('fly-org-token')}`,
-        org: `value-of-${storedSecretService('fly-org-slug')}`,
-      });
-      expect(read(dir, 'security-args')).toContain(`-a ${SECRET_ACCOUNT}`);
+      expect(credentials({ FLY_API_TOKEN: 't', FLY_ORG: 'o' })).toEqual({ token: 't', org: 'o' });
+      // A token and no org is not an error here; the org is resolved from fly.
+      expect(credentials({ FLY_API_TOKEN: 't' })).toEqual({ token: 't', org: undefined });
+      expect(() => credentials({ FLY_ORG: 'o' })).toThrow(
+        /set FLY_API_TOKEN.*app-kit-staging workflow/,
+      );
+      expect(() => credentials({})).toThrow('set FLY_API_TOKEN');
+      expect(read(dir, 'security-args')).toBe('');
+      // Positive control: the same PATH does log a `security` that runs.
+      spawnSync('security', ['find-generic-password'], { env: process.env });
+      expect(read(dir, 'security-args')).toContain('find-generic-password');
     } finally {
+      process.env.PATH = path;
       process.env.STUB_DIR = '';
     }
-  });
-
-  it('takes the environment first, and off a Mac asks for what is missing', () => {
-    expect(credentials({ FLY_API_TOKEN: 't', FLY_ORG: 'o' }, 'darwin', '/nonexistent')).toEqual({
-      token: 't',
-      org: 'o',
-    });
-    expect(() => credentials({ FLY_ORG: 'o' }, 'linux')).toThrow('set FLY_API_TOKEN');
-    // CI: a token and no org is not an error here; the org is resolved from fly.
-    expect(credentials({ FLY_API_TOKEN: 't' }, 'linux')).toEqual({ token: 't', org: undefined });
-  });
-
-  it('on a Mac with no Keychain entry, says deploys run from the workflow', () => {
-    expect(() => credentials({}, 'darwin', join(bin, 'security-empty'))).toThrow(
-      /no entry fly-org-token.*app-kit-staging workflow/,
-    );
-    expect(credentials({ FLY_API_TOKEN: 't' }, 'darwin', join(bin, 'security-empty'))).toEqual({
-      token: 't',
-      org: undefined,
-    });
   });
 });
 

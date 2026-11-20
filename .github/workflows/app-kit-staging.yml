@@ -13,8 +13,8 @@
 #   FLY_DEPLOY_TOKEN  a Fly token cut down to the one trial app,
 #                     cw-appkit-trial-staging, with no WireGuard and so no
 #                     `fly ssh`, valid 90 days. It can reach no other app, so
-#                     the app is fixed here rather than an input, and the Mac
-#                     makes the app once (deploy-staging.ts makes an app only
+#                     the app is fixed here rather than an input. The app
+#                     was made once (deploy-staging.ts makes an app only
 #                     when the token can list the org, which this one cannot).
 # It is on the deploy step alone: `bun install`, new-app and the setup
 # actions never see it. The repo and its logs are public: nothing here

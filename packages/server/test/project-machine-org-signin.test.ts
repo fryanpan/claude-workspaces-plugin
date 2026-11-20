@@ -75,7 +75,7 @@ const tokens = join(tmp, 'tokens');
 const securityCalls = join(tmp, 'security-calls');
 
 let server: ReturnType<typeof Bun.serve>;
-const saved = { path: process.env.PATH, keeper: process.env.CW_KEEPER_URL };
+const saved = { path: process.env.PATH };
 let restoreTokens = () => {};
 
 const exe = (name: string, body: string) => {
@@ -159,14 +159,12 @@ printf '\\r\\nStore this token securely. You will not be able to see it again.\\
 `,
   );
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
-  Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
   restoreTokens = giveMacFlyTokens(tmp, ['cw-harborlight', 'cw-riverbend']);
 });
 
 afterAll(() => {
   restoreTokens();
   process.env.PATH = saved.path;
-  if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
   server.stop(true);
   rmSync(tmp, { recursive: true, force: true });
 });

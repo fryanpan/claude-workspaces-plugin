@@ -75,7 +75,6 @@ let server: ReturnType<typeof Bun.serve>;
 
 const saved = {
   path: process.env.PATH,
-  keeper: process.env.CW_KEEPER_URL,
   fromEnv: process.env.CW_SECRETS_FROM_ENV,
   owner: process.env.CW_SECRET_CW_BOARD_OWNER_EMAIL,
 };
@@ -155,14 +154,12 @@ cat "$f"
   chmodSync(join(bin, 'security'), 0o755);
   chmodSync(join(bin, 'fly'), 0o755);
   process.env.PATH = `${bin}:${saved.path ?? ''}`;
-  Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
   restoreTokens = giveMacFlyTokens(tmp, [cfg.app]);
 });
 
 afterAll(() => {
   restoreTokens();
   process.env.PATH = saved.path;
-  if (saved.keeper !== undefined) process.env.CW_KEEPER_URL = saved.keeper;
   for (const [name, value] of [
     ['CW_SECRETS_FROM_ENV', saved.fromEnv],
     ['CW_SECRET_CW_BOARD_OWNER_EMAIL', saved.owner],

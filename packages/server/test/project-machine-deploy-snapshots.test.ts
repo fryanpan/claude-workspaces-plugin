@@ -50,7 +50,6 @@ const bucket = {
 };
 let server: ReturnType<typeof Bun.serve>;
 const savedPath = process.env.PATH;
-const savedKeeper = process.env.CW_KEEPER_URL;
 let restoreTokens = () => {};
 
 beforeAll(() => {
@@ -120,14 +119,12 @@ exit 0
   chmodSync(join(bin, 'security'), 0o755);
   chmodSync(join(bin, 'fly'), 0o755);
   process.env.PATH = `${bin}:${savedPath ?? ''}`;
-  Reflect.deleteProperty(process.env, 'CW_KEEPER_URL');
   restoreTokens = giveMacFlyTokens(tmp, [cfg.app]);
 });
 
 afterAll(() => {
   restoreTokens();
   process.env.PATH = savedPath;
-  if (savedKeeper !== undefined) process.env.CW_KEEPER_URL = savedKeeper;
   server.stop(true);
   rmSync(tmp, { recursive: true, force: true });
 });
