@@ -17,9 +17,10 @@
  * legitimate update always resolves; one that does not is refused rather
  * than guessed at.
  *
- * The board's roles mode decides what a refusal does. `enforce` drops the
- * frame. `report-only` — every board's default — applies it and logs the
- * refusal it would have made, once per socket per reason.
+ * The board's roles mode decides what a refusal does. `enforce` — every
+ * board's default — drops the frame. `report-only`, which the owner sets per
+ * board, applies it and logs the refusal it would have made, once per socket
+ * per reason. Both log lines are what `scripts/roles-would-refuse.ts` reads.
  */
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
