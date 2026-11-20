@@ -69,18 +69,92 @@ describe('the sign-in settings machine:deploy derives', () => {
     });
   });
 
-  it('skips all three, saying why, when the Keychain has no client', () => {
+  it('skips the client, saying why, when the Keychain has none, and still sets the origin', () => {
     const found = readSettings('riverbend', {
       outputs,
       ...keychain({ [OWNER_EMAIL_ENTRY]: 'owner@harborlight.test' }),
     });
     const names = found.settings.map((s) => s.name);
     expect(names).not.toContain('CW_GOOGLE_CLIENT_ID');
-    expect(names).not.toContain('CW_SIGNIN_ORIGIN');
+    // The origin is no secret, and the sealing job that reads no Keychain needs it.
+    expect(names).toContain('CW_SIGNIN_ORIGIN');
     expect(found.notes).toEqual([]);
     expect(found.skipped).toContainEqual(expect.stringContaining(GOOGLE_CLIENT_ID_ENTRY));
     // CONTROL: the Access settings are still all there.
     expect(names).toContain('CF_ACCESS_AUD');
+  });
+
+  describe('the sign-in address is the router address, not an Access host', () => {
+    const SALTMARSH = 'saltmarsh-workspaces.harborlight.test';
+    const tunnel = (label: string, host: string) => ({
+      account_id: 'acct',
+      id: `tunnel-${label}`,
+      name: `cw-${label}`,
+      origin: `${label}-origin.harborlight.test`,
+      public_host: host,
+    });
+    const env = (found: ReturnType<typeof readSettings>) =>
+      Object.fromEntries(found.settings.map((s) => [s.name, s.value()]));
+
+    it('a new project with no Access application signs in at its router host', () => {
+      const newProject = (): TfOutputs => ({
+        ...outputs(),
+        tunnels: { saltmarsh: tunnel('saltmarsh', SALTMARSH) },
+      });
+      const found = readSettings('saltmarsh', { outputs: newProject, ...keychain(WITH_CLIENT) });
+      expect(env(found).CW_SIGNIN_ORIGIN).toBe(`https://${SALTMARSH}`);
+      expect(env(found).CW_PUBLIC_BASE_URL).toBe(`https://${SALTMARSH}`);
+      expect(found.notes).toEqual([
+        expect.stringContaining(`https://${SALTMARSH}/api/auth/callback/google`),
+      ]);
+      // No Access application, so no Access settings, and the run says so.
+      expect(found.settings.map((s) => s.name)).not.toContain('CF_ACCESS_AUD');
+      expect(found.skipped).toContainEqual(
+        expect.stringContaining('no Access application for saltmarsh'),
+      );
+    });
+
+    it('a project routed by the Worker alone, with no tunnel, signs in there too', () => {
+      const macProject = (): TfOutputs => ({
+        ...outputs(),
+        routerRoutes: { saltmarsh: `${SALTMARSH}/*` },
+      });
+      const found = readSettings('saltmarsh', { outputs: macProject, ...keychain(WITH_CLIENT) });
+      expect(env(found).CW_SIGNIN_ORIGIN).toBe(`https://${SALTMARSH}`);
+    });
+
+    it('an existing project keeps the address it has today', () => {
+      const existing = (): TfOutputs => ({
+        ...outputs(),
+        tunnels: { riverbend: tunnel('riverbend', HOST) },
+        routerRoutes: { riverbend: `${HOST}/*` },
+      });
+      const found = readSettings('riverbend', { outputs: existing, ...keychain(WITH_CLIENT) });
+      expect(env(found).CW_SIGNIN_ORIGIN).toBe(`https://${HOST}`);
+      expect(env(found).CW_PUBLIC_BASE_URL).toBe(`https://${HOST}`);
+      // CONTROL: its Access settings are untouched.
+      expect(env(found).CF_ACCESS_AUD).toBe('aud-riverbend');
+    });
+
+    it('sets no address, and says why, when the Access host and the router host differ', () => {
+      const moved = (): TfOutputs => ({
+        ...outputs(),
+        tunnels: { riverbend: tunnel('riverbend', SALTMARSH) },
+      });
+      const found = readSettings('riverbend', { outputs: moved, ...keychain(WITH_CLIENT) });
+      const names = found.settings.map((s) => s.name);
+      expect(names).not.toContain('CW_SIGNIN_ORIGIN');
+      expect(names).not.toContain('CW_PUBLIC_BASE_URL');
+      expect(found.skipped).toContainEqual(expect.stringContaining('differ'));
+      // CONTROL: the Access settings are still set.
+      expect(names).toContain('CF_ACCESS_AUD');
+    });
+
+    it('sets no address, and says why, for a project nothing routes', () => {
+      const found = readSettings('saltmarsh', { outputs, ...keychain(WITH_CLIENT) });
+      expect(found.settings.map((s) => s.name)).not.toContain('CW_SIGNIN_ORIGIN');
+      expect(found.skipped).toContainEqual(expect.stringContaining('router.local.json'));
+    });
   });
 
   it('keeps the client off the list the wall-drift report reads back', () => {
