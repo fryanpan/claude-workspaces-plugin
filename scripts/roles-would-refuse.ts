@@ -21,6 +21,11 @@
  * older than the window, is counted apart as `unplaced` rather than guessed
  * in or out. Without `--days` every record counts.
  *
+ * **It judges every line by today's rule** (`dropsUnderEnforce`): enforce
+ * drops only what the role does not allow, so a line an older server wrote
+ * as would-refuse — an owner's or editor's write to `threads`, say — is not
+ * a row when today's gate would keep it. Those are totalled as `kept`.
+ *
  * Read-only: it opens the files it is given and writes only to stdout.
  *
  * Usage:
@@ -33,6 +38,8 @@ import { createReadStream, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import type { AccessRole } from '../packages/server/src/share/board-access.ts';
+import { type WriteRefusal, dropsUnderEnforce } from '../packages/server/src/socket-write-gate.ts';
 
 export const DEFAULT_LOG = join(
   homedir(),
@@ -63,6 +70,8 @@ export interface Summary {
   rows: Row[];
   /** Squelch summaries whose excerpt was cut before the board and role. */
   truncated: number;
+  /** Would-refuse records today's rule keeps (owner, edit, a comment's threads write). */
+  kept: number;
 }
 
 const STAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) /;
@@ -76,10 +85,18 @@ interface Cell {
   docs: Set<string>;
 }
 
+/** A logged role word, or undefined for `unknown` (no stamped access). */
+function roleOf(word: string): AccessRole | undefined {
+  return word === 'owner' || word === 'edit' || word === 'comment' || word === 'view'
+    ? word
+    : undefined;
+}
+
 /** Fold log lines, one file at a time, into per-board counts. */
 export class Tally {
   private readonly cells = new Map<string, Cell>();
   private truncated = 0;
+  private kept = 0;
   /** The latest stamp seen in the file being read. */
   private bound: number | null = null;
 
@@ -115,6 +132,10 @@ export class Tally {
     }
     const [, said, operation = '', docId = '', board = '', role = ''] = m;
     if ((said === 'refused') !== (this.verdict === 'refused')) return;
+    if (said !== 'refused' && !dropsUnderEnforce(roleOf(role), operation as WriteRefusal)) {
+      this.kept += times;
+      return;
+    }
     const key = `${board}\u0000${role}\u0000${operation}`;
     const cell = this.cells.get(key) ?? { count: 0, unplaced: 0, docs: new Set<string>() };
     const placed = this.since === null || (this.bound !== null && this.bound >= this.since);
@@ -137,7 +158,13 @@ export class Tally {
         a.role.localeCompare(b.role) ||
         a.operation.localeCompare(b.operation),
     );
-    return { verdict: this.verdict, since: this.since, rows, truncated: this.truncated };
+    return {
+      verdict: this.verdict,
+      since: this.since,
+      rows,
+      truncated: this.truncated,
+      kept: this.kept,
+    };
   }
 }
 
@@ -170,6 +197,9 @@ export function render(s: Summary): string {
         `  ${r.board.padEnd(24)} ${r.role.padEnd(8)} ${r.operation.padEnd(10)} ${String(r.count).padStart(6)} ${String(r.unplaced).padStart(8)} ${String(r.docs).padStart(5)}`,
       );
     }
+  }
+  if (s.kept > 0) {
+    out.push(`  ${s.kept} record(s) an older gate logged that today's rule keeps (not refused)`);
   }
   if (s.truncated > 0) {
     out.push(`  ${s.truncated} squelched record(s) cut before their board and role`);

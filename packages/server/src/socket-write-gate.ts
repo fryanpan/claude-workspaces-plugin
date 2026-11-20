@@ -17,15 +17,29 @@
  * legitimate update always resolves; one that does not is refused rather
  * than guessed at.
  *
- * The board's roles mode decides what a refusal does. `enforce` — every
- * board's default — drops the frame. `report-only`, which the owner sets per
- * board, applies it and logs the refusal it would have made, once per socket
- * per reason. Both log lines are what `scripts/roles-would-refuse.ts` reads.
+ * The board's roles mode decides what a refusal does, and the role decides
+ * which refusals enforcement acts on (`dropsUnderEnforce`): owner and edit
+ * keep every write, comment keeps a write to `threads` alone, view keeps none.
+ * `enforce` — every board's default — drops the frames the role does not
+ * allow. `report-only`, which the owner sets per board, applies them and logs
+ * the refusal it would have made, once per socket per reason. A refusal the
+ * role keeps is applied in both modes and logged as `allowed`.
+ *
+ * Why owner and edit keep `threads` and `unresolved`: no page writes the
+ * threads map over its socket, so such a write from a page is a step 2
+ * carrying items the server no longer holds — a comment, a resolve or an
+ * anchor the person already saw, which the server lost (a restart inside the
+ * persist window, a doc cache holding the server's own writes). Dropping it
+ * loses that. Prod logged 436 of them from owner and edit sockets over 14
+ * days before this rule; none could be shown illegitimate. The cost is the one `threads`
+ * was added for: an edit socket can still write a comment under any author
+ * name, as every socket could before. `scripts/roles-would-refuse.ts` reads
+ * these log lines.
  */
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
-import { type SocketAccess, mayEditDocs } from './share/board-access.ts';
+import { type AccessRole, type SocketAccess, mayEditDocs } from './share/board-access.ts';
 
 export type WriteRefusal = 'role' | 'threads' | 'unresolved';
 
@@ -248,14 +262,32 @@ export function judgeSocketWrite(
   if (update === null) return null;
   try {
     if (writesNothing(ydoc, update)) return null;
-    if (access && !mayEditDocs(access.role)) return 'role';
+    if (access?.role === 'view') return 'role';
     const roots = rootsTouched(ydoc, update);
+    // A comment socket may write comments; any other root is a role refusal.
+    if (access && !mayEditDocs(access.role)) {
+      for (const root of roots) {
+        if (root !== null && !SERVER_WRITTEN_ROOTS.has(root)) return 'role';
+      }
+    }
     if (roots.has(null)) return 'unresolved';
     for (const root of roots) if (root !== null && SERVER_WRITTEN_ROOTS.has(root)) return 'threads';
     return null;
   } catch {
     return 'unresolved';
   }
+}
+
+/**
+ * Whether `enforce` drops this refusal for this role: only what the role does
+ * not allow. Owner and edit keep every write they could make before roles
+ * were enforced; comment keeps a write to `threads` alone; view keeps none. A
+ * socket with no stamped access is never enforced.
+ */
+export function dropsUnderEnforce(role: AccessRole | undefined, refusal: WriteRefusal): boolean {
+  if (role === undefined || role === 'owner' || role === 'edit') return false;
+  if (role === 'comment') return refusal !== 'threads';
+  return true;
 }
 
 /** Sockets already logged for a reason, so a typing reader logs once. */
@@ -274,13 +306,14 @@ export function refuseSocketWrite(
 ): boolean {
   const refusal = judgeSocketWrite(ydoc, access, frame);
   if (refusal === null) return false;
-  const enforce = access?.mode() === 'enforce';
+  const drops = dropsUnderEnforce(access?.role, refusal);
+  const enforce = drops && access?.mode() === 'enforce';
   const seen = logged.get(socket) ?? new Set<WriteRefusal>();
   if (!seen.has(refusal)) {
     seen.add(refusal);
     logged.set(socket, seen);
     console.warn(
-      `[roles] ${enforce ? 'refused' : 'report-only, would refuse'} a ${refusal} write on ${docId}` +
+      `[roles] ${enforce ? 'refused' : drops ? 'report-only, would refuse' : 'allowed'} a ${refusal} write on ${docId}` +
         ` (board ${access?.workspaceId ?? 'unknown'}, role ${access?.role ?? 'unknown'})`,
     );
   }

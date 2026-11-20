@@ -356,37 +356,37 @@ describe('board roles over the real server', () => {
     }
   });
 
-  it('comments are written only by the server: a socket write to threads is dropped', async () => {
+  it('enforce drops only what the role does not allow: owner, editor and commenter thread writes land', async () => {
     const forged = (id: string) =>
       updateFrame((d) => {
         const t = new Y.Map<unknown>();
         t.set('author', 'Someone Else');
         d.getMap('threads').set(id, t);
       });
-    // Report-only: applied, and logged.
+    const threads = () => live().getMap('threads');
+    const viewer = await asMember('viewer@harborlight.example');
+    await accessFrame(viewer);
+    // Report-only applies it; enforce, read per frame, drops the next one.
     await setMode('report-only');
-    const owner = await asOwner();
-    await accessFrame(owner);
-    await sendAndSettle(owner, forged('t-reported'));
-    expect(live().getMap('threads').has('t-reported')).toBe(true);
+    await sendAndSettle(viewer, forged('t-seen'));
+    expect(threads().has('t-seen')).toBe(true);
     expect(await (await setMode('enforce')).json()).toMatchObject({ rolesMode: 'enforce' });
-    try {
-      // The mode is read per frame, so the socket already open follows it.
-      await sendAndSettle(owner, forged('t-enforced'));
-      expect(live().getMap('threads').has('t-enforced')).toBe(false);
-      // The server's own route still writes a comment.
-      const before = live().getMap('threads').size;
-      const posted = await postLocal(`/workspaces/${board}/docs/${docId}/threads`, {
-        anchor: { kind: 'orphan' },
-        text: 'A comment the server stamps.',
-        author: { id: 'agent:harborlight', name: 'Harborlight', kind: 'agent' },
-      });
-      expect(posted.status, await posted.clone().text()).toBeLessThan(300);
-      expect(live().getMap('threads').size).toBe(before + 1);
-      owner.ws.close();
-    } finally {
-      await setMode('enforce');
-    }
+    await sendAndSettle(viewer, forged('t-dropped'));
+    expect(threads().has('t-dropped')).toBe(false);
+    expect(viewer.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
+    const [owner, editor] = await Promise.all([asOwner(), asMember('editor@harborlight.example')]);
+    const member = handle.shareLinks.membersOf(board).find((m) => m.access === 'comment');
+    const commenter = await asMember(member?.email ?? '');
+    expect(await accessFrame(commenter)).toMatchObject({ role: 'comment', mode: 'enforce' });
+    await Promise.all([accessFrame(owner), accessFrame(editor)]);
+    await sendAndSettle(owner, forged('t-owner'));
+    await sendAndSettle(editor, forged('t-editor'));
+    await sendAndSettle(commenter, forged('t-commenter'));
+    for (const id of ['t-owner', 't-editor', 't-commenter']) expect(threads().has(id)).toBe(true);
+    await typeInto(commenter, 'commenter-probe', 'from a commenter');
+    expect(live().getText('commenter-probe').toString()).toBe('');
+    expect(commenter.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
+    for (const c of [viewer, owner, editor, commenter]) c.ws.close();
   });
 
   it('enforce: a page reconnecting to a doc with a resolved comment is not refused', async () => {

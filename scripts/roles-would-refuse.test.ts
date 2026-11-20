@@ -26,7 +26,7 @@ describe('summarise', () => {
         would('riverbend-notes', 'ws-harborlight', 'view'),
         would('riverbend-notes', 'ws-harborlight', 'view', 'threads'),
         refused('riverbend-notes', 'ws-harborlight', 'view'),
-        would('d-1', 'unknown', 'unknown', 'unresolved'),
+        '[roles] allowed a threads write on d-1 (board ws-harborlight, role owner)',
         '[roles] board ws-harborlight roles mode set to enforce',
       ],
     ]);
@@ -39,14 +39,6 @@ describe('summarise', () => {
         unplaced: 0,
         docs: 2,
       },
-      {
-        board: 'unknown',
-        role: 'unknown',
-        operation: 'unresolved',
-        count: 1,
-        unplaced: 0,
-        docs: 1,
-      },
       { board: 'ws-harborlight', role: 'view', operation: 'role', count: 1, unplaced: 0, docs: 1 },
       {
         board: 'ws-harborlight',
@@ -57,6 +49,27 @@ describe('summarise', () => {
         docs: 1,
       },
     ]);
+    expect(s.kept).toBe(0);
+  });
+
+  it('judges an older server’s lines by today’s rule: what the role allows is kept, not a row', () => {
+    const s = summarise([
+      [
+        // Logged as would-refuse by the gate before roles were per-write.
+        would('riverbend-notes', 'ws-harborlight', 'owner', 'threads'),
+        would('riverbend-notes', 'ws-harborlight', 'owner', 'unresolved'),
+        would('saltmarsh-plan', 'ws-harborlight', 'edit', 'threads'),
+        would('saltmarsh-plan', 'ws-harborlight', 'comment', 'threads'),
+        would('d-1', 'unknown', 'unknown', 'unresolved'),
+        // Still refused today.
+        would('saltmarsh-plan', 'ws-harborlight', 'comment', 'unresolved'),
+      ],
+    ]);
+    expect(s.kept).toBe(5);
+    expect(s.rows).toMatchObject([
+      { board: 'ws-harborlight', role: 'comment', operation: 'unresolved', count: 1 },
+    ]);
+    expect(render(s)).toContain("5 record(s) an older gate logged that today's rule keeps");
   });
 
   it('adds a squelch summary’s repeats, and counts one cut before the board apart', () => {
