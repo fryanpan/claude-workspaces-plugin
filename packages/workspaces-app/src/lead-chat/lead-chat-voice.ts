@@ -79,6 +79,7 @@ import {
 import {
   PLAYBACK_REPORTS,
   audioContext,
+  closeClock,
   defaultSetups,
   onPageReturn,
   playbackError,
@@ -93,10 +94,9 @@ export * from './lead-chat-voice-api.ts';
 /** Said, and reported, when the voice socket closes while the page stays. */
 const CLOSED = 'The connection closed. Tap the mic to try again.';
 /** How long a question may show working with nothing said before the next
- *  one listens anyway: a router or voice that never answers does not leave
- *  voice deaf (Bryan, 3 Nov: "stopping often after I say one thing"). A
- *  board answer takes a few seconds, and a slow one plays its filler cue
- *  well inside this. */
+ *  one listens anyway, so a router or voice that never answers does not
+ *  leave voice deaf (Bryan, 3 Nov: "stopping often after I say one thing").
+ *  A board answer takes seconds; a slow one plays its filler cue inside it. */
 export const WORKING_MS = 30_000;
 /** The route of the lead's later answer (`spoken-reply/lead-answer.ts`). */
 const LEAD_ANSWER = 'lead-answer';
@@ -132,9 +132,8 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
   let micWhileSaying: 'live' | 'released' | 'off' = 'off';
   const onPageHide = (ev: Event): void => {
     leaving = true;
-    // A page that is going for good lets go of its audio now, rather than
-    // when the browser tears it down under the next page's contexts — the
-    // moment a running context on iOS can stop its clock (WebKit 276687).
+    // Going for good: let go of the audio now, not when the browser tears it
+    // down under the next page's contexts, where iOS can stop a clock (WebKit 276687).
     if ((ev as PageTransitionEvent).persisted) return;
     mic.stop();
     player.release();
@@ -256,8 +255,10 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
     const ws = (opts.openSocket ?? ((u) => new WebSocket(u) as unknown as SpokenSocket))(
       socketUrl(opts.workspaceId),
     );
+    const clock = closeClock();
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
+      clock.opened();
       owedTries = OWED_RETRIES;
       const pending = queue;
       queue = [];
@@ -271,13 +272,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       const m = typeof ev.data === 'string' ? parseSpokenServerMessage(ev.data) : null;
       if (m) onServer(m);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (socket !== ws) return;
       socket = null;
       queue = [];
       const owed = awaiting > 0 && !leaving && !hushed;
       if (!owed) awaiting = 0;
-      if (on && !leaving) halt(CLOSED);
+      if (on && !leaving) halt(CLOSED, clock.detail(ev));
       // A new socket collects what the lead owes; the microphone stays off.
       if (owed && owedTries > 0) {
         owedTries--;
@@ -449,8 +450,7 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
       tab.join();
       player.wake();
       set({ phase: 'listening', heard: '', notice: '', paused: !tab.hears() });
-      // Inside the tap, before anything is awaited: the context is made and
-      // resumed, and the microphone is asked for (see the header).
+      // Inside the tap, before any await: make and resume the context, ask for the mic.
       mic.open(makeGestureContext(), how?.gesture === false);
       const go = (): void => {
         if (!on) return;

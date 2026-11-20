@@ -1,10 +1,10 @@
 /**
  * Owner, edit, comment and view over the real server (D1 step 8).
  *
- * A share-link member's role reaches their socket at connect, a comment or
- * view socket's doc edit and any socket's write to `threads` are dropped
- * when the board enforces roles and applied-but-logged when it reports
- * only, and changing a role or revoking a token hangs up what was open.
+ * A member's role reaches their socket at connect; a comment or view
+ * socket's edit and any socket's `threads` write are dropped under enforce
+ * (every board's default) and applied-but-logged under report-only; a role
+ * change or a revoked token hangs up what was open.
  *
  * The harness is `share-link-flow.test.ts`'s: an Access-fronted share
  * hostname and a board shared by a link. Every name here is invented.
@@ -184,6 +184,13 @@ describe('board roles over the real server', () => {
     });
   };
 
+  /** A doc edit from `c`: `text` typed at the start of the root `key`. */
+  const typeInto = (c: Conn, key: string, text: string) =>
+    sendAndSettle(
+      c,
+      updateFrame((d) => d.getText(key).insert(0, text)),
+    );
+
   /**
    * Sync `page` the way `core/ws-client.ts` does: send our step 1, answer
    * every sync frame with `readSyncMessage` in arrival order, and send back
@@ -268,13 +275,13 @@ describe('board roles over the real server', () => {
     const alice = 'alice@harborlight.example';
     await join_(alice);
     const owner = await asOwner();
-    expect(await accessFrame(owner)).toMatchObject({ role: 'owner', mode: 'report-only' });
+    expect(await accessFrame(owner)).toMatchObject({ role: 'owner', mode: 'enforce' });
     owner.ws.close();
     for (const role of ['comment', 'view', 'edit']) {
       const set = await setRole(alice, role);
       expect(set.status, await set.clone().text()).toBe(200);
       const c = await asMember(alice);
-      expect(await accessFrame(c)).toMatchObject({ role, mode: 'report-only' });
+      expect(await accessFrame(c)).toMatchObject({ role, mode: 'enforce' });
       c.ws.close();
     }
     // The old payload still works, as edit.
@@ -284,22 +291,60 @@ describe('board roles over the real server', () => {
       rolesMode: string;
       members: Array<{ email: string; accessRole: string }>;
     };
-    expect(listed.rolesMode).toBe('report-only');
+    expect(listed.rolesMode).toBe('enforce');
     expect(listed.members.find((m) => m.email === alice)?.accessRole).toBe('edit');
   });
 
-  it('report-only: a comment socket’s edit goes through, and the refusal is logged', async () => {
+  it('a board whose mode was never set enforces: a view or comment socket’s edit is dropped, and the owner’s and an editor’s land', async () => {
+    const viewer = 'viewer@harborlight.example';
+    const editor = 'editor@harborlight.example';
+    await join_(viewer);
+    await join_(editor);
+    expect((await setRole(viewer, 'view')).status).toBe(200);
+    expect((await setRole(editor, 'edit')).status).toBe(200);
+    // No roles-mode call has been made on this board.
+    expect(handle.shareLinks.rolesModeOf(board)).toBe('enforce');
+    const warn = spyOn(console, 'warn');
+    try {
+      const v = await asMember(viewer);
+      expect(await accessFrame(v)).toMatchObject({ role: 'view', mode: 'enforce' });
+      await typeInto(v, 'enforce-probe', 'viewer');
+      expect(live().getText('enforce-probe').toString()).toBe('');
+      // Told to drop the state it now holds, so it does not diverge silently.
+      expect(v.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
+      const lines = warn.mock.calls.map((args) => String(args[0]));
+      expect(lines.some((l) => /\[roles\] refused a role write/.test(l))).toBe(true);
+      // The positive controls: the same frame from an edit socket, and from
+      // the owner's, lands.
+      const e = await asMember(editor);
+      await typeInto(e, 'enforce-probe', 'editor');
+      expect(live().getText('enforce-probe').toString()).toBe('editor');
+      expect(e.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
+      const o = await asOwner();
+      await accessFrame(o);
+      await typeInto(o, 'enforce-owner-probe', 'owner');
+      expect(live().getText('enforce-owner-probe').toString()).toBe('owner');
+      expect(o.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
+      v.ws.close();
+      e.ws.close();
+      o.ws.close();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('report-only, once the owner sets it: a comment socket’s edit goes through, and the refusal is logged', async () => {
     const bob = 'bob@harborlight.example';
     await join_(bob);
     expect((await setRole(bob, 'comment')).status).toBe(200);
+    expect(await (await setMode('report-only')).json()).toMatchObject({
+      rolesMode: 'report-only',
+    });
     const warn = spyOn(console, 'warn');
     try {
       const c = await asMember(bob);
-      await accessFrame(c);
-      await sendAndSettle(
-        c,
-        updateFrame((d) => d.getText('report-only-probe').insert(0, 'from a commenter')),
-      );
+      expect(await accessFrame(c)).toMatchObject({ role: 'comment', mode: 'report-only' });
+      await typeInto(c, 'report-only-probe', 'from a commenter');
       expect(live().getText('report-only-probe').toString()).toBe('from a commenter');
       const lines = warn.mock.calls.map((args) => String(args[0]));
       expect(lines.some((l) => /report-only, would refuse a role write/.test(l))).toBe(true);
@@ -307,72 +352,41 @@ describe('board roles over the real server', () => {
       c.ws.close();
     } finally {
       warn.mockRestore();
+      await setMode('enforce');
     }
   });
 
-  it('enforce: a view or comment socket’s edit is dropped and an edit socket’s lands', async () => {
-    const viewer = 'viewer@harborlight.example';
-    const editor = 'editor@harborlight.example';
-    await join_(viewer);
-    await join_(editor);
-    expect((await setRole(viewer, 'view')).status).toBe(200);
-    expect((await setRole(editor, 'edit')).status).toBe(200);
-    expect(await (await setMode('enforce')).json()).toMatchObject({ rolesMode: 'enforce' });
-    try {
-      const v = await asMember(viewer);
-      expect(await accessFrame(v)).toMatchObject({ role: 'view', mode: 'enforce' });
-      await sendAndSettle(
-        v,
-        updateFrame((d) => d.getText('enforce-probe').insert(0, 'viewer')),
-      );
-      expect(live().getText('enforce-probe').toString()).toBe('');
-      // Told to drop the state it now holds, so it does not diverge silently.
-      expect(v.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
-      // The positive control: the same frame from an edit socket lands.
-      const e = await asMember(editor);
-      await sendAndSettle(
-        e,
-        updateFrame((d) => d.getText('enforce-probe').insert(0, 'editor')),
-      );
-      expect(live().getText('enforce-probe').toString()).toBe('editor');
-      expect(e.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(false);
-      v.ws.close();
-      e.ws.close();
-    } finally {
-      await setMode('report-only');
-    }
-  });
-
-  it('comments are written only by the server: a socket write to threads is dropped', async () => {
+  it('enforce drops only what the role does not allow: owner, editor and commenter thread writes land', async () => {
     const forged = (id: string) =>
       updateFrame((d) => {
         const t = new Y.Map<unknown>();
         t.set('author', 'Someone Else');
         d.getMap('threads').set(id, t);
       });
-    // Report-only: applied, and logged.
-    const owner = await asOwner();
-    await accessFrame(owner);
-    await sendAndSettle(owner, forged('t-reported'));
-    expect(live().getMap('threads').has('t-reported')).toBe(true);
+    const threads = () => live().getMap('threads');
+    const viewer = await asMember('viewer@harborlight.example');
+    await accessFrame(viewer);
+    // Report-only applies it; enforce, read per frame, drops the next one.
+    await setMode('report-only');
+    await sendAndSettle(viewer, forged('t-seen'));
+    expect(threads().has('t-seen')).toBe(true);
     expect(await (await setMode('enforce')).json()).toMatchObject({ rolesMode: 'enforce' });
-    try {
-      // The mode is read per frame, so the socket already open follows it.
-      await sendAndSettle(owner, forged('t-enforced'));
-      expect(live().getMap('threads').has('t-enforced')).toBe(false);
-      // The server's own route still writes a comment.
-      const before = live().getMap('threads').size;
-      const posted = await postLocal(`/workspaces/${board}/docs/${docId}/threads`, {
-        anchor: { kind: 'orphan' },
-        text: 'A comment the server stamps.',
-        author: { id: 'agent:harborlight', name: 'Harborlight', kind: 'agent' },
-      });
-      expect(posted.status, await posted.clone().text()).toBeLessThan(300);
-      expect(live().getMap('threads').size).toBe(before + 1);
-      owner.ws.close();
-    } finally {
-      await setMode('report-only');
-    }
+    await sendAndSettle(viewer, forged('t-dropped'));
+    expect(threads().has('t-dropped')).toBe(false);
+    expect(viewer.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
+    const [owner, editor] = await Promise.all([asOwner(), asMember('editor@harborlight.example')]);
+    const member = handle.shareLinks.membersOf(board).find((m) => m.access === 'comment');
+    const commenter = await asMember(member?.email ?? '');
+    expect(await accessFrame(commenter)).toMatchObject({ role: 'comment', mode: 'enforce' });
+    await Promise.all([accessFrame(owner), accessFrame(editor)]);
+    await sendAndSettle(owner, forged('t-owner'));
+    await sendAndSettle(editor, forged('t-editor'));
+    await sendAndSettle(commenter, forged('t-commenter'));
+    for (const id of ['t-owner', 't-editor', 't-commenter']) expect(threads().has(id)).toBe(true);
+    await typeInto(commenter, 'commenter-probe', 'from a commenter');
+    expect(live().getText('commenter-probe').toString()).toBe('');
+    expect(commenter.frames.some((f) => kindOf(f) === MSG_RESET)).toBe(true);
+    for (const c of [viewer, owner, editor, commenter]) c.ws.close();
   });
 
   it('enforce: a page reconnecting to a doc with a resolved comment is not refused', async () => {
@@ -395,7 +409,7 @@ describe('board roles over the real server', () => {
     const viewer = 'saltmarsh-viewer@harborlight.example';
     await join_(viewer);
     expect((await setRole(viewer, 'view')).status).toBe(200);
-    expect(await (await setMode('enforce')).json()).toMatchObject({ rolesMode: 'enforce' });
+    expect(handle.shareLinks.rolesModeOf(board)).toBe('enforce');
     const warn = spyOn(console, 'warn');
     try {
       for (const connect of [asOwner, () => asMember(viewer)]) {
@@ -416,7 +430,6 @@ describe('board roles over the real server', () => {
       expect(lines.filter((l) => l.includes('[roles]'))).toEqual([]);
     } finally {
       warn.mockRestore();
-      await setMode('report-only');
     }
   });
 
@@ -476,7 +489,10 @@ describe('board roles over the real server', () => {
     expect(minted.status, await minted.clone().text()).toBe(201);
     const { id, token } = (await minted.json()) as { id: string; token: string };
     const c = await open({ host: `localhost:${handle.port}`, authorization: `Bearer ${token}` });
-    expect(await accessFrame(c)).toMatchObject({ role: 'edit' });
+    expect(await accessFrame(c)).toMatchObject({ role: 'edit', mode: 'enforce' });
+    // An edit-capped agent's write lands on an enforcing board.
+    await typeInto(c, 'token-probe', 'agent');
+    expect(live().getText('token-probe').toString()).toBe('agent');
     const revoked = await local(`/api/board-tokens/${id}/revoke`, { method: 'POST' });
     expect(revoked.status).toBe(200);
     expect(await c.closed).toBe(1008);
