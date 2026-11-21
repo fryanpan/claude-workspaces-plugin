@@ -224,18 +224,26 @@ describe('wall-read.yml', () => {
     }
   });
 
-  it('reads Cloudflare in cloudflare-prod, and Fly in fly-org', () => {
+  it('reads Cloudflare in cloudflare-prod, and Fly in fly-org-read, never fly-org (review H1, M5)', () => {
     expect(wf.jobs.cloudflare?.environment).toBe('cloudflare-prod');
-    expect(wf.jobs.fly?.environment).toBe('fly-org');
+    expect(wf.jobs.fly?.environment).toBe('fly-org-read');
   });
 
   it('hands each secret to the one step that reads with it, never in a script', () => {
     const holders = (job?: Job) =>
       (job?.steps ?? []).filter((s) => secretsIn(s.env).length > 0).map((s) => s.name);
     expect(holders(wf.jobs.cloudflare)).toEqual(['Read Cloudflare and seal it to the Mac']);
-    expect(holders(wf.jobs.fly)).toEqual(['Read fly apps list and seal it to the Mac']);
-    const fly = wf.jobs.fly?.steps?.find((s) => s.name?.startsWith('Read'));
-    expect(secretsIn(fly?.env)).toEqual(['FLY_API_TOKEN']);
+    expect(holders(wf.jobs.fly)).toEqual([
+      'Read token is present',
+      'Read fly apps list and seal it to the Mac',
+    ]);
+    // The presence check sees only whether the token is set, never its value.
+    const present = wf.jobs.fly?.steps?.find((s) => s.name === 'Read token is present');
+    expect(present?.env).toEqual({ HAS_READ: "${{ secrets.FLY_READ_TOKEN != '' }}" });
+    // The read holds the read-only token; the org token is in no step.
+    const fly = wf.jobs.fly?.steps?.find((s) => s.name?.startsWith('Read fly'));
+    expect(secretsIn(fly?.env)).toEqual(['FLY_READ_TOKEN']);
+    expect(fly?.env?.FLY_API_TOKEN).toBe('${{ secrets.FLY_READ_TOKEN }}');
     for (const job of Object.values(wf.jobs))
       for (const s of job.steps ?? []) expect(s.run ?? '').not.toContain('secrets.');
   });

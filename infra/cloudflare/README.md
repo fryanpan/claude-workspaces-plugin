@@ -325,7 +325,10 @@ The org token is `FLY_API_TOKEN`, which only the GitHub Environment
 `fly-org` holds, so the apply runs in `fly-ci-tokens.yml` (weekly, and after
 `fly-provision.yml` makes an app); without it the run refuses. The same run
 cuts each project app a 14-day token for the Mac's own `fly ssh` and `fly
-logs` (`builder` and `wg`) and seals it to the Mac. The org token reaches `fly` and Fly's API (each app's numeric id)
+logs` (`builder` and `wg`) and seals it to the Mac, and one 14-day
+read-only token, `FLY_READ_TOKEN` in the environment `fly-org-read` (read on
+every app and the org, nothing else, so no `wg`), for `wall-read.yml`'s daily
+`fly apps list` (`TF_VAR_read_token`). The org token reaches `fly` and Fly's API (each app's numeric id)
 only. Each cut token goes from `fly`'s stdout into terraform's environment
 (`TF_VAR_deploy_tokens`) and nowhere else; the run refuses an attenuate that
 printed nothing, more than one line, or the org token. The state holds the

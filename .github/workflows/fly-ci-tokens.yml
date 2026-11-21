@@ -16,6 +16,9 @@
 #
 # and writes
 #   fly-<project>.FLY_DEPLOY_TOKEN   one app, no WireGuard, 90 days (fly.yml)
+#   fly-org-read.FLY_READ_TOKEN      read on every app and the org, nothing
+#                                    else, so no WireGuard, 14 days
+#                                    (wall-read.yml's daily read)
 #   handoff-mac artifact             one token per project app for the Mac's
 #                                    own `fly` calls (`fly ssh`, `fly logs`),
 #                                    14 days, sealed to the Mac's committed

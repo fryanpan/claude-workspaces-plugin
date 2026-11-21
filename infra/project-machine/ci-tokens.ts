@@ -26,6 +26,13 @@
  * `handoff:pull`. This is what replaced the keeper's routine `fly` calls,
  * its `fly logs` and its board moves.
  *
+ * It also cuts one read-only token (`readCaveats`: read on every app and on
+ * the org, no write, create, delete or control anywhere, so no `wg` and no
+ * `fly ssh`, for READ_VALID_DAYS) into READ_ENVIRONMENT as FLY_READ_TOKEN.
+ * wall-read.yml's daily `fly apps list` runs on it, so the only jobs that
+ * hold the org token are this weekly one and fly-provision.yml's dispatch
+ * (wall-off review H1 and M5).
+ *
  *   GITHUB_TOKEN   a classic token with repo scope, for the GitHub provider
  *                  (fly-org's GH_ADMIN_TOKEN)
  *   FLY_API_TOKEN  the org token: only fly-org holds it since the keeper retired
@@ -59,6 +66,8 @@ export const STAGING_APP = 'cw-appkit-trial-staging';
 export const STAGING_ENVIRONMENT = 'fly-appkit-staging';
 /** The environment a project machine's deploy job runs in (fly.yml). */
 export const environmentFor = (project: string): string => `fly-${project}`;
+/** Where the read-only token goes (wall-read.yml's `fly` job). */
+export const READ_ENVIRONMENT = 'fly-org-read';
 
 export interface Target {
   environment: string;
@@ -84,6 +93,8 @@ export const VALID_DAYS = 90;
 export const MAC_VALID_DAYS = 14;
 /** What the Mac's token adds: `wg`, the door `fly ssh` (board moves, restores) uses. */
 export const MAC_FEATURES = ['builder', 'wg'] as const;
+/** Cut weekly like the Mac's, so one missed run still leaves a week. */
+export const READ_VALID_DAYS = 14;
 
 export interface Caveat {
   type: string;
@@ -145,6 +156,21 @@ export function macCaveats(appId: string, nowMs: number): Caveat[] {
   return [scope(appId, MAC_FEATURES), window(nowMs, MAC_VALID_DAYS)];
 }
 
+/**
+ * The read-only token: every app (`0` is the resource set's every-id) with
+ * read alone, and read alone for an access naming no app, which is how an
+ * org feature (`wg`, `builder`) and an org read (`fly apps list`) are asked.
+ */
+export function readCaveats(nowMs: number): Caveat[] {
+  return [
+    {
+      type: 'IfPresent',
+      body: { ifs: [{ type: 'Apps', body: { apps: { '0': ELSE_ACTIONS } } }], else: ELSE_ACTIONS },
+    },
+    window(nowMs, READ_VALID_DAYS),
+  ];
+}
+
 export interface RunResult {
   status: number;
   stdout: string;
@@ -199,6 +225,11 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
   let list: Target[];
   try {
     list = targets(io.projects());
+    if (list.some((t) => t.environment === READ_ENVIRONMENT)) {
+      throw new Error(
+        `a project named org-read would share ${READ_ENVIRONMENT}, the read token's environment`,
+      );
+    }
     org = io.orgToken();
   } catch (e) {
     say(`${e instanceof Error ? e.message : String(e)}; nothing was run`);
@@ -216,6 +247,16 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
       return 1;
     }
   }
+  const read = io.attenuate(JSON.stringify(readCaveats(io.now())), org);
+  const readToken = read.stdout.trim();
+  if (readToken !== '') mask(readToken);
+  if (read.status !== 0 || !TOKEN_LINE.test(readToken) || readToken === org.trim()) {
+    say(`${READ_ENVIRONMENT}: fly tokens attenuate printed no read token; nothing was run`);
+    return 1;
+  }
+  say(
+    `${READ_ENVIRONMENT}: a read-only token for every app and the org, no wg, valid ${READ_VALID_DAYS} days`,
+  );
   for (const t of list) {
     let id: string | null;
     try {
@@ -264,6 +305,7 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
     TF_VAR_repository_owner: owner,
     TF_VAR_repository: repository,
     TF_VAR_deploy_tokens: JSON.stringify(tokens),
+    TF_VAR_read_token: readToken,
   };
   const init = io.terraform(
     [

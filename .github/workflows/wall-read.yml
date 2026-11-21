@@ -18,8 +18,14 @@
 #               Terraform outputs, each tunnel's configuration, the live Access
 #               applications and service token names, and a plan in CI mode
 #               (no lock, nothing applied). The plan needs the routing configs.
-#   fly         in `fly-org` (deployments from main only): `fly apps list`
-#               with the org token, each project app's name and network.
+#   fly         in `fly-org-read` (deployments from main only): `fly apps
+#               list`, each project app's name and network, with
+#               FLY_READ_TOKEN. That token reads every app and the org and
+#               can change nothing: no deploy, no machine control and no
+#               WireGuard, so no `fly ssh`. fly-ci-tokens.yml cuts it weekly
+#               from the org token (ci-tokens.ts `readCaveats`). The org token
+#               stays in `fly-org`, which this daily job never enters
+#               (wall-off review H1, M5).
 #
 # What either reads holds hostnames, ids and Access policy rules and no
 # credential. The repository is public and so are these logs and artifacts,
@@ -80,7 +86,7 @@ jobs:
   fly:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: fly-org
+    environment: fly-org-read
     permissions:
       contents: read
     steps:
@@ -99,10 +105,20 @@ jobs:
             ln -s "$(command -v flyctl)" "$RUNNER_TEMP/flybin/fly"
             echo "$RUNNER_TEMP/flybin" >> "$GITHUB_PATH"
           fi
+      # Fails rather than skips: a missing read is a failed row on the Mac's
+      # report either way, and this names the fix.
+      - name: Read token is present
+        env:
+          HAS_READ: ${{ secrets.FLY_READ_TOKEN != '' }}
+        run: |
+          if [ "$HAS_READ" != true ]; then
+            echo "::error::fly-org-read holds no FLY_READ_TOKEN: dispatch fly-ci-tokens.yml on main, which cuts it."
+            exit 1
+          fi
       - name: Read fly apps list and seal it to the Mac
         env:
           CW_SECRETS_FROM_ENV: '1'
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_READ_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/wall-read"
           bun infra/project-machine/wall-read.ts fly --out "$RUNNER_TEMP/wall-read/fly.json"
