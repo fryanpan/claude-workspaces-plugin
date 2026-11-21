@@ -30,10 +30,11 @@ import {
   STORE_SECRETS,
   storeActions,
   storeSecretNames,
+  storeWriterPolicy,
 } from '../../../infra/project-machine/store-plan.ts';
 import { s3Bucket, statusOf } from '../../../infra/project-machine/store-s3.ts';
 import { setupStoreTest, storeNames } from '../../../infra/project-machine/store-setup.ts';
-import { hasSnapshots } from '../../../infra/project-machine/tigris.ts';
+import { ensurePolicy, hasSnapshots } from '../../../infra/project-machine/tigris.ts';
 import { startFakeTigris } from './fake-tigris.ts';
 
 // As real Tigris: S3 versioning answers 501, a snapshot bucket keeps versions.
@@ -222,5 +223,52 @@ describe('the CI run that makes the store', () => {
     expect(
       storeSecretValue({ app: 'cw-riverbend' }, 'BACKUP_S3_BUCKET', memoryIo()),
     ).toBeUndefined();
+  });
+});
+
+describe('a policy found by name is attached only if it grants what was asked', () => {
+  const admin = tigris.createBucket('cw-policy-reuse-test');
+  const asked = storeWriterPolicy('cw-policy-reuse-test', 'cw-harborlight');
+
+  it('reuses the existing policy when its document matches, in any order or spacing', async () => {
+    const arn = await ensurePolicy(admin, 'reuse-harborlight-writer', asked, tigris.iamUrl);
+    const reordered = JSON.stringify(
+      {
+        Statement: [
+          {
+            Resource: [
+              'arn:aws:s3:::cw-policy-reuse-test/cw-harborlight_lead/*',
+              'arn:aws:s3:::cw-policy-reuse-test/cw-harborlight/*',
+            ],
+            Action: 's3:PutObject',
+            Effect: 'Allow',
+          },
+        ],
+        Version: '2012-10-17',
+      },
+      null,
+      2,
+    );
+    expect(await ensurePolicy(admin, 'reuse-harborlight-writer', reordered, tigris.iamUrl)).toBe(
+      arn,
+    );
+  });
+
+  it('refuses a policy of the same name whose document grants more', async () => {
+    const wider = JSON.stringify({
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['s3:*'], Resource: ['arn:aws:s3:::cw-policy-reuse-test/*'] },
+      ],
+    });
+    await ensurePolicy(admin, 'reuse-riverbend-writer', wider, tigris.iamUrl);
+    await expect(
+      ensurePolicy(
+        admin,
+        'reuse-riverbend-writer',
+        storeWriterPolicy('cw-policy-reuse-test', 'cw-riverbend'),
+        tigris.iamUrl,
+      ),
+    ).rejects.toThrow(/exists with a different document/);
   });
 });
