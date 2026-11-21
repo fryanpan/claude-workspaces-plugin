@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
+import { type StoreObserved, storeActions, storeSecretNames } from './store-plan.ts';
 import { vmSizeFor } from './vm-size.ts';
 
 export type TunnelMode = 'quick' | 'named';
@@ -226,6 +227,8 @@ export interface Observed {
   browser: boolean;
   /** Whether the central list has a token for this run (`token-list.ts`). */
   listedToken?: boolean;
+  /** The transcript store (`deploy-store.ts`); absent, nothing of it is planned. */
+  store?: StoreObserved;
 }
 
 export type Action =
@@ -234,6 +237,8 @@ export type Action =
   | { kind: 'make-backup-key' }
   | { kind: 'create-bucket' }
   | { kind: 'make-writer-key' }
+  | { kind: 'setup-store' }
+  | { kind: 'make-store-writer' }
   | { kind: 'remove-lifecycle' }
   | { kind: 'enable-snapshots' }
   | { kind: 'set-secrets'; names: string[] }
@@ -347,15 +352,21 @@ export function plan(
     if (obs.lifecycle) actions.push({ kind: 'remove-lifecycle' });
     actions.push({ kind: 'enable-snapshots' });
   }
+  actions.push(...storeActions(obs));
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once. The
   // lead's token is listed only when it is due, so it is set over the old one.
+  // A new store writer is a new key id AND a new secret: every store secret
+  // is set beside it, over whatever an earlier writer left.
+  const store = storeSecretNames(obs);
   const names = [
     ...requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey), leadSecrets(cfg, obs)),
     ...settings,
+    ...store,
   ].filter(
     (n) =>
       !obs.secrets.has(n) ||
+      store.includes(n) ||
       refresh.includes(n) ||
       cfg.leadRefresh.includes(n) ||
       LEAD_TOKEN_PAIR.includes(n),

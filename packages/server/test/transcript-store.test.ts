@@ -97,20 +97,31 @@ function line(i: number, text = `turn ${i} from Alice`): string {
   })}\n`;
 }
 
-/** Every chunk under `prefix`, opened with `identity` and joined in offset order. */
+/** A chunk's byte offset, from its name `<offset>-<random>.jsonl.zst.cw`. */
+const offsetOf = (key: string): number => Number((key.split('/').at(-1) ?? '').split('-')[0]);
+
+/**
+ * Every chunk directly under `prefix`, opened with `identity` and joined in
+ * offset order. Two chunks at one offset (a put whose answer was lost, sent
+ * again) must hold the same bytes, and count once.
+ */
 function joined(store: MemoryStore, prefix: string, identity: string): string {
-  const byOffset = store
-    .keysUnder(prefix)
-    .filter((k) => !k.slice(prefix.length).includes('/'))
-    .map((k) => ({ offset: Number(k.slice(prefix.length).split('.')[0]), k }))
-    .sort((a, b) => a.offset - b.offset);
-  let out = '';
-  for (const { offset, k } of byOffset) {
-    // Contiguous: each chunk starts where the last one ended.
-    expect(offset).toBe(Buffer.byteLength(out));
+  const byOffset = new Map<number, string>();
+  for (const k of store.keysUnder(prefix)) {
+    if (k.slice(prefix.length).includes('/')) continue;
+    expect(k).toMatch(/\/\d+-[0-9a-f]{16}\.jsonl\.zst\.cw$/);
     const body = store.objects.get(k);
     if (!body) throw new Error(`missing ${k}`);
-    out += openChunk(body, identity).toString('utf8');
+    const text = openChunk(body, identity).toString('utf8');
+    const seen = byOffset.get(offsetOf(k));
+    if (seen !== undefined) expect(text).toBe(seen);
+    byOffset.set(offsetOf(k), text);
+  }
+  let out = '';
+  for (const [offset, text] of [...byOffset].sort((a, b) => a[0] - b[0])) {
+    // Contiguous: each chunk starts where the last one ended.
+    expect(offset).toBe(Buffer.byteLength(out));
+    out += text;
   }
   return out;
 }
@@ -150,8 +161,8 @@ function threeBoards(): { projects: string; ledger: string; files: Record<string
   return { projects, ledger, files };
 }
 
-describe('each file is sealed to its board’s key', () => {
-  it('ordinary and private upload under different keys, local-only never, no board to the owner', async () => {
+describe('each file is sealed to its board’s key and the review key', () => {
+  it('every board uploads, each to its own key as well as the review key; no board to the owner', async () => {
     const { projects, ledger, files } = threeBoards();
     const store = new MemoryStore();
     const sources = transcriptSources(projects, ledgerResolver(ledger));
@@ -162,31 +173,34 @@ describe('each file is sealed to its board’s key', () => {
     const salt = 'mac/transcripts/saltmarsh/sess-salt/';
     expect(joined(store, river, review.identity)).toBe(readFileSync(files.riverbend, 'utf8'));
     expect(joined(store, salt, saltmarsh.identity)).toBe(readFileSync(files.saltmarsh, 'utf8'));
+    // The weekly review reads everything, client boards included.
+    expect(joined(store, salt, review.identity)).toBe(readFileSync(files.saltmarsh, 'utf8'));
     // A subagent transcript goes with its session.
     expect(
       joined(store, 'mac/transcripts/riverbend/sess-river/subagents/agent-1/', review.identity),
     ).toBe(readFileSync(files.riverbendSub, 'utf8'));
 
-    // Different keys: the private chunk does not open with the review key.
-    const saltKey = store.keysUnder(salt)[0] ?? '';
-    const saltBody = store.objects.get(saltKey) ?? new Uint8Array();
-    expect(() => openChunk(saltBody, review.identity)).toThrow(/did not decrypt/);
+    // An ordinary board's chunk is the review key's alone.
+    const riverBody = store.objects.get(store.keysUnder(river)[0] ?? '') ?? new Uint8Array();
+    expect(() => openChunk(riverBody, owner.identity)).toThrow(/did not decrypt/);
+    // A client board's chunk does not open with another board's key.
+    const saltBody = store.objects.get(store.keysUnder(salt)[0] ?? '') ?? new Uint8Array();
+    expect(() => openChunk(saltBody, owner.identity)).toThrow(/did not decrypt/);
 
-    // Local-only: nothing anywhere names it or holds its words.
-    const all = [...store.objects.keys()];
-    expect(all.some((k) => k.includes('harborlight') || k.includes('sess-harbor'))).toBe(false);
+    // Local-only boards upload too (Bryan, 30 Oct: uniform treatment), like a
+    // private board with no key of its own: the owner's and the review key.
+    const harbor = 'mac/transcripts/harborlight/sess-harbor/';
+    expect(joined(store, harbor, owner.identity)).toBe(readFileSync(files.harborlight, 'utf8'));
+    expect(joined(store, harbor, review.identity)).toBe(readFileSync(files.harborlight, 'utf8'));
 
-    // No board, and two boards, both land in unsorted under the owner's key.
+    // No board, and two boards, both land in unsorted under the owner's key and the review key.
     const loose = 'mac/transcripts/unsorted/sess-loose/';
     const both = 'mac/transcripts/unsorted/sess-both/';
     expect(joined(store, loose, owner.identity)).toBe(readFileSync(files.loose, 'utf8'));
     expect(joined(store, both, owner.identity)).toBe(readFileSync(files.twoBoards, 'utf8'));
-    expect(() =>
-      openChunk(
-        store.objects.get(store.keysUnder(loose)[0] ?? '') ?? new Uint8Array(),
-        review.identity,
-      ),
-    ).toThrow(/did not decrypt/);
+    expect(joined(store, loose, review.identity)).toBe(readFileSync(files.loose, 'utf8'));
+    const looseBody = store.objects.get(store.keysUnder(loose)[0] ?? '') ?? new Uint8Array();
+    expect(() => openChunk(looseBody, saltmarsh.identity)).toThrow(/did not decrypt/);
   });
 
   it('a usage side file holds model and token counts, no text, under the usage key', async () => {
@@ -214,10 +228,12 @@ describe('each file is sealed to its board’s key', () => {
       },
     ]);
     expect(JSON.stringify(rows)).not.toContain('Saltmarsh client notes');
-    expect(store.keysUnder('mac/usage/harborlight/')).toEqual([]);
+    expect(() => openChunk(store.objects.get(k) ?? new Uint8Array(), review.identity)).toThrow(
+      /did not decrypt/,
+    );
   });
 
-  it('a board whose class cannot be read is private: it never gets the review key', async () => {
+  it('a board whose class cannot be read is private: its own key, or the owner’s', async () => {
     const dir = fresh('t');
     const path = join(dir, 'x.jsonl');
     writeFileSync(path, line(1));
@@ -233,11 +249,11 @@ describe('each file is sealed to its board’s key', () => {
         throw new Error('server down');
       },
     });
-    const body = store.objects.get('mac/transcripts/riverbend/x/0.jsonl.zst.cw');
+    const body = store.objects.get(store.keysUnder('mac/transcripts/riverbend/x/')[0] ?? '');
     if (!body) throw new Error('nothing uploaded');
     // No board key is configured for riverbend, so it falls back to the owner.
     expect(openChunk(body, owner.identity).toString()).toBe(line(1));
-    expect(() => openChunk(body, review.identity)).toThrow(/did not decrypt/);
+    expect(openChunk(body, review.identity).toString()).toBe(line(1));
   });
 });
 
@@ -286,12 +302,15 @@ describe('event logs', () => {
       host: 'fly',
       keys,
       classOf,
+      now: () => new Date('2026-10-29T12:00:00Z'),
     });
-    // On a project machine every log is that machine's board.
-    expect(store.keysUnder('fly/events/').sort()).toEqual([
-      'fly/events/saltmarsh/activity/0.jsonl.zst.cw',
-      'fly/events/saltmarsh/harborlight.agent-notes/0.jsonl.zst.cw',
-      'fly/events/saltmarsh/riverbend.events/0.jsonl.zst.cw',
+    // On a project machine every log is that machine's board, and each UTC
+    // day of a log is a folder of its own.
+    const rand = (k: string) => k.replace(/\/0-[0-9a-f]{16}\.jsonl\.zst\.cw$/, '/0-R');
+    expect(store.keysUnder('fly/events/').map(rand).sort()).toEqual([
+      'fly/events/saltmarsh/activity/2026-10-29/0-R',
+      'fly/events/saltmarsh/harborlight.agent-notes/2026-10-29/0-R',
+      'fly/events/saltmarsh/riverbend.events/2026-10-29/0-R',
     ]);
     expect(store.keysUnder('fly/usage/')).toEqual([]);
   });
@@ -308,13 +327,14 @@ describe('a run resumes where it stopped', () => {
     const statePath = join(dir, 'state.json');
     const store = new MemoryStore();
     // Small chunks so one run makes several puts; the third one fails.
-    const opts = { sources, store, statePath, host: 'fly', keys, classOf, maxChunkBytes: 600 };
+    const now = () => new Date('2026-10-29T12:00:00Z');
+    const opts = { sources, store, statePath, host: 'fly', keys, classOf, now, maxChunkBytes: 600 };
     store[failure] = 3;
     await expect(runOnce(opts)).rejects.toThrow();
     const landed = store.objects.size;
     expect(landed).toBe(failure === 'failBefore' ? 2 : 3);
     // The two puts that were answered are never sent again.
-    const acknowledged = store.log.slice(0, 2);
+    const acknowledged = store.log.slice(0, 2).map(offsetOf);
     const firstRun = store.log.length;
 
     // The file grows while the uploader is down, half a line at the end.
@@ -323,7 +343,7 @@ describe('a run resumes where it stopped', () => {
     expected += more;
 
     await runOnce(opts);
-    const resent = store.log.slice(firstRun).filter((k) => acknowledged.includes(k));
+    const resent = store.log.slice(firstRun).filter((k) => acknowledged.includes(offsetOf(k)));
     expect(resent).toEqual([]);
     const prefix = 'fly/transcripts/riverbend/s/';
     expect(joined(store, prefix, review.identity)).toBe(expected);
@@ -372,6 +392,63 @@ describe('a run resumes where it stopped', () => {
   });
 });
 
+describe('a day’s manifest', () => {
+  const at = (iso: string) => () => new Date(iso);
+
+  it('names every chunk a file sent that day, closed by the first pass after midnight', async () => {
+    const dir = fresh('manifest');
+    const t = join(dir, 't.jsonl');
+    const e = join(dir, 'e.jsonl');
+    writeFileSync(t, line(1));
+    writeFileSync(e, line(2));
+    const sources: UploadSource[] = [
+      { path: t, kind: 'transcript', name: 'sess-m', board: 'saltmarsh' },
+      { path: e, kind: 'event', name: 'saltmarsh.events', board: 'saltmarsh' },
+    ];
+    const store = new MemoryStore();
+    const base = { sources, store, statePath: join(dir, 'st.json'), host: 'mac', keys, classOf };
+    await runOnce({ ...base, now: at('2026-10-29T23:58:00Z') });
+    appendFileSync(t, line(3));
+    await runOnce({ ...base, now: at('2026-10-29T23:59:00Z') });
+    expect(store.keysUnder('mac/manifests/')).toEqual([]);
+
+    // Bytes written just before midnight go up in the first pass after it,
+    // and that pass closes the old day, so its manifest covers them.
+    appendFileSync(t, line(4));
+    await runOnce({ ...base, now: at('2026-10-30T00:00:30Z') });
+    const mKey = 'mac/manifests/2026-10-29/transcripts/saltmarsh/sess-m.json.zst.cw';
+    expect(store.keysUnder('mac/manifests/').sort()).toEqual([
+      'mac/manifests/2026-10-29/events/saltmarsh/saltmarsh.events.json.zst.cw',
+      mKey,
+    ]);
+    const body = store.objects.get(mKey) ?? new Uint8Array();
+    // Bookkeeping, sealed to the review key.
+    const m = JSON.parse(openChunk(body, review.identity).toString('utf8'));
+    const chunks = store.keysUnder('mac/transcripts/saltmarsh/sess-m/');
+    expect(m).toMatchObject({ version: 1, host: 'mac', day: '2026-10-29', gen: 0 });
+    expect(m.chunks.map((c: { key: string }) => c.key).sort()).toEqual(chunks);
+    const sizes = [line(1), line(3), line(4)].map((l) => Buffer.byteLength(l));
+    expect(m.chunks.map((c: { offset: number; bytes: number }) => [c.offset, c.bytes])).toEqual([
+      [0, sizes[0]],
+      [sizes[0], sizes[1]],
+      [(sizes[0] ?? 0) + (sizes[1] ?? 0), sizes[2]],
+    ]);
+    const plain = openChunk(
+      store.objects.get(chunks[0] ?? '') ?? new Uint8Array(),
+      review.identity,
+    );
+    const { createHash } = await import('node:crypto');
+    expect(m.chunks[0].sha256).toBe(createHash('sha256').update(plain).digest('hex'));
+
+    // The next pass starts the new day: its chunk is not in the closed manifest,
+    // and an event chunk goes in the new day's folder.
+    appendFileSync(e, line(5));
+    await runOnce({ ...base, now: at('2026-10-30T00:01:30Z') });
+    expect(store.keysUnder('mac/events/saltmarsh/saltmarsh.events/2026-10-30/')).toHaveLength(1);
+    expect(store.keysUnder('mac/manifests/2026-10-30/')).toEqual([]);
+  });
+});
+
 describe('the seal', () => {
   it('opens only with the identity it was sealed to', () => {
     const plain = Buffer.from(line(1) + line(2));
@@ -387,6 +464,24 @@ describe('the seal', () => {
     expect(openBytes(sealed, owner.identity).equals(plain)).toBe(true);
     sealed[sealed.length - 40] ^= 1;
     expect(() => openBytes(sealed, owner.identity)).toThrow(/did not decrypt/);
+  });
+
+  it('sealed to two keys, opens with either and with no third', () => {
+    const plain = Buffer.alloc(150_000, 3);
+    const sealed = sealBytes(plain, [saltmarsh.recipient, review.recipient]);
+    expect(openBytes(sealed, saltmarsh.identity).equals(plain)).toBe(true);
+    expect(openBytes(sealed, review.identity).equals(plain)).toBe(true);
+    expect(() => openBytes(sealed, owner.identity)).toThrow(/did not decrypt/);
+    sealed[sealed.length - 40] ^= 1;
+    expect(() => openBytes(sealed, review.identity)).toThrow(/did not decrypt/);
+  });
+
+  it('the restore’s file decrypt opens a chunk sealed to two keys', () => {
+    const dir = fresh('fmt2');
+    const plain = Buffer.from(line(4) + line(5));
+    writeFileSync(join(dir, 'c.cw'), sealBytes(plain, [owner.recipient, review.recipient]));
+    decryptFile(join(dir, 'c.cw'), owner.identity, join(dir, 'out'));
+    expect(readFileSync(join(dir, 'out')).equals(plain)).toBe(true);
   });
 
   it('is the snapshot format, so the restore’s file decrypt opens it', () => {

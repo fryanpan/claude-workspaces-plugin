@@ -327,6 +327,8 @@ describe('the workflows that replaced the keeper', () => {
       'FLY_API_TOKEN',
       'GH_ADMIN_TOKEN',
       'HANDOFF_PRIVATE_KEY',
+      // The transcript store's admin, written there by the first run that made it.
+      'STORE_BUCKET_ADMIN',
     ]);
     expect(make?.env?.CW_SECRETS_FROM_ENV).toBe('1');
     expect(make?.env?.CW_HANDOFF_OUT).toContain('handoff-mac');

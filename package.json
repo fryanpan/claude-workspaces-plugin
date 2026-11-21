@@ -18,6 +18,7 @@
     "machine:wall-report": "bun run infra/project-machine/wall-report.ts",
     "machine:move-board": "bun run infra/project-machine/move-board.ts",
     "machine:push-board": "bun run infra/project-machine/push-board.ts",
+    "store:read": "bun run infra/project-machine/store-read.ts",
     "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
     "machine:tokens": "bun run infra/project-machine/tokens.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",

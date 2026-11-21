@@ -28,6 +28,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -201,6 +202,76 @@ exec /bin/sleep 1000`;
         describe: 'the server',
       });
       expect(readRecords(log).recs.filter((r) => r.uid === 'cwdev')).toEqual([]);
+    } finally {
+      if (child.pid) process.kill(-child.pid, 'SIGKILL');
+    }
+  }, 30_000);
+
+  it("reads cw's and the lead's transcripts as their owners, and only cwstore holds the store's credential", async () => {
+    const { bin, log, volume } = stubs('0');
+    const store = {
+      STORE_S3_ENDPOINT: 'https://store.harborlight.test',
+      STORE_S3_BUCKET: 'cw-transcript-store',
+      STORE_S3_ACCESS_KEY_ID: 'store-key-id-riverbend',
+      STORE_S3_SECRET_ACCESS_KEY: 'store-secret-saltmarsh',
+    };
+    const keys = '{"review":"cwsnap-pub-r","owner":"cwsnap-pub-o","usage":"cwsnap-pub-u"}';
+    const env = {
+      ...machineEnv(bin, volume),
+      ...store,
+      STORE_KEYS: keys,
+      FLY_APP_NAME: 'cw-harborlight',
+    };
+    const child = spawn(BASH as string, [entrypoint], { env, detached: true, stdio: 'ignore' });
+    try {
+      const of = (needle: string) => readRecords(log).recs.filter((r) => r.argv.includes(needle));
+      await waitFor(
+        () => of('store-uploader.ts').length >= 2 && of('store-sender.ts').length >= 1,
+        {
+          timeout: 20_000,
+          describe: 'both readers and the sender to start',
+        },
+      );
+      const readers = of('store-uploader.ts');
+      const byUid = new Map(readers.map((r) => [r.uid, r]));
+      expect([...byUid.keys()].sort()).toEqual(['cw', 'lead']);
+      expect(byUid.get('cw')?.env.get('STORE_HOST')).toBe('cw-harborlight');
+      expect(byUid.get('lead')?.env.get('STORE_HOST')).toBe('cw-harborlight_lead');
+      expect(byUid.get('lead')?.env.get('STORE_TRANSCRIPTS_DIR')).toBe(
+        `${volume}/lead/claude-projects`,
+      );
+      expect(byUid.get('cw')?.env.get('STORE_SPOOL_DIR')).toBe(`${volume}/store-spool-cw`);
+      expect(readFileSync(join(volume, 'store-keys.json'), 'utf8').trim()).toBe(keys);
+
+      // No process of cw's or the lead's holds the credential, under any name...
+      const secret = [store.STORE_S3_ACCESS_KEY_ID, store.STORE_S3_SECRET_ACCESS_KEY];
+      const all = readRecords(log);
+      for (const rec of all.recs.filter((r) => r.uid === 'cw' || r.uid === 'lead')) {
+        const held = [...rec.env.values()].filter((v) => secret.some((s) => v.includes(s)));
+        expect(held).toEqual([]);
+      }
+      // ...and the sender, the POSITIVE CONTROL, holds it and nothing else.
+      const sender = of('store-sender.ts')[0];
+      expect(sender?.uid).toBe('cwstore');
+      expect(sender?.env.get('STORE_S3_SECRET_ACCESS_KEY')).toBe(store.STORE_S3_SECRET_ACCESS_KEY);
+      const bashOwn = new Set(['PWD', 'SHLVL', '_', 'OLDPWD']);
+      expect([...(sender?.env.keys() ?? [])].filter((k) => !bashOwn.has(k)).sort()).toEqual(
+        ['HOME', 'LOGNAME', 'PATH', 'STUB_UID', 'USER', ...Object.keys(store)].sort(),
+      );
+      expect(sender?.argv).toContain(`--spool ${volume}/store-spool-cw:cw-harborlight:10001`);
+      expect(sender?.argv).toContain(
+        `--spool ${volume}/store-spool-lead:cw-harborlight_lead:10004`,
+      );
+      const argvs = [...all.recs.map((r) => r.argv), ...all.setprivArgv];
+      expect(argvs.filter((a) => secret.some((s) => a.includes(s)))).toEqual([]);
+
+      // Each spool is cwstore's, its writer's group, 3770; root changed nothing else there.
+      const chowns = lines(log, '.chown');
+      expect(chowns).toContain(`root -h cwstore:cw ${volume}/store-spool-cw`);
+      expect(chowns).toContain(`root -h cwstore:lead ${volume}/store-spool-lead`);
+      expect(lines(log, '.chmod')).toContain(
+        `root 3770 ${volume}/store-spool-cw ${volume}/store-spool-lead`,
+      );
     } finally {
       if (child.pid) process.kill(-child.pid, 'SIGKILL');
     }

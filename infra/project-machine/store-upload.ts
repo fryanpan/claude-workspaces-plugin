@@ -1,32 +1,45 @@
 /**
  * The transcript store's uploader: every Claude Code transcript and every
  * analytics log on this machine, sent as new objects to one bucket, each
- * sealed to the key its board decides.
+ * sealed to the keys its board decides.
  *
  * Files are assumed to be only appended to, and that is checked. Per file the
  * state keeps the bytes already sent and a hash of the last 4 KiB of them.
- * Each run sends whole lines past that point as
- * `<host>/<kind>/<board>/<name>/<offset>.jsonl.zst.cw`: zstd, then sealed with
- * `snapshot.ts`'s format. A file that shrank, or whose sent tail changed, is
- * sent again from offset 0 under `<name>/rewrite-<n>/`.
+ * Each run sends whole lines past that point as a new object, zstd then
+ * sealed in `seal.ts`'s v2 format, named `<offset>-<random>.jsonl.zst.cw`:
+ *
+ *   <host>/transcripts/<board>/<name>/<offset>-<random>.jsonl.zst.cw
+ *   <host>/events/<board>/<name>/<YYYY-MM-DD>/<offset>-<random>.jsonl.zst.cw
+ *
+ * A file that shrank, or whose sent tail changed, is sent again from offset 0
+ * under `<name>/rewrite-<n>/`.
  *
  * The writing host comes first, so a writer's credential is a plain trailing
  * prefix, `<host>/*`. Boards are kept apart by their keys, not by the path.
+ * The random part means a credential that cannot list cannot name an object
+ * to overwrite it.
  *
- * The offset in the key means no upload replaces another, so a create-only
- * credential is enough. The state is saved only after a put succeeds; a put
- * that landed but whose answer was lost is repeated at the same offset, and
- * the reader keeps one object per offset.
+ * The state is saved only after a put succeeds; a put that landed but whose
+ * answer was lost is repeated at the same offset under a new name, and the
+ * reader keeps one object per offset (the check counts it as a duplicate).
  *
- * Which key: an ordinary board's files go to the review key; a client or
- * private board's to its own key (the owner's when it has none configured);
- * a file with no board, or more than one, goes to `unsorted` under the
- * owner's key; a local-only board's files are never sent. A class that cannot
- * be read counts as private. The class is asked again for every chunk, so a
- * board made local-only stops at its next chunk; the folder a file went to
- * first is kept, so its chunks stay together.
+ * Which keys: every chunk goes to the review key, because the weekly review
+ * reads everything (Bryan, 30 Oct). An ordinary board's chunk goes to it
+ * alone; a client, private or local-only board's also to its own key (the
+ * owner's when it has none configured); a file with no board, or more than
+ * one, goes to `unsorted` under the owner's key as well. A class that cannot
+ * be read counts as private. The folder a file went to first is kept, so its
+ * chunks stay together.
+ *
+ * Each UTC day, every file that sent a chunk gets a manifest naming each
+ * chunk, its range and the sha256 of its plain bytes, at
+ * `<host>/manifests/<YYYY-MM-DD>/<kind>/<board>/<name>.json.zst.cw`. The
+ * first pass after midnight closes the old day and its chunks belong to it,
+ * so a day's manifests cover every byte written before its midnight. The
+ * check (`store-check.ts`) reads them to tell a deleted chunk from one that
+ * was never sent.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -39,12 +52,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, join, relative, sep } from 'node:path';
-import { openBytes, sealBytes } from './snapshot.ts';
+import { openBytes, sealBytes } from './seal.ts';
 
 /** Where objects go. The real one is an S3 bucket; tests use a map. */
 export interface ObjectStore {
   put(key: string, body: Uint8Array): Promise<void>;
 }
+
+/**
+ * A store's answer that this object can never be taken, as opposed to a put
+ * that failed and may succeed next pass. `runOnce` holds the file and says
+ * why, and carries on with the others.
+ */
+export class RefusedObject extends Error {}
 
 export type BoardClass = 'ordinary' | 'private' | 'local-only';
 
@@ -76,6 +96,8 @@ export interface RunOptions {
   classOf: (board: string) => BoardClass;
   /** Plaintext bytes per object at most, unless one line is longer. */
   maxChunkBytes?: number;
+  /** The clock that decides the UTC day. */
+  now?: () => Date;
 }
 
 export interface RunReport {
@@ -92,18 +114,44 @@ interface FileState {
   gen: number;
 }
 
+export interface ManifestChunk {
+  key: string;
+  offset: number;
+  bytes: number;
+  /** sha256 of the chunk's plain bytes. */
+  sha256: string;
+}
+
+export interface Manifest {
+  version: 1;
+  host: string;
+  day: string;
+  kind: 'transcripts' | 'events';
+  folder: string;
+  name: string;
+  gen: number;
+  chunks: ManifestChunk[];
+}
+
+/** The open day's chunks, per file, until the day closes. */
+interface Pending {
+  day: string;
+  files: Record<string, Omit<Manifest, 'version' | 'host' | 'day'>>;
+}
+
 interface State {
   version: 1;
   files: Record<string, FileState>;
+  pending?: Pending;
 }
 
-const UNSORTED = 'unsorted';
+export const UNSORTED = 'unsorted';
 const TAIL = 4096;
 const DEFAULT_MAX_CHUNK = 8 * 1024 * 1024;
 const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-const validSegment = (s: string): boolean => SEGMENT.test(s);
-const validBoard = (b: string): boolean => validSegment(b) && b !== UNSORTED;
+export const validSegment = (s: string): boolean => SEGMENT.test(s);
+export const validBoard = (b: string): boolean => validSegment(b) && b !== UNSORTED;
 
 export function loadState(path: string): State {
   if (!existsSync(path)) return { version: 1, files: {} };
@@ -111,7 +159,11 @@ export function loadState(path: string): State {
   if (parsed.version !== 1 || typeof parsed.files !== 'object' || parsed.files === null) {
     throw new Error(`${path} is not an uploader state file`);
   }
-  return { version: 1, files: parsed.files };
+  return {
+    version: 1,
+    files: parsed.files,
+    ...(parsed.pending ? { pending: parsed.pending } : {}),
+  };
 }
 
 function saveState(path: string, state: State): void {
@@ -142,18 +194,27 @@ function tailHash(path: string, sent: number): string {
     .digest('hex');
 }
 
-/** The recipient for a chunk in `folder`, or null when it must not leave. */
-function recipientFor(folder: string, opts: RunOptions): string | null {
-  if (folder === UNSORTED) return opts.keys.owner;
+/** The keys a chunk in `folder` is sealed to. The review key is always one. */
+function recipientsFor(folder: string, opts: RunOptions): string[] {
+  if (folder === UNSORTED) return [opts.keys.owner, opts.keys.review];
   let cls: BoardClass;
   try {
     cls = opts.classOf(folder);
   } catch {
     cls = 'private';
   }
-  if (cls === 'local-only') return null;
-  if (cls === 'ordinary') return opts.keys.review;
-  return opts.keys.boards[folder] ?? opts.keys.owner;
+  if (cls === 'ordinary') return [opts.keys.review];
+  return [opts.keys.boards[folder] ?? opts.keys.owner, opts.keys.review];
+}
+
+export const utcDay = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** Where a manifest goes. */
+export function manifestKey(
+  m: Pick<Manifest, 'host' | 'day' | 'kind' | 'folder' | 'name' | 'gen'>,
+) {
+  const gen = m.gen === 0 ? '' : `/rewrite-${m.gen}`;
+  return `${m.host}/manifests/${m.day}/${m.kind}/${m.folder}/${m.name}${gen}.json.zst.cw`;
 }
 
 /** Model, token counts and time of each assistant line. No text. */
@@ -174,8 +235,8 @@ export function usageLines(chunk: Buffer): string {
   return out;
 }
 
-const seal = (plain: Uint8Array, recipient: string): Buffer =>
-  sealBytes(Bun.zstdCompressSync(plain), recipient);
+export const seal = (plain: Uint8Array, recipients: string | readonly string[]): Buffer =>
+  sealBytes(Bun.zstdCompressSync(plain), recipients);
 
 /** One object's plaintext, given the identity it was sealed to. */
 export function openChunk(body: Uint8Array, identity: string): Buffer {
@@ -195,12 +256,18 @@ function nextChunk(path: string, sent: number, size: number, max: number): Buffe
   return end < 0 ? null : bytes.subarray(0, end + 1);
 }
 
+const sha256 = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+
 /** One pass over every source. Throws on the first failed put, after saving what landed. */
 export async function runOnce(opts: RunOptions): Promise<RunReport> {
   if (!validSegment(opts.host))
     throw new Error(`host ${JSON.stringify(opts.host)} is not a safe path segment`);
   const max = opts.maxChunkBytes ?? DEFAULT_MAX_CHUNK;
   const state = loadState(opts.statePath);
+  const today = utcDay((opts.now ?? (() => new Date()))());
+  // This pass's chunks belong to the open day, even when it has just ended.
+  const pending: Pending = state.pending ?? { day: today, files: {} };
+  state.pending = pending;
   const report: RunReport = { uploaded: [], held: [] };
   for (const src of opts.sources) {
     if (!src.name.split('/').every(validSegment)) {
@@ -225,17 +292,22 @@ export async function runOnce(opts: RunOptions): Promise<RunReport> {
     }
     const kind = src.kind === 'transcript' ? 'transcripts' : 'events';
     const genPart = rec.gen === 0 ? '' : `rewrite-${rec.gen}/`;
+    const dayPart = kind === 'events' ? `${pending.day}/` : '';
     for (;;) {
       const chunk = nextChunk(src.path, rec.sent, size, max);
       if (!chunk) break;
-      const recipient = recipientFor(rec.folder, opts);
-      if (recipient === null) {
-        report.held.push({ path: src.path, reason: 'local-only board' });
+      const name = `${rec.sent}-${randomBytes(8).toString('hex')}.jsonl.zst.cw`;
+      const tail = `${rec.folder}/${src.name}/${dayPart}${genPart}${name}`;
+      const key = `${opts.host}/${kind}/${tail}`;
+      try {
+        await opts.store.put(key, seal(chunk, recipientsFor(rec.folder, opts)));
+      } catch (err) {
+        if (!(err instanceof RefusedObject)) throw err;
+        // Not sent and not skipped: the file stays at this offset, and every
+        // pass reports it held until something changes.
+        report.held.push({ path: src.path, reason: err.message });
         break;
       }
-      const tail = `${rec.folder}/${src.name}/${genPart}${rec.sent}.jsonl.zst.cw`;
-      const key = `${opts.host}/${kind}/${tail}`;
-      await opts.store.put(key, seal(chunk, recipient));
       report.uploaded.push({ key, bytes: chunk.length });
       const usage = src.kind === 'transcript' && opts.keys.usage ? usageLines(chunk) : '';
       if (usage && opts.keys.usage) {
@@ -244,12 +316,35 @@ export async function runOnce(opts: RunOptions): Promise<RunReport> {
           seal(Buffer.from(usage), opts.keys.usage),
         );
       }
+      const group = `${kind}\0${rec.folder}\0${src.name}\0${rec.gen}`;
+      const entry = pending.files[group] ?? {
+        kind,
+        folder: rec.folder,
+        name: src.name,
+        gen: rec.gen,
+        chunks: [],
+      };
+      entry.chunks.push({ key, offset: rec.sent, bytes: chunk.length, sha256: sha256(chunk) });
+      pending.files[group] = entry;
       const sent = rec.sent + chunk.length;
       rec = { ...rec, sent, tail: tailHash(src.path, sent) };
       state.files[src.path] = rec;
       saveState(opts.statePath, state);
     }
   }
+  if (pending.day !== today) {
+    for (const f of Object.values(pending.files)) {
+      const m: Manifest = { version: 1, host: opts.host, day: pending.day, ...f };
+      const key = manifestKey(m);
+      await opts.store.put(
+        key,
+        seal(Buffer.from(JSON.stringify(m)), [opts.keys.review, opts.keys.owner]),
+      );
+      report.uploaded.push({ key, bytes: 0 });
+    }
+    state.pending = { day: today, files: {} };
+  }
+  saveState(opts.statePath, state);
   return report;
 }
 

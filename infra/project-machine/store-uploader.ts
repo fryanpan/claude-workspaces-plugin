@@ -2,8 +2,13 @@
 /**
  * Run the transcript store's uploader (`store-upload.ts`) on this machine.
  *
- *   bun infra/project-machine/store-uploader.ts           a pass now, then every 5 minutes
+ *   bun infra/project-machine/store-uploader.ts           a pass now, then every minute
  *   bun infra/project-machine/store-uploader.ts --once    one pass, then exit
+ *   bun infra/project-machine/store-uploader.ts --inventory
+ *                         write today's inventory (`store-inventory.ts`), then exit
+ *
+ * The loop also writes the inventory itself on its first pass of each UTC
+ * day, before that pass sends anything, so a machine needs no second timer.
  *
  * SIGUSR1 starts the next pass early, so the Stop hook only has to signal.
  *
@@ -17,10 +22,14 @@
  *   STORE_DATA_DIR                optional; a board server's data dir, for its event logs
  *   STORE_BOARD                   optional; a project machine's one board, which every file here is
  *   STORE_LEDGER                  optional; session -> board lines, where many boards share a machine
- *   STORE_INTERVAL_SECONDS        optional; 300 when unset
- *   STORE_S3_ENDPOINT, STORE_S3_BUCKET, STORE_S3_REGION (optional, "auto"),
+ *   STORE_INTERVAL_SECONDS        optional; 60 when unset
+ *   STORE_SPOOL_DIR               where to write each object instead of sending it
+ *                                 (`store-spool.ts`): a project machine's readers
+ *                                 hold no credential, and `store-sender.ts` sends
+ *   STORE_S3_ENDPOINT, STORE_S3_BUCKET,
  *   STORE_S3_ACCESS_KEY_ID, STORE_S3_SECRET_ACCESS_KEY
- *                                 a credential that may create objects and nothing else
+ *                                 without a spool: a credential that may create
+ *                                 objects and nothing else
  *
  * The keys file holds public keys only, and is refused if it holds an
  * identity: a machine that uploads must not be able to read the store.
@@ -31,9 +40,12 @@
  *
  * A board missing from `classes` counts as private.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { checkRecipient } from './snapshot.ts';
+import { checkRecipient } from './seal.ts';
+import { takeInventory, writeInventory } from './store-inventory.ts';
+import { s3Bucket } from './store-s3.ts';
+import { clearSpoolTemps, spoolStore } from './store-spool.ts';
 import {
   type BoardClass,
   type ObjectStore,
@@ -43,6 +55,7 @@ import {
   ledgerResolver,
   runOnce,
   transcriptSources,
+  utcDay,
 } from './store-upload.ts';
 
 export interface UploaderConfig {
@@ -119,7 +132,7 @@ export function configFromEnv(env: Record<string, string | undefined>): Uploader
   const ledger = opt('STORE_LEDGER');
   const transcripts = opt('STORE_TRANSCRIPTS_DIR');
   const dataDir = opt('STORE_DATA_DIR');
-  const seconds = Number(opt('STORE_INTERVAL_SECONDS') ?? '300');
+  const seconds = Number(opt('STORE_INTERVAL_SECONDS') ?? '60');
   if (!Number.isFinite(seconds) || seconds < 10)
     throw new Error('STORE_INTERVAL_SECONDS must be at least 10');
   return {
@@ -144,24 +157,50 @@ export function configFromEnv(env: Record<string, string | undefined>): Uploader
   };
 }
 
+/** The spool when one is set (a project machine's reader), else the bucket. */
+export function destinationFromEnv(env: Record<string, string | undefined>): ObjectStore {
+  const spool = env.STORE_SPOOL_DIR?.trim();
+  if (spool) {
+    clearSpoolTemps(spool);
+    return spoolStore(spool);
+  }
+  return bucketFromEnv(env);
+}
+
+/**
+ * The day's inventory, once: on the first pass of each UTC day, whose sizes
+ * are then the closest this host gets to the midnight. The day it was last
+ * written is kept beside the state, so a restart does not write it again.
+ */
+export async function inventoryIfDue(
+  config: UploaderConfig,
+  store: ObjectStore,
+  now: Date,
+): Promise<boolean> {
+  const marker = `${config.statePath}.inventory-day`;
+  const day = utcDay(now);
+  if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === day) return false;
+  const inv = takeInventory({ ...config, sources: config.sources(), now });
+  await writeInventory(inv, store, config.keys);
+  writeFileSync(marker, `${day}\n`, { mode: 0o600 });
+  console.log(`[store] inventory for ${inv.day}: ${inv.files.length} files`);
+  return true;
+}
+
 function bucketFromEnv(env: Record<string, string | undefined>): ObjectStore {
   const need = (name: string): string => {
     const v = env[name]?.trim();
     if (!v) throw new Error(`${name} is not set`);
     return v;
   };
-  const client = new Bun.S3Client({
-    endpoint: need('STORE_S3_ENDPOINT'),
-    bucket: need('STORE_S3_BUCKET'),
-    region: env.STORE_S3_REGION?.trim() || 'auto',
-    accessKeyId: need('STORE_S3_ACCESS_KEY_ID'),
-    secretAccessKey: need('STORE_S3_SECRET_ACCESS_KEY'),
-  });
-  return {
-    put: async (key, body) => {
-      await client.write(key, body, { type: 'application/octet-stream' });
+  return s3Bucket(
+    {
+      endpoint: need('STORE_S3_ENDPOINT'),
+      accessKeyId: need('STORE_S3_ACCESS_KEY_ID'),
+      secretAccessKey: need('STORE_S3_SECRET_ACCESS_KEY'),
     },
-  };
+    need('STORE_S3_BUCKET'),
+  );
 }
 
 async function pass(config: UploaderConfig, store: ObjectStore): Promise<void> {
@@ -170,11 +209,18 @@ async function pass(config: UploaderConfig, store: ObjectStore): Promise<void> {
   console.log(
     `[store] sent ${report.uploaded.length} objects (${bytes} bytes); held ${report.held.length} files`,
   );
+  for (const h of report.held) console.error(`[store] held ${h.path}: ${h.reason}`);
 }
 
 async function main(): Promise<void> {
   const config = configFromEnv(process.env);
-  const store = bucketFromEnv(process.env);
+  const store = destinationFromEnv(process.env);
+  if (process.argv.includes('--inventory')) {
+    const inv = takeInventory({ ...config, sources: config.sources(), now: new Date() });
+    await writeInventory(inv, store, config.keys);
+    console.log(`[store] inventory for ${inv.day}: ${inv.files.length} files`);
+    return;
+  }
   if (process.argv.includes('--once')) {
     await pass(config, store);
     return;
@@ -182,6 +228,14 @@ async function main(): Promise<void> {
   let wake: (() => void) | null = null;
   process.on('SIGUSR1', () => wake?.());
   for (;;) {
+    try {
+      await inventoryIfDue(config, store, new Date());
+    } catch (err) {
+      // Its own try: an inventory that keeps failing must not stop the uploads.
+      console.error(
+        `[store] inventory failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     try {
       await pass(config, store);
     } catch (err) {

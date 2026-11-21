@@ -98,6 +98,14 @@ import {
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
 import {
+  ghPersist,
+  makeStoreWriter,
+  markWriterStored,
+  revokeUnstoredWriters,
+  setupStore,
+  storeReady,
+} from './deploy-store.ts';
+import {
   fly,
   flyJson,
   flyLive,
@@ -115,6 +123,7 @@ import { makePushKeys } from './push-keys.ts';
 import { writeImageRelease } from './release-publish.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
+import { STORE_SECRETS, STORE_WRITER_SECRET } from './store-plan.ts';
 import {
   attachPolicy,
   createAccessKey,
@@ -234,6 +243,10 @@ async function observe(cfg: ProjectConfig) {
     secrets,
     machines: app ? machines(cfg.app) : [],
     browser: !secretsFromEnv(),
+    store: {
+      ready: storeReady({ keychainHas }),
+      canMake: secretsFromEnv() && handoffSink() !== null,
+    },
   };
 }
 
@@ -326,6 +339,24 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       keychainCreate(cfg.keychain.writer, JSON.stringify(key));
       return;
     }
+    case 'setup-store':
+      for (const line of await setupStore({
+        keychainHas,
+        keychainRead,
+        keychainCreate,
+        createBucket: async (name) => {
+          // Not flyOk: the output holds the admin credential.
+          const r = fly(['storage', 'create', '--org', ctx.org(), '--name', name, '--yes']);
+          if (r.status !== 0) throw new Error(`fly storage create failed: ${r.stderr.trim()}`);
+          return parseStorageCreate(r.stdout);
+        },
+        persist: ghPersist,
+      }))
+        console.log(`[deploy]   ${line}`);
+      return;
+    case 'make-store-writer':
+      await makeStoreWriter(cfg, { keychainRead });
+      return;
     case 'remove-lifecycle':
       await deleteLifecycle(bucketAdmin(cfg), cfg.bucket);
       return;
@@ -352,6 +383,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       if (a.names.includes(LEAD_TOKEN_SECRET)) lines.set(LEAD_TOKEN_SECRET, await ctx.leadToken());
       const input = a.names.map((n) => `${n}=${lines.get(n)}\n`).join('');
       flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input });
+      if (a.names.includes(STORE_WRITER_SECRET)) markWriterStored(cfg.app);
       return;
     }
     case 'make-push-keys':
@@ -409,6 +441,8 @@ const MAKES = new Set([
   'make-backup-key',
   'create-bucket',
   'make-writer-key',
+  'setup-store',
+  'make-store-writer',
   'make-push-keys',
 ]);
 
@@ -475,6 +509,10 @@ export async function deployProject(
     }
   }
   for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
+  if (!observed.store?.canMake && !observed.secrets.has(STORE_WRITER_SECRET))
+    console.log(
+      `[deploy] not set: ${STORE_SECRETS.join(', ')}: only fly-provision.yml mints the machine's transcript store writer`,
+    );
   for (const line of found.notes) console.log(`[deploy] ${line}`);
   const tooSmall = leadMemoryError(cfg, observed);
   if (tooSmall) throw new Error(tooSmall);
@@ -543,9 +581,20 @@ export async function deployProject(
     },
   };
   if (needsToken && presetTunnel) ctx.tunnelToken = () => presetTunnel;
-  for (const a of actions) {
-    console.log(`[deploy] ${describe(a)}`);
-    await act(cfg, a, ctx);
+  try {
+    for (const a of actions) {
+      console.log(`[deploy] ${describe(a)}`);
+      await act(cfg, a, ctx);
+    }
+  } catch (err) {
+    // A store writer minted and never set as a secret is a live key that
+    // can put and that nothing holds: delete it before giving up.
+    const revoked = await revokeUnstoredWriters({ keychainRead }).catch((e: unknown) => {
+      console.error(`[deploy] could not revoke this run's store writer: ${String(e)}`);
+      return 0;
+    });
+    if (revoked > 0) console.error(`[deploy] revoked ${revoked} store writer(s) this run minted`);
+    throw err;
   }
   return actions;
 }

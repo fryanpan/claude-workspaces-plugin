@@ -10,7 +10,7 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and six users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent, `cwdev` for the project's dev server, `cwrelease` for the release check |
+| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512), tmux and an SSH client, and seven users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent, `cwdev` for the project's dev server, `cwrelease` for the release check, `cwstore` for the transcript store's sender |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
 | `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, the project's dev server as `cwdev` when one is configured, a loopback health check, the backup loop and the release check as `cwrelease`; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
 | `lead.sh` | Keeps one Claude Code session running in a tmux session named `lead`, and starts it again when it ends (below) |
@@ -18,6 +18,7 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 | `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
 | `release-cli.ts`, `release-store.ts`, `release-manifest.ts` | Checks for a newer signed release, chooses which app the server boots, and rolls a release back that did not stay up ("Releases", below) |
 | `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
+| `store-uploader.ts`, `store-sender.ts`, `store-spool.ts` | Every minute, seals the new lines of each session transcript and analytics log into a spool, as the user that owns them (`cw`, then `lead`); `cwstore` puts what it finds there into the transcript store ("The transcript store", below) |
 
 **What a snapshot holds.** The data dir, which carries every board's docs,
 tasks, analytics events (`workspaces/<board>.events.jsonl`) and agent notes
@@ -399,7 +400,8 @@ What the lead can reach:
   (`board-socket-lead-binds.test.ts`). The lead can still write `/tmp`, which
   the server can read, so a person must not bind a doc or folder under `/tmp`
   on this machine. The transcripts are not in the snapshots yet: the snapshot
-  runs as `cw`.
+  runs as `cw`. They do reach the transcript store, through the lead's own
+  reader ("The transcript store", below).
 - **Its memory.** A ceiling of 1280M unless `CW_LEAD_MEMORY_MAX` is set, so a
   lead that grows is killed alone and the server keeps running. Where the
   machine has a cgroup v2 memory controller (the entrypoint mounts cgroup2 at
@@ -896,6 +898,56 @@ It renews the token itself every 12 hours and keeps the renewed value in its
 state dir (`CW_BOARD_SYNC_STATE_DIR`, default
 `~/.claude/claude-workspaces/board-sync`, mode 700). Revoking the token on the
 machine stops it.
+
+## The transcript store
+
+Every machine sends its session transcripts and analytics events to one
+Tigris bucket, `cw-transcript-store`, within about two minutes of each line
+being written. Each chunk is compressed and sealed to the review key; a
+private or local-only board's chunks are sealed as well to that board's key,
+or to the owner key while the board has none. The machine holds only
+public keys (`STORE_KEYS`), so it cannot read back what it sent. The Mac reads
+the store with `bun run store:read`.
+
+**Who makes what.** The first `fly-provision.yml` run, for any project, makes
+the bucket with versioning on, the review, owner and usage key pairs, and the
+Mac's read-and-list credential; each identity and credential is sealed to the
+Mac and stored on `handoff:pull`. The run also writes the bucket's admin
+credential to the `fly-org` environment as the secret `STORE_BUCKET_ADMIN`, and
+the public keys as the variable `STORE_KEYS`, so later runs find the store
+made. Every run then mints the machine a writer, a credential that may put
+objects under `<app>/` and `<app>_lead/` and nothing else, and sets it as the
+app's secrets. The writer is kept nowhere else. To replace one, unset
+`STORE_S3_ACCESS_KEY_ID` on the app and dispatch the workflow again. A
+`machine:deploy` from the Mac makes none of this.
+
+**Who reads what on the machine.** Claude Code writes every transcript mode
+600, so only its owner can read it, and a user's processes can read each
+other's environment, so neither owner may hold the writer. The entrypoint
+runs three processes, the way the backup splits into `cw` and `cwbackup`:
+
+| Process | User | Reads | Holds |
+| --- | --- | --- | --- |
+| `store-uploader.ts` | `cw` | `/data/claude-projects`, the data dir's event logs | public keys only |
+| `store-uploader.ts` | `lead` | `/data/lead/claude-projects` | public keys only |
+| `store-sender.ts` | `cwstore` | the two spools | the writer, nothing else |
+
+Each reader writes its sealed chunks into its own spool, `/data/store-spool-cw`
+or `/data/store-spool-lead`, which is `cwstore:<reader>` mode 3770: the reader
+may add files and remove only its own, and no other user can enter.
+The sender puts each file under the key its name stands for and then removes
+it. It refuses, and leaves in place, a link, a file with a second name, one
+the reader does not own, one over 64 MiB, and one whose key is not under that
+reader's host, so a reader cannot get the sender to upload its credential or
+to write under the other host. A reader holds, and logs, a chunk the sender
+would refuse rather than count it sent. The sender sends chunks before the
+manifests that list them, and one spool's failed put does not stop the other.
+
+**Checking it.** `bun run store:read list --host cw-<project>` counts the
+objects under both hosts and opens one transcript and one event chunk,
+printing keys, sizes, line counts and a hash, never content.
+`bun run store:read check --hosts cw-<project>` opens every chunk of a day
+and raises any fault to Sentry (`store-check.ts`).
 
 ## Restore
 

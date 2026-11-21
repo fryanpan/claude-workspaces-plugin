@@ -81,8 +81,75 @@ describe('on a project machine', () => {
       STORE_HOST: 'fly',
     });
     expect(config.sources().map((s) => [s.name, s.board])).toEqual([['sess-a', 'saltmarsh']]);
-    expect(config.intervalMs).toBe(300_000);
+    // Every minute: the weekly review reads up to the last 5 minutes.
+    expect(config.intervalMs).toBe(60_000);
   });
+});
+
+describe('the midnight inventory', () => {
+  it('--inventory puts one object naming each file’s whole-line size, sealed to owner and review', async () => {
+    const dir = mkdtempSync(join(scratch, 'inv-'));
+    const projects = join(dir, 'projects', '-cw');
+    mkdirSync(projects, { recursive: true });
+    const whole = `${JSON.stringify({ type: 'user', message: { content: 'Harborlight' } })}\n`;
+    writeFileSync(join(projects, 'sess-i.jsonl'), `${whole}{"half":`);
+    writeFileSync(join(dir, 'keys.json'), keysText);
+    const seen: string[] = [];
+    const objects = new Map<string, Uint8Array>();
+    const bucket = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        seen.push(`${req.method} ${url.pathname}`);
+        objects.set(url.pathname, new Uint8Array(await req.arrayBuffer()));
+        return new Response('', { status: 200 });
+      },
+    });
+    try {
+      const child = Bun.spawn(
+        ['bun', join(repoRoot, 'infra', 'project-machine', 'store-uploader.ts'), '--inventory'],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            ...process.env,
+            STORE_KEYS_FILE: join(dir, 'keys.json'),
+            STORE_STATE_FILE: join(dir, 'state.json'),
+            STORE_TRANSCRIPTS_DIR: join(dir, 'projects'),
+            STORE_BOARD: 'saltmarsh',
+            STORE_HOST: 'fly',
+            STORE_S3_ENDPOINT: `http://127.0.0.1:${bucket.port}`,
+            STORE_S3_BUCKET: 'cw-store-test',
+            STORE_S3_ACCESS_KEY_ID: 'test-access-key',
+            STORE_S3_SECRET_ACCESS_KEY: 'test-secret-key',
+          },
+        },
+      );
+      const status = await child.exited;
+      expect(await new Response(child.stderr).text()).toBe('');
+      expect(status).toBe(0);
+      expect(seen).toHaveLength(1);
+      const put = seen[0] ?? '';
+      expect(put).toMatch(
+        /^PUT \/cw-store-test\/fly\/inventory\/\d{4}-\d{2}-\d{2}\.json\.zst\.cw$/,
+      );
+      const body = objects.get(put.slice('PUT '.length)) ?? new Uint8Array();
+      const inv = JSON.parse(openChunk(body, owner.identity).toString('utf8'));
+      expect(JSON.parse(openChunk(body, review.identity).toString('utf8'))).toEqual(inv);
+      expect(inv.files).toEqual([
+        {
+          kind: 'transcripts',
+          folder: 'saltmarsh',
+          name: 'sess-i',
+          gen: 0,
+          size: Buffer.byteLength(whole),
+        },
+      ]);
+    } finally {
+      bucket.stop(true);
+    }
+  }, 30_000);
 });
 
 describe('a pass against a bucket', () => {
@@ -130,11 +197,15 @@ describe('a pass against a bucket', () => {
       const status = await child.exited;
       expect(await new Response(child.stderr).text()).toBe('');
       expect(status).toBe(0);
-      const path = '/cw-store-test/fly/transcripts/saltmarsh/sess-s/0.jsonl.zst.cw';
-      expect(seen).toEqual([`PUT ${path}`]);
-      const body = objects.get(path) ?? new Uint8Array();
+      expect(seen).toHaveLength(1);
+      const put = seen[0] ?? '';
+      expect(put).toMatch(
+        /^PUT \/cw-store-test\/fly\/transcripts\/saltmarsh\/sess-s\/0-[0-9a-f]{16}\.jsonl\.zst\.cw$/,
+      );
+      const body = objects.get(put.slice('PUT '.length)) ?? new Uint8Array();
       expect(openChunk(body, saltmarsh.identity).toString()).toBe(text);
-      expect(() => openChunk(body, review.identity)).toThrow(/did not decrypt/);
+      expect(openChunk(body, review.identity).toString()).toBe(text);
+      expect(() => openChunk(body, owner.identity)).toThrow(/did not decrypt/);
     } finally {
       bucket.stop(true);
     }

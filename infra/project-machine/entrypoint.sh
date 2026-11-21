@@ -25,6 +25,9 @@
 #             proxy to the hosts in lead-egress.allow (wall_network); its
 #             memory has a ceiling (lead_cgroup, else lead-memory.sh).
 #   cwproxy   that proxy (lead-proxy.ts), with PATH and nothing else.
+#   cwstore   the transcript store's sender (store-sender.ts), with the
+#             store's credential and nothing else. It reads only the spools
+#             cw's and the lead's uploaders write sealed objects into.
 #   cwdev     the project's dev server, when CW_DEV_SERVER_CMD names one, with
 #             PATH and the proxy's address. It binds loopback; the board proxies it
 #             (attach_app) behind the board's own sign-in. The server refuses
@@ -499,6 +502,84 @@ if [ -n "${BACKUP_RECIPIENT:-}" ] && [ -n "${BACKUP_S3_BUCKET:-}" ]; then
     done
   ) &
   pids+=($!)
+fi
+
+# The transcript store (store-spool.ts, docs/process/project-machine.md): every
+# transcript and event log here, sealed to public keys and sent to the one
+# bucket every host uploads to. Claude Code writes each transcript 0600, so
+# each owner reads its own: cw its sessions and the board's event logs, the
+# lead its sessions. Neither holds the store's credential; each writes into a
+# spool of its own, which cwstore, holding only that credential, sends from.
+# A spool is cwstore's, group the writer's, 3770: the writer adds files, only
+# cwstore removes them, and no third user enters. Root makes both in the
+# volume's root, which only root writes, so neither can be a link by now.
+# None of these stops the machine: each starts again a minute after it exits.
+STORE_HOST="${FLY_APP_NAME:-}"
+if [ -n "${STORE_S3_ACCESS_KEY_ID:-}" ] && [ -n "${STORE_KEYS:-}" ] && [ -n "$STORE_HOST" ]; then
+  STORE_KEYS_PATH="$DATA_ROOT/store-keys.json"
+  STORE_SPOOL_CW="$DATA_ROOT/store-spool-cw"
+  STORE_SPOOL_LEAD="$DATA_ROOT/store-spool-lead"
+  STORE_STATE_CW="$DATA_ROOT/store-cw"
+  # Not exported, so it survives each reader's only_env.
+  STORE_DATA="$CW_DATA_DIR"
+  for d in "$STORE_KEYS_PATH" "$STORE_SPOOL_CW" "$STORE_SPOOL_LEAD" "$STORE_STATE_CW"; do
+    if [ -L "$d" ]; then
+      echo "[machine] $d is a symlink; refusing to start" >&2
+      exit 2
+    fi
+  done
+  # Public keys only: the uploader refuses a file that holds an identity.
+  printf '%s\n' "$STORE_KEYS" >"$STORE_KEYS_PATH"
+  chmod 0644 "$STORE_KEYS_PATH"
+  mkdir -p "$STORE_SPOOL_CW" "$STORE_SPOOL_LEAD" "$STORE_STATE_CW"
+  chown -h cwstore:cw "$STORE_SPOOL_CW"
+  chown -h cwstore:lead "$STORE_SPOOL_LEAD"
+  chown -h cw:cw "$STORE_STATE_CW"
+  chmod 3770 "$STORE_SPOOL_CW" "$STORE_SPOOL_LEAD"
+  chmod 0700 "$STORE_STATE_CW"
+  keep_running() {
+    local label=$1 status
+    shift
+    while :; do
+      status=0
+      "$@" || status=$?
+      log "the transcript store's $label exited ($status); starting it again in 60s"
+      sleep 60
+    done
+  }
+  store_read_cw() (
+    only_env PATH
+    export STORE_KEYS_FILE="$STORE_KEYS_PATH" STORE_HOST STORE_SPOOL_DIR="$STORE_SPOOL_CW" \
+      STORE_STATE_FILE="$STORE_STATE_CW/state.json" STORE_TRANSCRIPTS_DIR="$TRANSCRIPTS" \
+      STORE_DATA_DIR="$STORE_DATA"
+    if [ -n "$LEAD_BOARD" ]; then export STORE_BOARD="$LEAD_BOARD"; fi
+    umask 077
+    run_as cw bun "$HERE/store-uploader.ts"
+  )
+  store_read_lead() (
+    only_env PATH
+    export STORE_KEYS_FILE="$STORE_KEYS_PATH" STORE_HOST="${STORE_HOST}_lead" \
+      STORE_SPOOL_DIR="$STORE_SPOOL_LEAD" STORE_STATE_FILE="$LEAD_ROOT/store-state.json" \
+      STORE_TRANSCRIPTS_DIR="$LEAD_ROOT/claude-projects"
+    if [ -n "$LEAD_BOARD" ]; then export STORE_BOARD="$LEAD_BOARD"; fi
+    umask 077
+    run_as lead bun "$HERE/store-uploader.ts"
+  )
+  store_send() (
+    only_env PATH STORE_S3_ENDPOINT STORE_S3_BUCKET STORE_S3_ACCESS_KEY_ID STORE_S3_SECRET_ACCESS_KEY
+    run_as cwstore bun "$HERE/store-sender.ts" \
+      --spool "$STORE_SPOOL_CW:$STORE_HOST:$CW_UID" \
+      --spool "$STORE_SPOOL_LEAD:${STORE_HOST}_lead:$LEAD_UID"
+  )
+  (keep_running reader store_read_cw) &
+  pids+=($!)
+  (keep_running "lead's reader" store_read_lead) &
+  pids+=($!)
+  (keep_running sender store_send) &
+  pids+=($!)
+  log "the transcript store sends $STORE_HOST's and ${STORE_HOST}_lead's files every minute"
+else
+  log "the transcript store is not set up on this machine (STORE_S3_ACCESS_KEY_ID, STORE_KEYS): fly-provision.yml sets it"
 fi
 
 # The release check: every CW_RELEASE_POLL_SECONDS (300 unless set), ask the

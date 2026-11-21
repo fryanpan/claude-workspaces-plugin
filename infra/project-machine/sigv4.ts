@@ -1,6 +1,7 @@
 /**
- * AWS Signature Version 4, for the two calls Bun's S3 client cannot make:
- * Tigris's IAM API (the write-only key) and a bucket's settings.
+ * AWS Signature Version 4, for the calls Bun's S3 client cannot make:
+ * Tigris's IAM API (the write-only key), a bucket's settings and versioning
+ * rules, and the store's object calls (`store-s3.ts`).
  * Pure: the caller supplies the clock, so the test can use AWS's published
  * example and expect its published signature.
  */
@@ -12,13 +13,13 @@ export interface SignInput {
   region: string;
   service: string;
   headers: Record<string, string>;
-  body: string;
+  body: string | Uint8Array;
   accessKeyId: string;
   secretAccessKey: string;
   now: Date;
 }
 
-const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+const sha256 = (s: string | Uint8Array) => createHash('sha256').update(s).digest('hex');
 const hmac = (key: Buffer | string, s: string) => createHmac('sha256', key).update(s).digest();
 
 /** RFC 3986 encoding, which is what SigV4's canonical query string uses. */
