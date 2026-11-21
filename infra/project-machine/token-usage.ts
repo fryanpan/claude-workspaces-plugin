@@ -79,7 +79,7 @@ function projectsToRead(named: readonly string[], declared: () => string[]): str
 }
 
 /** A secrets read, so an app with no lead gets no ssh. Unknown counts as having one. */
-function hasLead(app: string): boolean {
+export function hasLead(app: string): boolean {
   try {
     const secrets = flyJson<{ Name?: string; name?: string }[]>(['secrets', 'list', '--app', app]);
     return secrets.some((s) => (s.Name ?? s.name) === LEAD_BOARD_SECRET);

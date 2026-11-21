@@ -3,6 +3,7 @@
  * `bun run machine:tokens`: the central list of long-lived Claude tokens.
  * Commands and rules are in `HELP`; the list is `token-list.ts`.
  */
+import { burnLine, pullBurn } from './machine-burn.ts';
 import { approveOrgSignIn } from './org-signin.ts';
 import { addToken, assertNewLabel, readTokenList } from './token-list.ts';
 import { moveProject } from './token-move.ts';
@@ -24,6 +25,11 @@ terms bar routing work through another person's account. No value is printed.
       Each listed token's last reading and the projects on it, from every cw-
       app or the projects named. Through the keeper each project is one tap.
 
+  burn [--project <name>]... [--every <seconds>]
+      Copy each project lead's token counts per turn to this Mac, under
+      ~/.claude/projects/cw-machine-<project>, where budget watch reads them
+      beside the Mac's own projects. --every repeats it until stopped.
+
   move --project <name> --to <label>
       Move a project's lead to a listed token and restart its machine. Through
       the keeper this is two taps: one to set the token, one to confirm.
@@ -34,6 +40,8 @@ export interface TokensIo {
   show?: (text: string) => void;
   stdin?: () => Promise<string>;
   imageReady?: (commit: string) => boolean;
+  /** Between `burn --every` rounds. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function flag(args: string[], name: string): string | undefined {
@@ -79,6 +87,22 @@ function usage(args: string[]): number {
   return 0;
 }
 
+async function burn(args: string[], io: TokensIo): Promise<number> {
+  const named = args.flatMap((a, i) => (a === '--project' ? [args[i + 1] ?? ''] : []));
+  const every = flag(args, 'every');
+  const seconds = every === undefined ? 0 : Number(every);
+  if (!Number.isInteger(seconds) || seconds < 0 || (every !== undefined && seconds < 60)) {
+    console.error('[tokens] --every takes whole seconds, at least 60');
+    return 2;
+  }
+  for (;;) {
+    const results = pullBurn(named);
+    for (const r of results) console.log(burnLine(r));
+    if (seconds === 0) return results.some((r) => r.error) ? 1 : 0;
+    await (io.sleep ?? Bun.sleep)(seconds * 1000);
+  }
+}
+
 function move(args: string[], io: TokensIo): number {
   const project = flag(args, 'project');
   const label = flag(args, 'to');
@@ -107,6 +131,8 @@ export async function runTokens(args: string[], io: TokensIo = {}): Promise<numb
         return await add(rest, io);
       case 'usage':
         return usage(rest);
+      case 'burn':
+        return await burn(rest, io);
       case 'move':
         return move(rest, io);
       case 'help':
