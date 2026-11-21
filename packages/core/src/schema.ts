@@ -1,7 +1,8 @@
 import * as Y from 'yjs';
 import { readAddressedTo, waitingOnOf } from './addressed-to.ts';
 import { readPageEdits, readSuggestionField } from './page-edits.ts';
-import { type ReviewPayload, readReviewPayload } from './review-item.ts';
+import type { ReviewPayload } from './review-item-types.ts';
+import { readReviewPayload } from './review-item-wire.ts';
 import { readStoredSummary } from './thread-summary.ts';
 import {
   type Anchor,

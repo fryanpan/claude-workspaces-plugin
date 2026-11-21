@@ -92,6 +92,20 @@ import { gzipSync } from 'node:zlib';
  * (`packages/widget/scripts/shims/y-protocols-awareness.ts`) and
  * `bundle-guard.ts` refuses a bundle that takes the real one back.
  *
+ * And on 2026-11-21, when splitting `review-item.ts` put the bundle 3 over
+ * with no new code in it: two more modules renamed enough minified
+ * identifiers to cost 12 bytes, on a main 9 under.
+ *
+ *   origin/main   40,951 gz   (129,960 raw)
+ *   the split     40,963 gz   (129,960 raw)
+ *   after         40,789 gz   (129,509 raw)      171 under
+ *
+ * The dock now imports the two leaves it reads (`review-item-retired.ts`,
+ * `review-item-gate.ts`) and `schema.ts` imports the payload reader from
+ * `review-item-wire.ts`, so the lifecycle module never enters the bundle. The
+ * rest is an item's `blocks`, which the dock never draws: the read is cut
+ * and `review-blocks.ts` left with it. `bundle-guard.ts` refuses both modules.
+ *
  * Raising the ceiling is a decision about what the widget costs the pages it is
  * a guest on, so it takes a paragraph here, not a round-up.
  */

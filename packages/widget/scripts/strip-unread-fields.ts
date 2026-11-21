@@ -100,6 +100,11 @@ export const READER_CUTS: readonly ReaderCut[] = [
       "  if (typeof value.step === 'string' && REVIEW_STEP.test(value.step)) out.step = value.step;\n",
       '  const access = readAccessChange(value.access);\n',
       '  if (access) out.access = access;\n',
+      // An item's structured blocks: the board's card draws them, and the
+      // dock shows only the headline, the detail and the options. Cutting the
+      // read drops `review-blocks.ts` from the bundle.
+      '  const blocks = readReviewBlocks(value.blocks);\n',
+      '  if (blocks) out.blocks = blocks;\n',
     ],
     blocks: [
       '  if (Array.isArray(value.answerHistory)) {\n',
@@ -136,6 +141,7 @@ export const STRIPPED_FIELDS: readonly string[] = [
   'answerHistory',
   'partialAnswers',
   'access',
+  'blocks',
   'addressedTo',
   'waitingOn',
 ];
