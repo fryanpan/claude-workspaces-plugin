@@ -125,11 +125,25 @@ project's own hostname:
 | `CW_PROXIED_TRUSTED_HOSTS` | the project's hosts |
 | `CW_SIGNIN` | `better-auth`, for a project with no Access application only |
 
-Every row but the first comes from the Terraform outputs
-(`infra/cloudflare/outputs.ts`, `terraform output` against the prod state, or
-the environment `--tf-env` names), so deploy reads no Cloudflare API for
-them; it needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
-or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
+Every row but the first comes from the Terraform outputs, so deploy reads no
+Cloudflare API for them. Where they come from depends on whether the run
+holds the state bucket's credential (`AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY`, or `cloudflare-r2-tfstate` or the secret card's two
+entries in the Keychain); `infra/project-machine/mac-outputs.ts` decides:
+
+- **With the credential**, `terraform output` against the prod state, or the
+  environment `--tf-env` names (`infra/cloudflare/outputs.ts`).
+- **Without it**, which is the Mac since its Cloudflare credentials were
+  retired, the newest sealed wall read (`wall-read.yml`, read with `gh` and
+  opened with the Mac's handoff key, as `machine:wall-report` does). It holds
+  prod's outputs only, so `--tf-env staging` without the credential fails.
+  A read older than 36 hours, or no readable read at all, fails the run
+  before Fly is touched, and the message names the fix:
+  `gh workflow run wall-read.yml --ref main`.
+
+`bun run signin:callbacks` reads the outputs the same way.
+
+A project with no Access
 application gets no Access settings, and the run says which settings it left
 unset; it does not fail. Sign-in is Better Auth, so a new project is given no
 Access application at all.
@@ -151,7 +165,9 @@ one address>.<zone>`, which the board router routes once the project is in
 the sign-in origin (`CW_SIGNIN_ORIGIN`) and what `bun run signin:callbacks`
 lists. A project whose route is not in the state yet keeps its Access host;
 where the two differ the run sets neither and says so, so a deploy never
-moves an existing project's address. Nor does a state it cannot read: it says why and skips the same rows.
+moves an existing project's address. Outputs it cannot read at all fail the
+run, because a named tunnel's id comes from them; `bun run signin:callbacks`
+instead lists the Mac's lines and names the projects it could not list.
 
 Not set by deploy: `CW_PROXIED_TRUSTED_EMAILS`, which defaults to
 `CW_OWNER_EMAIL`, and the share settings (`CF_ACCESS_SHARE_AUD`,
