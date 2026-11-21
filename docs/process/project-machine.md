@@ -117,7 +117,8 @@ project's own hostname:
 | Setting | From |
 | --- | --- |
 | `CW_OWNER_EMAIL` | the Keychain's `cw-board-owner-email` |
-| `CW_PUBLIC_BASE_URL` | `https://` and the project's first Access host |
+| `CW_PUBLIC_BASE_URL` | `https://` and the project's router host |
+| `CW_SIGNIN_ORIGIN` | the same: the origin Better Auth signs in at |
 | `CF_ACCESS_TEAM_DOMAIN` | the account's Access organization (`auth_domain`) |
 | `CF_ACCESS_AUD` | the Access application `board <project>` |
 | `CF_ACCESS_HOST_AUDS` | each of the project's hosts, to that audience |
@@ -128,9 +129,17 @@ Every row but the first comes from the Terraform outputs
 the environment `--tf-env` names), so deploy reads no Cloudflare API for
 them; it needs the state bucket's credential (`cloudflare-r2-tfstate` in the Keychain,
 or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
-application in the state yet (CI's apply makes it, after `bun run cf:sync-config`) gets only the
-owner address, and the run says which settings it left unset; it does not
-fail. Nor does a state it cannot read: it says why and skips the same rows.
+application gets no Access settings, and the run says which settings it left
+unset; it does not fail. Sign-in is Better Auth, so a new project is given no
+Access application at all.
+
+The router host is the project's own hostname, `<label>-<first label of the
+one address>.<zone>`, which the board router routes once the project is in
+`router.local.json` and CI has applied `bun run cf:sync-config`. It is also
+the sign-in origin (`CW_SIGNIN_ORIGIN`) and what `bun run signin:callbacks`
+lists. A project whose route is not in the state yet keeps its Access host;
+where the two differ the run sets neither and says so, so a deploy never
+moves an existing project's address. Nor does a state it cannot read: it says why and skips the same rows.
 
 Not set by deploy: `CW_PROXIED_TRUSTED_EMAILS`, which defaults to
 `CW_OWNER_EMAIL`, and the share settings (`CF_ACCESS_SHARE_AUD`,

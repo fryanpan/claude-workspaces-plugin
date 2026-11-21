@@ -131,8 +131,22 @@ describe('signin:callbacks', () => {
       '  https://workspaces.harborlight.test    (the Mac)',
       '  https://riverbend-workspaces.harborlight.test    (riverbend)',
       'Not listed:',
-      '  saltmarsh: the Terraform state has no Access application for it',
+      '  saltmarsh: the Terraform state routes no host for saltmarsh (add it to router.local.json; bun run cf:sync-config)',
     ]);
+  });
+
+  it('lists a project with no Access application at its router host', () => {
+    const lines = callbackLines('workspaces.harborlight.test', ['riverbend', 'saltmarsh'], () => ({
+      ...outputs(),
+      routerRoutes: { saltmarsh: 'saltmarsh-workspaces.harborlight.test/*' },
+    }));
+    expect(lines).toContain(
+      '  https://saltmarsh-workspaces.harborlight.test/api/auth/callback/google    (saltmarsh)',
+    );
+    expect(lines).toContain('  https://saltmarsh-workspaces.harborlight.test    (saltmarsh)');
+    // CONTROL: the existing project keeps its address, and nothing is unlisted.
+    expect(lines).toContain('  https://riverbend-workspaces.harborlight.test    (riverbend)');
+    expect(lines).not.toContain('Not listed:');
   });
 
   it('still lists the Mac when the Terraform outputs cannot be read', () => {

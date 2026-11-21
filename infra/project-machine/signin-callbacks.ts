@@ -7,8 +7,8 @@
  *   bun run signin:callbacks [--mac-host <host>] [--tf-env prod|staging]
  *
  * A project's address is the one `machine:deploy` gives it as
- * CW_SIGNIN_ORIGIN (`settings.ts` `signInHost`), read from the same
- * Terraform outputs. Prints hostnames only.
+ * CW_SIGNIN_ORIGIN (`settings.ts` `signInHost`: its router host), read from
+ * the same Terraform outputs. Prints hostnames only.
  */
 import { readFileSync } from 'node:fs';
 import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
@@ -36,9 +36,9 @@ export function callbackLines(
       );
     }
     for (const project of read ? projects : []) {
-      const host = signInHost(read as TfOutputs, project);
-      if (host) hosts.push({ label: project, host });
-      else missing.push(`${project}: the Terraform state has no Access application for it`);
+      const found = signInHost(read as TfOutputs, project);
+      if ('error' in found) missing.push(`${project}: ${found.error}`);
+      else hosts.push({ label: project, host: found.host });
     }
   }
   return [

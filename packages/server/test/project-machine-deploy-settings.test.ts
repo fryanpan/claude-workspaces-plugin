@@ -233,6 +233,7 @@ const run = (dryRun: boolean, outs: () => TfOutputs = outputs) =>
 const ALL = [
   'CW_OWNER_EMAIL',
   'CW_PUBLIC_BASE_URL',
+  'CW_SIGNIN_ORIGIN',
   'CF_ACCESS_TEAM_DOMAIN',
   'CF_ACCESS_AUD',
   'CF_ACCESS_HOST_AUDS',
@@ -257,6 +258,7 @@ describe('machine:deploy sets the project settings', () => {
     expect(lines).toEqual([
       `CW_OWNER_EMAIL=${OWNER}`,
       `CW_PUBLIC_BASE_URL=https://${HOST}`,
+      `CW_SIGNIN_ORIGIN=https://${HOST}`,
       `CF_ACCESS_TEAM_DOMAIN=${TEAM}`,
       `CF_ACCESS_AUD=${AUD}`,
       `CF_ACCESS_HOST_AUDS=${JSON.stringify({ [HOST]: AUD, [ALT_HOST]: AUD })}`,
@@ -544,7 +546,8 @@ describe('plan, with the settings', () => {
   });
 
   it('lists every setting deploy can derive', () => {
-    expect<string[]>([...SETTING_NAMES]).toEqual(ALL);
+    // The sign-in origin is on SIGNIN_SETTING_NAMES, off the wall-drift list.
+    expect<string[]>([...SETTING_NAMES]).toEqual(ALL.filter((n) => n !== 'CW_SIGNIN_ORIGIN'));
   });
 
   it('sets a setting that is missing, and leaves one that exists', () => {
