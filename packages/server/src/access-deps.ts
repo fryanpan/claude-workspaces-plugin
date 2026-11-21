@@ -160,14 +160,11 @@ export function createAccessDeps(ctx: AccessDepsContext) {
   });
 
   // Root HMAC key for this server's own tokens — the email session cookie and
-  // the widget token derive from it. Generated on first use, mode 600.
-  // It used to sign share session cookies too; link-mode shares are retired
-  // and a share visitor is now proven by Cloudflare Access instead.
-  let cookieKeyCache: string | null = null;
-  const cookieKey = (): string => {
-    cookieKeyCache ??= loadCookieKey(dataDir);
-    return cookieKeyCache;
-  };
+  // the widget token derive from it. Made at boot, mode 600, so the key file
+  // exists before the first request: the wall report's cross-project probe
+  // (`infra/project-machine/wall-probe.ts`) reads it and refuses a missing one.
+  const cookieKeyValue = loadCookieKey(dataDir);
+  const cookieKey = (): string => cookieKeyValue;
 
   /**
    * What a share may reach — or null, when it may reach nothing.
