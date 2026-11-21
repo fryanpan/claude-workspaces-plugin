@@ -1,3 +1,7 @@
 {
-  "machines": [{ "project": "moi", "memory": 2048 }]
+  "machines": [
+    { "project": "moi", "memory": 2048 },
+    { "project": "harborlight", "memory": 512 },
+    { "project": "riverbend", "memory": 512 }
+  ]
 }
