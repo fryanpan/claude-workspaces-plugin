@@ -12,3 +12,8 @@ output "tunnels" {
   description = "Project label -> its named tunnel's id and names."
   value       = module.stack.tunnels
 }
+
+output "router_routes" {
+  description = "Project label -> the board router Worker's route for its host; the sign-in address machine:deploy derives."
+  value       = module.stack.router_routes
+}

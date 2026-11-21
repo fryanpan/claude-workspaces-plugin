@@ -3,7 +3,7 @@
  * new board needs no hand-typed `fly secrets set`:
  *
  *   CW_OWNER_EMAIL            the Keychain's `cw-board-owner-email`
- *   CW_PUBLIC_BASE_URL        https:// and the project's first Access host
+ *   CW_PUBLIC_BASE_URL        https:// and the project's router host
  *   CF_ACCESS_TEAM_DOMAIN     the account's Access organization (`auth_domain`)
  *   CF_ACCESS_AUD             the audience of the Access application `board <project>`
  *   CF_ACCESS_HOST_AUDS       each of the project's hosts, to that audience
@@ -15,7 +15,8 @@
  *
  *   CW_GOOGLE_CLIENT_ID       the Keychain's `cw-google-signin-client-id`
  *   CW_GOOGLE_CLIENT_SECRET   the Keychain's `cw-google-signin-client-secret`
- *   CW_SIGNIN_ORIGIN          https:// and the project's first host
+ *   CW_SIGNIN_ORIGIN          https:// and the project's router host, set
+ *                             with or without the client
  *
  * And for email and password beside Google (`board-signin-password.ts`),
  * all four from the Keychain or none:
@@ -35,7 +36,12 @@
  * host only with all four Access settings and an owner address
  * (`packages/server/src/server-config.ts`). A setting whose source is missing
  * is skipped with a line saying why, never guessed: a project with no Access
- * application yet still gets the rest.
+ * application still gets the rest.
+ *
+ * The router host is `projectHost(label, oneAddress)`, the name the board
+ * router Worker routes for the project (`signInHost`). Sign-in is Better
+ * Auth, so a new project gets no Access application; its address comes from
+ * the routing Terraform already does, not from Access.
  *
  * Values are read into memory and handed to `fly secrets import` on stdin.
  * Nothing here prints one; a dry run prints names and sources.
@@ -101,9 +107,31 @@ export interface SettingsSources {
   keychainRead: (name: string) => string;
 }
 
-/** A project machine's sign-in host: its Access application's first host. */
-export function signInHost(outputs: TfOutputs, project: string): string | null {
-  return outputs.access[project]?.hosts[0] ?? null;
+export type SignInHost = { host: string; from: string } | { error: string };
+
+/**
+ * A project machine's sign-in host: its router host, `projectHost(label,
+ * oneAddress)` in `infra/cloudflare/vars.ts`. Terraform outputs it as the
+ * project's tunnel `public_host` and as its router route (`<host>/*`).
+ * A project whose route is not in the outputs keeps its Access application's
+ * first host, the address it had before. Where both exist and differ, no host:
+ * an existing project's address is never moved by a deploy.
+ */
+export function signInHost(outputs: TfOutputs, project: string): SignInHost {
+  const route = outputs.routerRoutes?.[project];
+  const routed =
+    outputs.tunnels[project]?.public_host ?? (route?.endsWith('/*') ? route.slice(0, -2) : null);
+  const access = outputs.access[project]?.hosts[0] ?? null;
+  if (routed && access && routed !== access) {
+    return {
+      error: `${project}'s router host ${routed} and its Access host ${access} differ; set CW_SIGNIN_ORIGIN by hand`,
+    };
+  }
+  if (routed) return { host: routed, from: `Terraform output, ${project}'s router host` };
+  if (access) return { host: access, from: `Terraform output access, ${project}'s first host` };
+  return {
+    error: `the Terraform state routes no host for ${project} (add it to router.local.json; bun run cf:sync-config)`,
+  };
 }
 
 /** Where Google returns a sign-in at `host`. */
@@ -139,7 +167,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
     );
   } else {
     skipped.push(
-      `CW_GOOGLE_CLIENT_ID, CW_GOOGLE_CLIENT_SECRET, CW_SIGNIN_ORIGIN: the Keychain has no ${GOOGLE_CLIENT_ID_ENTRY} and ${GOOGLE_CLIENT_SECRET_ENTRY}`,
+      `CW_GOOGLE_CLIENT_ID, CW_GOOGLE_CLIENT_SECRET: the Keychain has no ${GOOGLE_CLIENT_ID_ENTRY} and ${GOOGLE_CLIENT_SECRET_ENTRY}`,
     );
   }
   const password = Object.entries(PASSWORD_ENTRIES) as [keyof typeof PASSWORD_ENTRIES, string][];
@@ -164,32 +192,32 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
     skipped.push(
-      `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: could not read the Terraform outputs (${why})`,
+      `CW_PUBLIC_BASE_URL, CW_SIGNIN_ORIGIN, ${ACCESS_NAMES}: could not read the Terraform outputs (${why})`,
     );
     return { settings, skipped, notes };
+  }
+  const signIn = signInHost(outputs, project);
+  if ('error' in signIn) {
+    skipped.push(`CW_PUBLIC_BASE_URL, CW_SIGNIN_ORIGIN: ${signIn.error}`);
+  } else {
+    const { host, from } = signIn;
+    // The origin is set without the client: it is not a secret, password
+    // sign-in needs it too, and fly-provision's sealing job reads no Keychain.
+    settings.push(
+      { name: 'CW_PUBLIC_BASE_URL', from, value: () => `https://${host}` },
+      { name: 'CW_SIGNIN_ORIGIN', from, value: () => `https://${host}` },
+    );
+    if (google) {
+      notes.push(
+        `Google sign-in returns to ${googleRedirectUri(host)}: add it to the shared client's authorized redirect URIs in Google's console`,
+      );
+    }
   }
   const p = outputs.access[project];
-  const host = signInHost(outputs, project);
-  if (!p || !host) {
-    skipped.push(
-      `CW_PUBLIC_BASE_URL, ${ACCESS_NAMES}: the Terraform state has no Access application for ${project} (add it to access.local.json; bun run cf:sync-config)`,
-    );
+  if (!p) {
+    // Sign-in is Better Auth: a new project is given no Access application.
+    skipped.push(`${ACCESS_NAMES}: the Terraform state has no Access application for ${project}`);
     return { settings, skipped, notes };
-  }
-  settings.push({
-    name: 'CW_PUBLIC_BASE_URL',
-    from: `Terraform output access, ${project}'s first host`,
-    value: () => `https://${host}`,
-  });
-  if (google) {
-    settings.push({
-      name: 'CW_SIGNIN_ORIGIN',
-      from: `Terraform output access, ${project}'s first host`,
-      value: () => `https://${host}`,
-    });
-    notes.push(
-      `Google sign-in returns to ${googleRedirectUri(host)}: add it to the shared client's authorized redirect URIs in Google's console`,
-    );
   }
   const team = outputs.accessTeamDomain;
   if (!team) {
