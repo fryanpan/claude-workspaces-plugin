@@ -537,6 +537,7 @@ label, never a value:
 | Add the account signed in to this Mac's browser | `bun run machine:tokens add --label <name>` |
 | Add a token already made | `bun run machine:tokens add --label <name> --stdin` |
 | Read each token's usage | `bun run machine:tokens usage [--project <name>]` |
+| Show each lead's spend in budget watch | `bun run machine:tokens burn [--project <name>]... [--every 900]` |
 | Move a project | `bun run machine:tokens move --project <name> --to <label>` |
 
 - A label is a name for an account, not an address: a-z, 0-9 and `-`.
@@ -561,6 +562,21 @@ label, never a value:
   each listed token's newest reading from the projects on it now, so a token
   no project runs on has no reading. The file is the lead's to write, so a
   steered lead can misreport its own token.
+- **Spend in budget watch.** Budget watch on the Mac sums the token counts in
+  the transcripts under `~/.claude/projects`, one row per folder. A machine's
+  lead writes its transcripts on the machine, so `machine:tokens burn` copies
+  them over as counts only: `lead-turns.ts` runs as the `lead` user over `fly
+  ssh console`, with the app's own token, and prints each billed request's
+  time, request id, model and four token counts. The Mac checks every field
+  and writes them as transcript lines under
+  `~/.claude/projects/cw-machine-<project>/` (main sessions in `lead.jsonl`,
+  subagents under `subagents/`), so budget watch shows a `cw-machine-<project>`
+  row beside the Mac's projects with no change to budget watch. Each pull
+  takes what is new since an hour before the newest turn already copied; the
+  files keep eight days. `--every 900` repeats it, in a tmux session beside
+  budget watch's own loop. Budget watch adds the row to its fleet total, which
+  it compares with the Mac account's limit, so a lead on a token from another
+  account makes that total high by the lead's share.
 - **Unproven: whether `rate_limits` appears for a session signed in with
   `CLAUDE_CODE_OAUTH_TOKEN`.** The docs do not say, and give it only on Pro,
   Max and Ultra plans, after a session's first answer. The first real read
