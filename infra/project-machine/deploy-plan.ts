@@ -356,13 +356,17 @@ export function plan(
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once. The
   // lead's token is listed only when it is due, so it is set over the old one.
+  // A new store writer is a new key id AND a new secret: every store secret
+  // is set beside it, over whatever an earlier writer left.
+  const store = storeSecretNames(obs);
   const names = [
     ...requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey), leadSecrets(cfg, obs)),
     ...settings,
-    ...storeSecretNames(obs),
+    ...store,
   ].filter(
     (n) =>
       !obs.secrets.has(n) ||
+      store.includes(n) ||
       refresh.includes(n) ||
       cfg.leadRefresh.includes(n) ||
       LEAD_TOKEN_PAIR.includes(n),

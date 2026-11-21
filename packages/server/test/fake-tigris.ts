@@ -176,6 +176,12 @@ export function startFakeTigris(opts: { asTigris?: boolean } = {}): FakeTigris {
         );
         return wrap(`<Policies>${members.join('')}</Policies>`);
       }
+      case 'DeleteAccessKey': {
+        const target = form.get('AccessKeyId') ?? '';
+        if (!keys.has(target) || keys.get(target)?.adminOf) return denied('NoSuchEntity', 404);
+        keys.delete(target);
+        return wrap('');
+      }
       case 'AttachUserPolicy': {
         const user = keys.get(form.get('UserName') ?? '');
         const arn = form.get('PolicyArn') ?? '';

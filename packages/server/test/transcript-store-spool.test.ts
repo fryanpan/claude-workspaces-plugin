@@ -98,25 +98,84 @@ describe('the spool', () => {
     expect(statSync(join(d, name ?? '')).mode & 0o777).toBe(0o644);
     const store = memory();
     const r = await sendSpool([{ dir: d, host: 'cw-harborlight', ownerUid: uid }], store);
-    expect(r).toEqual({ sent: 1, bytes: 1, refused: [] });
+    expect(r).toEqual({ sent: 1, bytes: 1, refused: [], failed: [] });
     expect([...store.got.keys()]).toEqual([
       'cw-harborlight/events/b/e/2026-11-20/0-aa.jsonl.zst.cw',
     ]);
     expect(readdirSync(d)).toEqual([]);
   });
 
-  it('leaves a file whose put failed, so the next pass sends it', async () => {
+  it("leaves a file whose put failed for the next pass, and still sends the other spool's", async () => {
     const d = dir();
+    const lead = dir();
     await spoolStore(d).put('cw-harborlight/transcripts/b/s/0-aa.jsonl.zst.cw', Buffer.from('x'));
-    const failing: ObjectStore = {
-      put: async () => {
-        throw new Error('HTTP 503');
+    await spoolStore(lead).put(
+      'cw-harborlight_lead/transcripts/b/s/0-aa.jsonl.zst.cw',
+      Buffer.from('y'),
+    );
+    const got: string[] = [];
+    const failingForCw: ObjectStore = {
+      put: async (k) => {
+        if (k.startsWith('cw-harborlight/')) throw new Error('HTTP 503');
+        got.push(k);
       },
     };
-    await expect(
-      sendSpool([{ dir: d, host: 'cw-harborlight', ownerUid: uid }], failing),
-    ).rejects.toThrow(/503/);
+    const r = await sendSpool(
+      [
+        { dir: d, host: 'cw-harborlight', ownerUid: uid },
+        { dir: lead, host: 'cw-harborlight_lead', ownerUid: uid },
+      ],
+      failingForCw,
+    );
+    expect(r.failed).toEqual([{ host: 'cw-harborlight', error: 'HTTP 503' }]);
+    expect(got).toEqual(['cw-harborlight_lead/transcripts/b/s/0-aa.jsonl.zst.cw']);
     expect(readdirSync(d)).toHaveLength(1);
+    expect(readdirSync(lead)).toEqual([]);
+  });
+
+  it('sends the chunks before the manifest and inventory that list them', async () => {
+    const d = dir();
+    const put = spoolStore(d).put;
+    for (const k of [
+      'cw-harborlight/inventory/2026-11-20.json.zst.cw',
+      'cw-harborlight/manifests/2026-11-19/events/b/e.json.zst.cw',
+      'cw-harborlight/transcripts/b/s/0-aa.jsonl.zst.cw',
+      'cw-harborlight/events/b/e/2026-11-19/0-aa.jsonl.zst.cw',
+    ])
+      await put(k, Buffer.from('x'));
+    const store = memory();
+    await sendSpool([{ dir: d, host: 'cw-harborlight', ownerUid: uid }], store);
+    expect([...store.got.keys()].map((k) => k.split('/')[1])).toEqual([
+      'events',
+      'transcripts',
+      'inventory',
+      'manifests',
+    ]);
+  });
+
+  it('holds, and says why, a chunk the sender would refuse, rather than counting it sent', async () => {
+    const files = dir();
+    const path = join(files, 's.jsonl');
+    writeFileSync(path, `${JSON.stringify({ n: 1 })}\n`);
+    const spool = dir();
+    const keys = generateSnapshotKeys();
+    const opts = {
+      sources: [{ path, kind: 'transcript' as const, name: 's', board: 'b' }],
+      statePath: join(files, 'state.json'),
+      host: 'cw-harborlight',
+      keys: { review: keys.recipient, owner: keys.recipient, boards: {} },
+      classOf: () => 'private' as const,
+    };
+    const small = await runOnce({ ...opts, store: spoolStore(spool, 10) });
+    expect(small.uploaded).toEqual([]);
+    expect(small.held.map((h) => h.reason)).toEqual([
+      expect.stringMatching(/over the 10-byte cap/),
+    ]);
+    expect(readdirSync(spool)).toEqual([]);
+    // The control: the same file under the default cap is spooled.
+    const plain = await runOnce({ ...opts, store: spoolStore(spool) });
+    expect(plain.uploaded).toHaveLength(1);
+    expect(plain.held).toEqual([]);
   });
 
   it('refuses a link to a file only the sender reads, and sends the same bytes as a plain file', async () => {

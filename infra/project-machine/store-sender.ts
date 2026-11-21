@@ -54,9 +54,10 @@ async function main(): Promise<void> {
         `[store] sent ${r.sent} objects (${r.bytes} bytes); ${r.refused.length} spool files refused`,
       );
       for (const f of r.refused) console.error(`[store] refused ${f.name}: ${f.reason}`);
+      // A file whose put failed is still in its spool for the next pass.
+      for (const f of r.failed) console.error(`[store] send failed for ${f.host}: ${f.error}`);
     } catch (err) {
       // The client's errors name the call and status, never the credential.
-      // A file whose put failed is still in its spool for the next pass.
       console.error(`[store] send failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (process.argv.includes('--once')) return;

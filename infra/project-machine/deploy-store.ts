@@ -30,7 +30,7 @@ import type { BucketCredential, ProjectConfig } from './deploy-plan.ts';
 import { recipientOf } from './seal.ts';
 import { STORE_SECRETS, storeWriterPolicy } from './store-plan.ts';
 import { type SetupOps, setupStoreTest, storeNames } from './store-setup.ts';
-import { attachPolicy, createAccessKey, ensurePolicy } from './tigris.ts';
+import { attachPolicy, createAccessKey, deleteAccessKey, ensurePolicy } from './tigris.ts';
 
 /** The public keys every chunk is sealed to, as a Keychain entry (CI: the variable). */
 export const STORE_KEYS_ENTRY = 'cw-transcript-store-keys';
@@ -53,13 +53,28 @@ export function storeReady(io: Pick<StoreIo, 'keychainHas'>): boolean {
   return io.keychainHas(storeNames().admin) && io.keychainHas(STORE_KEYS_ENTRY);
 }
 
-/** The bucket, its keys and the Mac's reader; then what later runs need, persisted. */
+/**
+ * The bucket, its keys and the Mac's reader. What later runs need is
+ * persisted the moment it exists, so a run that fails part-way is re-run
+ * rather than repaired: the admin credential as soon as the bucket is made,
+ * the public keys as soon as they are written.
+ */
 export async function setupStore(io: StoreIo): Promise<string[]> {
   const names = storeNames();
+  if (io.keychainHas(names.admin) && !io.keychainHas(STORE_KEYS_ENTRY)) {
+    // An earlier run made the identities and sealed them to the Mac; making
+    // new ones here would seal every later chunk to keys the Mac never gets.
+    throw new Error(
+      `STORE_BUCKET_ADMIN is set but STORE_KEYS is not: set the variable on ${STORE_ENVIRONMENT} from the Mac's ${STORE_KEYS_ENTRY} entry, then dispatch again`,
+    );
+  }
   const ops: SetupOps = {
     keychainHas: io.keychainHas,
     keychainRead: io.keychainRead,
-    keychainCreate: io.keychainCreate,
+    keychainCreate: (name, value) => {
+      io.keychainCreate(name, value);
+      if (name === names.admin) io.persist('secret', 'STORE_BUCKET_ADMIN', value);
+    },
     createBucket: io.createBucket,
     ...(io.iamUrl ? { iamUrl: io.iamUrl } : {}),
   };
@@ -72,16 +87,18 @@ export async function setupStore(io: StoreIo): Promise<string[]> {
       usage: pub('usage'),
     });
     io.keychainCreate(STORE_KEYS_ENTRY, keys);
-    done.push(`the public keys (in the Keychain as ${STORE_KEYS_ENTRY})`);
+    io.persist('variable', 'STORE_KEYS', keys);
+    done.push(`the public keys (STORE_KEYS on ${STORE_ENVIRONMENT}, sealed to the Mac)`);
   }
-  io.persist('secret', 'STORE_BUCKET_ADMIN', io.keychainRead(names.admin));
-  io.persist('variable', 'STORE_KEYS', io.keychainRead(STORE_KEYS_ENTRY));
-  done.push(`STORE_BUCKET_ADMIN and STORE_KEYS on the ${STORE_ENVIRONMENT} environment`);
   return done;
 }
 
-/** Writers minted this run, by app. Held in memory only, for `storeSecretValue`. */
-const writers = new Map<string, BucketCredential>();
+/**
+ * Writers minted this run and not yet set as the app's secrets, by app. Held
+ * in memory only, for `storeSecretValue`, and revoked by `revokeUnstoredWriters`
+ * when the run fails before `markWriterStored`.
+ */
+const writers = new Map<string, BucketCredential & { stored: boolean }>();
 
 export async function makeStoreWriter(
   cfg: Pick<ProjectConfig, 'app'>,
@@ -96,8 +113,32 @@ export async function makeStoreWriter(
     storeWriterPolicy(names.bucket, cfg.app),
     io.iamUrl,
   );
+  writers.set(cfg.app, { endpoint: admin.endpoint, ...key, stored: false });
   await attachPolicy(admin, key.accessKeyId, arn, io.iamUrl);
-  writers.set(cfg.app, { endpoint: admin.endpoint, ...key });
+}
+
+/** The app's writer is in its secrets now; a later failure leaves it there. */
+export function markWriterStored(app: string): void {
+  const w = writers.get(app);
+  if (w) w.stored = true;
+}
+
+/**
+ * Deletes every writer this run minted and never stored, so a failed run
+ * leaves no live key that can put. Returns how many it deleted.
+ */
+export async function revokeUnstoredWriters(
+  io: Pick<StoreIo, 'keychainRead' | 'iamUrl'>,
+): Promise<number> {
+  let n = 0;
+  for (const [app, w] of writers) {
+    if (w.stored) continue;
+    const admin = JSON.parse(io.keychainRead(storeNames().admin)) as BucketCredential;
+    await deleteAccessKey(admin, w.accessKeyId, io.iamUrl);
+    writers.delete(app);
+    n++;
+  }
+  return n;
 }
 
 /** The value of a store secret, or undefined for a name that is not one. */

@@ -59,6 +59,13 @@ export interface ObjectStore {
   put(key: string, body: Uint8Array): Promise<void>;
 }
 
+/**
+ * A store's answer that this object can never be taken, as opposed to a put
+ * that failed and may succeed next pass. `runOnce` holds the file and says
+ * why, and carries on with the others.
+ */
+export class RefusedObject extends Error {}
+
 export type BoardClass = 'ordinary' | 'private' | 'local-only';
 
 /** Public keys (`cwsnap-pub-…`) only. No identity is ever on a machine that uploads. */
@@ -292,7 +299,15 @@ export async function runOnce(opts: RunOptions): Promise<RunReport> {
       const name = `${rec.sent}-${randomBytes(8).toString('hex')}.jsonl.zst.cw`;
       const tail = `${rec.folder}/${src.name}/${dayPart}${genPart}${name}`;
       const key = `${opts.host}/${kind}/${tail}`;
-      await opts.store.put(key, seal(chunk, recipientsFor(rec.folder, opts)));
+      try {
+        await opts.store.put(key, seal(chunk, recipientsFor(rec.folder, opts)));
+      } catch (err) {
+        if (!(err instanceof RefusedObject)) throw err;
+        // Not sent and not skipped: the file stays at this offset, and every
+        // pass reports it held until something changes.
+        report.held.push({ path: src.path, reason: err.message });
+        break;
+      }
       report.uploaded.push({ key, bytes: chunk.length });
       const usage = src.kind === 'transcript' && opts.keys.usage ? usageLines(chunk) : '';
       if (usage && opts.keys.usage) {

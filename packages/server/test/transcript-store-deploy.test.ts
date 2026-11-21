@@ -9,11 +9,18 @@
  * its own two hosts and do nothing else.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import type { Observed } from '../../../infra/project-machine/deploy-plan.ts';
+import {
+  type Observed,
+  plan,
+  projectConfig,
+  requiredSecrets,
+} from '../../../infra/project-machine/deploy-plan.ts';
 import {
   STORE_KEYS_ENTRY,
   type StoreIo,
   makeStoreWriter,
+  markWriterStored,
+  revokeUnstoredWriters,
   setupStore,
   storeReady,
   storeSecretValue,
@@ -58,6 +65,30 @@ describe('what a run plans for the store', () => {
     expect(storeActions(obs({ ready: true, canMake: false }))).toEqual([]);
     expect(storeSecretNames(obs({ ready: false, canMake: false }))).toEqual([]);
     expect(storeActions(obs(undefined))).toEqual([]);
+  });
+});
+
+describe('replacing a lost writer', () => {
+  it('sets every store secret beside the new key, the secret over the old one included', () => {
+    const cfg = projectConfig({ project: 'harborlight', imageLabel: 'a'.repeat(40) });
+    // The writer's key id was unset; the old secret and the rest are still there.
+    const left = STORE_SECRETS.filter((n) => n !== 'STORE_S3_ACCESS_KEY_ID');
+    const actions = plan(cfg, {
+      app: true,
+      volumes: 1,
+      keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
+      snapshots: true,
+      lifecycle: false,
+      secrets: new Set([...requiredSecrets('quick'), ...left]),
+      machines: [{ id: 'm1', state: 'started', imageTag: 'a'.repeat(40), memoryMb: 512 }],
+      browser: true,
+      store: { ready: true, canMake: true },
+    });
+    const set = actions.find((a) => a.kind === 'set-secrets');
+    expect(actions.map((a) => a.kind)).toContain('make-store-writer');
+    expect(set && 'names' in set ? [...set.names].sort() : []).toEqual(
+      expect.arrayContaining([...STORE_SECRETS].sort()),
+    );
   });
 });
 
@@ -133,6 +164,49 @@ describe('the CI run that makes the store', () => {
     expect(await statusOf(() => reader.get('cw-harborlight/events/b/e/0-a.cw'))).toBe(200);
     expect(await statusOf(() => reader.put('cw-harborlight/events/b/e/1-a.cw', one))).toBe(403);
     expect(await statusOf(() => reader.delete('cw-harborlight/events/b/e/0-a.cw'))).toBe(403);
+  });
+
+  it('persists the admin credential the moment the bucket exists, so a run that fails after is re-run', async () => {
+    const io = memoryIo();
+    const failingAfter: StoreIo = {
+      ...io,
+      keychainCreate: (n, v) => {
+        if (n.endsWith('-identity')) throw new Error('handoff full');
+        io.keychainCreate(n, v);
+      },
+    };
+    await expect(setupStore(failingAfter)).rejects.toThrow(/handoff full/);
+    expect(io.persisted).toEqual(['secret STORE_BUCKET_ADMIN']);
+    // The next run finds the admin and refuses to mint keys the Mac would never get.
+    await expect(setupStore(io)).rejects.toThrow(/STORE_KEYS is not/);
+  });
+
+  it('revokes a writer this run minted and never stored, and keeps one it stored', async () => {
+    const io = memoryIo();
+    await setupStore(io);
+    const names = storeNames();
+    const admin = JSON.parse(io.keychainRead(names.admin));
+    const writerOf = (app: string) => {
+      const v = (n: string) => storeSecretValue({ app }, n, io) ?? '';
+      return s3Bucket(
+        {
+          endpoint: v('STORE_S3_ENDPOINT'),
+          accessKeyId: v('STORE_S3_ACCESS_KEY_ID'),
+          secretAccessKey: v('STORE_S3_SECRET_ACCESS_KEY'),
+        },
+        names.bucket,
+      );
+    };
+    await makeStoreWriter({ app: 'cw-harborlight' }, io);
+    await makeStoreWriter({ app: 'cw-saltmarsh' }, io);
+    const kept = writerOf('cw-harborlight');
+    const lost = writerOf('cw-saltmarsh');
+    markWriterStored('cw-harborlight');
+    expect(await revokeUnstoredWriters(io)).toBe(1);
+    const one = new Uint8Array([1]);
+    expect(await statusOf(() => kept.put('cw-harborlight/events/b/e/9-a.cw', one))).toBe(200);
+    expect(await statusOf(() => lost.put('cw-saltmarsh/events/b/e/9-a.cw', one))).toBe(403);
+    expect(admin.accessKeyId).toBeTruthy();
   });
 
   it('would fail on real Tigris if it asked for S3 versioning: the control for the snapshot path', async () => {

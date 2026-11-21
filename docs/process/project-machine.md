@@ -918,12 +918,14 @@ runs three processes, the way the backup splits into `cw` and `cwbackup`:
 
 Each reader writes its sealed chunks into its own spool, `/data/store-spool-cw`
 or `/data/store-spool-lead`, which is `cwstore:<reader>` mode 3770: the reader
-may add files, only `cwstore` may remove them, and no other user can enter.
+may add files and remove only its own, and no other user can enter.
 The sender puts each file under the key its name stands for and then removes
 it. It refuses, and leaves in place, a link, a file with a second name, one
 the reader does not own, one over 64 MiB, and one whose key is not under that
 reader's host, so a reader cannot get the sender to upload its credential or
-to write under the other host.
+to write under the other host. A reader holds, and logs, a chunk the sender
+would refuse rather than count it sent. The sender sends chunks before the
+manifests that list them, and one spool's failed put does not stop the other.
 
 **Checking it.** `bun run store:read list --host cw-<project>` counts the
 objects under both hosts and opens one transcript and one event chunk,

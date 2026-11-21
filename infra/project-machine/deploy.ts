@@ -97,7 +97,14 @@ import {
   writeOnlyPolicy,
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
-import { ghPersist, makeStoreWriter, setupStore, storeReady } from './deploy-store.ts';
+import {
+  ghPersist,
+  makeStoreWriter,
+  markWriterStored,
+  revokeUnstoredWriters,
+  setupStore,
+  storeReady,
+} from './deploy-store.ts';
 import {
   fly,
   flyJson,
@@ -376,6 +383,7 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       if (a.names.includes(LEAD_TOKEN_SECRET)) lines.set(LEAD_TOKEN_SECRET, await ctx.leadToken());
       const input = a.names.map((n) => `${n}=${lines.get(n)}\n`).join('');
       flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input });
+      if (a.names.includes(STORE_WRITER_SECRET)) markWriterStored(cfg.app);
       return;
     }
     case 'make-push-keys':
@@ -573,9 +581,20 @@ export async function deployProject(
     },
   };
   if (needsToken && presetTunnel) ctx.tunnelToken = () => presetTunnel;
-  for (const a of actions) {
-    console.log(`[deploy] ${describe(a)}`);
-    await act(cfg, a, ctx);
+  try {
+    for (const a of actions) {
+      console.log(`[deploy] ${describe(a)}`);
+      await act(cfg, a, ctx);
+    }
+  } catch (err) {
+    // A store writer minted and never set as a secret is a live key that
+    // can put and that nothing holds: delete it before giving up.
+    const revoked = await revokeUnstoredWriters({ keychainRead }).catch((e: unknown) => {
+      console.error(`[deploy] could not revoke this run's store writer: ${String(e)}`);
+      return 0;
+    });
+    if (revoked > 0) console.error(`[deploy] revoked ${revoked} store writer(s) this run minted`);
+    throw err;
   }
   return actions;
 }

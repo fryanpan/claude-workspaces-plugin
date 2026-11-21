@@ -209,6 +209,7 @@ async function pass(config: UploaderConfig, store: ObjectStore): Promise<void> {
   console.log(
     `[store] sent ${report.uploaded.length} objects (${bytes} bytes); held ${report.held.length} files`,
   );
+  for (const h of report.held) console.error(`[store] held ${h.path}: ${h.reason}`);
 }
 
 async function main(): Promise<void> {
@@ -229,6 +230,13 @@ async function main(): Promise<void> {
   for (;;) {
     try {
       await inventoryIfDue(config, store, new Date());
+    } catch (err) {
+      // Its own try: an inventory that keeps failing must not stop the uploads.
+      console.error(
+        `[store] inventory failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
       await pass(config, store);
     } catch (err) {
       // The S3 client's errors name the request, never the secret key. What

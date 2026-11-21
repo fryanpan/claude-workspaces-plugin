@@ -14,13 +14,18 @@ import { randomBytes } from 'node:crypto';
  * succeeds.
  *
  * Each spool is `cwstore:<owner>` mode 3770 (`entrypoint.sh`): the owner's
- * group may add files, the sticky bit lets no one but `cwstore` remove them,
- * and no third user can enter. A spool file's name is its object key with `/`
- * written as `+`. The sender refuses, and leaves in place, any file that is
- * not a regular file owned by the spool's writer, that is a link, that is too
- * large, or whose key is not under the writer's own host: a writer that
+ * group may add files and no third user can enter. The sticky bit stops a
+ * writer removing or renaming a file it does not own; it can still remove or
+ * replace its own, between the sender's read and its unlink, which puts only
+ * that writer's own data at risk. A spool file's name is its object key with
+ * `/` written as `+`. The sender refuses, and leaves in place, any file that
+ * is not a regular file owned by the spool's writer, that is a link, that is
+ * too large, or whose key is not under the writer's own host: a writer that
  * plants a link to `/proc/self/environ` must not get the sender's
  * credential uploaded, and one writer must not put under another's host.
+ * The writer's side applies the same size and name limits first
+ * (`RefusedObject`), so what the sender would refuse is held, and reported,
+ * where the file is rather than counted as sent.
  */
 import {
   constants,
@@ -35,11 +40,13 @@ import {
   writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { type ObjectStore, validSegment } from './store-upload.ts';
+import { type ObjectStore, RefusedObject, validSegment } from './store-upload.ts';
 
 /** A sealed chunk is at most 8 MiB of plain text unless one line is longer. */
 export const MAX_SPOOL_BYTES = 64 * 1024 * 1024;
 const TMP = '.tmp-';
+/** The longest file name the spool's filesystem takes. */
+export const MAX_SPOOL_NAME = 255;
 
 /** The spool file name for `key`, or null when `key` is not a safe object key. */
 export function spoolName(key: string): string | null {
@@ -55,11 +62,15 @@ export function keyOfSpoolName(name: string): string | null {
 }
 
 /** An `ObjectStore` that writes each object into `dir`, whole or not at all. */
-export function spoolStore(dir: string): ObjectStore {
+export function spoolStore(dir: string, max = MAX_SPOOL_BYTES): ObjectStore {
   return {
     async put(key, body) {
       const name = spoolName(key);
       if (name === null) throw new Error(`${JSON.stringify(key)} is not a safe object key`);
+      if (Buffer.byteLength(name) > MAX_SPOOL_NAME)
+        throw new RefusedObject(`key longer than ${MAX_SPOOL_NAME} bytes as a spool name`);
+      if (body.length > max)
+        throw new RefusedObject(`sealed chunk of ${body.length} bytes is over the ${max}-byte cap`);
       const tmp = join(dir, `${TMP}${randomBytes(8).toString('hex')}`);
       const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       try {
@@ -96,7 +107,16 @@ export interface SendReport {
   bytes: number;
   /** Files left in place, with why. Names only, never contents. */
   refused: { name: string; reason: string }[];
+  /** Spools whose pass stopped at a failed put, with the error. */
+  failed: { host: string; error: string }[];
 }
+
+/** Manifests and inventories describe chunks, so they go after them. */
+const LAST_KINDS = new Set(['manifests', 'inventory']);
+const sendOrder = (names: string[]): string[] => {
+  const last = (n: string) => LAST_KINDS.has(n.split('+')[1] ?? '');
+  return [...names.filter((n) => !last(n)).sort(), ...names.filter(last).sort()];
+};
 
 function readSpoolFile(path: string, ownerUid: number, max: number): Buffer | string {
   let fd: number;
@@ -127,35 +147,52 @@ function readSpoolFile(path: string, ownerUid: number, max: number): Buffer | st
 
 /**
  * One pass over each spool: put every acceptable file and remove it after
- * its put succeeds. A failed put stops that spool's pass, so the next pass
- * starts from the same file.
+ * its put succeeds, chunks before the manifests that list them. A failed put
+ * stops that spool's pass, so its next pass starts from the same file, and
+ * the other spools still run.
  */
 export async function sendSpool(
   sources: readonly SpoolSource[],
   store: ObjectStore,
   max = MAX_SPOOL_BYTES,
 ): Promise<SendReport> {
-  const report: SendReport = { sent: 0, bytes: 0, refused: [] };
+  const report: SendReport = { sent: 0, bytes: 0, refused: [], failed: [] };
   for (const src of sources) {
     if (!validSegment(src.host)) throw new Error(`host ${JSON.stringify(src.host)} is not safe`);
-    for (const name of readdirSync(src.dir).sort()) {
-      if (name.startsWith(TMP)) continue;
-      const key = keyOfSpoolName(name);
-      if (key === null || !key.startsWith(`${src.host}/`)) {
-        report.refused.push({ name, reason: `not a key under ${src.host}/` });
-        continue;
-      }
-      const path = join(src.dir, name);
-      const body = readSpoolFile(path, src.ownerUid, max);
-      if (typeof body === 'string') {
-        report.refused.push({ name, reason: body });
-        continue;
-      }
-      await store.put(key, body);
-      unlinkSync(path);
-      report.sent++;
-      report.bytes += body.length;
+    try {
+      await sendOne(src, store, max, report);
+    } catch (err) {
+      report.failed.push({
+        host: src.host,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return report;
+}
+
+async function sendOne(
+  src: SpoolSource,
+  store: ObjectStore,
+  max: number,
+  report: SendReport,
+): Promise<void> {
+  for (const name of sendOrder(readdirSync(src.dir))) {
+    if (name.startsWith(TMP)) continue;
+    const key = keyOfSpoolName(name);
+    if (key === null || !key.startsWith(`${src.host}/`)) {
+      report.refused.push({ name, reason: `not a key under ${src.host}/` });
+      continue;
+    }
+    const path = join(src.dir, name);
+    const body = readSpoolFile(path, src.ownerUid, max);
+    if (typeof body === 'string') {
+      report.refused.push({ name, reason: body });
+      continue;
+    }
+    await store.put(key, body);
+    unlinkSync(path);
+    report.sent++;
+    report.bytes += body.length;
+  }
 }
