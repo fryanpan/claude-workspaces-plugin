@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
+import { StateRefused, type TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import { stateDir } from '../../../infra/cloudflare/terraform.ts';
 import { storeAppToken, writePrivate } from '../../../infra/handoff/mac-store.ts';
 import { generateHandoffKeys } from '../../../infra/handoff/seal.ts';
@@ -142,7 +142,9 @@ describe('macOutputs', () => {
       },
       state: (env) => {
         i.calls.push(`state ${env}`);
-        throw new Error('terraform init for prod exited 1');
+        throw new StateRefused(
+          'terraform init for prod exited 1: the state bucket refused the credential',
+        );
       },
     });
     const said: string[] = [];
@@ -150,10 +152,26 @@ describe('macOutputs', () => {
     expect(macOutputs('prod', i)).toEqual(OUTPUTS);
     expect(i.calls).toEqual(['state prod', 'sealed']);
     expect(said).toEqual([
-      "[outputs] the state was refused (terraform init for prod exited 1): prod's Terraform outputs from the sealed wall read, run 42, 1h old",
+      "[outputs] the state was refused (terraform init for prod exited 1: the state bucket refused the credential): prod's Terraform outputs from the sealed wall read, run 42, 1h old",
     ]);
     // Staging has no sealed read, so its refusal stands.
-    expect(() => macOutputs('staging', i)).toThrow('terraform init for prod exited 1');
+    expect(() => macOutputs('staging', i)).toThrow('the state bucket refused the credential');
+  });
+
+  it('a state failure that is not a refusal stands: no sealed read is pulled', () => {
+    const i = io({
+      sources: {
+        env: {},
+        keychainHas: (n) => n === 'cloudflare-r2-tfstate',
+        keychainRead: () => '',
+      },
+      state: (env) => {
+        i.calls.push(`state ${env}`);
+        throw new Error('terraform init for prod exited 1');
+      },
+    });
+    expect(() => macOutputs('prod', i)).toThrow('terraform init for prod exited 1');
+    expect(i.calls).toEqual(['state prod']);
   });
 
   it('refuses staging without a credential: the sealed read is prod only', () => {
@@ -227,7 +245,12 @@ esac`,
   // makes it", after the outputs were read.
   stub(bin, 'fly', 'echo "Could not find App" >&2; exit 1');
   stub(bin, 'security', 'exit 44');
-  stub(bin, 'terraform', 'exit 1');
+  // As R2 answers a revoked key: init fails on a 401.
+  stub(
+    bin,
+    'terraform',
+    'echo "Error: Failed to get existing workspaces: operation error S3: ListObjectsV2, https response error StatusCode: 401, api error Unauthorized: Unauthorized" >&2; exit 1',
+  );
   return {
     PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
     HOME: root,
@@ -311,7 +334,7 @@ describe('the Mac deploy and signin:callbacks with no state credential', () => {
     const err = r.stderr.toString();
     expect(log('terraform')).toEqual([expect.stringMatching(/^init /)]);
     expect(err).toContain(
-      "the state was refused (terraform init for prod exited 1): prod's Terraform outputs from the sealed wall read, run 88, 1h old",
+      "the state was refused (terraform init for prod exited 1: the state bucket refused the credential): prod's Terraform outputs from the sealed wall read, run 88, 1h old",
     );
     expect(r.stdout.toString()).toContain(
       `[deploy] tunnel cw-harborlight is ${TUNNEL_ID}, from Terraform`,
@@ -329,7 +352,9 @@ describe('the Mac deploy and signin:callbacks with no state credential', () => {
     const err = r.stderr.toString();
     expect(r.exitCode).toBe(1);
     expect(log('terraform')).toEqual([expect.stringMatching(/^init /)]);
-    expect(err).toContain('the state was refused (terraform init for prod exited 1), and');
+    expect(err).toContain(
+      'the state was refused (terraform init for prod exited 1: the state bucket refused the credential), and',
+    );
     expect(err).toContain(DISPATCH_HINT);
     expect(log('fly')).toEqual([]);
   }, 60_000);

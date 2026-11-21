@@ -84,7 +84,22 @@ export function parseOutputs(json: string): TfOutputs {
 export interface OutputIo extends CredentialSources {
   backendExists: (path: string) => boolean;
   writeBackend: (path: string, content: string) => void;
-  terraform: (args: string[], env: Record<string, string>, capture?: boolean) => TfResult;
+  terraform: (args: string[], env: Record<string, string>, capture?: boolean | 'both') => TfResult;
+}
+
+/**
+ * The state bucket refused the credential (401 or 403), as opposed to any
+ * other failure. Only this may send a prod read to the sealed wall read
+ * (`mac-outputs.ts`): a transient failure must not swap live outputs for a
+ * read up to 36 hours old.
+ */
+export class StateRefused extends Error {}
+
+/** Whether terraform init's stderr says the backend refused the credential. */
+export function isStateRefusal(stderr: string): boolean {
+  return /StatusCode: 40[13]\b|\b(Unauthorized|AccessDenied|Forbidden|InvalidAccessKeyId|SignatureDoesNotMatch)\b/.test(
+    stderr,
+  );
 }
 
 /** Init against the environment's R2 state and read every output. */
@@ -104,9 +119,17 @@ export function readOutputs(tfEnv: TfEnv, io: OutputIo = realOutputIo(tfEnv)): T
   const init = io.terraform(
     ['init', '-input=false', '-lockfile=readonly', '-reconfigure', `-backend-config=${backend}`],
     env,
-    true,
+    'both',
   );
-  if (init.status !== 0) throw new Error(`terraform init for ${tfEnv} exited ${init.status}`);
+  if (init.status !== 0) {
+    // Named by status only: init's own error is already on stderr.
+    if (isStateRefusal(init.stderr ?? '')) {
+      throw new StateRefused(
+        `terraform init for ${tfEnv} exited ${init.status}: the state bucket refused the credential`,
+      );
+    }
+    throw new Error(`terraform init for ${tfEnv} exited ${init.status}`);
+  }
   const out = io.terraform(['output', '-json'], env, true);
   if (out.status !== 0) throw new Error(`terraform output for ${tfEnv} exited ${out.status}`);
   return parseOutputs(out.stdout || '{}');

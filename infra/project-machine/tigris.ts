@@ -104,10 +104,80 @@ export async function ensurePolicy(
     for (const member of list.split('<member>')) {
       if (xmlValue(member, 'PolicyName') === name) {
         const arn = xmlValue(member, 'Arn');
-        if (arn) return arn;
+        if (!arn) continue;
+        // A policy of this name may have been made by hand, or by an older
+        // run with a wider grant: attaching it would hand the new key that.
+        const held = await policyDocument(admin, arn, iamUrl);
+        if (!samePolicy(held, document)) {
+          throw new Error(
+            `policy ${name} exists with a different document; not attaching it (delete or rename it, then run again)`,
+          );
+        }
+        return arn;
       }
     }
     throw new Error(`policy ${name} exists but ListPolicies did not return it`);
+  }
+}
+
+const XML_ENTITIES: Record<string, string> = {
+  '&quot;': '"',
+  '&apos;': "'",
+  '&lt;': '<',
+  '&gt;': '>',
+  '&amp;': '&',
+};
+
+/** The default version's document of the policy at `arn`, as JSON text. */
+async function policyDocument(
+  admin: BucketCredential,
+  arn: string,
+  iamUrl: string,
+): Promise<string> {
+  const policy = await iam(admin, { Action: 'GetPolicy', PolicyArn: arn }, iamUrl);
+  const versionId = xmlValue(policy, 'DefaultVersionId');
+  if (!versionId) throw new Error(`GetPolicy answered without a DefaultVersionId for ${arn}`);
+  const version = await iam(
+    admin,
+    { Action: 'GetPolicyVersion', PolicyArn: arn, VersionId: versionId },
+    iamUrl,
+  );
+  const raw = xmlValue(version, 'Document');
+  if (raw === undefined) throw new Error(`GetPolicyVersion answered without a Document for ${arn}`);
+  const text = raw.replace(/&(quot|apos|lt|gt|amp);/g, (e) => XML_ENTITIES[e] ?? e);
+  // IAM answers the document URL-encoded; accept it plain as well.
+  return text.trimStart().startsWith('{') ? text : decodeURIComponent(text);
+}
+
+/** A statement field IAM may answer as one string or a list, as a sorted list. */
+const asList = (v: unknown): unknown =>
+  typeof v === 'string' ? [v] : Array.isArray(v) ? [...v].map(String).sort() : v;
+
+function canonicalPolicy(text: string): string {
+  const doc = JSON.parse(text) as { Version?: unknown; Statement?: unknown };
+  const statements = Array.isArray(doc.Statement) ? doc.Statement : [doc.Statement];
+  return JSON.stringify({
+    Version: doc.Version,
+    Statement: statements
+      .map((s) => {
+        const o = (s ?? {}) as Record<string, unknown>;
+        return Object.fromEntries(
+          Object.keys(o)
+            .sort()
+            .map((k) => [k, k === 'Effect' || k === 'Sid' ? o[k] : asList(o[k])]),
+        );
+      })
+      .map((s) => JSON.stringify(s))
+      .sort(),
+  });
+}
+
+/** Whether two policy documents grant the same, ignoring order and spacing. */
+export function samePolicy(a: string, b: string): boolean {
+  try {
+    return canonicalPolicy(a) === canonicalPolicy(b);
+  } catch {
+    return false;
   }
 }
 

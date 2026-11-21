@@ -78,7 +78,7 @@ function matches(pattern: string, value: string): boolean {
 
 export function startFakeTigris(opts: { asTigris?: boolean } = {}): FakeTigris {
   const keys = new Map<string, Key>();
-  const policies = new Map<string, { name: string; statements: Statement[] }>();
+  const policies = new Map<string, { name: string; statements: Statement[]; document: string }>();
   const buckets = new Map<string, FakeBucket>();
   const log: string[] = [];
   let lose: ((key: string) => boolean) | null = null;
@@ -167,7 +167,11 @@ export function startFakeTigris(opts: { asTigris?: boolean } = {}): FakeTigris {
         }
         const doc = JSON.parse(form.get('PolicyDocument') ?? '{}') as { Statement?: Statement[] };
         const arn = `arn:aws:iam::fake:policy/${name}`;
-        policies.set(arn, { name, statements: doc.Statement ?? [] });
+        policies.set(arn, {
+          name,
+          statements: doc.Statement ?? [],
+          document: form.get('PolicyDocument') ?? '{}',
+        });
         return wrap(`<Policy>${xml('PolicyName', name)}${xml('Arn', arn)}</Policy>`);
       }
       case 'ListPolicies': {
@@ -175,6 +179,20 @@ export function startFakeTigris(opts: { asTigris?: boolean } = {}): FakeTigris {
           ([arn, p]) => `<member>${xml('PolicyName', p.name)}${xml('Arn', arn)}</member>`,
         );
         return wrap(`<Policies>${members.join('')}</Policies>`);
+      }
+      case 'GetPolicy': {
+        const arn = form.get('PolicyArn') ?? '';
+        if (!policies.has(arn)) return denied('NoSuchEntity', 404);
+        return wrap(`<Policy>${xml('Arn', arn)}${xml('DefaultVersionId', 'v1')}</Policy>`);
+      }
+      case 'GetPolicyVersion': {
+        // As AWS IAM answers it: the document URL-encoded, inside XML.
+        const p = policies.get(form.get('PolicyArn') ?? '');
+        if (!p || form.get('VersionId') !== 'v1') return denied('NoSuchEntity', 404);
+        const doc = escape(encodeURIComponent(p.document));
+        return wrap(
+          `<PolicyVersion>${xml('Document', doc)}${xml('VersionId', 'v1')}</PolicyVersion>`,
+        );
       }
       case 'DeleteAccessKey': {
         const target = form.get('AccessKeyId') ?? '';
