@@ -49,3 +49,40 @@ resource "github_actions_environment_secret" "deploy_token" {
 
   depends_on = [github_repository_environment_deployment_policy.main]
 }
+
+locals {
+  # Whether a read token was handed in; the value itself stays sensitive.
+  read_environments = nonsensitive(var.read_token != "") ? toset(["fly-org-read"]) : toset([])
+}
+
+# The read token's environment: main alone and no reviewer, like the others.
+resource "github_repository_environment" "read" {
+  for_each = local.read_environments
+
+  repository  = var.repository
+  environment = each.key
+
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+resource "github_repository_environment_deployment_policy" "read_main" {
+  for_each = local.read_environments
+
+  repository     = var.repository
+  environment    = github_repository_environment.read[each.key].environment
+  branch_pattern = "main"
+}
+
+resource "github_actions_environment_secret" "read_token" {
+  for_each = local.read_environments
+
+  repository  = var.repository
+  environment = github_repository_environment.read[each.key].environment
+  secret_name = "FLY_READ_TOKEN"
+  value       = var.read_token
+
+  depends_on = [github_repository_environment_deployment_policy.read_main]
+}

@@ -16,6 +16,8 @@ import {
   type CiTokensIo,
   MAC_VALID_DAYS,
   NEVER_FEATURES,
+  READ_ENVIRONMENT,
+  READ_VALID_DAYS,
   STAGING_APP,
   STAGING_ENVIRONMENT,
   USAGE,
@@ -25,6 +27,7 @@ import {
   ciTokens,
   flyAppId,
   orgTokenFrom,
+  readCaveats,
 } from '../../../infra/project-machine/ci-tokens.ts';
 import { allows } from './fly-macaroon.ts';
 
@@ -145,9 +148,11 @@ describe('fly:ci-tokens', () => {
   it('allows each token its one app and the builder, never WireGuard, for 90 days', async () => {
     const r = fake();
     await ciTokens(['plan'], r.io);
-    expect(r.cut).toHaveLength(3);
+    // The read token (every app, `0`) has its own tests below.
+    const deployCuts = r.cut.filter((c) => !appsOf(c).includes('0'));
+    expect(deployCuts).toHaveLength(3);
     const ids = ['101', '202', '303'];
-    for (const [i, set] of r.cut.entries()) {
+    for (const [i, set] of deployCuts.entries()) {
       const appId = ids[i] as string;
       expect(appsOf(set)).toEqual([appId]);
       expect(allows(set, { appId, action: 'rwcdC', now: nowS })).toBe(true);
@@ -312,14 +317,15 @@ describe('fly:ci-tokens, the Mac’s tokens', () => {
       .split('\n')
       .filter((l) => l.startsWith('::add-mask::'));
     for (const id of ['101', '202', '303']) expect(masks).toContain(`::add-mask::${cutFor(id)}`);
-    // Every value cut: CI's three and the Mac's two.
+    // Every value cut: CI's three, the read token and the Mac's two.
     expect(masks).toHaveLength(r.cut.length);
   });
 
   it('a plan cuts none for the Mac and seals nothing', async () => {
     const { r, written } = withSink('plan');
     expect(await ciTokens(['plan'], r.io)).toBe(0);
-    expect(r.cut).toHaveLength(3);
+    // CI's three and the read token.
+    expect(r.cut).toHaveLength(4);
     expect(written).toEqual([]);
   });
 
@@ -331,5 +337,81 @@ describe('fly:ci-tokens, the Mac’s tokens', () => {
     expect(await ciTokens(['apply'], r.io)).toBe(1);
     expect(r.calls).toEqual([]);
     expect(r.cut).toEqual([]);
+  });
+});
+
+describe('fly:ci-tokens, the read token (wall-off review H1, M5)', () => {
+  const readCut = (r: Run) => r.cut.find((c) => appsOf(c).includes('0'));
+
+  it('cuts one token that reads every app and the org and changes nothing, for 14 days', async () => {
+    const r = fake();
+    expect(await ciTokens(['plan'], r.io)).toBe(0);
+    const set = readCut(r);
+    if (!set) throw new Error('no read token was cut');
+    expect(set).toEqual(readCaveats(NOW));
+    // `fly apps list` and each app's network: reads that name the org, or an app.
+    expect(allows(set, { action: 'r', now: nowS })).toBe(true);
+    for (const appId of ['101', '202', '303'])
+      expect(allows(set, { appId, action: 'r', now: nowS })).toBe(true);
+    // Nothing that writes: no deploy, no machine control, no WireGuard, so no `fly ssh`.
+    for (const appId of ['101', '202'])
+      for (const action of ['w', 'c', 'd', 'C'])
+        expect(allows(set, { appId, action, now: nowS })).toBe(false);
+    for (const feature of ['wg', 'builder', ...NEVER_FEATURES])
+      for (const action of ['w', 'c', 'd', 'C'])
+        expect(allows(set, { feature, action, now: nowS })).toBe(false);
+    for (const action of ['w', 'c', 'd', 'C'])
+      expect(allows(set, { action, now: nowS })).toBe(false);
+    const last = nowS + READ_VALID_DAYS * 86_400;
+    expect(allows(set, { action: 'r', now: last })).toBe(true);
+    expect(allows(set, { action: 'r', now: last + 1 })).toBe(false);
+  });
+
+  it('hands it to terraform for its own environment, never among the deploy tokens, and prints it nowhere', async () => {
+    const r = fake({
+      attenuate: (json) => ({
+        status: 0,
+        stdout: `${cutFor(appsOf(JSON.parse(json) as Caveat[])[0] ?? '?')}\n`,
+      }),
+    });
+    r.io.env = { GITHUB_TOKEN: GH_TOKEN, GITHUB_ACTIONS: 'true' };
+    expect(await ciTokens(['apply'], r.io)).toBe(0);
+    expect(READ_ENVIRONMENT).toBe('fly-org-read');
+    expect(r.calls[0]?.env.TF_VAR_read_token).toBe(cutFor('0'));
+    expect(Object.values(tokensHanded(r))).not.toContain(cutFor('0'));
+    expect(r.printed()).toContain(`::add-mask::${cutFor('0')}`);
+    const unmasked = r
+      .printed()
+      .split('\n')
+      .filter((l) => !l.startsWith('::add-mask::'))
+      .join('\n');
+    expect(unmasked).not.toContain(cutFor('0'));
+    expect(unmasked).toContain(`${READ_ENVIRONMENT}: a read-only token`);
+  });
+
+  it('refuses a read cut that failed or printed the org token back, before terraform', async () => {
+    for (const answer of [
+      { status: 1, stdout: '' },
+      { status: 0, stdout: `${ORG}\n` },
+    ]) {
+      const r = fake({
+        attenuate: (json) =>
+          appsOf(JSON.parse(json) as Caveat[]).includes('0')
+            ? answer
+            : { status: 0, stdout: `${cutFor(appsOf(JSON.parse(json) as Caveat[])[0] ?? '?')}\n` },
+      });
+      expect(await ciTokens(['apply'], r.io)).toBe(1);
+      expect(r.calls).toEqual([]);
+      expect(r.printed()).not.toContain('fixture-org-token');
+    }
+  });
+
+  it('refuses a project whose environment would be the read token’s', async () => {
+    const r = fake();
+    r.io.projects = () => ['harborlight', 'org-read'];
+    expect(await ciTokens(['apply'], r.io)).toBe(1);
+    expect(r.cut).toEqual([]);
+    expect(r.calls).toEqual([]);
+    expect(r.printed()).toContain('org-read');
   });
 });

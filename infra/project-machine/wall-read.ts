@@ -11,9 +11,10 @@
  * `cloudflare-prod`, with the token and state key cloudflare.yml's apply
  * uses (the repository holds no Cloudflare token of its own). It reads prod's Terraform outputs, each tunnel's
  * ingress, the live Access applications and service token names, and a plan
- * in CI mode (no lock, nothing applied). `fly` runs in `fly-org` and reads
- * `fly apps list` (each `cw-` app's name and network): a command that names
- * no app needs the org token, which only CI holds.
+ * in CI mode (no lock, nothing applied). `fly` runs in `fly-org-read` and
+ * reads `fly apps list` (each `cw-` app's name and network) with a read-only
+ * token cut from the org token (`ci-tokens.ts` `readCaveats`), so the daily
+ * read never holds the org token itself.
  *
  * What it reads holds hostnames, ids and Access policy rules and no
  * credential, but the repository is public and so is the artifact, so the

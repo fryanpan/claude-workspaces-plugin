@@ -29,3 +29,14 @@ variable "deploy_tokens" {
     error_message = "No token may be empty; leave its environment out instead."
   }
 }
+
+# The read-only token: every app and the org with read alone, no wg, so no
+# `fly ssh` (`readCaveats` in ci-tokens.ts). It goes to `fly-org-read` as
+# FLY_READ_TOKEN, where wall-read.yml's daily `fly apps list` reads with it
+# instead of the org token. Empty makes no environment.
+variable "read_token" {
+  description = "The read-only Fly token for the fly-org-read environment; empty makes none."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
