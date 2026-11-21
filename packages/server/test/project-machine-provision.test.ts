@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'bun:test';
 import { statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import {
   type HandoffItem,
   HandoffSink,
@@ -159,14 +160,17 @@ const OUTPUTS = {
 };
 
 describe('fly-provision.yml, the cloudflare-prod half', () => {
-  function world(machines = '{"machines":[{"project":"harborlight"}]}') {
+  function world(
+    machines = '{"machines":[{"project":"harborlight"}]}',
+    outputs: TfOutputs = OUTPUTS,
+  ) {
     const flyOrg = generateHandoffKeys();
     const written: string[] = [];
     const printed: string[] = [];
     const read: string[] = [];
     const io = {
       machines: () => machines,
-      outputs: () => OUTPUTS,
+      outputs: () => outputs,
       tunnelToken: async (t: { id: string }) => {
         read.push(t.id);
         return SECRET;
@@ -193,6 +197,22 @@ describe('fly-provision.yml, the cloudflare-prod half', () => {
     expect(w.printed.join('')).toContain('CLOUDFLARE_TUNNEL_TOKEN');
     expect(w.printed.join('')).not.toContain(SECRET);
     expect(w.written[0]).not.toContain(SECRET);
+  });
+
+  it('for a project with no Access application, seals its trusted host but not CW_SIGNIN', async () => {
+    // This job holds no Google client; CW_SIGNIN without one stops the server.
+    const w = world(undefined, { ...OUTPUTS, access: {} });
+    const env = { CW_PROVISION_HANDOFF_OUT: '/fixture/p.json' };
+    expect(await provisionOutputs(['--project', 'harborlight'], env, w.io)).toBe(0);
+    const item = openItems(w.flyOrg.privateKey, w.written[0] ?? '').items[0] as Extract<
+      HandoffItem,
+      { kind: 'fly-secrets' }
+    >;
+    expect(item.secrets.CW_PROXIED_TRUSTED_HOSTS).toBe('harborlight.example.test');
+    expect(item.secrets.CW_SIGNIN_ORIGIN).toBe('https://harborlight.example.test');
+    expect(item.secrets).not.toHaveProperty('CW_SIGNIN');
+    expect(item.secrets).not.toHaveProperty('CF_ACCESS_AUD');
+    expect(w.printed.join('')).toContain('not sealed: CW_SIGNIN:');
   });
 
   it('refuses a project machines.json does not list, before reading a token', async () => {

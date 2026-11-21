@@ -26,8 +26,16 @@
  *   CW_RESEND_API_KEY         the Keychain's `cw-resend-api-key` (send-only)
  *   CW_SIGNIN_MAIL_FROM       the Keychain's `cw-signin-mail-from`
  *
- * These do not switch sign-in on: `CW_SIGNIN` stays unset (Access) until the
- * owner switches it. Google sends a sign-in result only to a return address
+ * A project with an Access application keeps `CW_SIGNIN` unset (Access)
+ * until the owner switches it. A project with none (every new one) has
+ * nothing else in front of it, so it also gets
+ *
+ *   CW_PROXIED_TRUSTED_HOSTS  its router host, the CW_SIGNIN_ORIGIN host
+ *   CW_SIGNIN                 `better-auth`, only when the run holds the
+ *                             Google client (the server will not boot
+ *                             without one)
+ *
+ * Google sends a sign-in result only to a return address
  * the client lists, so a run that sets the client prints the one this
  * machine names (`notes`), for the owner to add in Google's console.
  *
@@ -76,12 +84,14 @@ export const SETTING_NAMES = [
  * that report should read back.
  */
 export const SIGNIN_SETTING_NAMES = [
+  'CW_SIGNIN',
   'CW_GOOGLE_CLIENT_ID',
   'CW_GOOGLE_CLIENT_SECRET',
   'CW_SIGNIN_ORIGIN',
   ...(Object.keys(PASSWORD_ENTRIES) as (keyof typeof PASSWORD_ENTRIES)[]),
 ] as const;
 
+const ACCESS_ONLY_NAMES = 'CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD and CF_ACCESS_HOST_AUDS';
 const ACCESS_NAMES =
   'CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CF_ACCESS_HOST_AUDS and CW_PROXIED_TRUSTED_HOSTS';
 
@@ -132,6 +142,39 @@ export function signInHost(outputs: TfOutputs, project: string): SignInHost {
   return {
     error: `the Terraform state routes no host for ${project} (add it to router.local.json; bun run cf:sync-config)`,
   };
+}
+
+/**
+ * A project with no Access application: the server admits a browser on its
+ * router host only behind Better Auth, so that host is trusted from the same
+ * source as CW_SIGNIN_ORIGIN, and sign-in is turned on when this run holds
+ * the Google client. Without the client CW_SIGNIN stays unset, because the
+ * server refuses to boot on `better-auth` with no client; the Mac's next
+ * `machine:deploy` sets both.
+ */
+function betterAuthSettings(
+  signIn: SignInHost,
+  google: boolean,
+  settings: Setting[],
+  skipped: string[],
+): void {
+  if ('error' in signIn) {
+    skipped.push(`CW_PROXIED_TRUSTED_HOSTS, CW_SIGNIN: ${signIn.error}`);
+    return;
+  }
+  const { host, from } = signIn;
+  settings.push({ name: 'CW_PROXIED_TRUSTED_HOSTS', from, value: () => host });
+  if (google) {
+    settings.push({
+      name: 'CW_SIGNIN',
+      from: 'no Access application, and the Google client is set',
+      value: () => 'better-auth',
+    });
+  } else {
+    skipped.push(
+      `CW_SIGNIN: better-auth needs ${GOOGLE_CLIENT_ID_ENTRY} and ${GOOGLE_CLIENT_SECRET_ENTRY}, which this run does not hold; the Mac's machine:deploy sets it`,
+    );
+  }
 }
 
 /** Where Google returns a sign-in at `host`. */
@@ -192,7 +235,7 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
     skipped.push(
-      `CW_PUBLIC_BASE_URL, CW_SIGNIN_ORIGIN, ${ACCESS_NAMES}: could not read the Terraform outputs (${why})`,
+      `CW_PUBLIC_BASE_URL, CW_SIGNIN_ORIGIN, CW_SIGNIN, ${ACCESS_NAMES}: could not read the Terraform outputs (${why})`,
     );
     return { settings, skipped, notes };
   }
@@ -216,7 +259,10 @@ export function readSettings(project: string, src: SettingsSources): SettingsRea
   const p = outputs.access[project];
   if (!p) {
     // Sign-in is Better Auth: a new project is given no Access application.
-    skipped.push(`${ACCESS_NAMES}: the Terraform state has no Access application for ${project}`);
+    skipped.push(
+      `${ACCESS_ONLY_NAMES}: the Terraform state has no Access application for ${project}`,
+    );
+    betterAuthSettings(signIn, google, settings, skipped);
     return { settings, skipped, notes };
   }
   const team = outputs.accessTeamDomain;

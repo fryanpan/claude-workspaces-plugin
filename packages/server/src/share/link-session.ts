@@ -15,7 +15,7 @@
  * rather than whenever a browser's cookie happens to lapse.
  */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type TokenFormat, mintToken, tokenClaims } from '../auth/signed-token.ts';
 
@@ -23,7 +23,8 @@ export const SHARE_COOKIE = 'lf_share';
 const KEY_FILENAME = 'share-cookie.key';
 
 /**
- * This server's signing key, generated on its first start. Every signed value
+ * This server's signing key, generated on its first start (`access-deps.ts`
+ * loads it at boot, making the data dir if it is not there yet). Every signed value
  * the server mints — cookies, widget tokens, agent tokens — is signed with it
  * or with a key derived from it, so it is this server's alone: it lives in
  * this server's data dir, is never read from anywhere else, and a value
@@ -44,6 +45,7 @@ export function loadCookieKey(dataDir: string): string {
     }
   }
   const key = randomBytes(32).toString('hex');
+  mkdirSync(dataDir, { recursive: true });
   writeFileSync(path, key, { mode: 0o600 });
   ownerOnly(path); // a pre-existing file keeps its old mode otherwise
   return key;

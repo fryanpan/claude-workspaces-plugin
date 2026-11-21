@@ -13,7 +13,10 @@
  *                            the apply token (`tunnel-plan.ts`)
  *   the Access settings      CW_PUBLIC_BASE_URL and the four CF_ACCESS_* /
  *                            trusted-host values (`settings.ts`), each when
- *                            the outputs hold its source
+ *                            the outputs hold its source; for a project
+ *                            with no Access application, its router host
+ *                            as the trusted host. Never CW_SIGNIN: this job
+ *                            holds no Google client (`settings.ts`)
  *
  * and writes them, sealed to `fly-org`'s committed key, to the file
  * CW_PROVISION_HANDOFF_OUT names, for the workflow to upload. The repository
