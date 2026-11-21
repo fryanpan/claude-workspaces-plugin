@@ -56,7 +56,10 @@
  * (`mac-ops.ts`). With CW_SECRETS_FROM_ENV=1 Keychain entries come from the
  * environment. Only fly-provision.yml, which holds the org token and a
  * handoff sink, makes an app, a volume, a bucket or a credential; what it
- * makes for the Mac is sealed to it (`infra/handoff/`). `--no-terraform-outputs` (CI's jobs hold no key to the state) reads
+ * makes for the Mac is sealed to it (`infra/handoff/`). The outputs come
+ * from the state when the run holds its credential, and on the Mac, which
+ * holds none, from the newest sealed wall read (`mac-outputs.ts`); a read
+ * older than 36 hours stops the run. `--no-terraform-outputs` (CI's jobs hold no key to the state) reads
  * no outputs: a named tunnel's id is not looked up, and a setting whose
  * source is an output is left as it is. The image records its serial
  * (`image-release.json`) so it beats an older release on the volume.
@@ -71,7 +74,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
+import type { TfOutputs } from '../cloudflare/outputs.ts';
 import { type TfEnv, isEnv } from '../cloudflare/terraform.ts';
 import { recipientKey } from '../handoff/items.ts';
 import {
@@ -105,6 +108,7 @@ import {
   keychainRead,
   secretsFromEnv,
 } from './mac-ops.ts';
+import { macOutputs } from './mac-outputs.ts';
 import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
 import { flushMacHandoff, provisionPresets } from './provision.ts';
 import { makePushKeys } from './push-keys.ts';
@@ -379,7 +383,7 @@ function describe(a: Action): string {
 }
 
 export interface DeployOptions {
-  /** The Terraform outputs; a test's stand-in. Default: `readOutputs(tfEnv)`. */
+  /** The Terraform outputs; a test's stand-in. Default: `macOutputs(tfEnv)`. */
   outputs?: () => TfOutputs;
   /** Which Terraform environment's outputs to read. Default prod. */
   tfEnv?: TfEnv;
@@ -416,7 +420,7 @@ export async function deployProject(
   let cached: TfOutputs | undefined;
   const outputs = () => {
     if (opts.noOutputs) throw new Error(NO_OUTPUTS);
-    cached ??= (opts.outputs ?? (() => readOutputs(opts.tfEnv ?? 'prod')))();
+    cached ??= (opts.outputs ?? (() => macOutputs(opts.tfEnv ?? 'prod')))();
     return cached;
   };
   // fly-provision.yml reads no outputs; the token it sets again comes sealed.

@@ -8,11 +8,13 @@
  *
  * A project's address is the one `machine:deploy` gives it as
  * CW_SIGNIN_ORIGIN (`settings.ts` `signInHost`: its router host), read from
- * the same Terraform outputs. Prints hostnames only.
+ * the same Terraform outputs (`mac-outputs.ts`: the state with a credential,
+ * else the newest sealed wall read). Prints hostnames only.
  */
 import { readFileSync } from 'node:fs';
-import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
+import type { TfOutputs } from '../cloudflare/outputs.ts';
 import { isEnv } from '../cloudflare/terraform.ts';
+import { macOutputs } from './mac-outputs.ts';
 import { MACHINES_FILE, parseMachines } from './machines.ts';
 import { googleRedirectUri, signInHost } from './settings.ts';
 
@@ -62,6 +64,6 @@ if (import.meta.main) {
     process.exit(2);
   }
   const projects = parseMachines(readFileSync(MACHINES_FILE, 'utf8')).map((m) => m.project);
-  const lines = callbackLines(after('--mac-host') ?? MAC_HOST, projects, () => readOutputs(tfEnv));
+  const lines = callbackLines(after('--mac-host') ?? MAC_HOST, projects, () => macOutputs(tfEnv));
   process.stdout.write(`${lines.join('\n')}\n`);
 }
