@@ -157,6 +157,86 @@ describe('the sign-in settings machine:deploy derives', () => {
     });
   });
 
+  describe('a project with no Access application serves sign-in', () => {
+    const SALTMARSH = 'saltmarsh-workspaces.harborlight.test';
+    const routed = (): TfOutputs => ({
+      ...outputs(),
+      routerRoutes: { saltmarsh: `${SALTMARSH}/*` },
+    });
+    const env = (found: ReturnType<typeof readSettings>) =>
+      Object.fromEntries(found.settings.map((s) => [s.name, s.value()]));
+
+    it('trusts its router host and turns Better Auth on', () => {
+      const found = readSettings('saltmarsh', { outputs: routed, ...keychain(WITH_CLIENT) });
+      expect(env(found).CW_PROXIED_TRUSTED_HOSTS).toBe(SALTMARSH);
+      expect(env(found).CW_SIGNIN).toBe('better-auth');
+      // What it sets is a sign-in the server accepts, on the host it trusts.
+      expect(signInFromEnv(env(found))).toEqual({
+        setting: {
+          mode: 'better-auth',
+          origin: `https://${SALTMARSH}`,
+          google: { clientId: 'shared-client', clientSecret: 'stub-secret' },
+        },
+      });
+    });
+
+    it('without the Google client it trusts the host but leaves sign-in off, saying why', () => {
+      // fly-provision's sealing job reads no Keychain: CW_SIGNIN without the
+      // client would stop the server at boot.
+      const found = readSettings('saltmarsh', { outputs: routed, ...keychain({}) });
+      expect(env(found).CW_PROXIED_TRUSTED_HOSTS).toBe(SALTMARSH);
+      expect(found.settings.map((s) => s.name)).not.toContain('CW_SIGNIN');
+      expect(found.skipped).toContainEqual(expect.stringMatching(/^CW_SIGNIN: /));
+      expect(signInFromEnv(env(found))).toEqual({ setting: null });
+    });
+
+    it('sets neither, saying why, when nothing routes the project', () => {
+      const found = readSettings('saltmarsh', { outputs, ...keychain(WITH_CLIENT) });
+      const names = found.settings.map((s) => s.name);
+      expect(names).not.toContain('CW_PROXIED_TRUSTED_HOSTS');
+      expect(names).not.toContain('CW_SIGNIN');
+      expect(found.skipped).toContainEqual(expect.stringContaining('CW_PROXIED_TRUSTED_HOSTS'));
+    });
+
+    it('a project with an Access application gets exactly what it got before', () => {
+      // moi's shape: an Access application and a tunnel on the same host.
+      const withAccess = (): TfOutputs => ({
+        ...outputs(),
+        tunnels: {
+          riverbend: {
+            account_id: 'acct',
+            id: 'tunnel-riverbend',
+            name: 'cw-riverbend',
+            origin: 'riverbend-origin.harborlight.test',
+            public_host: HOST,
+          },
+        },
+      });
+      const found = readSettings('riverbend', { outputs: withAccess, ...keychain(WITH_CLIENT) });
+      expect(found.settings.map((s) => [s.name, s.value(), s.from])).toEqual([
+        ['CW_OWNER_EMAIL', 'owner@harborlight.test', `Keychain ${OWNER_EMAIL_ENTRY}`],
+        ['CW_GOOGLE_CLIENT_ID', 'shared-client', `Keychain ${GOOGLE_CLIENT_ID_ENTRY}`],
+        ['CW_GOOGLE_CLIENT_SECRET', 'stub-secret', `Keychain ${GOOGLE_CLIENT_SECRET_ENTRY}`],
+        ['CW_PUBLIC_BASE_URL', `https://${HOST}`, "Terraform output, riverbend's router host"],
+        ['CW_SIGNIN_ORIGIN', `https://${HOST}`, "Terraform output, riverbend's router host"],
+        [
+          'CF_ACCESS_TEAM_DOMAIN',
+          'harborlight.cloudflareaccess.test',
+          'Terraform output access_team_domain',
+        ],
+        ['CF_ACCESS_AUD', 'aud-riverbend', "Terraform output access, board riverbend's audience"],
+        [
+          'CF_ACCESS_HOST_AUDS',
+          JSON.stringify({ [HOST]: 'aud-riverbend' }),
+          "Terraform output access, board riverbend's hosts, each to its audience",
+        ],
+        ['CW_PROXIED_TRUSTED_HOSTS', HOST, "Terraform output access, board riverbend's hosts"],
+      ]);
+      // Sign-in stays as the owner left it: Access.
+      expect(signInFromEnv(env(found))).toEqual({ setting: null });
+    });
+  });
+
   it('keeps the client off the list the wall-drift report reads back', () => {
     expect<readonly string[]>(SETTING_NAMES).not.toContain('CW_GOOGLE_CLIENT_SECRET');
     expect<readonly string[]>(SETTING_NAMES).not.toContain('CW_TURNSTILE_SECRET_KEY');

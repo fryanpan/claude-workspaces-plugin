@@ -123,6 +123,7 @@ project's own hostname:
 | `CF_ACCESS_AUD` | the Access application `board <project>` |
 | `CF_ACCESS_HOST_AUDS` | each of the project's hosts, to that audience |
 | `CW_PROXIED_TRUSTED_HOSTS` | the project's hosts |
+| `CW_SIGNIN` | `better-auth`, for a project with no Access application only |
 
 Every row but the first comes from the Terraform outputs
 (`infra/cloudflare/outputs.ts`, `terraform output` against the prod state, or
@@ -132,6 +133,17 @@ or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). A project with no Access
 application gets no Access settings, and the run says which settings it left
 unset; it does not fail. Sign-in is Better Auth, so a new project is given no
 Access application at all.
+
+Such a project has only Better Auth in front of it, so the run trusts its
+router host (`CW_PROXIED_TRUSTED_HOSTS`, the `CW_SIGNIN_ORIGIN` host) and
+turns sign-in on (`CW_SIGNIN=better-auth`). Without both, the server answers
+every browser `403 unknown_host`. `CW_SIGNIN` is set only by a run that also
+holds the Google client, because the server refuses to boot on `better-auth`
+without one. fly-provision.yml's run reads no Keychain, so it sets the trusted
+host and leaves `CW_SIGNIN`, the client and the owner's address to the Mac's
+next `bun run machine:deploy --project <name>`, which reads all three from the
+Keychain. A project with an Access application gets exactly what it got
+before: its Access hosts, and `CW_SIGNIN` left unset.
 
 The router host is the project's own hostname, `<label>-<first label of the
 one address>.<zone>`, which the board router routes once the project is in
