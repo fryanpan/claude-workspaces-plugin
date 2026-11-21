@@ -97,6 +97,7 @@ import {
   writeOnlyPolicy,
 } from './deploy-plan.ts';
 import { bucketAdmin, secretValue } from './deploy-secrets.ts';
+import { ghPersist, makeStoreWriter, setupStore, storeReady } from './deploy-store.ts';
 import {
   fly,
   flyJson,
@@ -115,6 +116,7 @@ import { makePushKeys } from './push-keys.ts';
 import { writeImageRelease } from './release-publish.ts';
 import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys } from './snapshot.ts';
+import { STORE_SECRETS, STORE_WRITER_SECRET } from './store-plan.ts';
 import {
   attachPolicy,
   createAccessKey,
@@ -234,6 +236,10 @@ async function observe(cfg: ProjectConfig) {
     secrets,
     machines: app ? machines(cfg.app) : [],
     browser: !secretsFromEnv(),
+    store: {
+      ready: storeReady({ keychainHas }),
+      canMake: secretsFromEnv() && handoffSink() !== null,
+    },
   };
 }
 
@@ -326,6 +332,24 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
       keychainCreate(cfg.keychain.writer, JSON.stringify(key));
       return;
     }
+    case 'setup-store':
+      for (const line of await setupStore({
+        keychainHas,
+        keychainRead,
+        keychainCreate,
+        createBucket: async (name) => {
+          // Not flyOk: the output holds the admin credential.
+          const r = fly(['storage', 'create', '--org', ctx.org(), '--name', name, '--yes']);
+          if (r.status !== 0) throw new Error(`fly storage create failed: ${r.stderr.trim()}`);
+          return parseStorageCreate(r.stdout);
+        },
+        persist: ghPersist,
+      }))
+        console.log(`[deploy]   ${line}`);
+      return;
+    case 'make-store-writer':
+      await makeStoreWriter(cfg, { keychainRead });
+      return;
     case 'remove-lifecycle':
       await deleteLifecycle(bucketAdmin(cfg), cfg.bucket);
       return;
@@ -409,6 +433,8 @@ const MAKES = new Set([
   'make-backup-key',
   'create-bucket',
   'make-writer-key',
+  'setup-store',
+  'make-store-writer',
   'make-push-keys',
 ]);
 
@@ -475,6 +501,10 @@ export async function deployProject(
     }
   }
   for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
+  if (!observed.store?.canMake && !observed.secrets.has(STORE_WRITER_SECRET))
+    console.log(
+      `[deploy] not set: ${STORE_SECRETS.join(', ')}: only fly-provision.yml mints the machine's transcript store writer`,
+    );
   for (const line of found.notes) console.log(`[deploy] ${line}`);
   const tooSmall = leadMemoryError(cfg, observed);
   if (tooSmall) throw new Error(tooSmall);

@@ -12,6 +12,7 @@ import {
   ORG_KEY_SECRET,
   type ProjectConfig,
 } from './deploy-plan.ts';
+import { storeSecretValue } from './deploy-store.ts';
 import { assertLeadKeyReadOnly } from './lead-key-check.ts';
 import { keychainRead } from './mac-ops.ts';
 import { recipientOf } from './snapshot.ts';
@@ -48,8 +49,11 @@ export function secretValue(cfg: ProjectConfig, name: string): string {
       return cfg.leadBoard;
     case LEAD_DEPLOY_KEY_SECRET:
       return deployKey(cfg);
-    default:
+    default: {
+      const store = storeSecretValue(cfg, name, { keychainRead });
+      if (store !== undefined) return store;
       throw new Error(`no source for secret ${name}`);
+    }
   }
 }
 

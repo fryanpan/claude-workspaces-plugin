@@ -1,19 +1,32 @@
 /**
- * Steps 1 to 3 of the transcript store's test-bucket proof, set up: a test
- * bucket with versioning on, the keys chunks are sealed to, a Fly-style
- * credential that may only put under its host's prefix, and a Mac-style
- * credential that may only read and list.
+ * The transcript store's bucket, set up: the bucket keeping every version, the
+ * key pairs chunks are sealed to, and a credential for the Mac that may only
+ * read and list. A test bucket also gets one writer for a stand-in host.
  *
- * Each run reads what exists and makes only what is missing, so a second run
- * changes nothing. Every credential and identity goes into the Keychain and
- * nowhere else; what is printed is names only.
+ * The real store (`storeNames`) is made in CI, by `fly-provision.yml`'s
+ * deploy (`deploy-store.ts`): there `keychainCreate` seals each identity and
+ * credential to the Mac (`mac-ops.ts`), and each project machine's own
+ * writer is minted by the deploy, not here. Each run reads what exists and
+ * makes only what is missing, so a second run changes nothing. What is
+ * printed is names only.
+ *
+ * Real Tigris answers PutBucketVersioning with 501, so the real store keeps
+ * versions as a Tigris snapshot bucket (`retention: 'snapshots'`, the call the
+ * backup bucket uses, `tigris.ts`). A test bucket asks for S3 versioning.
  */
 import { type BucketCredential, writeOnlyPolicy } from './deploy-plan.ts';
 import { generateSnapshotKeys } from './seal.ts';
 import { s3Bucket } from './store-s3.ts';
-import { TIGRIS_IAM_ENDPOINT, attachPolicy, createAccessKey, ensurePolicy } from './tigris.ts';
+import {
+  TIGRIS_IAM_ENDPOINT,
+  attachPolicy,
+  createAccessKey,
+  enableSnapshots,
+  ensurePolicy,
+  hasSnapshots,
+} from './tigris.ts';
 
-/** The Fly project machine the proof writes as, and the test board it writes for. */
+/** The stand-in host a test bucket's writer puts for, and its board. */
 export const FLY_HOST = 'cw-riverbend-test';
 export const TEST_BOARD = 'riverbend-test';
 
@@ -21,9 +34,29 @@ export interface StoreTestNames {
   bucket: string;
   /** Keychain entries. */
   admin: string;
-  writer: string;
+  /** A test bucket's writer for `FLY_HOST`; the real store mints one per machine. */
+  writer?: string;
   reader: string;
-  identities: { review: string; owner: string; board: string };
+  identities: Record<string, string>;
+  /** How the bucket keeps what an overwrite replaced. S3 versioning unless set. */
+  retention?: 'versioning' | 'snapshots';
+}
+
+/** The one real store, every host's (the owner, 30 Oct 2026: one bucket). */
+export const STORE_BUCKET = 'cw-transcript-store';
+
+export function storeNames(): StoreTestNames {
+  return {
+    bucket: STORE_BUCKET,
+    retention: 'snapshots',
+    admin: `${STORE_BUCKET}-bucket-admin`,
+    reader: `${STORE_BUCKET}-reader`,
+    identities: {
+      review: `${STORE_BUCKET}-review-identity`,
+      owner: `${STORE_BUCKET}-owner-identity`,
+      usage: `${STORE_BUCKET}-usage-identity`,
+    },
+  };
 }
 
 export function storeTestNames(bucket: string): StoreTestNames {
@@ -95,7 +128,21 @@ export async function setupStoreTest(
       ops.keychainCreate(names.admin, JSON.stringify(await ops.createBucket(names.bucket)));
     }
   }
-  if (dryRun && !hasAdmin) {
+  if (names.retention === 'snapshots') {
+    if (dryRun && !hasAdmin) {
+      done.push(`make ${names.bucket} a snapshot bucket`);
+    } else {
+      const admin = readCredential(ops, names.admin);
+      if (!(await hasSnapshots(admin, names.bucket))) {
+        done.push(`make ${names.bucket} a snapshot bucket`);
+        if (!dryRun) {
+          await enableSnapshots(admin, names.bucket);
+          if (!(await hasSnapshots(admin, names.bucket)))
+            throw new Error(`${names.bucket} is not a snapshot bucket after making it one`);
+        }
+      }
+    }
+  } else if (dryRun && !hasAdmin) {
     done.push(`turn on versioning for ${names.bucket}`);
   } else {
     const bucket = s3Bucket(readCredential(ops, names.admin), names.bucket);
@@ -114,12 +161,16 @@ export async function setupStoreTest(
     if (!dryRun) ops.keychainCreate(entry, generateSnapshotKeys().identity);
   }
   const credentials = [
-    {
-      entry: names.writer,
-      what: `the Fly-style credential: put under ${FLY_HOST}/ only`,
-      policy: `${names.bucket}-writer-${FLY_HOST}`,
-      document: writeOnlyPolicy(names.bucket, `${FLY_HOST}/`),
-    },
+    ...(names.writer === undefined
+      ? []
+      : [
+          {
+            entry: names.writer,
+            what: `the Fly-style credential: put under ${FLY_HOST}/ only`,
+            policy: `${names.bucket}-writer-${FLY_HOST}`,
+            document: writeOnlyPolicy(names.bucket, `${FLY_HOST}/`),
+          },
+        ]),
     {
       entry: names.reader,
       what: 'the Mac-style credential: read and list only',

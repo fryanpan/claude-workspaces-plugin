@@ -66,6 +66,7 @@ export async function stageDrill(
     ...wanted,
   };
   const bucket = (entry: string): Bucket => s3Bucket(readCredential(ops, entry), names.bucket);
+  if (names.writer === undefined) throw new Error('the drill needs a test bucket with a writer');
   const writer = bucket(names.writer);
   const reader = bucket(names.reader);
   const admin = bucket(names.admin);
@@ -79,7 +80,7 @@ export async function stageDrill(
   const keys: StoreKeys = {
     review: recipientOf(id(names.identities.review)),
     owner: recipientOf(id(names.identities.owner)),
-    boards: { [TEST_BOARD]: recipientOf(id(names.identities.board)) },
+    boards: { [TEST_BOARD]: recipientOf(id(names.identities.board ?? '')) },
   };
 
   const dir = join(scratch, 'drill');

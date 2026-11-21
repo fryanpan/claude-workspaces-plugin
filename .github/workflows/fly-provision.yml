@@ -22,7 +22,8 @@
 #              sealed settings, then cuts the narrow tokens again
 #              (fly-ci-tokens.yml's apply) so the new app has its own.
 #              What it made for the Mac (the backup identity, the bucket's
-#              keys, the Mac's app token) is sealed to the Mac and uploaded
+#              keys, the Mac's app token, and on the first run the transcript
+#              store's identities and reader) is sealed to the Mac and uploaded
 #              as `handoff-mac`; `bun run handoff:pull` stores it.
 #
 # Both environments admit deployments from main alone and have no reviewer: a
@@ -137,6 +138,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
           HANDOFF_PRIVATE_KEY: ${{ secrets.HANDOFF_PRIVATE_KEY }}
           CW_SECRET_FLY_ORG_SLUG: ${{ vars.FLY_ORG_SLUG }}
+          # The transcript store (deploy-store.ts): empty until the first run
+          # makes the bucket and writes both to this environment.
+          CW_SECRET_CW_TRANSCRIPT_STORE_BUCKET_ADMIN: ${{ secrets.STORE_BUCKET_ADMIN }}
+          CW_SECRET_CW_TRANSCRIPT_STORE_KEYS: ${{ vars.STORE_KEYS }}
           CW_PROVISION_HANDOFF: ${{ runner.temp }}/provision/provision.json
           CW_HANDOFF_OUT: ${{ runner.temp }}/handoff-mac/handoff.json
           PROJECT: ${{ inputs.project }}

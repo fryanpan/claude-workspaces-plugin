@@ -9,6 +9,11 @@
  * secret it was minted with, and every S3 call is judged against the
  * caller's attached policies. A bucket's admin credential may do anything to
  * its bucket. Every credential here is generated inside the test.
+ *
+ * With `{ asTigris: true }` it keeps versions the way real Tigris does:
+ * PutBucketVersioning answers 501, and a bucket keeps versions only once it is
+ * a snapshot bucket (`PATCH /<bucket>` with `{"type":1}`, read back with
+ * `GET /<bucket>?metadata`, the calls `tigris.ts` makes).
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { signRequest } from '../../../infra/project-machine/sigv4.ts';
@@ -71,7 +76,7 @@ function matches(pattern: string, value: string): boolean {
   return pattern.endsWith('*') ? value.startsWith(pattern.slice(0, -1)) : pattern === value;
 }
 
-export function startFakeTigris(): FakeTigris {
+export function startFakeTigris(opts: { asTigris?: boolean } = {}): FakeTigris {
   const keys = new Map<string, Key>();
   const policies = new Map<string, { name: string; statements: Statement[] }>();
   const buckets = new Map<string, FakeBucket>();
@@ -196,8 +201,19 @@ export function startFakeTigris(): FakeTigris {
     const q = url.searchParams;
     const can = (action: string) => allowed(id, action, bucketName, key);
     if (key === null || key === '') {
+      if (q.has('metadata') && req.method === 'GET') {
+        if (!keys.get(id)?.adminOf) return denied();
+        return Response.json({ type: b.versioning === 'Enabled' ? 1 : 0 });
+      }
+      if (req.method === 'PATCH') {
+        if (keys.get(id)?.adminOf !== bucketName) return denied();
+        const type = (JSON.parse(new TextDecoder().decode(body)) as { type?: unknown }).type;
+        if (type === 1) b.versioning = 'Enabled';
+        return Response.json({ status: 'ok' });
+      }
       if (q.has('versioning')) {
         if (req.method === 'PUT') {
+          if (opts.asTigris) return denied('NotImplemented', 501);
           if (!can('s3:PutBucketVersioning')) return denied();
           const status = new TextDecoder().decode(body).match(/<Status>(\w+)<\/Status>/)?.[1];
           b.versioning = status === 'Enabled' ? 'Enabled' : 'Suspended';
