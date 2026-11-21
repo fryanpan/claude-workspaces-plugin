@@ -1,10 +1,6 @@
+import { isReviewPayloadGated } from './review-item-gate.ts';
+import { pendingDeclaration, reviewAnswered, reviewWithdrawn } from './review-item-retired.ts';
 import type { ReviewOption, ReviewPayload } from './review-item-types.ts';
-import {
-  isReviewPayloadGated,
-  pendingDeclaration,
-  reviewAnswered,
-  reviewWithdrawn,
-} from './review-item.ts';
 import type { Thread } from './types.ts';
 import { escapeHtml as escape } from './ui-shared.ts';
 

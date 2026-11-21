@@ -41,6 +41,16 @@ export const EXCLUDED_MODULES: ReadonlyArray<{ module: string; why: string }> = 
       'map; the base bundle only shows their words (`strip-unread-fields.ts`).',
   },
   {
+    module: 'core/src/review-item.ts',
+    why:
+      'the review-item lifecycle (revise, withdraw, reinstate). The dock reads ' +
+      '`review-item-retired.ts` and `review-item-gate.ts`, never this module; import those leaves.',
+  },
+  {
+    module: 'core/src/review-blocks.ts',
+    why: "an item's structured blocks, which the dock never draws (`strip-unread-fields.ts`).",
+  },
+  {
     module: 'core/src/review-judge-prompt.ts',
     why: 'the wording of a server-side model prompt.',
   },
