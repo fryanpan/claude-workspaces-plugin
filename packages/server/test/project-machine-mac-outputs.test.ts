@@ -133,6 +133,29 @@ describe('macOutputs', () => {
     expect(macOutputs('prod', edge)).toEqual(OUTPUTS);
   });
 
+  it('falls back to the sealed read when the state refuses the credential', () => {
+    const i = io({
+      sources: {
+        env: {},
+        keychainHas: (n) => n === 'cloudflare-r2-tfstate',
+        keychainRead: () => '',
+      },
+      state: (env) => {
+        i.calls.push(`state ${env}`);
+        throw new Error('terraform init for prod exited 1');
+      },
+    });
+    const said: string[] = [];
+    i.say = (l) => said.push(l);
+    expect(macOutputs('prod', i)).toEqual(OUTPUTS);
+    expect(i.calls).toEqual(['state prod', 'sealed']);
+    expect(said).toEqual([
+      "[outputs] the state was refused (terraform init for prod exited 1): prod's Terraform outputs from the sealed wall read, run 42, 1h old",
+    ]);
+    // Staging has no sealed read, so its refusal stands.
+    expect(() => macOutputs('staging', i)).toThrow('terraform init for prod exited 1');
+  });
+
   it('refuses staging without a credential: the sealed read is prod only', () => {
     const i = io();
     expect(() => macOutputs('staging', i)).toThrow(/prod's outputs only/);
@@ -265,24 +288,49 @@ describe('the Mac deploy and signin:callbacks with no state credential', () => {
     expect(log('terraform')).toEqual([]);
   }, 60_000);
 
-  it('with a state credential, deploy runs terraform (the control)', () => {
-    clearLogs();
+  /** Deploy with a (fake, revoked) state pair; the terraform stand-in exits 1 on init. */
+  const withCredential = (ageMs: number) => {
     // readOutputs writes a backend file where none exists; remove only ours.
-    const backend = join(stateDir('prod'), 'backend.hcl');
-    const had = existsSync(backend);
+    const dir = stateDir('prod');
+    const had = existsSync(dir);
     try {
-      const r = deploy({
-        ...world(3_600_000),
+      return deploy({
+        ...world(ageMs),
         AWS_ACCESS_KEY_ID: 'id-alice',
         AWS_SECRET_ACCESS_KEY: 'secret-bob',
         CLOUDFLARE_ACCOUNT_ID: ACCOUNT,
       });
-      expect(r.exitCode).toBe(1);
-      expect(r.stderr.toString()).toContain('terraform init for prod exited 1');
-      expect(log('terraform')).toEqual([expect.stringMatching(/^init /)]);
-      expect(log('gh')).toEqual([]);
     } finally {
-      if (!had) rmSync(backend, { force: true });
+      if (!had) rmSync(dirname(dir), { recursive: true, force: true });
     }
+  };
+
+  it('a credential the state refuses falls back to the sealed read', () => {
+    clearLogs();
+    const r = withCredential(3_600_000);
+    const err = r.stderr.toString();
+    expect(log('terraform')).toEqual([expect.stringMatching(/^init /)]);
+    expect(err).toContain(
+      "the state was refused (terraform init for prod exited 1): prod's Terraform outputs from the sealed wall read, run 88, 1h old",
+    );
+    expect(r.stdout.toString()).toContain(
+      `[deploy] tunnel cw-harborlight is ${TUNNEL_ID}, from Terraform`,
+    );
+    expect(log('gh')).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^run download 88 .*--name wall-read-cloudflare/),
+      ]),
+    );
+  }, 60_000);
+
+  it('with a credential, deploy runs terraform; refused and stale, it fails naming both (the control)', () => {
+    clearLogs();
+    const r = withCredential(MAX_AGE_MS + 3_600_000);
+    const err = r.stderr.toString();
+    expect(r.exitCode).toBe(1);
+    expect(log('terraform')).toEqual([expect.stringMatching(/^init /)]);
+    expect(err).toContain('the state was refused (terraform init for prod exited 1), and');
+    expect(err).toContain(DISPATCH_HINT);
+    expect(log('fly')).toEqual([]);
   }, 60_000);
 });

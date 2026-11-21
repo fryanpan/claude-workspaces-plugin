@@ -6,8 +6,10 @@
  * them from the state with `readOutputs`, as before. The Mac holds none since
  * its Cloudflare credentials were retired, so there they come from the newest
  * sealed wall read (`wall-read.yml`, `wall-read-pull.ts`), which carries the
- * same four outputs. That read is of prod only, and one older than
- * `MAX_AGE_MS` is refused, naming the dispatch that makes a new one.
+ * same four outputs. A state read that fails (a configured key can be a
+ * revoked one, as the Mac's is) falls back to the same read. It is of prod
+ * only, and one older than `MAX_AGE_MS` is refused, naming the dispatch that
+ * makes a new one.
  */
 import {
   type CredentialSources,
@@ -46,23 +48,41 @@ export interface MacOutputsIo {
   say: (line: string) => void;
 }
 
-/** The outputs from the state when a credential is configured, else from the sealed read. */
+/**
+ * The outputs from the state when a credential is configured and the state
+ * accepts it, else from the sealed read. A configured key can be a revoked
+ * one (the Mac's was), so a refused state read falls back too, for prod.
+ */
 export function macOutputs(tfEnv: TfEnv, io: MacOutputsIo = realMacOutputsIo()): TfOutputs {
-  if (stateCredentialConfigured(io.sources)) return io.state(tfEnv);
-  if (tfEnv !== 'prod')
+  let refused: string | null = null;
+  if (stateCredentialConfigured(io.sources)) {
+    try {
+      return io.state(tfEnv);
+    } catch (e) {
+      if (tfEnv !== 'prod') throw e;
+      refused = e instanceof Error ? e.message : String(e);
+    }
+  } else if (tfEnv !== 'prod') {
     throw new Error(
       `no state credential, and the sealed wall read holds prod's outputs only, not ${tfEnv}'s`,
     );
-  const pulled = io.sealed();
+  }
+  const why = refused === null ? 'no state credential' : `the state was refused (${refused})`;
+  let pulled: Pulled<CloudflareRead>;
+  try {
+    pulled = io.sealed();
+  } catch (e) {
+    throw new Error(`${why}, and ${e instanceof Error ? e.message : String(e)}`);
+  }
   const age = io.now() - pulled.read.readAt;
+  const hours = Math.round(age / 3_600_000);
   if (age > MAX_AGE_MS || age < -300_000) {
-    const hours = Math.round(age / 3_600_000);
     throw new Error(
-      `the newest sealed wall read (run ${pulled.runId}) is ${hours}h old, older than ${MAX_AGE_MS / 3_600_000}h or from the future: ${DISPATCH_HINT}`,
+      `${why}, and the newest sealed wall read (run ${pulled.runId}) is ${hours}h old, older than ${MAX_AGE_MS / 3_600_000}h or from the future: ${DISPATCH_HINT}`,
     );
   }
   io.say(
-    `[outputs] prod's Terraform outputs from the sealed wall read, run ${pulled.runId}, ${Math.max(0, Math.round(age / 3_600_000))}h old`,
+    `[outputs] ${why}: prod's Terraform outputs from the sealed wall read, run ${pulled.runId}, ${Math.max(0, hours)}h old`,
   );
   return pulled.read.outputs;
 }
