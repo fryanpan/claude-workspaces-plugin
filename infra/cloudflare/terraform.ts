@@ -32,6 +32,8 @@ export const APP_DIRS = { 'signin-test': join(TF_DIR, 'apps', 'signin-test') } a
 export interface TfResult {
   status: number;
   stdout: string;
+  /** Only when run with `capture: 'both'`; still echoed to this process's stderr. */
+  stderr?: string;
 }
 
 /** Every file under `dir` to 600, the directory to 700. */
@@ -54,7 +56,7 @@ export function spawnTerraform(
   cwd: string,
   args: string[],
   env: Record<string, string>,
-  capture = false,
+  capture: boolean | 'both' = false,
   lockDir?: string,
   bin = 'terraform',
 ): TfResult {
@@ -62,10 +64,13 @@ export function spawnTerraform(
     cwd,
     env: { ...process.env, TF_IN_AUTOMATION: '1', ...env },
     encoding: 'utf8',
-    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+    stdio: capture === 'both' ? 'pipe' : capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     maxBuffer: 64 * 1024 * 1024,
   });
   if (lockDir) lockDownState(lockDir);
   if (r.error) throw new Error(`could not run terraform: ${r.error.message}`);
-  return { status: r.status ?? 1, stdout: r.stdout ?? '' };
+  if (capture !== 'both') return { status: r.status ?? 1, stdout: r.stdout ?? '' };
+  // Read for its verdict (outputs.ts `StateRefused`), and still shown.
+  if (r.stderr) process.stderr.write(r.stderr);
+  return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }

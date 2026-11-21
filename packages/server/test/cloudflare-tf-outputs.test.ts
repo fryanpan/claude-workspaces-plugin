@@ -11,7 +11,12 @@ import {
   stateCredentials,
   tfCredentials,
 } from '../../../infra/cloudflare/credentials.ts';
-import { type OutputIo, parseOutputs, readOutputs } from '../../../infra/cloudflare/outputs.ts';
+import {
+  type OutputIo,
+  StateRefused,
+  parseOutputs,
+  readOutputs,
+} from '../../../infra/cloudflare/outputs.ts';
 import { planSummary, verbOf } from '../../../infra/cloudflare/plan-summary.ts';
 import { parseEnvNames } from '../../../infra/cloudflare/vars.ts';
 
@@ -220,6 +225,38 @@ describe('the outputs machine:deploy reads', () => {
       });
     }
     expect(Object.values(written).join()).toContain('cloudflare/prod.tfstate');
+  });
+
+  it('a 401 or 403 from the state bucket is a refusal; any other init failure is not', () => {
+    const failing = (stderr: string) =>
+      io({
+        terraform: () => ({ status: 1, stdout: '', stderr }),
+      }).o;
+    for (const stderr of [
+      'operation error S3: ListObjectsV2, https response error StatusCode: 401, api error Unauthorized',
+      'api error AccessDenied: Access Denied',
+      'operation error S3: HeadObject, https response error StatusCode: 403',
+    ]) {
+      const o = failing(stderr);
+      o.env.CLOUDFLARE_ACCOUNT_ID = ACCOUNT;
+      expect(() => readOutputs('prod', o)).toThrow(StateRefused);
+    }
+    for (const stderr of [
+      'dial tcp: lookup r2.example: no such host',
+      'operation error S3: ListObjectsV2, https response error StatusCode: 503',
+      '',
+    ]) {
+      const o = failing(stderr);
+      o.env.CLOUDFLARE_ACCOUNT_ID = ACCOUNT;
+      let thrown: unknown;
+      try {
+        readOutputs('prod', o);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(StateRefused);
+    }
   });
 
   it('refuses, saying what to run, with no backend file and no account id', () => {

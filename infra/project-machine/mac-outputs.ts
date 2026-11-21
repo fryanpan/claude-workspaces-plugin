@@ -6,8 +6,10 @@
  * them from the state with `readOutputs`, as before. The Mac holds none since
  * its Cloudflare credentials were retired, so there they come from the newest
  * sealed wall read (`wall-read.yml`, `wall-read-pull.ts`), which carries the
- * same four outputs. A state read that fails (a configured key can be a
- * revoked one, as the Mac's is) falls back to the same read. It is of prod
+ * same four outputs. A state read the bucket refuses with a 401 or 403 (a
+ * configured key can be a revoked one, as the Mac's is) falls back to the
+ * same read; any other failure stands, so a transient one never swaps live
+ * outputs for a read up to 36 hours old. It is of prod
  * only, and one older than `MAX_AGE_MS` is refused, naming the dispatch that
  * makes a new one.
  */
@@ -17,7 +19,7 @@ import {
   STATE_CARD_SECRET_ENTRY,
   STATE_ENTRY,
 } from '../cloudflare/credentials.ts';
-import { type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
+import { StateRefused, type TfOutputs, readOutputs } from '../cloudflare/outputs.ts';
 import type { TfEnv } from '../cloudflare/terraform.ts';
 import { keychainHas, keychainRead } from './mac-ops.ts';
 import {
@@ -51,7 +53,8 @@ export interface MacOutputsIo {
 /**
  * The outputs from the state when a credential is configured and the state
  * accepts it, else from the sealed read. A configured key can be a revoked
- * one (the Mac's was), so a refused state read falls back too, for prod.
+ * one (the Mac's was), so a state read refused with 401 or 403 falls back
+ * too, for prod. Any other state failure is thrown as it is.
  */
 export function macOutputs(tfEnv: TfEnv, io: MacOutputsIo = realMacOutputsIo()): TfOutputs {
   let refused: string | null = null;
@@ -59,7 +62,7 @@ export function macOutputs(tfEnv: TfEnv, io: MacOutputsIo = realMacOutputsIo()):
     try {
       return io.state(tfEnv);
     } catch (e) {
-      if (tfEnv !== 'prod') throw e;
+      if (tfEnv !== 'prod' || !(e instanceof StateRefused)) throw e;
       refused = e instanceof Error ? e.message : String(e);
     }
   } else if (tfEnv !== 'prod') {

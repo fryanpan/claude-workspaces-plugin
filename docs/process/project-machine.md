@@ -137,9 +137,10 @@ entries in the Keychain); `infra/project-machine/mac-outputs.ts` decides:
 - **Without it, or when the state refuses it**, the newest sealed wall read (`wall-read.yml`, read with `gh` and
   opened with the Mac's handoff key, as `machine:wall-report` does). The
   Mac's Cloudflare credentials were retired, but its Keychain may still hold
-  the revoked state key, so a failed `terraform init` or `output` falls back
-  here too, with one line saying the state was refused and which run, how
-  old, it used instead. It holds
+  the revoked state key, so a `terraform init` the state bucket refuses with
+  a 401 or 403 falls back here too, with one line saying the state was
+  refused and which run, how old, it used instead. Any other failure (a
+  network error, a 5xx) stops the run rather than use an older read. It holds
   prod's outputs only, so `--tf-env staging` without the credential fails.
   A read older than 36 hours, or no readable read at all, fails the run
   before Fly is touched, and the message names the fix:
