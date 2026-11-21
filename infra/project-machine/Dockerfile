@@ -53,7 +53,8 @@ FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14
 # `nftables` loads the lead's network wall (lead-egress.ts) as a native table
 # matched by `meta skuid`, which Fly's kernel has; `iptables` (nft and legacy,
 # IPv4 and IPv6) is the fallback for a kernel with the owner match instead. `cwproxy` runs the proxy that is the wall's one way out
-# (lead-proxy.ts); the wall does not hold it.
+# (lead-proxy.ts); the wall does not hold it. `cwstore` sends the transcript
+# store's spools (store-sender.ts) with the store's credential and nothing else.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git iptables nftables openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
@@ -64,13 +65,14 @@ RUN apt-get update \
   && useradd --uid 10005 --create-home --shell /usr/sbin/nologin cwdev \
   && useradd --uid 10006 --create-home --shell /usr/sbin/nologin cwrelease \
   && useradd --uid 10007 --create-home --shell /usr/sbin/nologin cwproxy \
+  && useradd --uid 10008 --create-home --shell /usr/sbin/nologin cwstore \
   && groupadd --gid 10010 cwboard \
   && groupadd --gid 10011 cwdevsrc \
   && usermod -aG cwboard cw \
   && usermod -aG cwboard lead \
   && usermod -aG cwdevsrc cwdev \
   && usermod -aG cwdevsrc lead \
-  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev /home/cwrelease /home/cwproxy
+  && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead /home/cwdev /home/cwrelease /home/cwproxy /home/cwstore
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 # The lead clones and fetches its project's repo over SSH with a deploy key
 # (lead.sh); GitHub's host keys are pinned, not learned on first use.

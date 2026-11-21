@@ -143,7 +143,7 @@ const TAIL = 4096;
 const DEFAULT_MAX_CHUNK = 8 * 1024 * 1024;
 const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-const validSegment = (s: string): boolean => SEGMENT.test(s);
+export const validSegment = (s: string): boolean => SEGMENT.test(s);
 export const validBoard = (b: string): boolean => validSegment(b) && b !== UNSORTED;
 
 export function loadState(path: string): State {
