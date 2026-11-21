@@ -2582,7 +2582,9 @@ it refuses loopback TCP from that user, by uid, at the front door. The runbook i
 [docs/process/project-machine.md](../process/project-machine.md). Which Claude
 account a lead runs on comes from the Mac's central token list
 (`infra/project-machine/token-list.ts`); `machine:tokens` moves a project
-between listed tokens and reads each one's usage. None of it is in a package.
+between listed tokens, reads each one's usage, and copies each lead's token
+counts per turn into `~/.claude/projects` for the fleet's budget watch
+(`machine-burn.ts`). None of it is in a package.
 
 `claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
 it holds one piece of process state the domain row's purity bar would not
