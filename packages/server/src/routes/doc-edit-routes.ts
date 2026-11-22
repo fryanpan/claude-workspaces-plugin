@@ -13,6 +13,7 @@
  * moved here with their family rather than staying unassigned.
  */
 import type { prose } from '@claude-workspaces/core';
+import { NOTES_AUTHOR_ID } from '../notes-doc-access.ts';
 import { taskIdOfBodyDoc } from '../task-projection.ts';
 import { treeFsMode } from '../tree-fs.ts';
 import {
@@ -303,6 +304,10 @@ export async function handleDocEditRoutes(
   // changes nothing about where the edit lands — and a reader watching the doc
   // never sees half a batch. Authorship decides direct-vs-proposal inside
   // core: an edit to a block a person has touched comes back `suggested`.
+  // A block still marked as the Meeting Assistant's counts as the caller's:
+  // a person typing in it clears the mark, so it holds no person's words, and
+  // an agent tidying the notes should not leave a suggestion per bullet.
+  // Not for a share visitor, whose reach this does not widen.
   if (rest === 'block_edits' && req.method === 'POST') {
     const body = sent<BlockEditsBody>(await safeJson(req));
     const parsed = parseBlockEdits(body?.edits);
@@ -314,6 +319,7 @@ export async function handleDocEditRoutes(
       author: author.id,
       authorName: author.name,
       authorColor: author.color,
+      ...(visitor ? {} : { directAuthors: [NOTES_AUTHOR_ID] }),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
     return j(200, withSyncError(docStore, docId, res));
