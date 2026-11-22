@@ -19,6 +19,7 @@ import {
   prose,
 } from '@claude-workspaces/core';
 import { LEAD_CHAT_MEETING_EVENT, type LeadChatMeeting } from '@claude-workspaces/core/lead-chat';
+import { LeadChatMeetings } from '../src/lead-chat/meeting.ts';
 import { createStubNotesComposer } from '../src/meeting-notes.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
@@ -137,5 +138,35 @@ describe('a recording’s coverage on an open page', () => {
     });
     socket.close();
     page.close();
+  });
+
+  it('forgets a live status after a restart, keeping a stopped one', () => {
+    const deps = { dataDir, broadcast: () => {}, newId: () => 'lcm-restart' };
+    const one = new LeadChatMeetings(deps);
+    one.start('w-riverbend', {
+      by: { id: BRYAN.id, name: 'Bryan' },
+      docId,
+      docTitle: 'Saltmarsh sync',
+      notes: 'none',
+      source: 'mic',
+      speakers: 'solo',
+      recorder: 'rec-9',
+    });
+    one.recording('w-riverbend', 'lcm-restart', { meetingId: 'm-9', recorder: 'rec-9' });
+    const live = {
+      meetingId: 'm-9',
+      startedAt: 1,
+      capturedMs: 60_000,
+      asOf: 60_001,
+      state: 'recording' as const,
+      gapsClosed: 0,
+    };
+    one.coverageForDoc(docId, live);
+    expect(one.current('w-riverbend')?.coverage?.state).toBe('recording');
+    // Nothing watches the recording once the process is gone, so a page must
+    // not be told it is still recording.
+    expect(new LeadChatMeetings(deps).current('w-riverbend')?.coverage).toBeUndefined();
+    one.coverageForDoc(docId, { ...live, state: 'stopped' });
+    expect(new LeadChatMeetings(deps).current('w-riverbend')?.coverage?.state).toBe('stopped');
   });
 });

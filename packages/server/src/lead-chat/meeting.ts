@@ -296,7 +296,16 @@ export class LeadChatMeetings {
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as { meeting?: LeadChatMeeting | null };
       const m = raw.meeting;
-      return m && typeof m.id === 'string' && Array.isArray(m.lines) ? m : null;
+      if (!(m && typeof m.id === 'string' && Array.isArray(m.lines))) return null;
+      // A live coverage read back from disk is a claim nothing is watching any
+      // more: the watch that wrote it died with the process. Showing
+      // "Recording" from it is the silent failure coverage exists to end, so
+      // it goes until the next leg to start sends a fresh one.
+      if (m.coverage && m.coverage.state !== 'stopped') {
+        const { coverage: _stale, ...rest } = m;
+        return rest;
+      }
+      return m;
     } catch (err) {
       console.error(`[lead-chat] could not read ${workspaceId}'s meeting: ${String(err)}`);
       return null;
