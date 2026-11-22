@@ -4122,6 +4122,79 @@ What no test can do is start Chrome's share picker: the real-meeting
 confirmation over real screen shares is a person's step and is not covered
 here.
 
+## How much of a meeting was heard (2026-11-21)
+
+**The incident.** A 188-minute public meeting reached the transcript for about
+68 minutes: the start was missed, there were gaps of 9 and 3 minutes, and the
+last 46 minutes were lost. Nobody in the room was told, and the notes read as
+complete. The note-taker's own quality score covered only what was recorded,
+so it hid the loss too.
+
+**Three things now say it.**
+
+- **Live, on every page of the board.** The lead chat's meeting carries a
+  `coverage` field (`MeetingCoverageLive`, `core/src/meeting-coverage.ts`):
+  the audio received so far, whether it is still arriving, and any gap open
+  now. The heading shows "Recording · 42 min" beside "Meeting", and "of N"
+  once anything was lost, so a closed gap stays visible. The server sends the
+  field only when the state changes; a page counts the minutes forward itself
+  and redraws every 30s.
+- **An alert, during the meeting.** No audio frame for over a minute
+  (`COVERAGE_GAP_MS`) on a live socket, or a socket that closed without a
+  `stop` and was not resumed within that minute, turns the coverage to `gap`.
+  The panel then shows one alert line above the notes, and the closed chat's
+  bar shows it in place of the room's words. It names the cause: "No audio has
+  reached the meeting since 18:02" or "The recording device lost its
+  connection at 18:02". It is steady text; nothing pulses.
+- **A stamp, when the meeting ends.** One line under the meeting's notes
+  heading: "Coverage: captured 68 of 188 minutes; gaps at 18:02–18:11,
+  19:40–19:43." A later end of the same meeting replaces it in place, found
+  by its `Coverage:` prefix. A meeting that settled no turn gets no line,
+  because it wrote no notes; the figures still go to `meeting.json`.
+
+**What "captured" means.** Audio bytes the server received, counted per
+stream in `ActiveMeeting.recordAudio` whatever the project keeps, and written
+as `audioMs` on each leg's stop line in `meetings.jsonl`; the fold sums the
+legs. The stamp states the smaller of that and the time outside the gaps, so
+its two figures never add up to more than the meeting. Elapsed runs from the
+meeting's start to its last leg's end.
+
+**Why a minute, and why the drop alert waits.** A browser sends frames
+continuously, silent room or not, so a minute without one means the capture
+stopped, never that the room went quiet. A page move in the lead chat closes
+the socket and resumes in 100–350ms, so alerting on the close itself would
+fire on every move. A drop is therefore a gap only once it has lasted the
+same minute.
+
+**Which gaps count.** A no-audio gap is written to the index as gap lines with
+`gapReason: 'no-audio'`, on every stream, beside the `reconnect` gaps a resume
+writes and the capture gaps the browser reports. The stamp counts only
+stretches where EVERY stream of the meeting was down (`wholeMeetingGaps`): a
+mic+system meeting whose Mac audio died lost a source, not the meeting.
+
+**A drop that never comes back.** The relay waits `ABANDON_MS` (150s: the
+browser stops retrying at two minutes) and then stamps the notes with how it
+ended: "The recording stopped at 19:40 when its connection was lost." A
+person's Stop, the silence timeout and a lost engine stamp at once. A server
+restart cancels the wait; a meeting that is never resumed after one gets no
+stamp, only its `meeting.json` figures from the leg's own stop.
+
+**Not built: a complete change of voices.** The engine's speaker labels are
+per session and start again at "A" after every reconnect, and a solo capture
+(the default) has no labels at all. A "new set of voices" test would fire on
+every page move and never on a solo meeting, so it was left out. Keeping a
+second call off the microphone is a design question, written up on the PR.
+
+**Where it lives.** `meeting-coverage-watch.ts` (the timer and the live
+state, one per recording, driven from `MeetingRelay.deliver`, `start` and
+`stop`) · `meeting-coverage-stamp.ts` (the figures from a folded record, and
+the line into the notes) · `writeCoverageJson` in `meeting-raw.ts` ·
+`LeadChatMeetings.coverageForDoc` (`lead-chat/meeting.ts`) · the status and
+alert in `lead-chat/lead-chat-meeting-view.ts`. Tests:
+`meeting-coverage.test.ts` (relay, fake clock) and
+`lead-chat-meeting-coverage.test.ts` (real server to an open page; and the
+app's own, for the panel).
+
 ## Where things live
 
 `packages/core/src/meeting.ts` (wire contract, incl. `CaptureMode` and
