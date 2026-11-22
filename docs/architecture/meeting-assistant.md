@@ -4185,6 +4185,22 @@ per session and start again at "A" after every reconnect, and a solo capture
 every page move and never on a solo meeting, so it was left out. Keeping a
 second call off the microphone is a design question, written up on the PR.
 
+**A stopped recording comes back as the same recording.** The same meeting
+started a new recording five times: each segment had its own meeting id. In
+the lead chat, a recording that stopped (the connection lost past the
+two-minute retry, a long silence, a lost engine) left the page with only End
+meeting, and the next Start opened a new meeting. Only a reload took the old
+one back. Now, while the board's meeting runs, the recording page shows "Tap
+to keep recording", and that tap starts again with `resume: <meetingId>`
+(`createLeadMeetingRun().tap`, `lead-chat-meeting.ts`). File times alone
+cannot prove which of those endings happened in that meeting; this closes the
+only path that turns any of them into a new id.
+
+**Another call's audio is transcribed by design under Mac Audio.** The
+wizard's "Mac Audio" source is `mic+system`: one engine session per stream,
+and both streams' turns go into one transcript and one notes pipeline. A call
+the Mac plays is in the transcript, attributed like anyone in the room.
+
 **Where it lives.** `meeting-coverage-watch.ts` (the timer and the live
 state, one per recording, driven from `MeetingRelay.deliver`, `start` and
 `stop`) · `meeting-coverage-stamp.ts` (the figures from a folded record, and

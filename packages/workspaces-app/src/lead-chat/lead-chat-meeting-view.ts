@@ -243,7 +243,9 @@ export function createMeetingView(doc: Document): MeetingView {
         meeting.notes === 'none' ? 'Notes: not written down' : `Notes: ${meeting.docTitle}`;
       count.textContent = linesLabel(meeting.lines.length);
 
-      tap.hidden = !(m.recording && m.run.phase === 'tap');
+      // Also after the recording stopped with the meeting still running: the
+      // same tap takes it back as the same recording (`lead-chat-meeting.ts`).
+      tap.hidden = !(m.recording && (m.run.phase === 'tap' || m.run.phase === 'stopped'));
       const note =
         !m.recording || m.run.phase === 'tap'
           ? ''
