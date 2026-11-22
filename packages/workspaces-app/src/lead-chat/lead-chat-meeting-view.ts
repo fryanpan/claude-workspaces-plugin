@@ -8,8 +8,11 @@
  * It was a box of every line under the header, which took up to 38% of the
  * panel (the owner, 13 Nov: "the raw notes take half the chat").
  *
- * Beside "Meeting", a steady status says whether audio is arriving and how
- * many minutes have been captured ("Recording · 42 min"), and a gap of over a
+ * Once the recording runs, a steady status takes the place of the word
+ * "Meeting" and says whether audio is arriving and how many minutes have been
+ * captured ("Recording · 42 min"). It is sized for its widest label, and the
+ * row has no room for both: measured at the panel's ~420px, the status
+ * beside the word pushed End meeting under the close button. A gap of over a
  * minute adds one alert line above the notes, on every page of the board
  * (`core/src/meeting-coverage.ts`). No pulse and no badge: the words change
  * and the dot goes grey, nothing moves.
@@ -36,12 +39,19 @@ export const MEETING_STYLES = `
 .lc-meet-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #d1242f; }
 .lc-meet-dot.lc-off { background: #8a8780; }
 .lc-meet-name { flex: none; font-size: 15px; font-weight: 650; }
-.lc-meet-status { flex: none; min-width: 9.5em; font-size: 12.5px; color: var(--fg-muted, #57606a); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-meet-status { flex: none; width: 14.75em; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--fg-muted, #57606a); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lc-meet-status.lc-warn { color: #a40e26; font-weight: 600; }
-.lc-faces { display: flex; min-width: 0; overflow: hidden; }
+.lc-faces { flex: 1 1 0; min-width: 0; display: flex; overflow: hidden; container-type: inline-size; }
 .lc-face { flex: none; width: 26px; height: 26px; margin-left: -6px; border: 2px solid var(--bg, #fff); border-radius: 50%; background: #e5e0d6; color: #3d3a33; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 650; }
 .lc-face:first-child { margin-left: 0; }
-.lc-meet-sp { flex: 1; }
+/* The status can leave the faces little room: a face that
+   does not fit is hidden whole, never drawn as a clipped sliver. After the
+   rules above, which they must outrank. */
+@container (max-width: 29px) { .lc-face { display: none; } }
+@container (max-width: 53px) { .lc-face:nth-child(n+2) { display: none; } }
+@container (max-width: 77px) { .lc-face:nth-child(n+3) { display: none; } }
+@container (max-width: 101px) { .lc-face:nth-child(n+4) { display: none; } }
+.lc-meet-sp { flex: none; }
 .lc-end { flex: none; height: 36px; margin: 0; padding: 0 12px; border: 1px solid #1a1a18; border-radius: 8px; background: #1a1a18; color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .lc-end:disabled { opacity: .5; cursor: default; }
 .lc-notes { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--border, #d1d5da); background: #faf8f3; }
@@ -72,7 +82,7 @@ export interface MeetingViewModel {
 /** How often the minutes are redrawn while audio is arriving. */
 export const STATUS_TICK_MS = 30_000;
 
-/** The status beside "Meeting", or empty before the recording first runs. */
+/** The status in the heading, or empty before the recording first runs. */
 export function meetingStatus(c: MeetingCoverageLive | undefined, now: number): string {
   return c ? coverageStatusLabel(c, now) : '';
 }
@@ -186,6 +196,7 @@ export function createMeetingView(doc: Document): MeetingView {
   const drawStatus = (now: number): void => {
     status.textContent = meetingStatus(shown, now);
     status.hidden = status.textContent === '';
+    name.hidden = !status.hidden;
     status.classList.toggle('lc-warn', shown?.state === 'gap');
   };
   const tick = (): void => {

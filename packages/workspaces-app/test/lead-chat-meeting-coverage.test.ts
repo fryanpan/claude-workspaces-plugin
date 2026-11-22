@@ -74,6 +74,8 @@ function heard(over: Partial<MeetingCoverageLive> = {}): MeetingCoverageLive {
 
 const status = (view: LeadChatMount['view']) =>
   view.meeting.head.querySelector<HTMLElement>('.lc-meet-status');
+const name = (view: LeadChatMount['view']) =>
+  view.meeting.head.querySelector<HTMLElement>('.lc-meet-name');
 const alert = (view: LeadChatMount['view']) =>
   view.meeting.notes.querySelector<HTMLElement>('.lc-alert');
 
@@ -84,6 +86,8 @@ describe('a meeting’s recording status in the lead chat', () => {
     t.view.button.click();
     expect(status(t.view)?.textContent).toBe('Recording · 12 min');
     expect(alert(t.view)?.hidden).toBe(true);
+    // The status takes the word's place: the row has no room for both.
+    expect(name(t.view)?.hidden).toBe(true);
   });
 
   it('raises the alert on an open page when the audio stops, and clears it when it returns', async () => {
@@ -140,5 +144,6 @@ describe('a meeting’s recording status in the lead chat', () => {
     t.view.button.click();
     expect(status(t.view)?.hidden).toBe(true);
     expect(alert(t.view)?.hidden).toBe(true);
+    expect(name(t.view)?.hidden).toBe(false);
   });
 });
