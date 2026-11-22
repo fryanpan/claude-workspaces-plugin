@@ -8,6 +8,7 @@
  * a `lead-chat.changed` frame on `/workspaces/<ws>/events:stream`, carrying
  * the message whole, so a page upserts it by id and needs no second read.
  */
+import type { MeetingCoverageLive } from './meeting-coverage.ts';
 
 /** The board-stream event a changed message rides. */
 export const LEAD_CHAT_EVENT = 'lead-chat.changed';
@@ -257,6 +258,9 @@ export interface LeadChatMeeting {
   people: Array<{ id: string; name: string }>;
   /** The last `LEAD_CHAT_MEETING_LINES` final lines, oldest first. */
   lines: LeadChatMeetingLine[];
+  /** How much audio the recording has received, and any gap open now.
+   *  Absent until the recording first goes live, and for a bot meeting. */
+  coverage?: MeetingCoverageLive;
 }
 
 /** How many lines a meeting keeps for the live notes. */
