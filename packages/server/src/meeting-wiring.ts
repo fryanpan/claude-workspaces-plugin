@@ -26,7 +26,7 @@
  * anonymous actor's colour arrives as a value.
  */
 import { hashToColor } from '@claude-workspaces/core';
-import type { User } from '@claude-workspaces/core';
+import type { MeetingCoverageLive, User } from '@claude-workspaces/core';
 import { ownerIdentityIds } from './actor-identity.ts';
 import type { BoardMembership } from './board-membership.ts';
 import { parseDocKey } from './doc-key.ts';
@@ -80,6 +80,9 @@ export interface MeetingLateDeps {
   ) => Promise<{ threadId: string; requestedAt?: number } | null>;
   /** The board's docs as a lookup ask sees them. */
   lookupDocs: (workspaceId: string, exceptDocId: string) => LookupDoc[];
+  /** Where a recording's live coverage goes: the lead chat's meeting on
+   *  that doc (`LeadChatMeetings.coverageForDoc`). */
+  meetingCoverage?: () => (docId: string, coverage: MeetingCoverageLive) => void;
 }
 
 export interface MeetingWiringDeps {
@@ -292,6 +295,9 @@ export function wireMeetings(deps: MeetingWiringDeps) {
       : null,
     // Lifecycle only. The words never touch this bus — see meeting-protocol.
     broadcast: (docId, payload) => sse.broadcast(docId, payload),
+    // Whether audio is still arriving, onto the lead chat's meeting for that
+    // doc, which every page of its board shows.
+    onCoverage: (docId, coverage) => late.meetingCoverage?.()(docId, coverage),
     // Which note-taker this doc uses, changed while it is recording. The
     // same write the at-rest route makes, so the two halves of one choice
     // cannot disagree about where the answer is kept.

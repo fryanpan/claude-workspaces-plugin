@@ -1281,7 +1281,9 @@ describe('notes through the audio socket', () => {
         quietMs: 1000,
         schedule,
         onNotes: (u) => {
-          updates.push(u);
+          // The coverage line a stop writes is not a tick (meeting-coverage.test.ts).
+          if (!u.edits.some((e) => 'markdown' in e && e.markdown.startsWith('Coverage:')))
+            updates.push(u);
         },
       },
     });

@@ -113,6 +113,26 @@ describe('the lead chat meeting, on the device that records it', () => {
     expect(other.net.last().json()[0]).not.toHaveProperty('notes');
   });
 
+  it('takes a stopped recording back as the same recording when tapped, while the meeting runs', async () => {
+    const { meeting, net, run } = setup();
+    await run.begin(meeting, { gesture: true });
+    const first = net.last();
+    first.onopen?.();
+    first.say({ type: 'ready', meetingId: 'm-77' });
+    await flush();
+    // The server ends the recording (a long silence); the board's meeting
+    // runs on, so the page must offer a way back into the same recording.
+    first.say({ type: 'stopped', reason: 'silence' });
+    expect(run.state().phase).toBe('stopped');
+    run.tap();
+    await flush();
+    const second = net.last();
+    expect(second).not.toBe(first);
+    second.onopen?.();
+    expect(second.json()[0]).toMatchObject({ type: 'start', resume: 'm-77' });
+    expect(second.json()[0]).not.toHaveProperty('handoff');
+  });
+
   it('on the next page, asks for the same recording back, and needs no tap where the microphone runs', async () => {
     const { net, mic, clock, run } = setup({
       meeting: meetingFixture({ meetingId: 'm-77' }),

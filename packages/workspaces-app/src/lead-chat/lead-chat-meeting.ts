@@ -107,7 +107,8 @@ export interface LeadMeetingRun {
     meeting: LeadChatMeeting,
     how: { gesture: boolean; context?: AudioContext; botUrl?: string },
   ): Promise<void>;
-  /** The tap a resumed page asked for. */
+  /** The tap a resumed page asked for, or the one that takes a stopped
+   *  recording back while its meeting still runs. */
   tap(): void;
   /** End the recording for good: the server is told to stop. */
   stop(): void;
@@ -379,7 +380,20 @@ export function createLeadMeetingRun(opts: LeadMeetingRunOpts): LeadMeetingRun {
       if (!how.gesture) watchForTap();
     },
     tap() {
-      if (state.phase !== 'tap' || !meeting) return;
+      if (!meeting) return;
+      // A recording that stopped (the connection lost for good, a long
+      // silence, a lost engine) while the board's meeting runs on: the tap
+      // starts it again as the SAME recording. `begin` asks for
+      // `resume: <meetingId>`, so the transcript and the notes section carry
+      // on. Without this the page offered only End meeting, and the next
+      // Start opened a new recording every time.
+      if (state.phase === 'stopped' && meeting.source !== 'bot') {
+        const m = { ...meeting, meetingId: recordingId ?? meeting.meetingId };
+        set({ phase: 'idle' });
+        void this.begin(m, { gesture: true });
+        return;
+      }
+      if (state.phase !== 'tap') return;
       if (capture) {
         // Inside the gesture: the one call Safari lets start the context.
         void capture.resumeAudio();

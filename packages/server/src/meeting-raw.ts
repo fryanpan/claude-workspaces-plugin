@@ -153,6 +153,16 @@ export interface MeetingJsonSegment {
    * flush that finds something to say writes the whole segment instead.
    */
   noTurnsYet?: true;
+  /**
+   * How much of the meeting was heard, as the notes' coverage stamp states it
+   * (`meeting-coverage-stamp.ts`). Rewritten at each end of the meeting.
+   */
+  coverage?: {
+    capturedMs: number;
+    elapsedMs: number;
+    gaps: Array<{ from: number; to: number }>;
+    droppedAt?: number;
+  };
 }
 
 /**
@@ -502,6 +512,34 @@ export function writeMeetingJson(dataDir: string, docId: string, json: MeetingJs
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(json, null, 2)}\n`);
   renameSync(tmp, path);
+}
+
+/**
+ * The figures into the meeting's segment entry in `meeting.json`. Only when
+ * the file and the entry already exist: a project that keeps no transcript
+ * has no file, and this must never be what creates one.
+ */
+export function writeCoverageJson(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+  coverage: {
+    capturedMs: number;
+    elapsedMs: number;
+    gaps: ReadonlyArray<{ from: number; to: number }>;
+    droppedAt?: number;
+  },
+): void {
+  const json = readMeetingJson(dataDir, docId);
+  const segment = json?.segments.find((s) => s.meetingId === meetingId);
+  if (!json || !segment) return;
+  segment.coverage = {
+    capturedMs: coverage.capturedMs,
+    elapsedMs: coverage.elapsedMs,
+    gaps: coverage.gaps.map((g) => ({ from: g.from, to: g.to })),
+    ...(coverage.droppedAt !== undefined ? { droppedAt: coverage.droppedAt } : {}),
+  };
+  writeMeetingJson(dataDir, docId, { ...json, updatedAt: Date.now() });
 }
 
 /**

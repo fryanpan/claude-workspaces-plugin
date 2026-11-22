@@ -13,6 +13,7 @@ export * from './meeting-tuning.ts';
 export * from './meeting-bot.ts';
 export * from './meeting-timing.ts';
 export * from './meeting-transcript-fold.ts';
+export * from './meeting-coverage.ts';
 export * from './speech-lexicon.ts';
 export * from './model-cost.ts';
 export * from './redline.ts';

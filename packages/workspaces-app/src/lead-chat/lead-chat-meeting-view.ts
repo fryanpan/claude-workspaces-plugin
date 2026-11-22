@@ -8,8 +8,23 @@
  * It was a box of every line under the header, which took up to 38% of the
  * panel (the owner, 13 Nov: "the raw notes take half the chat").
  *
+ * Once the recording runs, a steady status takes the place of the word
+ * "Meeting" and says whether audio is arriving and how many minutes have been
+ * captured ("Recording · 42 min"). It is sized for its widest label, and the
+ * row has no room for both: measured at the panel's ~420px, the status
+ * beside the word pushed End meeting under the close button. A gap of over a
+ * minute adds one alert line above the notes, on every page of the board
+ * (`core/src/meeting-coverage.ts`). No pulse and no badge: the words change
+ * and the dot goes grey, nothing moves.
+ *
  * Drawing only; `lead-chat-mount.ts` decides what End meeting and the tap do.
  */
+import {
+  type MeetingCoverageLive,
+  coverageAlert,
+  coverageStatusLabel,
+  localClock,
+} from '@claude-workspaces/core';
 import type { LeadChatMeeting } from '@claude-workspaces/core/lead-chat';
 import type { MeetingRunState } from './lead-chat-meeting.ts';
 
@@ -24,10 +39,19 @@ export const MEETING_STYLES = `
 .lc-meet-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #d1242f; }
 .lc-meet-dot.lc-off { background: #8a8780; }
 .lc-meet-name { flex: none; font-size: 15px; font-weight: 650; }
-.lc-faces { display: flex; min-width: 0; }
+.lc-meet-status { flex: none; width: 14.75em; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--fg-muted, #57606a); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-meet-status.lc-warn { color: #a40e26; font-weight: 600; }
+.lc-faces { flex: 1 1 0; min-width: 0; display: flex; overflow: hidden; container-type: inline-size; }
 .lc-face { flex: none; width: 26px; height: 26px; margin-left: -6px; border: 2px solid var(--bg, #fff); border-radius: 50%; background: #e5e0d6; color: #3d3a33; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 650; }
 .lc-face:first-child { margin-left: 0; }
-.lc-meet-sp { flex: 1; }
+/* The status can leave the faces little room: a face that
+   does not fit is hidden whole, never drawn as a clipped sliver. After the
+   rules above, which they must outrank. */
+@container (max-width: 29px) { .lc-face { display: none; } }
+@container (max-width: 53px) { .lc-face:nth-child(n+2) { display: none; } }
+@container (max-width: 77px) { .lc-face:nth-child(n+3) { display: none; } }
+@container (max-width: 101px) { .lc-face:nth-child(n+4) { display: none; } }
+.lc-meet-sp { flex: none; }
 .lc-end { flex: none; height: 36px; margin: 0; padding: 0 12px; border: 1px solid #1a1a18; border-radius: 8px; background: #1a1a18; color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .lc-end:disabled { opacity: .5; cursor: default; }
 .lc-notes { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--border, #d1d5da); background: #faf8f3; }
@@ -38,6 +62,7 @@ export const MEETING_STYLES = `
 .lc-notes-n { flex: none; font-size: 12.5px; color: var(--fg-muted, #57606a); font-variant-numeric: tabular-nums; }
 .lc-tap { flex: none; margin: 4px 16px 8px; height: 40px; border: 1px solid #d1242f; border-radius: 8px; background: var(--bg, #fff); color: #d1242f; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .lc-run-note { flex: none; margin: 0 16px 6px; font-size: 12.5px; color: var(--fg-muted, #57606a); }
+.lc-alert { flex: none; margin: 6px 16px 2px; padding: 6px 10px; border-left: 3px solid #d1242f; background: #fff5f5; color: #82071e; font-size: 14px; line-height: 20px; }
 `;
 
 export interface MeetingViewModel {
@@ -50,6 +75,21 @@ export interface MeetingViewModel {
   /** Lines the lead said that this page is playing, or has played. */
   playing?: number | null;
   said?: ReadonlySet<number>;
+  /** The clock the minutes are read on; absent is `Date.now`. */
+  now?: number;
+}
+
+/** How often the minutes are redrawn while audio is arriving. */
+export const STATUS_TICK_MS = 30_000;
+
+/** The status in the heading, or empty before the recording first runs. */
+export function meetingStatus(c: MeetingCoverageLive | undefined, now: number): string {
+  return c ? coverageStatusLabel(c, now) : '';
+}
+
+/** The alert for a gap open now, in the reader's own HH:MM, or empty. */
+export function meetingAlert(c: MeetingCoverageLive | undefined): string {
+  return c ? coverageAlert(c, localClock) : '';
 }
 
 /** The one line of notes: who said it and what, as `lead-chat-tail.ts`
@@ -125,10 +165,12 @@ export function createMeetingView(doc: Document): MeetingView {
   const dot = el('span', 'lc-meet-dot');
   dot.setAttribute('aria-hidden', 'true');
   const name = el('span', 'lc-meet-name', 'Meeting');
+  const status = el('span', 'lc-meet-status');
+  status.setAttribute('role', 'status');
   const faces = el('span', 'lc-faces');
   const end = el('button', 'lc-end', 'End meeting');
   end.type = 'button';
-  head.append(dot, name, faces, el('span', 'lc-meet-sp'), end);
+  head.append(dot, name, status, faces, el('span', 'lc-meet-sp'), end);
 
   const notes = el('section', 'lc-notes');
   notes.hidden = true;
@@ -142,7 +184,33 @@ export function createMeetingView(doc: Document): MeetingView {
   const runNote = el('p', 'lc-run-note');
   const tap = el('button', 'lc-tap', 'Tap to keep recording');
   tap.type = 'button';
-  notes.append(row, runNote, tap);
+  const alert = el('p', 'lc-alert');
+  alert.setAttribute('role', 'alert');
+  alert.hidden = true;
+  notes.append(alert, row, runNote, tap);
+
+  /** The minutes move on by themselves while audio arrives, so the status is
+   *  redrawn on a slow tick; it stops when the heading leaves the page. */
+  let shown: MeetingCoverageLive | undefined;
+  let ticking = false;
+  const drawStatus = (now: number): void => {
+    status.textContent = meetingStatus(shown, now);
+    status.hidden = status.textContent === '';
+    name.hidden = !status.hidden;
+    status.classList.toggle('lc-warn', shown?.state === 'gap');
+  };
+  const tick = (): void => {
+    if (ticking || shown?.state !== 'recording') return;
+    const win = doc.defaultView;
+    if (!win) return;
+    ticking = true;
+    win.setTimeout(() => {
+      ticking = false;
+      if (!head.isConnected || head.hidden) return;
+      drawStatus(Date.now());
+      tick();
+    }, STATUS_TICK_MS);
+  };
 
   return {
     head,
@@ -155,7 +223,13 @@ export function createMeetingView(doc: Document): MeetingView {
       head.hidden = !meeting;
       notes.hidden = !meeting;
       if (!meeting) return;
-      dot.classList.toggle('lc-off', m.recording && m.run.phase !== 'recording');
+      shown = meeting.coverage;
+      const silent = shown !== undefined && shown.state !== 'recording';
+      dot.classList.toggle('lc-off', (m.recording && m.run.phase !== 'recording') || silent);
+      drawStatus(m.now ?? Date.now());
+      tick();
+      alert.textContent = meetingAlert(shown);
+      alert.hidden = alert.textContent === '';
       faces.replaceChildren();
       for (const p of meeting.people.slice(0, FACES_SHOWN)) {
         const f = el('span', 'lc-face', initials(p.name));
@@ -169,7 +243,9 @@ export function createMeetingView(doc: Document): MeetingView {
         meeting.notes === 'none' ? 'Notes: not written down' : `Notes: ${meeting.docTitle}`;
       count.textContent = linesLabel(meeting.lines.length);
 
-      tap.hidden = !(m.recording && m.run.phase === 'tap');
+      // Also after the recording stopped with the meeting still running: the
+      // same tap takes it back as the same recording (`lead-chat-meeting.ts`).
+      tap.hidden = !(m.recording && (m.run.phase === 'tap' || m.run.phase === 'stopped'));
       const note =
         !m.recording || m.run.phase === 'tap'
           ? ''

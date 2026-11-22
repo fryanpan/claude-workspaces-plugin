@@ -24,6 +24,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type CaptureMode,
+  type CoverageSummary,
   type MeetingStopReason,
   normalizeSpeakerName,
   parseCaptureMode,
@@ -45,6 +46,7 @@ import {
   flushRawSegments,
   parseMeetingSource,
   segmentAudioFileName,
+  writeCoverageJson,
 } from './meeting-raw.ts';
 
 /** One settled turn, as stored. */
@@ -135,7 +137,20 @@ export interface MeetingRecord {
    * before this field existed actually kept.
    */
   retention?: MeetingRetention;
+  /**
+   * Audio the server received for this meeting, in milliseconds, summed over
+   * every leg (one `audioMs` index line per leg, at its stop). The captured
+   * half of the coverage stamp; see `core/src/meeting-coverage.ts`. Absent on
+   * a meeting recorded before it was counted, and on one that heard nothing.
+   */
+  audioMs?: number;
 }
+
+/**
+ * The gap reason the relay writes when the socket stayed up and no audio
+ * frame arrived for over a minute (`meeting-coverage-watch.ts`).
+ */
+export const NO_AUDIO_GAP_REASON = 'no-audio';
 
 /**
  * What a gap the RECONNECT wrote says, where a browser-reported one says
@@ -296,6 +311,7 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
     // every reader of this record that nothing downstream can render.
     if (row.endedBy === 'silence') existing.endedBy = 'silence';
     if (typeof row.turns === 'number') existing.turns = row.turns;
+    if (typeof row.audioMs === 'number') existing.audioMs = (existing.audioMs ?? 0) + row.audioMs;
     // A gap is two append-only lines, opened by one and closed by the other,
     // so a server that dies mid-outage still leaves the gap in the record
     // rather than losing it with the line that would have closed it.
@@ -435,6 +451,12 @@ export interface ActiveMeeting {
    */
   readonly turnBase: number;
   /**
+   * Audio received for this meeting so far, in milliseconds: what earlier legs
+   * recorded plus what this leg has. Counted whatever the project keeps,
+   * because how long a meeting was heard is metadata, not content.
+   */
+  capturedMs(): number;
+  /**
    * Append a settled turn. Repeats of a turn already written are ignored —
    * except a repeat with a DIFFERENT speaker label, which appends a relabel
    * line (the engine's end-of-session pass changing its mind).
@@ -461,7 +483,7 @@ export interface ActiveMeeting {
    * event that fires twice must not put two holes in a record that cannot be
    * edited afterwards.
    */
-  recordGap(stream: string, state: 'lost' | 'restored', reason?: string): void;
+  recordGap(stream: string, state: 'lost' | 'restored', reason?: string, at?: number): void;
   /**
    * Tee one audio frame to this meeting's retained audio, exactly as it
    * arrived. `stream` separates sources that carry more than one (a bot's
@@ -492,7 +514,7 @@ export interface ActiveMeeting {
  * Answering with nothing rather than inventing a `bot` stream is what keeps
  * that true if it ever does.
  */
-function gapStreamsFor(source: MeetingSource): readonly string[] {
+export function gapStreamsFor(source: MeetingSource): readonly string[] {
   return source === 'bot' ? [] : streamsForSource(source);
 }
 
@@ -570,6 +592,8 @@ function appendReconnectGap(
  */
 export class MeetingStore {
   private readonly live = new Map<string, ActiveMeeting>();
+  /** See the `now` option. */
+  readonly clock: () => number;
   private readonly docInfo: DocInfoResolver;
   private readonly retentionOf: (docId: string) => MeetingRetention;
 
@@ -586,8 +610,15 @@ export class MeetingStore {
    */
   constructor(
     private readonly dataDir: string,
-    opts: { docInfo?: DocInfoResolver; retention?: (docId: string) => MeetingRetention } = {},
+    opts: {
+      docInfo?: DocInfoResolver;
+      retention?: (docId: string) => MeetingRetention;
+      /** The clock a meeting's start, resume, gaps and end are stamped on.
+       *  A seam so a test can walk a meeting through minutes. */
+      now?: () => number;
+    } = {},
   ) {
+    this.clock = opts.now ?? Date.now;
     this.docInfo = opts.docInfo ?? (() => undefined);
     this.retentionOf = opts.retention ?? (() => DEFAULT_MEETING_RETENTION);
   }
@@ -642,7 +673,7 @@ export class MeetingStore {
   }): ActiveMeeting | null {
     const { docId } = args;
     if (this.live.has(docId)) return null;
-    const startedAt = args.now ?? Date.now();
+    const startedAt = args.now ?? this.clock();
     const dataDir = this.dataDir;
     const source: MeetingSource = args.source ?? 'mic';
     // This recording's ordinal on the doc: the `## Segment N` it will be
@@ -762,7 +793,7 @@ export class MeetingStore {
     // is not the one that recorded it must read as "gone" rather than as an
     // empty meeting that quietly loses its first half.
     if (!existsSync(meetingTranscriptPath(dataDir, docId, meetingId))) return null;
-    const resumedAt = args.now ?? Date.now();
+    const resumedAt = args.now ?? this.clock();
     // Append-only, like every other fact here: the meeting is recording
     // again, which `listMeetings` reads as undoing the end its last stop
     // wrote. Nothing already on disk is touched.
@@ -884,6 +915,14 @@ export class MeetingStore {
       []) {
       if (gap.to === null) openGaps.set(gap.stream, gap.from);
     }
+    /** Bytes this leg received, per stream; the leg's audio is the largest. */
+    const legBytes = new Map<string, number>();
+    const priorAudioMs =
+      listMeetings(dataDir, docId).find((m) => m.meetingId === meetingId)?.audioMs ?? 0;
+    const legAudioMs = (): number => {
+      const most = Math.max(0, ...legBytes.values());
+      return sampleRate > 0 ? Math.round((most / (sampleRate * 2)) * 1000) : 0;
+    };
     let stopped = false;
     const live = this.live;
     const store = this;
@@ -893,6 +932,7 @@ export class MeetingStore {
       docId,
       startedAt,
       turnBase,
+      capturedMs: () => priorAudioMs + legAudioMs(),
       get speakerNames(): Readonly<Record<string, string>> {
         // Carried first, so a name given IN this meeting wins over the one it
         // arrived with — the person is correcting the carry.
@@ -958,9 +998,9 @@ export class MeetingStore {
         speakers[speaker] = given;
         appendLine(meetingIndexPath(dataDir, docId), { meetingId, speakers: { [speaker]: given } });
       },
-      recordGap(stream: string, state: 'lost' | 'restored', reason?: string): void {
+      recordGap(stream: string, state: 'lost' | 'restored', reason?: string, at?: number): void {
         if (stopped) return;
-        const ts = Date.now();
+        const ts = at ?? store.clock();
         if (state === 'lost') {
           // Already down: the track fired twice, or a reopen failed and the
           // client said so again. The gap that is open is still the gap.
@@ -979,7 +1019,9 @@ export class MeetingStore {
         appendLine(meetingIndexPath(dataDir, docId), { meetingId, gapStream: stream, gapTo: ts });
       },
       recordAudio(chunk: Uint8Array, stream = 'mic'): void {
-        if (stopped || chunk.byteLength === 0 || !keepAudio) return;
+        if (stopped || chunk.byteLength === 0) return;
+        legBytes.set(stream, (legBytes.get(stream) ?? 0) + chunk.byteLength);
+        if (!keepAudio) return;
         let sink = sinks.get(stream);
         if (!sink) {
           sink = new AudioSink(
@@ -996,11 +1038,12 @@ export class MeetingStore {
           meetingId,
           docId,
           startedAt,
-          endedAt: endedAt ?? Date.now(),
+          endedAt: endedAt ?? store.clock(),
           engine,
           sampleRate,
           mode,
           turns: written.size,
+          ...(priorAudioMs + legAudioMs() > 0 ? { audioMs: priorAudioMs + legAudioMs() } : {}),
           ...(reason !== undefined ? { endedBy: reason } : {}),
           ...(Object.keys(speakers).length > 0 ? { speakers: { ...speakers } } : {}),
           segment,
@@ -1022,6 +1065,8 @@ export class MeetingStore {
           meetingId,
           endedAt: record.endedAt,
           turns: written.size,
+          // This leg's audio only; the fold sums the legs.
+          ...(legAudioMs() > 0 ? { audioMs: legAudioMs() } : {}),
           ...(reason !== undefined ? { endedBy: reason } : {}),
         });
         // The audio files close first so their byte counts are final, then
@@ -1065,6 +1110,11 @@ export class MeetingStore {
     };
     this.live.set(docId, meeting);
     return meeting;
+  }
+
+  /** A meeting's coverage figures into its `meeting.json` entry. */
+  recordCoverage(docId: string, meetingId: string, coverage: CoverageSummary): void {
+    writeCoverageJson(this.dataDir, docId, meetingId, coverage);
   }
 
   /** Every meeting this doc has held. */

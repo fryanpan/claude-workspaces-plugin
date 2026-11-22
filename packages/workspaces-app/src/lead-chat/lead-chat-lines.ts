@@ -3,7 +3,7 @@
  * lines, the status under the list, and the line above the first message.
  * `lead-chat-view.ts` puts them on the page.
  */
-import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
+import { type MeetingViewModel, meetingAlert } from './lead-chat-meeting-view.ts';
 import type { LeadChatViewModel } from './lead-chat-view.ts';
 
 /** Said while listening is on here and another tab hears the reader. */
@@ -37,6 +37,10 @@ function meetingBarLines(mm: MeetingViewModel): BarLine[] {
     lines.push({ who: 'Heard', text: mm.run.partial, dim: true, live: true });
   }
   if (lines.length === 0) lines.push({ who: 'Meeting', text: 'Nothing said yet', dim: true });
+  // A gap open now outranks the room's words: the bar is all of the meeting
+  // a reader sees with the chat closed.
+  const alert = meetingAlert(mm.meeting?.coverage);
+  if (alert) lines.push({ who: 'No audio', text: alert });
   return lines.slice(-2);
 }
 

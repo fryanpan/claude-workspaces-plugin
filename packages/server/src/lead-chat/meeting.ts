@@ -20,6 +20,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { MeetingCoverageLive } from '@claude-workspaces/core';
 import {
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
@@ -233,6 +234,20 @@ export class LeadChatMeetings {
     return r.ok ? { ok: true, meeting: m, line: r.line } : r;
   }
 
+  /**
+   * A recording's live coverage, onto every running meeting recording into
+   * `docId` (`meeting-coverage-watch.ts` decides when it changes). Only the
+   * boards held in memory are searched: a meeting that is recording has been
+   * read by the page holding its microphone, so its board is among them.
+   */
+  coverageForDoc(docId: string, coverage: MeetingCoverageLive): void {
+    for (const [workspaceId, m] of this.held) {
+      if (!m || m.docId !== docId) continue;
+      if (m.meetingId !== undefined && m.meetingId !== coverage.meetingId) continue;
+      this.save(workspaceId, { ...m, coverage });
+    }
+  }
+
   end(workspaceId: string, id: string): MeetingChange {
     const m = this.current(workspaceId);
     if (!m || m.id !== id) return { ok: false, error: 'no-meeting' };
@@ -281,7 +296,16 @@ export class LeadChatMeetings {
     try {
       const raw = JSON.parse(readFileSync(path, 'utf8')) as { meeting?: LeadChatMeeting | null };
       const m = raw.meeting;
-      return m && typeof m.id === 'string' && Array.isArray(m.lines) ? m : null;
+      if (!(m && typeof m.id === 'string' && Array.isArray(m.lines))) return null;
+      // A live coverage read back from disk is a claim nothing is watching any
+      // more: the watch that wrote it died with the process. Showing
+      // "Recording" from it is the silent failure coverage exists to end, so
+      // it goes until the next leg to start sends a fresh one.
+      if (m.coverage && m.coverage.state !== 'stopped') {
+        const { coverage: _stale, ...rest } = m;
+        return rest;
+      }
+      return m;
     } catch (err) {
       console.error(`[lead-chat] could not read ${workspaceId}'s meeting: ${String(err)}`);
       return null;

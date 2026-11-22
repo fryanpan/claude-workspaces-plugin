@@ -1587,6 +1587,17 @@ core module) names the board's four pages and their glyphs, so the mock host
 (`mockup-frame.ts`), which loads no app bundle, draws the same rail as the
 board.
 
+**How much of a meeting was heard.** `meeting-coverage-watch.ts` (a new
+top-level server module, in the Meetings group) is one timer per recording
+that notices no audio frame for a minute, or a socket that dropped and did not
+come back, and hands the change to `LeadChatMeetings.coverageForDoc`, so every
+page of the board shows it on the meeting's `coverage` field.
+`meeting-coverage-stamp.ts` (also new, same group) writes the one coverage
+line into the finished notes and the figures into `meeting.json`. The words
+and the arithmetic both sides read are `core/src/meeting-coverage.ts` (a new
+top-level core module). Detail: `meeting-assistant.md` "How much of a
+meeting was heard".
+
 **A mock or app that talks.** A page served in a board's frame can speak,
 listen and post to its own dev server through
 `WS /workspaces/<ws>/docs/<docId>/app-voice`. Its wire is `core/app-voice.ts`
