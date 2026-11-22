@@ -17,6 +17,8 @@ export async function pageStream(base: string, workspaceId: string, agentId?: st
   if (!res.ok) throw new Error(`page stream: HTTP ${res.status}`);
   const messages: LeadChatMessage[] = [];
   const events: string[] = [];
+  /** Every frame whole, for a test that reads more than the message. */
+  const frames: Array<Record<string, unknown>> = [];
   const reader = res.body?.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -41,6 +43,7 @@ export async function pageStream(base: string, workspaceId: string, agentId?: st
           try {
             const p = JSON.parse(data) as { event?: string; message?: LeadChatMessage };
             if (p.event) events.push(p.event);
+            frames.push(p as Record<string, unknown>);
             if (p.event === LEAD_CHAT_EVENT && p.message) messages.push(p.message);
           } catch {
             // A keepalive.
@@ -51,5 +54,5 @@ export async function pageStream(base: string, workspaceId: string, agentId?: st
       // Aborted by close().
     }
   })();
-  return { messages, events, close: () => controller.abort() };
+  return { messages, events, frames, close: () => controller.abort() };
 }

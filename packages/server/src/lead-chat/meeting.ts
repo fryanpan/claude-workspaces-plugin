@@ -20,6 +20,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { MeetingCoverageLive } from '@claude-workspaces/core';
 import {
   LEAD_CHAT_MEETING_EVENT,
   LEAD_CHAT_MEETING_LINE_EVENT,
@@ -231,6 +232,20 @@ export class LeadChatMeetings {
     if (turn === null) return { ok: false, error: 'room-first' };
     const r = this.line(workspaceId, m.id, { turn, who, text, lead: true });
     return r.ok ? { ok: true, meeting: m, line: r.line } : r;
+  }
+
+  /**
+   * A recording's live coverage, onto every running meeting recording into
+   * `docId` (`meeting-coverage-watch.ts` decides when it changes). Only the
+   * boards held in memory are searched: a meeting that is recording has been
+   * read by the page holding its microphone, so its board is among them.
+   */
+  coverageForDoc(docId: string, coverage: MeetingCoverageLive): void {
+    for (const [workspaceId, m] of this.held) {
+      if (!m || m.docId !== docId) continue;
+      if (m.meetingId !== undefined && m.meetingId !== coverage.meetingId) continue;
+      this.save(workspaceId, { ...m, coverage });
+    }
   }
 
   end(workspaceId: string, id: string): MeetingChange {

@@ -644,6 +644,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       backTargetFor: (docId) => backTargetFor(docId),
       fileReviewRequest: (docId, author, text) => fileReviewRequest(docId, author, text),
       lookupDocs: (workspaceId, exceptDocId) => lookupDocs(workspaceId, exceptDocId),
+      meetingCoverage: () => (docId, coverage) => leadChatMeetings.coverageForDoc(docId, coverage),
     },
   });
   const {

@@ -37,6 +37,7 @@ import {
   AudioChunkLedger,
   type CaptureMode,
   type MeetingCaptureSource,
+  type MeetingCoverageLive,
   type MeetingServerMessage,
   type MeetingStopReason,
   type MeetingStreamId,
@@ -53,6 +54,8 @@ import {
   streamsForSource,
   untagAudioFrame,
 } from '@claude-workspaces/core';
+import { coverageOfRecord, stampMeetingCoverage } from './meeting-coverage-stamp.ts';
+import { MeetingCoverageWatch } from './meeting-coverage-watch.ts';
 import {
   type MeetingNotesDeps,
   type MeetingNotesSession,
@@ -187,6 +190,28 @@ export interface MeetingRelayDeps {
    * meeting is heard by nothing else.
    */
   ears?: MeetingEars;
+  /**
+   * The meeting's live coverage changed: recording, a gap of over a minute
+   * opened or closed, a leg ended (`meeting-coverage-watch.ts`). The server
+   * hands it to the lead chat's meeting so every page shows it. Absent, it
+   * goes nowhere.
+   */
+  onCoverage?: (docId: string, coverage: MeetingCoverageLive) => void;
+  /**
+   * The coverage watch's scheduler. Its own seam rather than `schedule`, so a
+   * test counting the silence deadline's timers counts only those. Absent is
+   * an unreferenced `setTimeout`.
+   */
+  coverageSchedule?: (ms: number, fn: () => void) => () => void;
+}
+
+/** The endings after which nothing resumes the meeting, so it is stamped now. */
+const STAMPED_AT_STOP: ReadonlySet<string> = new Set(['client-stop', 'silence', 'engine-lost']);
+
+function unrefTimeout(ms: number, fn: () => void): () => void {
+  const timer = setTimeout(fn, ms);
+  (timer as { unref?: () => void }).unref?.();
+  return () => clearTimeout(timer);
 }
 
 /**
@@ -519,7 +544,34 @@ export class MeetingRelay {
    */
   private readonly holders = new Map<string, { ws: MeetingClient; conn: Conn }>();
 
-  constructor(private readonly deps: MeetingRelayDeps) {}
+  /** Whether audio is still arriving, per meeting; see `meeting-coverage-watch.ts`. */
+  private readonly coverage: MeetingCoverageWatch;
+
+  constructor(private readonly deps: MeetingRelayDeps) {
+    this.coverage = new MeetingCoverageWatch({
+      schedule: deps.coverageSchedule ?? unrefTimeout,
+      now: () => this.now(),
+      emit: (docId, c) => deps.onCoverage?.(docId, c),
+      abandoned: (docId, meetingId, droppedAt, withNotes) =>
+        this.stampCoverage(docId, meetingId, withNotes, droppedAt),
+    });
+  }
+
+  private stampCoverage(
+    docId: string,
+    meetingId: string,
+    withNotes: boolean,
+    droppedAt?: number,
+  ): void {
+    stampMeetingCoverage({
+      store: this.deps.store,
+      notes: withNotes ? this.deps.notes : null,
+      docId,
+      meetingId,
+      ...(droppedAt !== undefined ? { droppedAt } : {}),
+      log: (line) => this.log(line),
+    });
+  }
 
   /**
    * The notes pipeline this relay was built with, so the BOT relay can share
@@ -779,6 +831,7 @@ export class MeetingRelay {
     // the stream's own name so `segment-N-<stream>.pcm` says where it came
     // from.
     conn.meeting?.recordAudio(chunk, stream);
+    if (conn.meeting) this.coverage.frame(conn.meeting.meetingId);
     // Recorded BEFORE the send: an engine may answer inside it, and the turn
     // it answers with has to find this chunk already in the ledger.
     conn.ledgers?.get(stream)?.record(chunk.byteLength, recvMs, Date.now());
@@ -820,7 +873,7 @@ export class MeetingRelay {
     // engine session and flushing the notes are both awaited below it, so the
     // clock `stop()` reads by default can be seconds later — seconds a
     // reconnect would then count as recorded. See `MeetingRecord.endedAt`.
-    this.track(this.stop(ws, conn, false, undefined, cause, Date.now()));
+    this.track(this.stop(ws, conn, false, undefined, cause, this.deps.store.clock()));
   }
 
   private track(work: Promise<void>): void {
@@ -850,6 +903,7 @@ export class MeetingRelay {
     while (this.inFlight.size > 0 && Date.now() < deadline) {
       await raceDeadline(Promise.allSettled([...this.inFlight]), deadline - Date.now());
     }
+    this.coverage.dispose();
     this.deps.store.stopAll();
   }
 
@@ -1307,6 +1361,14 @@ export class MeetingRelay {
 
     conn.streams = streamSet;
     conn.state = 'live';
+    // Gaps the record already holds — a reconnect's, written by the resume
+    // just now — so the page's "of N" survives a restart.
+    const record = this.deps.store.list(docId).find((m) => m.meetingId === meeting.meetingId);
+    this.coverage.legStarted(meeting, {
+      streams,
+      gapsClosed: record ? coverageOfRecord(record, this.now()).gaps.length : 0,
+      withNotes: notes !== null,
+    });
     this.deps.ears?.started(docId, (markdown) => notes?.noteAside(markdown));
     // From the moment the meeting is live, not from the first word: a
     // recording that hears nothing at all is exactly the one this window
@@ -1421,6 +1483,9 @@ export class MeetingRelay {
     // canceller left behind on an idle connection is a timer nobody owns.
     this.clearSilence(conn);
     const meeting = conn.meeting;
+    const stampNow = STAMPED_AT_STOP.has(cause ?? conn.endedCause ?? 'client-stop');
+    const withNotes = conn.notes !== null;
+    if (meeting) this.coverage.legEnded(meeting.meetingId, closedAt ?? this.now(), stampNow);
     const streams = conn.streams;
     const notes = conn.notes;
     this.release(ws.data.docId, ws);
@@ -1452,6 +1517,7 @@ export class MeetingRelay {
     conn.state = 'idle';
     if (!meeting) return;
     const record = meeting.stop(reason, closedAt);
+    if (stampNow) this.stampCoverage(meeting.docId, record.meetingId, withNotes);
     this.log(
       `[meeting] ended doc=${meeting.docId} meeting=${record.meetingId} ` +
         // The same vocabulary the `socket closed` line uses, so one grep

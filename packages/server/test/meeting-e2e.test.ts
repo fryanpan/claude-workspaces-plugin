@@ -184,7 +184,9 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
         quietMs: 1_000,
         schedule,
         onNotes: (u) => {
-          updates.push(u);
+          // The coverage line a stop writes is not a tick (meeting-coverage.test.ts).
+          if (!u.edits.some((e) => 'markdown' in e && e.markdown.startsWith('Coverage:')))
+            updates.push(u);
         },
       },
     });
