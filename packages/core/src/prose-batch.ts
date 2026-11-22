@@ -16,6 +16,8 @@
  *   `clearAuthorshipOnPersonEdit` — becomes a block proposal
  *   (`suggest-blocks.ts`): the words struck, the replacement offered beside
  *   them. `propose` on a replace takes that path whoever owns the block.
+ *   `directAuthors` names other authors whose still-marked blocks count as
+ *   the caller's here; the route passes the note-taker's id for agents.
  *   Nothing here can destroy words the caller did not write.
  * - **A list is grown, never twinned.** Inserting bullets where the target
  *   already ends in a list of the same type puts the new items INTO that
@@ -111,6 +113,10 @@ export interface ApplyBlockEditsOptions {
   parse?: MarkdownParseOptions;
   /** Structure only — `NestBlocksOptions.moveOthers` is why, and who passes it. */
   moveOthers?: boolean;
+  /** Other authors whose still-marked blocks this batch may replace or delete
+   *  directly. A mark is cleared when a person types in the block, so a block
+   *  still carrying one holds no words a person wrote. */
+  directAuthors?: readonly string[];
 }
 
 /** Give an id to anything in `fragment` that has none. Called from INSIDE
@@ -293,7 +299,11 @@ export function applyBlockEdits(
           // So does an image or a rule, unless a proposal was asked for.
           const asked = edit.op === 'replace_block' && edit.propose === true;
           const direct = holdsNoWords(el) || (isTextlessLeaf(el) && !asked);
-          if ((asked || readBlockAuthor(el) !== opts.author) && !direct) {
+          const owner = readBlockAuthor(el);
+          const owned =
+            owner === opts.author ||
+            (owner !== undefined && opts.directAuthors?.includes(owner) === true);
+          if ((asked || !owned) && !direct) {
             // Not ours (or no longer ours): propose it, in this transaction,
             // so a reader sees the batch land whole or not at all.
             const res = proposeEdit(fragment, el, replacement, opts);

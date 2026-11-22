@@ -41,6 +41,11 @@ export type BlockEditsResult =
  */
 export interface BlockEditsPowers {
   moveOthers?: boolean;
+  /** Authors whose still-marked blocks this batch may replace or delete
+   *  directly, as if they were its own. The block-edit route passes the
+   *  note-taker's id: a note still carrying its mark is one no person has
+   *  touched, so an agent tidying the notes is not overwriting anybody. */
+  directAuthors?: readonly string[];
 }
 
 /** Who a batch's writes belong to. `author` is the id stamped on the blocks;
@@ -88,6 +93,7 @@ export function applyDocBlockEdits(
     // An `.mdx` doc reads a component in the markdown as a block, as its file does.
     parse: { mdx: prose.isMdxPath(doc.meta.sourceUrl) },
     ...(who.moveOthers === true ? { moveOthers: true } : {}),
+    ...(who.directAuthors ? { directAuthors: who.directAuthors } : {}),
   });
   return { ok: true, ...res };
 }
