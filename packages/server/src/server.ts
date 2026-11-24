@@ -212,6 +212,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
+import { applySeedBoard } from './seed-board.ts';
 import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
@@ -1112,6 +1113,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const taskProjection = new TaskProjection({ docStore, tasks: taskStore });
   armLoadedBody = (doc) => taskProjection.armLoadedBody(doc);
   taskProjection.init();
+  // The board the deploy settings name, and the people let into it.
+  if (opts.seedBoard) {
+    try {
+      const seeded = applySeedBoard(opts.seedBoard, {
+        listWorkspaces: () => taskStore.listWorkspaces(),
+        createWorkspace: (name) => taskStore.createWorkspace(name),
+        ensureWorkspace: (id) => taskProjection.ensureWorkspace(id),
+        shareLinks,
+      });
+      console.log(
+        `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : 'present'}, ${seeded.added.length} address(es) added`,
+      );
+    } catch (e) {
+      console.error(`[feedback] seed board not applied: ${e instanceof Error ? e.message : e}`);
+    }
+  }
 
   // Provenance stamping at the store's one choke point: every create whose
   // origin names a doc records the doc's settled content revision, whichever

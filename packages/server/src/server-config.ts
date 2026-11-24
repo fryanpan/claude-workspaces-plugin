@@ -29,6 +29,7 @@ import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
 import { BOARD_SERVER_PORTS } from './reserved-ports.ts';
+import { parseSeedBoard } from './seed-board.ts';
 import { TTL_FORMAT_HINT, parseTtl } from './share/ttl.ts';
 
 /** Reads one `--name value` / `--name=value` flag out of argv. Parsing stays
@@ -363,6 +364,14 @@ export function resolveServerConfig(opts: {
    * empty — see activity.ts.
    */
   const ownerEmail = (env.CW_OWNER_EMAIL ?? '').trim();
+
+  // A board to start with, and who is let into it (`seed-board.ts`). A bad
+  // setting is logged by name and seeds nothing; the server still boots.
+  const parsedSeed = parseSeedBoard(env);
+  if (parsedSeed && 'error' in parsedSeed) {
+    console.error(`[feedback] seed board refused: ${parsedSeed.error}.`);
+  }
+  const seedBoard = parsedSeed && !('error' in parsedSeed) ? parsedSeed : undefined;
 
   const trustedHosts = (env.TRUSTED_HOSTS ?? '')
     .split(',')
@@ -755,6 +764,7 @@ export function resolveServerConfig(opts: {
     spendAlarmUsd,
     emailCodeSignIn,
     ownerEmail,
+    seedBoard,
     trustedHosts,
     cfAccess,
     signIn,
