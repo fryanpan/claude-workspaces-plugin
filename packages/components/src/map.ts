@@ -84,6 +84,10 @@ export type MapLayerProp = {
   url?: string;
   /** `false` starts it switched off. */
   visible?: boolean;
+  /** The zooms it draws at, 0 to 24, both ends included: outside them the
+   *  map takes it off and puts it back as the zoom returns. */
+  minZoom?: number;
+  maxZoom?: number;
   /** `{key}` is filled from each feature's properties, as text. */
   popup?: string;
 } & (
