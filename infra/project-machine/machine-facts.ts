@@ -15,8 +15,11 @@
  *     can find it on GitHub and read its read-only flag
  *   which GitHub repos the lead's clones point at, from their `.git/config`
  *     text (no git runs here)
- *   which listed Claude token the lead runs on, by LABEL (`lead.sh` writes
- *     `token-label`), and whether a process runs with `--remote-control`
+ *   which listed Claude token the machine's lead is set to, by LABEL alone,
+ *     from the `CW_LEAD_TOKEN_ORG` marker in root's environment (the deploy
+ *     sets it; the lead cannot write it), and whether Remote Control is on:
+ *     `CW_LEAD_REMOTE_CONTROL=1` there, or a process run with
+ *     `--remote-control`
  *
  * The settings carried back are addresses, hostnames, audiences and uids: no
  * token, key or password. The report compares them and prints none.
@@ -52,9 +55,9 @@ export interface MachineFacts {
   /** `owner/name` of each GitHub repo a clone of the lead's points at. */
   repos: string[];
   /**
-   * The lead's sign-in by label ("" for the org's own approval, null for no
-   * lead started), and whether Remote Control is on. Absent from a probe
-   * older than this field.
+   * The lead's sign-in by label ("" for the org's own approval, null for none
+   * set), and whether Remote Control is on. Absent from a probe older than
+   * this field.
    */
   lead?: { tokenLabel: string | null; remoteControl: boolean };
 }
@@ -69,8 +72,8 @@ export interface FactsIo {
   procs: () => Proc[];
   /** A file's text, or null when it is not there. */
   read: (path: string) => string | null;
-  /** A small file the lead writes: never through a link, or null. */
-  readLeadFile: (path: string) => string | null;
+  /** The lead's two settings from root's environment, as Fly set them. */
+  leadEnv: () => { CW_LEAD_TOKEN_ORG?: string; CW_LEAD_REMOTE_CONTROL?: string };
   /** The full paths of the folders directly inside `path`. */
   dirs: (path: string) => string[];
   /** The public half of a private key file, or null. */
@@ -81,7 +84,6 @@ export const PATHS = {
   data: '/data/cw',
   leadKey: '/home/lead/.ssh/github_deploy_key',
   leadWork: '/data/lead/work',
-  leadTokenLabel: '/data/lead/token-label',
 };
 
 const GITHUB_URL =
@@ -103,13 +105,15 @@ export function loginUsers(passwd: string): Array<{ name: string; uid: number }>
 }
 
 /**
- * The label `lead.sh` wrote, carried back only when it is a label: the lead
- * owns the file, so anything else is reported as such, not copied.
+ * The label in a `CW_LEAD_TOKEN_ORG` marker: `listed:<label>:<digest>` for a
+ * listed token, "" for an org name (a sign-in made by the org's own
+ * approval), null for none. The digest is of the sign-in, so it never leaves.
  */
-function leadLabel(raw: string | null): string | null {
-  if (raw === null) return null;
-  const v = raw.trim();
-  return v === '' || TOKEN_LABEL.test(v) ? v : '(not a label)';
+export function markerLabel(marker: string | undefined): string | null {
+  if (marker === undefined || marker === '') return null;
+  if (!marker.startsWith('listed:')) return '';
+  const label = marker.split(':')[1] ?? '';
+  return TOKEN_LABEL.test(label) ? label : '(not a label)';
 }
 
 export function readFacts(io: FactsIo): MachineFacts {
@@ -160,9 +164,14 @@ export function readFacts(io: FactsIo): MachineFacts {
     gitPush,
     deployKey,
     repos: [...repos].sort(),
-    lead: {
-      tokenLabel: leadLabel(io.readLeadFile(PATHS.leadTokenLabel)),
-      remoteControl: procs.some((p) => p.cmdline.includes('--remote-control')),
-    },
+    lead: (() => {
+      const env = io.leadEnv();
+      return {
+        tokenLabel: markerLabel(env.CW_LEAD_TOKEN_ORG),
+        remoteControl:
+          env.CW_LEAD_REMOTE_CONTROL === '1' ||
+          procs.some((p) => p.cmdline.some((a) => /^--remote-control(=|$)/.test(a))),
+      };
+    })(),
   };
 }

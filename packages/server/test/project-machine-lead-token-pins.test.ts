@@ -51,6 +51,21 @@ describe('a listed token goes only where machines.json pins it', () => {
     expect(pinnedToken([], 'riverbend', [m('riverbend')])).toBeUndefined();
   });
 
+  it('an empty list sets nothing for a pinned project either, so a CI deploy, which reads no Keychain, goes on', () => {
+    const pins = [m('riverbend', { leadToken: 'second-account' })];
+    expect(pinnedToken([], 'riverbend', pins)).toBeUndefined();
+    expect(() => pinnedToken([], 'riverbend', pins, 'second-account')).toThrow(
+      'no token labelled second-account',
+    );
+  });
+
+  it('refuses --claude-token naming a label another project pins, saying where', () => {
+    const pins = [m('harborlight', { leadToken: 'first-account' }), m('riverbend')];
+    expect(() => pinnedToken(LIST, 'riverbend', pins, 'first-account')).toThrow(
+      'first-account is pinned on harborlight, and riverbend pins nothing',
+    );
+  });
+
   it('refuses --claude-token naming a label other than the pin', () => {
     const pins = [m('riverbend', { leadToken: 'second-account' })];
     expect(() => pinnedToken(LIST, 'riverbend', pins, 'first-account')).toThrow(
@@ -120,28 +135,39 @@ describe('machines.json carries the pins', () => {
 });
 
 describe('the machine reports its lead', () => {
-  const io = (procs: string[][], label: string | null) => ({
+  const io = (procs: string[][], env: Record<string, string> = {}) => ({
     procs: () => procs.map((cmdline) => ({ cmdline, environ: () => ({}) })),
     read: () => null,
-    readLeadFile: (p: string) => (p === '/data/lead/token-label' ? label : null),
+    leadEnv: () => env,
     dirs: () => [],
     publicKey: () => null,
   });
+  const DIGEST = 'f'.repeat(64);
 
-  it('reads the token label and whether Remote Control is on', () => {
-    const f = readFacts(io([['claude', '--remote-control', 'Riverbend lead']], 'second-account\n'));
+  it('reads the label from the marker the deploy set, never the digest', () => {
+    const f = readFacts(
+      io([['claude', '--remote-control', 'Riverbend lead']], {
+        CW_LEAD_TOKEN_ORG: `listed:second-account:${DIGEST}`,
+      }),
+    );
     expect(f.lead).toEqual({ tokenLabel: 'second-account', remoteControl: true });
+    expect(JSON.stringify(f)).not.toContain(DIGEST);
   });
 
-  it('carries back only a label, never other text the lead put in the file', () => {
-    expect(readFacts(io([], 'Saltmarsh secret value\n')).lead?.tokenLabel).toBe('(not a label)');
+  it("reads an org-name marker as the org's own approval, and no marker as none", () => {
+    expect(readFacts(io([], { CW_LEAD_TOKEN_ORG: 'riverbend' })).lead?.tokenLabel).toBe('');
+    expect(readFacts(io([['claude']])).lead).toEqual({ tokenLabel: null, remoteControl: false });
   });
 
-  it('says no label and no Remote Control when neither is there', () => {
-    expect(readFacts(io([['claude']], null)).lead).toEqual({
-      tokenLabel: null,
-      remoteControl: false,
-    });
+  it('carries back only a label out of a malformed marker', () => {
+    const f = readFacts(io([], { CW_LEAD_TOKEN_ORG: 'listed:Saltmarsh Secret:x' }));
+    expect(f.lead?.tokenLabel).toBe('(not a label)');
+  });
+
+  it('sees Remote Control as a set secret or as --remote-control=<name>', () => {
+    expect(readFacts(io([], { CW_LEAD_REMOTE_CONTROL: '1' })).lead?.remoteControl).toBe(true);
+    expect(readFacts(io([['claude', '--remote-control=lead']])).lead?.remoteControl).toBe(true);
+    expect(readFacts(io([['claude', '--remote-controlx']])).lead?.remoteControl).toBe(false);
   });
 });
 

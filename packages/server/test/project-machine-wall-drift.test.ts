@@ -99,7 +99,7 @@ describe('the on-machine reader', () => {
         '/etc/passwd':
           'root:x:0:0::/root:/bin/sh\ncw:x:10001:10001::/home/cw:/bin/sh\nlead:x:10004:10004::/home/lead:/bin/sh\nnobody:x:65534:65534::/:/bin/false\n',
       })[path] ?? null,
-    readLeadFile: () => null,
+    leadEnv: () => ({}),
     dirs: () => ['/data/lead/work/riverbend'],
     publicKey: () => `${PUB} lead@riverbend\n`,
     ...over,

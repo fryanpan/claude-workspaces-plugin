@@ -29,16 +29,7 @@
  * reason to make one.
  */
 import { spawnSync } from 'node:child_process';
-import {
-  constants,
-  closeSync,
-  existsSync,
-  fstatSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-} from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { appVoiceToken } from '../../packages/server/src/app-voice/token.ts';
 import {
@@ -136,24 +127,6 @@ const readOrNull = (path: string): string | null => {
   }
 };
 
-/**
- * A small file the lead writes, read as root without following a link the
- * lead could plant there, and only its first 256 bytes.
- */
-const readLeadFile = (path: string): string | null => {
-  let fd: number | undefined;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    if (!fstatSync(fd).isFile()) return null;
-    const buf = Buffer.alloc(256);
-    return buf.subarray(0, readSync(fd, buf, 0, 256, 0)).toString('utf8');
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-};
-
 /** /proc, /etc/passwd and the volume, read as root. */
 const realFactsIo: FactsIo = {
   procs: () =>
@@ -175,7 +148,11 @@ const realFactsIo: FactsIo = {
       })
       .filter((p): p is Proc => p !== null),
   read: readOrNull,
-  readLeadFile,
+  // `fly ssh console` runs the probe as root with the machine's Fly secrets.
+  leadEnv: () => ({
+    CW_LEAD_TOKEN_ORG: process.env.CW_LEAD_TOKEN_ORG,
+    CW_LEAD_REMOTE_CONTROL: process.env.CW_LEAD_REMOTE_CONTROL,
+  }),
   dirs: (path) => {
     try {
       return readdirSync(path, { withFileTypes: true })

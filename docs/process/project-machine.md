@@ -341,13 +341,16 @@ bun run machine:deploy --project <project> --memory 2048 \
   exact token (`entrypoint.sh`). So a token with no marker, or one set over a
   listed marker, starts no lead. A token set by hand over an org-name marker
   still does. The next deploy on the Mac sees no
-  `CW_LEAD_TOKEN_ORG` and sets a listed token, or asks for the org's approval.
+  `CW_LEAD_TOKEN_ORG` and sets the listed token `machines.json` pins on the
+  project, refuses when the list holds tokens and none is pinned, or with an
+  empty list asks for the org's approval.
 - The Mac's walled lead keeps its own Keychain sign-in,
   `claude-lead-oauth-token` (`scripts/lead-sandbox-token.ts`); no org's lead
   is given it. `--claude-account` is gone.
 - Revoke a sign-in made for one org at claude.ai/settings/claude-code; no other
   org loses its lead. `--refresh-lead` then makes the org a new one. With
-  tokens on the list, `--refresh-lead` must name one with `--claude-token`.
+  tokens on the list, `--refresh-lead` must name the pinned one with
+  `--claude-token`.
 - A deploy takes a listed token only where `machines.json` pins it on the
   project (`"leadToken": "<label>"`), so no two orgs share a sign-in by
   default (wall-off review H2). A project with no pin is refused while the

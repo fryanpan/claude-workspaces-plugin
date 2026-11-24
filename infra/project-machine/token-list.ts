@@ -77,7 +77,9 @@ export function imageHasTokenList(commit: string, repo = REPO): boolean {
  * it (wall-off review H2). A project with no pin takes nothing, and the
  * refusal names the first label no project pins, so a new org never lands on
  * another org's sign-in by default. Undefined only when the list is empty
- * and nothing names a label: the per-org browser approval is then the path.
+ * and `--claude-token` names nothing, pinned or not: on the Mac the per-org
+ * browser approval is then the path, and in CI, which reads no Keychain, the
+ * deploy goes on and names the sign-in as not set.
  * `label` is `--claude-token`, which must agree with the pin.
  */
 export function pinnedToken(
@@ -92,9 +94,15 @@ export function pinnedToken(
       `machines.json pins ${pin} on ${project}, not ${label}: change its leadToken first; nothing was changed`,
     );
   }
+  if (label === undefined && list.length === 0) return undefined;
   if (pin === undefined) {
-    if (label === undefined && list.length === 0) return undefined;
     const pinned = new Set(machines.map((m) => m.leadToken));
+    const holders = machines.filter((m) => label !== undefined && m.leadToken === label);
+    if (holders.length > 0) {
+      throw new Error(
+        `${label} is pinned on ${holders.map((m) => m.project).join(', ')}, and ${project} pins nothing: a sign-in is shared only when every project pinning it says "shareLeadToken": true in machines.json; nothing was changed`,
+      );
+    }
     const free = label ?? list.find((t) => !pinned.has(t.label))?.label;
     throw new Error(
       free === undefined
