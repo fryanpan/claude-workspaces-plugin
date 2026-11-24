@@ -9,7 +9,8 @@
  *                     "memory": 2048, "leadBoard": "<board id>",
  *                     "pushRepos": ["<owner>/<name>"] } ] }
  *
- * Only `project` is required; `tunnel` defaults to named. `pushRepos` are the
+ * Only `project` is required, and it may not be a name `reserved-names.ts`
+ * lists; `tunnel` defaults to named. `pushRepos` are the
  * repos the project's server pushes to, one write deploy key each: they are
  * read from this file and nowhere else, so only a merged change decides which
  * repos get a key that writes.
@@ -48,6 +49,7 @@ import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { MAX_PUSH_REPOS } from '../../packages/server/src/provisioning/push-keys.ts';
 import { PROJECT_NAME, SEED_BOARD_NAME } from './deploy-plan.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
+import { reservedProject } from './reserved-names.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 export const MACHINES_FILE = join(HERE, 'machines.json');
@@ -98,6 +100,8 @@ export function parseMachines(raw: string): Machine[] {
     if (typeof project !== 'string' || !PROJECT_NAME.test(project)) {
       throw new Error(`machines.json entry ${i} has no valid project`);
     }
+    const reserved = reservedProject(project);
+    if (reserved) throw new Error(`machines.json entry ${i}: ${reserved}`);
     if (seen.has(project)) throw new Error(`machines.json lists ${project} twice`);
     seen.add(project);
     const tunnel = m.tunnel ?? 'named';
