@@ -242,6 +242,11 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     };
   });
   const ready: Promise<Auth> = loaded.then((l) => l.auth);
+  // Nothing awaits the migration until the first request, so a failure with
+  // no request in flight would be an unhandled rejection, thrown into
+  // whatever runs next. Report it here; every request that waits on `ready`
+  // still gets the rejection.
+  ready.catch((err) => console.error('[signin] Better Auth migration failed:', err));
 
   /** The request as Better Auth must see it: on the sign-in origin. */
   const onOrigin = (req: Request, pathname: string, init: RequestInit = {}): Request => {

@@ -4159,7 +4159,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // onto its dead registry and write `[loop]` lines into unrelated tests'
       // output for the rest of the run.
       loopLag.stop();
-      void boardSignIn?.close();
+      const signInClosed = boardSignIn?.close();
       taskScheduler.stop();
       features.stop();
       landingChanges.dispose();
@@ -4240,6 +4240,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // subscriber's cursor is unrecognisable after the restart and every
       // stream opens with a `replay.gap` that has nothing behind it.
       saveReplayMarks(dataDir, sse.marks());
+      // Last, and awaited: the sign-in's migration may still be running on
+      // the user list, and a caller that removes the data dir once `stop`
+      // resolves would delete the file under it.
+      await signInClosed;
     },
   };
 }
