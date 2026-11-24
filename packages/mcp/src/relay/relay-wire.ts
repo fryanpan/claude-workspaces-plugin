@@ -16,7 +16,19 @@ export const SUPPORTED_VERSIONS = [
 const present = (v: string | undefined): string | undefined =>
   v !== undefined && v.trim() !== '' ? v : undefined;
 
-/** The headers identity.ts reads, from the environment the stdio child read. */
+/** The header that says the identity values below were percent-encoded. */
+export const IDENTITY_ENCODING_HEADER = 'x-cw-identity-encoding';
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+
+/**
+ * The headers identity.ts reads, from the environment the stdio child read.
+ *
+ * A header value is bytes, not text: fetch refuses a character above U+00FF
+ * and sends the rest as Latin-1, so a decomposed "ü" in a directory name
+ * never arrives. When any value is not printable ASCII, every value except the
+ * plugin root (a version, always ASCII) is percent-encoded as UTF-8 and the
+ * encoding header says so. An all-ASCII identity is sent exactly as before.
+ */
 export function relayIdentityHeaders(
   env: Record<string, string | undefined>,
   cwd: string,
@@ -29,6 +41,10 @@ export function relayIdentityHeaders(
   if (agent) h['x-cw-agent'] = agent;
   if (legacy) h['x-cw-agent-legacy'] = legacy;
   if (workspace) h['x-cw-workspace'] = workspace.trim();
+  if (Object.values(h).some((v) => !PRINTABLE_ASCII.test(v))) {
+    for (const [k, v] of Object.entries(h)) h[k] = encodeURIComponent(v);
+    h[IDENTITY_ENCODING_HEADER] = 'percent';
+  }
   // identity.ts keeps only the last path segment, and only when it is a version.
   if (version) h['x-cw-plugin-root'] = `/${version.trim()}`;
   return h;

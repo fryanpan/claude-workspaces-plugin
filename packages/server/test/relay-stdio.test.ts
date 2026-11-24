@@ -19,7 +19,7 @@
  * file or plugin cache is touched — every child gets a temp HOME.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveAgentAuthor } from '../../mcp/src/author.ts';
@@ -39,6 +39,9 @@ import { seedBoard } from './workspace-seed.ts';
 
 const ALPHA = 'Riverbend Alpha';
 const ALPHA_ID = resolveAgentAuthor({ CW_AGENT_NAME: ALPHA, CW_AUTHOR: 'agent' }).id;
+/** Not ASCII: é fits one Latin-1 byte, so a header carries it mangled rather than refused. */
+const CAFE = 'Riverbend café';
+const CAFE_ID = resolveAgentAuthor({ CW_AGENT_NAME: CAFE, CW_AUTHOR: 'agent' }).id;
 const BETA_ID = resolveAgentAuthor({ CW_AGENT_NAME: 'Harborlight Beta', CW_AUTHOR: 'agent' }).id;
 const PERSON = {
   id: 'known-reviewer',
@@ -183,6 +186,40 @@ describe.each(ARMS)('the $kind relay', (arm) => {
       1,
     );
   }, 40_000);
+
+  it('stays on the relay for a name and a directory that are not ASCII, and the server reads both', async () => {
+    // The mint is answered only for café's own id, so a name that arrived
+    // mangled is refused and the session gets no tools.
+    const { handle, base } = boot(0, CAFE_ID);
+    const ws = await seedBoard(base);
+    // Decomposed: u + U+0308, as macOS tools often write it. A character above
+    // U+00FF is what a header cannot carry; an NFC ü fits one Latin-1 byte and
+    // round-trips by accident.
+    const dir = join(workDir, 'Projekt-u\u0308ber');
+    mkdirSync(dir, { recursive: true });
+    const child = startChild(
+      arm,
+      { CW_BASE_URL: base, CW_AGENT_NAME: CAFE, CW_WORKSPACE_ID: ws },
+      dir,
+    );
+    children.push(child);
+    await child.handshake();
+    const banner = arm.kind === 'compiled' ? 'compiled relay started' : 'node relay started';
+    await waitFor(() => child.stderr().includes(banner), { describe: banner });
+    const listed = await child.request('tools/list');
+    expect((listed.result as { tools: unknown[] }).tools.length).toBe(TOOL_LIST.tools.length);
+
+    const path = join(dir, 'notes.md');
+    writeFileSync(path, '# Notes\n\nBody.\n');
+    const bound = await child.callTool('attach_markdown', {
+      workspaceId: ws,
+      docId: 'notes',
+      path,
+    });
+    expect(bound.isError).toBe(false);
+    const docId = (JSON.parse(bound.text) as { docId: string }).docId;
+    expect(handle.docStore.peekMeta(docId)?.owner).toBe(dir);
+  }, 30_000);
 
   it('gets no tools when its token mint is refused', async () => {
     // The probe says the caller is somebody else, so Alpha's mint is refused.
