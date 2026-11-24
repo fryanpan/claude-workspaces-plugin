@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applySeedBoard, parseSeedBoard } from '../src/seed-board.ts';
+import { applySeedBoard, parseSeedBoard, seedBoardMarker } from '../src/seed-board.ts';
 import type { ServerOptions } from '../src/server-options.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ShareLinks } from '../src/share/share-links.ts';
@@ -86,12 +86,13 @@ describe('applySeedBoard against a real share-link store', () => {
       },
       ensureWorkspace: (id: string) => void ensured.push(id),
       shareLinks: new ShareLinks({ dataDir }),
+      marker: seedBoardMarker(dataDir),
     });
     const first = applySeedBoard({ name: BOARD, members: [ALICE] }, deps());
-    expect(first).toEqual({ workspaceId: 'ws-1', created: true, added: [ALICE] });
+    expect(first).toEqual({ workspaceId: 'ws-1', created: true, added: [ALICE], notOurs: [] });
     // A fresh store over the same directory, as the next boot reads it.
     const second = applySeedBoard({ name: BOARD, members: [ALICE] }, deps());
-    expect(second).toEqual({ workspaceId: 'ws-1', created: false, added: [] });
+    expect(second).toEqual({ workspaceId: 'ws-1', created: false, added: [], notOurs: [] });
     expect(boards).toHaveLength(1);
     expect(ensured).toEqual(['ws-1']);
     const links = new ShareLinks({ dataDir });
@@ -194,5 +195,49 @@ describe('a server booted with a seed board', () => {
     expect(audience).toEqual([ALICE, BOB]);
     expect((await openAs(profile(ALICE, 'Alice'), board ?? '')).status).toBe(200);
     expect((await openAs(profile(BOB, 'Bob'), board ?? '')).status).toBe(200);
+  });
+});
+
+describe('a seed board name somebody else already used', () => {
+  let dataDir: string;
+  let server: ServerHandle | null = null;
+  const boot = async (seed: boolean) => {
+    await server?.stop();
+    server = createServer({
+      port: 0,
+      dataDir,
+      ownerEmail: OWNER,
+      ...(seed ? { seedBoard: { name: BOARD, members: [ALICE] } } : {}),
+    });
+    return server;
+  };
+  const sameNamed = () =>
+    (server?.tasks.listWorkspaces() ?? []).filter((w) => w.name === BOARD).map((w) => w.id);
+
+  beforeAll(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'seed-board-taken-'));
+  });
+  afterAll(async () => {
+    await server?.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('lets nobody into a same-named board the seed did not make', async () => {
+    // Somebody makes a board with the seed's name before the seed ever runs.
+    const theirs = (await boot(false)).tasks.createWorkspace(BOARD).id;
+    const handle = await boot(true);
+    expect(handle.shareLinks.audienceOf(theirs)?.entries ?? []).toEqual([]);
+    expect(handle.shareLinks.membersOf(theirs)).toEqual([]);
+    const ours = sameNamed().filter((id) => id !== theirs);
+    expect(ours).toHaveLength(1);
+    expect(handle.shareLinks.membersOf(ours[0] ?? '').map((m) => m.email)).toEqual([ALICE]);
+  });
+
+  it('finds its own board again after a restart, and still leaves theirs alone', async () => {
+    const before = sameNamed();
+    const handle = await boot(true);
+    expect(sameNamed().sort()).toEqual(before.sort());
+    const admitted = before.filter((id) => handle.shareLinks.membersOf(id).length > 0);
+    expect(admitted).toHaveLength(1);
   });
 });

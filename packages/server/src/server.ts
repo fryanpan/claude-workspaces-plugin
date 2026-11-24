@@ -212,7 +212,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { applySeedBoard } from './seed-board.ts';
+import { applySeedBoard, seedBoardMarker } from './seed-board.ts';
 import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
@@ -1121,10 +1121,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         createWorkspace: (name) => taskStore.createWorkspace(name),
         ensureWorkspace: (id) => taskProjection.ensureWorkspace(id),
         shareLinks,
+        marker: seedBoardMarker(dataDir),
       });
       console.log(
         `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : 'present'}, ${seeded.added.length} address(es) added`,
       );
+      if (seeded.notOurs.length > 0) {
+        console.warn(
+          `[feedback] seed board: ${seeded.notOurs.length} other board(s) share its name and were left untouched: ${seeded.notOurs.join(', ')}`,
+        );
+      }
     } catch (e) {
       console.error(`[feedback] seed board not applied: ${e instanceof Error ? e.message : e}`);
     }
