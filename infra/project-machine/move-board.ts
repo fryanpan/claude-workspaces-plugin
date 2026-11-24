@@ -191,7 +191,7 @@ async function realOps(): Promise<MoveOps> {
   };
 }
 
-/** The project machine, over `fly ssh`. Every command is a step of the move grant. */
+/** The project machine, over `fly ssh`. Every command is one of `moveCommands`. */
 export function flyTarget(app: string, ops: MoveOps): MoveTarget {
   const { flyOk, onMachine, privateStage, machines } = ops;
   const lastJson = <T>(out: string): T => {

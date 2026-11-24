@@ -287,7 +287,7 @@ anything. Links do not expire by default — pass `ttl` (`'15m'`, `s`/`m`/`h`/
 `d`/`w`) or `ttlSeconds` when a window is wanted. `CF_SHARE_MAX_TTL` (same
 grammar, e.g. `30d`) caps a mint or an extension, and a clamped reply carries
 `ttlClamped`. Shares already minted the old way keep working until they lapse:
-`list_shares` lists them, `set_share_ttl` shortens one, `unshare` revokes one.
+`list_shares` lists them, `set_share_ttl` shortens one, `unshare` revokes one. The server holds no Cloudflare token, so a revoke drops the record and leaves that share's Access application (`claude-workspaces-share-<slug>`) in the account; delete it in the Zero Trust dashboard.
 
 You can also drive it manually with the CLI:
 
@@ -326,9 +326,8 @@ unlock it.
 5. Comments save the same way they would for a Tailscale visitor —
    anchored, persistent, watched by the agent.
 
-The session cookie lives the full TTL of the share. After that, the
-cf-access app is gone, the URL stops working, and any cached cookie
-becomes useless.
+The session cookie lives the full TTL of the share. After that, the URL
+stops working and any cached cookie becomes useless.
 
 ## Troubleshooting
 
@@ -338,9 +337,8 @@ becomes useless.
 - **"no_share_for_host" 401** — the URL points at a hostname we don't
   have an active share for (expired or revoked). Run
   `bun share list` to confirm and re-share if needed.
-- **Reviewer's allowed domain rejected** — confirm the domain in the
-  Cloudflare Zero Trust dashboard (Access → Applications → your app →
-  Policies). The policy is `email_domain` based and exact.
+- **Reviewer's allowed domain rejected** — confirm the address or domain
+  is in the board's audience (`set_share_audience`). The match is exact.
 
 ## Limitations (current build)
 

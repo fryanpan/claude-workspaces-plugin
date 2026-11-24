@@ -237,6 +237,11 @@ export class Shares {
     return { ok: true };
   }
 
+  /** Whether this server can make an Access application for a share. */
+  get canMintAccess(): boolean {
+    return this.cfApi !== null;
+  }
+
   list(): Share[] {
     return this.shares.slice();
   }
