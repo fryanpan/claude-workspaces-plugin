@@ -14,6 +14,10 @@
  * read from this file and nowhere else, so only a merged change decides which
  * repos get a key that writes.
  *
+ * `seedBoard` names a board the project's server starts with, letting in
+ * the collaborators the Keychain's `cw-test-collaborator-email` lists
+ * (`settings.ts`, `packages/server/src/seed-board.ts`): the test servers'.
+ *
  * `leadToken` pins the label of the listed Claude token the project's lead
  * signs in with (`token-list.ts`); a deploy takes a listed token only where
  * this file pins it, so which org uses which sign-in is written down and
@@ -42,7 +46,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { MAX_PUSH_REPOS } from '../../packages/server/src/provisioning/push-keys.ts';
-import { PROJECT_NAME } from './deploy-plan.ts';
+import { PROJECT_NAME, SEED_BOARD_NAME } from './deploy-plan.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -59,6 +63,8 @@ export interface Machine {
   leadToken?: string;
   /** The lead may run with Remote Control (`CW_LEAD_REMOTE_CONTROL`). */
   remoteControl?: boolean;
+  /** The board the server starts with, its collaborators from the Keychain. */
+  seedBoard?: string;
 }
 
 const flag = (project: string, m: Record<string, unknown>, name: string) => {
@@ -109,6 +115,12 @@ export function parseMachines(raw: string): Machine[] {
     ) {
       throw new Error(`${project}: leadToken is a token list label`);
     }
+    if (
+      m.seedBoard !== undefined &&
+      (typeof m.seedBoard !== 'string' || !SEED_BOARD_NAME.test(m.seedBoard))
+    ) {
+      throw new Error(`${project}: seedBoard is a board name of 1-120 printable characters`);
+    }
     return {
       project,
       tunnel,
@@ -117,6 +129,7 @@ export function parseMachines(raw: string): Machine[] {
       ...(m.pushRepos !== undefined ? { pushRepos: checkPushRepos(project, m.pushRepos) } : {}),
       ...(m.leadToken !== undefined ? { leadToken: m.leadToken as string } : {}),
       ...flag(project, m, 'remoteControl'),
+      ...(m.seedBoard !== undefined ? { seedBoard: m.seedBoard as string } : {}),
     };
   });
 }
@@ -136,6 +149,7 @@ export function deployArgs(m: Machine, ref: string, dryRun: boolean, noOutputs =
     ...(m.memory !== undefined ? ['--memory', String(m.memory)] : []),
     ...(m.leadBoard !== undefined ? ['--lead-board', m.leadBoard] : []),
     ...(m.pushRepos ?? []).flatMap((r) => ['--push-repo', r]),
+    ...(m.seedBoard !== undefined ? ['--seed-board', m.seedBoard] : []),
     ...(dryRun ? ['--dry-run'] : []),
     ...(noOutputs ? ['--no-terraform-outputs'] : []),
   ];

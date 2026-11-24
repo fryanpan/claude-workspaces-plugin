@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
+import { SEED_SETTING_NAMES } from './settings.ts';
 import { type StoreObserved, storeActions, storeSecretNames } from './store-plan.ts';
 import { vmSizeFor } from './vm-size.ts';
 
@@ -57,6 +58,8 @@ export interface ProjectConfig {
   pushRepos?: string[];
   /** Make the push keys again even though the secret exists (`--refresh-push-keys`). */
   refreshPushKeys: boolean;
+  /** The board the server starts with (`--seed-board`, `settings.ts`). */
+  seedBoard?: string;
 }
 
 export interface ConfigInput {
@@ -78,12 +81,15 @@ export interface ConfigInput {
   leadRepos?: string[];
   pushRepos?: string[];
   refreshPushKeys?: boolean;
+  seedBoard?: string;
 }
 
 export const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const KEYCHAIN_ENTRY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const BOARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** A board name: printable, no leading or trailing space, as `seed-board.ts` reads it. */
+export const SEED_BOARD_NAME = /^[^\s\p{C}](?:[^\p{C}]{0,118}[^\s\p{C}])?$/u;
 
 /**
  * The Fly secret the lead's Claude Code signs in with (entrypoint.sh, lead.sh):
@@ -147,6 +153,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       `lead board must be a board id (A-Z, a-z, 0-9, _ and -), got "${input.leadBoard}"`,
     );
   }
+  if (input.seedBoard !== undefined && !SEED_BOARD_NAME.test(input.seedBoard)) {
+    throw new Error('seed board must be a board name of 1-120 printable characters');
+  }
   const badRepo = input.pushRepos?.find((r) => !isRepoName(r));
   if (badRepo !== undefined) throw new Error(`push repo must be owner/name, got "${badRepo}"`);
   const badLeadRepo = input.leadRepos?.find((r) => !isRepoName(r));
@@ -196,6 +205,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
     ...(input.leadRepos?.length ? { leadRepos: [...input.leadRepos] } : {}),
     ...(input.pushRepos?.length ? { pushRepos: [...input.pushRepos] } : {}),
     refreshPushKeys: input.refreshPushKeys === true,
+    ...(input.seedBoard !== undefined ? { seedBoard: input.seedBoard } : {}),
   };
 }
 
@@ -379,6 +389,10 @@ export function plan(
   const unset = [
     ...(cfg.tunnel === 'named' && obs.secrets.has('CW_TUNNEL_MODE') ? ['CW_TUNNEL_MODE'] : []),
     ...(obs.secrets.has(CLASSIC_PUSH_TOKEN_SECRET) ? [CLASSIC_PUSH_TOKEN_SECRET] : []),
+    // machines.json decides who a seed board lets in: an entry that no longer
+    // names one takes the settings away, so the next boot adds nobody. The
+    // board and the people already in it stay; removing them is the owner's.
+    ...(cfg.seedBoard === undefined ? SEED_SETTING_NAMES.filter((n) => obs.secrets.has(n)) : []),
   ];
   if (unset.length > 0) actions.push({ kind: 'unset-secrets', names: unset });
   const current = obs.machines.filter((m) => m.state !== 'destroyed');
