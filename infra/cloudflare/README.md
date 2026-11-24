@@ -258,6 +258,27 @@ retired keeper's `CI credentials` step, not by this root, which needs a token wi
 nobody on the Mac holds. Apps' secrets and Fly's CI tokens are therefore
 roots of their own.
 
+### When the deploy token needs Bryan
+
+The deploy token has no expiry, so nothing breaks on a date. It needs Bryan
+in two cases, because only he can make a token with Account API Tokens Edit:
+
+- **A new permission.** When an apply fails with 403 "Authentication error"
+  (code 10000) on a resource type the token has never made, add that
+  permission to the token in the dashboard. Turnstile Sites Edit was added
+  this way on 24 Nov 2026.
+- **The yearly rotation, next due 24 Nov 2027.** Rotate it sooner if its value
+  may have been exposed. This cadence is the agent's choice, not Bryan's;
+  change it here. Steps:
+  1. Bryan makes a short-lived account token with Account API Tokens Edit
+     and stores it where the agent's run can read it.
+  2. The agent runs `bun run cf:ci-secrets apply`, which makes the new deploy
+     token and writes it and the R2 pair to `cloudflare-prod`.
+  3. The agent runs `signin-test.yml` to show the new token works.
+  4. Bryan deletes the old deploy token and the short-lived token in the
+     dashboard. The first apply leaves the keeper-written token active (see
+     the paragraph above).
+
 ## Apps' secrets
 
 `app-secrets/` writes the secrets an app's workflow reads from
