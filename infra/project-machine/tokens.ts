@@ -23,7 +23,7 @@ terms bar routing work through another person's account. No value is printed.
 
   usage [--project <name>]...
       Each listed token's last reading and the projects on it, from every cw-
-      app or the projects named. Through the keeper each project is one tap.
+      app or the projects named.
 
   burn [--project <name>]... [--every <seconds>]
       Copy each project lead's token counts per turn to this Mac, under
@@ -31,8 +31,7 @@ terms bar routing work through another person's account. No value is printed.
       beside the Mac's own projects. --every repeats it until stopped.
 
   move --project <name> --to <label>
-      Move a project's lead to a listed token and restart its machine. Through
-      the keeper this is two taps: one to set the token, one to confirm.
+      Move a project's lead to a listed token and restart its machine.
 `;
 
 export interface TokensIo {

@@ -24,8 +24,8 @@ locals {
   service_token_names = toset(flatten([for p in var.projects : p.service_tokens]))
 }
 
-# Every service token a project names. The apply never makes one: `cf:sync-config`
-# makes a missing token first, through the keeper, and keeps its secret in the Keychain
+# Every service token a project names. The apply never makes one: the wrapper
+# (`run.ts`) makes a missing token first and seals its secret to the Mac
 # (`infra/cloudflare/service-tokens.ts`), and each root imports it by id, so
 # the state never holds a `client_secret` (Cloudflare returns it only to the
 # call that made the token). A plan for a token that does not exist yet still

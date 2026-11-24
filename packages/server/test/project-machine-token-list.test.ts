@@ -35,7 +35,6 @@ import {
 } from '../../../infra/project-machine/token-list.ts';
 import { moveProject, waitForLabelCommand } from '../../../infra/project-machine/token-move.ts';
 import { HELP, runTokens } from '../../../infra/project-machine/tokens.ts';
-import { classifyFly } from '../src/keeper/keeper-policy.ts';
 import { BASH, readRecords } from './project-machine-harness.ts';
 import {
   APPROVED,
@@ -235,11 +234,6 @@ describe('one step moves a project to another listed token', () => {
       .split('\n');
     expect(imports).toEqual(['secrets import --app cw-riverbend']);
     expectNoTokenShown(FIRST, SECOND);
-  });
-
-  it('the keeper holds that exact import, unchanged', () => {
-    const v = classifyFly(['secrets', 'import', '--app', 'cw-riverbend'], ['cw-riverbend']);
-    expect(v).toMatchObject({ kind: 'held', hold: 'token.move' });
   });
 
   it.skipIf(BASH === null)(

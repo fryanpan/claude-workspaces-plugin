@@ -1,20 +1,13 @@
 /**
  * What a workflow pushed with a repo's new write deploy key could read
- * (`provisioning/push-exposure.ts`), that the keeper's push-key answer
- * carries it (`provisioning/push-keys.ts`), and that the keeper's GitHub
- * calls give up on a hung request (`keeper/keeper-exec.ts`).
+ * (`provisioning/push-exposure.ts`), and that the push-key answer carries it
+ * (`provisioning/push-keys.ts`).
  *
  * GitHub is an in-memory stand-in that records every call; no request leaves
  * the machine. Its secrets carry a value only so the test can show the value
  * never reaches the answer.
  */
-import { afterAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { keeperExecutors } from '../src/keeper/keeper-exec.ts';
-import { openKeeperStore } from '../src/keeper/keeper-store.ts';
-import type { GuardedFetch } from '../src/outbound-fetch.ts';
+import { describe, expect, it } from 'bun:test';
 import {
   type RepoExposure,
   exposureLines,
@@ -293,7 +286,7 @@ describe('whether the default branch refuses the deploy key', () => {
   });
 });
 
-describe('the keeper’s push-key answer', () => {
+describe('the push-key answer', () => {
   const deps = (github: GithubApi) => ({
     github,
     keygen: async (c: string) => ed25519Pair(c),
@@ -335,48 +328,5 @@ describe('the keeper’s push-key answer', () => {
         openEnvironments: null,
       },
     ]);
-  });
-});
-
-describe('the keeper’s GitHub calls', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'keeper-gh-timeout-'));
-  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
-
-  it('give up on a call GitHub never answers', async () => {
-    const dir = join(tmp, 'store');
-    mkdirSync(dir, { mode: 0o700 });
-    const store = openKeeperStore(dir);
-    if ('error' in store) throw new Error(store.error);
-    store.setCredential('github-token', 'riverbend-test-token');
-    let aborted = false;
-    // Answers only when aborted, as a hung connection would.
-    const hang = ((_url: unknown, init?: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => {
-          aborted = true;
-          reject(init.signal?.reason);
-        });
-      })) as unknown as GuardedFetch;
-    const exec = keeperExecutors({
-      store,
-      flyBin: '/bin/false',
-      home: tmp,
-      fetch: hang,
-      githubTimeoutMs: 20,
-    });
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    // A deadline, not a wait: without the keeper's own timeout the call never settles.
-    const outcome = await Promise.race([
-      exec.github?.('GET', '/repos/Riverbend/app').then(
-        () => 'answered',
-        () => 'abandoned',
-      ),
-      new Promise((resolve) => {
-        deadline = setTimeout(() => resolve('hung'), 5_000);
-      }),
-    ]);
-    clearTimeout(deadline);
-    expect(outcome).toBe('abandoned');
-    expect(aborted).toBe(true);
   });
 });

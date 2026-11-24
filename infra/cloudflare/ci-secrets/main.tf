@@ -22,9 +22,7 @@ locals {
   zone_scope    = "com.cloudflare.api.account.zone"
   bucket_scope  = "com.cloudflare.edge.r2.bucket"
 
-  # What the two workflows need. The account and zone halves are the apply
-  # token's list in packages/server/src/keeper/keeper-setup-ci.ts
-  # (CF_APPLY_PERMISSIONS); keep the two the same.
+  # What the two workflows need. This is the one copy of the list.
   permissions = {
     account = [
       "Access: Apps and Policies Write",
@@ -149,9 +147,7 @@ locals {
 }
 
 # The environment's write credentials are safe only while a run from main
-# alone can deploy to it: the keeper checks the same before its own write
-# (packages/server/src/provisioning/github-ci.ts). The token's precondition
-# reads this.
+# alone can deploy to it. The token's precondition reads this.
 data "github_repository_environment_deployment_policies" "deploy" {
   repository  = var.repository
   environment = var.environment

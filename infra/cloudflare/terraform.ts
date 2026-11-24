@@ -50,7 +50,7 @@ export function lockDownState(dir: string): void {
 /**
  * terraform, under umask 077, in `cwd`. `capture` returns stdout instead of
  * showing it. The credentials are only ever in `env`. `bin` is the binary,
- * found on PATH by default; the keeper passes its own fixed path.
+ * found on PATH by default.
  */
 export function spawnTerraform(
   cwd: string,
