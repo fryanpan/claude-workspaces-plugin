@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
 import { projectConfig, requiredSecrets } from '../../../infra/project-machine/deploy-plan.ts';
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
+import type { Machine } from '../../../infra/project-machine/machines.ts';
 import { tokenSlot } from '../../../infra/project-machine/token-list.ts';
 import { giveMacFlyTokens } from './mac-fly-tokens.ts';
 import { BASH, machineDir, machineEnv, readRecords, stubs } from './project-machine-harness.ts';
@@ -229,12 +230,24 @@ export const approvalCount = () =>
 export const output: string[] = [];
 let spies: Array<{ mockRestore(): void }> = [];
 
+/** machines.json's pins for these tests: each project its own listed token (wall-off review H2). */
+export const PINS: Machine[] = [
+  { project: 'harborlight', tunnel: 'quick', leadToken: 'first-account' },
+  { project: 'riverbend', tunnel: 'quick', leadToken: 'second-account' },
+];
+
 export const outputs = (): TfOutputs => ({ access: {}, accessTeamDomain: null, tunnels: {} });
 export const deploy = (
   org: Org,
   extra: Partial<Parameters<typeof projectConfig>[0]> = {},
   dry = false,
-) => deployProject(cfgOf(org, extra), dry, { outputs, signInOutput: (t) => output.push(t) });
+  machines: Machine[] = PINS,
+) =>
+  deployProject(cfgOf(org, extra), dry, {
+    outputs,
+    signInOutput: (t) => output.push(t),
+    machines,
+  });
 
 /** No token value in anything a person, a transcript or `ps` could see. */
 export function expectNoTokenShown(...tokens: string[]) {

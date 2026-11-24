@@ -148,6 +148,11 @@ const realFactsIo: FactsIo = {
       })
       .filter((p): p is Proc => p !== null),
   read: readOrNull,
+  // `fly ssh console` runs the probe as root with the machine's Fly secrets.
+  leadEnv: () => ({
+    CW_LEAD_TOKEN_ORG: process.env.CW_LEAD_TOKEN_ORG,
+    CW_LEAD_REMOTE_CONTROL: process.env.CW_LEAD_REMOTE_CONTROL,
+  }),
   dirs: (path) => {
     try {
       return readdirSync(path, { withFileTypes: true })

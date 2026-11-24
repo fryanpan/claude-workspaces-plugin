@@ -4,6 +4,7 @@
  * Commands and rules are in `HELP`; the list is `token-list.ts`.
  */
 import { burnLine, pullBurn } from './machine-burn.ts';
+import type { Machine } from './machines.ts';
 import { approveOrgSignIn } from './org-signin.ts';
 import { addToken, assertNewLabel, readTokenList } from './token-list.ts';
 import { moveProject } from './token-move.ts';
@@ -39,6 +40,8 @@ export interface TokensIo {
   show?: (text: string) => void;
   stdin?: () => Promise<string>;
   imageReady?: (commit: string) => boolean;
+  /** The project list whose pins a move follows. Default: machines.json. */
+  machines?: Machine[];
   /** Between `burn --every` rounds. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -109,7 +112,10 @@ function move(args: string[], io: TokensIo): number {
     console.error(HELP);
     return 2;
   }
-  const r = moveProject(project, label, io.imageReady ? { imageReady: io.imageReady } : {});
+  const r = moveProject(project, label, {
+    ...(io.imageReady ? { imageReady: io.imageReady } : {}),
+    ...(io.machines ? { machines: io.machines } : {}),
+  });
   if (r.confirmed) {
     console.log(`[tokens] ${project}'s machine took ${label}: it reports that label`);
     return 0;
