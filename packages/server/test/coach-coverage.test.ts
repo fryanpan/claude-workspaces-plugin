@@ -251,13 +251,24 @@ describe('the coach digest covers his day', () => {
     expect(seated.ok).toBe(true);
     const stream = await coachStream(coachBoard, coachId);
     try {
-      await waitFor(() => stream.digests().length > 0);
-      const digest = stream.digests()[0] ?? {};
-      const items = digest.items as Array<Record<string, unknown>>;
+      // A window closes WINDOW_MS after it opens, so on a slow runner the
+      // comment and the prompt land in two digests. Both reaching the coach
+      // is the claim; how the window split them is not.
+      type Row = Record<string, unknown>;
+      const rows = (key: 'items' | 'sessions') =>
+        stream.digests().flatMap((d) => (d[key] as Row[] | undefined) ?? []);
+      await waitFor(
+        () =>
+          rows('items').some((i) => i.text === COMMENT) &&
+          rows('sessions').some((r) => r.boardId === board),
+        { describe: 'digests carrying the comment and the prompt' },
+      );
+      const digest = stream.digests();
+      const items = rows('items');
       expect(items).toContainEqual(
         expect.objectContaining({ kind: 'comment', boardId: board, text: COMMENT }),
       );
-      const sessions = digest.sessions as Array<Record<string, unknown>>;
+      const sessions = rows('sessions');
       expect(sessions).toContainEqual(
         expect.objectContaining({
           boardId: board,

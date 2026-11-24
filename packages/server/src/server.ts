@@ -212,7 +212,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { applySeedBoard } from './seed-board.ts';
+import { applySeedBoard, seedBoardMarker } from './seed-board.ts';
 import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
@@ -1121,10 +1121,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         createWorkspace: (name) => taskStore.createWorkspace(name),
         ensureWorkspace: (id) => taskProjection.ensureWorkspace(id),
         shareLinks,
+        marker: seedBoardMarker(dataDir),
       });
       console.log(
         `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : 'present'}, ${seeded.added.length} address(es) added`,
       );
+      if (seeded.notOurs.length > 0) {
+        console.warn(
+          `[feedback] seed board: ${seeded.notOurs.length} other board(s) share its name and were left untouched: ${seeded.notOurs.join(', ')}`,
+        );
+      }
     } catch (e) {
       console.error(`[feedback] seed board not applied: ${e instanceof Error ? e.message : e}`);
     }
@@ -4153,7 +4159,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // onto its dead registry and write `[loop]` lines into unrelated tests'
       // output for the rest of the run.
       loopLag.stop();
-      void boardSignIn?.close();
+      const signInClosed = boardSignIn?.close();
       taskScheduler.stop();
       features.stop();
       landingChanges.dispose();
@@ -4234,6 +4240,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // subscriber's cursor is unrecognisable after the restart and every
       // stream opens with a `replay.gap` that has nothing behind it.
       saveReplayMarks(dataDir, sse.marks());
+      // Last, and awaited: the sign-in's migration may still be running on
+      // the user list, and a caller that removes the data dir once `stop`
+      // resolves would delete the file under it.
+      await signInClosed;
     },
   };
 }

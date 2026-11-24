@@ -155,7 +155,11 @@ describe('the map with layers', () => {
         ],
       }),
     );
-    await until(() => rows(el)[1]?.state === 'failed');
+    // The map paints once its slot is placed, a few frames after mount, and
+    // the 404 can arrive before or after that; wait for both.
+    const markers = () => el.querySelector<HTMLElement>('.cw-map-slot')?.dataset.markers;
+    await until(() => rows(el)[1]?.state === 'failed' && markers() !== undefined);
+    expect(markers()).toBe('1');
     expect(rows(el)).toEqual([
       { id: 'paths', state: 'loading', features: 0, text: 'Pathsloading' },
       { id: 'gone', state: 'failed', features: 0, text: 'Gonecould not load: HTTP 404' },

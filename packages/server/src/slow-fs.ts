@@ -152,6 +152,8 @@ class BoundFileReader {
   /** The poll's stat, from a checked descriptor under a guard. A field only
    *  so a test can hold one pending. */
   private statFile = (path: string): Promise<BigIntStats> => this.guards.stat(path);
+  /** How long `race` waits. Tests only may move it, for a suite not about slow files. */
+  deadlineMs = DEADLINE_MS;
   /** Just-completed reads, waiting to be consumed by the hydrate that asked. */
   private readonly fresh = new Map<
     string,
@@ -464,7 +466,7 @@ class BoundFileReader {
     void running.then(settle, settle);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<Raced<T>>((resolve) => {
-      timer = setTimeout(() => resolve({ kind: 'late' }), DEADLINE_MS);
+      timer = setTimeout(() => resolve({ kind: 'late' }), this.deadlineMs);
       // Never a reason to hold the process open; a stalled read must not be
       // able to stop the server exiting.
       (timer as unknown as { unref?: () => void }).unref?.();
@@ -484,7 +486,7 @@ class BoundFileReader {
         counted = true;
         this.leaked++;
       }
-      this.markStalled(path, `no answer in ${DEADLINE_MS}ms`);
+      this.markStalled(path, `no answer in ${this.deadlineMs}ms`);
     }
     return outcome;
   }
