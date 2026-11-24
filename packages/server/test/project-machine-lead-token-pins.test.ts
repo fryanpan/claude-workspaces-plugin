@@ -1,8 +1,9 @@
 /**
- * Wall-off review H2 (residual): one Claude sign-in per org. A listed token
- * goes to a project only when `machines.json` pins it there, two projects
- * share one only when both say so, and the daily wall report reads which
- * sign-in each machine's lead runs on and whether Remote Control is on.
+ * Wall-off review H2 (residual): which Claude sign-in each org uses is
+ * written down. A listed token goes to a project only when `machines.json`
+ * pins it there; orgs may share one (Bryan, 2026-11-24). The daily wall
+ * report reads which sign-in each machine's lead is set to and whether
+ * Remote Control is on.
  *
  * Pure functions over stand-in lists and machine facts: no Keychain, Fly or
  * machine is touched.
@@ -36,14 +37,14 @@ describe('a listed token goes only where machines.json pins it', () => {
     );
   });
 
-  it('refuses when every listed token is pinned on another project', () => {
+  it('names the first listed when every token is pinned elsewhere, since orgs may share', () => {
     const pins = [
       m('harborlight', { leadToken: 'first-account' }),
       m('saltmarsh', { leadToken: 'second-account' }),
       m('riverbend'),
     ];
     expect(() => pinnedToken(LIST, 'riverbend', pins)).toThrow(
-      'every listed token is pinned on another project',
+      '"leadToken": "first-account" on riverbend',
     );
   });
 
@@ -59,10 +60,10 @@ describe('a listed token goes only where machines.json pins it', () => {
     );
   });
 
-  it('refuses --claude-token naming a label another project pins, saying where', () => {
+  it('refuses --claude-token on an unpinned project, naming the pin to write', () => {
     const pins = [m('harborlight', { leadToken: 'first-account' }), m('riverbend')];
     expect(() => pinnedToken(LIST, 'riverbend', pins, 'first-account')).toThrow(
-      'first-account is pinned on harborlight, and riverbend pins nothing',
+      '"leadToken": "first-account" on riverbend',
     );
   });
 
@@ -80,51 +81,34 @@ describe('a listed token goes only where machines.json pins it', () => {
     );
   });
 
-  it('refuses a label two projects pin unless both share it on purpose', () => {
+  it('lets two projects pin one label: a shared token is allowed', () => {
     const both = [
       m('harborlight', { leadToken: 'first-account' }),
       m('riverbend', { leadToken: 'first-account' }),
     ];
-    expect(() => pinnedToken(LIST, 'riverbend', both)).toThrow('pinned on harborlight, riverbend');
-    const shared = both.map((x) => ({ ...x, shareLeadToken: true }));
-    expect(pinnedToken(LIST, 'riverbend', shared)?.label).toBe('first-account');
+    expect(pinnedToken(LIST, 'riverbend', both)?.label).toBe('first-account');
   });
 });
 
 describe('machines.json carries the pins', () => {
-  it('parses leadToken, shareLeadToken and remoteControl', () => {
-    const [h] = parseMachines(
+  it('parses leadToken and remoteControl, and one label on two projects', () => {
+    const [h, r] = parseMachines(
       list([
-        {
-          project: 'harborlight',
-          leadToken: 'first-account',
-          shareLeadToken: true,
-          remoteControl: true,
-        },
+        { project: 'harborlight', leadToken: 'first-account', remoteControl: true },
+        { project: 'riverbend', leadToken: 'first-account' },
       ]),
     );
-    expect(h).toMatchObject({
-      leadToken: 'first-account',
-      shareLeadToken: true,
-      remoteControl: true,
-    });
+    expect(h).toMatchObject({ leadToken: 'first-account', remoteControl: true });
+    expect(r?.leadToken).toBe('first-account');
   });
 
-  it('refuses a bad label, a non-boolean flag and an unshared double pin', () => {
+  it('refuses a bad label and a non-boolean flag', () => {
     expect(() => parseMachines(list([{ project: 'riverbend', leadToken: 'Bad Label' }]))).toThrow(
       'leadToken',
     );
     expect(() => parseMachines(list([{ project: 'riverbend', remoteControl: 'yes' }]))).toThrow(
       'remoteControl',
     );
-    expect(() =>
-      parseMachines(
-        list([
-          { project: 'harborlight', leadToken: 'first-account' },
-          { project: 'riverbend', leadToken: 'first-account', shareLeadToken: true },
-        ]),
-      ),
-    ).toThrow('first-account is pinned on harborlight, riverbend');
   });
 
   it('the committed file parses', async () => {
@@ -195,7 +179,7 @@ describe('the daily report judges each lead', () => {
     expect(rows.length).toBe(4);
   });
 
-  it('fails two leads on one sign-in that machines.json does not share', () => {
+  it('fails a lead on a label machines.json does not pin there, naming who shares it', () => {
     const pins = [m('harborlight', { leadToken: 'first-account' }), m('riverbend')];
     const rows = leadRows(
       pins,
@@ -205,17 +189,17 @@ describe('the daily report judges each lead', () => {
       ]),
     );
     expect(failing(rows)).toEqual([
-      'harborlight lead sign-in: first-account, also run by riverbend',
       'riverbend lead sign-in: first-account, which machines.json does not pin here; also run by harborlight',
     ]);
   });
 
-  it('passes a shared sign-in both projects mark shareLeadToken', () => {
-    const pins = ['harborlight', 'riverbend'].map((p) =>
-      m(p, { leadToken: 'first-account', shareLeadToken: true }),
+  it('passes a shared sign-in both projects pin, and names who shares it', () => {
+    const pins = ['harborlight', 'riverbend'].map((p) => m(p, { leadToken: 'first-account' }));
+    const rows = leadRows(pins, new Map(pins.map((p) => [p.project, lead('first-account')])));
+    expect(failing(rows)).toEqual([]);
+    expect(rows.find((r) => r.project === 'riverbend')?.answer).toBe(
+      'first-account, also run by harborlight',
     );
-    const facts = new Map(pins.map((p) => [p.project, lead('first-account')]));
-    expect(failing(leadRows(pins, facts))).toEqual([]);
   });
 
   it('passes a lead on its own approval, and no lead at all', () => {

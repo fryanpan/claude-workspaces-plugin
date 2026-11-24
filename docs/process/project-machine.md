@@ -352,12 +352,13 @@ bun run machine:deploy --project <project> --memory 2048 \
   tokens on the list, `--refresh-lead` must name the pinned one with
   `--claude-token`.
 - A deploy takes a listed token only where `machines.json` pins it on the
-  project (`"leadToken": "<label>"`), so no two orgs share a sign-in by
-  default (wall-off review H2). A project with no pin is refused while the
-  list holds a token, and the refusal names the first label no project pins.
-  Two projects may pin one label only when both say `"shareLeadToken": true`;
-  `machines.json` fails to parse otherwise. With an empty list and no pin,
-  the deploy asks for the per-org browser approval, as before.
+  project (`"leadToken": "<label>"`), so which org uses which sign-in is
+  written down and merged (wall-off review H2). A project with no pin is
+  refused while the list holds a token; the refusal names the first label no
+  project pins, or the first listed when all are pinned. Orgs may share a
+  label (Bryan, 2026-11-24), and a lead moves orgs between tokens to spread
+  usage: change the pin, then `machine:tokens move`. With an empty list the
+  deploy asks for the per-org browser approval, as before.
 - `--claude-token <label>` must agree with the pin, and sets it again on a
   run that names it. Only a deploy of an image holding this code can set one.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private

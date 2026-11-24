@@ -16,9 +16,10 @@
  *
  * `leadToken` pins the label of the listed Claude token the project's lead
  * signs in with (`token-list.ts`); a deploy takes a listed token only where
- * this file pins it, so no two orgs share a sign-in by default (wall-off
- * review H2). Two projects may pin one label only when both say
- * `shareLeadToken: true`. `remoteControl: true` allows the lead's Remote
+ * this file pins it, so which org uses which sign-in is written down and
+ * merged (wall-off review H2). Several projects may pin one label: Bryan
+ * chose shared tokens, and a lead moves orgs between them to spread usage
+ * (2026-11-24). `remoteControl: true` allows the lead's Remote
  * Control, which the daily wall report otherwise fails. Nothing here is a
  * secret: the app is `cw-<project>` (`deploy-plan.ts`), and every credential
  * comes from the Keychain, or from the environment with CW_SECRETS_FROM_ENV=1.
@@ -56,31 +57,8 @@ export interface Machine {
   pushRepos?: string[];
   /** The listed Claude token's label this project's lead signs in with. */
   leadToken?: string;
-  /** This project may share its `leadToken` with another that also says so. */
-  shareLeadToken?: boolean;
   /** The lead may run with Remote Control (`CW_LEAD_REMOTE_CONTROL`). */
   remoteControl?: boolean;
-}
-
-/**
- * Why the pins share a sign-in nobody chose to share, or null. A label pinned
- * on two projects is allowed only when every project pinning it says
- * `shareLeadToken`.
- */
-export function sharedPinError(
-  machines: ReadonlyArray<Pick<Machine, 'project' | 'leadToken' | 'shareLeadToken'>>,
-): string | null {
-  const byLabel = new Map<string, Array<Pick<Machine, 'project' | 'shareLeadToken'>>>();
-  for (const m of machines) {
-    if (m.leadToken === undefined) continue;
-    byLabel.set(m.leadToken, [...(byLabel.get(m.leadToken) ?? []), m]);
-  }
-  for (const [label, holders] of byLabel) {
-    if (holders.length > 1 && holders.some((h) => h.shareLeadToken !== true)) {
-      return `${label} is pinned on ${holders.map((h) => h.project).join(', ')}: one sign-in is shared between orgs only when every project pinning it says "shareLeadToken": true`;
-    }
-  }
-  return null;
 }
 
 const flag = (project: string, m: Record<string, unknown>, name: string) => {
@@ -109,7 +87,7 @@ export function parseMachines(raw: string): Machine[] {
   const list = (JSON.parse(raw) as { machines?: unknown }).machines;
   if (!Array.isArray(list)) throw new Error('machines.json has no "machines" list');
   const seen = new Set<string>();
-  const machines = list.map((m: Record<string, unknown>, i): Machine => {
+  return list.map((m: Record<string, unknown>, i): Machine => {
     const project = m?.project;
     if (typeof project !== 'string' || !PROJECT_NAME.test(project)) {
       throw new Error(`machines.json entry ${i} has no valid project`);
@@ -138,13 +116,9 @@ export function parseMachines(raw: string): Machine[] {
       ...(m.leadBoard !== undefined ? { leadBoard: m.leadBoard as string } : {}),
       ...(m.pushRepos !== undefined ? { pushRepos: checkPushRepos(project, m.pushRepos) } : {}),
       ...(m.leadToken !== undefined ? { leadToken: m.leadToken as string } : {}),
-      ...flag(project, m, 'shareLeadToken'),
       ...flag(project, m, 'remoteControl'),
     };
   });
-  const shared = sharedPinError(machines);
-  if (shared) throw new Error(shared);
-  return machines;
 }
 
 /** The committed list. */

@@ -4,9 +4,10 @@
  * `machines.json`, and whether Remote Control is on where the file does not
  * allow it. The facts come from the machine probe (`machine-facts.ts`).
  *
- * A label run by two projects fails unless both pin it with
- * `shareLeadToken`, so a sign-in shared by hand, or by a deploy older than the
- * pins, shows the next day.
+ * A label the file does not pin on that project fails, so a token set by
+ * hand, or by a deploy older than the pins, shows the next day. Orgs may
+ * share a label (Bryan, 2026-11-24); the row names the others on it, so a
+ * lead spreading usage can see who shares what.
  */
 import type { MachineFacts } from './machine-facts.ts';
 import type { Machine } from './machines.ts';
@@ -42,9 +43,6 @@ export function leadRows(
         .filter(([p, l]) => p !== project && l?.tokenLabel === label)
         .map(([p]) => p);
       const pinned = own?.leadToken === label;
-      const shared =
-        others.length === 0 ||
-        (own?.shareLeadToken === true && others.every((p) => entry(p)?.shareLeadToken === true));
       const notes = [
         ...(pinned ? [] : ['which machines.json does not pin here']),
         ...(others.length ? [`also run by ${others.join(', ')}`] : []),
@@ -53,7 +51,7 @@ export function leadRows(
         project,
         check: 'lead sign-in',
         answer: notes.length ? `${label}, ${notes.join('; ')}` : label,
-        ok: pinned && shared,
+        ok: pinned,
       });
     }
     const allowed = own?.remoteControl === true;
