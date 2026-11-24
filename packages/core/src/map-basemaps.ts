@@ -16,10 +16,13 @@
  *    attribution required, no bulk prefetch, and "heavy use" is not allowed
  *    (https://operations.osmfoundation.org/policies/tiles/). A board's doc
  *    readers are a handful of people, which is light use.
- *  - `carto-light`: CARTO's Positron raster tiles over OpenStreetMap data.
- *    Keyless; attribution to OpenStreetMap and CARTO required; free for
- *    non-commercial use up to 75,000 map views a month
- *    (https://github.com/CartoDB/basemap-styles#1-web-raster-basemaps).
+ *  - `carto-light`: draws OpenStreetMap's tiles. CARTO's Positron raster
+ *    tiles were keyless until November 2026; on 24 Nov 2026 every
+ *    `{a,b,c,d}.basemaps.cartocdn.com` path (`light_all`, `light_nolabels`,
+ *    `rastertiles/voyager`, the bare host and the old fastly host) answered
+ *    200 with one 2049-byte tile reading "API key required,
+ *    carto.com/basemaps/apikey", Referer or not. The name stays, so a doc
+ *    that names it keeps drawing streets rather than failing as unknown.
  *  - `google`: Google's roadmap, drawn by the Maps JavaScript API under a
  *    browser key restricted to the board's site, and moved under Leaflet's
  *    layers by GoogleMutant (`map-entry.ts`). The API puts Google's logo and
@@ -55,24 +58,19 @@ export interface Basemap {
 const OSM_CREDIT =
   '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
 
+const OSM: Basemap = {
+  label: 'OpenStreetMap',
+  tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: OSM_CREDIT,
+  maxZoom: 19,
+  origins: ['https://tile.openstreetmap.org'],
+  terms: 'https://operations.osmfoundation.org/policies/tiles/',
+};
+
 export const BASEMAPS: Readonly<Record<string, Basemap>> = Object.freeze({
-  osm: {
-    label: 'OpenStreetMap',
-    tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: OSM_CREDIT,
-    maxZoom: 19,
-    origins: ['https://tile.openstreetmap.org'],
-    terms: 'https://operations.osmfoundation.org/policies/tiles/',
-  },
-  'carto-light': {
-    label: 'CARTO Positron',
-    tiles: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-    subdomains: 'abcd',
-    attribution: `${OSM_CREDIT} &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>`,
-    maxZoom: 20,
-    origins: ['a', 'b', 'c', 'd'].map((s) => `https://${s}.basemaps.cartocdn.com`),
-    terms: 'https://github.com/CartoDB/basemap-styles#1-web-raster-basemaps',
-  },
+  osm: OSM,
+  // CARTO now stamps every keyless tile; see the terms note above.
+  'carto-light': OSM,
   google: {
     label: 'Google Maps',
     tiles: '',
