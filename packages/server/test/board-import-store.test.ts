@@ -33,6 +33,7 @@ describe('the board import route', () => {
         clientId: undefined,
         verifier: verifier({ ok: true, email: undefined, commonName: 'a.access' }),
         print: async () => ({}),
+        externalAccessOpen: () => true,
         j,
       },
       tunnel(),

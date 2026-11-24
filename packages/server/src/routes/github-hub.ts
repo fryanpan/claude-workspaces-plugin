@@ -25,7 +25,11 @@
  * caller check too.
  *
  * Answered ABOVE request admission, for the home feed's reason: the relay's
- * request names nobody, and admission refuses a stamp that names nobody.
+ * request names nobody, and admission refuses a stamp that names nobody. So
+ * the relay's two routes ask the external-access master switch themselves,
+ * first (`refuseWhileExternalAccessOff`): while it is off, nothing through the
+ * tunnel reads a subscription list or posts an event, key or no key. The
+ * first two are this machine's only, so the switch has nothing to add there.
  *
  * A pushed event is checked against the board's list here, whatever the
  * relay thought, and reaches each agent holding a stream on the board as one
@@ -39,7 +43,11 @@ import {
   parseGithubEventPush,
   parseGithubSubscriptions,
 } from '../github-hub.ts';
-import { type HomeFeedRoutesContext, homeFeedCallerAllowed } from './home-feed.ts';
+import {
+  type HomeFeedRoutesContext,
+  homeFeedCallerAllowed,
+  refuseWhileExternalAccessOff,
+} from './home-feed.ts';
 import { sent } from './route-contract.ts';
 import type { GithubSubscriptionsBody } from './workspace-board-contract.ts';
 
@@ -51,7 +59,10 @@ export interface GithubHubRoutesContext {
   hub: GithubHub;
   boardExists: (boardId: string) => boolean;
   /** The home feed's caller check, which these routes share. */
-  caller: Pick<HomeFeedRoutesContext, 'verifier' | 'clientId' | 'peerAddress'>;
+  caller: Pick<
+    HomeFeedRoutesContext,
+    'verifier' | 'clientId' | 'peerAddress' | 'externalAccessOpen' | 'j'
+  >;
   /** Send the frame to every agent on the board; how many streams it reached. */
   deliver: (boardId: string, frame: Record<string, unknown> & { event: string }) => number;
   j: (status: number, body: unknown) => Response;
@@ -99,6 +110,8 @@ export async function handleGithubHubRoute(
 
   const relay = RELAY_PATH.exec(pathname);
   if (!relay) return null;
+  const shut = refuseWhileExternalAccessOff(ctx.caller, req);
+  if (shut) return shut;
   if (req.headers.has('cookie')) return j(403, { error: 'forbidden' });
   if (!(await homeFeedCallerAllowed(ctx.caller, req))) return j(403, { error: 'forbidden' });
   const boardId = relay[1] as string;

@@ -33,6 +33,12 @@
  *    (`home-remotes.ts` `boardTokens`). In `access` and `both` the service
  *    token above is still the only tunnel caller, with or without an `at2`.
  *
+ * The external-access master switch covers every caller through the tunnel:
+ * while it is off, a request carrying `cf-ray` is refused before any of the
+ * checks above runs (`refuseWhileExternalAccessOff`), so a live service token
+ * and no credential at all get the same answer. A process on this machine is
+ * not external reach and is unaffected, as it is everywhere else.
+ *
  * With no client id configured and no token presented, only the first caller
  * is admitted. The two
  * answers carry nothing a board member could not read on the board itself,
@@ -64,7 +70,31 @@ export interface HomeFeedRoutesContext {
   boardGrantFor?: (bearer: string) => BoardAgentClaims | null;
   /** Whether an Access application fronts this server's hosts. */
   accessInFront?: () => boolean;
+  /** The external-access master switch (`SharingGate.isEnabled`). */
+  externalAccessOpen: () => boolean;
   j: (status: number, body: unknown) => Response;
+}
+
+/**
+ * The external-access master switch, for a family answered above admission.
+ *
+ * Admission applies the switch to every external host kind, and these
+ * families answer before admission runs, so each asks it here instead:
+ * first, before its own caller check, so that while the switch is off a valid
+ * credential and none at all are indistinguishable. "External" is "through
+ * the tunnel" (`cf-ray`), the rule the frame hostname uses: a loopback or
+ * tailnet caller is on this side of the outside door, which is how the owner
+ * turns the switch back on.
+ *
+ * The refusal is admission's own (`403 sharing_disabled`), so a caller sees
+ * one answer for "the outside door is shut" whichever door it knocked on.
+ */
+export function refuseWhileExternalAccessOff(
+  ctx: Pick<HomeFeedRoutesContext, 'externalAccessOpen' | 'j'>,
+  req: Request,
+): Response | null {
+  if (!req.headers.has('cf-ray') || ctx.externalAccessOpen()) return null;
+  return ctx.j(403, { error: 'sharing_disabled' });
 }
 
 /** Whether this caller may read a home feed. Never says which check failed. */
@@ -99,6 +129,8 @@ export async function handleHomeFeedRoute(
   const m = FEED_PATH.exec(pathname);
   if (!m) return null;
   const boardId = m[1] as string;
+  const shut = refuseWhileExternalAccessOff(ctx, req);
+  if (shut) return shut;
   if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
     return ctx.j(403, { error: 'forbidden' });
   }
