@@ -15,12 +15,15 @@
  *     can find it on GitHub and read its read-only flag
  *   which GitHub repos the lead's clones point at, from their `.git/config`
  *     text (no git runs here)
+ *   which listed Claude token the lead runs on, by LABEL (`lead.sh` writes
+ *     `token-label`), and whether a process runs with `--remote-control`
  *
  * The settings carried back are addresses, hostnames, audiences and uids: no
  * token, key or password. The report compares them and prints none.
  */
 import { join } from 'node:path';
 import { parsePolicy } from '../../packages/server/src/git-push/policy.ts';
+import { TOKEN_LABEL } from './lead-usage.ts';
 
 export const SERVER_KEYS = [
   'CW_OWNER_EMAIL',
@@ -48,6 +51,12 @@ export interface MachineFacts {
   deployKey: string | null;
   /** `owner/name` of each GitHub repo a clone of the lead's points at. */
   repos: string[];
+  /**
+   * The lead's sign-in by label ("" for the org's own approval, null for no
+   * lead started), and whether Remote Control is on. Absent from a probe
+   * older than this field.
+   */
+  lead?: { tokenLabel: string | null; remoteControl: boolean };
 }
 
 export interface Proc {
@@ -60,6 +69,8 @@ export interface FactsIo {
   procs: () => Proc[];
   /** A file's text, or null when it is not there. */
   read: (path: string) => string | null;
+  /** A small file the lead writes: never through a link, or null. */
+  readLeadFile: (path: string) => string | null;
   /** The full paths of the folders directly inside `path`. */
   dirs: (path: string) => string[];
   /** The public half of a private key file, or null. */
@@ -70,6 +81,7 @@ export const PATHS = {
   data: '/data/cw',
   leadKey: '/home/lead/.ssh/github_deploy_key',
   leadWork: '/data/lead/work',
+  leadTokenLabel: '/data/lead/token-label',
 };
 
 const GITHUB_URL =
@@ -88,6 +100,16 @@ export function loginUsers(passwd: string): Array<{ name: string; uid: number }>
     .filter((f) => f.length >= 3)
     .map((f) => ({ name: f[0] ?? '', uid: Number(f[2]) }))
     .filter((u) => Number.isInteger(u.uid) && u.uid >= 1000 && u.uid < 65534);
+}
+
+/**
+ * The label `lead.sh` wrote, carried back only when it is a label: the lead
+ * owns the file, so anything else is reported as such, not copied.
+ */
+function leadLabel(raw: string | null): string | null {
+  if (raw === null) return null;
+  const v = raw.trim();
+  return v === '' || TOKEN_LABEL.test(v) ? v : '(not a label)';
 }
 
 export function readFacts(io: FactsIo): MachineFacts {
@@ -138,5 +160,9 @@ export function readFacts(io: FactsIo): MachineFacts {
     gitPush,
     deployKey,
     repos: [...repos].sort(),
+    lead: {
+      tokenLabel: leadLabel(io.readLeadFile(PATHS.leadTokenLabel)),
+      remoteControl: procs.some((p) => p.cmdline.includes('--remote-control')),
+    },
   };
 }

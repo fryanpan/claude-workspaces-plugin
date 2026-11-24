@@ -24,7 +24,8 @@ import {
 } from './deploy-plan.ts';
 import { machines } from './deploy.ts';
 import { flyJson, flyOk, onMachine } from './mac-ops.ts';
-import { chooseToken, imageHasTokenList, readTokenList, tokenMarker } from './token-list.ts';
+import { type Machine, readMachines } from './machines.ts';
+import { imageHasTokenList, pinnedToken, readTokenList, tokenMarker } from './token-list.ts';
 import { LEAD_ROOT, MACHINE_PATH, asLead, boundedRead } from './token-usage.ts';
 
 const CONFIRMED = 'cw-token-label=';
@@ -52,10 +53,11 @@ export interface MoveResult {
 export function moveProject(
   project: string,
   label: string,
-  opts: { imageReady?: (commit: string) => boolean } = {},
+  opts: { imageReady?: (commit: string) => boolean; machines?: Machine[] } = {},
 ): MoveResult {
   if (!PROJECT_NAME.test(project)) throw new Error(`${project} is not a project name`);
-  const target = chooseToken(readTokenList(), label);
+  // The move follows machines.json: pin the label there first (wall-off review H2).
+  const target = pinnedToken(readTokenList(), project, opts.machines ?? readMachines(), label);
   if (!target) throw new Error(`no token labelled ${label} is on the list; nothing was changed`);
   const app = `cw-${project}`;
   const secrets = flyJson<{ Name?: string; name?: string }[]>(['secrets', 'list', '--app', app]);

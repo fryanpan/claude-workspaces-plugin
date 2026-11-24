@@ -117,6 +117,7 @@ import {
   secretsFromEnv,
 } from './mac-ops.ts';
 import { macOutputs } from './mac-outputs.ts';
+import { type Machine, readMachines } from './machines.ts';
 import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
 import { flushMacHandoff, provisionPresets } from './provision.ts';
 import { makePushKeys } from './push-keys.ts';
@@ -135,8 +136,8 @@ import {
 } from './tigris.ts';
 import {
   type ListedToken,
-  chooseToken,
   imageHasTokenList,
+  pinnedToken,
   readTokenList,
   tokenMarker,
 } from './token-list.ts';
@@ -430,6 +431,8 @@ export interface DeployOptions {
    * (`provision.ts`): the tunnel's token and the Access settings, by name.
    */
   presets?: Record<string, string>;
+  /** The project list whose `leadToken` pins say which org takes which listed token. Default: machines.json. */
+  machines?: Machine[];
 }
 
 const NO_OUTPUTS = 'this run reads no Terraform outputs (--no-terraform-outputs)';
@@ -482,7 +485,9 @@ export async function deployProject(
   const seen = await observe(cfg);
   // Before anything is changed: a label that is not listed stops the run.
   const tokens = leadTokenDue(cfg, seen) ? readTokenList() : [];
-  const listed: ListedToken | undefined = chooseToken(tokens, cfg.claudeToken);
+  const listed: ListedToken | undefined = leadTokenDue(cfg, seen)
+    ? pinnedToken(tokens, cfg.project, opts.machines ?? readMachines(), cfg.claudeToken)
+    : undefined;
   if (cfg.claudeToken !== undefined && !leadTokenDue(cfg, seen)) {
     throw new Error(`--claude-token signs in a lead, and ${cfg.app} has no board to lead`);
   }

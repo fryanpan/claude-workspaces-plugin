@@ -10,8 +10,8 @@
  * `{ label, token, added }` as JSON. The Keychain cannot list its entries by
  * prefix, so the list is the slots 1 to `TOKEN_LIST_SLOTS`, read in order. An
  * entry is made once and never rewritten, which keeps `keychainCreate`'s
- * refusal to replace; an emptied slot is skipped. The first listed token is
- * the one a deploy takes when it is not told a label.
+ * refusal to replace; an emptied slot is skipped. A deploy takes the token
+ * `machines.json` pins on its project, and no other (`pinnedToken`).
  *
  * A value goes to a child's stdin and nowhere else (`mac-ops.ts`). Every error
  * here names the entry or the label, never any part of a value.
@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { TOKEN_LABEL } from './lead-usage.ts';
 import { keychainCreate, keychainHas, keychainRead } from './mac-ops.ts';
+import { type Machine, sharedPinError } from './machines.ts';
 import { isSetupToken } from './org-signin.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
@@ -71,11 +72,40 @@ export function imageHasTokenList(commit: string, repo = REPO): boolean {
   return spawnSync('git', ['-C', repo, 'cat-file', '-e', path], { stdio: 'ignore' }).status === 0;
 }
 
-/** The token `label` names, or the first listed; undefined only for an empty list and no label. */
-export function chooseToken(list: readonly ListedToken[], label?: string): ListedToken | undefined {
-  if (label === undefined) return list[0];
-  const found = list.find((t) => t.label === label);
-  if (!found) throw new Error(`no token labelled ${label} is on the list; nothing was changed`);
+/**
+ * The listed token `project`'s lead takes: the label `machines.json` pins on
+ * it (wall-off review H2). A project with no pin takes nothing, and the
+ * refusal names the first label no project pins, so a new org never lands on
+ * another org's sign-in by default. Undefined only when the list is empty
+ * and nothing names a label: the per-org browser approval is then the path.
+ * `label` is `--claude-token`, which must agree with the pin.
+ */
+export function pinnedToken(
+  list: readonly ListedToken[],
+  project: string,
+  machines: ReadonlyArray<Pick<Machine, 'project' | 'leadToken' | 'shareLeadToken'>>,
+  label?: string,
+): ListedToken | undefined {
+  const pin = machines.find((m) => m.project === project)?.leadToken;
+  if (label !== undefined && pin !== undefined && label !== pin) {
+    throw new Error(
+      `machines.json pins ${pin} on ${project}, not ${label}: change its leadToken first; nothing was changed`,
+    );
+  }
+  if (pin === undefined) {
+    if (label === undefined && list.length === 0) return undefined;
+    const pinned = new Set(machines.map((m) => m.leadToken));
+    const free = label ?? list.find((t) => !pinned.has(t.label))?.label;
+    throw new Error(
+      free === undefined
+        ? `every listed token is pinned on another project, and ${project} must not share one by default: add a token to the list, or pin one with "shareLeadToken": true on both projects in machines.json; nothing was changed`
+        : `${project} pins no listed token: set "leadToken": "${free}" on ${project} in machines.json, so no other org takes the same sign-in; nothing was changed`,
+    );
+  }
+  const shared = sharedPinError(machines);
+  if (shared) throw new Error(`${shared}; nothing was changed`);
+  const found = list.find((t) => t.label === pin);
+  if (!found) throw new Error(`no token labelled ${pin} is on the list; nothing was changed`);
   return found;
 }
 

@@ -43,6 +43,7 @@ import {
   FIRST,
   ORGS,
   type Org,
+  PINS,
   SECOND,
   SHARED,
   appDir,
@@ -66,7 +67,7 @@ import { waitFor } from './wait-for.ts';
 useTokenStandIns();
 
 describe('a new project takes a token from the list', () => {
-  it('sets the first listed token with no browser approval, and prints no value', async () => {
+  it('sets the token machines.json pins, with no browser approval, and prints no value', async () => {
     listed(1, 'first-account', FIRST);
     listed(2, 'second-account', SECOND);
     await deploy('harborlight');
@@ -78,7 +79,18 @@ describe('a new project takes a token from the list', () => {
     expectNoTokenShown(FIRST, SECOND);
   });
 
-  it('takes the label --claude-token names', async () => {
+  it('refuses a project machines.json pins no token on, so it never lands on another org’s sign-in', async () => {
+    listed(1, 'first-account', FIRST);
+    listed(2, 'second-account', SECOND);
+    const onlyHarborlight = PINS.filter((m) => m.project === 'harborlight');
+    await expect(deploy('riverbend', {}, false, onlyHarborlight)).rejects.toThrow(
+      '"leadToken": "second-account" on riverbend',
+    );
+    expect(imported('riverbend')).toEqual([]);
+    expect(approvalCount()).toBe(0);
+  });
+
+  it('takes the label --claude-token names when it is the pin', async () => {
     listed(1, 'first-account', FIRST);
     listed(2, 'second-account', SECOND);
     await deploy('riverbend', { claudeToken: 'second-account' });
@@ -98,10 +110,10 @@ describe('a new project takes a token from the list', () => {
 
   it('refuses an image older than this code before anything changes', async () => {
     listed(1, 'first-account', FIRST);
-    await expect(deploy('riverbend', { imageLabel: '0'.repeat(40) })).rejects.toThrow(
+    await expect(deploy('harborlight', { imageLabel: '0'.repeat(40) })).rejects.toThrow(
       'cannot start a lead on a listed token',
     );
-    expect(imported('riverbend')).toEqual([]);
+    expect(imported('harborlight')).toEqual([]);
   });
 
   it('refuses a label that is not listed before anything changes', async () => {
@@ -125,8 +137,8 @@ describe('a new project takes a token from the list', () => {
     expect(imported('riverbend').some((l) => l.startsWith(`${LEAD_TOKEN_SECRET}=`))).toBe(false);
   });
 
-  it('asks for the browser approval only when the list is empty', async () => {
-    await deploy('harborlight');
+  it('asks for the browser approval only when the list is empty and nothing is pinned', async () => {
+    await deploy('harborlight', {}, false, []);
     expect(approvalCount()).toBe(1);
     expect(appEnv('harborlight')[LEAD_TOKEN_SECRET]).toBe(APPROVED);
     expect(appEnv('harborlight')[LEAD_TOKEN_ORG_SECRET]).toBe('harborlight');
@@ -225,7 +237,7 @@ describe('one step moves a project to another listed token', () => {
   const ready = () => true;
 
   it('imports the token and its marker in one call that restarts the machine', async () => {
-    const r = moveProject('riverbend', 'second-account', { imageReady: ready });
+    const r = moveProject('riverbend', 'second-account', { imageReady: ready, machines: PINS });
     expect(r.confirmed).toBe(true);
     const env = appEnv('riverbend');
     expect(env[LEAD_TOKEN_SECRET]).toBe(SECOND);
@@ -245,7 +257,7 @@ describe('one step moves a project to another listed token', () => {
   it.skipIf(BASH === null)(
     'the machine booted from what the move set runs its lead on the new token',
     async () => {
-      moveProject('riverbend', 'second-account', { imageReady: ready });
+      moveProject('riverbend', 'second-account', { imageReady: ready, machines: PINS });
       const m = bootMachine('riverbend', {
         ...appEnv('riverbend'),
         CW_LEAD_BOARD: BOARD.riverbend,
@@ -283,22 +295,30 @@ describe('one step moves a project to another listed token', () => {
 
   it('says so when the machine does not confirm', () => {
     writeFileSync(join(appDir('riverbend'), 'ssh-fails'), '');
-    expect(moveProject('riverbend', 'second-account', { imageReady: ready }).confirmed).toBe(false);
+    expect(
+      moveProject('riverbend', 'second-account', { imageReady: ready, machines: PINS }).confirmed,
+    ).toBe(false);
     rmSync(join(appDir('riverbend'), 'ssh-fails'));
     writeFileSync(join(appDir('riverbend'), 'ssh-out'), 'cw-token-label=first-account\n');
-    expect(moveProject('riverbend', 'second-account', { imageReady: ready }).confirmed).toBe(false);
+    expect(
+      moveProject('riverbend', 'second-account', { imageReady: ready, machines: PINS }).confirmed,
+    ).toBe(false);
   });
 
   it('refuses before any change: an unlisted label, no lead, no project, an old image', () => {
-    expect(() => moveProject('riverbend', 'no-such', { imageReady: ready })).toThrow('no-such');
-    expect(() => moveProject('Not A Project', 'second-account', { imageReady: ready })).toThrow();
+    expect(() =>
+      moveProject('riverbend', 'no-such', { imageReady: ready, machines: PINS }),
+    ).toThrow('no-such');
+    expect(() =>
+      moveProject('Not A Project', 'second-account', { imageReady: ready, machines: PINS }),
+    ).toThrow();
     flySecrets('harborlight', requiredSecrets('quick'));
-    expect(() => moveProject('harborlight', 'second-account', { imageReady: ready })).toThrow(
-      'no lead',
-    );
-    expect(() => moveProject('riverbend', 'second-account', { imageReady: () => false })).toThrow(
-      'machine:deploy',
-    );
+    expect(() =>
+      moveProject('harborlight', 'first-account', { imageReady: ready, machines: PINS }),
+    ).toThrow('no lead');
+    expect(() =>
+      moveProject('riverbend', 'second-account', { imageReady: () => false, machines: PINS }),
+    ).toThrow('machine:deploy');
     expect(imported('riverbend')).toEqual([]);
     expect(imported('harborlight')).toEqual([]);
   });
@@ -412,6 +432,7 @@ describe('machine:tokens', () => {
     writeFileSync(join(appDir('riverbend'), 'ssh-fails'), '');
     const code = await runTokens(['move', '--project', 'riverbend', '--to', 'first-account'], {
       imageReady: () => true,
+      machines: [{ project: 'riverbend', tunnel: 'quick', leadToken: 'first-account' }],
     });
     expect(code).toBe(1);
     expect(output.join('\n')).toContain('not confirmed');

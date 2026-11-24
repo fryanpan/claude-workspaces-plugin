@@ -348,9 +348,15 @@ bun run machine:deploy --project <project> --memory 2048 \
 - Revoke a sign-in made for one org at claude.ai/settings/claude-code; no other
   org loses its lead. `--refresh-lead` then makes the org a new one. With
   tokens on the list, `--refresh-lead` must name one with `--claude-token`.
-- `--claude-token <label>` picks a listed token and sets it again on a run
-  that names it. Without it a deploy that needs a token takes the first listed,
-  and only a deploy of an image holding this code can set one.
+- A deploy takes a listed token only where `machines.json` pins it on the
+  project (`"leadToken": "<label>"`), so no two orgs share a sign-in by
+  default (wall-off review H2). A project with no pin is refused while the
+  list holds a token, and the refusal names the first label no project pins.
+  Two projects may pin one label only when both say `"shareLeadToken": true`;
+  `machines.json` fails to parse otherwise. With an empty list and no pin,
+  the deploy asks for the per-org browser approval, as before.
+- `--claude-token <label>` must agree with the pin, and sets it again on a
+  run that names it. Only a deploy of an image holding this code can set one.
 - `--github-deploy-key` names a Keychain entry holding an OpenSSH private
   key, the project repo's deploy key; it becomes `CW_LEAD_GITHUB_DEPLOY_KEY`.
   The deploy sets it only once GitHub lists it read-only: it reads the deploy
@@ -471,7 +477,9 @@ fly ssh console --pty --app cw-<project> -C \
 Detach with `Ctrl-b d`; exiting Claude Code ends the session, and the
 supervisor starts another. `fly secrets set CW_LEAD_REMOTE_CONTROL=1` starts
 each session with Remote Control, named after the agent (the flag is in the
-pinned Claude Code build).
+pinned Claude Code build). The daily wall report fails a machine whose lead
+runs with Remote Control unless its `machines.json` entry says
+`"remoteControl": true`.
 
 ### The lead's limits: checking them on a machine
 
@@ -544,14 +552,15 @@ label, never a value:
 | Move a project | `bun run machine:tokens move --project <name> --to <label>` |
 
 - A label is a name for an account, not an address: a-z, 0-9 and `-`.
-- A deploy that needs a token takes the first listed one, or the label
-  `--claude-token` names. It sets the token and a marker
+- A deploy that needs a token takes the label `machines.json` pins on the
+  project (above). It sets the token and a marker
   (`listed:<label>:<sha256 of org, label and token>`) in `CW_LEAD_TOKEN_ORG`.
 - **A move** is `fly secrets import` without `--stage`, which sets both and
   restarts the machine in one call. The board is down for a boot and the lead
   resumes its conversation. The move then waits until the machine reports the
   new label. That shows the machine took the token, not that Claude accepted
-  it. Both calls run with the app's own token on the Mac, with no tap. It refuses, before
+  it. Both calls run with the app's own token on the Mac, with no tap. Pin the
+  new label in `machines.json` first: a move to any other label is refused. It refuses, before
   any change, a project with no lead or a machine on an image older than this
   code, whose entrypoint would read the marker as another org's and start no
   lead. Deploy that project first. A move off a token made for one org leaves
