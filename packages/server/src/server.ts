@@ -4153,7 +4153,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // onto its dead registry and write `[loop]` lines into unrelated tests'
       // output for the rest of the run.
       loopLag.stop();
-      boardSignIn?.close();
+      void boardSignIn?.close();
       taskScheduler.stop();
       features.stop();
       landingChanges.dispose();
