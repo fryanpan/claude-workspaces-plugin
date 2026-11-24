@@ -723,7 +723,8 @@ export function shareScopeFrom(
 /**
  * Does `got` match these pattern segments, with every parameter in scope?
  * The same shape as `patternMatches` in `route-table.ts`: `:name` is one
- * segment, a trailing `*` is one or more, a mid-segment colon is literal.
+ * non-empty segment, a trailing `*` is one or more, a mid-segment colon is
+ * literal.
  * The literal segments are matched first, so `workspacesOf` is asked only
  * about a path that is this route.
  */
@@ -744,6 +745,9 @@ function matchesInScope(
     const here = got[i];
     if (here === undefined) return false;
     if (seg.startsWith(':')) {
+      // An empty segment names no id. Bun's router does not match one either,
+      // and the old allowlist's `[^/]+` refused it.
+      if (here === '') return false;
       const scope = PARAM_SCOPE[seg.slice(1)];
       if (scope === undefined) return false;
       params.push([scope, here]);

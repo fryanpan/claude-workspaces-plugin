@@ -9,7 +9,8 @@
  * each answers admission's `403 sharing_disabled` instead, the same answer a
  * request with no credential at all gets, while a process on this machine
  * still reads the home feed and the relay's list. Turning the switch back on
- * restores every answer.
+ * restores every answer. A home-feed stream the tunnel already holds is hung
+ * up when the switch goes off, as a share visitor's is.
  *
  * All fixtures synthetic; port 0; no request leaves the machine.
  */
@@ -157,6 +158,23 @@ describe('the families above admission obey the external-access switch', () => {
       // A process on this machine is not external reach.
       expect(await answer(await local(feed()))).toBe('200');
       expect(await answer(await local(relay(), keyed()))).toBe('200');
+    } finally {
+      await setSwitch(true);
+    }
+  });
+
+  it('hang up a home-feed stream the tunnel already holds when the switch goes off', async () => {
+    const res = await tunnel(`${feed()}/events:stream`, serviceJwt);
+    expect(res.status).toBe(200);
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    // The stream is registered once its first frame arrives.
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain(':ok');
+    await setSwitch(false);
+    try {
+      // Read until the server ends it; a keepalive frame may arrive first.
+      let done = false;
+      while (!done) done = (await reader.read()).done;
+      expect(done).toBe(true);
     } finally {
       await setSwitch(true);
     }

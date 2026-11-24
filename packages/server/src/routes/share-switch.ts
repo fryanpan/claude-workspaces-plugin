@@ -210,6 +210,9 @@ export function applyMasterFlip(
     // delivering.
     closedSockets += docStore.closeSocketsForShareMembers(() => true);
     closedStreams += sse.closeForShareMembers(() => true);
+    // And a tunnel caller of a route answered above admission (the home
+    // feed's stream), whom neither sweep above can name.
+    closedStreams += sse.closeExternal();
   }
   ctx.onSharingFlip(flip);
   return { ok: true, closedSockets, closedStreams };

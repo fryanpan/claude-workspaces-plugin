@@ -4,7 +4,7 @@
  *
  * The probes are the vocabulary of the hand-written allowlist the route table
  * replaced: every sub-path it named, under every collection it named them
- * for, with ids on the shared board, on another board and on none, the board
+ * for, with ids on the shared board, on another board, on none and empty, the board
  * segment spelled plainly and percent-encoded, and keys that resolve up
  * `Object.prototype`. FROZEN on purpose, and independent of the route table:
  * a path the old guard admitted but no row names shows up as a difference
@@ -28,7 +28,8 @@ const OWNERS: Readonly<Record<string, readonly string[]>> = {
   'rev-other': [OTHER],
 };
 
-export const workspacesOf = (id: string): string[] => [...(OWNERS[id] ?? [])];
+export const workspacesOf = (id: string): string[] =>
+  Object.hasOwn(OWNERS, id) ? [...(OWNERS[id] as readonly string[])] : [];
 
 export const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
@@ -103,6 +104,7 @@ const OLD_TASK_VERBS = [
   'review-items/ri-1/withdraw',
   'review-items/ri-1/withdraw/undo',
   'review-items/ri-1',
+  'review-items//answer',
   'review-items/viewed',
   'constructor',
 ];
@@ -136,6 +138,8 @@ const OLD_DOC_VERBS = [
   'meetings',
   'meetings/m-1',
   'meetings/m-1/speakers',
+  'meetings/',
+  'meetings//speakers',
   'meeting-bot',
   'assets',
   'assets/a.png',
@@ -154,10 +158,14 @@ const OLD_DOC_VERBS = [
   'threads/th-1/summary',
   'threads/th-1/linked-items',
   'threads/th-1/anything',
+  'threads/',
+  'threads//comments',
+  'threads//resolve',
   'suggestions',
   'suggestions/resolve_all',
   'suggestions/s-1/accept',
   'suggestions/s-1/reject',
+  'suggestions//accept',
   'y',
   'audio',
   'events:stream',
@@ -210,23 +218,24 @@ export function probePaths(): string[] {
         paths.add(`${board(ws)}/apps/${doc}${tail}`);
       }
     }
-    for (const task of ['t-1', 't-other', 't-orphan']) {
+    for (const task of ['t-1', 't-other', 't-orphan', '']) {
       for (const verb of OLD_TASK_VERBS) {
         paths.add(`${board(ws)}/tasks/${task}${verb === '' ? '' : `/${verb}`}`);
       }
     }
-    for (const goal of ['g-1', 'g-other']) {
+    for (const goal of ['g-1', 'g-other', '']) {
       for (const verb of OLD_GOAL_VERBS) {
         paths.add(`${board(ws)}/goals/${goal}${verb === '' ? '' : `/${verb}`}`);
       }
     }
-    for (const set of ['rev-1', 'rev-other', SHARED]) {
+    for (const set of ['rev-1', 'rev-other', SHARED, '']) {
       for (const verb of OLD_ATTACHMENT_VERBS) {
         paths.add(`${board(ws)}/attachments/${set}${verb === '' ? '' : `/${verb}`}`);
       }
     }
     for (const verb of ['', 'role', 'other']) {
       paths.add(`${board(ws)}/members/member-1${verb === '' ? '' : `/${verb}`}`);
+      paths.add(`${board(ws)}/members/${verb === '' ? '' : `/${verb}`}`);
     }
   }
   return [...paths].sort();

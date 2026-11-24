@@ -63,12 +63,26 @@ const NARROWED: readonly { readonly why: string; readonly match: RegExp }[] = [
     why: 'a mockup’s and a whiteboard’s data is its doc’s, under `docs/`; nothing answers these under their page’s collection',
     match: /^\S+ \/workspaces\/[^/]+\/(mockups|whiteboards)\/[^/]*\/.+$/,
   },
+  {
+    why: 'an empty id segment, which names nothing: Bun’s router does not match one, and every handler’s own pattern is `[^/]+`',
+    match: /^\S+ \/workspaces\/[^/]+\/(members\/(\/role)?|tasks\/[^/]+\/review-items\/\/answer)$/,
+  },
 ];
+
+/** Does a row's `:name` segment sit on an empty segment of this path? Bun never matches that. */
+const emptyParam = (pattern: string, path: string): boolean => {
+  const got = path.split('/');
+  return pattern.split('/').some((seg, i) => seg.startsWith(':') && got[i] === '');
+};
 
 /** Does any row (other than the two answered above the guard at `*`) answer this? */
 const aRowAnswers = (method: string, path: string): string | null => {
   const row = ROUTE_TABLE.find(
-    (r) => r.pattern !== '*' && r.methods.includes(method) && patternMatches(r.pattern, path),
+    (r) =>
+      r.pattern !== '*' &&
+      r.methods.includes(method) &&
+      patternMatches(r.pattern, path) &&
+      !emptyParam(r.pattern, path),
   );
   return row ? `${row.gate} ${row.pattern}` : null;
 };

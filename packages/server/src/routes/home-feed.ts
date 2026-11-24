@@ -136,6 +136,21 @@ export async function handleHomeFeedRoute(
   }
   if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
-  if (m[2]) return openSseStream(ctx.sse, LANDING_CHANNEL);
+  if (m[2]) {
+    // A tunnel caller's stream is marked so the master switch hangs it up
+    // when external access goes off; the check above only stops new ones.
+    const external = req.headers.has('cf-ray');
+    return openSseStream(
+      ctx.sse,
+      LANDING_CHANNEL,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      external,
+    );
+  }
   return ctx.j(200, await ctx.feed(boardId));
 }
