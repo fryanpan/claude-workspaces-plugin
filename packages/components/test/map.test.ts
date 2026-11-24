@@ -159,7 +159,9 @@ describe('the basemap', () => {
     });
     // CARTO answers every keyless tile with an "API key required" stamp.
     for (const src of tiles) expect(src).toMatch(/^https:\/\/tile\.openstreetmap\.org\//);
-    expect(el.querySelector('.leaflet-control-attribution')?.textContent).toContain('OpenStreetMap');
+    expect(el.querySelector('.leaflet-control-attribution')?.textContent).toContain(
+      'OpenStreetMap',
+    );
   });
 });
 
