@@ -26,6 +26,14 @@
  *   CW_RESEND_API_KEY         the Keychain's `cw-resend-api-key` (send-only)
  *   CW_SIGNIN_MAIL_FROM       the Keychain's `cw-signin-mail-from`
  *
+ * And for a project whose `machines.json` entry names a `seedBoard`, the
+ * board the server starts with and who is let into it (`seed-board.ts`),
+ * both or neither:
+ *
+ *   CW_SEED_BOARD_NAME        the entry's `seedBoard`
+ *   CW_SEED_BOARD_MEMBERS     the Keychain's `cw-test-collaborator-email`:
+ *                             one address, or several comma separated
+ *
  * A project with an Access application keeps `CW_SIGNIN` unset (Access)
  * until the owner switches it. A project with none (every new one) has
  * nothing else in front of it, so it also gets
@@ -60,6 +68,8 @@ import type { TfOutputs } from '../cloudflare/outputs.ts';
 export const OWNER_EMAIL_ENTRY = 'cw-board-owner-email';
 export const GOOGLE_CLIENT_ID_ENTRY = 'cw-google-signin-client-id';
 export const GOOGLE_CLIENT_SECRET_ENTRY = 'cw-google-signin-client-secret';
+/** The collaborator addresses a seeded board lets in. Never in the repo. */
+export const SEED_MEMBERS_ENTRY = 'cw-test-collaborator-email';
 
 /** Each password sign-in setting, and the Keychain entry it comes from. */
 export const PASSWORD_ENTRIES = {
@@ -95,8 +105,14 @@ const ACCESS_ONLY_NAMES = 'CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD and CF_ACCESS_HO
 const ACCESS_NAMES =
   'CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CF_ACCESS_HOST_AUDS and CW_PROXIED_TRUSTED_HOSTS';
 
+/** The seed board's settings; off `SETTING_NAMES` too, being set once at boot. */
+export const SEED_SETTING_NAMES = ['CW_SEED_BOARD_NAME', 'CW_SEED_BOARD_MEMBERS'] as const;
+
 export interface Setting {
-  name: (typeof SETTING_NAMES)[number] | (typeof SIGNIN_SETTING_NAMES)[number];
+  name:
+    | (typeof SETTING_NAMES)[number]
+    | (typeof SIGNIN_SETTING_NAMES)[number]
+    | (typeof SEED_SETTING_NAMES)[number];
   /** Where the value comes from, for the dry run. Never the value. */
   from: string;
   value: () => string;
@@ -181,10 +197,42 @@ function betterAuthSettings(
 export const googleRedirectUri = (host: string): string =>
   `https://${host}${SIGNIN_BASE_PATH}/callback/google`;
 
+/** What `machines.json` says about this project that a setting depends on. */
+export interface SettingsFor {
+  /** The board the server starts with (`seedBoard`). */
+  seedBoard?: string;
+}
+
+/** The seed board's two settings, or the line saying why neither is set. */
+function seedSettings(
+  seedBoard: string,
+  src: SettingsSources,
+  settings: Setting[],
+  skipped: string[],
+): void {
+  if (!src.keychainHas(SEED_MEMBERS_ENTRY)) {
+    skipped.push(`${SEED_SETTING_NAMES.join(', ')}: the Keychain has no ${SEED_MEMBERS_ENTRY}`);
+    return;
+  }
+  settings.push(
+    { name: 'CW_SEED_BOARD_NAME', from: 'machines.json seedBoard', value: () => seedBoard },
+    {
+      name: 'CW_SEED_BOARD_MEMBERS',
+      from: `Keychain ${SEED_MEMBERS_ENTRY}`,
+      value: () => src.keychainRead(SEED_MEMBERS_ENTRY).trim(),
+    },
+  );
+}
+
 /** Read every source. Reads only: Keychain reads and the Terraform outputs. */
-export function readSettings(project: string, src: SettingsSources): SettingsRead {
+export function readSettings(
+  project: string,
+  src: SettingsSources,
+  machine: SettingsFor = {},
+): SettingsRead {
   const settings: Setting[] = [];
   const skipped: string[] = [];
+  if (machine.seedBoard !== undefined) seedSettings(machine.seedBoard, src, settings, skipped);
   if (src.keychainHas(OWNER_EMAIL_ENTRY)) {
     settings.push({
       name: 'CW_OWNER_EMAIL',

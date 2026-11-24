@@ -107,6 +107,7 @@ const {
   spendAlarmUsd,
   emailCodeSignIn,
   ownerEmail,
+  seedBoard,
   trustedHosts,
   cfAccess,
   signIn,
@@ -318,6 +319,7 @@ while (!handle) {
       ...(spendAlarmUsd !== undefined ? { spendAlarmUsd } : {}),
       emailCodeSignIn,
       ...(ownerEmail ? { ownerEmail } : {}),
+      ...(seedBoard ? { seedBoard } : {}),
       // Browser Sentry DSN — box config, never the repo (see ServerOptions).
       ...(sentryDsn ? { sentryDsn } : {}),
       // …and the deploy it should call itself, when this start is a published

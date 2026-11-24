@@ -46,6 +46,7 @@ import type { RecallCalendarClient } from './recall-calendar.ts';
 import type { RecallClient } from './recall.ts';
 import type { ReviewJudge } from './review-judge.ts';
 import type { SecretWriter } from './secret-store.ts';
+import type { SeedBoard } from './seed-board.ts';
 import type { CfApi } from './share/cf-api.ts';
 import type { ShareConfig } from './share/types.ts';
 import type { MeetingEars } from './spoken-reply/meeting-ears.ts';
@@ -282,6 +283,12 @@ export interface ServerOptions {
    * keeps it matching. See activity.ts.
    */
   ownerEmail?: string;
+  /**
+   * A board to start with and the addresses let into it
+   * (`CW_SEED_BOARD_NAME`, `CW_SEED_BOARD_MEMBERS`). Applied at every boot,
+   * adding only (`seed-board.ts`).
+   */
+  seedBoard?: SeedBoard;
   /**
    * Delivers login codes. Defaults to the log sender — the code prints to the
    * server log, which is what makes the flow exercisable end to end before a

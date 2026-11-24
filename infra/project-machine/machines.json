@@ -1,7 +1,7 @@
 {
   "machines": [
     { "project": "moi", "memory": 2048 },
-    { "project": "harborlight", "memory": 512 },
-    { "project": "riverbend", "memory": 512 }
+    { "project": "harborlight", "memory": 512, "seedBoard": "Sign-in check" },
+    { "project": "riverbend", "memory": 512, "seedBoard": "Sign-in check" }
   ]
 }
