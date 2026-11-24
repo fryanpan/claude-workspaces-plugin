@@ -96,9 +96,14 @@ this server has as a whole-path template and collapses every segment it
 cannot place to `:id`. The degrade is safe by construction, so the risk is not
 a leak but a NAME: a route missing from the table arrives as `/:id/:id/:id`
 alongside unrelated ones, and Sentry's N+1 detector reads two different calls
-as one call twice. `packages/server/test/span-route-names.test.ts` walks
-`ROUTE_TABLE` and fails on any fixed-length route the table cannot name, so
-the list stays whole without anyone remembering to extend it. The scrub floors
+as one call twice. The templates are not written by hand: `bun run
+routes:table` generates them from `ROUTE_TABLE` into a marked block of
+`route-templates.ts` (core cannot import the server, so it holds a copy), and
+`packages/server/test/route-templates-drift.test.ts` fails when that copy is
+stale. Adding a route is its row and that one command. A route the server
+answers with no row sits in the file's hand-written `WITHOUT_A_ROW` list, and
+`packages/server/test/span-route-names.test.ts` still fails on any fixed-length
+row the templates cannot name. The scrub floors
 either side of it — key-targeted, then id-shaped — stay in
 `core/src/trace-privacy.ts`, which re-exports the function.
 
