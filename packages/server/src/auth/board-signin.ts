@@ -126,7 +126,13 @@ export interface BoardSignIn {
   handle(req: Request, pathname: string): Promise<Response | null>;
   /** Who this request's cookie signs in, or null. */
   personOf(req: Request): Promise<SignedInPerson | null>;
-  close(): void;
+  /**
+   * Close the user list once the tables are made. The migration starts at
+   * construction and nothing awaits it until the first request, so closing
+   * at once would pull the database out from under it and throw outside any
+   * caller.
+   */
+  close(): Promise<void>;
 }
 
 /** This machine's Better Auth secret. Exported for the isolation test. */
@@ -321,7 +327,17 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     };
   };
 
-  return { origin, host, handle, personOf, close: () => db.close() };
+  const close = async (): Promise<void> => {
+    // A failed migration is not the closer's to report: `ready` still
+    // rejects for every request that waits on it.
+    await loaded.then(
+      () => undefined,
+      () => undefined,
+    );
+    db.close();
+  };
+
+  return { origin, host, handle, personOf, close };
 }
 
 function withJson(headers: Headers): Headers {

@@ -61,8 +61,8 @@ describe('Better Auth inside the server', () => {
     });
   });
 
-  afterAll(() => {
-    signIn.close();
+  afterAll(async () => {
+    await signIn.close();
     google.stop();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
@@ -211,7 +211,7 @@ describe('Better Auth inside the server', () => {
       mayHaveAccount: () => false,
     });
     await loose.personOf(new Request(ORIGIN, { headers: { cookie: '__Host-cw-ba.x=y' } }));
-    loose.close();
+    await loose.close();
     for (const name of ['signin.sqlite', 'signin.sqlite-wal', 'signin.sqlite-shm']) {
       expect({ name, mode: statSync(join(dir, name)).mode & 0o777 }).toEqual({
         name,

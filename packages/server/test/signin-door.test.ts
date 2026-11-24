@@ -17,7 +17,7 @@ const fakeSignIn = (person: SignedInPerson | null): BoardSignIn => ({
   handle: async (_req, pathname) =>
     pathname === '/auth/sign-in' ? new Response('page', { status: 200 }) : null,
   personOf: async () => person,
-  close: () => {},
+  close: async () => {},
 });
 const alice: SignedInPerson = {
   email: 'alice@harborlight.test',
