@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
+import { SEED_SETTING_NAMES } from './settings.ts';
 import { type StoreObserved, storeActions, storeSecretNames } from './store-plan.ts';
 import { vmSizeFor } from './vm-size.ts';
 
@@ -388,6 +389,10 @@ export function plan(
   const unset = [
     ...(cfg.tunnel === 'named' && obs.secrets.has('CW_TUNNEL_MODE') ? ['CW_TUNNEL_MODE'] : []),
     ...(obs.secrets.has(CLASSIC_PUSH_TOKEN_SECRET) ? [CLASSIC_PUSH_TOKEN_SECRET] : []),
+    // machines.json decides who a seed board lets in: an entry that no longer
+    // names one takes the settings away, so the next boot adds nobody. The
+    // board and the people already in it stay; removing them is the owner's.
+    ...(cfg.seedBoard === undefined ? SEED_SETTING_NAMES.filter((n) => obs.secrets.has(n)) : []),
   ];
   if (unset.length > 0) actions.push({ kind: 'unset-secrets', names: unset });
   const current = obs.machines.filter((m) => m.state !== 'destroyed');

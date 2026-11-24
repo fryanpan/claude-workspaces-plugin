@@ -7,7 +7,12 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
-import { projectConfig } from '../../../infra/project-machine/deploy-plan.ts';
+import {
+  type Observed,
+  plan,
+  projectConfig,
+  requiredSecrets,
+} from '../../../infra/project-machine/deploy-plan.ts';
 import {
   MACHINES_FILE,
   deployArgs,
@@ -89,5 +94,36 @@ describe('the seed board settings machine:deploy derives', () => {
     });
     expect(found.settings.map((s) => s.name)).not.toContain('CW_SEED_BOARD_MEMBERS');
     expect(asked).not.toContain(SEED_MEMBERS_ENTRY);
+  });
+});
+
+describe('the deploy plan for a seed board', () => {
+  const SHA = 'a'.repeat(40);
+  const observed = (extra: string[]): Observed => {
+    const cfg = projectConfig({ project: 'riverbend', imageLabel: SHA });
+    return {
+      app: true,
+      volumes: 1,
+      keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
+      snapshots: true,
+      lifecycle: false,
+      secrets: new Set([...requiredSecrets('quick'), ...extra]),
+      machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
+      browser: true,
+    };
+  };
+  const SEEDED = ['CW_SEED_BOARD_NAME', 'CW_SEED_BOARD_MEMBERS'];
+
+  it('unsets both settings once machines.json stops naming a seed board', () => {
+    const cfg = projectConfig({ project: 'riverbend', imageLabel: SHA });
+    expect(plan(cfg, observed(SEEDED))).toContainEqual({ kind: 'unset-secrets', names: SEEDED });
+  });
+
+  it('CONTROL: keeps them while it still names one, and unsets nothing never set', () => {
+    const seeded = projectConfig({ project: 'riverbend', imageLabel: SHA, seedBoard: 'X' });
+    const kinds = (a: { kind: string }[]) => a.map((x) => x.kind);
+    expect(kinds(plan(seeded, observed(SEEDED)))).not.toContain('unset-secrets');
+    const plain = projectConfig({ project: 'riverbend', imageLabel: SHA });
+    expect(kinds(plan(plain, observed([])))).not.toContain('unset-secrets');
   });
 });
