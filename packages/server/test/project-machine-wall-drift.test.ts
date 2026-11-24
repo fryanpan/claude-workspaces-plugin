@@ -388,6 +388,9 @@ describe('the reads behind them', () => {
     const { io: i, asked } = io();
     const rows = await driftRows(['riverbend'], outputs, i);
     expect(failing(rows)).toEqual([]);
+    expect(rows.filter((r) => r.check === 'push repo is this project’s alone')).toEqual([
+      { project: 'riverbend', check: 'push repo is this project’s alone', answer: 'yes', ok: true },
+    ]);
     expect(asked).toEqual([
       'fly ips list --app cw-riverbend',
       'fly machine list --app cw-riverbend',
