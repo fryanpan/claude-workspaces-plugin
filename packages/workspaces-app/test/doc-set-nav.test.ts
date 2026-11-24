@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { openBoardStream } from '../src/board-stream.ts';
 import { wireDiffNavRefresh } from '../src/diff-nav.ts';
 import { mountDocSetNav } from '../src/doc/doc-set-nav.ts';
 import { MountScope } from '../src/mount-scope.ts';
+import { watchSetChanges } from '../src/set-live.ts';
 import { resetSidebarSignature } from '../src/sidebar-nav-key.ts';
 import { wireWorkspaceTreeRefresh } from '../src/workspace-tree.ts';
 
@@ -233,5 +235,34 @@ describe("the review's own push", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(calls.length, `stream ${n}`).toBeGreaterThan(before);
     }
+  });
+
+  it("joins the page's stream for the set instead of opening a second one", async () => {
+    vi.useFakeTimers();
+    const calls = stubDocs([]);
+    // Another reader of the same channel on the page, opened first.
+    const other = openBoardStream('s-harborlight');
+    const otherHeard: string[] = [];
+    other.addEventListener('attachments.changed', () => otherHeard.push('frame'));
+    let refreshed = 0;
+    const stop = watchSetChanges('s-harborlight', () => {
+      refreshed++;
+      void fetch('/refresh');
+    });
+    expect(FakeStream.opened.map((s) => s.url)).toEqual([
+      '/workspaces/s-harborlight/events:stream',
+    ]);
+    await frame('attachments.changed');
+    expect(refreshed).toBe(1);
+    expect(otherHeard).toEqual(['frame']);
+    expect(calls.length).toBe(1);
+    // The sidebar going away leaves the other reader's stream open.
+    stop();
+    expect(FakeStream.opened[0]?.closed).toBe(false);
+    await frame('attachments.changed');
+    expect(refreshed).toBe(1);
+    expect(otherHeard).toEqual(['frame', 'frame']);
+    other.close();
+    expect(FakeStream.opened[0]?.closed).toBe(true);
   });
 });

@@ -17,11 +17,15 @@
  * watch: past its cap, or a root it cannot open), and the stream reopening
  * after a drop, when frames sent in the gap are gone because none is replayed.
  */
+import { openBoardStream } from './board-stream.ts';
+
 /** The frame's name, as `page-nudges.ts` sends it. */
 const SET_CHANGED_EVENT = 'attachments.changed';
 
 export function watchSetChanges(setId: string, refresh: () => void): () => void {
-  const es = new EventSource(`/workspaces/${encodeURIComponent(setId)}/events:stream`);
+  // The page's one stream for this channel (`board-stream.ts`), shared with
+  // any other reader of the set's channel on the page.
+  const es = openBoardStream(setId);
   let dropped = false;
   const onOpen = (): void => {
     if (dropped) refresh();

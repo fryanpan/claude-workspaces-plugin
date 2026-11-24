@@ -4,6 +4,7 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { openBoardStream } from './board-stream.ts';
 import {
   LINK_REVIEW_EVENTS,
   cachedLinkHeld,
@@ -217,7 +218,8 @@ export const LINK_REFRESH_GATHER_MS = 150;
  * bind it to the mount scope so navigation closes the stream.
  */
 export function watchTaskLinkStatuses(workspaceId: string, view: EditorView): () => void {
-  const es = new EventSource(`/workspaces/${encodeURIComponent(workspaceId)}/events:stream`);
+  // The page's one stream for this board, shared (`board-stream.ts`).
+  const es = openBoardStream(workspaceId);
   let timer: ReturnType<typeof setTimeout> | null = null;
   // `staleLinkReviewMarks` stales every status as well, so a transition —
   // which can move both — needs nothing more.
