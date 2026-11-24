@@ -10,8 +10,9 @@
  * when stdin is not a terminal. It is stored the way every Keychain entry
  * here is (`mac-ops.ts`): base64 on `security -i`'s stdin, never as an
  * argument. Only the sign-in entries `machine:deploy` reads
- * (`settings.ts`) are accepted, and an existing entry is replaced only with
- * `--replace`. The one line printed is `stored <entry>`.
+ * (`settings.ts`) and the seed board's collaborator addresses are accepted,
+ * and an existing entry is replaced only with `--replace`. The one line
+ * printed is `stored <entry>`.
  */
 import { secretValueFitsStore } from '../../packages/core/src/secret-line.ts';
 import { keychainCreate, keychainHas, keychainReplace } from './mac-ops.ts';
@@ -19,12 +20,14 @@ import {
   GOOGLE_CLIENT_ID_ENTRY,
   GOOGLE_CLIENT_SECRET_ENTRY,
   PASSWORD_ENTRIES,
+  SEED_MEMBERS_ENTRY,
 } from './settings.ts';
 
 export const SETTABLE_ENTRIES: readonly string[] = [
   GOOGLE_CLIENT_ID_ENTRY,
   GOOGLE_CLIENT_SECRET_ENTRY,
   ...Object.values(PASSWORD_ENTRIES),
+  SEED_MEMBERS_ENTRY,
 ];
 
 /** Read a line from the terminal with echo off. */
