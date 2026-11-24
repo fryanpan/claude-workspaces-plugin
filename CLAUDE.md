@@ -49,10 +49,35 @@ server path that touches a walled lead's files, how each is contained, and
 the sandboxed git that runs in a lead's own repository),
 [doc-metadata](docs/architecture/doc-metadata.md) (the schema a folder
 declares for its docs' front matter, the YAML the editor writes, and the
-contract another repo reads) and
+contract another repo reads),
 [security](docs/architecture/security.md) (trust boundaries, the gates that
-enforce them, where secrets live, the deploy and webhook surfaces). Read the
-relevant one before touching its subsystem.
+enforce them, where secrets live, the deploy and webhook surfaces),
+[server-edge](docs/architecture/server-edge.md) (routes, Hono, the MCP
+connector and relay, sign-in, clock loops),
+[server-layers](docs/architecture/server-layers.md) (the full server layer
+table, module by module),
+[doc-store](docs/architecture/doc-store.md) (document identity, folders,
+bound-file sync, residency),
+[board-state](docs/architecture/board-state.md) (the task store and its Yjs
+mirror), [agent-channels](docs/architecture/agent-channels.md) (which channel
+carries what, and when an agent is woken),
+[comments](docs/architecture/comments.md),
+[mockups-and-apps](docs/architecture/mockups-and-apps.md) (mocks, frames,
+whiteboards, presence, dev servers),
+[voice-and-chat](docs/architecture/voice-and-chat.md) (the mic, the spoken
+reply, the lead chat),
+[meeting-modules](docs/architecture/meeting-modules.md),
+[model-prompts](docs/architecture/model-prompts.md),
+[ops](docs/architecture/ops.md),
+[collaboration-core](docs/architecture/collaboration-core.md) (the core
+another app can take, boards on the core),
+[client-and-core](docs/architecture/client-and-core.md) (layers in
+`workspaces-app` and `core`),
+[cross-board](docs/architecture/cross-board.md) (flows across boards,
+servers and organizations) and
+[exceptions-history](docs/architecture/exceptions-history.md) (the long
+reasons behind `exceptions.md` rows). Read the relevant one before touching
+its subsystem.
 Deliberately not `@`-imported — they cost no context until needed; keep it
 that way and add new subsystem docs to the list here.
 
