@@ -953,7 +953,7 @@ export async function handleAuthShareRoutes(
       if (error === ACCESS_NOT_CONFIGURED) {
         return j(503, {
           error,
-          hint: 'Link shares are retired, so every share needs Cloudflare Access: set CF_ACCOUNT_ID, CF_SHARE_BASE_HOSTNAME and CF_ACCESS_TEAM_DOMAIN, and put a Cloudflare API token in the Keychain (service cloudflare-api-token).',
+          hint: 'This server makes no Cloudflare Access application for a share. Publish the board with share_workspace on the share hostname (CW_SHARE_LINK_HOSTS) instead.',
         });
       }
       return j(400, { error });

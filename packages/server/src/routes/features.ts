@@ -6,8 +6,8 @@
  * that kind is a module beside this file, started and listed in
  * `startServerFeatures` below; `server.ts` does not change.
  *
- * Two of the three answer through Hono (`hono-families.ts`): Incoming
- * Messages (`/inbox/`) and the keeper holds (`/api/keeper/holds`). Git push
+ * One of the two answers through Hono (`hono-families.ts`): Incoming
+ * Messages (`/inbox/`). Git push
  * claims `/workspaces/<board>/git/`, below the workspace scope resolver, so
  * it is the first family of the tail on the board app
  * (`hono-tail-families.ts`), after the board families and before the shell.
@@ -21,7 +21,6 @@ import { type FeatureRoutes, chainFeatureRoutes, stopFeatures } from '../feature
 import type { FeatureDeps } from './feature-routes-context.ts';
 import { gitPushFeature } from './git-push-feature.ts';
 import { type InboxFeatureApi, inboxFeature } from './inbox-feature.ts';
-import { keeperHoldsFeature } from './keeper-holds-feature.ts';
 
 export type { FeatureDeps };
 
@@ -30,8 +29,6 @@ export interface ServerFeatures {
   routes: ReturnType<typeof chainFeatureRoutes>;
   /** Incoming Messages' routes, answered through Hono. */
   inboxRoutes: FeatureRoutes;
-  /** The keeper holds' routes, answered through Hono. */
-  keeperHoldsRoutes: FeatureRoutes;
   /** Every registered family's stop, in list order. */
   stop: () => void;
   /** Read by the front page's Incoming Messages section. */
@@ -41,12 +38,10 @@ export interface ServerFeatures {
 export function startServerFeatures(deps: FeatureDeps): ServerFeatures {
   const inbox = inboxFeature.start(deps);
   const gitPush = gitPushFeature.start(deps);
-  const keeperHolds = keeperHoldsFeature.start(deps);
-  const started = [inbox, gitPush, keeperHolds];
+  const started = [inbox, gitPush];
   return {
     routes: chainFeatureRoutes([gitPush]),
     inboxRoutes: chainFeatureRoutes([inbox]),
-    keeperHoldsRoutes: chainFeatureRoutes([keeperHolds]),
     stop: () => stopFeatures(started),
     inbox,
   };
