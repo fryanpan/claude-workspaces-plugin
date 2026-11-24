@@ -76,7 +76,11 @@ const failing = (rows: Array<{ check: string; answer: string; ok: boolean }>) =>
 describe('the on-machine reader', () => {
   const io = (over: Partial<FactsIo> = {}): FactsIo => ({
     procs: () => [
+      { pid: 7, ppid: 1, uid: 0, cmdline: ['bash', '/app/entrypoint.sh'], environ: () => ({}) },
       {
+        pid: 20,
+        ppid: 7,
+        uid: 10001,
         cmdline: ['bun', 'run', '/app/packages/server/src/bin.ts', '--port', '8787'],
         environ: () => ({
           CW_OWNER_EMAIL: OWNER,
@@ -85,6 +89,9 @@ describe('the on-machine reader', () => {
         }),
       },
       {
+        pid: 21,
+        ppid: 7,
+        uid: 10002,
         cmdline: ['/usr/local/bin/cloudflared', 'tunnel', '--no-autoupdate', 'run'],
         environ: () => ({}),
       },
@@ -127,6 +134,9 @@ describe('the on-machine reader', () => {
       io({
         procs: () => [
           {
+            pid: 21,
+            ppid: 7,
+            uid: 10002,
             cmdline: ['cloudflared', 'tunnel', '--url', 'http://localhost:8787'],
             environ: () => ({}),
           },
@@ -277,9 +287,9 @@ describe('the drift judges', () => {
       },
     };
     expect(failing(flyRows(['harborlight', 'riverbend'], view))).toEqual([
-      'Fly network: cw-harborlight, shared with riverbend',
+      'Fly network: cw-harborlight, shared with cw-riverbend',
       'no Fly service: services on m1',
-      'Fly network: cw-harborlight, shared with harborlight',
+      'Fly network: cw-harborlight, shared with cw-harborlight',
       'no public address: public: v6',
     ]);
     expect(
@@ -388,6 +398,9 @@ describe('the reads behind them', () => {
     const { io: i, asked } = io();
     const rows = await driftRows(['riverbend'], outputs, i);
     expect(failing(rows)).toEqual([]);
+    expect(rows.filter((r) => r.check === 'push repo is this project’s alone')).toEqual([
+      { project: 'riverbend', check: 'push repo is this project’s alone', answer: 'yes', ok: true },
+    ]);
     expect(asked).toEqual([
       'fly ips list --app cw-riverbend',
       'fly machine list --app cw-riverbend',

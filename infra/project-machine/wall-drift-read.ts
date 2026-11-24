@@ -48,6 +48,7 @@ import {
   uidRows,
 } from './wall-drift.ts';
 import { leadRows } from './wall-lead-rows.ts';
+import { pushOverlapRows } from './wall-push-overlap.ts';
 import type { CloudflareRead, FlyRead } from './wall-read.ts';
 
 export interface DriftIo {
@@ -99,6 +100,7 @@ export async function driftRows(
   }
   rows.push(...flyRows(projects, view));
   const leads = new Map<string, MachineFacts['lead']>();
+  const pushes = new Map<string, MachineFacts['gitPush']>();
   for (const p of projects) {
     let facts: MachineFacts;
     try {
@@ -108,6 +110,7 @@ export async function driftRows(
       continue;
     }
     leads.set(p, facts.lead);
+    pushes.set(p, facts.gitPush);
     rows.push(...settingsRows(p, io.expected(p), facts));
     rows.push(...uidRows(p, facts));
     rows.push(...gitPushRows(p, facts));
@@ -117,7 +120,8 @@ export async function driftRows(
     const t = outputs.tunnels[p];
     rows.push(...ingressRows(p, t?.public_host, t ? await io.ingress(t) : null, facts));
   }
-  rows.push(...leadRows(io.machines(), leads));
+  const machines = io.machines();
+  rows.push(...leadRows(machines, leads), ...pushOverlapRows(machines, pushes));
   rows.push(
     ...ciTokenRows(
       [

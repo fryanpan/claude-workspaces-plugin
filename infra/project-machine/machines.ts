@@ -9,10 +9,12 @@
  *                     "memory": 2048, "leadBoard": "<board id>",
  *                     "pushRepos": ["<owner>/<name>"] } ] }
  *
- * Only `project` is required; `tunnel` defaults to named. `pushRepos` are the
+ * Only `project` is required, and it may not be a name `reserved-names.ts`
+ * lists; `tunnel` defaults to named. `pushRepos` are the
  * repos the project's server pushes to, one write deploy key each: they are
  * read from this file and nowhere else, so only a merged change decides which
- * repos get a key that writes.
+ * repos get a key that writes. Two projects may list one repo only when both
+ * also name it in `sharePushRepos`.
  *
  * `seedBoard` names a board the project's server starts with, letting in
  * the collaborators the Keychain's `cw-test-collaborator-email` lists
@@ -48,6 +50,7 @@ import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { MAX_PUSH_REPOS } from '../../packages/server/src/provisioning/push-keys.ts';
 import { PROJECT_NAME, SEED_BOARD_NAME } from './deploy-plan.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
+import { reservedProject } from './reserved-names.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 export const MACHINES_FILE = join(HERE, 'machines.json');
@@ -59,6 +62,8 @@ export interface Machine {
   leadBoard?: string;
   /** The repos the server pushes to, each with its own write deploy key. */
   pushRepos?: string[];
+  /** Push repos this project agrees to share with another that lists them too. */
+  sharePushRepos?: string[];
   /** The listed Claude token's label this project's lead signs in with. */
   leadToken?: string;
   /** The lead may run with Remote Control (`CW_LEAD_REMOTE_CONTROL`). */
@@ -88,16 +93,41 @@ function checkPushRepos(project: string, raw: unknown): string[] {
   return [...(raw as string[])];
 }
 
+function checkShares(project: string, raw: unknown, push: readonly string[]): string[] {
+  if (!Array.isArray(raw) || !raw.every((r) => typeof r === 'string' && push.includes(r)))
+    throw new Error(`${project}: sharePushRepos lists only repos in its own pushRepos`);
+  return [...new Set(raw as string[])];
+}
+
+/**
+ * A push repo two projects list gives two orgs a key that writes to it, so
+ * it is refused unless every project that lists it also declares the share
+ * (wall L3). The daily wall checks the machines against it
+ * (`wall-push-overlap.ts`).
+ */
+function refuseUndeclaredShares(machines: readonly Machine[]): void {
+  const by = new Map<string, Machine[]>();
+  for (const m of machines) for (const r of m.pushRepos ?? []) by.set(r, [...(by.get(r) ?? []), m]);
+  for (const [repo, ms] of by) {
+    if (ms.length < 2 || ms.every((m) => m.sharePushRepos?.includes(repo))) continue;
+    throw new Error(
+      `${repo} is a push repo of ${ms.map((m) => m.project).join(' and ')}: each must list it in sharePushRepos to share it`,
+    );
+  }
+}
+
 /** The list, checked. Throws naming the entry, so a bad commit fails before any deploy. */
 export function parseMachines(raw: string): Machine[] {
   const list = (JSON.parse(raw) as { machines?: unknown }).machines;
   if (!Array.isArray(list)) throw new Error('machines.json has no "machines" list');
   const seen = new Set<string>();
-  return list.map((m: Record<string, unknown>, i): Machine => {
+  const machines = list.map((m: Record<string, unknown>, i): Machine => {
     const project = m?.project;
     if (typeof project !== 'string' || !PROJECT_NAME.test(project)) {
       throw new Error(`machines.json entry ${i} has no valid project`);
     }
+    const reserved = reservedProject(project);
+    if (reserved) throw new Error(`machines.json entry ${i}: ${reserved}`);
     if (seen.has(project)) throw new Error(`machines.json lists ${project} twice`);
     seen.add(project);
     const tunnel = m.tunnel ?? 'named';
@@ -121,17 +151,23 @@ export function parseMachines(raw: string): Machine[] {
     ) {
       throw new Error(`${project}: seedBoard is a board name of 1-120 printable characters`);
     }
+    const pushRepos = m.pushRepos !== undefined ? checkPushRepos(project, m.pushRepos) : undefined;
     return {
       project,
       tunnel,
       ...(m.memory !== undefined ? { memory: m.memory as number } : {}),
       ...(m.leadBoard !== undefined ? { leadBoard: m.leadBoard as string } : {}),
-      ...(m.pushRepos !== undefined ? { pushRepos: checkPushRepos(project, m.pushRepos) } : {}),
+      ...(pushRepos ? { pushRepos } : {}),
+      ...(m.sharePushRepos !== undefined
+        ? { sharePushRepos: checkShares(project, m.sharePushRepos, pushRepos ?? []) }
+        : {}),
       ...(m.leadToken !== undefined ? { leadToken: m.leadToken as string } : {}),
       ...flag(project, m, 'remoteControl'),
       ...(m.seedBoard !== undefined ? { seedBoard: m.seedBoard as string } : {}),
     };
   });
+  refuseUndeclaredShares(machines);
+  return machines;
 }
 
 /** The committed list. */

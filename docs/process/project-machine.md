@@ -673,7 +673,9 @@ repo as the Fly secret `CW_GITHUB_PUSH_KEYS` and the board's repo list in
 `/data/cw/git-push.json`. `fly-provision.yml` makes the keys for the repos
 the project's entry in `infra/project-machine/machines.json` lists as
 `pushRepos` (`owner/name` each). The repos are never a dispatch input, so a
-repo gets a write key only through a merged change. Dispatch the workflow
+repo gets a write key only through a merged change. Two projects may list
+one repo only when both also name it in `sharePushRepos`; otherwise the file
+is refused, because two orgs would hold a key that writes to it. Dispatch the workflow
 after that change lands, with `refresh_push_keys` to replace keys the app
 already has.
 
@@ -1074,12 +1076,13 @@ changes nothing. Per machine:
 
 | Check | Passes when | Read from |
 | --- | --- | --- |
-| Fly network | the app `cw-<project>` is on the network of that name, and no other project shares it | `fly apps list`, read in CI |
+| Fly network | the app `cw-<project>` is on the network of that name, and no other app is on it, listed project or not | `fly apps list`, read in CI |
 | No public address, no Fly service | the app holds no public IP and no machine publishes a service | `fly ips list`, `fly machine list` |
 | Admission settings | each setting `settings.ts` names matches what the deploy would set now | the server's environment, through `wall-probe.ts machine` |
 | Trusted emails | `CW_PROXIED_TRUSTED_EMAILS` is unset or holds the owner alone | the same |
 | Loopback uid policy | the lead's uid is refused and `CW_LOOPBACK_SKIPS_ACCESS` is `1`; the users it still admits are listed | the same, and `/etc/passwd` |
 | `git-push.json` | it parses; each repo is listed with whether every push waits (a `.github/` change always does) | the file on the volume |
+| Push repo is this project's alone | no other machine's `git-push.json` names the same repo, unless every project naming it lists it in `sharePushRepos` | the same file on each machine, and `machines.json` |
 | Deploy key | the lead's key is read-only on GitHub | its public half, matched against `gh api repos/<repo>/keys` for each repo the lead clones or may push to |
 | Tunnel ingress | cloudflared runs the named tunnel, whose ingress sends the project's host to the server and everything else to a 404 | Cloudflare's API |
 

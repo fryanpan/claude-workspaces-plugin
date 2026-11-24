@@ -60,14 +60,13 @@ import { FLY_CI_DIR, type TfResult, spawnTerraform } from '../cloudflare/terrafo
 import { type HandoffSink, actionsMask, macSinkFromEnv, recipientKey } from '../handoff/items.ts';
 import { HANDOFF_REPO as CI_REPO } from '../handoff/mac-store.ts';
 import { MACHINES_FILE, parseMachines } from './machines.ts';
+import { READ_ENVIRONMENT, STAGING_ENVIRONMENT, reservedProject } from './reserved-names.ts';
 
-/** The app-kit-staging trial's one app, and its environment. */
+/** The app-kit-staging trial's one app; its environment is in `reserved-names.ts`. */
 export const STAGING_APP = 'cw-appkit-trial-staging';
-export const STAGING_ENVIRONMENT = 'fly-appkit-staging';
+export { READ_ENVIRONMENT, STAGING_ENVIRONMENT };
 /** The environment a project machine's deploy job runs in (fly.yml). */
 export const environmentFor = (project: string): string => `fly-${project}`;
-/** Where the read-only token goes (wall-read.yml's `fly` job). */
-export const READ_ENVIRONMENT = 'fly-org-read';
 
 export interface Target {
   environment: string;
@@ -224,12 +223,13 @@ export async function ciTokens(argv: string[], io: CiTokensIo): Promise<number> 
   let org: string;
   let list: Target[];
   try {
-    list = targets(io.projects());
-    if (list.some((t) => t.environment === READ_ENVIRONMENT)) {
-      throw new Error(
-        `a project named org-read would share ${READ_ENVIRONMENT}, the read token's environment`,
-      );
+    const projects = io.projects();
+    // parseMachines refuses these too; the projects may come from elsewhere.
+    for (const p of projects) {
+      const why = reservedProject(p);
+      if (why) throw new Error(why);
     }
+    list = targets(projects);
     org = io.orgToken();
   } catch (e) {
     say(`${e instanceof Error ? e.message : String(e)}; nothing was run`);
