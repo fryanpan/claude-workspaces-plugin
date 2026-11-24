@@ -57,28 +57,18 @@ flowchart LR
    `<team>.cloudflareaccess.com`). **Permanent** — choose carefully.
    Accept ToS, pick the default email-OTP IdP. ~3 min.
 
-2. **Note your Account ID.** Right sidebar of any zone page in the
-   Cloudflare dashboard.
+   The server holds no Cloudflare API token, so it never makes an Access
+   application per share. A board is published with `share_workspace` on the
+   share hostname ("Day-to-day: sharing a workspace", below).
 
-3. **Create a scoped API token.** Dashboard → Profile → API Tokens →
-   Create Custom Token:
-   - Permissions: `Account → Access: Apps and Policies → Edit`
-   - Account Resources: scoped to the account
-   - TTL: 1 year (rotate annually)
-
-4. **Stash the token in macOS Keychain:**
-   ```sh
-   security add-generic-password -a "$USER" -s "cloudflare-api-token" -w "<paste-token>"
-   ```
-
-5. **Install cloudflared as a launchd service** so the tunnel survives
+2. **Install cloudflared as a launchd service** so the tunnel survives
    reboots and runs alongside the existing `notion-bridge` /
    `sentry-bridge` tunnels:
    ```sh
    sudo cloudflared service install
    ```
 
-6. **Edit `~/.cloudflared/live-feedback.yml`** so the wildcard ingress
+3. **Edit `~/.cloudflared/live-feedback.yml`** so the wildcard ingress
    points at the Workspaces server port (default `8787`):
    ```yaml
    tunnel: live-feedback
@@ -89,19 +79,12 @@ flowchart LR
      - service: http_status:404
    ```
 
-7. **Set server env** (in your shell rc, launchd plist, or wherever
+4. **Set server env** (in your shell rc, launchd plist, or wherever
    `bun run dev` reads its env):
    ```sh
    export CF_ACCESS_TEAM_DOMAIN="<team>.cloudflareaccess.com"
-   export CF_ACCOUNT_ID="<your-account-id>"
-   export CF_SHARE_BASE_HOSTNAME="tunnel.example.com"
    ```
-   Then restart the Workspaces server. Look for these lines in startup
-   logs to confirm it's wired:
-   ```
-   [feedback]   cf-access:  team=<team>.cloudflareaccess.com aud=auto-from-shares
-   [feedback]   share:      base=tunnel.example.com account=abc12345…
-   ```
+   Then restart the Workspaces server.
 
 ## A standing collaboration hostname (no share link needed)
 
