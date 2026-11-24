@@ -504,3 +504,9 @@ Where prod's data directory, checkout and launchd job live is in
 the owner's gitignored `CLAUDE.local.md` under "Where prod lives"; the deploy verb that
 schedules a restart is in
 [docs/process/delivery.md](../process/delivery.md).
+
+## Where these modules sit in the architecture map
+
+> Moved out of [overview.md](overview.md) on 2026-11-24, when the overview was cut to a map. "The diagram" and "the picture" below mean the package diagram there.
+
+- the health check `scripts/serve.ts` runs against the server it supervises: what the probe asks, why the budget is 75s and a first bind's is 240s, the three-per-hour restart limit and its on-disk ledger, and the 16 September 2026 outage as the worked example. It adds no module to the picture — `supervisor-health.ts`, `server-starts.ts` and `event-loop.ts` are already drawn in Ops — but the budgets and the restart limit were stated nowhere a reader could find them, and the 75s was being read as 45s.

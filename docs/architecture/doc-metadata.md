@@ -191,3 +191,9 @@ the doc, so it binds it as every edit does.
 The schema search stats and reads through `boundFiles.guards`, as every bound
 read does (`lead-tree-containment.md`). The git default runs `git log`, which
 the contained git does not allow, so under a lead's root the default is blank.
+
+## Where these modules sit in the architecture map
+
+> Moved out of [overview.md](overview.md) on 2026-11-24, when the overview was cut to a map. "The diagram" and "the picture" below mean the package diagram there.
+
+- the fields a folder's `.workspaces/doc-metadata.schema.json` declares for its docs, kept as YAML front matter. It adds four top-level modules and no new edge. `core/doc-metadata-schema.ts` and `core/doc-metadata.ts` are pure: the schema subset in the first, and in the second the YAML subset it reads, the per-field judgement and the line-level write, shared by the server and the editor. `server/doc-metadata.ts` joins the doc store box (the `doc-*.ts` glob already draws it): it finds the schema by walking up from the bound file through `boundFiles.guards`, and edits the front-matter block of the live doc. `server/doc-git-modified.ts` is one bounded async `git log` for the git-last-modified default, barred under a lead's root. `routes/doc-metadata.ts` is one more member of the docs chain, and `workspaces-app/src/doc/doc-metadata.ts` joins the `doc/` family: the form reads its values from the editor's first block, so it is live by the same Yjs path as the prose.

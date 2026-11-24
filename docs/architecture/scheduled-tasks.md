@@ -365,3 +365,26 @@ Deliberately, and each is a task of its own:
 
 The scheduler still never starts a session itself: the wake path asks the
 spawner to, and asks a person when nobody answers.
+
+## The modules that spell a rule
+
+> Moved out of [overview.md](overview.md) on 2026-11-24, when the overview was cut to a map. 
+
+**A schedule rule has one spelling.** `core` holds ten modules for it and no
+other package holds any: `task-schedule.ts` (the rule type and the occurrence
+arithmetic), `schedule-trigger.ts` (the kind that runs on a doc or task
+change, and its quiet window), `schedule-parse.ts` (a rule read off the
+wire), `schedule-output.ts` (the folder a rule writes into, and which of a
+project's files are one run's output), `schedule-timezone.ts` (instant ⇄ wall clock),
+`schedule-missed.ts` (what a rule wants done about an occurrence the server
+missed — catch up, skip, or fold into the open catch-up that is the lock),
+`schedule-run-record.ts` (what the task says about its last run, and when a
+rule's last success is old enough to call it stale — one derivation the board
+and the server both read), `schedule-wake.ts` (the wake's retry schedule and
+what one instance's wake records, which the run record reads as answered or
+not),
+`schedule-phrase.ts` (a rule written as canonical English) and
+`schedule-phrase-parse.ts` (English read back into a rule). The last two are a
+pair and are asserted to be inverses, which is what lets the editor show one
+rule as a phrase and as chips without either view being the source
+([scheduled-tasks](scheduled-tasks.md)).
