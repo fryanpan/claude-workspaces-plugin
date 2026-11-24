@@ -380,16 +380,22 @@ else
           CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
           CW_LEAD_ROOT="$LEAD_ROOT" CW_LEAD_TOKEN_LABEL="$LEAD_TOKEN_LABEL" \
           DISABLE_AUTOUPDATER=1 TERM=xterm-256color SHELL=/bin/bash \
-          DISABLE_TELEMETRY=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
-        # The last two keep Claude Code off the telemetry and connector hosts
-        # the proxy refuses. Not CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
-        # which turns off Remote Control as well.
+          DISABLE_TELEMETRY=1 ENABLE_CLAUDEAI_MCP_SERVERS=false \
+          PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+        # DISABLE_TELEMETRY and ENABLE_CLAUDEAI_MCP_SERVERS keep Claude Code
+        # off the telemetry and connector hosts the proxy refuses. Not
+        # CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, which turns off Remote
+        # Control as well. The two PLAYWRIGHT_ variables point a project's
+        # Playwright at the Chromium the image installed (the Dockerfile's
+        # PLAYWRIGHT_VERSION) and stop it downloading one: its CDN is not on
+        # lead-egress.allow.
         proxy_env
         # shellcheck disable=SC2086
         only_env PATH TERM SHELL CLAUDE_CODE_OAUTH_TOKEN CW_BOARD_SOCKET CW_WORKSPACE_ID \
           CW_AGENT_NAME CW_LEAD_ROOT CW_LEAD_TOKEN_LABEL CW_LEAD_REMOTE_CONTROL \
           CW_LEAD_GITHUB_DEPLOY_KEY \
-          DISABLE_AUTOUPDATER DISABLE_TELEMETRY ENABLE_CLAUDEAI_MCP_SERVERS $PROXY_VARS
+          DISABLE_AUTOUPDATER DISABLE_TELEMETRY ENABLE_CLAUDEAI_MCP_SERVERS \
+          PLAYWRIGHT_BROWSERS_PATH PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD $PROXY_VARS
         # 007, not 077: a file's group is the lead's own group, which holds
         # nobody else, except in the setgid dev folder, where it is
         # cwdevsrc's, so the dev server can read the checkout there.

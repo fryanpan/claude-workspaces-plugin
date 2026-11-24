@@ -189,6 +189,11 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     }
     expect(lead?.env.get('NO_PROXY')).toBe('localhost,127.0.0.1,::1');
     expect(lead?.env.get('ENABLE_CLAUDEAI_MCP_SERVERS')).toBe('false');
+    // A project's Playwright uses the image's Chromium and never downloads
+    // one: its CDN is not on lead-egress.allow, and the lead has no root to
+    // install the browser's libraries.
+    expect(lead?.env.get('PLAYWRIGHT_BROWSERS_PATH')).toBe('/opt/ms-playwright');
+    expect(lead?.env.get('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD')).toBe('1');
 
     // Nothing else of root's: not the server's key, not the tunnel's or the
     // bucket's. An allowlist, so a new machine secret is kept out too. The
@@ -218,6 +223,8 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
         'no_proxy',
         'LOGNAME',
         'PATH',
+        'PLAYWRIGHT_BROWSERS_PATH',
+        'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD',
         'SHELL',
         'STUB_UID',
         'TERM',
