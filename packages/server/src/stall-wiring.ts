@@ -61,7 +61,10 @@ import {
   isBoardActivity,
 } from './ready-nudge.ts';
 import { REVIEW_GATE_RELEASE_MS, type ReviewGateAddress } from './review-gate.ts';
-import { DoneWhenReadyNudger } from './review-items/done-when-ready.ts';
+import {
+  DONE_WHEN_READY_TOLD_FILENAME,
+  DoneWhenReadyNudger,
+} from './review-items/done-when-ready.ts';
 import { isReviewItemOnQueue, pendingQuestionOf } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
 import {
@@ -1316,6 +1319,15 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
     taskUrl: (workspaceId, taskId) =>
       `${ctx.externalBaseUrl?.() ?? ''}${taskDeepLink(workspaceId, taskId)}`,
+    // Ticked inside `snapshot`, while the threads read ahead are still held.
+    lastCommentAt: (task) => {
+      let newest = 0;
+      for (const thread of docStore.peekThreads(taskBodyDocId(task.id))) {
+        if (thread.lastActivity > newest) newest = thread.lastActivity;
+      }
+      return newest;
+    },
+    toldPath: join(dataDir, DONE_WHEN_READY_TOLD_FILENAME),
   });
   /**
    * The aging half of the unfiled-wait check: a task whose agent said it is

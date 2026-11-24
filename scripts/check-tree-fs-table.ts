@@ -188,6 +188,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/repo-registry-file.ts': 'not-in-inventory',
   'packages/server/src/review-answer-ledger.ts': 'not-in-inventory',
   'packages/server/src/review-archive.ts': 'not-in-inventory',
+  // `<dataDir>/done-when-ready-told.json`, a path built from the data dir alone.
+  'packages/server/src/review-items/done-when-ready.ts': 'data-dir',
   'packages/server/src/review-plan.ts': 'not-in-inventory',
   'packages/server/src/review-ranks.ts': 'not-in-inventory',
   'packages/server/src/review-size-prefs.ts': 'not-in-inventory',
