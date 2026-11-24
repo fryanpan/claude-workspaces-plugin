@@ -191,7 +191,7 @@ export function retagNotesGroups(
   } catch {
     return NOTHING;
   }
-  const start = top.findIndex((el) => prose.readBlockId(el) === headingId);
+  const start = top.findIndex((el) => prose.blockAddressOf(el) === headingId);
   if (start < 0) return NOTHING;
   const openLevel = levelOf(top[start] as Y.XmlElement) ?? 2;
   const out: NotesGroupTagResult = { hoisted: 0, cleared: 0, restored: 0, unfolded: 0 };

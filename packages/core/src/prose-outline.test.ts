@@ -10,7 +10,6 @@ import {
   findBlockById,
   isPersonOrigin,
   readBlockAuthor,
-  readBlockId,
   readOutline,
 } from './prose-outline.ts';
 import { listSuggestions } from './suggest-ops.ts';
@@ -53,9 +52,14 @@ describe('readOutline', () => {
     expect(topic?.level).toBe(2);
   });
 
-  it('is idempotent — a second read mints nothing and returns the same ids', () => {
+  it('writes nothing, and a write stores the same ids the read handed out', () => {
     const doc = docOf('## Topic\n\n- one\n');
+    let updates = 0;
+    doc.on('update', () => updates++);
     const first = readOutline(doc).map((e) => e.id);
+    expect(readOutline(doc).map((e) => e.id)).toEqual(first);
+    expect(updates).toBe(0);
+    expect(ensureBlockIds(doc)).toBe(3);
     expect(ensureBlockIds(doc)).toBe(0);
     expect(readOutline(doc).map((e) => e.id)).toEqual(first);
   });
@@ -122,9 +126,7 @@ describe('readOutline', () => {
       text.delete(0, text.length);
       text.insert(0, 'Something else entirely');
     }, 'test-person-edit');
-    expect(readBlockId(findBlockById(getProseFragment(doc), bulletId) as Y.XmlElement)).toBe(
-      bulletId,
-    );
+    expect(findBlockById(getProseFragment(doc), bulletId)?.nodeName).toBe('listItem');
   });
 });
 

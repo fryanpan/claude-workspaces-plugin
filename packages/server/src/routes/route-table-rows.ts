@@ -662,6 +662,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/tasks', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/lead-presence', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/status', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/outline', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/diff', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/activity', 'POST'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/title', 'PUT'],

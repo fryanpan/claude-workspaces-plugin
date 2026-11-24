@@ -224,6 +224,7 @@ const FROM_ROUTE_TABLE: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'docs', ':id', 'move'],
   ['workspaces', ':id', 'docs', ':id', 'move-file'],
   ['workspaces', ':id', 'docs', ':id', 'notes-method'],
+  ['workspaces', ':id', 'docs', ':id', 'outline'],
   ['workspaces', ':id', 'docs', ':id', 'plan'],
   ['workspaces', ':id', 'docs', ':id', 'plan-request'],
   ['workspaces', ':id', 'docs', ':id', 'reparse_from_disk'],
@@ -379,16 +380,10 @@ const FROM_ROUTE_TABLE: readonly (readonly string[])[] = [
 /**
  * Routes the server answers that have no row in the route table, so the
  * generator cannot see them. Each one says why it has no row; give it a row
- * and delete it here.
- *
- * - `GET …/docs/:docId/outline` mints missing block ids as it reads, and
- *   `get-routes-change-nothing.test.ts` calls every GET row expecting no
- *   write, so the route stays off the table until the read stops writing
- *   (docs/architecture/overview.md, the typed-routes recipe).
+ * and delete it here. None today: the last one, `GET …/docs/:docId/outline`,
+ * got its row once its read stopped writing block ids.
  */
-const WITHOUT_A_ROW: readonly (readonly string[])[] = [
-  ['workspaces', ':id', 'docs', ':id', 'outline'],
-];
+const WITHOUT_A_ROW: readonly (readonly string[])[] = [];
 
 /**
  * Every REAL route this server dispatches on, as a whole-path template —

@@ -89,17 +89,16 @@ export function commentedBlockIds(ydoc: Y.Doc): Set<string> {
   try {
     const threads = ydoc.getMap('threads') as Y.Map<Y.Map<unknown>>;
     if (threads.size === 0) return out;
-    const walk = prose.walkProse(prose.getProseFragment(ydoc));
+    const fragment = prose.getProseFragment(ydoc);
+    const addressOf = new Map(prose.blockAddresses(fragment).map((b) => [b.el, b.id]));
     const blockOf = new Map<unknown, string>();
-    for (const seg of walk.segments) {
-      // Climb from the text to the NEAREST ancestor carrying a block id. A
-      // bullet's words sit in a paragraph inside a list item inside a list,
-      // and only one of those three is the block an edit addresses — the
-      // innermost that has an id, which `seg.block` and `seg.topBlock` between
-      // them can miss in either direction.
+    for (const seg of prose.walkProse(fragment).segments) {
+      // Climb to the NEAREST addressable ancestor, by the id an outline hands
+      // out. A bullet's words sit in a paragraph in a list item in a list, and
+      // only one of those is the block an edit addresses.
       let node: Y.XmlText | Y.XmlElement | Y.XmlFragment | null = seg.node;
       while (node) {
-        const id = node instanceof Y.XmlElement ? prose.readBlockId(node) : undefined;
+        const id = node instanceof Y.XmlElement ? addressOf.get(node) : undefined;
         if (id !== undefined) {
           blockOf.set(seg.node, id);
           break;

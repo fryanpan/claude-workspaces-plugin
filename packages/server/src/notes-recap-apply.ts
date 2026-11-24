@@ -58,7 +58,7 @@ export function applyRecapShape(
 ): RecapApplyResult {
   const fragment = prose.getProseFragment(ydoc);
   const top = fragment.toArray() as Y.XmlElement[];
-  const start = top.findIndex((el) => prose.readBlockId(el) === headingId);
+  const start = top.findIndex((el) => prose.blockAddressOf(el) === headingId);
   if (start < 0) return { applied: false, reason: 'no-section' };
   const openLevel = levelOf(top[start] as Y.XmlElement) ?? 2;
   let end = start + 1;
@@ -83,14 +83,14 @@ export function applyRecapShape(
     return { applied: false, reason: 'person' };
   }
   const commented = opts.commented();
-  if (old.some((b) => commented.has(prose.readBlockId(b) ?? ''))) {
+  if (old.some((b) => commented.has(prose.blockAddressOf(b) ?? ''))) {
     return { applied: false, reason: 'commented' };
   }
 
   // Each old id, offered once, to the first new block with the same words.
   const idsByLine = new Map<string, string[]>();
   for (const b of old) {
-    const id = prose.readBlockId(b);
+    const id = prose.blockAddressOf(b);
     if (id === undefined || id === headingId) continue;
     const key = `${b.nodeName}:${lineOf(b)}`;
     idsByLine.set(key, [...(idsByLine.get(key) ?? []), id]);

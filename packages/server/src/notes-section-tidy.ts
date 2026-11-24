@@ -144,7 +144,7 @@ export function tidyNotesSection(
   } catch {
     return NOTHING;
   }
-  const start = top.findIndex((el) => prose.readBlockId(el) === headingId);
+  const start = top.findIndex((el) => prose.blockAddressOf(el) === headingId);
   if (start < 0) return NOTHING;
   const openLevel = levelOf(top[start] as Y.XmlElement) ?? 2;
 
@@ -183,7 +183,7 @@ export function tidyNotesSection(
     ) {
       break;
     }
-    const id = prose.readBlockId(el);
+    const id = prose.blockAddressOf(el);
     const commentedHere = (): boolean => id !== undefined && commentedNow().has(id);
     if (level !== undefined) {
       const text = textOf(el);
@@ -329,7 +329,7 @@ function wordlessItems(
     }
     if (WORD.test(text)) continue;
     if (holdsASuggestion(item)) continue;
-    const id = prose.readBlockId(item);
+    const id = prose.blockAddressOf(item);
     if (id !== undefined && commented().has(id)) continue;
     out.push(i);
   }

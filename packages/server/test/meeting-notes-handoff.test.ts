@@ -158,9 +158,11 @@ describe('a Record press on a doc holding the person’s own writing', () => {
       'Harbour plan',
       '# Harbour plan\n\nWhat I want settled before the season opens.\n',
     );
-    // Block ids are stamped by the first outline read, which any reader of
-    // the doc makes; the snapshot is taken after one so it compares content.
-    handle.docStore.readOutline(source);
+    // Block ids are stored by the doc's first write, and the link line is
+    // one; store them first so the snapshot compares content, not ids.
+    const sourceDoc = handle.docStore.get(source);
+    if (!sourceDoc) throw new Error(`no doc ${source}`);
+    prose.ensureBlockIds(sourceDoc.ydoc);
     const before = blocksOf(source);
 
     const press = await startOn(source, true);

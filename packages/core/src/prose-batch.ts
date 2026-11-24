@@ -41,16 +41,16 @@ import {
   writeReplacement,
 } from './prose-batch-write.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
-import {
-  BLOCK_AUTHOR_ATTR,
-  BLOCK_ID_ATTR,
-  readBlockAuthor,
-  readBlockId,
-} from './prose-identity.ts';
+import { BLOCK_AUTHOR_ATTR, readBlockAuthor, readBlockId } from './prose-identity.ts';
 import { parseMarkdownBlocks } from './prose-markdown.ts';
 import type { MarkdownParseOptions } from './prose-mdx.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
-import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
+import {
+  addressableBlocks,
+  claimSubtree,
+  findBlockById,
+  storeBlockAddresses,
+} from './prose-outline.ts';
 import { type SplitBeforeError, splitBeforeBlock } from './prose-split.ts';
 import { blockText, markBlockProposal, splitOffer } from './suggest-blocks.ts';
 import type { SuggestionAuthor } from './suggest-ops.ts';
@@ -117,14 +117,6 @@ export interface ApplyBlockEditsOptions {
    *  directly. A mark is cleared when a person types in the block, so a block
    *  still carrying one holds no words a person wrote. */
   directAuthors?: readonly string[];
-}
-
-/** Give an id to anything in `fragment` that has none. Called from INSIDE
- *  the batch transaction, which is why it is not `ensureBlockIds`. */
-function mintMissingIds(fragment: Y.XmlFragment): void {
-  for (const el of addressableBlocks(fragment)) {
-    if (readBlockId(el) === undefined) el.setAttribute(BLOCK_ID_ATTR, newBlockId());
-  }
 }
 
 const ALREADY_PROPOSED =
@@ -216,6 +208,10 @@ export function applyBlockEdits(
   const fragment = getProseFragment(doc);
 
   doc.transact(() => {
+    // Store the addresses the caller's outline read handed out BEFORE any
+    // edit runs: that read wrote nothing, so a block it named by a derived
+    // id has no `cwId` yet, and a replace keeps only a stored one.
+    storeBlockAddresses(fragment);
     for (const edit of edits) {
       switch (edit.op) {
         case 'insert_at_end':
@@ -347,7 +343,7 @@ export function applyBlockEdits(
     }
     // Ids for everything just written, inside the same transaction: a reader
     // watching the doc must never see a block that has no address yet.
-    mintMissingIds(fragment);
+    storeBlockAddresses(fragment);
   }, opts.transactionOrigin ?? 'agent');
 
   return {
