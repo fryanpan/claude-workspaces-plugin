@@ -48,8 +48,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Deployer } from '../src/deploy.ts';
 import { PluginRefresher } from '../src/plugin-refresh.ts';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
-import { exampleFor } from '../src/routes/route-table.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
+import { exampleFor } from '../src/route-table.ts';
 import type { ServerHandle } from '../src/server.ts';
 import { type RouteHandlerSpy, spyOnRouteHandlers } from './route-handler-spy.ts';
 

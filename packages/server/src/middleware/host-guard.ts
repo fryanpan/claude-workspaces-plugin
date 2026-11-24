@@ -55,6 +55,9 @@
  * nothing type-checks (see docs/process/learnings.md).
  */
 
+import { ROUTE_TABLE } from '../route-table-rows.ts';
+import type { RouteEntry, RouteGate } from '../route-table.ts';
+
 /** Strip the port and lowercase, so `Host: mac-mini.local:8787` compares. */
 export function normalizeHost(host: string | null | undefined): string {
   if (!host) return '';
@@ -544,639 +547,225 @@ export function classifyHost(
 }
 
 /**
- * What a MEMBER of a shared board may do ON that board, by route name.
+ * ===== SHARE SCOPE, read off the route table =====
  *
- * A share used to admit a reader: comments, suggestions, the reading tracker,
- * and document text over the live-editing socket. Bryan's 2026-09-03 call
- * ("Let's allow everything for now") makes an admitted member a participant
- * instead, so the acts a board is worked with — filing a task, editing one,
- * moving its status, answering what is waiting on a person, organising the
- * goal bands — are named here.
+ * Which addresses a share visitor may reach used to be written out here a
+ * second time: five tables and two if-chains naming the same paths the route
+ * table names, kept in step by `route-table.test.ts` checking one against the
+ * other. The rows are now the only place a path is written. A row whose gate
+ * is in `SHARE_VISIBLE_GATES` is an address a visitor reaches, for exactly the
+ * methods the row lists; every other address, including one no row names, is
+ * refused. A route added later is therefore closed until its row says
+ * otherwise, which is the property the hand-written allowlist existed for.
  *
- * THREE TABLES, one shape: `<route sub-path>` to the methods allowed on it.
- * Named routes rather than a prefix wildcard, because a wildcard grants
- * routes that do not exist yet, and adding one then becomes an accidental
- * publication rather than a decision. Anything absent is refused.
+ * WHAT THE ROW CANNOT SAY is which board an id in the path belongs to. That
+ * half is `PARAM_SCOPE`: one entry per parameter name, saying what a value in
+ * that position must be inside before the row admits it. Three questions,
+ * every time, and all three must pass:
  *
- * Every one of them is still asked the workspace question first. These tables
- * say WHICH ACT is a member's; `shareScopeAllows` says which board it may be
- * done on, and the ids in `/workspaces/<id>/tasks/<id>` and
- * `/workspaces/<id>/goals/<id>` are resolved through the same `workspacesOf`
- * every other scope question uses — as
- * `task:<id>`, which is the id a board holds a task's body under.
+ *   the method must be one the row lists, AND
+ *   the `:ws` segment must be the shared board, AND
+ *   every id nested under it must be inside that board.
+ *
+ * Any one alone admits something. The segment alone would let a visitor read
+ * any doc on the server by spelling their own board id in front of it; the
+ * membership alone would ignore which board was asked; the method alone would
+ * grant every board.
+ *
+ * Why each share row is granted is the row's own business, and its `reason`
+ * says so where the grant is not obvious. The history of each grant (the
+ * 2026-09-03 call that made a member a participant, the `docs:attach` key
+ * move, the region-edit verbs) is in git: `git log -S BOARD_MEMBER_ROUTES`.
  */
-/** The static files an "Add to Home Screen" install fetches. */
-const INSTALL_ASSETS: ReadonlySet<string> = new Set([
-  '/manifest.webmanifest',
-  '/apple-touch-icon.png',
-  '/icon.svg',
-  '/icon-192.png',
-  '/icon-512.png',
+
+/**
+ * The gates the host guard admits a share visitor through.
+ *
+ * `owner-in-handler` is here because the guard admits the visitor and the
+ * route refuses them a layer lower; `collab-scope` because a collaboration
+ * host is the share surface plus a membership check (`collabScope`).
+ */
+export const SHARE_VISIBLE_GATES: ReadonlySet<RouteGate> = new Set<RouteGate>([
+  'share-scope',
+  'collab-scope',
+  'owner-in-handler',
 ]);
 
-const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  // The board's own web-app manifest — its title and its address, which the
-  // page linking it already showed the reader. What makes a Home Screen
-  // install from a share open on the board instead of on a refused `/`.
-  'manifest.webmanifest': ['GET'],
-  // Reads that predate membership — the workspace record, the presence strip,
-  // and the review-item queue the strip's thread half arrives on.
-  '': ['GET'],
-  'review-items': ['GET'],
-  // "I have seen this" — the browser's beacon, which writes one
-  // `review_item.viewed` row and answers `{ok:true}`. A member's own reading
-  // of their own queue: it discloses nothing (the queue itself is the `GET`
-  // directly above) and the row it writes is ids and timestamps only. Named
-  // HERE, above the member dispatch, because `viewed` is a verb sitting where
-  // an item id goes — the same shape as `goals/add`.
-  'review-items/viewed': ['POST'],
-  // The board's rows. GET is the list the Tasks pane pages through; POST is
-  // filing one. The board doc syncs the same rows, so the GET is a
-  // convenience rather than a new disclosure.
-  tasks: ['GET', 'POST'],
-  // The Home pane and its per-person "caught up" marker. `home` is both the
-  // browser's tab and, with `?format=json`, the brief behind it — one address
-  // since the `/api` prefix went, so one entry.
-  home: ['GET'],
-  // The two panes with no data twin. They are page addresses only, and they
-  // are in the table rather than admitted beside it because there is one
-  // prefix now and a second place to say yes is a second place to drift.
-  mine: ['GET'],
-  activity: ['GET'],
-  // The Library tab, and its list. A member's list is built from what is
-  // FILED on the board and nothing else (`workspace-library.ts`): no project
-  // path, no repo file nobody filed, no mount. Its one verb (`library/open`)
-  // stays absent — it binds a file in a repo on this machine.
-  library: ['GET'],
-  'library/items': ['GET'],
-  'home/read': ['POST'],
-  // The Home brief's own recipe — how this board's summary is written. Board
-  // content in the owner's words, edited from the Home pane's own control.
-  'home/instructions': ['PUT'],
-  // The goal bands: naming one, renaming one, and ranking them. Reorder is
-  // the same organising act as the other two and was the gap in it — a member
-  // could add a band and rename it, and not say which came first.
-  'goals/add': ['POST'],
-  'goals/rename': ['POST'],
-  'goals/reorder': ['POST'],
-  // Filing a doc on this board. The route additionally requires the target to
-  // be one the member can ALREADY open here (`workspace-content.ts`), because
-  // attaching is what makes a doc readable on a board — so an unrestricted
-  // attach would be a read of somebody else's doc wearing a write's clothes.
-  // What is left is the verb's real subject: a file inside a folder bind or a
-  // diff review already filed here, which has no row of its own.
-  //
-  // THE KEY MOVED, and re-deriving this table is the reason to look for that
-  // rather than copy it. Attaching used to be `POST /workspaces/<id>/docs`;
-  // under the canonical shape that address is where a doc is CREATED, and the
-  // custom method `docs:attach` is the filing verb. Carried across unchanged,
-  // this one entry would have handed every share visitor the ability to mint
-  // docs on the board — a write nothing else here grants — while silently
-  // withdrawing the attach it was written for.
-  'docs:attach': ['POST'],
-  // The board's own Yjs room, which was the `/y/ws:<id>` allowance. Same
-  // grant, addressed the canonical way; the board doc carries the rows the
-  // Tasks pane already reads over HTTP.
-  y: ['GET'],
-  // "Make a plan" and "Have a meeting". One call mints a board-tied doc and
-  // files it here; the mic is the browser's own. The reply's doc metadata is
-  // redacted for a visitor at the route — a huddle's `sourceUrl` is a path in
-  // the owner's data directory.
-  huddles: ['POST'],
-  // The board's settings panel: the review-item criteria, the effort prompt
-  // and the parallelism cap. `notesHome` is withheld from a member's read and
-  // refused on a member's write — it is a checkout path on the owner's
-  // machine, and validating one would answer "does this path exist" besides.
-  //
-  // THE PUT IS ADMITTED HERE AND REFUSED BY ROLE, the same split as
-  // MEMBER_ADMIN_ROUTES below: every field it writes is board-wide
-  // configuration, so `requireOwner` inside `workspace-settings.ts` is what
-  // says no. Keeping the path a member route is what lets a PROMOTED owner
-  // retune their own board from the share hostname.
-  settings: ['GET', 'PUT'],
-  // The board's embed mapping (`routes/workspace-embeds.ts`): which
-  // `::name{block="…"}` doc paragraphs draw a frame, and from where. A doc
-  // on this board renders it for every reader, so refusing the read left a
-  // member looking at the directive as plain text. GET only: the PUT is
-  // board configuration and stays the owner's, from their own host.
-  embeds: ['GET'],
-  // The Activity tab. Rows are passed through the same visitor redaction the
-  // board's live event stream uses, so actor ids do not arrive here by the
-  // one door nothing was checking.
-  events: ['GET'],
-  // The board client's own boot report — one line per page load, written by
-  // the page that just painted and read back on the same tab.
-  'load-reports': ['GET', 'POST'],
-  // Who has access to this board, and at what level — the Settings panel's
-  // "Who has access". A READ for everyone in the workspace, because everything
-  // in a workspace is available to everyone in it
-  // (`.claude/rules/workspace-board.md`), and the list is how a Regular User
-  // learns who else can see what they write. The two verbs that CHANGE it are
-  // in MEMBER_ADMIN_ROUTES below, admitted as paths and refused by role.
-  members: ['GET'],
-  // The presence strip's read. It was `attachments: ['GET']` here until the
-  // roster moved to `agents`, and it is in the TABLE rather than admitted by
-  // name beside the pages because there is now one prefix and one table: the
-  // board's pages and the board's data share `/workspaces/<id>/…`, so a
-  // second place to say yes would be a second place to drift.
-  agents: ['GET'],
-  // The live board feed, which was the `/events/workspace/<id>` allowance.
-  // Task events on it are redacted for visitors (actor display names only)
-  // before they reach the stream.
-  'events:stream': ['GET'],
-  // The comments addressed to the person this request proved, and nobody
-  // else's: the channel is the proof's identity, not a path segment
-  // (`routes/upgrade-stream.ts`). Every comment on it is on a board that
-  // person is a member of (`addressees.ts`).
-  'me/events:stream': ['GET'],
-  // One person's direct messages with another person on this board
-  // (`routes/direct-messages.ts`). The route answers only for the person the
-  // request proved, and only about people this same board admits, so a
-  // member reaches nobody here they could not already see in its audience.
-  'me/dm': ['GET', 'POST'],
-};
-
-/** The per-task verbs, under `/workspaces/<id>/tasks/<taskId>/`. See BOARD_MEMBER_ROUTES. */
-const TASK_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  // One row in full, for the panel a reader opened. Not a widening: it
-  // answers with the same projected row, and every field it adds back is
-  // one the board's ydoc handed this same reader before the trim reached
-  // it. EVERY row is now short on the wire, open ones included —
-  // `task-row-slim.ts` names the reader behind each field — and this is
-  // where the panel asks for the rest.
-  detail: ['GET'],
-  transition: ['POST'],
-  evidence: ['POST'],
-  goal: ['POST'],
-  after: ['POST'],
-  title: ['POST'],
-  body: ['POST'],
-  assignee: ['POST'],
-  due: ['POST'],
-  park: ['POST'],
-  archive: ['POST'],
-  restore: ['POST'],
-  answer: ['POST'],
-  'answer/undo': ['POST'],
-  'more-info': ['POST'],
-  links: ['GET', 'POST', 'DELETE'],
-  'review-items': ['POST'],
-  // The item verbs, spelled with their id segment elided — see
-  // `taskSubroutePattern`. Answering, asking back, releasing a hold,
-  // revising the ask, and taking it back.
-  'review-items/*/answer': ['POST'],
-  'review-items/*/more-info': ['POST'],
-  'review-items/*/release': ['POST'],
-  'review-items/*/revise': ['POST'],
-  'review-items/*/withdraw': ['POST'],
-  'review-items/*/withdraw/undo': ['POST'],
-};
-
-/** The per-goal verbs, under `/workspaces/<id>/goals/<goalId>/`. A goal row
- *  lives in the same `task:<id>` id space as a task body, so it resolves the
- *  same way — and now that the board is in the path there are TWO questions,
- *  not one: the segment must be the shared board AND the row must be inside
- *  it. Either alone would admit a band on somebody else's board. */
-const GOAL_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  cascade: ['GET'],
-  archive: ['POST'],
-  restore: ['POST'],
-};
-
 /**
- * The per-member verbs, under `/workspaces/<id>/members/<email>/`.
+ * What a path parameter's value must be inside, for a share row to admit it.
  *
- * ADMITTED HERE, REFUSED BY ROLE. These two are the owner's, and the check
- * that says so is `requireOwner` inside the route — not this table. The
- * difference matters both ways: a table refusal would leave a PROMOTED owner
- * reaching their own board through the share hostname unable to manage it at
- * all, and a route with no check would be a page-level hide rather than a
- * server-side rule. So the path is a member route and the act is an owner's.
+ * - `board` — the shared board itself.
+ * - `board-doc` — a doc (or mockup, app, whiteboard: all docs) filed on it.
+ * - `board-row` — a task or goal row on it, which a board holds as `task:<id>`.
+ * - `board-attachment` — a review filed on it, or the board's own id. A group
+ *   bind is filed on the board, so the review row a visitor sees is reached
+ *   through the GROUPING's id while the share is scoped to the board's.
+ * - `unchecked` — a value inside a resource already checked to its left: a
+ *   thread, suggestion, meeting or review item of the doc or row before it,
+ *   or a member's email on the board before it (which board's list is
+ *   administered is settled by `:ws`; who may change it is `requireOwner`).
  *
- * `''` is the bare `DELETE /workspaces/<id>/members/<email>` — ending one
- * person's access. `role` is the promotion or demotion.
+ * A share row naming a parameter not in this table throws when the table is
+ * read, so a new kind of id cannot reach a visitor without someone deciding
+ * what it must belong to.
  */
-const MEMBER_ADMIN_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  '': ['DELETE'],
-  role: ['POST'],
+type ParamScope = 'board' | 'board-doc' | 'board-row' | 'board-attachment' | 'unchecked';
+
+const PARAM_SCOPE: Readonly<Record<string, ParamScope>> = {
+  ws: 'board',
+  docId: 'board-doc',
+  taskId: 'board-row',
+  goalId: 'board-row',
+  setId: 'board-attachment',
+  threadId: 'unchecked',
+  itemId: 'unchecked',
+  sid: 'unchecked',
+  meetingId: 'unchecked',
+  email: 'unchecked',
 };
 
-/**
- * The per-attachment verbs, under `/workspaces/<id>/attachments/<setId>/`.
- *
- * This is the table the `/api/reviews/` branch used to be — five lines of
- * `if (method === 'GET') return sub === 'tree' || …`, which said the same
- * thing in a shape nothing else here uses. Written as a table it can be read
- * beside the other three and, more to the point, it is walked by the
- * foreign-workspace test rather than restated in it.
- *
- * WHAT IT GRANTS, and it is exactly what the if-chain granted:
- *   tree / grouped   the sidebar (bound folder, or diff file groups)
- *   threads          every thread in the set, for the comments panel
- *   files            the review's file list
- *   context-file     open a member lazily, read-only
- *   editable-file    open a member lazily, editable
- *   raw              a listed video or image's bytes, for the page that
- *                    plays it — the same files `context-file` would open
- *
- * The last two matter because members bind LAZILY: `bind_folder` binds only
- * the entry doc, and everything else in the tree comes into being through
- * these calls. Block them and a shared folder shows one file. Both are
- * bounded by the review's own root — `docStore.openContextFile` /
- * `openEditableFile` reject any relPath that escapes it, and the listing that
- * backs them is `git ls-files --cached --others --exclude-standard`, so an
- * ignored `.env` or anything under `.git/` answers 404 by path however it is
- * spelled. This table admits the route; the listing decides the file.
- *
- * WHAT IT DOES NOT GRANT, and each was already refused by the if-chain's
- * final `return false`: `refresh` and `groups` re-scan the owner's disk,
- * `archive`/`unarchive` are the review's lifecycle, and the bare DELETE
- * destroys it. A visitor was given a review to read, not to re-run or retire.
- *
- * Worth knowing when you share a DIFF review rather than a folder: its root
- * is the whole repo, so `files` lists every repo file and `context-file` can
- * open any of them for context. Share a folder bind when you want the visitor
- * confined to a directory.
- */
-const REVIEW_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
-  tree: ['GET'],
-  grouped: ['GET'],
-  threads: ['GET'],
-  files: ['GET'],
-  'context-file': ['POST'],
-  'editable-file': ['POST'],
-  raw: ['GET', 'HEAD'],
-};
-
-/**
- * One table lookup, and the reason it is a function rather than `table[sub]`.
- *
- * `sub` is a path segment the CALLER typed. On a plain object literal
- * `toString`, `constructor`, `valueOf` and `__proto__` all resolve up
- * Object.prototype to something truthy that is not an array, `?.includes(...)`
- * on it throws, the exception escapes the guard, and the connection closes
- * with no response at all — which is neither an allow nor a deny, chosen by
- * whoever sent the request. `Object.hasOwn` asks the table and nothing above
- * it, so an unlisted segment is an ordinary refusal like every other one.
- */
-function memberRouteAllows(
-  table: Readonly<Record<string, readonly string[]>>,
-  sub: string,
-  method: string,
-): boolean {
-  if (!Object.hasOwn(table, sub)) return false;
-  return table[sub]?.includes(method.toUpperCase()) === true;
+/** One share-visible row, split once so a request is matched without re-parsing. */
+interface ShareRoute {
+  readonly pattern: string;
+  readonly segments: readonly string[];
+  readonly methods: ReadonlySet<string>;
 }
 
 /**
- * `review-items/r-7/answer` to `review-items/*\/answer`, so one table entry
- * covers every item id.
+ * The share-visible rows of a route table, checked.
  *
- * Only the segment after `review-items` is elided, and only when there is
- * exactly one. Eliding by position rather than by pattern is what keeps
- * `review-items/<id>/withdraw/undo` a DIFFERENT key from
- * `review-items/<id>/withdraw`: the table decides, not the parser.
+ * Throws, rather than refusing quietly, on a row the matcher could only get
+ * wrong: a parameter `PARAM_SCOPE` does not name, or a parameter that is not
+ * under `/workspaces/:ws/`. Every id a visitor reaches is reached under the
+ * board that owns it; a share row outside that shape has nothing to scope its
+ * ids against.
  */
-function taskSubroutePattern(sub: string): string {
-  const parts = sub.split('/');
-  if (parts[0] !== 'review-items' || parts.length < 3) return sub;
-  return ['review-items', '*', ...parts.slice(2)].join('/');
+export function shareRoutesOf(entries: readonly RouteEntry[]): readonly ShareRoute[] {
+  const routes: ShareRoute[] = [];
+  for (const entry of entries) {
+    if (!SHARE_VISIBLE_GATES.has(entry.gate)) continue;
+    const segments = entry.pattern.split('/');
+    const params = segments.filter((s) => s.startsWith(':')).map((s) => s.slice(1));
+    if (params.length > 0 && (segments[1] !== 'workspaces' || segments[2] !== ':ws')) {
+      throw new Error(`share route ${entry.pattern}: a parameter outside /workspaces/:ws/`);
+    }
+    for (const name of params) {
+      if (!Object.hasOwn(PARAM_SCOPE, name)) {
+        throw new Error(`share route ${entry.pattern}: no PARAM_SCOPE entry for :${name}`);
+      }
+    }
+    routes.push({ pattern: entry.pattern, segments, methods: new Set(entry.methods) });
+  }
+  return routes;
+}
+
+/**
+ * The `shareScopeAllows` a set of share rows spells. Exported so a test can
+ * build one from the real table plus a row of its own; the server uses the one
+ * below, built from `ROUTE_TABLE`.
+ */
+export function shareScopeFrom(
+  routes: readonly ShareRoute[],
+): (
+  pathname: string,
+  method: string,
+  target: ShareTarget,
+  workspacesOf?: (id: string) => string[],
+) => boolean {
+  return (pathname, method, target, workspacesOf) => {
+    // A workspace is the unit of sharing, so a target that names none grants
+    // NOTHING — not even the app shell. A legacy record or a caller still
+    // building the old doc-only shape is refused here.
+    const wsId = target.workspaceId;
+    if (!wsId) return false;
+
+    // The agent-multiplexed feed carries every channel that agent watches,
+    // which is wider than any board a share covers. Refused by name, so no
+    // row added later can open it.
+    if (pathname.startsWith('/events/agent/')) return false;
+
+    /**
+     * Is this id inside the shared workspace? The only place `workspacesOf` is
+     * read. `Array.isArray` because this parameter used to return a bare
+     * string, and a string also answers `.includes` — a caller still handing
+     * the old shape would grant on any substring. Refusing a non-array can
+     * only close.
+     */
+    const insideSharedWorkspace = (id: string): boolean => {
+      const owners = workspacesOf?.(id);
+      return Array.isArray(owners) && owners.includes(wsId);
+    };
+    const inScope = (scope: ParamScope, value: string): boolean => {
+      const id = safeDecode(value);
+      switch (scope) {
+        case 'board':
+          return id === wsId;
+        case 'board-doc':
+          return insideSharedWorkspace(id);
+        case 'board-row':
+          return insideSharedWorkspace(`task:${id}`);
+        case 'board-attachment':
+          return id === wsId || insideSharedWorkspace(id);
+        case 'unchecked':
+          return true;
+      }
+    };
+
+    const got = pathname.split('/');
+    for (const route of routes) {
+      if (!route.methods.has(method)) continue;
+      if (matchesInScope(route.segments, got, inScope)) return true;
+    }
+    return false;
+  };
+}
+
+/**
+ * Does `got` match these pattern segments, with every parameter in scope?
+ * The same shape as `patternMatches` in `route-table.ts`: `:name` is one
+ * segment, a trailing `*` is one or more, a mid-segment colon is literal.
+ * The literal segments are matched first, so `workspacesOf` is asked only
+ * about a path that is this route.
+ */
+function matchesInScope(
+  segments: readonly string[],
+  got: readonly string[],
+  inScope: (scope: ParamScope, value: string) => boolean,
+): boolean {
+  const params: [ParamScope, string][] = [];
+  let tail = false;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i] as string;
+    if (seg === '*') {
+      if (got.length <= i) return false;
+      tail = true;
+      break;
+    }
+    const here = got[i];
+    if (here === undefined) return false;
+    if (seg.startsWith(':')) {
+      const scope = PARAM_SCOPE[seg.slice(1)];
+      if (scope === undefined) return false;
+      params.push([scope, here]);
+      continue;
+    }
+    if (seg !== here) return false;
+  }
+  if (!tail && segments.length !== got.length) return false;
+  return params.every(([scope, value]) => inScope(scope, value));
 }
 
 /**
  * May a request on a SHARE host touch this path?
  *
- * Allowlist, not denylist: the app shell plus the shared doc's own surfaces.
- * Anything unlisted is refused, so a route added later is closed by default
- * rather than silently exposed to external reviewers.
+ * Allowlist, not denylist, and the list is the route table's share-visible
+ * rows (see the block above). `workspacesOf` answers every workspace an id
+ * belongs to, most specific first — empty when it belongs to none. A doc
+ * belongs to more than one at once (its review, and the board that review is
+ * filed on), so membership is a set; an exact `=== workspaceOf(id)` was what
+ * once refused a board visitor every review row on their own board.
  */
-export function shareScopeAllows(
-  pathname: string,
-  method: string,
-  target: ShareTarget,
-  /**
-   * Every workspace an id belongs to, most specific first — empty when it
-   * belongs to none. ONE rule, consulted at BOTH places a scope question is
-   * asked below (a member doc, and a `/workspaces/<id>/…` path segment),
-   * because two rules that agree today drift apart later and the one that
-   * drifts open is a breach.
-   *
-   * The id may be a doc OR a review (folder bind / diff review), and a
-   * doc belongs to more than one workspace at once: its review, and the
-   * board that review is filed on. Membership is therefore a SET, not
-   * a single answer — an exact `=== workspaceOf(id)` was what refused a board
-   * visitor every review row on their own board.
-   *
-   * Every share is a workspace share, so this is consulted for every scope
-   * question there is. A target with no workspace never reaches it: the guard
-   * refuses before this parameter is read.
-   */
-  workspacesOf?: (id: string) => string[],
-): boolean {
-  // A workspace is the unit of sharing, so a target that names none grants
-  // NOTHING — not even the app shell. This is the structural half of removing
-  // per-doc sharing: the mint paths are gone, and a target that somehow
-  // arrives without a workspace (a legacy registry record, a caller still
-  // building the old shape) is refused here rather than falling through to
-  // the doc rules below and being served its one doc.
-  if (!target.workspaceId) return false;
-
-  // Static app shell + assets (needed to render the review at all).
-  if (pathname === '/app' || pathname.startsWith('/app/')) return true;
-  if (pathname === '/widget.js' || pathname === '/widget.iife.js') return true;
-  if (pathname === '/widget.esm.js' || pathname.startsWith('/widget/')) return true;
-  if (pathname === '/favicon.ico') return true;
-  /**
-   * The install assets — the icons a phone's Home Screen shows, and the
-   * product's root manifest. Without these a member who taps "Add to Home
-   * Screen" on a shared board gets a bookmark with no icon: the browser
-   * asked for them and was refused. They are the same static files the app
-   * bundle ships, and they name nothing about any board. The root manifest
-   * is in the set because an attachment page still links it; the board
-   * shell a visitor sees links the board's own (`manifest.webmanifest` in
-   * the table below), which is what makes the install open on their board.
-   * The service worker is NOT here: push subscriptions are not a member
-   * route, so a worker on the share origin would have nothing to do.
-   */
-  if (INSTALL_ASSETS.has(pathname)) return true;
-  /**
-   * Who am I, and may I write? — `GET /api/auth/session`.
-   *
-   * The board's bundle asks this before it paints anything. Refused, it fell
-   * back to "nobody is signed in" and opened the "Who's reviewing?" name
-   * prompt, which `main()` awaits — so a member landing on their board saw a
-   * modal asking them to type a name and NO BOARD BEHIND IT until they
-   * dismissed it. Measured in headless Chromium on 2026-09-03.
-   *
-   * It carries the caller's own identity and nothing else: the email
-   * Cloudflare Access already proved to reach this hostname, the display name
-   * derived from it, and whether this deployment demands a sign-in to write.
-   * Telling somebody who they are cannot tell them anything they did not
-   * bring. `GET` only, and the sign-in flow's other routes stay out — there
-   * is no second sign-in behind Access to start or finish.
-   */
-  if (pathname === '/api/auth/session' && method.toUpperCase() === 'GET') return true;
-  /**
-   * Which transcription engines this server can run — `GET /api/meeting-engines`.
-   *
-   * Names no workspace, so it sits with the shell allowances rather than
-   * behind the board check. The meeting chooser reads it before a meeting
-   * starts, and refused it offered engines that answer `unavailable`.
-   *
-   * What it carries is a list of engine names and which is the default.
-   * Nothing about a key beyond the fact that one is set, which the button it
-   * draws would announce anyway the first time somebody pressed it.
-   */
-  if (pathname === '/api/meeting-engines' && method.toUpperCase() === 'GET') return true;
-
-  /**
-   * Is this id INSIDE the shared workspace? The one rule, and the only place
-   * `workspacesOf` is read — every predicate below is it, so there is nothing
-   * here for a second rule to drift away from. It used to sit beside a
-   * `id === target.docId` base case; that base case WAS the per-doc grant.
-   */
-  const insideSharedWorkspace = (id: string): boolean => {
-    const wsId = target.workspaceId;
-    if (!wsId) return false;
-    const owners = workspacesOf?.(id);
-    // `Array.isArray` is not ceremony: this parameter used to return a bare
-    // `string | null`, and a STRING also answers `.includes` — so a caller
-    // still handing the old shape would silently grant on any SUBSTRING
-    // match. Refusing a non-array can only close, never open.
-    return Array.isArray(owners) && owners.includes(wsId);
-  };
-
-  /**
-   * Does this `/workspaces/<id>/attachments/<seg>/…` segment name a workspace the share
-   * covers — the shared workspace itself, or a review filed on it?
-   *
-   * Deliberately NOT `inScope`: a workspace id and a doc id come from the
-   * same string space, and letting the entry DOC of a workspace share match
-   * here would answer a workspace question with a doc's identity.
-   */
-  const inWorkspaceScope = (segment: string): boolean => {
-    const id = safeDecode(segment);
-    return id === target.workspaceId || insideSharedWorkspace(id);
-  };
-
-  /**
-   * ===== ONE PREFIX, one segment check, one table lookup. =====
-   *
-   * This block used to be FIVE. `/workspaces/<id>/…` judged the board's own
-   * routes and its goal bands; `/api/docs/<id>/…` judged docs through a
-   * twelve-line if-chain; `/api/tasks/<id>/…` judged rows through a table;
-   * `/api/reviews/<id>/…` judged reviews through a second if-chain in a third
-   * shape. Four of those addressed a resource by its own id and named no
-   * board at all, so each had to RE-DERIVE which board it was on, and each
-   * derived it slightly differently — the reviews branch through
-   * `inWorkspaceScope`, the tasks branch through a `task:` prefix, the docs
-   * branch through a bare segment. Four derivations of one rule is three
-   * chances for the one that drifts open, and a widening drift here is a
-   * breach rather than a bug.
-   *
-   * Now every resource is addressed under the board that owns it, so the
-   * question is asked once in the shape it actually has:
-   *
-   *   the workspace SEGMENT must be the shared board, AND
-   *   the member id nested under it must be inside that board, AND
-   *   the verb must be in that collection's table.
-   *
-   * All three, every time. Any one alone admits something: the segment alone
-   * would let a visitor read any doc on the server by spelling their own
-   * board id in front of it; the membership alone would ignore which board
-   * was asked; the table alone would grant every board.
-   *
-   * Each nested shape is still spelled out rather than admitted by depth. A
-   * rule like "anything under the shared workspace" grants routes that do not
-   * exist yet, which makes adding one an accidental publication rather than a
-   * decision — which is the same reason every table here is a table of names.
-   */
-  if (target.workspaceId) {
-    const wsId = target.workspaceId;
-    if (pathname.startsWith('/workspaces/')) {
-      const rest = pathname.slice('/workspaces/'.length);
-      const slash = rest.indexOf('/');
-      const wsSeg = slash === -1 ? rest : rest.slice(0, slash);
-      // The board segment. Everything below is inside this check, and a
-      // path naming a DIFFERENT board is refused here rather than falling
-      // through to a later rule that might not look at the segment at all.
-      if (safeDecode(wsSeg) !== wsId) return false;
-      const sub = slash === -1 ? '' : rest.slice(slash + 1);
-
-      // The board's own surface, `<sub>` by `<sub>` and method by method:
-      // BOARD_MEMBER_ROUTES. It covers the PAGES as well as the data, because
-      // the `/api` prefix is gone and both live at one address — `''`, `home`
-      // and `tasks` are a tab in a browser and a JSON body with
-      // `?format=json`, and a member is entitled to the same board either
-      // way, so one table entry says so once. `mine` and `activity` are panes
-      // with no data twin and are in the table for the same reason.
-      //
-      // FIRST, and that order is load-bearing: `goals/add`, `goals/rename`
-      // and `goals/reorder` put a collection VERB exactly where a member id
-      // goes, and the member dispatch below would look `add` up as a band.
-      // The table names them, so they are answered before anything treats
-      // them as an id — the same rule, and the same reason, as the verb list
-      // in `middleware/workspace-scope.ts`.
-      if (memberRouteAllows(BOARD_MEMBER_ROUTES, sub, method)) return true;
-
-      // `<collection>/<memberId>[/<verb…>]` — the merged member dispatch.
-      const cut = sub.indexOf('/');
-      if (cut > 0) {
-        const collection = sub.slice(0, cut);
-        const tail = sub.slice(cut + 1);
-        const idEnd = tail.indexOf('/');
-        const memberId = safeDecode(idEnd === -1 ? tail : tail.slice(0, idEnd));
-        const verb = idEnd === -1 ? '' : tail.slice(idEnd + 1);
-        switch (collection) {
-          /**
-           * A doc, and its whole REST surface. `verb === ''` is the meta read
-           * (and the page, which is the same address without `?format=json`);
-           * everything deeper goes to `docSubrouteAllowed`, which is the same
-           * predicate that judged `/api/docs/<id>/…` and is unchanged.
-           *
-           * A mockup is a doc with a different renderer, and shares the doc's
-           * verbs — its page is `mockups/<id>`, its data is the doc's.
-           */
-          case 'docs':
-          case 'mockups':
-          // A whiteboard's page; its data and its socket are the doc's.
-          case 'whiteboards':
-            return insideSharedWorkspace(memberId) && docSubrouteAllowed(verb, method);
-          /**
-           * An attached dev server (`routes/apps.ts`). `verb` here is not a
-           * verb but the app's own path, so there is no table to look it up
-           * in: every path under an app filed on THIS board, read-only. That
-           * is exactly what a mockup grants — its page, whatever it shows —
-           * spelled for a resource that has more than one page. The app's
-           * own origin is loopback by the attach rule and the path cannot
-           * leave it (`app-proxy.ts`), so what a member reaches is that one
-           * dev server and nothing else on the machine. The attach itself,
-           * `POST …/apps`, is not under this case and stays refused.
-           *
-           * `POST …/apps/<id>`, the bare address with no slash after the
-           * id, is the waiting page's "Ask again". A member who finds the
-           * app down is the reader that page is for; the POST carries no
-           * input, sends a fixed notice to the agent already told, and is
-           * held to one per outage per two minutes (`AppOutages.askAgain`).
-           *
-           * A write under the slash (POST, PUT, PATCH, DELETE) is the app's
-           * own save, and is admitted here for the same app only. Which
-           * visitor may make it is NOT decided here, because this function
-           * cannot tell a share-link visitor from a member: `routes/apps.ts`
-           * asks `appWriteRefusal` (`app-proxy.ts`), which refuses the
-           * share-link visitor and any write from another origin.
-           */
-          case 'apps':
-            return (
-              insideSharedWorkspace(memberId) &&
-              (method === 'GET' ||
-                method === 'HEAD' ||
-                (method === 'POST' && idEnd === -1) ||
-                (idEnd !== -1 && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)))
-            );
-          /**
-           * A task row. Resolved as `task:<rowId>` — the id a board holds a
-           * task body under — through the SAME `insideSharedWorkspace` every
-           * other question here reads, so a row on another board is refused
-           * by the same line that refuses reading their doc.
-           *
-           * `taskSubroutePattern` elides the item id in `review-items/<id>/…`
-           * BY POSITION, which is what keeps `review-items/*\/withdraw/undo`
-           * a different key from `review-items/*\/withdraw`. A glob would
-           * collapse the two.
-           *
-           * Bare `tasks/<id>` is not in the table and therefore refused: the
-           * row itself arrives over the board doc, and a bare-path read would
-           * be a second, unredacted spelling of it.
-           */
-          case 'tasks':
-            return (
-              insideSharedWorkspace(`task:${memberId}`) &&
-              memberRouteAllows(TASK_MEMBER_ROUTES, taskSubroutePattern(verb), method)
-            );
-          /**
-           * A goal band. Same id space as a task body, so the same resolver —
-           * and TWO questions, not one: the segment above must be the shared
-           * board AND the row must be inside it. Either alone would admit a
-           * band on somebody else's board.
-           */
-          case 'goals':
-            return (
-              insideSharedWorkspace(`task:${memberId}`) &&
-              memberRouteAllows(GOAL_MEMBER_ROUTES, verb, method)
-            );
-          /**
-           * A person on this board's access list. The member id is an EMAIL
-           * rather than a doc or row id, so there is no `insideSharedWorkspace`
-           * question to ask about it: the board segment above already settled
-           * which board is being administered, and the list belongs to that
-           * board. What the caller may DO with the two verbs is the role check
-           * in the route, which this table deliberately does not duplicate.
-           */
-          case 'members':
-            return memberRouteAllows(MEMBER_ADMIN_ROUTES, verb, method);
-          /**
-           * A review — a diff review or a bound folder — filed on this board.
-           *
-           * `inWorkspaceScope`, not `inScope`, and the difference is the fix
-           * for a shared BOARD: a group bind is filed on a board workspace, so
-           * the review row a visitor sees on the board is reached through the
-           * GROUPING's id while the share is scoped to the BOARD's. An exact
-           * match refused every one of them. A review filed on a DIFFERENT
-           * board is not in the set `workspacesOf` returns, so it stays
-           * refused — that half is the one under test, because widening is
-           * the direction that costs.
-           *
-           * `verb === ''` is the review's page, a GET. The bare DELETE is not
-           * in the table and stays refused: a visitor was given a review to
-           * read, not to destroy.
-           */
-          case 'attachments':
-            return (
-              inWorkspaceScope(memberId) &&
-              (verb === ''
-                ? method === 'GET'
-                : memberRouteAllows(REVIEW_MEMBER_ROUTES, verb, method))
-            );
-          default:
-            return false;
-        }
-      }
-      return false;
-    }
-    // The server-owned board doc socket, `/workspaces/<id>/y`. Reads are the
-    // §3.3 visitor-contract projection; foreign writes are reverted
-    // server-side. Spelled out here rather than left to a table because it is
-    // the BOARD's own socket and not a member of any collection — its
-    // allowance stays a decision, never a resolver side effect.
-    //
-    // It is judged above the `/workspaces/` block's `return false` only in
-    // reading order; the block above already answered every path under the
-    // shared board, so this line is reached for the board socket through the
-    // same segment check. (See the socket's own entry in BOARD_MEMBER_ROUTES.)
-  }
-
-  /*
-   * `/review/<docId>` used to be allowed here, scoped by the doc it named,
-   * because it 302'd to the canonical page. The route is gone with the
-   * cutover, so the allowance is gone with it — nothing below grants it, and
-   * a visitor following an old link gets the same 404 the owner does. Left
-   * as a note rather than silently dropped: this WAS a share grant, and the
-   * next person to read this table should know it was withdrawn on purpose.
-   */
-
-  // The agent-multiplexed feed is never a share surface: one stream carries
-  // every channel that agent watches, which is by construction wider than any
-  // board a share covers. Refused BY NAME rather than left to a rule failing
-  // on its shape — this is the one refusal that must not be folded into
-  // anything, because a generic rule would not catch it.
-  if (pathname.startsWith('/events/agent/')) return false;
-
-  // Everything else — /api/share*, /workspaces (list + create), /demos,
-  // /signin, the deploy route … — is out of scope.
-  return false;
-}
-
+export const shareScopeAllows = shareScopeFrom(shareRoutesOf(ROUTE_TABLE));
 /**
  * A workspace id no store can mint, used as the target when a path names no
  * workspace at all. Every workspace-dependent rule in `shareScopeAllows`
@@ -1324,131 +913,6 @@ function pathWorkspaces(pathname: string): string[] {
   // because the guard's other caller still passes it and removing a
   // parameter is not what this change is about.
   return [];
-}
-
-/**
- * Which `/api/docs/<id>/<sub>` calls may a share visitor make?
- *
- * A visitor is a reviewer, not an operator. They co-edit through the Yjs
- * websocket (that's the point of a live review) and comment through the
- * thread routes — but the doc's OPERATOR verbs stay local-only:
- *
- *   DELETE <doc>        destroys the attachment
- *   POST content        replaces the whole document in one call
- *   POST reparse_from_disk  discards live state, including others' edits
- *   POST threads/<id>/{rewrite_region,insert_after,insert_blocks_after}
- *                       agent-side document surgery, not a review action
- * `threads/<id>/promote` used to be in that list, with the reason "visitors
- * are read-only on the board gate, comments are their only write". That reason
- * is the thing Bryan's 2026-09-03 call removed: a member files tasks on the
- * board this doc is filed on, so turning a comment into one is the same act
- * by a shorter route. It is allowed now.
- *
- * `tasks` (GET) is the §3.3 rule-2 chip endpoint: how a task chip inside a
- * shared doc resolves (id, title, status, assignee) without the visitor
- * ever syncing the workspace board doc.
- *
- * Anything not named here is refused, so a subroute added later is closed
- * until someone decides a visitor should have it.
- */
-function docSubrouteAllowed(sub: string, method: string): boolean {
-  if (sub === '') return method === 'GET'; // meta; DELETE refused
-  if (sub === 'diff' || sub === 'content' || sub === 'status') return method === 'GET';
-  if (sub === 'tasks') return method === 'GET'; // task chips, visitor-safe shape
-  if (sub === 'activity') return method === 'POST'; // reading tracker
-  // Who is holding this doc open — the banner every reader of it sees.
-  if (sub === 'lead-presence') return method === 'GET';
-  /**
-   * The meeting the doc carries, and what was said in it. Reads only: the
-   * transcript is the least reconstructible thing this server holds, because
-   * the audio is already gone.
-   *
-   * `meetings/<id>/speakers` is NOT admitted by this line — it is a POST, and
-   * the route refuses a visitor on its own besides. Naming a voice after the
-   * fact rewrites notes already written, and only the session that wrote them
-   * can keep its own memory of them straight.
-   */
-  if (sub === 'meetings' || /^meetings\/[^/]+$/.test(sub)) return method === 'GET';
-  /**
-   * Is a meeting bot even set up on this server? A read of two booleans and
-   * whatever bot is already on this doc, which is what lets the meeting panel
-   * say "bots are not configured here" instead of offering a button that
-   * always fails.
-   *
-   * POST and DELETE stay refused, and this is the one place a member is
-   * deliberately narrower than the board. Inviting a bot spends the owner's
-   * money at a vendor the moment it is created and sends a participant into a
-   * call outside this server; leaving it dials that bot back out again.
-   * Neither is a way to work THIS board, which is what the grant is for.
-   */
-  if (sub === 'meeting-bot') return method === 'GET';
-  /**
-   * An image the doc names by a path relative to its own file
-   * (`routes/doc-assets.ts`). Reads only, and the doc must already be inside
-   * the shared board: what a member reaches is what the doc displays.
-   */
-  if (sub.startsWith('assets/')) return method === 'GET' || method === 'HEAD';
-  /**
-   * Storing a pasted image beside the doc's file. A member already edits the
-   * doc's text over the live socket (`y`, below); this is the same edit made
-   * with a picture, so it is admitted on the same line. The write gate still
-   * refuses a browser that has not signed in, as it refuses that socket.
-   */
-  if (sub === 'assets') return method === 'POST';
-  /**
-   * The files beside the doc's own file, which a `::html{src="…"}` line
-   * frames (`routes/doc-files.ts`). Reads only, on a doc already inside the
-   * shared board, by the same rule as its images: what a member reaches is
-   * what the doc displays.
-   */
-  if (sub.startsWith('files/')) return method === 'GET' || method === 'HEAD';
-  /**
-   * The key a `<StreetMap>` on Google in the doc draws with
-   * (`routes/doc-map-key.ts`), answered only while the doc's live content
-   * draws on that basemap. A read, on a doc already inside the shared board:
-   * the map is part of what the doc displays, and the key is a browser key
-   * Google restricts to the board's site.
-   */
-  if (sub.startsWith('map-key/')) return method === 'GET';
-  /**
-   * A built component of an `.mdx` doc (`routes/doc-components.ts`), served
-   * only while the doc's own build map names it. Reads only, on a doc already
-   * inside the shared board: the component is part of what the doc displays.
-   */
-  if (sub.startsWith('components/')) return method === 'GET' || method === 'HEAD';
-  /**
-   * Thread verbs, INCLUDING the three region-edit ones this used to exclude.
-   *
-   * The exclusion protected nothing it was written for: a member already has
-   * the doc's live-editing socket (`/y/<id>` below), which is unrestricted
-   * text editing on the same document. Refusing the REST spelling of an edit
-   * a member can make by typing left an inconsistency, not a boundary. What
-   * still bounds all of them is the same line as ever — the doc has to be
-   * inside the shared board.
-   */
-  if (sub === 'threads' || sub.startsWith('threads/')) return true;
-  if (sub === 'suggestions' || sub.startsWith('suggestions/')) return true;
-  /**
-   * The doc's three long-lived connections, now that they are addressed under
-   * the doc rather than at three top-level prefixes of their own.
-   *
-   * `y` is the live-editing socket — co-editing IS the point of a live
-   * review, and it was granted at `/y/<docId>` before the move. `audio` is
-   * the meeting microphone, granted at `/audio/<docId>` for the same doc: it
-   * spends money while it is open, which is the honest cost of the grant and
-   * not a reason to withhold it, because a member can already spend the same
-   * engine by being in the doc while the owner records. `events:stream` is
-   * the doc's own SSE feed, which was `/events/<docId>`.
-   *
-   * A websocket upgrade is a GET, so the method-keyed write gate cannot see
-   * these; each socket still checks the browser's Origin and the sign-in for
-   * itself at its handshake, unchanged by this line.
-   *
-   * The AGENT feed is deliberately not reachable from here at all: it is not
-   * addressed under a doc, and it is refused by name in `shareScopeAllows`.
-   */
-  if (sub === 'y' || sub === 'audio' || sub === 'events:stream') return method === 'GET';
-  return false;
 }
 
 function safeDecode(s: string): string {

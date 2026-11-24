@@ -14,7 +14,7 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  *
  * Gate: `share-scope`. The host guard admits `components/*` on a doc only when
  * the doc is inside the shared board, for GET and HEAD
- * (`docSubrouteAllowed`, `middleware/host-guard.ts`): a component is part of
+ * (its share-scope row in `route-table-rows.ts`): a component is part of
  * what the doc displays, as its images are.
  *
  * A hash is a fixed body, so the answer is `immutable`. `nosniff` and

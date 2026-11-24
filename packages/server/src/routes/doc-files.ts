@@ -39,7 +39,7 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  *
  * Gate: `share-scope`. The host guard admits `files/*` on a doc only when the
  * doc is inside the shared board — the line that admits the doc's text and its
- * relative images (`docSubrouteAllowed`, `middleware/host-guard.ts`) — and
+ * relative images (the share-scope rows in `route-table-rows.ts`) — and
  * only for GET and HEAD.
  *
  * Every answer is `no-cache` with an `ETag`, so a reload after an edit to the

@@ -22,8 +22,8 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  * page does not draw that map, and never into a log or an error body.
  *
  * Gate: `share-scope`. The host guard admits `map-key/*` on a doc only when
- * the doc is inside the shared board, GET only (`docSubrouteAllowed`,
- * `middleware/host-guard.ts`): a visitor who reads the doc reads its map.
+ * the doc is inside the shared board, GET only (its share-scope row in
+ * `route-table-rows.ts`): a visitor who reads the doc reads its map.
  * `no-store`, `nosniff` and `Cross-Origin-Resource-Policy: same-origin`,
  * with CORS only for the server's own allowed origins, so another site's
  * page can neither read the answer nor load it as a script.

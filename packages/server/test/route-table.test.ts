@@ -10,7 +10,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type ShareTarget, shareScopeAllows } from '../src/middleware/host-guard.ts';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
 import {
   type RouteEntry,
   exampleFor,
@@ -18,7 +18,7 @@ import {
   mountRouteTable,
   patternMatches,
   renderRouteTable,
-} from '../src/routes/route-table.ts';
+} from '../src/route-table.ts';
 
 const SHARED_BOARD = 'w-shared';
 const TARGET: ShareTarget = { workspaceId: SHARED_BOARD };
@@ -131,12 +131,13 @@ describe('the route table', () => {
 /**
  * The property the table exists for.
  *
- * `shareScopeAllows` is the guard's own decision, a pure function of the
- * path, the method and the share. Driving it with each row's example turns
- * the gate column into something CI checks rather than something a reviewer
- * hopes is true — a route added under an already-allowed prefix and declared
- * `trusted-local` fails here, and so does one declared `share-scope` that the
- * guard does not actually let a visitor reach.
+ * `shareScopeAllows` is built from the share-visible rows, so for those this
+ * is the guard reading its own source back: it fails when a row's parameters
+ * stop resolving to the shared board. For every other row it is the real
+ * check: a `trusted-local` row whose address a share row's pattern also
+ * matches (a `*` tail, a parameter where a literal was meant) is admitted by
+ * the guard and fails here. What the old hand-written allowlist admitted is
+ * `share-scope-parity.test.ts`'s.
  */
 describe('every row’s declared gate is the gate the guard applies', () => {
   for (const entry of ROUTE_TABLE) {

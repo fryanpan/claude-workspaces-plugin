@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { routePatternForSpan } from '@claude-workspaces/core/trace-privacy';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
 
 /** A name that says nothing: `/:id`, `/:id/:id`, and so on. */
 const isUnnamed = (name: string): boolean => /^\/(:id)(\/:id)*$/.test(name);

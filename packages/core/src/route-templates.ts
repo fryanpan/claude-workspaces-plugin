@@ -7,7 +7,7 @@
  *
  * MOST OF THIS FILE IS GENERATED. The block between the BEGIN and END markers
  * is written by `bun run routes:table` from the server's route table
- * (`packages/server/src/routes/route-table-rows.ts`), one template per
+ * (`packages/server/src/route-table-rows.ts`), one template per
  * fixed-length row. Add a route by adding its row and running that command;
  * never edit the block by hand. `packages/server/test/route-table.test.ts`
  * fails when the block is not what the rows render to, and
@@ -372,6 +372,7 @@ const FROM_ROUTE_TABLE: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'voice', 'converse'],
   ['workspaces', ':id', 'voice', 'timings'],
   ['workspaces', ':id', 'whiteboards'],
+  ['workspaces', ':id', 'whiteboards', ':id'],
   ['workspaces', ':id', 'y'],
   // ── END generated ──
 ];

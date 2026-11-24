@@ -17,7 +17,7 @@ import { type WriteVia, normalizeReviewType } from '@claude-workspaces/core';
  * changes who else is in and at what level, and answers the review items that
  * run a command on his machine; `member` — "Regular User" wherever a person
  * reads it — is everything else a board is worked with, which is already
- * generous (see BOARD_MEMBER_ROUTES in `middleware/host-guard.ts`).
+ * generous (see the share-scope rows in `route-table-rows.ts`).
  *
  * The BOARD'S OWN OWNER is not a row here at all, and that is the structural
  * half of "a board always has an owner". A board is created from the local

@@ -2,7 +2,7 @@
  * `POST /api/share/enabled`: the external-access master switch, and the
  * narrower switch for one board.
  *
- * Trusted-local like the rest of `/api/share*` (routes/route-table-rows.ts).
+ * Trusted-local like the rest of `/api/share*` (route-table-rows.ts).
  * Called from `routes/auth-share.ts` at the position this block held there,
  * after the share list and before the retired per-doc share route.
  *
