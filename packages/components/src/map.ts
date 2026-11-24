@@ -148,7 +148,7 @@ export type MapProps = {
   /** Pixels, 160 to 1200; 480 by default. */
   height?: number;
   legend?: boolean;
-  /** `osm`, `carto-light` or `google`. */
+  /** `osm`, `carto-light` (drawn on OpenStreetMap) or `google`. */
   basemap?: string;
   /** The key for a basemap that needs one (Google's browser key). */
   basemapKey?: string;

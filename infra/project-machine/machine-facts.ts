@@ -6,7 +6,10 @@
  * Reads only, as root over `fly ssh console`:
  *
  *   the running board server's settings that decide who it admits
- *     (`SERVER_KEYS`, from its /proc environ; no other variable is kept)
+ *     (`SERVER_KEYS`, from its /proc environ; no other variable is kept).
+ *     The server is the process run as `cw` whose parent is the root
+ *     supervisor (`entrypoint.sh` under tini), never one picked by its
+ *     command line, which any user can copy (wall L4)
  *   how cloudflared runs: `run` with the named tunnel's remote ingress, or a
  *     quick tunnel
  *   the machine's login users and their uids, for the loopback uid policy
@@ -18,8 +21,11 @@
  *   which listed Claude token the machine's lead is set to, by LABEL alone,
  *     from the `CW_LEAD_TOKEN_ORG` marker in root's environment (the deploy
  *     sets it; the lead cannot write it), and whether Remote Control is on:
- *     `CW_LEAD_REMOTE_CONTROL=1` there, or a process run with
- *     `--remote-control`
+ *     `CW_LEAD_REMOTE_CONTROL=1` there; any process run with
+ *     `--remote-control`, `--rc` or a `remote-control` subcommand; or a
+ *     process of the lead's carrying `CLAUDE_CODE_BRIDGE_SESSION_ID`, which
+ *     Claude Code sets for what a bridged session runs, so a session turned
+ *     on from inside with `/remote-control` shows too
  *
  * The settings carried back are addresses, hostnames, audiences and uids: no
  * token, key or password. The report compares them and prints none.
@@ -63,8 +69,13 @@ export interface MachineFacts {
 }
 
 export interface Proc {
+  pid: number;
+  /** The parent's pid, from /proc/<pid>/status. */
+  ppid: number;
+  /** The real uid, from /proc/<pid>/status. */
+  uid: number;
   cmdline: string[];
-  /** The process's environment; read lazily, so only the server's is opened. */
+  /** The process's environment; read lazily, so only the server's and the lead's are opened. */
   environ: () => Record<string, string>;
 }
 
@@ -116,9 +127,62 @@ export function markerLabel(marker: string | undefined): string | null {
   return TOKEN_LABEL.test(label) ? label : '(not a label)';
 }
 
+/** The parent pid and real uid in a /proc/<pid>/status; NaN for one it lacks. */
+export function statusIds(status: string): { ppid: number; uid: number } {
+  const field = (name: string) => Number(new RegExp(`^${name}:\\s*(\\d+)`, 'm').exec(status)?.[1]);
+  return { ppid: field('PPid'), uid: field('Uid') };
+}
+
+/**
+ * bash running entrypoint.sh, as root. Its shebang runs it as
+ * `bash <path>`; tini, its parent, carries the path too, but later.
+ */
+const isSupervisorCmd = (p: Proc) =>
+  p.uid === 0 &&
+  /(^|\/)bash$/.test(p.cmdline[0] ?? '') &&
+  (p.cmdline[1] ?? '').endsWith('/entrypoint.sh');
+
+/**
+ * The board server: run as `cw`, its parent the root supervisor. The
+ * supervisor's subshells share its command line, so the supervisor is the
+ * one whose own parent is not one of them. Another user's process, or one of
+ * cw's started by anything else, is never taken for it, whatever it is named.
+ */
+export function findServer(procs: readonly Proc[], cwUid: number | undefined): Proc | undefined {
+  if (cwUid === undefined) return undefined;
+  const byPid = new Map(procs.map((p) => [p.pid, p]));
+  const top = new Set(
+    procs
+      .filter((p) => isSupervisorCmd(p))
+      .filter((p) => {
+        const parent = byPid.get(p.ppid);
+        return !(parent && isSupervisorCmd(parent));
+      })
+      .map((p) => p.pid),
+  );
+  const found = procs.filter((p) => p.uid === cwUid && top.has(p.ppid));
+  return found.length === 1
+    ? found[0]
+    : found.find((p) => p.cmdline.some((a) => a.endsWith('packages/server/src/bin.ts')));
+}
+
+const RC_ARG = /^--(remote-control|rc)(=|$)/;
+
+/** Remote Control on any process's arguments, or in a lead process's environment. */
+function remoteControlSeen(procs: readonly Proc[], leadUid: number | undefined): boolean {
+  if (procs.some((p) => p.cmdline.some((a) => RC_ARG.test(a) || a === 'remote-control')))
+    return true;
+  if (leadUid === undefined) return false;
+  return procs
+    .filter((p) => p.uid === leadUid)
+    .some((p) => (p.environ().CLAUDE_CODE_BRIDGE_SESSION_ID ?? '').trim() !== '');
+}
+
 export function readFacts(io: FactsIo): MachineFacts {
   const procs = io.procs();
-  const server = procs.find((p) => p.cmdline.some((a) => a.endsWith('packages/server/src/bin.ts')));
+  const users = loginUsers(io.read('/etc/passwd') ?? '');
+  const uidOf = (name: string) => users.find((u) => u.name === name)?.uid;
+  const server = findServer(procs, uidOf('cw'));
   let settings: MachineFacts['server'] = null;
   if (server) {
     const env = server.environ();
@@ -160,7 +224,7 @@ export function readFacts(io: FactsIo): MachineFacts {
   return {
     server: settings,
     cloudflared,
-    users: loginUsers(io.read('/etc/passwd') ?? ''),
+    users,
     gitPush,
     deployKey,
     repos: [...repos].sort(),
@@ -169,8 +233,7 @@ export function readFacts(io: FactsIo): MachineFacts {
       return {
         tokenLabel: markerLabel(env.CW_LEAD_TOKEN_ORG),
         remoteControl:
-          env.CW_LEAD_REMOTE_CONTROL === '1' ||
-          procs.some((p) => p.cmdline.some((a) => /^--remote-control(=|$)/.test(a))),
+          env.CW_LEAD_REMOTE_CONTROL === '1' || remoteControlSeen(procs, uidOf('lead')),
       };
     })(),
   };

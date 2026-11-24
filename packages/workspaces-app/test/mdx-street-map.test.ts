@@ -261,7 +261,7 @@ describe('a StreetMap block on the doc page', () => {
       mount('<StreetMap basemap="carto-light" markers={[{ lat: 37.77, lng: -122.42 }]} />');
       await drawn();
       expect(asked).toEqual([]);
-      expect(drawnOn[0]?.base.label).toBe('CARTO Positron');
+      expect(drawnOn[0]?.base.label).toBe('OpenStreetMap');
     });
   });
 });
