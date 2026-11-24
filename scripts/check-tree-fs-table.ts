@@ -207,6 +207,8 @@ export const TREE_FS_TABLE: Readonly<Record<string, TreeFsLabel>> = {
   'packages/server/src/routes/workspace-next.ts': 'not-in-inventory',
   'packages/server/src/safe-path.ts': 'spelling-only',
   'packages/server/src/secret-store.ts': 'not-in-inventory',
+  // `<dataDir>/seed-board.json`, a path built from the data dir alone.
+  'packages/server/src/seed-board.ts': 'data-dir',
   'packages/server/src/server-config.ts': 'not-in-inventory',
   'packages/server/src/server-deps.ts': 'not-in-inventory',
   'packages/server/src/server-starts.ts': 'not-in-inventory',
