@@ -404,6 +404,11 @@ What the lead can reach:
   is refused. Without a deploy key the lead has no GitHub access.
 - **Its plugin.** The image's own copy (`--plugin-dir /app/packages/plugin`),
   from the same commit as the server, so it updates with each deploy.
+- **Its test tools.** Node (an LTS release) and Playwright's Chromium with
+  its system libraries are in the image, at `/opt/ms-playwright`, and the
+  lead gets `PLAYWRIGHT_BROWSERS_PATH` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`,
+  because the network wall does not list Playwright's CDN. The image's
+  `PLAYWRIGHT_VERSION` must equal the project's `@playwright/test` version.
 - **Its files.** Its working folder is `/data/lead/work` and its transcripts
   are in `/data/lead/claude-projects`, both on the volume. `/data/lead` is
   `lead` mode 700, so the server cannot read it, and no doc can be bound to a
