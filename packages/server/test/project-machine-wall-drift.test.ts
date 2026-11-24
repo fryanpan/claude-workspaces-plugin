@@ -277,9 +277,9 @@ describe('the drift judges', () => {
       },
     };
     expect(failing(flyRows(['harborlight', 'riverbend'], view))).toEqual([
-      'Fly network: cw-harborlight, shared with riverbend',
+      'Fly network: cw-harborlight, shared with cw-riverbend',
       'no Fly service: services on m1',
-      'Fly network: cw-harborlight, shared with harborlight',
+      'Fly network: cw-harborlight, shared with cw-harborlight',
       'no public address: public: v6',
     ]);
     expect(
