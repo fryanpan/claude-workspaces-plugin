@@ -91,6 +91,7 @@ describe('the smoke test, run against the live app', () => {
     );
     expect(result.lines).toEqual([
       'ok health',
+      'ok smoke key accepted',
       'ok sign-in page',
       'ok Turnstile is enforced',
       'ok Google start redirect',
@@ -100,6 +101,34 @@ describe('the smoke test, run against the live app', () => {
     expect(result.ok).toBe(true);
   });
 
+  // A secret PUT makes a new Worker version, and the edge keeps serving the
+  // old one, which has no SMOKE_KEY, for a moment after the PUT returns. Here
+  // the new version takes over once the smoke has waited twice.
+  it('waits for the Worker to honour a SMOKE_KEY put a moment before', async () => {
+    const before = live({ SMOKE_KEY: undefined });
+    const after = live();
+    let waits = 0;
+    const result = await runSmoke(
+      { origin: BASE, smokeKey: SMOKE_KEY, googleClientId: CLIENT_ID, label: 'saltmarsh-lag' },
+      {
+        fetch: (req) => (waits >= 2 ? after : before).fetchApp(req),
+        mail: capturedMail,
+        sleep: async () => void waits++,
+        mailWaitMs: 0,
+      },
+    );
+    expect(result.lines).toEqual([
+      'ok health',
+      'ok smoke key accepted',
+      'ok sign-in page',
+      'ok Turnstile is enforced',
+      'ok Google start redirect',
+      'ok password sign-up, verification and sign-in',
+      'ok magic link',
+    ]);
+    expect(waits).toBe(2);
+  });
+
   it('fails, naming the check, when its key is not the Worker’s', async () => {
     const { fetchApp } = live();
     const result = await runSmoke(
@@ -107,6 +136,9 @@ describe('the smoke test, run against the live app', () => {
       { fetch: fetchApp, mail: capturedMail, sleep: async () => {}, mailWaitMs: 0 },
     );
     expect(result.ok).toBe(false);
+    expect(result.lines).toContain(
+      'FAIL smoke key accepted: Turnstile still refused the smoke key after 9 waits',
+    );
     expect(result.lines).toContain(
       'FAIL password sign-up, verification and sign-in: sign-up: HTTP 403, wanted 200',
     );

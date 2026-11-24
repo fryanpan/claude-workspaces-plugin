@@ -33,7 +33,12 @@ export interface SmokeIo {
   sleep: (ms: number) => Promise<void>;
   /** How long to wait for a mail to show up in Resend. */
   mailWaitMs?: number;
+  /** How long to wait for the Worker to honour a SMOKE_KEY put just before the run. */
+  gateWaitMs?: number;
 }
+
+/** The wait between gate probes. Ten probes and the seven POSTs after them stay under the IP limit of 20 a minute. */
+const GATE_PROBE_MS = 5_000;
 
 export const GOOGLE_AUTHORIZE_HOST = 'accounts.google.com';
 const SMOKE_PASSWORD = 'smoke-password-not-a-secret';
@@ -149,6 +154,28 @@ export async function runSmoke(
   await check('health', async () => {
     const res = await new Browser(io, cfg.origin).call('/health');
     await expectStatus('GET /health', res, 200);
+  });
+
+  // deploy.ts puts SMOKE_KEY a moment before this runs. The PUT makes a new
+  // Worker version, and the edge can serve the old one, which has no key, for a
+  // while after the PUT returns. A password sign-in for an address nobody
+  // signed up is the probe: 403 while Turnstile still refuses the dummy token,
+  // 401 once the gate passes it. Nothing is created and no mail is sent.
+  await check('smoke key accepted', async () => {
+    const tries = Math.floor((io.gateWaitMs ?? 45_000) / GATE_PROBE_MS);
+    for (let i = 0; ; i++) {
+      // A fresh address each try: the per-address limit allows 3 per route.
+      const res = await new Browser(io, cfg.origin).call('/api/auth/sign-in/email', {
+        body: { email: address(`gate${i}`), password: SMOKE_PASSWORD },
+        headers: smokeHeaders,
+      });
+      if (res.status === 401) return;
+      if (res.status !== 403) await expectStatus('a smoke sign-in for no account', res, 401);
+      if (i >= tries) {
+        throw new Failed(`Turnstile still refused the smoke key after ${tries} waits`);
+      }
+      await io.sleep(GATE_PROBE_MS);
+    }
   });
 
   await check('sign-in page', async () => {
