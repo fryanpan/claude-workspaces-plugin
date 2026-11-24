@@ -4,7 +4,7 @@
  *
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
- *       [--lead-board <boardId>]
+ *       [--lead-board <boardId>] [--seed-board <name>]
  *       [--github-deploy-key <keychain entry>] [--refresh-lead]
  *       [--claude-token <label>]
  *       [--push-repo <owner/name>]... [--refresh-push-keys]
@@ -40,7 +40,9 @@
  *   classic CW_GITHUB_PUSH_TOKEN found on the app is unset
  *   the owner's address, the public address and the Access settings
  *   (`settings.ts`), from the Keychain and the Terraform outputs; each one
- *   whose source is missing is skipped with a line saying why
+ *   whose source is missing is skipped with a line saying why; with
+ *   `--seed-board`, the board the server starts with and the collaborators
+ *   it lets in, from the Keychain's `cw-test-collaborator-email`
  *
  * With `--tunnel named` it gives the machine the token of the tunnel
  * `cw-<name>` as CLOUDFLARE_TUNNEL_TOKEN. Terraform makes the tunnel, its
@@ -469,7 +471,11 @@ export async function deployProject(
   // the run before Fly is touched.
   const tunnel: AppliedTunnel | undefined =
     cfg.tunnel === 'named' && !opts.noOutputs ? appliedTunnel(outputs(), cfg) : undefined;
-  const found = readSettings(cfg.project, { outputs, keychainHas, keychainRead });
+  const found = readSettings(
+    cfg.project,
+    { outputs, keychainHas, keychainRead },
+    { ...(cfg.seedBoard !== undefined ? { seedBoard: cfg.seedBoard } : {}) },
+  );
   const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
   const presets = { ...opts.presets };
   delete presets[TUNNEL_TOKEN_SECRET];
@@ -647,6 +653,7 @@ async function main(): Promise<void> {
     leadRepos: args.flatMap((a, i) => (a === '--lead-repo' ? [args[i + 1] ?? ''] : [])),
     pushRepos: args.flatMap((a, i) => (a === '--push-repo' ? [args[i + 1] ?? ''] : [])),
     refreshPushKeys: args.includes('--refresh-push-keys'),
+    seedBoard: arg(args, 'seed-board'),
   });
   const tfEnv = arg(args, 'tf-env') ?? 'prod';
   if (!isEnv(tfEnv)) throw new Error(`--tf-env is prod or staging, not ${tfEnv}`);
