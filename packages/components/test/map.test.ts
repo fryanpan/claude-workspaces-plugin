@@ -149,6 +149,20 @@ describe('the basemap', () => {
     });
     expect(chooseBasemap({ basemap: 'atlas' })).toEqual({ error: 'basemap "atlas" is unknown' });
   });
+
+  it('draws a map naming carto-light from tiles that need no key', async () => {
+    const el = host();
+    cleanups.push(mount(el, { basemap: 'carto-light', markers: MARKERS }));
+    const tiles = await until(() => {
+      const srcs = [...el.querySelectorAll('img.leaflet-tile')].map((i) => i.getAttribute('src'));
+      return srcs.length ? srcs : null;
+    });
+    // CARTO answers every keyless tile with an "API key required" stamp.
+    for (const src of tiles) expect(src).toMatch(/^https:\/\/tile\.openstreetmap\.org\//);
+    expect(el.querySelector('.leaflet-control-attribution')?.textContent).toContain(
+      'OpenStreetMap',
+    );
+  });
 });
 
 describe('withState', () => {

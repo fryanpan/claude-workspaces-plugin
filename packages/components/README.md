@@ -16,12 +16,12 @@ The package is a tarball. It has no dependencies (Leaflet is bundled in), so
 it installs offline from the file alone:
 
 ```bash
-mkdir -p vendor && cp claude-workspaces-components-0.4.0.tgz vendor/
-bun add ./vendor/claude-workspaces-components-0.4.0.tgz   # or npm install
+mkdir -p vendor && cp claude-workspaces-components-0.4.1.tgz vendor/
+bun add ./vendor/claude-workspaces-components-0.4.1.tgz   # or npm install
 ```
 
 Your `package.json` then names it as
-`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.4.0.tgz"`.
+`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.4.1.tgz"`.
 
 ## Mount the map
 
@@ -93,7 +93,7 @@ needed on the element.
 | `height` | Pixels, 160 to 1200; 480 by default. |
 | `legend` | `false` hides the legend. |
 | `title`, `subtitle`, `note` | Words above and below the map, as text. |
-| `basemap` | `osm`, `carto-light` or `google`. See below. |
+| `basemap` | `osm`, `carto-light` (drawn on OpenStreetMap) or `google`. See below. |
 | `basemapKey` | The key for a basemap that needs one. |
 | `id` | The state's id, which a refused write names. |
 
@@ -282,9 +282,13 @@ Google Cloud console, because the page hands it to Google in the open. A map
 that names `google` and has no key draws on OpenStreetMap and says so under
 the map; one whose key Google refuses does the same.
 
+`carto-light` draws on OpenStreetMap. CARTO's Positron tiles now need a CARTO
+key and draw "API key required" on every tile without one, so the name is kept
+only so that a map naming it still shows streets.
+
 Every basemap's tiles come from the origins listed in the package, never from
-a prop: `tile.openstreetmap.org` for `osm`, `{a,b,c,d}.basemaps.cartocdn.com`
-for `carto-light`, and Google's Maps JavaScript API origins for `google`. A
+a prop: `tile.openstreetmap.org` for `osm` and `carto-light`, and Google's Maps
+JavaScript API origins for `google`. A
 site with a Content Security Policy allows those in `img-src` (and, for
 Google, `script-src` and `connect-src`). OpenStreetMap's tiles are for light
 use and need the credit the map shows
@@ -298,6 +302,9 @@ built from the claude-workspaces repo with
 `package.json` and moves to a new version by replacing the tarball and that
 line.
 
+- 0.4.1: a map naming `carto-light` draws on OpenStreetMap, because CARTO
+  now stamps "API key required" on every tile requested without a key. No
+  page needs `cartocdn.com` in its Content Security Policy any more.
 - 0.4.0: `minZoom` and `maxZoom` on every layer, so the map shows or
   hides it as the zoom crosses that range. A switch that turns a layer off
   now closes only that layer's open popup. Every 0.3.0 prop draws as
