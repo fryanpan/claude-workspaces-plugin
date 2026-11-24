@@ -64,7 +64,7 @@ also carry no cookie, so behind Access they cannot reach the board at all.
      frame hostname: 403
    - a missing or bad token: 401
 
-   The route is `trusted-local` in `routes/route-table-rows.ts`.
+   The route is `trusted-local` in `route-table-rows.ts`.
 5. **The socket goes through the host page.** The board's page that holds
    the frame relays it (`mock-host.ts`), as it relays the widget's own
    sockets. The host page has the cookie, so the socket gets past Access.

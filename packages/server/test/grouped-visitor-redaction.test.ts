@@ -2,7 +2,7 @@
  * `/grouped` is the diff review's default sidebar, and it was the one review
  * nav route on the share-visitor allowlist that never redacted.
  *
- * `docSubrouteAllowed` admits `tree`, `grouped`, `threads` and `files` for a
+ * The share-scope rows admit `tree`, `grouped`, `threads` and `files` for a
  * visitor. `/tree` and `/files` pass their payload through
  * `redactWorkspaceTreeForVisitor` / `redactWorkspaceFilesForVisitor`;
  * `/grouped` returned `listGroupedDiff` verbatim. Every file node in it

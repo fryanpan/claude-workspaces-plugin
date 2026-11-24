@@ -16,8 +16,8 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
-import { exampleFor, gated, renderRouteTemplates } from '../src/routes/route-table.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
+import { exampleFor, gated, renderRouteTemplates } from '../src/route-table.ts';
 
 const TEMPLATES_FILE = join(import.meta.dir, '../../core/src/route-templates.ts');
 const committed = readFileSync(TEMPLATES_FILE, 'utf8');

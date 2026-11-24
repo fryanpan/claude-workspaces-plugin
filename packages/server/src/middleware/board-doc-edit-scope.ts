@@ -9,7 +9,7 @@
  * browser reaches none of these paths through it.
  *
  * Each verb here is an edit a board member can already make. A member holds
- * the doc's live-editing socket (`docs/<doc>/y` in `docSubrouteAllowed`),
+ * the doc's live-editing socket (the `docs/:docId/y` share-scope row),
  * which is unrestricted text editing of the same document, and the thread
  * region edits (`threads/<id>/rewrite_region`, `insert_blocks_after`). These
  * are the same edits with an address an agent can name without a thread:

@@ -32,6 +32,10 @@ import {
  *    application's non-identity policy admitted, never a person;
  *  - with `CW_BOARD_IMPORT_CLIENT_ID` set, that one token's client id.
  *
+ * Ahead of all four, the external-access master switch
+ * (`refuseWhileExternalAccessOff`): every caller here is through the tunnel,
+ * so while the switch is off no push lands, whatever token it carries.
+ *
  * And the board must be one this machine is for (`CW_BOARD_IMPORT_BOARDS`,
  * which `entrypoint.sh` sets to the board the lead leads). Any other board is
  * refused before a byte is read.
@@ -43,6 +47,7 @@ import {
 } from '../../../../infra/project-machine/board-print.ts';
 import type { CfAccessVerifier } from '../middleware/cf-access.ts';
 import type { ServerOptions } from '../server-options.ts';
+import { refuseWhileExternalAccessOff } from './home-feed.ts';
 
 const IMPORT_PATH = /^\/api\/board-import\/([A-Za-z0-9_-]{1,128})(\/print)?$/;
 
@@ -56,6 +61,8 @@ export interface BoardImportRoutesContext {
   verifier: CfAccessVerifier | null;
   /** The board's fingerprint, read the way `board-probe.ts` reads it. */
   print: (boardId: string, limits: BoardLimits) => Promise<unknown>;
+  /** The external-access master switch (`SharingGate.isEnabled`). */
+  externalAccessOpen: () => boolean;
   j: (status: number, body: unknown) => Response;
 }
 
@@ -66,6 +73,7 @@ export function boardImportRoutesContext(
     verifier: CfAccessVerifier | null;
     /** This server's own port, read when a print is asked for. */
     port: () => number | undefined;
+    externalAccessOpen: BoardImportRoutesContext['externalAccessOpen'];
     j: BoardImportRoutesContext['j'];
   },
 ): BoardImportRoutesContext {
@@ -82,6 +90,7 @@ export function boardImportRoutesContext(
         boardId,
         limits,
       ),
+    externalAccessOpen: deps.externalAccessOpen,
     j: deps.j,
   };
 }
@@ -117,6 +126,8 @@ export async function handleBoardImportRoute(
   const { place, j } = ctx;
   const m = IMPORT_PATH.exec(pathname);
   if (!m) return null;
+  const shut = refuseWhileExternalAccessOff(ctx, req);
+  if (shut) return shut;
   if (!(await boardImportCallerAllowed(ctx, req))) return j(403, { error: 'forbidden' });
   const board = m[1] as string;
   try {

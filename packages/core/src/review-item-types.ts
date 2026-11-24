@@ -157,7 +157,7 @@ export interface ReviewPayload {
    * The flag an ask carries when answering it does something on the owner's
    * machine rather than on the board: running a command, handing over a
    * credential. A Regular User is a participant on a board (see
-   * BOARD_MEMBER_ROUTES in the server's host guard), and that is the right
+   * the share-scope rows of the server's route table), and that is the right
    * default for work; it is the wrong default for an ask whose answer the
    * owner's own machine then acts on.
    *

@@ -478,24 +478,28 @@ a person's answer the request did not prove (every answer door asks it), and
 top-level module is `core/src/review-access.ts`: the shape of an access change
 and the sentence a card says about it, read by the server and the page alike.
 
-**And every one of those paths is written down once.** `routes/route-table.ts`
+**And every one of those paths is written down once.** `route-table.ts`
 holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
 `share-scope`, `owner-in-handler`, `collab-scope`, `recall-callback` or `open`
-— and `routes/route-table-rows.ts` holds the rows, one per path pattern.
+— and `route-table-rows.ts` holds the rows, one per path pattern.
 `Bun.serve` mounts them as its `routes` object, so the table is a value the
 process holds rather than a document that rots, and
 [routes.md](routes.md) is the rendered copy (`bun run routes:table`). Both
-files sit under `routes/` and change none of the picture above: they name URL
-paths, which is what that directory is for.
+files sit directly under `server/src/`, not under `routes/`: they name URL
+paths but answer none, and the host guard reads them, and only `server.ts`
+may import out of `routes/`.
 
-The gate column is a CHECKED claim, not a comment.
-`shareScopeAllows` is a pure function of the path, the method and the share, so
-`test/route-table.test.ts` drives it with each row's own example address and
-fails when the guard disagrees. That is what makes a route added above its
-gate a CI failure: a new address under an already-allowed prefix either
-declares `share-scope`, or declares `owner-in-handler` and names where the
-in-route refusal lives. It cannot be filed as `trusted-local`, because the
-guard would say otherwise. What the table still cannot see is whether an
+The gate column IS the share allowlist, not a description of it.
+`shareScopeAllows` (`middleware/host-guard.ts`) is built from the rows: a
+share visitor reaches exactly the rows filed `share-scope`, `owner-in-handler`
+or `collab-scope`, for the methods each lists, with every id in the path
+checked against the shared board by its parameter's rule (`PARAM_SCOPE`). A
+new address is refused to a visitor until its row says otherwise, and a share
+row whose parameter has no rule fails at load. `test/route-table.test.ts`
+still drives the guard with each row's own example address, which catches a
+share row whose pattern also matches a `trusted-local` address, and
+`test/share-scope-parity.test.ts` holds the guard to the verdicts the
+hand-written allowlist gave before the rows replaced it. What the table still cannot see is whether an
 `owner-in-handler` route really carries its refusal — that one is the
 reviewer's, and the routes that have it carry their own tests.
 
@@ -3500,7 +3504,7 @@ the client module is chrome-free measurement with no UI of its own.
 - [app-voice.md](app-voice.md) — how a sandboxed mock or app proves it is one doc on one board, and the socket that lets it speak, listen and write to its dev server. It adds `core/app-voice.ts`, `widget/src/app-voice/` and `server/src/app-voice/`, drawn beside the spoken reply above.
 - [doc-metadata.md](doc-metadata.md) — the fields a folder's `.workspaces/doc-metadata.schema.json` declares for its docs, kept as YAML front matter. It adds four top-level modules and no new edge. `core/doc-metadata-schema.ts` and `core/doc-metadata.ts` are pure: the schema subset in the first, and in the second the YAML subset it reads, the per-field judgement and the line-level write, shared by the server and the editor. `server/doc-metadata.ts` joins the doc store box (the `doc-*.ts` glob already draws it): it finds the schema by walking up from the bound file through `boundFiles.guards`, and edits the front-matter block of the live doc. `server/doc-git-modified.ts` is one bounded async `git log` for the git-last-modified default, barred under a lead's root. `routes/doc-metadata.ts` is one more member of the docs chain, and `workspaces-app/src/doc/doc-metadata.ts` joins the `doc/` family: the form reads its values from the editor's first block, so it is live by the same Yjs path as the prose.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
-- [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
+- [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.
 
 `meeting-home.ts` is the one new top-level module in the Meetings box, and it

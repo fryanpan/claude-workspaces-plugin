@@ -37,8 +37,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { emailIdentityId } from '@claude-workspaces/core';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
-import { exampleFor } from '../src/routes/route-table.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
+import { exampleFor } from '../src/route-table.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import {
   type ShareProofServer,

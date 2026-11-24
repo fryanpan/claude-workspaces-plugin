@@ -5,8 +5,8 @@
  *   GET /workspaces/<ws>/embeds          → {workspaceId, embeds}
  *   PUT /workspaces/<ws>/embeds {embeds} → the same, after replacing it whole
  *
- * A member of a shared board may GET it (`BOARD_MEMBER_ROUTES` in
- * `middleware/host-guard.ts`): every doc on the board draws its frames from
+ * A member of a shared board may GET it (its share-scope row in
+ * `route-table-rows.ts`): every doc on the board draws its frames from
  * it, and refused, a member saw the directive as plain text. The PUT stays
  * trusted-local, like the parallelism cap.
  *
