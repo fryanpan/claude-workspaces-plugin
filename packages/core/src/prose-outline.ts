@@ -12,10 +12,11 @@
  *
  * So a block carries two attributes of its own:
  *
- * - `cwId` — a short opaque id, minted lazily the first time the doc's
- *   outline is read. It is the address the outline hands out and the address
- *   an edit comes back with, so a rename of the heading above the block
- *   changes nothing about where the edit lands.
+ * - `cwId` — a short opaque id. It is the address the outline hands out and
+ *   the address an edit comes back with, so a rename of the heading above the
+ *   block changes nothing about where the edit lands. A block that has none
+ *   yet is addressed by `derivedBlockId`, and the first edit that writes the
+ *   doc stores that value: an outline read writes nothing, like every GET.
  * - `cwAuthor` — the agent that WROTE this block. Set when an agent inserts
  *   it; cleared by `clearAuthorshipOnPersonEdit` the moment a person-origin
  *   transaction touches the block. So "still marked mine" and "still
@@ -25,7 +26,7 @@
  * Both live in the Yjs element, so they travel in the `.ydoc` snapshot and
  * survive a restart with no side file. They do NOT survive a round trip
  * through markdown — the `.md` on disk has nowhere to put them — which is
- * why a reparse-from-disk re-mints ids and drops authorship. That is the
+ * why a reparse-from-disk gives new ids and drops authorship. That is the
  * correct answer rather than a gap: a doc that came back off disk is one
  * nobody can prove the agent wrote.
  *
@@ -39,10 +40,10 @@
  * file.
  */
 import * as Y from 'yjs';
+import { blockAddresses, isAddressable, isListEl } from './prose-address.ts';
 import { getProseFragment, headingLevelOf, walkProse } from './prose-fragment.ts';
 import {
   BLOCK_AUTHOR_ATTR,
-  BLOCK_ID_ATTR,
   readBlockAuthor,
   readBlockId,
   setBlockAuthor,
@@ -50,9 +51,22 @@ import {
 import { textContent } from './prose-markdown.ts';
 
 export {
+  addressableBlocks,
+  blockAddresses,
+  duplicateIdBlocks,
+  ensureBlockIds,
+  findBlockById,
+  remintDuplicateIds,
+  storeBlockAddresses,
+  storeBlockIdsOnWrite,
+  BLOCK_IDS_ORIGIN,
+} from './prose-address.ts';
+export {
   BLOCK_ID_ATTR,
   BLOCK_AUTHOR_ATTR,
   BLOCK_IDENTITY_ATTRS,
+  blockAddressOf,
+  derivedBlockId,
   readBlockId,
   readBlockAuthor,
   setBlockAuthor,
@@ -60,23 +74,6 @@ export {
 
 /** Longest preview text an outline entry carries per block. */
 const OUTLINE_TEXT_MAX = 240;
-
-/** Node names an id is minted for. A list is addressed through its ITEMS —
- *  "replace that bullet" is the edit people actually ask for — so the list
- *  container gets an id too but is rarely named. Table internals do not:
- *  nothing addresses a table cell by id, and minting there would be churn. */
-const ADDRESSABLE = new Set([
-  'paragraph',
-  'heading',
-  'blockquote',
-  'codeBlock',
-  'bulletList',
-  'orderedList',
-  'listItem',
-  'horizontalRule',
-  'image',
-  'table',
-]);
 
 export type OutlineKind = 'heading' | 'listItem' | 'block';
 
@@ -120,11 +117,6 @@ export function parentOf(node: unknown): unknown {
   return (node as { parent?: unknown }).parent ?? null;
 }
 
-/** Is this element one an id is minted for? */
-function isAddressable(el: Y.XmlElement): boolean {
-  return ADDRESSABLE.has(el.nodeName);
-}
-
 let idSeq = 0;
 
 /** A short id, unique within a process and unlikely to collide across them.
@@ -132,10 +124,6 @@ let idSeq = 0;
 export function newBlockId(): string {
   idSeq = (idSeq + 1) % 0xffff;
   return `b${Date.now().toString(36)}${idSeq.toString(36)}${Math.floor(Math.random() * 0xffff).toString(36)}`;
-}
-
-function isListEl(el: Y.XmlElement): boolean {
-  return el.nodeName === 'bulletList' || el.nodeName === 'orderedList';
 }
 
 /** How many lists a list item sits inside, less the one that holds it: `0`
@@ -152,59 +140,6 @@ function listDepthOf(el: Y.XmlElement): number {
   return depth < 0 ? 0 : depth;
 }
 
-/**
- * Every addressable element in the fragment, in document order.
- *
- * The walk stops at three places on purpose. A list ITEM's paragraph is the
- * item's own words, not a block beside it — addressing both would offer an
- * agent two names for one bullet and print every bullet twice in an outline
- * — so an item is descended into only for the lists nested under it. A
- * table is one block: nothing addresses a cell, and minting inside one is
- * churn on every read.
- *
- * A BLOCK QUOTE'S PARAGRAPHS ARE THE QUOTE'S OWN WORDS, for the same reason
- * and with a worse failure when it was not so. `> some quote` parses to
- * `blockquote > paragraph`, so one inserted quote printed TWO outline entries
- * carrying the same text, with nothing saying one held the other. An agent
- * that read that as a duplicate and deleted "the paragraph" emptied the quote
- * — the words gone from the doc and from the file, a `>` left behind, and the
- * lead-in sentence ending in a colon left with nothing after it. Reported
- * twice in one day. So a quote is one address: its direct paragraph children
- * are skipped, and the entry an outline hands out is the blockquote's.
- *
- * A quote is descended into for everything ELSE it holds — a list, a nested
- * quote, a code block — because those are structures an agent addresses in
- * their own right, exactly as a list item is descended into for its lists. The
- * consequence, stated where the choice is made: a multi-paragraph quote (the
- * shape the browser editor builds when a person presses Enter inside one) is
- * editable AS A WHOLE and not paragraph by paragraph. `replace_block` on the
- * quote's id, with `> a\n>\n> b` for markdown, is how a paragraph inside one
- * gets rewritten.
- */
-export function addressableBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
-  const out: Y.XmlElement[] = [];
-  const visit = (node: Y.XmlElement | Y.XmlText | Y.XmlHook): void => {
-    if (!(node instanceof Y.XmlElement)) return;
-    if (isAddressable(node)) out.push(node);
-    if (node.nodeName === 'table') return;
-    for (const child of node.toArray()) {
-      if (node.nodeName === 'listItem' && !(child instanceof Y.XmlElement && isListEl(child))) {
-        continue;
-      }
-      if (
-        node.nodeName === 'blockquote' &&
-        child instanceof Y.XmlElement &&
-        child.nodeName === 'paragraph'
-      ) {
-        continue;
-      }
-      visit(child as Y.XmlElement | Y.XmlText);
-    }
-  };
-  for (const child of fragment.toArray()) visit(child as Y.XmlElement | Y.XmlText);
-  return out;
-}
-
 /** Mark `el` and every addressable block inside it as `author`'s. A parsed
  *  list arrives as ONE element, and it is the ITEMS an agent later edits. */
 export function claimSubtree(el: Y.XmlElement, author: string): void {
@@ -218,63 +153,6 @@ export function claimSubtree(el: Y.XmlElement, author: string): void {
       }
     }
   }
-}
-
-/**
- * The blocks whose id is a COPY: every holder of an id after the first, in
- * document order. An id is an address, and an address that names two blocks
- * sends an edit to whichever a lookup meets first. The browser no longer
- * makes copies (`block-identity.ts`), but a doc that already holds them keeps
- * them until something hands the extras ids of their own.
- */
-export function duplicateIdBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
-  const seen = new Set<string>();
-  const out: Y.XmlElement[] = [];
-  for (const el of addressableBlocks(fragment)) {
-    const id = readBlockId(el);
-    if (id === undefined) continue;
-    if (seen.has(id)) out.push(el);
-    else seen.add(id);
-  }
-  return out;
-}
-
-/** Give each copy a fresh id and drop the author it copied: nothing proves
- *  the agent wrote a block that only carries another block's attributes.
- *  Call inside a transaction. Returns how many it re-minted. */
-export function remintDuplicateIds(fragment: Y.XmlFragment): number {
-  const copies = duplicateIdBlocks(fragment);
-  for (const el of copies) {
-    el.setAttribute(BLOCK_ID_ATTR, newBlockId());
-    el.removeAttribute(BLOCK_AUTHOR_ATTR);
-  }
-  return copies.length;
-}
-
-/**
- * Give every addressable block an id it does not already have, and an id of
- * its own to every block holding a copy of another's. Idempotent, and a no-op
- * transaction-wise when there is nothing to mint — which matters, because
- * reading an outline must not look like an edit to the write-back.
- *
- * Returns how many ids were minted.
- */
-export function ensureBlockIds(doc: Y.Doc, opts: { transactionOrigin?: unknown } = {}): number {
-  const fragment = getProseFragment(doc);
-  const missing = addressableBlocks(fragment).filter((el) => readBlockId(el) === undefined);
-  const copies = duplicateIdBlocks(fragment);
-  if (missing.length === 0 && copies.length === 0) return 0;
-  doc.transact(() => {
-    for (const el of missing) el.setAttribute(BLOCK_ID_ATTR, newBlockId());
-    remintDuplicateIds(fragment);
-  }, opts.transactionOrigin ?? 'block-ids');
-  return missing.length + copies.length;
-}
-
-/** The element carrying `id`, or nothing. Ids are unique per doc; a
- *  duplicate (two docs merged) resolves to the first in document order. */
-export function findBlockById(fragment: Y.XmlFragment, id: string): Y.XmlElement | undefined {
-  return addressableBlocks(fragment).find((el) => readBlockId(el) === id);
 }
 
 /** The text an outline shows for a block: its own words, not its children's
@@ -341,26 +219,23 @@ export interface OutlineOptions {
 
 /**
  * The doc as an agent addresses it: every heading with its id, and the
- * blocks under them.
- *
- * Mints ids for anything that lacks one, so the caller never has to
- * remember to. That write is the only side effect of a read here.
+ * blocks under them. Writes nothing: a block with no stored id is reported
+ * under the address `blockAddresses` derives for it.
  */
 export function readOutline(doc: Y.Doc, opts: OutlineOptions = {}): OutlineEntry[] {
-  ensureBlockIds(doc);
   const fragment = getProseFragment(doc);
   const entries: OutlineEntry[] = [];
   let underHeadingId: string | undefined;
-  for (const el of addressableBlocks(fragment)) {
-    const id = readBlockId(el);
-    if (id === undefined) continue;
+  for (const { el, id } of blockAddresses(fragment)) {
     const isHeading = el.nodeName === 'heading';
     if (isHeading) underHeadingId = id;
     if (opts.headingsOnly === true && !isHeading) continue;
     // A list container carries no words of its own; its items are the
     // entries. Printing it would spend a line saying "a list follows".
     if (el.nodeName === 'bulletList' || el.nodeName === 'orderedList') continue;
-    const author = readBlockAuthor(el);
+    // A copy's author is one it copied, and nothing proves the agent wrote it.
+    const stored = readBlockId(el);
+    const author = stored === undefined || stored === id ? readBlockAuthor(el) : undefined;
     entries.push({
       id,
       kind: isHeading ? 'heading' : el.nodeName === 'listItem' ? 'listItem' : 'block',

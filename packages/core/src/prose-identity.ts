@@ -26,6 +26,25 @@ export function readBlockId(el: Y.XmlElement): string | undefined {
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
+/**
+ * The id a block is addressed by before it carries one: its Yjs item id,
+ * which is fixed for the element's life, survives the `.ydoc` round trip and
+ * is unique per doc. Reading it writes nothing, which is what lets an outline
+ * read be a pure read; the first edit that writes the doc stores this same
+ * value as the block's `cwId`, so an address handed out before the write
+ * still names the block after it. Nothing for an element not yet in a doc.
+ */
+export function derivedBlockId(el: Y.XmlElement): string | undefined {
+  const item = el._item;
+  if (item === null) return undefined;
+  return `y${item.id.client.toString(36)}-${item.id.clock.toString(36)}`;
+}
+
+/** The address a block answers to: its stored id, else its derived one. */
+export function blockAddressOf(el: Y.XmlElement): string | undefined {
+  return readBlockId(el) ?? derivedBlockId(el);
+}
+
 /** Read a block's author, or nothing if no agent claims it. */
 export function readBlockAuthor(el: Y.XmlElement): string | undefined {
   const raw = el.getAttribute(BLOCK_AUTHOR_ATTR);

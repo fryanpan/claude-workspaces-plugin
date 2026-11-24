@@ -2326,12 +2326,16 @@ export class DocStore {
       webhookUrl: init?.webhookUrl,
       seq: 0,
     };
-    // A doc saved while the editor still copied ids on Enter holds one id on
-    // several blocks. Re-mint the copies HERE, before `wireEvents` listens:
-    // the fix fires no update, so it schedules no save and writes nothing to
-    // disk on its own. It rides the next save a real edit causes.
+    // Store every block's address as its id HERE, before `wireEvents`
+    // listens: a block that never had one, and each copy of an id the editor
+    // used to copy on Enter. The fix schedules no save and writes nothing to
+    // disk on its own; it rides the next save a real edit causes. The values
+    // are derived from the blocks, so every load stores the same ones.
     if (!isNew && contentKind(meta.type) === 'prose') {
-      ydoc.transact(() => prose.remintDuplicateIds(prose.getProseFragment(ydoc)), 'block-ids');
+      ydoc.transact(
+        () => prose.storeBlockAddresses(prose.getProseFragment(ydoc)),
+        prose.BLOCK_IDS_ORIGIN,
+      );
       // An image line an edit wrote into a paragraph as text serializes to the
       // same `.md` line as an image node, so no reconcile ever rebuilds it.
       // Promote it here, for the same no-save reason (`prose-image-line.ts`).
@@ -2349,8 +2353,14 @@ export class DocStore {
     // only means anything if "still marked the agent's" also means "no person
     // has touched it since". Prose docs only — a flat doc has no addressable
     // blocks to claim in the first place.
+    // And every block a server-side write creates gets its id as it lands
+    // (a person's editor stamps its own), so an id handed out survives the
+    // editor re-creating the block.
     if (contentKind(meta.type) === 'prose') {
-      doc.disposeAuthorship = prose.clearAuthorshipOnPersonEdit(ydoc);
+      const stops = [prose.clearAuthorshipOnPersonEdit(ydoc), prose.storeBlockIdsOnWrite(ydoc)];
+      doc.disposeAuthorship = () => {
+        for (const stop of stops) stop();
+      };
     }
     // For freshly-created docs (no on-disk state), the initDocMeta call
     // above fired its update event before wireEvents listened, so nothing

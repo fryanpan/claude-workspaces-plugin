@@ -10,7 +10,7 @@ import { applyBlockEdits } from '../src/prose-batch.ts';
 import { autoReanchorDoc } from '../src/prose-blocks.ts';
 import { getProseFragment, walkProse } from '../src/prose-fragment.ts';
 import { parseMarkdownBlocks, serializeFragmentToMarkdown } from '../src/prose-markdown.ts';
-import { readOutline } from '../src/prose-outline.ts';
+import { findBlockById, readOutline } from '../src/prose-outline.ts';
 
 const AGENT = 'meeting-notes';
 const SUGGESTER = { id: AGENT, name: 'Meeting Assistant', color: '#7c5cff' };
@@ -269,14 +269,7 @@ describe('nest_blocks', () => {
     const ids = readOutline(doc);
     for (const entry of ids) {
       if (entry.text.startsWith('ours')) {
-        const el = getProseFragment(doc)
-          .toArray()
-          .flatMap((n) => (n instanceof Y.XmlElement ? n.toArray() : []))
-          .find(
-            (n): n is Y.XmlElement =>
-              n instanceof Y.XmlElement && n.getAttribute('cwId') === entry.id,
-          );
-        el?.setAttribute('cwAuthor', AGENT);
+        findBlockById(getProseFragment(doc), entry.id)?.setAttribute('cwAuthor', AGENT);
       }
     }
     const res = apply(doc, [
@@ -345,14 +338,7 @@ describe('nest_blocks with moveOthers', () => {
     );
     for (const entry of readOutline(doc)) {
       if (!entry.text.startsWith('ours')) continue;
-      const el = getProseFragment(doc)
-        .toArray()
-        .flatMap((n) => (n instanceof Y.XmlElement ? n.toArray() : []))
-        .find(
-          (n): n is Y.XmlElement =>
-            n instanceof Y.XmlElement && n.getAttribute('cwId') === entry.id,
-        );
-      el?.setAttribute('cwAuthor', AGENT);
+      findBlockById(getProseFragment(doc), entry.id)?.setAttribute('cwAuthor', AGENT);
     }
     return doc;
   }

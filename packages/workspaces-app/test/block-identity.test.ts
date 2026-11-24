@@ -93,3 +93,51 @@ describe('block identity survives the browser', () => {
     expect(identities(fragment)[0]).toEqual(['blk-0', 'note-taker']);
   });
 });
+
+describe('a block a person makes gets an id in the same change', () => {
+  /** A doc whose blocks carry no ids, as a legacy `.ydoc` loads. */
+  function mountBare(md: string) {
+    const ydoc = new Y.Doc();
+    const fragment = prose.getProseFragment(ydoc);
+    fragment.push(prose.parseMarkdownBlocks(md));
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const handle = createEditor({ parent, ydoc, awareness: new Awareness(ydoc) });
+    open.push({ handle, parent });
+    return { ydoc, fragment, handle };
+  }
+
+  it('Enter stamps the new paragraph and leaves the old one as it was', () => {
+    const { ydoc, fragment, handle } = mountBare('Harborlight line.\n');
+    let updates = 0;
+    ydoc.on('update', () => updates++);
+    const text = 'Harborlight line.';
+    handle.editor.commands.setTextSelection(posOf(handle, text) + text.length);
+    handle.editor.commands.splitBlock();
+    handle.editor.commands.insertContent('Riverbend line.');
+    const ids = identities(fragment).map(([id]) => id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBeUndefined();
+    expect(typeof ids[1]).toBe('string');
+    // One Yjs update per editor change: the id rode the split itself.
+    expect(updates).toBe(2);
+  });
+
+  it('a new bullet gets an id, and its own paragraph does not', () => {
+    const { fragment, handle } = mountBare('- Saltmarsh\n');
+    const text = 'Saltmarsh';
+    handle.editor.commands.setTextSelection(posOf(handle, text) + text.length);
+    handle.editor.commands.splitListItem('listItem');
+    const list = fragment.get(0) as Y.XmlElement;
+    const items = list.toArray() as Y.XmlElement[];
+    expect(items.map((el) => prose.readBlockId(el) !== undefined)).toEqual([false, true]);
+    expect(prose.readBlockId(items[1]?.get(0) as Y.XmlElement)).toBeUndefined();
+  });
+
+  it('typing inside an id-less block stamps nothing', () => {
+    const { fragment, handle } = mountBare('Bob typed this.\n');
+    handle.editor.commands.setTextSelection(posOf(handle, 'Bob typed this.') + 3);
+    handle.editor.commands.insertContent('XYZ');
+    expect(identities(fragment)).toEqual([[undefined, undefined]]);
+  });
+});

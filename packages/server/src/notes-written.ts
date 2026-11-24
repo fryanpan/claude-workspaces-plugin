@@ -84,14 +84,14 @@ function sectionScope(
 ): Set<Y.XmlElement> {
   const scope = new Set<Y.XmlElement>();
   if (headingId === undefined) return scope;
-  const start = all.findIndex((el) => prose.readBlockId(el) === headingId);
+  const start = all.findIndex((el) => prose.blockAddressOf(el) === headingId);
   if (start < 0) return scope;
   const openLevel = levelOf(all[start]!) ?? 2;
   for (let i = start; i < all.length; i++) {
     const el = all[i]!;
     const level = levelOf(el);
     if (i > start && level !== undefined && level <= openLevel) break;
-    const id = prose.readBlockId(el);
+    const id = prose.blockAddressOf(el);
     if (i > start && id !== undefined && skip.has(id)) continue;
     scope.add(el);
   }
@@ -120,7 +120,7 @@ function authoredScope(
   let lastHeading: Y.XmlElement | undefined;
   for (const el of all) {
     if (levelOf(el) !== undefined) lastHeading = el;
-    const id = prose.readBlockId(el);
+    const id = prose.blockAddressOf(el);
     const ours = prose.readBlockAuthor(el) === author || (id !== undefined && written.has(id));
     if (!ours) continue;
     if (id !== undefined && skip.has(id)) continue;

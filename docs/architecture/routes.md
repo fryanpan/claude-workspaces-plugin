@@ -251,6 +251,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/move` | POST | `routes/doc-move.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/move-file` | POST | `routes/doc-file-move.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/notes-method` | GET, PUT | `routes/meetings-calendar.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/outline` | GET | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan` | POST | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/plan-request` | POST | `routes/doc-resource.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/reparse_from_disk` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |

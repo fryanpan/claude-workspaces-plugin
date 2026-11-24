@@ -83,7 +83,7 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules (`review-item*.ts`, re-exported through `review-item.ts`; the quality gate's verdict predicates are `review-item-gate.ts`, the answered and withdrawn facts both read are the leaf `review-item-retired.ts`), goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract. Every tool, and the plumbing that attaches, heartbeats, acks a queued row, restores watches and declares a lead, sends through it, so a renamed server field fails typecheck there. Two things stay raw on purpose: `http-client.ts` and `server-client.ts` themselves, because they are the transport `hc` sends through, and `read_doc_outline`'s GET, which waits on its route-table row (its read mints block ids). Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
+| `mcp` | The MCP connector agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). `relay/` is the node relay: a stdio-to-`/mcp` forwarder with no tool code of its own. The full stdio child is still built, as the rollback. `server-client.ts` builds Hono's typed client (`hc`) over the child's `http()` call, one per server app or route contract. Every tool, and the plumbing that attaches, heartbeats, acks a queued row, restores watches and declares a lead, sends through it, so a renamed server field fails typecheck there. Two things stay raw on purpose: `http-client.ts` and `server-client.ts` themselves, because they are the transport `hc` sends through, and `read_doc_outline`'s GET, which has its route-table row now and has not been moved onto `hc` yet. Its import from `server` is `import type` only. | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle, and so does a markdown doc page (`doc/doc-comment-buttons.ts`, a lazy chunk; none on a `cw-embed=1` page), rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `components` | `@claude-workspaces/components`: components that run unchanged in a doc and on a site, packed into a tarball (`scripts/pack.ts`) a site installs with no Workspaces server. Today the street map: `map.ts` is the mount a doc tag or a site calls, over live doc state or a JSON snapshot; `draw.ts` is the Leaflet renderer, the board's `<StreetMap>` chunk included (`workspaces-app/src/map-entry.ts` re-exports it). GeoJSON `layers` (line, polygon, heatmap): `layers.ts` judges the props and data against the caps, `layer-control.ts` fetches `url` layers and draws the switch list, `draw-layers.ts` puts paths on the points' canvas in declared order, and `heat.ts` is the heatmap's own canvas. | The packed tarball names no dependency (Leaflet is bundled in) and nothing in this repo. Its source imports `core` and nothing else here. |
 | `plugin` | Skills, hooks, a bundled copy of `mcp` (the full child and the node relay), and `relay/relay.swift`, the compiled relay's source. The launcher compiles it on first use. | Version bumped in two places; see CLAUDE.md. No compiled binary is ever committed. |
@@ -607,8 +607,8 @@ a family takes the second unless its handler is small.
      `bun run routes:table`, and regenerate the fixture, whose diff must be
      that one new row. Then run `get-routes-change-nothing.test.ts`: a new
      GET row is called there too, and a GET that writes fails it. `GET
-     …/docs/:docId/outline` does (`readOutline` mints missing block ids),
-     which is why it has no row yet. A row whose answer is the scope's 404
+     …/docs/:docId/outline` used to (it minted missing block ids as it read)
+     and had no row until it stopped. A row whose answer is the scope's 404
      (`workspace-scope.ts`) names no family: its parameter is a stand-in the
      seed never made. `route-answers.test.ts` seeds a board, task and doc
      for every row, and a folder attachment for rows naming `:setId`; a
@@ -3103,6 +3103,14 @@ block's text, so a pick reaches other pages and the file the way typing does.
 document-model tier, and together they are how an agent addresses a block
 rather than a region of text. `prose-identity.ts` is the leaf that names the
 two attributes a block can carry — its stable id, and the agent that wrote it.
+`prose-address.ts` says which blocks are addressable and the id each answers
+to, writing nothing: a block with no stored id answers to its Yjs item id, and
+only a write stores that value, so an outline read is a pure read and an id it
+handed out still names its block after the next edit. Writes store ids as
+blocks land: the browser's `block-identity.ts` stamps the blocks a person
+inserts inside that person's own change, `storeBlockIdsOnWrite` stores them
+after a server-side write, and a hydrate stores them in memory without a save.
+So only a block nobody has written since load goes by a derived id.
 `prose-outline.ts` reads a document as a list of those ids with their headings
 and text, and installs the observer that drops the authorship attribute the
 moment a person edits the block. `prose-batch.ts` applies a list of scoped

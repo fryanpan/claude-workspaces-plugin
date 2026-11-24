@@ -162,9 +162,9 @@ describe('a meeting on a doc with a person’s own writing', () => {
   it('leaves every original block as it was and writes the notes to a linked doc', async () => {
     const source = docFrom(OWN_DOC, { type: 'markdown', title: 'Riverbend plan' });
     const w = world(source);
-    // Ids are minted on the first outline read; take the snapshot after it,
-    // because the server's docs already carry theirs.
-    w.store.readOutline(SOURCE);
+    // Ids are stored by the doc's first write, and the link line is one;
+    // store them first so the snapshot compares content, not ids.
+    proseNs.ensureBlockIds(source.ydoc);
     const before = blocksOf(source.ydoc);
     const dataDir = freshDataDir();
 

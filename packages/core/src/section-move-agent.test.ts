@@ -113,7 +113,7 @@ describe('an agent moving a section that holds a pending replace', () => {
 });
 
 describe('a doc already holding copies of one block id', () => {
-  it('reading the outline gives each copy an id of its own and drops the author it copied', () => {
+  it('reading the outline gives each copy an address of its own, credits no author, and writes nothing', () => {
     const doc = new Y.Doc();
     getProseFragment(doc).push(parseMarkdownBlocks('- dock\n- ferry\n- kiln\n'));
     ensureBlockIds(doc);
@@ -126,9 +126,17 @@ describe('a doc already holding copies of one block id', () => {
       setBlockAuthor(item, AGENT);
     }
 
+    let updates = 0;
+    doc.on('update', () => updates++);
     const entries = readOutline(doc).filter((e) => e.kind === 'listItem');
     expect(new Set(entries.map((e) => e.id)).size).toBe(3);
     expect(entries[0]?.id).toBe(shared);
+    expect(entries.map((e) => e.author)).toEqual([AGENT, undefined, undefined]);
+    expect(updates).toBe(0);
+
+    // The next write stores those addresses and drops the copied authors.
+    ensureBlockIds(doc);
+    expect(items.map(readBlockId)).toEqual(entries.map((e) => e.id));
     expect(items.map(readBlockAuthor)).toEqual([AGENT, undefined, undefined]);
   });
 });

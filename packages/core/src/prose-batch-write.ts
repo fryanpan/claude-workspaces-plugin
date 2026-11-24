@@ -200,7 +200,7 @@ function insertAfterList(
  * So the FIRST element written in `'replace'` mode inherits the replaced
  * block's id. One block is replaced by one address — a replacement that
  * parses to several blocks gives the extras ids of their own at
- * `mintMissingIds`, so no two blocks ever share one. `'after'` mode copies
+ * `storeBlockAddresses`, so no two blocks ever share one. `'after'` mode copies
  * nothing: the original is still in the doc there, and a proposal offered
  * beside it must never wear its address. This is the same law `prose-nest.ts`
  * already holds a MOVE to — "it keeps its block id, so an edit that named it
