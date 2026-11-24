@@ -337,8 +337,12 @@ and every step down is silent and safe:
 2. The node relay (`mcp/src/relay/`, bundled as `plugin/mcp/relay.js`). It is
    used when the compile is impossible or failed; a failed compile is not
    retried for a day.
-3. The full stdio child. It is used with `CW_MCP_RELAY=0` (the rollback
-   lever), or when the session's name, board or directory is not ASCII.
+3. The full stdio child. It is used only with `CW_MCP_RELAY=0` (the rollback
+   lever). A session whose name, board or directory is not ASCII runs a relay
+   like any other: an HTTP header cannot carry those characters, so both relays
+   percent-encode the identity values and send `x-cw-identity-encoding:
+   percent`, and `server/src/connector/identity.ts` decodes them before it
+   checks them.
 
 A board behind Cloudflare Access (`CW_ACCESS_CLIENT_ID` or
 `CW_ACCESS_SECRET_SERVICE` set) skips step 1. The node relay, the full child

@@ -16,6 +16,14 @@
  * placeholder (measured: `${CW_AGENT_NAME}` arrives as those characters), so
  * a value shaped like one means "not set".
  *
+ * A header carries bytes, and a name or directory that is not ASCII does not
+ * survive one (fetch refuses a character above U+00FF; Latin-1 below it). So a
+ * relay whose identity is not printable ASCII percent-encodes the agent,
+ * legacy agent, cwd and workspace values as UTF-8 and sends
+ * `x-cw-identity-encoding: percent`; they are decoded here, before any check.
+ * Without that header a value is read as it arrived, so a literal `%` in an
+ * ASCII directory still means `%`.
+ *
  * Every value is checked here, before anything is built from it, and none of
  * them grants anything: naming an agent is a claim, and the route
  * (routes/mcp-connector.ts) asks for that agent's token before the claim is
@@ -60,18 +68,53 @@ const PLACEHOLDER = /^\$\{[^}]*\}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const WORKSPACE_ID = /^[a-zA-Z0-9_.:~-]{1,100}$/;
 const VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+/** Must match IDENTITY_ENCODING_HEADER in packages/mcp/src/relay/relay-wire.ts and relay.swift. */
+const ENCODING_HEADER = 'x-cw-identity-encoding';
+/** The headers that header covers. The plugin root is a version and never encoded. */
+const ENCODED_NAMES = ['x-cw-agent', 'x-cw-agent-legacy', 'x-cw-cwd', 'x-cw-workspace'] as const;
+
+type HeaderGet = (name: string) => string | null;
 
 /** A header's value, or undefined when absent, empty or an unexpanded placeholder. */
-function headerValue(headers: Headers, name: string): string | undefined {
-  const raw = headers.get(name)?.trim();
+function headerValue(get: HeaderGet, name: string): string | undefined {
+  const raw = get(name)?.trim();
   if (!raw || PLACEHOLDER.test(raw)) return undefined;
   return raw;
 }
 
+/**
+ * The headers with the encoded values decoded, or the name of the one that
+ * would not decode. The checks below then run on the decoded text, so a `%0A`
+ * is refused as the control character it is.
+ */
+function decodedHeaders(
+  headers: Headers,
+): { ok: true; get: HeaderGet } | { ok: false; name: string } {
+  const get: HeaderGet = (name) => headers.get(name);
+  if (headers.get(ENCODING_HEADER)?.trim() !== 'percent') return { ok: true, get };
+  const decoded = new Map<string, string>();
+  for (const name of ENCODED_NAMES) {
+    const raw = headers.get(name);
+    if (raw === null) continue;
+    try {
+      decoded.set(name, decodeURIComponent(raw));
+    } catch {
+      return { ok: false, name };
+    }
+  }
+  return { ok: true, get: (name) => decoded.get(name) ?? headers.get(name) };
+}
+
 /** Validate the identity headers. Refuses with a sentence naming the header. */
-export function readIdentityHeaders(headers: Headers): IdentityRead {
-  const agent = headerValue(headers, 'x-cw-agent');
-  const agentLegacy = headerValue(headers, 'x-cw-agent-legacy');
+export function readIdentityHeaders(received: Headers): IdentityRead {
+  const decoded = decodedHeaders(received);
+  if (!decoded.ok) {
+    return { ok: false, message: `${decoded.name} is not valid percent-encoded UTF-8` };
+  }
+  const get = decoded.get;
+  const agent = headerValue(get, 'x-cw-agent');
+  const agentLegacy = headerValue(get, 'x-cw-agent-legacy');
   for (const [name, v] of [
     ['x-cw-agent', agent],
     ['x-cw-agent-legacy', agentLegacy],
@@ -83,7 +126,7 @@ export function readIdentityHeaders(headers: Headers): IdentityRead {
       };
     }
   }
-  const cwd = headerValue(headers, 'x-cw-cwd');
+  const cwd = headerValue(get, 'x-cw-cwd');
   if (cwd === undefined) {
     return {
       ok: false,
@@ -96,13 +139,13 @@ export function readIdentityHeaders(headers: Headers): IdentityRead {
       message: `x-cw-cwd must be an absolute path of at most ${CWD_MAX} characters`,
     };
   }
-  const workspace = headerValue(headers, 'x-cw-workspace');
+  const workspace = headerValue(get, 'x-cw-workspace');
   if (workspace !== undefined && (!WORKSPACE_ID.test(workspace) || workspace.startsWith('.'))) {
     return { ok: false, message: 'x-cw-workspace is not a workspace id' };
   }
   // Only the version is kept, and only when the last path segment is one: the
   // path itself is never used, logged or stored.
-  const root = headerValue(headers, 'x-cw-plugin-root');
+  const root = headerValue(get, 'x-cw-plugin-root');
   const lastSegment = root?.split('/').filter(Boolean).pop();
   const pluginVersion = lastSegment && VERSION.test(lastSegment) ? lastSegment : undefined;
   return {
@@ -170,13 +213,18 @@ export function resolveIdentity(
 }
 
 /** Snapshot values back into headers, so a restored identity passes exactly
- *  the checks a request's would. */
+ *  the checks a request's would. Encoded as a relay encodes them when any is
+ *  not printable ASCII, which a Headers object would otherwise refuse. */
 export function headersOf(saved: IdentityHeaders): Headers {
+  const values = [saved.agent, saved.agentLegacy, saved.cwd, saved.workspace];
+  const encode = values.some((v) => v !== undefined && !PRINTABLE_ASCII.test(v));
+  const put = (v: string) => (encode ? encodeURIComponent(v) : v);
   const h = new Headers();
-  if (saved.agent) h.set('x-cw-agent', saved.agent);
-  if (saved.agentLegacy) h.set('x-cw-agent-legacy', saved.agentLegacy);
-  h.set('x-cw-cwd', saved.cwd);
-  if (saved.workspace) h.set('x-cw-workspace', saved.workspace);
+  if (encode) h.set(ENCODING_HEADER, 'percent');
+  if (saved.agent) h.set('x-cw-agent', put(saved.agent));
+  if (saved.agentLegacy) h.set('x-cw-agent-legacy', put(saved.agentLegacy));
+  h.set('x-cw-cwd', put(saved.cwd));
+  if (saved.workspace) h.set('x-cw-workspace', put(saved.workspace));
   if (saved.pluginVersion) h.set('x-cw-plugin-root', `/${saved.pluginVersion}`);
   return h;
 }

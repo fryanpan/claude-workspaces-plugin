@@ -495,8 +495,8 @@ delivery gate at all: each session launches its own MCP child from its own
 version-keyed cache, both halves of a tool live in that one bundle, and the
 restart that delivers a deletion is the same restart that delivers its
 replacement — so a session that has not restarted never sees the removal.
-That holds only for a session running the full child (`CW_MCP_RELAY=0`, or a
-non-ASCII identity). A session running a relay gets its tools from the
+That holds only for a session running the full child (`CW_MCP_RELAY=0`). A
+session running a relay gets its tools from the
 server's hosted connector. A deploy changes that session's tool list with no
 restart, and the relay passes on the server's `tools/list_changed`.
 What genuinely bites is **narrowing something old callers still send or still

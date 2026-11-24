@@ -49,13 +49,37 @@ func writeJSON(_ obj: Any) {
   if let d = try? JSONSerialization.data(withJSONObject: obj) { writeLine(d) }
 }
 
+/// Unreserved characters, the set encodeURIComponent leaves alone.
+let unreserved = CharacterSet(
+  charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()")
+
+/// Whether every UTF-8 byte is printable ASCII. Read as bytes because String
+/// comparison is canonical: a decomposed "ü" must stay decomposed.
+func printableASCII(_ s: String) -> Bool { s.utf8.allSatisfy { $0 >= 0x20 && $0 <= 0x7E } }
+
+/// The working directory's bytes, as getcwd(3) gives them and process.cwd()
+/// reads them in the node relay.
+func currentDirectory() -> String {
+  guard let p = getcwd(nil, 0) else { return FileManager.default.currentDirectoryPath }
+  defer { free(p) }
+  return String(cString: p)
+}
+
 /// The headers connector/identity.ts reads, from the environment the stdio child read.
+/// A header carries bytes: URLSession sends a value as Latin-1, folding a
+/// decomposed "ü" and dropping what Latin-1 cannot hold. So when any value is
+/// not printable ASCII, every value but the plugin root is percent-encoded as
+/// UTF-8 under `x-cw-identity-encoding: percent`, as relay-wire.ts does.
 func identityHeaders() -> [String: String] {
-  var h = ["x-cw-cwd": FileManager.default.currentDirectoryPath]
+  var h = ["x-cw-cwd": currentDirectory()]
   if let a = present(env["CW_AGENT_NAME"]) { h["x-cw-agent"] = a }
   if let a = present(env["FEEDBACK_AGENT_NAME"]) { h["x-cw-agent-legacy"] = a }
   if let w = present(env["CW_WORKSPACE_ID"]) ?? present(env["FEEDBACK_WORKSPACE_ID"]) {
     h["x-cw-workspace"] = w.trimmingCharacters(in: .whitespaces)
+  }
+  if !h.values.allSatisfy(printableASCII) {
+    for (k, v) in h { h[k] = v.addingPercentEncoding(withAllowedCharacters: unreserved) ?? v }
+    h["x-cw-identity-encoding"] = "percent"
   }
   if let v = present(env["CW_RELAY_PLUGIN_VERSION"]) {
     h["x-cw-plugin-root"] = "/" + v.trimmingCharacters(in: .whitespaces)
