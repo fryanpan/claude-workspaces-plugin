@@ -23,7 +23,6 @@ const ctx = {
   opsRoutesCtx: { j, requestAddress: () => '127.0.0.1' },
   mountRoutesCtx: { j },
   inboxRoutes: () => null,
-  keeperHoldsRoutes: () => null,
   promptRoutesCtx: { j },
   reviewQueueRoutesCtx: { j },
   voicePageRoutesCtx: { j },

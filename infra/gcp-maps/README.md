@@ -36,8 +36,7 @@ the server through the file below, not into the repository.
 
 Apply writes the key to `key_file`, by default
 `~/Library/Application Support/claude-workspaces/google-maps-key`, mode 600.
-That folder is prod's own root on the boot disk, beside
-`keeper-caller-token`. The server reads the file once at boot
+That folder is prod's own root on the boot disk. The server reads the file once at boot
 (`packages/server/src/google-maps-key.ts`), so the key reaches prod with no
 edit to its launchd plist; restart the server after an apply that changes
 the key. Apply on the machine that runs the server, or pass `key_file` for

@@ -465,7 +465,6 @@
   "POST /api/github-push-keys": "404 application/json error=not_found {error} | by github-hub.ts:handleGithubHubRoute",
   "POST /api/goals": "410 application/json error=gone {error,message,path,reason,serverVersion} cache=no-store | by stale-client.ts:handleStaleClient",
   "POST /api/goals/*": "410 application/json error=gone {error,message,path,reason,serverVersion} cache=no-store | by stale-client.ts:handleStaleClient",
-  "POST /api/keeper/holds": "501 application/json error=this server has no keeper (CW_KEEPER_URL is unset) {error} | by keeper-holds.ts:handleKeeperHoldsRoutes",
   "POST /api/load-reports": "400 application/json error=page must be one of home, review; a board's pages post to /workspaces/<ws>/load-reports {error} | by load-reports.ts:handleLoadReportRoutes",
   "POST /api/me/messages": "401 application/json error=not_signed_in {error} | by private-messages.ts:handlePrivateMessageRoutes",
   "POST /api/mounts": "400 application/json error=path must be an absolute filesystem path to a folder {error} | by mounts.ts:handleMountRoutes",

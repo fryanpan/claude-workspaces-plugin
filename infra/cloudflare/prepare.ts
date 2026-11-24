@@ -1,10 +1,7 @@
 /**
- * The steps every Terraform run takes before terraform starts, shared by the
- * wrapper (`run.ts`, on the Mac and in CI) and by the keeper's own run
- * (`keeper-run.ts`, which runs from the keeper's release with the keeper's
- * token). Nothing here reads the Keychain or imports anything outside this
- * folder's own config parsers, so the keeper's release, which has no
- * `node_modules`, can run it.
+ * The steps every Terraform run takes before terraform starts, for the
+ * wrapper (`run.ts`, on the Mac and in CI). Nothing here reads the Keychain
+ * or imports anything outside this folder's own config parsers.
  *
  *   1. assemble the variables from the environment's configs (`vars.ts`) and
  *      its committed `terraform.tfvars`;

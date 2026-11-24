@@ -29,8 +29,8 @@ Everything is made from CI; nobody runs a step by hand after the one-time
    board's secret card, and writes them to `cloudflare-prod` as
    `RESEND_API_KEY`, `SIGNIN_TEST_GOOGLE_CLIENT_ID` and
    `SIGNIN_TEST_GOOGLE_CLIENT_SECRET`. The deploy token must already hold D1
-   Write and Turnstile Sites Write (`CF_APPLY_PERMISSIONS` in
-   `packages/server/src/keeper/keeper-setup-ci.ts`).
+   Write and Turnstile Sites Write (`permissions` in
+   `infra/cloudflare/ci-secrets/main.tf`).
 2. Dispatch `signin-test` on main: `gh workflow run signin-test.yml --ref main`.
 
 The run (`deploy.ts`):

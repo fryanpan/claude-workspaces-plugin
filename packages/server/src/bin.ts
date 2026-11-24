@@ -195,7 +195,6 @@ const {
   pluginRefresher,
   deployer,
   gitPushCredential,
-  keeperHolds,
 } = deps;
 
 // A ceiling on what a hot error loop can cost this process's log.
@@ -368,7 +367,6 @@ while (!handle) {
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
       gitPush: { credential: gitPushCredential },
-      ...(keeperHolds ? { keeperHolds } : {}),
       // The one construction of the real discovery reader — the seam rule
       // again, and for a machine-wide file the rule is at its most useful: a
       // test that fell through to this would be reading whichever server the

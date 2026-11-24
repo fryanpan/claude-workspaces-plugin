@@ -84,12 +84,14 @@ export function createAccessDeps(ctx: AccessDepsContext) {
   const { dataDir, opts, isBoard } = ctx;
   let shares: Shares | null = null;
   if (opts.share) {
-    // Only build a Cloudflare client when Access mode is actually
-    // configured. Link-mode sharing needs no Cloudflare credentials at all.
+    // Only build a Cloudflare client when the embedder handed one, or a
+    // token. The board server hands neither (`server-deps.ts`).
     const accountId = opts.share.config.cfAccountId;
     const cfApi =
       opts.share.cfApi ??
-      (accountId ? new CfApi({ accountId, token: opts.share.cfApiToken ?? '' }) : undefined);
+      (accountId && opts.share.cfApiToken
+        ? new CfApi({ accountId, token: opts.share.cfApiToken })
+        : undefined);
     shares = new Shares({
       dataDir,
       cfApi,

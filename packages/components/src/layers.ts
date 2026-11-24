@@ -58,6 +58,9 @@ interface LayerBase {
   id: string;
   name: string;
   visible: boolean;
+  /** The zooms it draws at, both ends included; an end not given is open. */
+  minZoom?: number;
+  maxZoom?: number;
   /** Inline data, or a URL still to fetch. */
   source: { data: unknown } | { url: string };
 }
@@ -236,6 +239,15 @@ class Fields {
     }
     return nums.join(' ');
   }
+  /** `minZoom` and `maxZoom`, each 0 to 24, the first not above the second. */
+  zoomRange(): { minZoom?: number; maxZoom?: number } {
+    const out: { minZoom?: number; maxZoom?: number } = {};
+    for (const key of ['minZoom', 'maxZoom'] as const) {
+      if (this.row[key] !== undefined) out[key] = this.number(key, 0, 0, 24);
+    }
+    if ((out.minZoom ?? 0) > (out.maxZoom ?? 24)) this.fail('minZoom must not be above maxZoom');
+    return out;
+  }
   colors(): string[] {
     const v = this.row.colors;
     if (v === undefined) return [...HEAT_COLORS];
@@ -277,6 +289,7 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     id,
     name: f.text('name') ?? id,
     visible: raw.visible !== false,
+    ...f.zoomRange(),
     source,
   };
   let layer: MapLayer;
@@ -290,8 +303,6 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     };
     const dash = f.dash();
     if (dash) line.dash = dash;
-    const popup = f.text('popup');
-    if (popup !== undefined) line.popup = popup;
     layer = line;
   } else if (type === 'polygon') {
     const fill = f.color('fill', DEFAULT_COLOR);
@@ -304,8 +315,6 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
       outlineWidth: f.number('outlineWidth', 1, 0, 20),
       outlineOpacity: f.number('outlineOpacity', 0.9, 0, 1),
     };
-    const popup = f.text('popup');
-    if (popup !== undefined) polygon.popup = popup;
     layer = polygon;
   } else if (type === 'circle') {
     const circle: CircleLayer = {
@@ -318,8 +327,6 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
       strokeOpacity: f.number('strokeOpacity', 1, 0, 1),
       radius: f.number('radius', 5, 1, 40),
     };
-    const popup = f.text('popup');
-    if (popup !== undefined) circle.popup = popup;
     layer = circle;
   } else {
     const heat: HeatmapLayer = {
@@ -333,6 +340,10 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     const weight = f.text('weight');
     if (weight !== undefined) heat.weight = weight;
     layer = heat;
+  }
+  if (layer.type !== 'heatmap') {
+    const popup = f.text('popup');
+    if (popup !== undefined) layer.popup = popup;
   }
   return f.error ? { ok: false, error: f.error } : { ok: true, value: layer };
 }
@@ -396,6 +407,12 @@ export const emptyBudget = (): LayerBudget => ({
   circles: 0,
 });
 
+/** The refusal for a layer that takes the map past one of its caps. */
+const over = (name: string, what: string, total: number, cap: keyof typeof LAYER_LIMITS) => ({
+  ok: false as const,
+  error: `${name} brings the map's ${what} to ${total}; a map draws at most ${LAYER_LIMITS[cap]}`,
+});
+
 /**
  * Judge a layer's GeoJSON: every feature's geometry must be of the layer's
  * kind (a null geometry is skipped), every position a finite `[lng, lat]`,
@@ -457,40 +474,21 @@ export function readLayerData(
   }
   if (layer.type === 'heatmap') {
     const total = budget.heatPoints + points.length;
-    if (total > LAYER_LIMITS.heatPoints) {
-      return {
-        ok: false,
-        error: `${name} brings the map's heatmap points to ${total}; a map draws at most ${LAYER_LIMITS.heatPoints}`,
-      };
-    }
+    if (total > LAYER_LIMITS.heatPoints) return over(name, 'heatmap points', total, 'heatPoints');
     budget.heatPoints = total;
     return { ok: true, value: { kind: 'heat', points, bbox } };
   }
   if (layer.type === 'circle') {
     const total = budget.circles + vertices;
-    if (total > LAYER_LIMITS.circles) {
-      return {
-        ok: false,
-        error: `${name} brings the map's circles to ${total}; a map draws at most ${LAYER_LIMITS.circles}`,
-      };
-    }
+    if (total > LAYER_LIMITS.circles) return over(name, 'circles', total, 'circles');
     budget.circles = total;
     return { ok: true, value: { kind: 'paths', features, vertices, bbox } };
   }
   const featureTotal = budget.features + features.length;
-  if (featureTotal > LAYER_LIMITS.features) {
-    return {
-      ok: false,
-      error: `${name} brings the map's line and polygon features to ${featureTotal}; a map draws at most ${LAYER_LIMITS.features}`,
-    };
-  }
+  if (featureTotal > LAYER_LIMITS.features)
+    return over(name, 'line and polygon features', featureTotal, 'features');
   const vertexTotal = budget.vertices + vertices;
-  if (vertexTotal > LAYER_LIMITS.vertices) {
-    return {
-      ok: false,
-      error: `${name} brings the map's vertices to ${vertexTotal}; a map draws at most ${LAYER_LIMITS.vertices}`,
-    };
-  }
+  if (vertexTotal > LAYER_LIMITS.vertices) return over(name, 'vertices', vertexTotal, 'vertices');
   budget.features = featureTotal;
   budget.vertices = vertexTotal;
   return { ok: true, value: { kind: 'paths', features, vertices, bbox } };

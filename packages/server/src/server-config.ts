@@ -677,10 +677,11 @@ export function resolveServerConfig(opts: {
 
   // Sharing.
   //
-  // ACCESS mode — per-share hostnames behind Cloudflare Access — is the only
-  // mode. It needs CF_SHARE_BASE_HOSTNAME + CF_ACCOUNT_ID +
-  // CF_ACCESS_TEAM_DOMAIN; the API token comes from the macOS Keychain via the
-  // share module's reader.
+  // ACCESS mode — per-share hostnames behind Cloudflare Access — reads
+  // CF_SHARE_BASE_HOSTNAME + CF_ACCOUNT_ID + CF_ACCESS_TEAM_DOMAIN. The board
+  // server holds no Cloudflare token, so it mints no new Access share
+  // (`server-deps.ts`); the config still classifies and verifies the
+  // hostnames of shares minted before.
   //
   // CF_SHARE_PUBLIC_HOSTNAME is read only so a box still setting it keeps a
   // share config at all. It authorizes nothing: link mode is retired and the

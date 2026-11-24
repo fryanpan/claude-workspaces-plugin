@@ -18,6 +18,12 @@
  * one per frame after, so tens of thousands of paths never hold the page
  * for one long task while Leaflet builds them.
  *
+ * A layer with `minZoom` or `maxZoom` is on the map only while the zoom is
+ * inside that range, both ends included. The stack follows the map's own
+ * zoom, because the page's handle hears of no zoom change; the reader's
+ * switch is kept apart from it, so a layer switched on outside its range
+ * draws once the zoom enters it.
+ *
  * Popups are built when a path is tapped, from the layer's template, as text.
  */
 import L from 'leaflet';
@@ -56,7 +62,12 @@ interface Drawn {
   paths: L.GeoJSON | null;
   heat: HeatLayer | null;
   bounds: L.LatLngBounds | null;
-  visible: boolean;
+  /** The reader's switch. */
+  on: boolean;
+  /** Whether it is on the map: switched on, and the zoom in its range. */
+  attached: boolean;
+  minZoom: number;
+  maxZoom: number;
 }
 
 export class LayerStack {
@@ -64,6 +75,10 @@ export class LayerStack {
   /** Bumped by every `set`, so a chunk left over from the last one stops. */
   private generation = 0;
   private readonly group = L.layerGroup();
+  private readonly rezoom = (): void => {
+    for (const d of this.drawn) this.attach(d);
+    this.restack();
+  };
 
   constructor(
     private readonly map: L.Map,
@@ -79,6 +94,7 @@ export class LayerStack {
       pane.style.pointerEvents = 'none';
     }
     this.group.addTo(map);
+    map.on('zoomend', this.rezoom);
   }
 
   /** Replace every layer with `ready`, in declared order. A layer `hidden`
@@ -90,7 +106,13 @@ export class LayerStack {
     const pending: Array<{ paths: L.GeoJSON; features: LayerFeature[] }> = [];
     let pathsSeen = false;
     for (const { layer, data } of ready) {
-      const visible = !hidden.has(layer.id);
+      const on = !hidden.has(layer.id);
+      const range = {
+        on,
+        attached: false,
+        minZoom: layer.minZoom ?? Number.NEGATIVE_INFINITY,
+        maxZoom: layer.maxZoom ?? Number.POSITIVE_INFINITY,
+      };
       if (data.kind === 'heat' && layer.type === 'heatmap') {
         const heat = new HeatLayer(
           layer,
@@ -98,7 +120,7 @@ export class LayerStack {
           pathsSeen ? 'cw-heat-above' : 'cw-heat-below',
         );
         const bounds = boundsOf(data.bbox);
-        this.drawn.push({ id: layer.id, layer: heat, paths: null, heat, bounds, visible });
+        this.drawn.push({ id: layer.id, layer: heat, paths: null, heat, bounds, ...range });
         continue;
       }
       if (data.kind !== 'paths' || layer.type === 'heatmap') continue;
@@ -106,9 +128,9 @@ export class LayerStack {
       const paths = this.pathsOf(layer);
       pending.push({ paths, features: data.features });
       const bounds = boundsOf(data.bbox);
-      this.drawn.push({ id: layer.id, layer: paths, paths, heat: null, bounds, visible });
+      this.drawn.push({ id: layer.id, layer: paths, paths, heat: null, bounds, ...range });
     }
-    for (const d of this.drawn) if (d.visible) this.group.addLayer(d.layer);
+    for (const d of this.drawn) this.attach(d);
     this.build(pending, generation, 0, 0);
   }
 
@@ -207,14 +229,26 @@ export class LayerStack {
   /** Switch one layer on or off; the rest stay as they are. */
   show(id: string, on: boolean): void {
     const d = this.drawn.find((x) => x.id === id);
-    if (!d || d.visible === on) return;
-    d.visible = on;
-    if (on) this.group.addLayer(d.layer);
+    if (!d || d.on === on) return;
+    d.on = on;
+    this.attach(d);
+    this.restack();
+  }
+
+  /** Put a layer on the map or take it off, as its switch and the zoom say. */
+  private attach(d: Drawn): void {
+    // Before a view is set the zoom is undefined, and every layer is in range.
+    const zoom = this.map.getZoom();
+    const want = d.on && !(zoom < d.minZoom) && !(zoom > d.maxZoom);
+    if (want === d.attached) return;
+    d.attached = want;
+    if (want) this.group.addLayer(d.layer);
     else {
       this.group.removeLayer(d.layer);
-      this.map.closePopup();
+      // Its own popup goes with it; a marker's stays open.
+      const popups = this.map.getContainer().querySelectorAll<HTMLElement>('.cw-map-popup');
+      if ([...popups].some((p) => p.dataset.layer === d.id)) this.map.closePopup();
     }
-    this.restack();
   }
 
   /** Put the paths back in declared order, beneath the points: each layer,
@@ -222,7 +256,7 @@ export class LayerStack {
   restack(): void {
     for (let i = this.drawn.length - 1; i >= 0; i--) {
       const d = this.drawn[i];
-      if (d?.paths && d.visible) d.paths.bringToBack();
+      if (d?.paths && d.attached) d.paths.bringToBack();
     }
   }
 
@@ -240,11 +274,12 @@ export class LayerStack {
 
   /** Cells the visible heatmaps stamped on their last redraw. */
   heatCells(): number {
-    return this.drawn.reduce((n, d) => n + (d.heat && d.visible ? d.heat.stamped : 0), 0);
+    return this.drawn.reduce((n, d) => n + (d.heat && d.attached ? d.heat.stamped : 0), 0);
   }
 
   remove(): void {
     this.generation++;
+    this.map.off('zoomend', this.rezoom);
     this.group.remove();
     this.drawn = [];
   }

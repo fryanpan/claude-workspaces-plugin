@@ -61,6 +61,9 @@ import { answerAs, sent } from './route-contract.ts';
 import type * as Contract from './share-contract.ts';
 import { handleShareSwitch, provedOwner } from './share-switch.ts';
 
+const ACCESS_MINT_HINT =
+  'This server makes no Cloudflare Access application for a share. Publish the board with share_workspace on the share hostname (CW_SHARE_LINK_HOSTS) instead.';
+
 /**
  * The refusal a share route gives when handed a GROUPING id.
  *
@@ -873,6 +876,11 @@ export async function handleAuthShareRoutes(
         hint: 'share_link no longer mints on this deployment. Publish the board with share_workspace: it records the board against the share hostname and returns https://share.<domain>/s/<id>, and whoever opens it signs in through Cloudflare Access and becomes a member of that board. Shares already minted by share_link keep working — list_shares lists them, unshare revokes one.',
       });
     }
+    // Refused before the audience check, so no owner card is filed for a mint
+    // that cannot happen: the board server holds no Cloudflare token.
+    if (!shares.canMintAccess) {
+      return j(503, { error: ACCESS_NOT_CONFIGURED, hint: ACCESS_MINT_HINT });
+    }
     // WHO the Access application admits. A caller that names an audience gets
     // it; one that does not — every older bundle, whose `share_link` had no
     // such argument because a link admitted the world — falls back to the
@@ -953,7 +961,7 @@ export async function handleAuthShareRoutes(
       if (error === ACCESS_NOT_CONFIGURED) {
         return j(503, {
           error,
-          hint: 'Link shares are retired, so every share needs Cloudflare Access: set CF_ACCOUNT_ID, CF_SHARE_BASE_HOSTNAME and CF_ACCESS_TEAM_DOMAIN, and put a Cloudflare API token in the Keychain (service cloudflare-api-token).',
+          hint: ACCESS_MINT_HINT,
         });
       }
       return j(400, { error });

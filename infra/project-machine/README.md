@@ -24,7 +24,6 @@ scripts that stand it up. How to run them is
 | `deploy-store.ts`, `store-plan.ts`, `store-setup.ts` | `fly-provision.yml` | Makes the store once (bucket, versioning, keys, the Mac's reader) and each machine's writer |
 | `bun run store:read list\|check` | the Mac | Counts a machine's objects and opens one of each kind (`store-read.ts`); `check` is the daily check (`store-check.ts`), raising to Sentry |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
-| `bun run machine:approve-move --board <id> --project <name>` | the Mac | Asks one passkey that covers that board's wall check and move on that project for 30 minutes (`docs/process/keeper.md`). |
 | `bun run machine:move-board --board <id> --project <name>` | the Mac | Moves one board onto the machine with the same ids (`board-bundle.ts`, `board-print.ts`), and archives the Mac's copy only when both fingerprints match |
 | `board-probe.ts` | the machine | The move's importer and fingerprint, on loopback |
 | `bun run machine:tokens` (`tokens.ts`, `token-list.ts`, `token-move.ts`, `token-usage.ts`) | the Mac | The central list of long-lived Claude tokens, of accounts Bryan owns only: add one, read each token's usage, move a project to another (`docs/process/project-machine.md`) |

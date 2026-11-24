@@ -3643,7 +3643,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         opsRoutesCtx,
         mountRoutesCtx,
         inboxRoutes: features.inboxRoutes,
-        keeperHoldsRoutes: features.keeperHoldsRoutes,
         promptRoutesCtx,
         reviewQueueRoutesCtx,
         voicePageRoutesCtx,

@@ -16,7 +16,7 @@
  * argument, a file this writes, or a printed line. What prints is the plan's
  * resource addresses and verbs (`plan-summary.ts`). The state is local, in
  * `~/.local/state/claude-workspaces/ci-secrets/` (or `$CW_TF_WORK_DIR/ci-secrets`
- * when the keeper runs it), outside every checkout, mode 700, because it holds
+ * when that is set), outside every checkout, mode 700, because it holds
  * the token's value and the shared R2 bucket is readable by every pull
  * request's plan. The saved plan holds the values too, so it is removed when
  * the run ends and again when the next one starts.

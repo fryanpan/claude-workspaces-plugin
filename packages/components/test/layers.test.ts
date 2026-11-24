@@ -152,8 +152,38 @@ describe('readLayers', () => {
     });
   });
 
+  it('reads a zoom range, holds it inside 0 to 24, and leaves it off a layer without one', () => {
+    const [plain, ranged, open] = only(
+      readLayers([
+        { type: 'circle', data: [] },
+        { type: 'heatmap', data: [], minZoom: -3, maxZoom: 13.75 },
+        { type: 'line', data: [], minZoom: 30 },
+      ]),
+    );
+    expect(plain).not.toHaveProperty('minZoom');
+    expect(plain).not.toHaveProperty('maxZoom');
+    expect(ranged).toMatchObject({ minZoom: 0, maxZoom: 13.75 });
+    expect(open).toMatchObject({ minZoom: 24 });
+    expect(open).not.toHaveProperty('maxZoom');
+  });
+
   it.each([
     ['not a list', { type: 'line' }, 'layers must be a list'],
+    [
+      'a minZoom that is text',
+      [{ type: 'circle', data: [], minZoom: '14' }],
+      'layers[0].minZoom must be a number',
+    ],
+    [
+      'a maxZoom that is not finite',
+      [{ type: 'heatmap', data: [], maxZoom: Number.NaN }],
+      'layers[0].maxZoom must be a number',
+    ],
+    [
+      'a minZoom above its maxZoom',
+      [{ type: 'line', data: [], minZoom: 15, maxZoom: 14 }],
+      'layers[0].minZoom must not be above maxZoom',
+    ],
     ['an unknown type', [{ type: 'raster', data: [] }], 'layers[0].type must be'],
     ['no data', [{ type: 'line' }], 'layers[0] needs data or a url, not both'],
     ['data and a url', [{ type: 'line', data: [], url: 'a.json' }], 'not both'],

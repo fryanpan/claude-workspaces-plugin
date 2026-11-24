@@ -1,6 +1,7 @@
 /**
- * Rotating one existing Access service token's secret, with the keeper's
- * Cloudflare token: `service-token-rotate`, always a passkey tap.
+ * Rotating one existing Access service token's secret, with
+ * `cloudflare-prod`'s Cloudflare token: `cf-rotate-token.yml` runs it
+ * (`infra/cloudflare/rotate-token.ts`).
  *
  * For a token whose secret nobody holds any more. Rotating keeps the token's
  * id, so Terraform, which imported it by id, sees no change; deleting and
@@ -9,14 +10,10 @@
  * (`previous_client_secret_expires_at`), so whatever still uses it has a day
  * to take the new one.
  *
- * The new secret goes back to the requester only, exactly as a new token's
- * does from `cf-sync` (`keeper-cf-sync.ts`): the requester puts it in Bryan's
- * Keychain under the token's services (`infra/cloudflare/rotate-token.ts`).
- * The approval page names the token and never shows a secret, and the
- * approval page's own answer does not carry the result
- * (`resultIsSecret` in `keeper-ci-calls.ts`).
+ * The new secret goes back to the caller only; the workflow seals it to the
+ * Mac, which stores it in the Keychain under the token's services
+ * (`handoff:pull`).
  */
-import type { Verdict } from './verdict.ts';
 
 export interface RotateCall {
   type: 'service-token-rotate';
@@ -30,16 +27,14 @@ export const PREVIOUS_SECRET_MS = 24 * 60 * 60_000;
 const TOKEN_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$/;
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
-export function classifyRotate(name: unknown): Verdict {
+/** Whether `name` is a service token name, before anything is asked of Cloudflare. */
+export function classifyRotate(
+  name: unknown,
+): { kind: 'ok'; name: string } | { kind: 'refused'; reason: string } {
   if (typeof name !== 'string' || !TOKEN_NAME.test(name)) {
     return { kind: 'refused', reason: 'name must be a service token name' };
   }
-  return {
-    kind: 'held',
-    hold: 'service-token.rotate',
-    app: null,
-    summary: `rotate the secret of Access service token "${name}"`,
-  };
+  return { kind: 'ok', name };
 }
 
 type Cf = (
@@ -71,7 +66,7 @@ export async function rotateServiceToken(
   const accounts = result<{ id?: unknown }[]>(await cf('GET', '/accounts', undefined)) ?? [];
   const account = accounts.length === 1 ? accounts[0]?.id : undefined;
   if (typeof account !== 'string' || !ID.test(account)) {
-    return fail(502, `the keeper's token sees ${accounts.length} accounts; it must see one`);
+    return fail(502, `the Cloudflare token sees ${accounts.length} accounts; it must see one`);
   }
   const list =
     result<{ id?: unknown; name?: unknown }[]>(

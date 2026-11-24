@@ -1,33 +1,27 @@
 /**
- * The keeper makes a project's push credential: one write deploy key per
- * repo (`provisioning/push-keys.ts`).
+ * A project's push credential: one write deploy key per repo
+ * (`provisioning/push-keys.ts`), which `fly-provision.yml` makes.
  *
  * GitHub is a stand-in that records every call; no request leaves the
  * machine. The key pairs are real ones from `ssh-keygen`, so the test can
  * say where each private half went: into the Fly secret, in the form the
  * server's push path reads (`git-push/credential.ts`), and nowhere else.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PUSH_KEYS_ENV, pushCredentialFor } from '../src/git-push/credential.ts';
-import { mintCallerToken } from '../src/keeper/keeper-callers.ts';
-import type { Executors } from '../src/keeper/keeper-requests.ts';
-import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
-import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
 import {
   type GithubApi,
   type KeyPair,
-  classifyPushKeys,
   ed25519Pair,
   makePushKeys,
   pushKeyTitle,
 } from '../src/provisioning/push-keys.ts';
-import { TestPasskey } from './keeper-authenticator.ts';
 
-const tmp = mkdtempSync(join(tmpdir(), 'keeper-push-keys-'));
+const tmp = mkdtempSync(join(tmpdir(), 'provisioning-push-keys-'));
 const APP = 'cw-harborlight';
 const REPOS = ['Harborlight/notes', 'Harborlight/app'];
 
@@ -140,7 +134,7 @@ describe('making a project’s push keys', () => {
     }
     expect(elsewhere).not.toContain('PRIVATE KEY');
 
-    // The keeper's older key for this app goes; another key on the repo stays.
+    // An older key this workflow made for this app goes; another key on the repo stays.
     const deletes = gh.calls.filter((c) => c.method === 'DELETE').map((c) => c.path);
     expect(deletes).toEqual(['/repos/Harborlight/notes/keys/7']);
     expect(JSON.parse(r.body)).toMatchObject({
@@ -193,116 +187,5 @@ describe('a key pair made in memory', () => {
     expect(r.stdout.trim().split(' ').slice(0, 2)).toEqual([type, body]);
     // Two pairs are never the same key.
     expect(ed25519Pair('x').publicKey).not.toBe(ed25519Pair('x').publicKey);
-  });
-});
-
-describe('who may ask for push keys', () => {
-  it('holds a request for an adopted app and refuses anything else', () => {
-    expect(classifyPushKeys(APP, REPOS, [APP])).toMatchObject({
-      kind: 'held',
-      hold: 'token.move',
-      app: APP,
-    });
-    for (const [app, repos] of [
-      ['cw-riverbend', REPOS],
-      ['Not An App', REPOS],
-      [APP, []],
-      [APP, ['../etc']],
-      [APP, ['Harborlight/notes', 'harborlight/NOTES']],
-      [APP, 'Harborlight/notes'],
-    ] as const)
-      expect(classifyPushKeys(app, repos, [APP]).kind).toBe('refused');
-  });
-});
-
-describe('a push-key request through the keeper', () => {
-  let store: KeeperStore;
-  let keeper: RunningKeeper;
-  let base: string;
-  let caller = '';
-  const owner = new TestPasskey();
-  const ran: { app: string; repos: readonly string[] }[] = [];
-  const exec: Executors = {
-    fly: async () => ({ status: 0, stdout: '', stderr: '' }),
-    cloudflare: async () => ({ status: 200, body: '{}' }),
-    pushKeys: async (app, repos) => {
-      ran.push({ app, repos });
-      return { status: 200, body: JSON.stringify({ keys: [] }) };
-    },
-  };
-  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
-    fetch(`${base}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-  const api = () => ({ 'x-cw-keeper': '1', 'x-cw-keeper-caller': caller });
-
-  beforeAll(async () => {
-    const dir = join(tmp, 'store');
-    mkdirSync(dir, { mode: 0o700 });
-    const s = openKeeperStore(dir);
-    if ('error' in s) throw new Error(s.error);
-    store = s;
-    store.addApp(APP);
-    caller = mintCallerToken(store);
-    keeper = serveKeeper({ store, exec, port: 0, keeperUid: 4_000_000 });
-    base = `http://127.0.0.1:${keeper.port}`;
-    store.saveEnroll({
-      tokenHash: hashToken('owner-link'),
-      expiresAt: Date.now() + 60_000,
-      createdAt: Date.now(),
-    });
-    const origin = { origin: keeper.origin };
-    const o = (await (
-      await post('/v1/enroll/options', { token: 'owner-link' }, origin)
-    ).json()) as {
-      challenge: string;
-      session: string;
-    };
-    const reg = owner.register({
-      challenge: o.challenge,
-      origin: keeper.origin,
-      rpId: 'localhost',
-    });
-    expect((await post('/v1/enroll', { session: o.session, ...reg }, origin)).status).toBe(200);
-  });
-  afterAll(() => keeper?.stop());
-
-  it('refuses a request without the API header or the caller token', async () => {
-    const body = { app: APP, repos: REPOS };
-    expect((await post('/v1/push-keys', body, {})).status).toBe(403);
-    expect((await post('/v1/push-keys', body, { 'x-cw-keeper': '1' })).status).toBe(401);
-  });
-
-  it('waits for the owner’s passkey, shows every repo, and runs only then', async () => {
-    const res = await post('/v1/push-keys', { app: APP, repos: REPOS }, api());
-    expect(res.status).toBe(202);
-    const held = (await res.json()) as { id: string };
-    expect(ran).toEqual([]);
-    const html = await (await fetch(`${base}/approve/${held.id}`)).text();
-    for (const r of REPOS) expect(html).toContain(r);
-    const page = /const pageToken = "([^"]+)"/.exec(html)?.[1] ?? '';
-    const origin = { origin: keeper.origin };
-    const c = (await (
-      await post(`/v1/requests/${held.id}/challenge`, { page }, origin)
-    ).json()) as {
-      challenge: string;
-    };
-    const signed = owner.assert({
-      challenge: c.challenge,
-      origin: keeper.origin,
-      rpId: 'localhost',
-    });
-    expect(
-      (await post(`/v1/requests/${held.id}/approve`, { page, ...signed }, origin)).status,
-    ).toBe(200);
-    expect(ran).toEqual([{ app: APP, repos: REPOS }]);
-  });
-
-  it('refuses an app the keeper did not make, and runs nothing', async () => {
-    const res = await post('/v1/push-keys', { app: 'cw-riverbend', repos: REPOS }, api());
-    expect(res.status).toBe(403);
-    expect(ran).toHaveLength(1);
   });
 });

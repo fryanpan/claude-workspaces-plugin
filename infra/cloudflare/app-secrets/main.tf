@@ -2,7 +2,7 @@
 # and nothing else (README.md, "Apps' secrets"). The GitHub provider is the
 # only one: it reads GITHUB_TOKEN from the environment, a classic token with
 # repo scope. No Cloudflare token is needed, and the deploy token and R2 pair
-# that `ci-secrets/` or the keeper wrote are not in this root, so no apply
+# that `ci-secrets/` wrote are not in this root, so no apply
 # here can change or delete them.
 
 provider "github" {
@@ -15,7 +15,7 @@ locals {
 }
 
 # The environment's secrets are safe only while a run from main alone can
-# deploy to it: the keeper and `ci-secrets/` check the same before writing.
+# deploy to it: `ci-secrets/` checks the same before writing.
 data "github_repository_environment_deployment_policies" "deploy" {
   repository  = var.repository
   environment = var.environment

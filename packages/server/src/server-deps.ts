@@ -29,9 +29,6 @@ import {
   createKeychainRefreshTokenVault,
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
-import { announceToBoard } from './keeper/keeper-announce.ts';
-import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
-import { keeperHoldsFromEnv } from './keeper/keeper-home-card.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
 import { haikuCoverageJudge } from './notes-coverage-judge.ts';
@@ -50,7 +47,6 @@ import { createRecallCalendarClient } from './recall-calendar.ts';
 import { createRecallClient, recallStatusWebhookUrl } from './recall.ts';
 import { haikuReviewJudge, reviewGateEnabled } from './review-judge.ts';
 import type { ServerConfig } from './server-config.ts';
-import { CfApi } from './share/cf-api.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { createSpokenEngines } from './spoken-reply/engines.ts';
 import { ThreadSummarizer } from './summarize.ts';
@@ -93,21 +89,12 @@ export function createServerDeps(
     console.log(stamped(line));
   }
   const transcriptionOn = featureOn(process.env, 'transcription');
-  const share = cfg.shareConfig
-    ? {
-        config: cfg.shareConfig,
-        // Only read the Keychain when Access mode is actually configured —
-        // the reader throws when the entry is missing, and a link-only
-        // deployment has no reason to hold a Cloudflare token at all.
-        //
-        // Once the keeper holds the token (`CW_KEEPER_URL`), the server reads
-        // none: its Access calls are asked of the keeper, and creating an
-        // application waits there for Bryan's passkey (`keeper/`).
-        ...(cfg.accessShareConfigured
-          ? shareCloudflare(cfg.shareConfig.cfAccountId, cfg.requestedPort)
-          : {}),
-      }
-    : undefined;
+  // The server holds no Cloudflare token. A board is published with
+  // `share_workspace` on the share hostname, which needs none; the older
+  // per-share Access application (`share_link` with no share hostname) needs
+  // one, so it answers 503 here. Its records still list and revoke, and a
+  // revoke drops the record without reaching Cloudflare.
+  const share = cfg.shareConfig ? { config: cfg.shareConfig } : undefined;
 
   // Which Claude key every adapter below spends, said ONCE: prod's under the
   // launchd service, the eval key anywhere else, or none — in which case each
@@ -460,35 +447,8 @@ export function createServerDeps(
     pluginRefresher,
     deployer,
     gitPushCredential,
-    keeperHolds: keeperHoldsFromEnv(process.env),
   };
 }
 
 /** What the boot has to work with — inferred, so the two cannot drift. */
 export type ServerDeps = ReturnType<typeof createServerDeps>;
-
-/**
- * The keeper's last caller in the server; it retires when shares move to Better Auth.
- *
- * How the share module reaches Cloudflare: through the keeper when
- * `CW_KEEPER_URL` names one, else with the Keychain's token. A held call
- * waits under the board server's 120s idle timeout for the tap.
- */
-function shareCloudflare(
-  accountId: string | undefined,
-  port: number,
-): { cfApi: CfApi } | { cfApiToken: string } {
-  const keeper = process.env[KEEPER_URL_ENV]?.trim();
-  if (!keeper || !accountId) return { cfApiToken: readKeychainPassword('cloudflare-api-token') };
-  const fetchImpl = keeperFetch(keeper, {
-    requester: 'board server (sharing)',
-    waitMs: 100_000,
-    onHeld: (held) =>
-      console.log(stamped(`[keeper] ${held.summary} waits for a passkey: ${held.approveUrl}`)),
-    // This server's own Home: the request shows there as a card.
-    announce: announceToBoard(`http://127.0.0.1:${port}`, 'board server (sharing)'),
-  });
-  return {
-    cfApi: new CfApi({ accountId, token: '', apiBase: `${keeper}/v1/cloudflare`, fetchImpl }),
-  };
-}

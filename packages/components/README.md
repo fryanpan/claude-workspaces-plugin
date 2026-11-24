@@ -16,12 +16,12 @@ The package is a tarball. It has no dependencies (Leaflet is bundled in), so
 it installs offline from the file alone:
 
 ```bash
-mkdir -p vendor && cp claude-workspaces-components-0.3.0.tgz vendor/
-bun add ./vendor/claude-workspaces-components-0.3.0.tgz   # or npm install
+mkdir -p vendor && cp claude-workspaces-components-0.4.0.tgz vendor/
+bun add ./vendor/claude-workspaces-components-0.4.0.tgz   # or npm install
 ```
 
 Your `package.json` then names it as
-`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.3.0.tgz"`.
+`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.4.0.tgz"`.
 
 ## Mount the map
 
@@ -116,6 +116,7 @@ layer takes:
 | `id` | Unique on the map; `layer-<index>` without. |
 | `name` | The words beside its switch under the map; its id without. |
 | `visible` | `false` starts it switched off. |
+| `minZoom`, `maxZoom` | Optional. The zooms it draws at, 0 to 24, both ends included; `minZoom` above `maxZoom` is refused. Outside the range the map takes the layer off, and puts it back when the zoom returns. Without them it draws at every zoom. |
 | `popup` | Line, polygon and circle only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`. Without it the layer takes no taps. |
 
 A switch per layer sits under the map, in the order given, and the reader's
@@ -194,6 +195,23 @@ of pixels across at every zoom.
 
 Colours are hex, a CSS colour name, or `rgb()`/`hsl()`. Numbers past their
 range are held at its edge.
+
+**Zoom ranges.** The map follows its own zoom, so the page needs no zoom
+listener. A heatmap that hands over to dots as the reader zooms in is two
+layers over the same data:
+
+```ts
+layers: [
+  { type: 'heatmap', id: 'heat', name: 'Harborlight reports', url, maxZoom: 13.75 },
+  { type: 'circle', id: 'dots', name: 'Harborlight crashes', url, minZoom: 14 },
+]
+```
+
+The map zooms in steps of 0.25, so a `maxZoom` of 13.75 and a `minZoom` of
+14 never draw together; 14 and 14 would both draw at 14. The zoom range is
+separate from the switch: a layer switched off stays off when the zoom
+enters its range, and one switched on outside its range draws once the zoom
+enters it. Its row under the map shows the switch, not the zoom.
 
 **Switching from the page.** The handle `mount` and `mountWithSnapshot`
 return is the cleanup function, and it also carries `setVisible(id, on)`.
@@ -280,6 +298,10 @@ built from the claude-workspaces repo with
 `package.json` and moves to a new version by replacing the tarball and that
 line.
 
+- 0.4.0: `minZoom` and `maxZoom` on every layer, so the map shows or
+  hides it as the zoom crosses that range. A switch that turns a layer off
+  now closes only that layer's open popup. Every 0.3.0 prop draws as
+  before.
 - 0.3.0: `circle` layers (a dot per point, with fill, stroke, radius,
   popup and `visible`), and `setVisible(id, on)` on the handle the map
   returns, which switches any layer from the host page and moves its switch
