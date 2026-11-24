@@ -11,8 +11,7 @@
  *                                      own `gh` login. No tap.
  *   rotate-token.ts --ci "<name>"      in that workflow, in `cloudflare-prod`:
  *                                      rotates with the apply token
- *                                      (`rotateServiceToken`, the function the
- *                                      keeper ran) and seals the new pair to
+ *                                      (`rotateServiceToken`) and seals the new pair to
  *                                      the Mac (CW_HANDOFF_OUT,
  *                                      `infra/handoff/`).
  *

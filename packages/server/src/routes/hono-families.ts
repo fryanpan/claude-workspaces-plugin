@@ -11,8 +11,7 @@
  * hosted MCP connector, agent identity, board tokens, a walled lead's
  * folders, the repo registry, load reports, ops, mounts, the workspaces
  * list's stream, prompts, the cross-board review queue, voice (the page and
- * the API), access, Incoming Messages, private messages, the keeper holds
- * and the coach. Each one
+ * the API), access, Incoming Messages, private messages and the coach. Each one
  *
  * - takes no workspace scope, so moving it above the scope resolver changes
  *   nothing it reads, and claims no path under `/workspaces/`, so the
@@ -47,7 +46,6 @@
 import type { Context, Env, Hono, Next } from 'hono';
 import type { FeatureRoutes } from '../feature-module.ts';
 import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
-import { HOLDS_PATH } from '../keeper/keeper-announce.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { RECALL_STATUS_PATH } from '../middleware/recall-callback-gate.ts';
 import { SHARING_OFF_PAGE_PATH } from '../sharing-off-door.ts';
@@ -107,11 +105,9 @@ export interface HonoFamiliesContext {
   privateMessageRoutesCtx: PrivateMessageRoutesContext;
   opsRoutesCtx: OpsRoutesContext;
   mountRoutesCtx: MountRoutesContext;
-  /** Incoming Messages and the keeper holds, two of the registered features
-   *  (`features.ts`); git-push, the third, claims `/workspaces/` and stays on
-   *  the chain. */
+  /** Incoming Messages, one of the registered features (`features.ts`);
+   *  git-push, the other, claims `/workspaces/` and stays on the chain. */
   inboxRoutes: FeatureRoutes;
-  keeperHoldsRoutes: FeatureRoutes;
   promptRoutesCtx: PromptRoutesContext;
   reviewQueueRoutesCtx: ReviewQueueRoutesContext;
   voicePageRoutesCtx: VoicePageRoutesContext;
@@ -342,8 +338,6 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       claim(app, ctx, ['/api/me/messages', '/api/agents/:agentId/messages/:personId'], (v) =>
         handlePrivateMessageRoutes(ctx.privateMessageRoutesCtx, v),
       ),
-    // routes/keeper-holds.ts through its feature — one exact path.
-    (app) => claim(app, ctx, [HOLDS_PATH], (v) => ctx.keeperHoldsRoutes(v)),
     // routes/coach.ts — its own test is `startsWith('/coach/')`.
     (app) => claim(app, ctx, ['/coach/*'], (v) => handleCoachRoutes(ctx.coachRoutesCtx, v)),
   ];

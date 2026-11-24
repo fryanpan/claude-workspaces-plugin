@@ -1,29 +1,24 @@
 /**
  * A project server's push credential: one write deploy key per repo, made
- * by the keeper during project setup.
+ * by `fly-provision.yml` for the project's `pushRepos` in `machines.json`
+ * (`infra/project-machine/push-keys.ts`).
  *
- * For each repo the keeper makes a new ed25519 key pair, registers the
- * public half on that repo (`POST /repos/{owner}/{repo}/keys`, `read_only`
- * false) with the GitHub token it holds, and then sets the Fly secret
+ * For each repo it makes a new ed25519 key pair, registers the public half
+ * on that repo (`POST /repos/{owner}/{repo}/keys`, `read_only` false) with
+ * the workflow's GitHub token, and then sets the Fly secret
  * `CW_GITHUB_PUSH_KEYS` on the project's app with the private halves, in
  * the form the server's push path reads (`git-push/credential.ts`). The
  * private halves go to that secret and nowhere else: not to GitHub, not to
- * the requester's answer, not to a log line, not to disk (`ed25519Pair`
- * makes each pair in memory). A deploy key
- * reaches one repo, so the machine can push to the repos listed here and
- * nothing else the token's account can reach, and the machine never holds
- * the token.
- *
- * It is always a passkey tap (`token.move`), never covered by a setup grant:
- * the repos are the requester's words, and a write key is a way into each
- * one. The approval page lists them. Only an app the keeper made or adopted
- * may get keys.
+ * the caller's answer, not to a log line, not to disk (`ed25519Pair` makes
+ * each pair in memory). A deploy key reaches one repo, so the machine can
+ * push to the repos listed here and nothing else the token's account can
+ * reach, and the machine never holds the token.
  *
  * If a key cannot be registered, or the secret cannot be set, every key this
  * run registered is deleted again, so a failed run leaves no write key on
- * GitHub that nothing holds. Once the secret is set, older keys this keeper
- * gave the same app (the same title) are deleted from each repo: the
- * machine's previous secret, which held them, is gone.
+ * GitHub that nothing holds. Once the secret is set, older keys given to the
+ * same app (the same title) are deleted from each repo: the machine's
+ * previous secret, which held them, is gone.
  *
  * The answer also names, per repo, the Actions secret names a workflow pushed
  * with the new key could read (`push-exposure.ts`). That report reads
@@ -31,10 +26,7 @@
  */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { PUSH_KEYS_ENV, encodePushKeys } from '../git-push/credential.ts';
-import { isRepoName } from '../git-push/policy.ts';
 import { type RepoExposure, repoExposure, unreadExposure } from './push-exposure.ts';
-import type { Verdict } from './verdict.ts';
-import { APP_NAME } from './verdict.ts';
 
 export interface PushKeysCall {
   type: 'push-keys';
@@ -64,36 +56,13 @@ export interface PushKeysDeps {
 
 export const MAX_PUSH_REPOS = 20;
 
-/** The title every key for `app` carries on GitHub, so a later run finds its own. */
+/**
+ * The title every key for `app` carries on GitHub, so a later run finds its
+ * own. It still says `keeper` because keys already on GitHub carry it, and a
+ * new title would leave those behind.
+ */
 export function pushKeyTitle(app: string): string {
   return `${app} push (claude-workspaces keeper)`;
-}
-
-/** Hold for a tap, or refuse: never routine, never covered by a grant. */
-export function classifyPushKeys(app: unknown, repos: unknown, apps: readonly string[]): Verdict {
-  if (typeof app !== 'string' || !APP_NAME.test(app)) {
-    return { kind: 'refused', reason: 'app must be a Fly app name' };
-  }
-  if (!apps.includes(app)) {
-    return { kind: 'refused', reason: `${app} is not an app the keeper made or adopted` };
-  }
-  if (!Array.isArray(repos) || repos.length === 0 || repos.length > MAX_PUSH_REPOS) {
-    return { kind: 'refused', reason: `repos must list 1-${MAX_PUSH_REPOS} owner/name repos` };
-  }
-  const seen = new Set<string>();
-  for (const r of repos) {
-    if (typeof r !== 'string' || !isRepoName(r)) {
-      return { kind: 'refused', reason: 'every repo must be owner/name' };
-    }
-    if (seen.has(r.toLowerCase())) return { kind: 'refused', reason: `${r} is listed twice` };
-    seen.add(r.toLowerCase());
-  }
-  return {
-    kind: 'held',
-    hold: 'token.move',
-    app,
-    summary: `make a write deploy key on ${repos.join(', ')} and set ${PUSH_KEYS_ENV} on ${app}`,
-  };
 }
 
 interface Made {
@@ -122,8 +91,8 @@ function why(text: string): string {
 
 /**
  * Make, register and hand over the keys. The answer is JSON in the shape of
- * a Cloudflare result (`{status, body}`), so the keeper's request path
- * carries it unchanged; its body names each repo's key id and public half.
+ * a Cloudflare result (`{status, body}`); its body names each repo's key id
+ * and public half.
  */
 export async function makePushKeys(
   deps: PushKeysDeps,

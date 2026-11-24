@@ -930,8 +930,6 @@
     "node:scripts/headless-chrome.test.ts": 2.3,
     "node:scripts/import-cycles.test.ts": 0,
     "node:scripts/import-direction.test.ts": 0,
-    "node:scripts/keeper-approval-browser.test.ts": 3.9,
-    "node:scripts/keeper-service-worker-browser.test.ts": 34.9,
     "node:scripts/launchd/bootstrap-retry.test.ts": 0.9,
     "node:scripts/lead-hold-replay-lib.test.ts": 0.1,
     "node:scripts/lead-sandbox-board-socket.test.ts": 1.8,

@@ -57,28 +57,18 @@ flowchart LR
    `<team>.cloudflareaccess.com`). **Permanent** — choose carefully.
    Accept ToS, pick the default email-OTP IdP. ~3 min.
 
-2. **Note your Account ID.** Right sidebar of any zone page in the
-   Cloudflare dashboard.
+   The server holds no Cloudflare API token, so it never makes an Access
+   application per share. A board is published with `share_workspace` on the
+   share hostname ("Day-to-day: sharing a workspace", below).
 
-3. **Create a scoped API token.** Dashboard → Profile → API Tokens →
-   Create Custom Token:
-   - Permissions: `Account → Access: Apps and Policies → Edit`
-   - Account Resources: scoped to the account
-   - TTL: 1 year (rotate annually)
-
-4. **Stash the token in macOS Keychain:**
-   ```sh
-   security add-generic-password -a "$USER" -s "cloudflare-api-token" -w "<paste-token>"
-   ```
-
-5. **Install cloudflared as a launchd service** so the tunnel survives
+2. **Install cloudflared as a launchd service** so the tunnel survives
    reboots and runs alongside the existing `notion-bridge` /
    `sentry-bridge` tunnels:
    ```sh
    sudo cloudflared service install
    ```
 
-6. **Edit `~/.cloudflared/live-feedback.yml`** so the wildcard ingress
+3. **Edit `~/.cloudflared/live-feedback.yml`** so the wildcard ingress
    points at the Workspaces server port (default `8787`):
    ```yaml
    tunnel: live-feedback
@@ -89,19 +79,12 @@ flowchart LR
      - service: http_status:404
    ```
 
-7. **Set server env** (in your shell rc, launchd plist, or wherever
+4. **Set server env** (in your shell rc, launchd plist, or wherever
    `bun run dev` reads its env):
    ```sh
    export CF_ACCESS_TEAM_DOMAIN="<team>.cloudflareaccess.com"
-   export CF_ACCOUNT_ID="<your-account-id>"
-   export CF_SHARE_BASE_HOSTNAME="tunnel.example.com"
    ```
-   Then restart the Workspaces server. Look for these lines in startup
-   logs to confirm it's wired:
-   ```
-   [feedback]   cf-access:  team=<team>.cloudflareaccess.com aud=auto-from-shares
-   [feedback]   share:      base=tunnel.example.com account=abc12345…
-   ```
+   Then restart the Workspaces server.
 
 ## A standing collaboration hostname (no share link needed)
 
@@ -304,7 +287,7 @@ anything. Links do not expire by default — pass `ttl` (`'15m'`, `s`/`m`/`h`/
 `d`/`w`) or `ttlSeconds` when a window is wanted. `CF_SHARE_MAX_TTL` (same
 grammar, e.g. `30d`) caps a mint or an extension, and a clamped reply carries
 `ttlClamped`. Shares already minted the old way keep working until they lapse:
-`list_shares` lists them, `set_share_ttl` shortens one, `unshare` revokes one.
+`list_shares` lists them, `set_share_ttl` shortens one, `unshare` revokes one. The server holds no Cloudflare token, so a revoke drops the record and leaves that share's Access application (`claude-workspaces-share-<slug>`) in the account; delete it in the Zero Trust dashboard.
 
 You can also drive it manually with the CLI:
 
@@ -343,9 +326,8 @@ unlock it.
 5. Comments save the same way they would for a Tailscale visitor —
    anchored, persistent, watched by the agent.
 
-The session cookie lives the full TTL of the share. After that, the
-cf-access app is gone, the URL stops working, and any cached cookie
-becomes useless.
+The session cookie lives the full TTL of the share. After that, the URL
+stops working and any cached cookie becomes useless.
 
 ## Troubleshooting
 
@@ -355,9 +337,8 @@ becomes useless.
 - **"no_share_for_host" 401** — the URL points at a hostname we don't
   have an active share for (expired or revoked). Run
   `bun share list` to confirm and re-share if needed.
-- **Reviewer's allowed domain rejected** — confirm the domain in the
-  Cloudflare Zero Trust dashboard (Access → Applications → your app →
-  Policies). The policy is `email_domain` based and exact.
+- **Reviewer's allowed domain rejected** — confirm the address or domain
+  is in the board's audience (`set_share_audience`). The match is exact.
 
 ## Limitations (current build)
 
