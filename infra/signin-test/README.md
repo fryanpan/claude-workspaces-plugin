@@ -75,6 +75,15 @@ requests for a `resend.dev` address. The key is 32 random bytes made by the
 run, set just before the smoke and deleted just after it, pass or fail, so
 between deploys the Worker has none and the exception is closed.
 
+Putting a secret makes a new Worker version, and for a while after the PUT
+returns the edge can still serve the previous one, which has no `SMOKE_KEY`.
+That fits the first run to reach the smoke: its sign-up and magic-link
+requests were refused 403, the answer Turnstile gives a dummy token checked
+against the widget's real secret, while the same code passes in workerd
+locally. So the smoke's first check after `/health` waits for the key. It signs in by password as an address nobody signed up,
+every 5 seconds for up to 45: 403 means the old version is still answering,
+401 means the gate passed the request and the rest of the checks can run.
+
 ## The Google client
 
 The OAuth client in Google Cloud must list the redirect URI above. That is
