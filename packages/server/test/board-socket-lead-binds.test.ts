@@ -35,7 +35,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardSocketPath } from '../src/board-sockets.ts';
-import { DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
+import { DEFAULT_DOC_STORE_TIMINGS, DOC_STORE_TIMINGS } from '../src/doc-store-timings.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 import { tinyPng } from './tiny-png.ts';
@@ -118,6 +118,12 @@ async function treeNames(setId: string): Promise<string> {
 }
 
 beforeAll(async () => {
+  // This file binds a dozen folders and every binding is polled, so on a
+  // loaded runner a healthy read can outlast the scaled 300ms deadline (CI
+  // has taken 815ms over a stat) and be quarantined: an open then answers
+  // 503 with nothing wrong with the file. No case here is about slow files,
+  // so pool calls get the production deadline.
+  boundFiles.deadlineMs = DEFAULT_DOC_STORE_TIMINGS.boundReadDeadlineMs;
   dataDir = mkdtempSync(join(tmpdir(), 'bs-lead-binds-'));
   workDir = realpathSync(mkdtempSync(join(tmpdir(), 'bs-lead-binds-work-')));
   socketRoot = mkdtempSync(
@@ -138,6 +144,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await h.stop();
+  boundFiles.deadlineMs = DOC_STORE_TIMINGS.boundReadDeadlineMs;
   for (const d of [dataDir, workDir, socketRoot]) rmSync(d, { recursive: true, force: true });
 });
 

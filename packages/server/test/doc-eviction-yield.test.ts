@@ -15,10 +15,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
 import { type TimeSlice, timeSlice } from '../src/event-loop.ts';
+import { type BoundStatResult, boundFiles } from '../src/slow-fs.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
+import { waitFor } from './wait-for.ts';
 
 const HOUR = 60 * 60 * 1000;
+
+type PoolWrite = (path: string, text: string) => Promise<BoundStatResult>;
+const patchable = boundFiles as unknown as { write: PoolWrite };
+const poolWrite: PoolWrite = boundFiles.write.bind(boundFiles);
 
 /** A slice that yields before every doc and runs `during(n)` inside yield n. */
 function scriptedSlice(during: (n: number) => void): TimeSlice {
@@ -51,6 +57,7 @@ describe('the idle sweep yields between docs', () => {
     });
   });
   afterEach(() => {
+    patchable.write = poolWrite;
     docStore.stop();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(srcDir, { recursive: true, force: true });
@@ -135,13 +142,35 @@ describe('the idle sweep yields between docs', () => {
       }
     });
 
+    // The edit's write-back goes to the thread pool once its debounce runs
+    // out. Hold that write open, so `flush()` below always meets it in
+    // flight: on a loaded runner the debounce can run out before the test
+    // reaches the flush, and that is the order this test has to survive.
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    patchable.write = async (path, text) => {
+      await released;
+      return poolWrite(path, text);
+    };
+
     const gone = await docStore.evictIdleDocs(slice);
 
     // The edit reached for the doc, so the sweep leaves it where the edit is.
     expect(gone).toEqual(['harborlight']);
     expect(resident('riverbend')).toBe(true);
-    // And when it does go, the edit goes to disk with it.
+    await waitFor(() => docStore.fileMoves.inFlight('riverbend'), {
+      describe: 'the write-back to reach the pool',
+    });
+    // And when it does go, the edit goes to disk with it. A write still on
+    // the pool holds the doc (`pending-write`), so the sweep waits for it to
+    // land rather than racing it.
     docStore.flush();
+    release();
+    await waitFor(() => !docStore.fileMoves.pendingWrite('riverbend'), {
+      describe: 'the pool write to land',
+    });
     clock += HOUR;
     expect(await docStore.evictIdleDocs()).toEqual(['riverbend']);
     expect(readFileSync(join(srcDir, 'riverbend.md'), 'utf8')).toContain('edited');
