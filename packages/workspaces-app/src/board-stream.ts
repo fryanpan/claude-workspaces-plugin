@@ -1,9 +1,13 @@
 /**
  * One board stream per page, shared by every part of the page that listens.
  *
- * `/workspaces/<ws>/events:stream` carries the board's events. A doc page
- * or a mock's host page has more than one reader of it: the lead chat, and
- * the tab title that follows a rename. Over HTTP/1.1 a browser holds about
+ * `/workspaces/<ws>/events:stream` carries the board's events, and a set's
+ * channel (a diff review, a folder) has the same shape under the set's id. A
+ * doc page has several readers of its board's channel: the lead chat, the
+ * tab title that follows a rename, the star, the plan gate and the task-link
+ * chips; the set sidebar (`set-live.ts`) reads the set's. Every one of them
+ * opens through here, and `doc-page-streams.test.ts` counts the streams a
+ * booted page holds. Over HTTP/1.1 a browser holds about
  * six connections per host across ALL of its tabs, and every SSE stream
  * holds one for as long as the page is open, so each extra reader would be
  * one more connection taken from every other tab on the board.
