@@ -137,6 +137,8 @@ export {
   addressableBlocks,
   blockAddresses,
   storeBlockAddresses,
+  storeBlockIdsOnWrite,
+  BLOCK_IDS_ORIGIN,
   ensureBlockIds,
   duplicateIdBlocks,
   remintDuplicateIds,

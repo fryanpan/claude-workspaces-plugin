@@ -3105,8 +3105,12 @@ rather than a region of text. `prose-identity.ts` is the leaf that names the
 two attributes a block can carry — its stable id, and the agent that wrote it.
 `prose-address.ts` says which blocks are addressable and the id each answers
 to, writing nothing: a block with no stored id answers to its Yjs item id, and
-only a write's transaction stores that value, so an outline read is a pure
-read and an id it handed out still names its block after the next edit.
+only a write stores that value, so an outline read is a pure read and an id it
+handed out still names its block after the next edit. Writes store ids as
+blocks land: the browser's `block-identity.ts` stamps the blocks a person
+inserts inside that person's own change, `storeBlockIdsOnWrite` stores them
+after a server-side write, and a hydrate stores them in memory without a save.
+So only a block nobody has written since load goes by a derived id.
 `prose-outline.ts` reads a document as a list of those ids with their headings
 and text, and installs the observer that drops the authorship attribute the
 moment a person edits the block. `prose-batch.ts` applies a list of scoped

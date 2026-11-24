@@ -58,6 +58,8 @@ export {
   findBlockById,
   remintDuplicateIds,
   storeBlockAddresses,
+  storeBlockIdsOnWrite,
+  BLOCK_IDS_ORIGIN,
 } from './prose-address.ts';
 export {
   BLOCK_ID_ATTR,

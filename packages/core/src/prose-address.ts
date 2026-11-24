@@ -178,8 +178,46 @@ export function ensureBlockIds(doc: Y.Doc, opts: { transactionOrigin?: unknown }
   let set = 0;
   doc.transact(() => {
     set = storeBlockAddresses(fragment);
-  }, opts.transactionOrigin ?? 'block-ids');
+  }, opts.transactionOrigin ?? BLOCK_IDS_ORIGIN);
   return set;
+}
+
+/** Origin of the transaction that stores block ids, so the watcher below
+ *  never answers its own write. */
+export const BLOCK_IDS_ORIGIN = 'block-ids';
+
+/**
+ * Store an id on every block a server-side write creates.
+ *
+ * An outline read stores nothing, so a block that has never carried an id is
+ * named by its derived id, and a derived id dies with its element. A browser
+ * re-creates an element when a person's edit cannot be applied in place. The
+ * stored `cwId` is copied to the new element, because the editor's schema
+ * declares it (`block-identity.ts`); a derived id is not. So the ids are
+ * stored as soon as blocks are written: an agent's text edit, a whole-doc
+ * rewrite, a reparse from disk. A person's blocks get theirs from the editor.
+ * Only a block nobody has written since it was loaded still goes by a derived
+ * id.
+ *
+ * Only a transaction that ADDED an element is answered. Typing inside a
+ * block adds text and costs nothing here. The store runs as a transaction of
+ * its own, after the one that created the blocks.
+ */
+export function storeBlockIdsOnWrite(doc: Y.Doc): () => void {
+  const fragment = getProseFragment(doc);
+  const onChange = (events: Y.YEvent<Y.AbstractType<unknown>>[], txn: Y.Transaction): void => {
+    // A person's own edit is left alone: the editor stamps the blocks it
+    // inserts inside that change (`block-identity.ts`), and a write of ours
+    // after it would read as a second, server-made version in the history.
+    const origin = txn.origin;
+    if (origin === BLOCK_IDS_ORIGIN || (origin != null && typeof origin !== 'string')) return;
+    const added = events.some((event) =>
+      [...event.changes.added].some((item) => item.content instanceof Y.ContentType),
+    );
+    if (added) ensureBlockIds(doc);
+  };
+  fragment.observeDeep(onChange);
+  return () => fragment.unobserveDeep(onChange);
 }
 
 /** The element answering to `id`, stored or derived, or nothing. */

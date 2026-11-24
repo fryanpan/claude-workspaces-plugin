@@ -176,10 +176,13 @@ describe('moving a section in the editor', () => {
     handle.editor.commands.keyboardShortcut('Enter');
     handle.editor.commands.insertContent('new bullet');
     expect(duplicateIds(fragment)).toEqual([]);
-    // The bullet that was there keeps the address; the new one has none yet.
+    // The bullet that was there keeps the address; the new one gets its own,
+    // stamped in the same change (`identifyInsertedBlocks`).
     const after = idsInOrder(fragment);
     expect(after.find(([, text]) => text === 'dock opens')?.[0]).toBe(before);
-    expect(after.find(([, text]) => text === 'new bullet')?.[0]).toBeUndefined();
+    const fresh = after.find(([, text]) => text === 'new bullet')?.[0];
+    expect(typeof fresh).toBe('string');
+    expect(fresh).not.toBe(before);
   });
 
   it('Enter at the end of a paragraph gives the new paragraph no copy of the id', () => {
@@ -222,7 +225,7 @@ describe('moving a section in the editor', () => {
     ]);
   });
 
-  it('a copy-drag of a section leaves the ids on the original and none on the copy', () => {
+  it('a copy-drag of a section leaves the ids on the original and fresh ones on the copy', () => {
     const { fragment, view } = mountDoc();
     const before = idsInOrder(fragment);
     const section = before.slice(
@@ -237,7 +240,9 @@ describe('moving a section in the editor', () => {
     const after = idsInOrder(fragment);
     const copy = after.slice(0, section.length);
     expect(copy.map(([, text]) => text)).toEqual(section.map(([, text]) => text));
-    expect(copy.map(([id]) => id)).toEqual(section.map(() => undefined));
+    // Each copied block has an id of its own, none of them the original's.
+    const originals = new Set(section.map(([id]) => id));
+    expect(copy.every(([id]) => typeof id === 'string' && !originals.has(id))).toBe(true);
     expect(after.slice(section.length, 2 * section.length)).toEqual(section);
   });
 

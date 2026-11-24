@@ -9,6 +9,7 @@ import {
   BLOCK_AUTHOR_ATTR,
   BLOCK_IDENTITY_ATTRS,
   BLOCK_ID_ATTR,
+  newBlockId,
 } from '@claude-workspaces/core/prose';
 import { type Attribute, Extension } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -45,6 +46,14 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap';
  * so it gets neither. A copy-drag inside the editor carries its slice's
  * attributes the same way, which no attribute option reaches, so the plugin
  * below clears them off a copy whose id still sits on another block.
+ *
+ * **A block a person makes gets an id of its own, here.** The same plugin
+ * stamps a fresh `cwId` on every addressable block a local edit inserts, so
+ * the id reaches the server inside the person's own change. The server's
+ * outline read stores nothing, and a block with no stored id goes by an id
+ * derived from its Yjs element. That derived id is lost when the editor
+ * re-creates the element, and a stored `cwId` is not, because this schema
+ * carries it across.
  *
  * Registered in `createEditor`'s BASE extension list. Deleting it silently
  * un-does all of the server-side identity work.
@@ -109,8 +118,8 @@ function insertedRanges(tr: Transaction): Array<{ from: number; to: number }> {
 /**
  * Clear the identity off every block a local edit wrote whose id another
  * block already holds. The block that was there first keeps the address; the
- * copy goes back to having none, and the server mints it one of its own on
- * the next outline read. When every holder is new — the same slice dropped
+ * copy goes back to having none, and `identifyInsertedBlocks` gives it a
+ * fresh one. When every holder is new — the same slice dropped
  * twice — the first in document order keeps it.
  *
  * Remote transactions are left alone: the server's copy of the doc is what
@@ -161,6 +170,53 @@ export function dedupeInsertedIds(
   return out;
 }
 
+/** Whether core's outline addresses this node (`addressableBlocks` in
+ *  `prose-address.ts`): a list item's own paragraph, a quote's paragraphs and
+ *  everything inside a table are part of the block that holds them. */
+function addressable(node: PMNode, parent: PMNode | null, inTable: boolean): boolean {
+  if (!BLOCK_TYPES.includes(node.type.name) || inTable) return false;
+  if (parent?.type.name === 'listItem') {
+    return node.type.name === 'bulletList' || node.type.name === 'orderedList';
+  }
+  return !(parent?.type.name === 'blockquote' && node.type.name === 'paragraph');
+}
+
+/**
+ * Dedupe the inserted ids, then give every addressable block a local edit
+ * inserted, and that carries no id, a fresh one. Only blocks that START inside
+ * a range the edit wrote count, so a block that was already there keeps
+ * whatever address it had. Remote transactions are left alone.
+ */
+export function identifyInsertedBlocks(
+  trs: readonly Transaction[],
+  state: EditorState,
+): Transaction | null {
+  const deduped = dedupeInsertedIds(trs, state);
+  let ranges: Array<{ from: number; to: number }> = [];
+  for (const tr of trs) {
+    if (!tr.docChanged || tr.getMeta(ySyncPluginKey)) continue;
+    ranges = ranges.map((r) => ({ from: tr.mapping.map(r.from, 1), to: tr.mapping.map(r.to, -1) }));
+    ranges.push(...insertedRanges(tr));
+  }
+  if (ranges.length === 0) return deduped;
+  const out = deduped ?? state.tr;
+  let stamped = false;
+  for (const range of ranges) {
+    out.doc.nodesBetween(range.from, range.to, (node, pos, parent) => {
+      const $pos = out.doc.resolve(pos);
+      let inTable = false;
+      for (let d = 0; d <= $pos.depth; d++) if ($pos.node(d).type.name === 'table') inTable = true;
+      if (pos < range.from || !addressable(node, parent, inTable)) return !node.isTextblock;
+      const id = node.attrs[BLOCK_ID_ATTR];
+      if (typeof id === 'string' && id.length > 0) return !node.isTextblock;
+      out.setNodeMarkup(pos, undefined, { ...node.attrs, [BLOCK_ID_ATTR]: newBlockId() });
+      stamped = true;
+      return !node.isTextblock;
+    });
+  }
+  return stamped ? out : deduped;
+}
+
 export const BlockIdentity = Extension.create({
   name: 'blockIdentity',
 
@@ -172,7 +228,7 @@ export const BlockIdentity = Extension.create({
     return [
       new Plugin({
         key: new PluginKey('cwBlockIdentityDedupe'),
-        appendTransaction: (trs, _old, state) => dedupeInsertedIds(trs, state),
+        appendTransaction: (trs, _old, state) => identifyInsertedBlocks(trs, state),
       }),
     ];
   },

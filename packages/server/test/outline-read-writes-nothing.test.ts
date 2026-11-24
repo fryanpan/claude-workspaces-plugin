@@ -1,10 +1,13 @@
 /**
  * Reading a doc's outline changes nothing on disk.
  *
- * A doc parsed from markdown holds blocks with no `cwId`. The outline used to
- * mint those ids as it read, so the first `GET …/outline` wrote the `.ydoc`.
- * Now an id-less block is reported under an id derived from its Yjs identity,
- * and the id is persisted only when an edit writes the doc.
+ * A `.ydoc` saved before blocks got their ids on write holds blocks with no
+ * `cwId`. The outline used to mint those ids as it read, so the first
+ * `GET …/outline` wrote the `.ydoc`. Now such a block answers to an id derived
+ * from its Yjs identity, and the id reaches disk only with a write.
+ *
+ * The fixture is that legacy file: a doc the server made, with its ids
+ * stripped while the server is stopped, then loaded by a fresh server.
  *
  * Fixtures are synthetic. The repo is public.
  */
@@ -13,6 +16,8 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { prose } from '@claude-workspaces/core';
+import * as Y from 'yjs';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { pastWriteBack, waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -44,6 +49,20 @@ describe('GET …/outline on a doc whose blocks have no ids', () => {
     });
     expect(res.status).toBe(200);
     docId = ((await res.json()) as { docId: string }).docId;
+    const path = await settledYdoc();
+    await handle.stop();
+
+    const legacy = new Y.Doc();
+    Y.applyUpdate(legacy, readFileSync(path));
+    const blocks = prose.addressableBlocks(prose.getProseFragment(legacy));
+    expect(blocks.some((el) => prose.readBlockId(el) !== undefined)).toBe(true);
+    legacy.transact(() => {
+      for (const el of blocks) el.removeAttribute(prose.BLOCK_ID_ATTR);
+    });
+    writeFileSync(path, Y.encodeStateAsUpdate(legacy));
+
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
   });
 
   afterAll(async () => {
@@ -66,8 +85,28 @@ describe('GET …/outline on a doc whose blocks have no ids', () => {
     return walk(dataDir);
   };
 
+  const docFrom = (path: string): Y.Doc => {
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, readFileSync(path));
+    return doc;
+  };
+
   const sha = (path: string): string =>
     createHash('sha256').update(readFileSync(path)).digest('hex');
+
+  /** The doc's `.ydoc` once two reads a write-back apart agree. */
+  const settledYdoc = (): Promise<string> =>
+    waitFor(
+      async () => {
+        const path = ydocPath();
+        if (!path) return false;
+        const a = sha(path);
+        // timed: one write-back window, the debounce a write can still be inside.
+        await new Promise((r) => setTimeout(r, pastWriteBack()));
+        return sha(path) === a ? path : false;
+      },
+      { describe: 'the doc to stop writing its .ydoc' },
+    );
 
   const outline = async (): Promise<OutlineBody> => {
     const res = await fetch(`${base}/workspaces/${ws}/docs/${docId}/outline`);
@@ -76,19 +115,13 @@ describe('GET …/outline on a doc whose blocks have no ids', () => {
   };
 
   it('leaves the .ydoc byte for byte as it was, and hands out the same ids twice', async () => {
-    // The create persists the .ydoc on its own debounce; wait until two reads
-    // a write-back apart agree before taking the snapshot.
-    const before = await waitFor(
-      async () => {
-        const path = ydocPath();
-        if (!path) return false;
-        const a = sha(path);
-        // timed: one write-back window, the debounce the create can still be inside.
-        await new Promise((r) => setTimeout(r, pastWriteBack()));
-        return sha(path) === a ? a : false;
-      },
-      { describe: 'the created doc to stop writing its .ydoc' },
-    );
+    const path = ydocPath() as string;
+    const before = sha(path);
+    expect(
+      prose
+        .addressableBlocks(prose.getProseFragment(docFrom(path)))
+        .map((el) => prose.readBlockId(el)),
+    ).toEqual([undefined, undefined, undefined, undefined, undefined]);
 
     const first = await outline();
     const second = await outline();
