@@ -12,7 +12,8 @@
  * decides which family sees a request, and `route-table.ts` lists the eight
  * adjacencies where that order is behaviour.
  *
- * ADDING A ROUTE: add its row to its family below, then `bun run routes:table`.
+ * ADDING A ROUTE: add its row to its family below, then `bun run routes:table`,
+ * which also regenerates the span-name templates in core's `route-templates.ts`.
  */
 
 import { type RouteEntry, type RouteGate, exampleFor, gated } from './route-table.ts';
