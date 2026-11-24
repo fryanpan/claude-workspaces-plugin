@@ -2,7 +2,7 @@
  * `POST /api/share/enabled`: the external-access master switch, and the
  * narrower switch for one board.
  *
- * Trusted-local like the rest of `/api/share*` (routes/route-table-rows.ts).
+ * Trusted-local like the rest of `/api/share*` (route-table-rows.ts).
  * Called from `routes/auth-share.ts` at the position this block held there,
  * after the share list and before the retired per-doc share route.
  *
@@ -210,6 +210,9 @@ export function applyMasterFlip(
     // delivering.
     closedSockets += docStore.closeSocketsForShareMembers(() => true);
     closedStreams += sse.closeForShareMembers(() => true);
+    // And a tunnel caller of a route answered above admission (the home
+    // feed's stream), whom neither sweep above can name.
+    closedStreams += sse.closeExternal();
   }
   ctx.onSharingFlip(flip);
   return { ok: true, closedSockets, closedStreams };

@@ -303,8 +303,11 @@ describe('a proxied trusted host, with Access in front of it', () => {
       expect(create.status).toBe(403);
       expect(await create.json()).toEqual({ error: 'out_of_share_scope' });
       // POSITIVE CONTROL: the collab host is live and serving its own
-      // surface, so the 403s above are scope, not a dead hostname.
-      expect((await get(h, '/app', collab)).status).not.toBe(403);
+      // surface, so the 403s above are scope, not a dead hostname. The board
+      // page, not bare `/app`: no handler answers `/app`, so it used to pass
+      // this check with a 404, and it is out of share scope now that scope is
+      // read off the route table.
+      expect((await get(h, `/workspaces/${boards.get(h) ?? ''}`, collab)).status).toBe(200);
     });
 
     it('leaves loopback alone, and the retired link hostname reaches nothing', async () => {

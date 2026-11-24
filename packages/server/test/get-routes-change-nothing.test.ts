@@ -32,8 +32,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
-import { exampleFor } from '../src/routes/route-table.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
+import { exampleFor } from '../src/route-table.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { pastWriteBack, waitFor, waitForFile } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';

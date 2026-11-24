@@ -21,8 +21,8 @@ import { boundFiles } from '../slow-fs.ts';
  * read a set's source files.
  *
  * The path is a query parameter rather than trailing segments so the share
- * gate can name this verb as `raw` in its table, beside `context-file`
- * (`REVIEW_MEMBER_ROUTES` in `middleware/host-guard.ts`). A local-only set is
+ * gate can name this verb as `raw` in its row, beside `context-file`
+ * (the share-scope rows in `route-table-rows.ts`). A local-only set is
  * refused off the box by the request chain before this runs, as every route
  * under `attachments/<setId>/` is.
  *

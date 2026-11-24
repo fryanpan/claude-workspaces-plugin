@@ -130,10 +130,15 @@ export class SseBus {
    * it on nothing, so a tab can never make an absent agent look present —
    * which is the property that allows this signal to widen a delivery
    * decision where a bare subscriber count may only narrow one.
+   *
+   * `external` marks a stream opened through the tunnel by a route that
+   * answers above admission (the home feed), whose caller carries neither a
+   * shareId nor a membership. It is what lets the master switch hang that
+   * stream up when external access goes off (`closeExternal`).
    */
   private byDoc = new Map<
     string,
-    Map<Sink, { shareId?: string; agentId?: string; shareMember?: string }>
+    Map<Sink, { shareId?: string; agentId?: string; shareMember?: string; external?: true }>
   >();
 
   /** channel → recent frames (broadcast + addressed), oldest first. Bounded by REPLAY_MAX_EVENTS
@@ -262,6 +267,7 @@ export class SseBus {
     shareId?: string,
     agentId?: string,
     shareMember?: string,
+    external?: boolean,
   ): () => void {
     let set = this.byDoc.get(docId);
     if (!set) {
@@ -272,6 +278,7 @@ export class SseBus {
       ...(shareId !== undefined ? { shareId } : {}),
       ...(agentId !== undefined ? { agentId } : {}),
       ...(shareMember !== undefined ? { shareMember } : {}),
+      ...(external ? { external: true as const } : {}),
     });
     if (agentId !== undefined) this.onAgentStreams?.(docId, agentId);
     for (const fn of this.streamWatchers) fn(docId);
@@ -743,6 +750,27 @@ export class SseBus {
     return closed;
   }
 
+  /**
+   * Close every stream marked `external`: the master switch's hang-up for a
+   * tunnel caller no share or membership admitted. Returns how many.
+   */
+  closeExternal(): number {
+    let closed = 0;
+    for (const [docId, set] of this.byDoc) {
+      for (const [sink, who] of set) {
+        if (!who.external) continue;
+        try {
+          sink.close();
+        } catch {
+          // Already gone; the remove below is the bookkeeping either way.
+        }
+        this.remove(docId, sink);
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
   /** Close streams whose authorizing share is no longer live (revoked or
    *  expired). Returns the shareIds swept. */
   closeForDeadShares(isLive: (shareId: string) => boolean): string[] {
@@ -792,6 +820,8 @@ export function openSseStream(
    * production caller passes it.
    */
   keepaliveMs: number = SSE_KEEPALIVE_MS,
+  /** Opened through the tunnel by a route above admission; see `SseBus.closeExternal`. */
+  external = false,
 ): Response {
   // Every write goes through the writer, which hands it to the socket one
   // event-loop turn later: see sse-writer.ts for the macOS hold it avoids.
@@ -815,7 +845,7 @@ export function openSseStream(
       };
       // initial comment so proxies flush headers
       writer.write(':ok\n\n');
-      remove = bus.add(docId, sink, shareId, agentId, shareMember);
+      remove = bus.add(docId, sink, shareId, agentId, shareMember, external);
       // Catch-up, BETWEEN registration and the first live write. Everything
       // in start() runs synchronously on one event loop, so no broadcast can
       // land between `bus.add` above and this replay — the replayed tail and

@@ -48,7 +48,7 @@ import { join } from 'node:path';
 import { type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { Deployer } from '../src/deploy.ts';
 import { PluginRefresher } from '../src/plugin-refresh.ts';
-import { ROUTE_TABLE } from '../src/routes/route-table-rows.ts';
+import { ROUTE_TABLE } from '../src/route-table-rows.ts';
 import { type ServerHandle, type ServerOptions, createServer } from '../src/server.ts';
 
 /** This machine's first non-loopback IPv4 address, if it has one. */

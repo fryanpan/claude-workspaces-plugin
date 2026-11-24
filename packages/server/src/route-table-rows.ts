@@ -637,6 +637,14 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/doc-components.ts', [
     ['share-scope', '/workspaces/:ws/docs/:docId/components/*', 'GET HEAD'],
   ]),
+  ...family('routes/doc-map-key.ts', [
+    [
+      'share-scope',
+      '/workspaces/:ws/docs/:docId/map-key/*',
+      'GET',
+      'The browser key a map in the doc draws with, answered only while the doc’s live content draws on that basemap: a reader of the doc reads its map.',
+    ],
+  ]),
   // An agent's component tools; deliberately outside `components/*`.
   ...family('routes/doc-component-agent.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/agent-components', 'GET'],
@@ -778,12 +786,17 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   // on the board in the path.
   ...family('routes/apps.ts', [
     ['trusted-local', '/workspaces/:ws/apps', 'POST'],
-    ['share-scope', '/workspaces/:ws/apps/:docId', 'GET HEAD'],
+    [
+      'share-scope',
+      '/workspaces/:ws/apps/:docId',
+      'GET HEAD POST',
+      'The POST is the waiting page’s “Ask again”: no input, a fixed notice to the agent already told, one per outage per two minutes (`AppOutages.askAgain`).',
+    ],
     [
       'share-scope',
       '/workspaces/:ws/apps/:docId/*',
-      'GET HEAD',
-      'A websocket upgrade at this address is answered by `routes/upgrade-stream.ts` through `routes/app-socket.ts`, behind the same gate as the page.',
+      'GET HEAD POST PUT PATCH DELETE',
+      'The app’s own pages and its own saves. A write is refused to a share-link visitor and to another origin by `appWriteRefusal` (`app-proxy.ts`). A websocket upgrade here is answered by `routes/upgrade-stream.ts` through `routes/app-socket.ts`, behind the same gate as the page.',
     ],
   ]),
 
@@ -804,6 +817,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/activity', 'GET'],
     ['share-scope', '/workspaces/:ws/library', 'GET'],
     ['share-scope', '/workspaces/:ws/mockups/:docId', 'GET'],
+    ['share-scope', '/workspaces/:ws/whiteboards/:docId', 'GET'],
     ['share-scope', '/workspaces/:ws/attachments/:setId', 'GET'],
     ['trusted-local', '/demos/*', 'GET'],
     ['trusted-local', '/settings', 'GET'],

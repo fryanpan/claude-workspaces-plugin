@@ -39,7 +39,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = join(import.meta.dir, '..', 'src');
-const NOT_FAMILIES = /^(hono-app.*|hono-gates|route-table.*|hono-front|hono-families)\.ts$/;
+const NOT_FAMILIES = /^(hono-app.*|hono-gates|hono-front|hono-families)\.ts$/;
 const ROUTE_FUNCTION = /^(handle|serve)/;
 
 /** The gate functions, and the return values that mean "refused". */

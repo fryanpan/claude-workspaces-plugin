@@ -202,7 +202,7 @@ function redactNode(node: unknown, scopeWorkspaceId?: string): unknown {
  * `groups`.
  *
  * This route sits on the same visitor allowlist line as `/tree` and `/files`
- * (`docSubrouteAllowed`) and builds the identical `reviewUrl` on every node,
+ * (the share-scope rows) and builds the identical `reviewUrl` on every node,
  * but it was the one of the three that returned the model verbatim — so a
  * share visitor on a diff review learned the tailnet hostname and port, plus
  * the workspace id of whichever board holds the doc first, which need not be

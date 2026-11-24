@@ -170,6 +170,8 @@ import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { createStaleAskNotifier } from './review-stale-notify.ts';
+import { ROUTE_TABLE } from './route-table-rows.ts';
+import { mountRouteTable } from './route-table.ts';
 import { type AccessRoutesContext } from './routes/access.ts';
 import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
@@ -201,8 +203,6 @@ import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
 import { type RepoRoutesContext } from './routes/repos.ts';
 import { type ReviewFileRoutesContext } from './routes/review-files.ts';
 import { type ReviewQueueRoutesContext } from './routes/review-queue.ts';
-import { ROUTE_TABLE } from './routes/route-table-rows.ts';
-import { mountRouteTable } from './routes/route-table.ts';
 import { applyMasterFlip } from './routes/share-switch.ts';
 import { createShellStatic } from './routes/shell-static.ts';
 import { type TaskRoutesContext } from './routes/tasks.ts';
@@ -2525,12 +2525,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // `at2` only: a board-scoped token for the board the feed path names.
     boardGrantFor: (bearer) => (bearer.startsWith('at2.') ? boardAgentTokens.verify(bearer) : null),
     accessInFront: () => signInDoor.effectiveMode() !== 'better-auth',
+    // These families answer above admission, so they ask the master switch
+    // themselves (`refuseWhileExternalAccessOff`, routes/home-feed.ts).
+    externalAccessOpen: () => sharingGate.isEnabled(),
     j,
   };
 
   /** A board pushed from the Mac, on a project machine only — routes/board-import.ts. */
   const boardImportCtx = boardImportRoutesContext(opts.boardImport, {
     ...{ dataDir, verifier: staticAccessVerifier, j },
+    externalAccessOpen: () => sharingGate.isEnabled(),
     port: () => server.port ?? port,
   });
 
@@ -3585,7 +3589,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * fallback can be the SAME handler. A route in the table and a route that
    * falls through therefore cannot diverge: both run this, and this runs the
    * ordered chain in `route()` unchanged. The table decides nothing about
-   * dispatch on purpose — see `routes/route-table.ts` for why the chain, not
+   * dispatch on purpose — see `route-table.ts` for why the chain, not
    * Bun’s specificity matching, still orders the eight adjacencies whose
    * comments call them load-bearing.
    */
@@ -3754,7 +3758,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // it, and they now reach it through the narrowed forward reference the
     // upgrade-stream factory holds. Bun still passes it; nothing here wants
     // it.
-    // ── The route table ── see routes/route-table.ts.
+    // ── The route table ── see route-table.ts.
     //
     // Every front-door path pattern this server answers, each registered
     // through `gated(...)` naming the gate it sits behind. Mounting it here

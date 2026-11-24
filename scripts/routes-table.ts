@@ -9,11 +9,8 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROUTE_TABLE } from '../packages/server/src/routes/route-table-rows.ts';
-import {
-  renderRouteTable,
-  renderRouteTemplates,
-} from '../packages/server/src/routes/route-table.ts';
+import { ROUTE_TABLE } from '../packages/server/src/route-table-rows.ts';
+import { renderRouteTable, renderRouteTemplates } from '../packages/server/src/route-table.ts';
 
 const root = join(import.meta.dir, '..');
 

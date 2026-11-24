@@ -4,8 +4,7 @@
  *
  * The gate started life on the comment routes only. That protected nothing:
  * `resolve`, `reopen` and `threads/by_find` are all inside a visitor's scope
- * (`docSubrouteAllowed` allows everything under `threads/` bar three surgery
- * verbs), every one of them is a thread CHANGE, and every thread change
+ * (each has a share-scope row in `route-table-rows.ts`), every one of them is a thread CHANGE, and every thread change
  * schedules a summary. A visitor posts a comment (no call, correctly), clicks
  * Resolve, and the host's key pays for a prompt containing the visitor's own
  * text. `by_find` was worse still: the visitor's body is the WHOLE prompt and

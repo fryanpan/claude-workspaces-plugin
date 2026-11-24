@@ -32,7 +32,7 @@
  *
  * THE WRITES ARE THE OWNER'S ALONE (Bryan, 29 Oct: only he changes who is
  * in). Every share visitor is refused, an invited Owner included; the PATHS
- * are still admitted to members by `MEMBER_ADMIN_ROUTES` in the host guard,
+ * are still admitted to members by their `owner-in-handler` rows,
  * so the refusal is a server-side 403 here rather than a control the page
  * happened not to draw. Off the share hostname the check is `requireOwner`,
  * and an add needs the owner's own proof besides (`share/owner-proof.ts`).
