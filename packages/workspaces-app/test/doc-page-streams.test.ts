@@ -57,13 +57,14 @@ class CountingSource extends FakeEventSource {
 (globalThis as { EventSource?: unknown }).EventSource = CountingSource;
 
 /**
- * A board per case. The page's shared streams live for the page, and the lead
- * chat a boot mounts is never torn down (it is once per page), so a second
- * case on the same board would join the first case's stream and open nothing.
+ * A board and a set per case. The page's shared streams live for the page,
+ * and the lead chat a boot mounts is never torn down (it is once per page), so
+ * a second case on the same channel would join the first case's stream and
+ * open nothing.
  */
 let WS = '';
+let SET = '';
 let boards = 0;
-const SET = 'rev-1';
 const channel = (id: string) => `/workspaces/${id}/events:stream`;
 const taskUrl = () => `/workspaces/${WS}?task=t-9`;
 
@@ -152,6 +153,7 @@ beforeEach(() => {
   server.reset();
   server.on('/api/auth/session', { authenticated: false, canWrite: true });
   WS = `w-${++boards}`;
+  SET = `rev-${boards}`;
   server.on(`/workspaces/${WS}/links:titles`, {
     titles: { [taskUrl()]: 'The strip task' },
     statuses: { [taskUrl()]: 'todo' },
