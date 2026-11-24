@@ -120,7 +120,14 @@ describe('machines.json carries the pins', () => {
 
 describe('the machine reports its lead', () => {
   const io = (procs: string[][], env: Record<string, string> = {}) => ({
-    procs: () => procs.map((cmdline) => ({ cmdline, environ: () => ({}) })),
+    procs: () =>
+      procs.map((cmdline, i) => ({
+        pid: i + 2,
+        ppid: 1,
+        uid: 10004,
+        cmdline,
+        environ: () => ({}),
+      })),
     read: () => null,
     leadEnv: () => env,
     dirs: () => [],

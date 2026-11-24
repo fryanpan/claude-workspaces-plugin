@@ -40,7 +40,7 @@ import {
 } from '../../packages/server/src/auth/signed-token.ts';
 import { boardWidgetToken } from '../../packages/server/src/auth/widget-token.ts';
 import { frameCookie, frameTicket } from '../../packages/server/src/frame-ticket.ts';
-import { type FactsIo, type Proc, readFacts } from './machine-facts.ts';
+import { type FactsIo, type Proc, readFacts, statusIds } from './machine-facts.ts';
 
 export const WALL_TYPES = ['wt2', 'ft1', 'fc1', 'app-voice'] as const;
 export type WallType = (typeof WALL_TYPES)[number];
@@ -134,8 +134,11 @@ const realFactsIo: FactsIo = {
       .filter((d) => /^\d+$/.test(d))
       .map((pid): Proc | null => {
         const cmd = readOrNull(`/proc/${pid}/cmdline`);
-        if (cmd === null) return null;
+        const status = readOrNull(`/proc/${pid}/status`);
+        if (cmd === null || status === null) return null;
         return {
+          pid: Number(pid),
+          ...statusIds(status),
           cmdline: cmd.split('\0').filter(Boolean),
           environ: () =>
             Object.fromEntries(

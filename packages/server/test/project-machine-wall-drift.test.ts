@@ -76,7 +76,11 @@ const failing = (rows: Array<{ check: string; answer: string; ok: boolean }>) =>
 describe('the on-machine reader', () => {
   const io = (over: Partial<FactsIo> = {}): FactsIo => ({
     procs: () => [
+      { pid: 7, ppid: 1, uid: 0, cmdline: ['bash', '/app/entrypoint.sh'], environ: () => ({}) },
       {
+        pid: 20,
+        ppid: 7,
+        uid: 10001,
         cmdline: ['bun', 'run', '/app/packages/server/src/bin.ts', '--port', '8787'],
         environ: () => ({
           CW_OWNER_EMAIL: OWNER,
@@ -85,6 +89,9 @@ describe('the on-machine reader', () => {
         }),
       },
       {
+        pid: 21,
+        ppid: 7,
+        uid: 10002,
         cmdline: ['/usr/local/bin/cloudflared', 'tunnel', '--no-autoupdate', 'run'],
         environ: () => ({}),
       },
@@ -127,6 +134,9 @@ describe('the on-machine reader', () => {
       io({
         procs: () => [
           {
+            pid: 21,
+            ppid: 7,
+            uid: 10002,
             cmdline: ['cloudflared', 'tunnel', '--url', 'http://localhost:8787'],
             environ: () => ({}),
           },
