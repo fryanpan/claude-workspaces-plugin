@@ -15,12 +15,18 @@
  *     can find it on GitHub and read its read-only flag
  *   which GitHub repos the lead's clones point at, from their `.git/config`
  *     text (no git runs here)
+ *   which listed Claude token the machine's lead is set to, by LABEL alone,
+ *     from the `CW_LEAD_TOKEN_ORG` marker in root's environment (the deploy
+ *     sets it; the lead cannot write it), and whether Remote Control is on:
+ *     `CW_LEAD_REMOTE_CONTROL=1` there, or a process run with
+ *     `--remote-control`
  *
  * The settings carried back are addresses, hostnames, audiences and uids: no
  * token, key or password. The report compares them and prints none.
  */
 import { join } from 'node:path';
 import { parsePolicy } from '../../packages/server/src/git-push/policy.ts';
+import { TOKEN_LABEL } from './lead-usage.ts';
 
 export const SERVER_KEYS = [
   'CW_OWNER_EMAIL',
@@ -48,6 +54,12 @@ export interface MachineFacts {
   deployKey: string | null;
   /** `owner/name` of each GitHub repo a clone of the lead's points at. */
   repos: string[];
+  /**
+   * The lead's sign-in by label ("" for the org's own approval, null for none
+   * set), and whether Remote Control is on. Absent from a probe older than
+   * this field.
+   */
+  lead?: { tokenLabel: string | null; remoteControl: boolean };
 }
 
 export interface Proc {
@@ -60,6 +72,8 @@ export interface FactsIo {
   procs: () => Proc[];
   /** A file's text, or null when it is not there. */
   read: (path: string) => string | null;
+  /** The lead's two settings from root's environment, as Fly set them. */
+  leadEnv: () => { CW_LEAD_TOKEN_ORG?: string; CW_LEAD_REMOTE_CONTROL?: string };
   /** The full paths of the folders directly inside `path`. */
   dirs: (path: string) => string[];
   /** The public half of a private key file, or null. */
@@ -88,6 +102,18 @@ export function loginUsers(passwd: string): Array<{ name: string; uid: number }>
     .filter((f) => f.length >= 3)
     .map((f) => ({ name: f[0] ?? '', uid: Number(f[2]) }))
     .filter((u) => Number.isInteger(u.uid) && u.uid >= 1000 && u.uid < 65534);
+}
+
+/**
+ * The label in a `CW_LEAD_TOKEN_ORG` marker: `listed:<label>:<digest>` for a
+ * listed token, "" for an org name (a sign-in made by the org's own
+ * approval), null for none. The digest is of the sign-in, so it never leaves.
+ */
+export function markerLabel(marker: string | undefined): string | null {
+  if (marker === undefined || marker === '') return null;
+  if (!marker.startsWith('listed:')) return '';
+  const label = marker.split(':')[1] ?? '';
+  return TOKEN_LABEL.test(label) ? label : '(not a label)';
 }
 
 export function readFacts(io: FactsIo): MachineFacts {
@@ -138,5 +164,14 @@ export function readFacts(io: FactsIo): MachineFacts {
     gitPush,
     deployKey,
     repos: [...repos].sort(),
+    lead: (() => {
+      const env = io.leadEnv();
+      return {
+        tokenLabel: markerLabel(env.CW_LEAD_TOKEN_ORG),
+        remoteControl:
+          env.CW_LEAD_REMOTE_CONTROL === '1' ||
+          procs.some((p) => p.cmdline.some((a) => /^--remote-control(=|$)/.test(a))),
+      };
+    })(),
   };
 }

@@ -65,6 +65,7 @@ function facts(over: Partial<MachineFacts> = {}): MachineFacts {
     },
     deployKey: PUB,
     repos: ['alice/riverbend'],
+    lead: { tokenLabel: 'first-account', remoteControl: false },
     ...over,
   };
 }
@@ -98,6 +99,7 @@ describe('the on-machine reader', () => {
         '/etc/passwd':
           'root:x:0:0::/root:/bin/sh\ncw:x:10001:10001::/home/cw:/bin/sh\nlead:x:10004:10004::/home/lead:/bin/sh\nnobody:x:65534:65534::/:/bin/false\n',
       })[path] ?? null,
+    leadEnv: () => ({}),
     dirs: () => ['/data/lead/work/riverbend'],
     publicKey: () => `${PUB} lead@riverbend\n`,
     ...over,
@@ -375,6 +377,7 @@ describe('the reads behind them', () => {
         })),
       }),
       accessApps: async () => ({ apps: [], tokenNames: new Map() }),
+      machines: () => [{ project: 'riverbend', tunnel: 'named', leadToken: 'first-account' }],
       namePrefix: '',
       now: () => Date.UTC(2026, 10, 18),
     };
@@ -390,6 +393,16 @@ describe('the reads behind them', () => {
       'fly machine list --app cw-riverbend',
       'cw-riverbend: machine',
       'keys alice/riverbend',
+    ]);
+  });
+
+  it('a lead with Remote Control on, which machines.json does not allow, fails its row', async () => {
+    const { io: i } = io({
+      exec: () =>
+        JSON.stringify(facts({ lead: { tokenLabel: 'first-account', remoteControl: true } })),
+    });
+    expect(failing(await driftRows(['riverbend'], outputs, i))).toEqual([
+      'Remote Control: on, and machines.json does not allow it',
     ]);
   });
 

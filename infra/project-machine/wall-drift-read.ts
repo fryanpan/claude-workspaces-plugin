@@ -21,6 +21,7 @@ import { CONFIG_PATHS, type StaticVars, staticVars } from '../cloudflare/vars.ts
 import { STAGING_ENVIRONMENT, environmentFor } from './ci-tokens.ts';
 import { flyJson, keychainHas, keychainRead, onMachine } from './mac-ops.ts';
 import type { MachineFacts } from './machine-facts.ts';
+import { type Machine, readMachines } from './machines.ts';
 import { OWNER_EMAIL_ENTRY, SETTING_NAMES, readSettings } from './settings.ts';
 import {
   type FlyView,
@@ -46,6 +47,7 @@ import {
   settingsRows,
   uidRows,
 } from './wall-drift.ts';
+import { leadRows } from './wall-lead-rows.ts';
 import type { CloudflareRead, FlyRead } from './wall-read.ts';
 
 export interface DriftIo {
@@ -64,6 +66,8 @@ export interface DriftIo {
   github: () => GithubView;
   /** The live Access applications, and each service token's name by id; null when unread. */
   accessApps: () => Promise<{ apps: LiveAccessApp[]; tokenNames: Map<string, string> } | null>;
+  /** The committed project list, for its lead-token pins and Remote Control (`wall-lead-rows.ts`). */
+  machines: () => Machine[];
   /** The environment's Access `name_prefix`: "" for prod. */
   namePrefix: string;
   now: () => number;
@@ -94,6 +98,7 @@ export async function driftRows(
     }
   }
   rows.push(...flyRows(projects, view));
+  const leads = new Map<string, MachineFacts['lead']>();
   for (const p of projects) {
     let facts: MachineFacts;
     try {
@@ -102,6 +107,7 @@ export async function driftRows(
       rows.push({ project: p, check: 'machine probe', answer: 'did not answer', ok: false });
       continue;
     }
+    leads.set(p, facts.lead);
     rows.push(...settingsRows(p, io.expected(p), facts));
     rows.push(...uidRows(p, facts));
     rows.push(...gitPushRows(p, facts));
@@ -111,6 +117,7 @@ export async function driftRows(
     const t = outputs.tunnels[p];
     rows.push(...ingressRows(p, t?.public_host, t ? await io.ingress(t) : null, facts));
   }
+  rows.push(...leadRows(io.machines(), leads));
   rows.push(
     ...ciTokenRows(
       [
@@ -274,6 +281,7 @@ export function realDriftIo(
     github: () => readGithub(CI_REPO, ghJson),
     accessApps: async () =>
       cf.access ? { apps: cf.access.apps, tokenNames: new Map(cf.access.tokenNames) } : null,
+    machines: readMachines,
     namePrefix: tfEnv === 'staging' ? 'staging ' : '',
     now: Date.now,
     plan: async () => cf.plan,

@@ -26,8 +26,9 @@
  * Drift (`wall-drift.ts`, read by `wall-drift-read.ts`): per machine, its Fly
  * network, public addresses and services, the server's admission settings
  * against the deploy's, trusted emails, the loopback uid policy,
- * `git-push.json`'s approval flags, the deploy key's read-only flag and the
- * tunnel's ingress; across the account, ONE_ADDRESS_ORIGIN, shared service
+ * `git-push.json`'s approval flags, the deploy key's read-only flag, the
+ * tunnel's ingress, and the lead's sign-in label and Remote Control against
+ * `machines.json` (`wall-lead-rows.ts`); across the account, ONE_ADDRESS_ORIGIN, shared service
  * tokens, each project's live Access policies against `access.local.json`,
  * and a Cloudflare plan with no changes; in GitHub, no secret named
  * FLY_API_TOKEN outside the `fly-org` environment and each `fly-<project>` environment admitting main
