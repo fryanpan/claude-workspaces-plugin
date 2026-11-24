@@ -215,8 +215,8 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 
 Out of scope: `git-push/git.ts` runs git in a temp repository the server makes
 from the lead's bundle, with the server's own config. A bundle carries no
-config. `plugin-refresh.ts`, `deploy*.ts`, `dependency-install.ts` and the
-keeper run in the owner's own checkouts.
+config. `plugin-refresh.ts`, `deploy*.ts` and `dependency-install.ts` run in the
+owner's own checkouts.
 
 ### J. Backups and temp files
 
