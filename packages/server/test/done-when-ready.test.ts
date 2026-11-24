@@ -5,7 +5,10 @@
  * route-level behaviour is done-when-needs-owner.test.ts. Fixtures are
  * invented.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import {
@@ -53,9 +56,14 @@ describe('linesAwaitingReady', () => {
   });
 });
 
-function harness(rows: Task[], reachable: Set<string>) {
+function harness(
+  rows: Task[],
+  reachable: Set<string>,
+  extra: { toldPath?: string; lastCommentAt?: (task: Task) => number | undefined } = {},
+) {
   const sent: Array<{ to: string; frame: Record<string, unknown> }> = [];
   const nudger = new DoneWhenReadyNudger({
+    ...extra,
     workspaces: () => [{ id: 'w-1', leadAgentId: 'agent-harborlight' }],
     tasks: () => rows,
     ownerIdOf: () => 'agent-tidewright',
@@ -102,5 +110,95 @@ describe('DoneWhenReadyNudger', () => {
     expect(nudger.tick(2)).toBe(1);
     expect(sent[0]?.to).toBe('agent-harborlight');
     expect(sent[0]?.frame.forAssignee).toBe('Tidewright');
+  });
+});
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+function toldPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'done-when-ready-'));
+  dirs.push(dir);
+  return join(dir, 'told.json');
+}
+
+const BOTH = () => new Set(['agent-tidewright', 'agent-harborlight']);
+
+describe('DoneWhenReadyNudger under a declared wait', () => {
+  it('sends nothing while the wait stands, and tells once it lapses', () => {
+    const row = {
+      ...task([MET, PERSON]),
+      updatedAt: 10,
+      externalWait: {
+        what: 'Riverbend landing the release',
+        since: 20,
+        declaredAt: 20,
+        until: 1_000,
+        by: 'Harborlight',
+      },
+    } as Task;
+    const { nudger, sent } = harness([row], BOTH());
+    expect(nudger.tick(100)).toBe(0);
+    expect(nudger.tick(999)).toBe(0);
+    expect(sent).toHaveLength(0);
+    expect(nudger.tick(1_000)).toBe(1);
+    expect(sent[0]?.frame.event).toBe(DONE_WHEN_READY_EVENT);
+  });
+
+  it('stays quiet when a wait lapses over a line already told', () => {
+    const row = { ...task([MET, PERSON]), updatedAt: 10 } as Task;
+    const { nudger, sent } = harness([row], BOTH());
+    expect(nudger.tick(100)).toBe(1);
+    row.externalWait = { what: 'Bob', since: 200, declaredAt: 200, until: 500, by: 'Alice' };
+    expect(nudger.tick(300)).toBe(0);
+    expect(nudger.tick(600)).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+});
+
+describe('DoneWhenReadyNudger, once per line until the task changes', () => {
+  it('does not re-tell a standing line after a restart', () => {
+    const path = toldPath();
+    const row = { ...task([MET, PERSON]), updatedAt: 10 } as Task;
+    const first = harness([row], BOTH(), { toldPath: path });
+    expect(first.nudger.tick(100)).toBe(1);
+    // Four restarts in a row: each a fresh nudger reading the same record.
+    for (let i = 0; i < 4; i++) {
+      const again = harness([row], BOTH(), { toldPath: path });
+      expect(again.nudger.tick(200 + i)).toBe(0);
+      expect(again.sent).toHaveLength(0);
+    }
+  });
+
+  it('tells again after a field write or a comment on the task, and not before', () => {
+    const path = toldPath();
+    const row = { ...task([MET, PERSON]), updatedAt: 10 } as Task;
+    const thread: { lastActivity?: number } = {};
+    const { nudger, sent } = harness([row], BOTH(), {
+      toldPath: path,
+      lastCommentAt: () => thread.lastActivity,
+    });
+    expect(nudger.tick(100)).toBe(1);
+    expect(nudger.tick(101)).toBe(0);
+    row.updatedAt = 150; // a transition, a line reported
+    expect(nudger.tick(200)).toBe(1);
+    expect(nudger.tick(201)).toBe(0);
+    thread.lastActivity = 250;
+    expect(nudger.tick(300)).toBe(1);
+    expect(nudger.tick(301)).toBe(0);
+    expect(sent).toHaveLength(3);
+  });
+
+  it('forgets a line that stopped awaiting, so the record does not grow', () => {
+    const path = toldPath();
+    const row = { ...task([MET, PERSON]), updatedAt: 10 } as Task;
+    const { nudger } = harness([row], BOTH(), { toldPath: path });
+    expect(nudger.tick(100)).toBe(1);
+    row.status = 'done';
+    expect(nudger.tick(200)).toBe(0);
+    row.status = 'in-progress';
+    const restarted = harness([row], BOTH(), { toldPath: path });
+    expect(restarted.nudger.tick(300)).toBe(1);
   });
 });
