@@ -284,6 +284,8 @@ var SUPPORTED_VERSIONS = [
   "2024-10-07"
 ];
 var present2 = (v) => v !== undefined && v.trim() !== "" ? v : undefined;
+var IDENTITY_ENCODING_HEADER = "x-cw-identity-encoding";
+var PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 function relayIdentityHeaders(env, cwd) {
   const h = { "x-cw-cwd": cwd };
   const agent = present2(env.CW_AGENT_NAME);
@@ -296,6 +298,11 @@ function relayIdentityHeaders(env, cwd) {
     h["x-cw-agent-legacy"] = legacy;
   if (workspace)
     h["x-cw-workspace"] = workspace.trim();
+  if (Object.values(h).some((v) => !PRINTABLE_ASCII.test(v))) {
+    for (const [k, v] of Object.entries(h))
+      h[k] = encodeURIComponent(v);
+    h[IDENTITY_ENCODING_HEADER] = "percent";
+  }
   if (version)
     h["x-cw-plugin-root"] = `/${version.trim()}`;
   return h;

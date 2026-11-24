@@ -25,6 +25,7 @@
  */
 
 import type { User } from '@claude-workspaces/core';
+import { openBoardStream } from './board-stream.ts';
 import { api, docJsonUrl } from './doc-path.ts';
 import type { DocRecordReader } from './doc/doc-record.ts';
 import { floatDock } from './float-dock.ts';
@@ -101,7 +102,9 @@ async function defaultFetchJson(url: string, init?: RequestInit): Promise<unknow
 }
 
 function defaultSubscribe(workspaceId: string, onTaskEvent: () => void): () => void {
-  const es = new EventSource(`/workspaces/${encodeURIComponent(workspaceId)}/events:stream`);
+  // The page's one board stream, shared with the chips, the star, the tab
+  // title and the lead chat (`board-stream.ts`).
+  const es = openBoardStream(workspaceId);
   // Transitions are how an approval reaches this button (the release moves
   // the held rows); creates matter too — an agent filing more drafts while
   // the doc is open changes the count, though the count no longer renders.

@@ -31,8 +31,9 @@
 #      failed build. Also whenever CW_ACCESS_CLIENT_ID or
 #      CW_ACCESS_SECRET_SERVICE is set.
 #   3. The full child, mcp/index.js — today's connector in-process — when
-#      CW_MCP_RELAY=0 (the rollback lever), or when an identity value is not
-#      plain ASCII and so cannot travel as an HTTP header.
+#      CW_MCP_RELAY=0 (the rollback lever). A name, board or directory that
+#      is not ASCII stays on a relay: both percent-encode such values for the
+#      trip as headers (packages/mcp/src/relay/relay-wire.ts).
 #
 # A WALLED LEAD (CW_BOARD_SOCKET set, by scripts/lead-sandbox.ts) gets the
 # node relay and nothing else: it alone dials a unix socket, and the wall
@@ -121,12 +122,6 @@ relay_src="$mcp_dir/../relay/relay.swift"
 # Whether this session runs a relay rather than the full child.
 relay_wanted() {
   case "${CW_MCP_RELAY:-1}" in 0|off|false|no) return 1 ;; esac
-  # The relay sends these as headers, which carry ASCII; anything else takes
-  # the full child, which reads them from its environment.
-  for value in "${CW_AGENT_NAME:-}" "${FEEDBACK_AGENT_NAME:-}" \
-    "${CW_WORKSPACE_ID:-}" "${FEEDBACK_WORKSPACE_ID:-}" "${PWD:-}"; do
-    (LC_ALL=C; case "$value" in *[!\ -~]*) exit 1 ;; esac) || return 1
-  done
   return 0
 }
 
@@ -199,7 +194,7 @@ compiled_relay() {
 
 board_socket="${CW_BOARD_SOCKET:-}"
 if [ -n "$board_socket" ] && ! relay_wanted; then
-  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set, so only the node relay can reach the board, and it is off (CW_MCP_RELAY=0, or an identity value that is not plain ASCII)." >&2
+  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set, so only the node relay can reach the board, and it is off (CW_MCP_RELAY=0)." >&2
   exit 64
 fi
 

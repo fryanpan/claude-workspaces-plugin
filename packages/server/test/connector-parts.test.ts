@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readIdentityHeaders, resolveIdentity } from '../src/connector/identity.ts';
+import { headersOf, readIdentityHeaders, resolveIdentity } from '../src/connector/identity.ts';
 import { createOutbox } from '../src/connector/outbox.ts';
 import { inProcessEventsFetch } from '../src/connector/session-factory.ts';
 import {
@@ -44,6 +44,39 @@ describe('identity headers', () => {
     expect(read({ 'x-cw-cwd': 'work/riverbend' }).ok).toBe(false);
     expect(read({ 'x-cw-cwd': '/work/\triverbend' }).ok).toBe(false);
     expect(read({ 'x-cw-cwd': '/w', 'x-cw-workspace': '../boards' }).ok).toBe(false);
+  });
+
+  it('decodes percent-encoded values when the relay says it encoded them', () => {
+    const encoded = {
+      'x-cw-identity-encoding': 'percent',
+      'x-cw-agent': encodeURIComponent('Riverbend café'),
+      'x-cw-cwd': encodeURIComponent('/work/über 港'),
+      'x-cw-workspace': 'w-riverbend',
+    };
+    expect(read(encoded)).toEqual({
+      ok: true,
+      headers: { agent: 'Riverbend café', cwd: '/work/über 港', workspace: 'w-riverbend' },
+    });
+    // Without the marker a value is read as it arrived: a literal % is a character.
+    expect(read({ 'x-cw-cwd': '/work/100%25' })).toEqual({
+      ok: true,
+      headers: { cwd: '/work/100%25' },
+    });
+  });
+
+  it('refuses an encoded value that is malformed, or that decodes to a control character', () => {
+    const enc = { 'x-cw-identity-encoding': 'percent' };
+    expect(read({ ...enc, 'x-cw-cwd': '/work/%E0%A4' }).ok).toBe(false);
+    expect(read({ ...enc, 'x-cw-cwd': '/work/%0Ariverbend' }).ok).toBe(false);
+    expect(read({ ...enc, 'x-cw-cwd': '/w', 'x-cw-agent': 'Riverbend%00' }).ok).toBe(false);
+    expect(read({ ...enc, 'x-cw-cwd': '/w', 'x-cw-workspace': '%2E%2E%2Fboards' }).ok).toBe(false);
+  });
+
+  it('restores a saved identity that is not ASCII to the same values', () => {
+    const saved = { agent: 'Riverbend café', cwd: '/work/u\u0308ber', pluginVersion: '0.1.234' };
+    expect(readIdentityHeaders(headersOf(saved))).toEqual({ ok: true, headers: saved });
+    const plain = { agent: 'Riverbend Alpha', cwd: '/work/100%' };
+    expect(readIdentityHeaders(headersOf(plain))).toEqual({ ok: true, headers: plain });
   });
 
   it('keys a named agent by directory and an unnamed one by session', () => {
