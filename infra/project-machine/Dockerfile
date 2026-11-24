@@ -69,8 +69,12 @@ FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14
 # IPv4 and IPv6) is the fallback for a kernel with the owner match instead. `cwproxy` runs the proxy that is the wall's one way out
 # (lead-proxy.ts); the wall does not hold it. `cwstore` sends the transcript
 # store's spools (store-sender.ts) with the store's credential and nothing else.
+# `libatomic1` and `libstdc++6` are for the Node build below, which links
+# both. The base image has no libatomic, so without it node exits 127 at its
+# first run (the Fly run after PR 1792); libstdc++6 is named so Node does not
+# depend on the base image happening to carry it.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git iptables nftables openssh-client tini tmux \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iptables libatomic1 libstdc++6 nftables openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
@@ -91,7 +95,8 @@ COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 # Node on PATH as node, npm and npx. The base image's `node`, a link to bun,
 # sits in a folder at the end of PATH, so this one wins.
 COPY --from=node /opt/node /opt/node
-RUN ln -s /opt/node/bin/node /opt/node/bin/npm /opt/node/bin/npx /usr/local/bin/
+RUN ln -s /opt/node/bin/node /opt/node/bin/npm /opt/node/bin/npx /usr/local/bin/ \
+  && node --version
 # Playwright's Chromium and the system libraries it needs, at build time: the
 # lead's network wall does not list Playwright's download CDN, and the lead
 # has no root for apt. PLAYWRIGHT_VERSION MUST EQUAL the project's
