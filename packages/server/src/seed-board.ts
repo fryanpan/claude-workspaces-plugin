@@ -17,10 +17,9 @@
  * the seed makes a new board, beside any same-named one, and lets nobody into
  * that one. Each address the seeded board's audience does not already admit is
  * added to it, exactly as the owner's Share panel adds one, and then given its
- * member row. Nothing is removed, so an
- * address the owner removed comes back on the next boot while the setting
- * still names it: the setting is the owner's own decision, written where only
- * the owner's deploy can reach.
+ * member row. Nothing is removed, so an address the owner removed comes back
+ * on the next boot while the setting still names it: the setting is the
+ * owner's own decision, written where only the owner's deploy can reach.
  */
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
