@@ -52,10 +52,15 @@ export interface FlyView {
   machines: Record<string, Array<{ id?: string; config?: { services?: unknown[] } }>>;
 }
 
-/** Each app on its own network, named after itself, with nothing published. */
+/**
+ * Each app on its own network, named after itself, with nothing published.
+ * Every other app on that network counts, listed project or not (wall L2).
+ */
 export function flyRows(projects: readonly string[], view: FlyView): Row[] {
   const rows: Row[] = [];
   const networkOf = new Map(view.apps.map((a) => [nameOf(a), a.Network ?? a.network]));
+  const appsOn = (net: string, not: string) =>
+    [...networkOf].filter(([a, n]) => a !== not && n === net).map(([a]) => a);
   for (const p of projects) {
     const app = `cw-${p}`;
     if (!networkOf.has(app)) {
@@ -63,7 +68,7 @@ export function flyRows(projects: readonly string[], view: FlyView): Row[] {
       continue;
     }
     const net = networkOf.get(app);
-    const shared = projects.filter((o) => o !== p && net && networkOf.get(`cw-${o}`) === net);
+    const shared = net ? appsOn(net, app) : [];
     rows.push(
       row(
         p,
