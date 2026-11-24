@@ -1,18 +1,15 @@
 /**
  * Rotating one existing Access service token (`provisioning/rotate.ts`):
- * the old secret kept for 24 hours, and, through the keeper while it still
- * runs, one tap with the page naming the token and never a secret.
- * cf-rotate-token.yml runs the same function (`cloudflare-rotate-token.test.ts`).
+ * the old secret kept for 24 hours. cf-rotate-token.yml runs it
+ * (`cloudflare-rotate-token.test.ts`).
  * A stand-in Cloudflare; nothing leaves.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import type { Executors } from '../src/keeper/keeper-requests.ts';
+import { describe, expect, it } from 'bun:test';
 import {
   PREVIOUS_SECRET_MS,
   classifyRotate,
   rotateServiceToken,
 } from '../src/provisioning/rotate.ts';
-import { type LiveKeeper, startLiveKeeper } from './keeper-live-harness.ts';
 
 const ACCOUNT = 'a'.repeat(32);
 const SECRET = 'feedface'.repeat(8);
@@ -20,7 +17,7 @@ const NOW = Date.UTC(2026, 10, 12, 9, 0, 0);
 
 function fakeCloudflare(tokens: { id: string; name: string }[]) {
   const calls: Array<{ method: string; path: string; body?: string }> = [];
-  const cf: Executors['cloudflare'] = async (method, path, body) => {
+  const cf: Parameters<typeof rotateServiceToken>[0] = async (method, path, body) => {
     calls.push({ method, path, ...(body ? { body } : {}) });
     const ok = (result: unknown) => ({
       status: 200,
@@ -73,44 +70,8 @@ describe('rotateServiceToken', () => {
   });
 
   it('refuses a name that is not a token name', () => {
-    expect(classifyRotate('agent moi')).toMatchObject({
-      kind: 'held',
-      hold: 'service-token.rotate',
-    });
+    expect(classifyRotate('agent moi')).toEqual({ kind: 'ok', name: 'agent moi' });
     for (const bad of ['', '../x', 'a\nb', 'x'.repeat(101), 7])
       expect(classifyRotate(bad).kind).toBe('refused');
-  });
-});
-
-describe('service-token-rotate through the keeper', () => {
-  const f = fakeCloudflare([{ id: 'tok-1', name: 'agent moi' }]);
-  let k: LiveKeeper;
-  beforeAll(async () => {
-    k = await startLiveKeeper(
-      { fly: async () => ({ status: 0, stdout: '', stderr: '' }), cloudflare: f.cf },
-      'keeper-rotate',
-    );
-  });
-  afterAll(async () => k?.stop());
-
-  it('is held, its page names the token, and only the poll carries the secret', async () => {
-    const r = await k.submit('/v1/service-token-rotate', { name: 'agent moi' });
-    expect(r.status).toBe(202);
-    expect(f.calls).toEqual([]);
-    const page = await k.page(r.body.id as string);
-    expect(page).toContain('<code id="token">agent moi</code>');
-    const approved = await k.approve(r.body.id as string);
-    expect(approved.status).toBe(200);
-    expect(approved.text).not.toContain(SECRET);
-    const done = await k.poll(r.body.id as string, r.body.pollToken as string);
-    expect(JSON.parse(done.result?.body ?? '{}').secret).toBe(SECRET);
-  });
-
-  it('a raw Cloudflare rotate through the generic path is refused', async () => {
-    const r = await k.submit(
-      `/v1/cloudflare/accounts/${ACCOUNT}/access/service_tokens/tok-1/rotate`,
-      {},
-    );
-    expect(r.status).toBe(403);
   });
 });

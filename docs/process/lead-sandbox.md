@@ -136,8 +136,8 @@ its entry. Both keep their credential in the keychain on the owner's Mac
 keychain refused, measured 28 October, `gh auth status` exits 1 and
 `git ls-remote` of a private repo over HTTPS exits 128. A fetch of a public
 repo still works. Every other lead is refused the keychain by default,
-because a lead that can read it reads every item there, the Cloudflare and
-Fly tokens included until the keeper's cutover. A lead that needs only git
+because a lead that can read it reads every item there, the old Cloudflare
+and Fly tokens included until Bryan deletes them. A lead that needs only git
 fetch and push to named GitHub repos lists them in `githubRepos` instead and
 keeps the keychain refused ("GitHub through the proxy", below). One that
 also needs `gh` for its pull requests adds `"tools": ["gh"]`, and its gh
@@ -782,8 +782,9 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
   said "OAuth token revoked". The token is in every walled lead's
   environment, so any lead can act as Bryan's Claude account. A lead
   that sets `allowKeychain` for `gh` or git over HTTPS still reads every
-  item. That closes with the keeper ([keeper.md](keeper.md)), which moves the
-  fleet's secrets behind Bryan's passkey.
+  item. The Cloudflare and Fly write tokens have left the Mac for GitHub
+  Environments ([keeper.md](keeper.md), "Retired"); the rest of the
+  keychain is still readable.
 
 ## What this does not close
 

@@ -1,31 +1,13 @@
-# The keeper: Cloudflare and Fly credentials behind your passkey
+# The keeper (retired)
 
-> **Retired.** Workflows now do the keeper's jobs, with no tap (Bryan,
-> 19 Nov 2026). The Fly org token is in the GitHub Environment `fly-org`.
-> The Cloudflare write token is in `cloudflare-prod`. The Mac holds neither.
-> "Retired" below says where each job went and how to cut over. The rest of
-> this page describes the keeper as it ran, for as long as an installed one
-> still runs. The server still asks it for share credentials until the
-> follow-up removes `packages/server/src/keeper/`.
-
-The keeper is a separate process that holds the Cloudflare and Fly tokens.
-It runs as the relay's macOS user, `cw-relay`, so agents running as you can't
-read the tokens. Agents ask it to act instead:
-
-- **Routine calls run at once:** reads, and starting or stopping a machine of
-  an app the keeper made.
-- **Risky calls wait for your passkey:** a new project, an Access app, a
-  secret, a deploy, CI's Cloudflare secrets, a config sync.
-- **Calls whose answer would hand over a credential are refused.**
-
-What it allows and refuses is in [security.md](../architecture/security.md),
-under "The keeper holds the Mac's Cloudflare and Fly credentials". The code is
-in `packages/server/src/keeper/`.
-
-You run every step on this page, because each one needs your admin password.
-Sections 1 to 4 are one command.
-If an agent could install or update the keeper, it could replace it.
-`cw-relay` must already exist ([mac-lead-users.md](mac-lead-users.md)).
+The keeper was a separate process, run as the relay's macOS user
+`cw-relay`, that held the Mac's Cloudflare and Fly tokens and ran calls for
+agents behind Bryan's passkey. Workflows on main now do its jobs, with no tap
+(Bryan, 19 Nov 2026). The Fly org token is in the GitHub Environment
+`fly-org`, and the Cloudflare write token is in `cloudflare-prod`. No code in
+this repository runs the keeper or calls it. Its code was removed in the pull
+request that added this page; the page as it was before is in git history,
+at commit `d0b96801e`.
 
 ## Retired
 
@@ -63,346 +45,52 @@ login and stores what it holds:
 - **A Mac app token:** root on that one machine for up to 14 days. Any
   agent running as you can use it, with no tap. This is the main widening.
 
-### Cut-over, in order
+## Uninstall
 
-1. Merge this change. An installed keeper keeps running and is not touched.
-2. Create the GitHub Environment `fly-org`. It takes deployments from `main`
-   only and has no reviewer. Add the variable `FLY_ORG_SLUG`.
-3. Run `bun run handoff:keygen mac` and `bun run handoff:keygen fly-org`.
-   The second writes `HANDOFF_PRIVATE_KEY` into `fly-org` through `gh`, on
-   stdin. Commit `infra/handoff/recipients.json` through a pull request.
-4. Make a new org token and pipe it into the environment:
-   `fly tokens create org | gh secret set FLY_API_TOKEN --env fly-org`.
-   Do the same for a classic `repo` token as `GH_ADMIN_TOKEN`.
-5. Dispatch `fly-ci-tokens.yml`, then run `bun run handoff:pull`. Check that
-   `fly status --app cw-<project>` works on the Mac and that `fly.yml`
-   deploys.
-6. Uninstall the keeper and revoke its Fly and Cloudflare tokens. Delete the
-   Keychain entries in section 5.
+Bryan runs these, on the Mac, because each needs the admin password. An
+installed keeper keeps running until then; nothing reaches it, and the board
+server no longer reads `CW_KEEPER_URL`.
 
-## 1. Install, or update
+1. Stop both launchd jobs and remove their plists:
 
-Run this in Terminal, with `<sha>` replaced by the merge commit you mean to ship:
+   ```bash
+   sudo launchctl bootout system/com.claude-workspaces.keeper
+   sudo launchctl bootout system/com.claude-workspaces.keeper-port
+   sudo rm /Library/LaunchDaemons/com.claude-workspaces.keeper.plist \
+     /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist
+   ```
 
-```bash
-/bin/zsh -f -c "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/fryanpan/claude-workspaces-plugin/<sha>/scripts/keeper-install.sh)"
-```
+2. Remove the keeper's release, binaries and store. The store holds the old
+   tokens, so this is a credential delete, not a content delete:
 
-- **It installs from GitHub, not from your checkout**, because agents can
-  write your checkout. `-f` skips your shell's startup files, which agents
-  can also write.
-- **It is safe to run again from the top** after a crash or a fix. It skips
-  each step that is already done, and asks you to confirm the commit before
-  installing it.
-- **It stops at the first step that fails** and says which step. Fix the
-  problem and run it again.
+   ```bash
+   sudo rm -rf /Users/cw-relay/keeper
+   rm -f ~/Library/Application\ Support/claude-workspaces/keeper-caller-token
+   ```
 
-When it finishes, the keeper is running under launchd on
-`http://localhost:<port>`, holds new tokens, and prod uses it: the script's
-last step does sections 2 to 4.
+3. Remove `CW_KEEPER_URL` from the `env` block of `~/.claude/settings.json`,
+   and from prod's plist:
 
-**The first time:**
+   ```bash
+   /usr/libexec/PlistBuddy -c 'Delete :EnvironmentVariables:CW_KEEPER_URL' \
+     ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist
+   ```
 
-1. Clear `localhost`'s site data in every browser on this Mac. In Chrome:
-   Settings, Privacy and security, Site data. In Safari: Settings, Privacy,
-   Manage Website Data.
-2. Open the passkey link the script printed and confirm with Touch ID. The
-   link works once, for 15 minutes; run the script again for a new one.
+   `scripts/launchd/install.sh` no longer writes it, so a reinstall drops it
+   too.
 
-The passkey is tied to `localhost`, so you approve on this Mac, not on the iPad.
+4. Revoke the keeper's tokens and delete the old Keychain entries:
 
-Each request that waits for your passkey also shows on your Home as a card,
-on every device, so you see it while you are on the iPad. The card links to
-the approval page; open it on this Mac. It goes away once the request is
-approved, denied, withdrawn or expired.
+   ```bash
+   security delete-generic-password -s cloudflare-api-token
+   security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.cloudflare-api-token
+   security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.fly-org-token
+   ```
 
-**Never boot out the port job** (`com.claude-workspaces.keeper-port`) except to
-uninstall. While it is loaded, no other process can serve the keeper's address.
-If it ever is unloaded, clear `localhost`'s site data again.
+   Then revoke the Fly token named `keeper` (`fly tokens list`, then
+   `fly tokens revoke`), and delete the `claude-workspaces keeper` token in
+   Cloudflare's dashboard (My Profile, API Tokens). A `security` line that
+   says the item could not be found means that entry is already gone.
 
-## 2. to 4. Tokens, callers and the check: the same command
-
-The install command's last step, `10. Tokens, callers and the check`, runs
-`packages/server/src/keeper/keeper-setup-bin.ts` from the release it just
-installed, as you. It reuses the install's `sudo`, so the whole run asks for
-your admin password once. A second run skips each step already done, and
-always runs the check again.
-
-To see what it would do without changing anything, or reading a token:
-
-```bash
-cd /Users/cw-relay/keeper/app && /Users/cw-relay/keeper/bin/bun packages/server/src/keeper/keeper-setup-bin.ts --dry-run
-```
-
-It refuses to run from anywhere but the keeper's release, because it
-handles the new tokens and agents can write a checkout. What a passing run
-prints, step by step:
-
-```
-== 0. Preflight
-   ok: the keeper's store is sound and it answers on http://localhost:<port>
-   ok: wrote the keeper's caller token to ~/Library/Application Support/claude-workspaces/keeper-caller-token, mode 600
-== Confirm the org and the account
-   Fly org:            <slug>
-   Cloudflare account: <account name>
-   Make and store tokens for these? [y/N] y
-== 1. A new Fly org token, made with your own fly login
-   ok: the keeper stored fly-org-token
-   ok: the keeper stored fly-org-slug
-== 2. A new Cloudflare token, and the one account it sees
-   ok: made a new Cloudflare token with the current one
-   ok: the keeper stored cloudflare-api-token
-   ok: the keeper stored cloudflare-token-permissions
-   ok: the keeper stored cloudflare-account-id
-== 3. Adopt the project apps made before the keeper
-   ok: adopted cw-<project>
-== 4. Point the callers at http://localhost:<port>
-   ok: set CW_KEEPER_URL in ~/.claude/settings.json; sessions launched from now on have it
-   ok: set CW_KEEPER_URL in ~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist
-   ok: restarted com.fryanpan.claude-workspaces; it runs with CW_KEEPER_URL
-== 5. CI credentials
-   Cloudflare account: <account name>
-   GitHub repository:  fryanpan/claude-workspaces-plugin
-   Make the four CI credentials? [y/N] y
-   ok: made the apply token, the plan token and two R2 keys
-   The write waits for your passkey: http://localhost:<port>/approve/<id>
-   ok: wrote the CI credentials to fryanpan/claude-workspaces-plugin: the environment cloudflare-prod and the repository
-== 6. Check it
-   ok: /Users/cw-relay/keeper/state/credentials.json: Permission denied
-   ok: the probe waits for your passkey at http://localhost:<port>/approve/<id>
-   ok: withdrew the probe, so it created nothing and no tap can run it
-```
-
-- **The caller token:** every request an agent or prod makes to the keeper
-  carries it, and the keeper refuses one without it, a routine restart or
-  `fly logs` included. The keeper mints it and keeps only its hash; the
-  setup writes it, mode 600, under prod's folder in your home, which other
-  macOS users and walled leads cannot read. A second run keeps a token the
-  keeper still accepts. Running `keeper-bin.ts caller-token` again makes a
-  new one and retires the old, so run the setup after it.
-- **Confirm first:** the org slug and the Cloudflare account come from
-  stores anything running as you can write, so the command shows them and
-  makes nothing until you answer `y`. A dry run shows them without asking.
-  If you make the Cloudflare token by hand, you confirm its account after
-  you paste it.
-- **Fly:** it runs `fly tokens create org --name keeper` with your own `fly`
-  login and the org slug from the Keychain, and hands the token to the
-  keeper on stdin. The token is never printed, copied or written to a file.
-  If a token is made but not stored, the STOP line says how to revoke it.
-- **Cloudflare:** it asks the current token to make the new one. If the
-  current token cannot make tokens, it prints the permissions to give a
-  token you make in the dashboard, and waits for you to paste it (it is not
-  shown). That is the only step you might do by hand. If it takes you
-  longer than sudo's timeout (5 minutes by default), you may be asked for
-  your password once more. The permissions:
-  - on the account: Access: Apps and Policies Edit, Access: Apps and
-    Policies Read, Access: Organizations, Identity Providers, and Groups
-    Read, Access: Service Tokens Edit, Access: Service Tokens Read,
-    Cloudflare Tunnel Edit, Workers Scripts Edit;
-  - on all zones of the account: Zone Read, DNS Edit, SSL and Certificates
-    Read, Workers Routes Edit;
-  - no API Tokens permission.
-
-  The account id is the one account the new token sees. It goes to the
-  keeper and nowhere else.
-- **When the permissions change:** the setup stores a fingerprint of the
-  list above beside the token. If a later release's list differs, or the
-  keeper's token was stored before fingerprints existed, the next run says
-  `Cloudflare token: the keeper's lacks this release's permissions; a new
-  one is made`, makes a new token the same way after your `y`, and tells you
-  which token to keep and to delete the older `claude-workspaces keeper`
-  token in the dashboard (My Profile, API Tokens). It reads the account
-  through the keeper's old token; if that token no longer works, it asks
-  you to confirm the new token's account instead. Nothing else is made
-  again.
-- **Project apps:** every Fly app named `cw-<project>`, the deploy's name
-  for a project, is adopted, so starting and stopping it needs no passkey.
-- **Callers:** `CW_KEEPER_URL` goes into the `env` of
-  `~/.claude/settings.json`, which every Claude Code session launches with,
-  and into prod's launchd job. Prod is restarted (bootout, then bootstrap)
-  so it reads the new environment. Whether prod needs it is judged from the
-  job launchd is running, not from the file, so a run cut short after the
-  plist was written restarts prod the next time. The plist's old copy is kept beside it
-  as `.bak.keeper-<time>`. Sessions already running keep the old
-  environment until they restart. A later `scripts/launchd/install.sh`
-  keeps the plist's `CW_KEEPER_URL` unless you set the variable yourself
-  (`CW_KEEPER_URL=` clears it).
-- **CI credentials:** the four Cloudflare credentials
-  `.github/workflows/cloudflare.yml` runs with. The apply token and a
-  read-write key on the state bucket go to the environment `cloudflare-prod`;
-  the plan token (the Read form of each permission) and a read-only key go to
-  the repository. They are made with the Keychain's `cloudflare-api-token`;
-  when that cannot make tokens, the step asks you to paste one that can (User
-  > API Tokens > Edit), uses it for this step only, and keeps it nowhere. The
-  values go straight into one request to the keeper, whose approval page
-  lists the secret names and never a value; your tap writes them. If the
-  write certainly did not run (denied, expired, withdrawn, refused), every
-  token the step made is deleted again; if it may have run, the tokens are
-  kept and the step says to run setup again. It needs the
-  keeper's GitHub token ("The GitHub token", below), with the classic `repo`
-  scope; without the token the step says so and is skipped, and without the
-  scope it stops before making anything. The keeper also refuses the write
-  unless `cloudflare-prod` deploys from `main` only. The step is skipped once
-  GitHub holds all six names and Cloudflare shows the four tokens active; a
-  name whose token is gone makes it remake all four.
-- **The check:** the probe asks the keeper for `fly apps create
-  cw-keeper-probe`, prints the approval link, and withdraws the request, so
-  nothing is created and no tap can run it later.
-
-`machine:deploy` reads the Access settings from `terraform output`. It
-reads a named tunnel's token from the API with the Keychain's token, which
-the keeper refuses because the answer is a credential.
-
-## Cloudflare: CI applies, the keeper plans and syncs
-
-Only CI applies Cloudflare changes (`.github/workflows/cloudflare.yml`). A
-pull request that touches `infra/cloudflare/` or either Worker applies when
-it merges to main: the merge is the approval, and nobody runs anything.
-`bun run cf:apply` only prints this and changes nothing. The keeper refuses
-an apply.
-
-The keeper runs the rest itself, from its own release, with its own
-Cloudflare token, so they work after section 5 deletes the Keychain's
-`cloudflare-api-token`. Your terminal sends the keeper the configs and the
-state bucket's key (`cloudflare-r2-tfstate`, which stays in your Keychain).
-
-- **`bun run cf:plan`** runs at once and prints the plan. No passkey.
-- **`bun run cf:sync-config`** is how a change to the gitignored configs
-  (people, domains, session length, a project's service tokens) reaches CI.
-  The keeper plans the configs, then prints an approval link and puts it on
-  your Home. The page names the GitHub secrets it writes, who each project's
-  sign-in list gains or loses, and any service token it makes. Your tap makes
-  those tokens, writes the configs to the repository secrets
-  `CF_ROUTER_CONFIG`, `CF_ACCESS_CONFIG` and `CF_SHARE_LINK_CONFIG`, and
-  starts `cloudflare.yml` on main, which applies. Each new token's client id
-  and secret go into your Keychain without being printed.
-- **Read the sign-in list.** The keeper plans with its own `.tf` files, but
-  from the configs your terminal sent, which any agent running as you can
-  edit. The plan text prints `(sensitive value)` where the addresses are, so
-  the "Who can sign in" list on the page is the only place an added address
-  shows. Any program on the Mac can load the page; cf:sync-config never
-  prints the list.
-- **`bun run cf:rotate-token "<name>"`** gives one existing service token a
-  new secret, on one tap whose page names the token. The old secret keeps
-  working for 24 hours, and the new pair replaces the old one in your
-  Keychain. A second rotation inside those 24 hours ends the old secret at
-  once.
-
-Making and rotating service tokens needs the keeper's token to hold Access:
-Service Tokens **Edit**, which the setup grants. These two are the only ways
-the keeper writes under `service_tokens`: it refuses every other write there,
-because the answer is the new secret.
-
-The keeper needs its own `terraform` for this. The install script copies
-yours, from `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, or from
-`KEEPER_TERRAFORM=/path/to/terraform`.
-
-## The GitHub token
-
-The keeper uses a GitHub token of yours for two things: each project's push
-deploy keys (`packages/server/src/provisioning/push-keys.ts`), and Cloudflare
-CI's Actions secrets and its dispatch (`provisioning/github-ci.ts`). It only ever
-names one repository for the secrets, `fryanpan/claude-workspaces-plugin`,
-and never sends the token to a project machine. Writing Actions secrets needs
-a classic token with the `repo` scope; the keeper checks the scope GitHub
-reports and refuses before writing without it. Store it once, piping it in so it is never an argument:
-
-```bash
-/bin/zsh -f -c 'security find-generic-password -s cw-github-push-token -w | /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR=/Users/cw-relay/keeper/state /Users/cw-relay/keeper/bin/bun /Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts import github-token'
-```
-
-`machine:deploy --push-repo` then asks the keeper for the keys, and each
-request waits for your passkey with every repo listed on the page.
-
-A write deploy key can push a workflow file, and GitHub cannot stop it. The
-server holds every push that touches `.github/` for a person, but a server
-that is broken into skips that hold. So once the keys are in place the keeper
-reads, per repo, the secret names a workflow on a side branch could read:
-repository secrets, organization secrets shared with the repo, and the secrets
-of every environment with no branch policy and no required reviewers. It also
-reads whether the default branch refuses the key's direct push: classic
-protection that requires a pull request, restricts pushers or locks the
-branch, or a `pull_request` or `update` ruleset rule whose bypass list does
-not name deploy keys. When it does not refuse, the key can push the workflow
-to the default branch and reach environment secrets too, and the deploy says
-so. A read that fails prints "could not read", and a list longer than one page
-says it is incomplete. It reads names only, never values, and writes nothing
-(`packages/server/src/provisioning/push-exposure.ts`). Two gaps: an
-environment with any branch policy counts as closed whatever its patterns,
-and a 404 on the branch's protection counts as unprotected even when the
-branch itself does not exist.
-
-## 5. Retire the old tokens
-
-```bash
-security delete-generic-password -s cloudflare-api-token
-security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.cloudflare-api-token
-security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.fly-org-token
-```
-
-Then revoke the old Fly token (`fly tokens list`, then `fly tokens revoke`)
-and the old Cloudflare token in the dashboard.
-
-## One passkey for a board move
-
-Moving a board onto a machine that already has the right image takes one
-approval. Run this first:
-
-```bash
-bun run machine:approve-move --board <id> --project <project>
-```
-
-It waits for your passkey. The approval page names the app and the board and
-lists every step it covers: the exact commands of the move and the wall check,
-and the upload to that board's folder. For 30 minutes those steps run on that
-one app without another tap, one at a time, and a step still queued when the
-30 minutes end does not start. Run `machine:wall-report --projects
-<project>` and `machine:move-board` inside that window. The steps are in
-`packages/server/src/provisioning/move-steps.ts`, which the scripts also build
-their commands from.
-
-**A deploy is not part of it, so a move that needs a new image takes two
-passkeys or more.** A machine runs its image as root, and the move's commands
-run probes from that image as root and hand their output to the caller. A
-caller that could deploy without a tap could replace a probe and read every
-secret on the machine. Secrets and volumes exist for a deploy, so they are
-taps too.
-
-**The grant is only as safe as the image you last approved.** Its commands are
-fixed strings, and what they run is the probes in that image.
-
-**The import carries the board's share rows.** They can give a person access
-after the 30 minutes end. Who can sign in still goes through Access. The
-move's fingerprint compares the rows on both sides and leaves the Mac's board
-unarchived if they differ. That catches a changed bundle in the script's own
-run, and does not stop a caller that imports by hand and never fingerprints.
-
-Each of these still needs its own tap: a deploy, any secret, a volume, creating
-the app, the bucket, push keys, `fly logs`, any shell command not on the list,
-a destroy, and any step on another project. So a wall report across several
-projects holds for each other project. A move grant opens only on an app the
-keeper made or adopted.
-
-If the 30 minutes end during a move, its last steps wait for a tap: the one that
-takes the machine out of maintenance and removes the upload is held like any
-other. Approve it, or the machine stays held off.
-
-## If a page says "Approvals are stopped"
-
-A browser showed the keeper signs of a service worker on its address.
-
-1. Clear `localhost`'s site data, as in step 1.
-2. Run this in a `/bin/zsh -f` shell:
-   `/usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR=/Users/cw-relay/keeper/state /Users/cw-relay/keeper/bin/bun /Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts clear-alarm`.
-3. Open the approval link again.
-
-## What it does not protect against
-
-- **Your admin password.** Anyone who has it, or who reaches an open `sudo`
-  session, can read the tokens.
-- **Three credentials it doesn't hold:** each project's Tigris admin key and
-  backup identity, and Home's feed tokens.
-- **Its `bun`, `fly` and `terraform`:** they are copies of yours, so an agent
-  that had already replaced those binaries would have them copied in.
-- **The config a Cloudflare apply plans from:** it comes from your checkout,
-  which agents can write. Read the plan on the approval page before you tap.
+To check: `sudo launchctl print system/com.claude-workspaces.keeper` says it
+could not find the service, and `ls /Users/cw-relay/keeper` fails.

@@ -7,7 +7,7 @@
  *     whose launch config sets it.
  *  2. A file holding only the key. `infra/gcp-maps` writes it with
  *     Terraform, mode 600, at `GOOGLE_MAPS_KEY_FILE` under the home
- *     directory: prod's own boot-disk root, beside `keeper-caller-token`,
+ *     directory: prod's own boot-disk root,
  *     so the key reaches prod with no edit to its launchd plist.
  *     `CW_GOOGLE_MAPS_KEY_FILE` names another path.
  *

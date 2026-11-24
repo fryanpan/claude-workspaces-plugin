@@ -360,7 +360,7 @@ export const CI_TOKEN_STALE_DAYS = 45;
 
 /**
  * The one environment that holds the Fly org token, by design since the
- * keeper retired (docs/architecture/security.md, the keeper paragraph):
+ * keeper retired (docs/process/keeper.md, "Retired"):
  * deployments from main only, used by fly-provision.yml, fly-ci-tokens.yml
  * and wall-read.yml.
  */

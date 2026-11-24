@@ -1,7 +1,7 @@
 /**
  * Making the Access service tokens the config names and the account lacks,
- * in the keeper's run for `cf:sync-config` (`keeper-run.ts tokens`), and
- * storing a token's pair in Bryan's Keychain (`sync-config.ts`,
+ * in the wrapper's run (`run.ts`, in `cloudflare.yml`), and storing a token's
+ * pair in Bryan's Keychain (`sync-config.ts`,
  * `rotate-token.ts`). Terraform owns every token
  * (`modules/access`), but it does not make one: the wrapper does, here, and
  * the apply that follows adopts it by id (`service_token_ids`, imported in
@@ -20,8 +20,7 @@
  * value is printed, logged, written to a file, or put in an argument: the
  * Keychain line goes to `security -i` on stdin.
  *
- * Tested by `packages/server/test/cloudflare-tf-service-tokens.test.ts` and
- * `cloudflare-tf-keeper-wrapper.test.ts` (the `cf:sync-config` side).
+ * Tested by `packages/server/test/cloudflare-tf-service-tokens.test.ts`.
  */
 import { spawnSync } from 'node:child_process';
 import type { CloudflareApi } from '../project-machine/cloudflare.ts';
