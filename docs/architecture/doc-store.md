@@ -157,6 +157,14 @@ reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
 
+`doc-activity-recorder.ts` joins the doc-store group and moves no boundary. It
+is what readers and writers did, written to `activity.jsonl` — the comment,
+reply, resolve and reopen rows the thread verbs emit, the browser's reading
+events and the closed edit sessions — and the two thread-summary writes that
+happen outside the live path: the one-shot backfill and the on-demand summary.
+It holds no docs; `DocStore.activity` is the instance, and callers reach it
+there rather than through forwarders.
+
 `doc-state/` joins the doc-store group and moves no boundary. It is where each
 doc's shared state — the Yjs update behind a markdown doc, a board, a
 whiteboard or a component's state — is kept, behind one interface keyed by doc

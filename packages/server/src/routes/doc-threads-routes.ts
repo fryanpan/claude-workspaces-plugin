@@ -825,7 +825,7 @@ export async function handleDocThreadRoutes(
       if (summaryHash(now) !== summary.hash) {
         return j(409, { error: 'thread changed during generation' });
       }
-      const updated = docStore.applyThreadSummary(docId, threadId, summary);
+      const updated = docStore.activity.applyThreadSummary(docId, threadId, summary);
       return updated ? j(200, { thread: updated, summary }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/resolve' && req.method === 'POST') {

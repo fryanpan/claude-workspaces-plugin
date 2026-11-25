@@ -22,11 +22,9 @@ import {
   listThreadsWithLinks,
   prose,
   readDocMeta,
-  setThreadSummary,
   suggestOps,
   titleIsUnnamed,
 } from '@claude-workspaces/core';
-import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -37,6 +35,7 @@ import {
   forgettingWrites,
 } from './cold-threads-cache.ts';
 import { ComponentGrants } from './component-grants.ts';
+import { DocActivityRecorder } from './doc-activity-recorder.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
@@ -73,23 +72,7 @@ export { isBoardOwnedDoc } from './doc-ids.ts';
  *  under the name it was first published as. */
 export { decideReconcile } from './file-binding.ts';
 
-import { type StoredSummary, needsCall } from '@claude-workspaces/core/summary-prompt';
-import {
-  type ActivityType,
-  type Event,
-  appendActivity,
-  buildEventDoc,
-  clampReadPayload,
-  eventId,
-  payloadDigest,
-  toUtcIso,
-} from './activity.ts';
-import {
-  type CommentTrust,
-  classifyActor,
-  commentTrustOf,
-  isOwnerActor,
-} from './actor-identity.ts';
+import { type CommentTrust, commentTrustOf } from './actor-identity.ts';
 import {
   type BindDiffOpts,
   type BindDiffResult,
@@ -125,12 +108,7 @@ import { docKeyForPath } from './doc-key.ts';
 import { type LiveCopyResult, type ResolveOpts, resolveLiveCopy } from './doc-live-copy.ts';
 import { resolveOriginRepoCheckout } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
-import {
-  type ClosedEditSession,
-  EditSessionTracker,
-  type SocketEditor,
-  editSessionEvent,
-} from './edit-sessions.ts';
+import { EditSessionTracker, type SocketEditor } from './edit-sessions.ts';
 import { type TimeSlice, backgroundPasses, timeSlice } from './event-loop.ts';
 import {
   CONTENT_REVISION_ORIGIN,
@@ -157,7 +135,7 @@ import {
 import type { SocketAccess } from './share/board-access.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
-import type { ScheduleArgs, ThreadSummarizer } from './summarize.ts';
+import type { ThreadSummarizer } from './summarize.ts';
 import { deleteVoiceFeedback } from './voice-feedback-store.ts';
 import type { WebhookDispatcher } from './webhooks.ts';
 
@@ -765,9 +743,26 @@ export class DocStore {
       fireThreadEvent: (doc, event, thread, comment, opts, actor) =>
         this.fanout.fireEvent(doc, event, thread, comment, opts, actor),
       recordActivity: (doc, type, author, threadId, opts) =>
-        this.recordActivity(doc, type, author, threadId, opts),
+        this.activity.recordActivity(doc, type, author, threadId, opts),
     };
   }
+
+  /** What readers and writers did, to `activity.jsonl`, and the thread
+   *  summaries written outside the live path (`doc-activity-recorder.ts`). */
+  readonly activity = new DocActivityRecorder({
+    dataDir: () => this.cfg.dataDir,
+    summarizer: () => this.cfg.summarizer,
+    doc: (docId) => this.resolveDoc(docId),
+    metaOf: (docId) => this.docs.get(docId)?.meta ?? this.catalog.entry(docId)?.meta,
+    allDocIds: () => new Set([...this.catalog.ids(), ...this.docs.keys()]),
+    isResident: (docId) => this.docs.has(docId),
+    threadTotal: (docId) => this.catalog.threadCounts(docId).total,
+    thread: (docId, threadId) => this.docThreads.getThread(docId, threadId),
+    schedulePersist: (doc) => this.saveToDisk(doc),
+    evict: (docId) => {
+      this.evictDoc(docId);
+    },
+  });
 
   /** The editing verbs, and this store seen through the contract they need. */
   private readonly docEdits = new DocEditOps(this.docEditPersistence());
@@ -1204,7 +1199,7 @@ export class DocStore {
     );
     this.editSessions = new EditSessionTracker({
       ...(cfg.editSessionIdleMs !== undefined ? { idleMs: cfg.editSessionIdleMs } : {}),
-      emit: (session) => this.recordEditSession(session),
+      emit: (session) => this.activity.recordEditSession(session),
     });
     // The index IS the boot. Nothing is hydrated here: a start now costs one
     // read per doc of a small JSON row instead of decoding every CRDT ever
@@ -4457,211 +4452,6 @@ export class DocStore {
 
   autoReanchor(docId: string): { checked: number; reanchored: number; stillOrphan: number } | null {
     return this.docEdits.autoReanchor(docId);
-  }
-
-  /**
-   * Append a comment-family activity event (comment / reply / resolve /
-   * reopen) for a successful thread action. Both person and agent actions are
-   * recorded — agent events carry actor:'agent' so the Weekly Review agent can
-   * filter them, but person events are never dropped. Best-effort: any failure
-   * is swallowed so activity capture can't break the action it observes.
-   */
-  private recordActivity(
-    doc: LiveDoc,
-    type: ActivityType,
-    author: User,
-    threadId: string,
-    opts: { text?: string; tsMs: number },
-  ): void {
-    try {
-      const actor = classifyActor(author);
-      const ts = toUtcIso(opts.tsMs);
-      const payload: Event['payload'] =
-        opts.text !== undefined ? { text: opts.text, wordCount: wordCount(opts.text) } : {};
-      const id = eventId({
-        ts,
-        actor,
-        docId: doc.docId,
-        type,
-        threadId,
-        payloadDigest: payloadDigest(opts.text),
-      });
-      const event: Event = {
-        eventId: id,
-        ts,
-        type,
-        actor,
-        actorId: author.id,
-        actorName: author.name,
-        isOwner: isOwnerActor(author),
-        threadId,
-        doc: buildEventDoc(doc.meta),
-        payload,
-      };
-      appendActivity(this.cfg.dataDir, event);
-    } catch (err) {
-      console.error('[doc-store] recordActivity failed:', err);
-    }
-  }
-
-  /**
-   * Append a browser-originated reading event (read_session / doc_open). The
-   * client posts the interaction-bounded payload; the server resolves the doc
-   * / repo / producedBy and stamps actor=person, ts=now. Unknown `type`s are
-   * rejected so a malformed POST can't poison the stream.
-   */
-  recordReadEvent(
-    docId: string,
-    type: 'read_session' | 'doc_open',
-    payload: Event['payload'],
-    author: User,
-  ): { ok: boolean; error?: 'no-doc' | 'bad-type' | 'append-failed' } {
-    if (type !== 'read_session' && type !== 'doc_open') {
-      return { ok: false, error: 'bad-type' };
-    }
-    const doc = this.resolveDoc(docId);
-    if (!doc) return { ok: false, error: 'no-doc' };
-    try {
-      // Re-clamp the browser-supplied duration/scroll fields server-side so a
-      // spoofed or buggy POST can't write an inflated read time.
-      clampReadPayload(payload);
-      const ts = toUtcIso(Date.now());
-      const sessionId = payload.sessionId;
-      const id = eventId({
-        ts,
-        actor: 'person',
-        docId,
-        type,
-        threadId: null,
-        payloadDigest: payloadDigest(sessionId),
-      });
-      const event: Event = {
-        eventId: id,
-        ts,
-        type,
-        actor: 'person',
-        actorId: author.id,
-        actorName: author.name,
-        isOwner: isOwnerActor(author),
-        doc: buildEventDoc(doc.meta),
-        payload,
-      };
-      appendActivity(this.cfg.dataDir, event);
-      return { ok: true };
-    } catch (err) {
-      console.error('[doc-store] recordReadEvent failed:', err);
-      return { ok: false, error: 'append-failed' };
-    }
-  }
-
-  /** Append one closed edit session. The doc may have left memory by the
-   *  time a session closes, so its meta comes from the index when it has. */
-  private recordEditSession(session: ClosedEditSession): void {
-    const meta = this.docs.get(session.docId)?.meta ?? this.catalog.entry(session.docId)?.meta;
-    if (!meta) return;
-    appendActivity(this.cfg.dataDir, editSessionEvent(session, meta));
-  }
-
-  /**
-   * Summarize every already-existing thread that has no current summary.
-   *
-   * Generation is triggered by thread CHANGES, so nothing that was written
-   * before this feature shipped would ever get a summary — the docs with the
-   * worst deterministic topic lines are exactly the old ones. This walks the
-   * hydrated docs once and hands the backlog to the summarizer, which paces
-   * it over `windowMs`.
-   *
-   * Resolved threads are included: their cards still render both lines in the
-   * all-threads panel and the outdated-comments flow, and a summary is the
-   * whole point there too. They are counted separately so the operator sees
-   * what they are agreeing to pay for rather than one opaque total.
-   *
-   * Returns immediately with the count queued; the drain runs in the
-   * background. Never automatic — the caller (bin.ts) decides, because a
-   * backfill spends real money and must not fire in a test or a short-lived
-   * process.
-   */
-  backfillSummaries(opts: { windowMs?: number } = {}): {
-    queued: number;
-    open: number;
-    resolved: number;
-  } {
-    const summarizer = this.cfg.summarizer;
-    if (!summarizer?.enabled) return { queued: 0, open: 0, resolved: 0 };
-    const tasks: ScheduleArgs[] = [];
-    let open = 0;
-    let resolved = 0;
-    // Every doc on the server, not just the ones that happen to be in memory.
-    // Under lazy hydration those are two very different sets, and the whole
-    // point of this sweep is the OLD threads — which are exactly the ones in
-    // docs nobody has opened.
-    for (const docId of new Set([...this.catalog.ids(), ...this.docs.keys()])) {
-      // The index says how many threads a doc has, so a doc with none is
-      // skipped without loading it. On the measured corpus that is most of
-      // them, and it is the difference between a sweep that reads a few
-      // hundred docs and one that reads five thousand.
-      if (this.threadCounts(docId).total === 0) continue;
-      const wasResident = this.docs.has(docId);
-      const doc = this.resolveDoc(docId);
-      if (!doc) continue;
-      let queuedHere = 0;
-      for (const t of listThreads(doc.ydoc)) {
-        // Ask the same question the live path asks, so a thread summarized a
-        // second ago is not paid for twice.
-        if (!needsCall(t, t.summary)) continue;
-        if (t.status === 'open') open++;
-        else resolved++;
-        queuedHere++;
-        tasks.push({
-          docId,
-          threadId: t.id,
-          getThread: () => this.getThread(docId, t.id),
-          apply: (summary) => {
-            // Resolved again HERE, not captured above: this runs minutes
-            // later, spread over the pacing window, and the doc it was
-            // collected from may have been evicted since — writing into a
-            // destroyed Y.Doc would drop the summary silently.
-            const live = this.resolveDoc(docId);
-            if (!live) return;
-            setThreadSummary(live.ydoc, t.id, summary);
-            this.saveToDisk(live);
-          },
-        });
-      }
-      // Put back what this sweep pulled in and did not need. A doc that had
-      // work queued stays for now — `apply` is about to write to it — and the
-      // idle sweep takes it later on the ordinary clock.
-      if (!wasResident && queuedHere === 0) this.evictDoc(docId);
-    }
-    if (tasks.length > 0) {
-      void summarizer
-        .backfill(tasks, {
-          ...(opts.windowMs !== undefined ? { windowMs: opts.windowMs } : {}),
-        })
-        .then(({ attempted, stored }) => {
-          console.log(`[summarize] backfill done: ${stored} stored of ${attempted} attempted`);
-        })
-        // Nothing observes this promise. Every throw inside `backfill` is
-        // caught today, so this cannot fire — but it is one refactor away
-        // from being an unhandled rejection on a fire-and-forget path.
-        .catch((err) => {
-          console.error('[summarize] backfill failed:', err instanceof Error ? err.message : err);
-        });
-    }
-    return { queued: tasks.length, open, resolved };
-  }
-
-  /**
-   * Store a summary that was generated on demand (REST route / MCP tool).
-   * Same write and same persistence as the scheduled path — one way in, so
-   * an on-demand summary cannot end up in the doc but not on disk.
-   */
-  applyThreadSummary(docId: string, threadId: string, summary: StoredSummary): Thread | null {
-    const doc = this.resolveDoc(docId);
-    if (!doc) return null;
-    const t = setThreadSummary(doc.ydoc, threadId, summary);
-    if (t) this.saveToDisk(doc);
-    return t;
   }
 
   private stateStore: DocStateStore | undefined;

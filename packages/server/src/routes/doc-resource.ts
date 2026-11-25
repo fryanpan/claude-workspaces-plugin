@@ -463,7 +463,7 @@ export async function handleDocResourceCore(
     // activity as his — the one identity on the server that carries
     // any weight. An unattributed read is now unattributed.
     const author = authorFor(body?.author) ?? ANONYMOUS_ACTOR;
-    const res = docStore.recordReadEvent(docId, type, payload, author);
+    const res = docStore.activity.recordReadEvent(docId, type, payload, author);
     // Fold a successful task read_session onto the task record's
     // cumulative reading time. `recordReadEvent` clamps `payload`
     // in place (see `clampReadPayload`), so `durationMs` here is
