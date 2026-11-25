@@ -85,14 +85,29 @@ describe('applySeedBoard against a real share-link store', () => {
         return b;
       },
       ensureWorkspace: (id: string) => void ensured.push(id),
+      renameWorkspace: () => {
+        throw new Error('the name did not change');
+      },
       shareLinks: new ShareLinks({ dataDir }),
       marker: seedBoardMarker(dataDir),
     });
     const first = applySeedBoard({ name: BOARD, members: [ALICE] }, deps());
-    expect(first).toEqual({ workspaceId: 'ws-1', created: true, added: [ALICE], notOurs: [] });
+    expect(first).toEqual({
+      workspaceId: 'ws-1',
+      created: true,
+      renamed: false,
+      added: [ALICE],
+      notOurs: [],
+    });
     // A fresh store over the same directory, as the next boot reads it.
     const second = applySeedBoard({ name: BOARD, members: [ALICE] }, deps());
-    expect(second).toEqual({ workspaceId: 'ws-1', created: false, added: [], notOurs: [] });
+    expect(second).toEqual({
+      workspaceId: 'ws-1',
+      created: false,
+      renamed: false,
+      added: [],
+      notOurs: [],
+    });
     expect(boards).toHaveLength(1);
     expect(ensured).toEqual(['ws-1']);
     const links = new ShareLinks({ dataDir });
@@ -239,5 +254,48 @@ describe('a seed board name somebody else already used', () => {
     expect(sameNamed().sort()).toEqual(before.sort());
     const admitted = before.filter((id) => handle.shareLinks.membersOf(id).length > 0);
     expect(admitted).toHaveLength(1);
+  });
+});
+
+describe('a seed board whose setting is renamed', () => {
+  let dataDir: string;
+  let server: ServerHandle | null = null;
+  const boot = async (name: string) => {
+    await server?.stop();
+    server = createServer({
+      port: 0,
+      dataDir,
+      ownerEmail: OWNER,
+      seedBoard: { name, members: [ALICE] },
+    });
+    return server;
+  };
+  const RENAMED = 'Riverbend sign-in check';
+
+  beforeAll(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'seed-board-renamed-'));
+  });
+  afterAll(async () => {
+    await server?.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('renames its own board in place, keeping the id and the people let in', async () => {
+    const first = await boot(BOARD);
+    const [id] = first.tasks.listWorkspaces().map((w) => w.id);
+    const handle = await boot(RENAMED);
+    const boards = handle.tasks.listWorkspaces();
+    expect(boards.map((w) => [w.id, w.name])).toEqual([[id, RENAMED]]);
+    expect(handle.shareLinks.membersOf(id ?? '').map((m) => m.email)).toEqual([ALICE]);
+  });
+
+  it('keeps a name the owner gave the board by hand', async () => {
+    const handle = await boot(RENAMED);
+    const [id] = handle.tasks.listWorkspaces().map((w) => w.id);
+    handle.tasks.renameWorkspace(id ?? '', 'Owner picked this', {
+      actor: { id: 'o', name: 'Owner' },
+    });
+    const again = await boot(RENAMED);
+    expect(again.tasks.listWorkspaces().map((w) => w.name)).toEqual(['Owner picked this']);
   });
 });
