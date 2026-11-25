@@ -15,6 +15,7 @@ import { PAGE_LOAD_WINDOW_MS, PageLoadLog, type SlowestByPage } from '../src/pag
 import { handleLoadReportRoutes } from '../src/routes/load-reports.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { PAGE_TYPES, SlowLoadAlarm } from '../src/slow-load-alarm.ts';
+import { rowAt } from './route-row.ts';
 
 const T0 = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -112,7 +113,7 @@ describe('the read refuses anyone off the box', () => {
       },
       {
         req: new Request('http://localhost/api/load-reports/slowest'),
-        pathname: '/api/load-reports/slowest',
+        row: rowAt('load-reports.ts', '/api/load-reports/slowest'),
         visitor: null,
       },
     );

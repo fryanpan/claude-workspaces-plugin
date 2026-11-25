@@ -8,6 +8,7 @@ import {
   type SlowLoadAlarm,
   pageTypeOf,
 } from '../slow-load-alarm.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 /**
  * The load reports of pages on no board, and the read the daily health check
@@ -41,7 +42,8 @@ export interface LoadReportRoutesContext {
 
 export interface LoadReportRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   /** The share target this request resolved to, or null for a member. */
   visitor: ShareTarget | null;
 }
@@ -50,51 +52,63 @@ export async function handleLoadReportRoutes(
   ctx: LoadReportRoutesContext,
   rq: LoadReportRouteRequest,
 ): Promise<Response | null> {
-  const { j, safeJson, requestAddress } = ctx;
-  const { req, pathname, visitor } = rq;
+  return ROWS(ctx, rq);
+}
+
+const ROWS = rowHandlers<LoadReportRoutesContext, LoadReportRouteRequest, Promise<Response>>(
+  'load-reports.ts',
+  { '/api/load-reports': record, '/api/load-reports/slowest': slowest },
+);
+
+/** `GET /api/load-reports/slowest` — the box's own read of the slowest loads. */
+async function slowest(
+  ctx: LoadReportRoutesContext,
+  rq: LoadReportRouteRequest,
+): Promise<Response> {
+  const { j, requestAddress } = ctx;
+  const { req, visitor } = rq;
   const now = ctx.now ?? Date.now;
-
-  if (pathname === '/api/load-reports/slowest') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (req.headers.has('cf-ray')) {
-      return j(403, {
-        error: 'load timings cannot be read through the edge — run this on the box',
-      });
-    }
-    if (!isLoopbackAddress(requestAddress(req))) {
-      return j(403, { error: 'load timings are read from this machine only (loopback)' });
-    }
-    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
-    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
-    return j(200, ctx.pageLoads.slowestByPage(now()));
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (req.headers.has('cf-ray')) {
+    return j(403, {
+      error: 'load timings cannot be read through the edge — run this on the box',
+    });
   }
-
-  if (pathname === '/api/load-reports') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    const body = await safeJson(req);
-    if (body === null) return j(400, { error: 'report required' });
-    const refusal = loadReportRefusal(body);
-    if (refusal) return j(400, { error: refusal });
-    const page = pageTypeOf((body as LoadReportReading).page);
-    // A page on a board posts to that board, where its share members can
-    // reach it; one arriving here would be a load filed under no board.
-    if (!page || !BOARDLESS_PAGES.includes(page)) {
-      return j(400, {
-        error: `page must be one of ${BOARDLESS_PAGES.join(', ')}; a board's pages post to /workspaces/<ws>/load-reports`,
-      });
-    }
-    // Measured on what would be kept, as the board's route measures its row.
-    if (JSON.stringify(body).length > LOAD_REPORT_MAX_BYTES) {
-      return j(400, { error: `report is over ${LOAD_REPORT_MAX_BYTES} bytes` });
-    }
-    const ts = now();
-    // Kept first, judged second, as on the board's route: a raise that
-    // throws cannot cost the reading that caused it.
-    ctx.pageLoads.record(null, body as LoadReportReading, ts);
-    ctx.slowLoadAlarm.consider(null, body as LoadReportReading, ts);
-    return j(200, { ok: true });
+  if (!isLoopbackAddress(requestAddress(req))) {
+    return j(403, { error: 'load timings are read from this machine only (loopback)' });
   }
+  if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+  if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
+  return j(200, ctx.pageLoads.slowestByPage(now()));
+}
 
-  return null;
+/** `POST /api/load-reports` — one boardless page's load, kept and judged. */
+async function record(ctx: LoadReportRoutesContext, rq: LoadReportRouteRequest): Promise<Response> {
+  const { j, safeJson } = ctx;
+  const { req, visitor } = rq;
+  const now = ctx.now ?? Date.now;
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+  const body = await safeJson(req);
+  if (body === null) return j(400, { error: 'report required' });
+  const refusal = loadReportRefusal(body);
+  if (refusal) return j(400, { error: refusal });
+  const page = pageTypeOf((body as LoadReportReading).page);
+  // A page on a board posts to that board, where its share members can
+  // reach it; one arriving here would be a load filed under no board.
+  if (!page || !BOARDLESS_PAGES.includes(page)) {
+    return j(400, {
+      error: `page must be one of ${BOARDLESS_PAGES.join(', ')}; a board's pages post to /workspaces/<ws>/load-reports`,
+    });
+  }
+  // Measured on what would be kept, as the board's route measures its row.
+  if (JSON.stringify(body).length > LOAD_REPORT_MAX_BYTES) {
+    return j(400, { error: `report is over ${LOAD_REPORT_MAX_BYTES} bytes` });
+  }
+  const ts = now();
+  // Kept first, judged second, as on the board's route: a raise that
+  // throws cannot cost the reading that caused it.
+  ctx.pageLoads.record(null, body as LoadReportReading, ts);
+  ctx.slowLoadAlarm.consider(null, body as LoadReportReading, ts);
+  return j(200, { ok: true });
 }

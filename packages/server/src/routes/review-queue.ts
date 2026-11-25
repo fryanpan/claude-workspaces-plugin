@@ -49,6 +49,7 @@ import { type ReviewRanks, parseGoalTag, parseRank } from '../review-ranks.ts';
 import type { ReviewSizePrefs } from '../review-size-prefs.ts';
 import type { RankReviewItemBody } from './agent-machine-contract.ts';
 import { sent } from './route-contract.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface ReviewQueueRoutesContext {
   crossReview: CrossReview;
@@ -79,7 +80,8 @@ export interface ReviewQueueRoutesContext {
 
 export interface ReviewQueueRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   url: URL;
   /** Truthy for a share or collaboration visitor — refused here. */
   visitor: unknown;
@@ -94,24 +96,18 @@ export function parseSince(raw: string | null): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-const RANK_PATH = '/api/review-queue/rank';
-
-const PATHS = new Set([
-  '/review',
-  '/api/review-queue',
-  '/api/review-wait',
-  '/api/review-size',
-  RANK_PATH,
-]);
-
 /** The longest key accepted: a board id, a kind, a doc id and a thread id. */
 const MAX_KEY = 512;
 
 /** The largest rank body read: an agent id, a key, a number and a goal. */
 const MAX_RANK_BYTES = 4096;
 
-async function handleRank(ctx: ReviewQueueRoutesContext, req: Request): Promise<Response> {
+async function rankRoute(
+  ctx: ReviewQueueRoutesContext,
+  rq: ReviewQueueRouteRequest,
+): Promise<Response> {
   const { j } = ctx;
+  const { req } = rq;
   if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
   const notLocal = ctx.refuseNonLocal(req);
   if (notLocal) return j(notLocal.status, notLocal.body);
@@ -189,30 +185,55 @@ export async function handleReviewQueueRoutes(
   ctx: ReviewQueueRoutesContext,
   rq: ReviewQueueRouteRequest,
 ): Promise<Response | undefined> {
-  const { crossReview, j } = ctx;
-  const { req, pathname, url, visitor } = rq;
-  if (!PATHS.has(pathname)) return undefined;
-  if (visitor) return j(403, { error: 'not available to share visitors' });
-  if (pathname === RANK_PATH) return handleRank(ctx, req);
+  return (await ROWS(ctx, rq)) ?? undefined;
+}
 
-  if (pathname === '/api/review-size') {
-    const identityId = ctx.sessionIdentityId(req);
-    if (req.method === 'GET') {
-      return j(200, { size: identityId ? (ctx.sizePrefs.get(identityId) ?? null) : null });
-    }
-    if (req.method !== 'PUT') return j(405, { error: 'method not allowed' });
-    if (!identityId) return j(401, { error: 'not_signed_in' });
-    const size = parseReviewSize((await ctx.safeJson(req))?.size);
-    if (!size) return j(400, { error: 'size must be easy, medium or hard' });
-    ctx.sizePrefs.set(identityId, size);
-    return j(200, { size });
+type Ctx = ReviewQueueRoutesContext;
+type Rq = ReviewQueueRouteRequest;
+
+/** Every row refuses a visitor before it reads anything. */
+const refusingVisitors =
+  (row: (ctx: Ctx, rq: Rq) => Promise<Response>) =>
+  (ctx: Ctx, rq: Rq): Promise<Response> =>
+    rq.visitor
+      ? Promise.resolve(ctx.j(403, { error: 'not available to share visitors' }))
+      : row(ctx, rq);
+
+const ROWS = rowHandlers<Ctx, Rq, Promise<Response>>('review-queue.ts', {
+  '/api/review-queue': refusingVisitors(async (ctx, rq) =>
+    rq.req.method !== 'GET'
+      ? ctx.j(405, { error: 'method not allowed' })
+      : ctx.j(200, await ctx.crossReview.queue()),
+  ),
+  '/api/review-queue/rank': refusingVisitors(rankRoute),
+  '/api/review-wait': refusingVisitors(reviewWaitRoute),
+  '/api/review-size': refusingVisitors(reviewSizeRoute),
+  '/review': refusingVisitors(async (ctx, rq) =>
+    rq.req.method !== 'GET'
+      ? ctx.j(405, { error: 'method not allowed' })
+      : new Response(ctx.renderPage(), { headers: ctx.pageHeaders }),
+  ),
+});
+
+async function reviewSizeRoute(ctx: Ctx, rq: Rq): Promise<Response> {
+  const { j } = ctx;
+  const { req } = rq;
+  const identityId = ctx.sessionIdentityId(req);
+  if (req.method === 'GET') {
+    return j(200, { size: identityId ? (ctx.sizePrefs.get(identityId) ?? null) : null });
   }
+  if (req.method !== 'PUT') return j(405, { error: 'method not allowed' });
+  if (!identityId) return j(401, { error: 'not_signed_in' });
+  const size = parseReviewSize((await ctx.safeJson(req))?.size);
+  if (!size) return j(400, { error: 'size must be easy, medium or hard' });
+  ctx.sizePrefs.set(identityId, size);
+  return j(200, { size });
+}
 
-  if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
-  if (pathname === '/review') return new Response(ctx.renderPage(), { headers: ctx.pageHeaders });
-  if (pathname === '/api/review-queue') return j(200, await crossReview.queue());
-
-  const since = parseSince(url.searchParams.get('since'));
+async function reviewWaitRoute(ctx: Ctx, rq: Rq): Promise<Response> {
+  const { crossReview, j } = ctx;
+  if (rq.req.method !== 'GET') return j(405, { error: 'method not allowed' });
+  const since = parseSince(rq.url.searchParams.get('since'));
   if (since === null) return j(400, { error: 'since must be epoch milliseconds' });
   // The records go out beside the summary. Any question about ordering that
   // this summary does not answer — a different threshold, a per-day cut, the

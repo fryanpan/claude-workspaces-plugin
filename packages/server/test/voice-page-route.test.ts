@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { matchRow } from '../src/routes/row-dispatch.ts';
 import {
   type VoicePageRouteRequest,
   type VoicePageRoutesContext,
@@ -14,6 +15,7 @@ import {
 } from '../src/routes/voice-page.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { voiceAgentList } from '../src/voice-agent-list.ts';
+import { rowAt } from './route-row.ts';
 
 const ctx: VoicePageRoutesContext = {
   agents: () => [{ id: 'w-1', name: 'Harborlight', agents: [] }],
@@ -26,7 +28,7 @@ const ctx: VoicePageRoutesContext = {
 function ask(path: string, who: Partial<VoicePageRouteRequest> = {}) {
   return handleVoicePageRoutes(ctx, {
     req: new Request(`http://127.0.0.1${path}`),
-    pathname: new URL(`http://127.0.0.1${path}`).pathname,
+    row: rowAt('voice-page.ts', new URL(`http://127.0.0.1${path}`).pathname),
     visitor: null,
     ownerProven: () => false,
     anyoneProven: () => false,
@@ -37,8 +39,8 @@ function ask(path: string, who: Partial<VoicePageRouteRequest> = {}) {
 
 describe('who may open the voice page', () => {
   it('answers only its own two paths', () => {
-    expect(ask('/voices')).toBeNull();
-    expect(ask('/api/voice/agent')).toBeNull();
+    expect(matchRow('voice-page.ts', '/voices')).toBeNull();
+    expect(matchRow('voice-page.ts', '/api/voice/agent')).toBeNull();
   });
 
   it('the owner, signed in, gets the page and the list', async () => {
@@ -88,7 +90,7 @@ describe('who may open the voice page', () => {
   it('reads only', () => {
     const r = handleVoicePageRoutes(ctx, {
       req: new Request('http://127.0.0.1/api/voice/agents', { method: 'POST' }),
-      pathname: '/api/voice/agents',
+      row: rowAt('voice-page.ts', '/api/voice/agents'),
       visitor: null,
       ownerProven: () => true,
       anyoneProven: () => true,

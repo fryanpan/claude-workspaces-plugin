@@ -35,6 +35,7 @@ import {
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { normalizeBoardRole } from '../share/board-role.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface BoardTokenRoutesContext {
   tokens: BoardAgentTokens;
@@ -54,7 +55,8 @@ export interface BoardTokenRoutesContext {
 
 export interface BoardTokenRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   visitor: ShareTarget | null;
   /** The agent and board an `at2` bearer on this request proved, or null. */
   boardAgent: BoardAgentClaims | null;
@@ -62,26 +64,43 @@ export interface BoardTokenRouteRequest {
 
 export const BOARD_TOKEN_REFRESH_PATH = '/api/board-tokens/refresh';
 
-const REVOKE_PATH = /^\/api\/board-tokens\/([^/]+)\/revoke$/;
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export async function handleBoardTokenRoutes(
   ctx: BoardTokenRoutesContext,
   rq: BoardTokenRouteRequest,
 ): Promise<Response | null> {
-  const { req, pathname, visitor } = rq;
+  return ROWS(ctx, rq);
+}
+
+const ROWS = rowHandlers<BoardTokenRoutesContext, BoardTokenRouteRequest, Promise<Response>>(
+  'board-tokens.ts',
+  {
+    '/api/board-tokens': listOrMint,
+    '/api/board-tokens/:id/revoke': revoke,
+    [BOARD_TOKEN_REFRESH_PATH]: refresh,
+  },
+);
+
+async function refresh(
+  ctx: BoardTokenRoutesContext,
+  rq: BoardTokenRouteRequest,
+): Promise<Response> {
+  const { req } = rq;
   const { j } = ctx;
-  if (pathname === BOARD_TOKEN_REFRESH_PATH) {
-    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    if (!rq.boardAgent) return j(401, { error: 'board_token_required' });
-    const fresh = isGrant(rq.boardAgent)
-      ? ctx.grants.refresh(rq.boardAgent)
-      : ctx.tokens.refresh(rq.boardAgent);
-    if (!fresh) return j(401, { error: 'board_token_invalid' });
-    return j(200, { ok: true, ...fresh });
-  }
-  const revoke = pathname.match(REVOKE_PATH);
-  if (pathname !== '/api/board-tokens' && !revoke) return null;
+  if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+  if (!rq.boardAgent) return j(401, { error: 'board_token_required' });
+  const fresh = isGrant(rq.boardAgent)
+    ? ctx.grants.refresh(rq.boardAgent)
+    : ctx.tokens.refresh(rq.boardAgent);
+  if (!fresh) return j(401, { error: 'board_token_invalid' });
+  return j(200, { ok: true, ...fresh });
+}
+
+/** The list, the mint and the revoke are for this machine only; null when the caller is. */
+function refuseOffBox(ctx: BoardTokenRoutesContext, rq: BoardTokenRouteRequest): Response | null {
+  const { req, visitor } = rq;
+  const { j } = ctx;
   if (visitor) return j(403, { error: 'not available to share visitors' });
   const notLocal = refuseNonLocalAgentCaller(req, ctx.requestAddress(req));
   if (notLocal) {
@@ -92,19 +111,33 @@ export async function handleBoardTokenRoutes(
       message: 'Board tokens are minted, listed and revoked from this machine only (loopback).',
     });
   }
+  return null;
+}
 
-  if (revoke) {
-    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    const id = revoke[1] ?? '';
-    if (!isValidBoardTokenId(id)) return j(400, { error: 'bad token id' });
-    const record = ctx.tokens.revoke(id) ?? ctx.grants.revoke(id);
-    if (!record) return j(404, { error: 'not_found' });
-    // The token stops verifying on its next request; this ends the
-    // connections it already holds open, which were authorized once.
-    const closed = ctx.closeConnections(boardAgentMemberKey(record.boardId, record.id));
-    return j(200, { ok: true, record, ...(closed ? { closed } : {}) });
-  }
+async function revoke(ctx: BoardTokenRoutesContext, rq: BoardTokenRouteRequest): Promise<Response> {
+  const { req } = rq;
+  const { j } = ctx;
+  const refused = refuseOffBox(ctx, rq);
+  if (refused) return refused;
+  if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+  const id = rq.row.params.id ?? '';
+  if (!isValidBoardTokenId(id)) return j(400, { error: 'bad token id' });
+  const record = ctx.tokens.revoke(id) ?? ctx.grants.revoke(id);
+  if (!record) return j(404, { error: 'not_found' });
+  // The token stops verifying on its next request; this ends the
+  // connections it already holds open, which were authorized once.
+  const closed = ctx.closeConnections(boardAgentMemberKey(record.boardId, record.id));
+  return j(200, { ok: true, record, ...(closed ? { closed } : {}) });
+}
 
+async function listOrMint(
+  ctx: BoardTokenRoutesContext,
+  rq: BoardTokenRouteRequest,
+): Promise<Response> {
+  const { req } = rq;
+  const { j } = ctx;
+  const refused = refuseOffBox(ctx, rq);
+  if (refused) return refused;
   if (req.method === 'GET') {
     const grants = ctx.grants.list().map((r) => ({ ...r, version: 'at3' as const }));
     return j(200, { tokens: [...ctx.tokens.list(), ...grants] });

@@ -278,6 +278,18 @@ put a stale `content-length` on a compressed body.
   stale-client 410, the wrong-prefix hint and the board's not-found page. An
   address none of them claims gets the chain's bare 404.
 
+**Row-dispatched families.** Eighteen families are registered on their own
+rows of the route table (`claimRowsWith` in `routes/hono-families.ts`), and
+their handlers do not test the path. The router finds the row the raw path
+matches and hands it to the handler with its `:name` params, still
+percent-encoded as the request spelt them. Each module keeps a map from row
+pattern to the function that answers it (`rowHandlers` in
+`routes/row-dispatch.ts`). The map is checked against the table when the
+module loads, and a row with no entry, or an entry with no row, throws at
+boot. Adding a route to one of these families is one row and one map entry.
+`test/hono-row-dispatch.test.ts` names which families are registered this
+way and which still use hand-written patterns.
+
 **Converting a family so the MCP calls it typed.** There are two ways, and
 a family takes the second unless its handler is small.
 
