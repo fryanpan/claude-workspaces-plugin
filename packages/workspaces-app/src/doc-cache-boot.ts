@@ -10,6 +10,7 @@
  */
 import type { AcceptSync, FeedbackClient } from '@claude-workspaces/core';
 import * as decoding from 'lib0/decoding';
+import { trackDocAccess, typingAllowed } from './doc-access.ts';
 import {
   type CachedDoc,
   type DocCacheStore,
@@ -118,6 +119,32 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
   /** Docs whose copy the server's history refused: not seeded again this page,
    *  even before the store's delete lands. */
   const refused = new Set<string>();
+  /** Docs remounted because they held edits the server refused
+   *  (`doc-access.ts`), and not since told they may type. Once each until
+   *  then: a second refusal with no raise between would mean something on the
+   *  page writes the doc by itself, and remounting again would never end. A
+   *  raise clears the doc, so a later narrowing drops its words too. */
+  const remounted = new Set<string>();
+  const track = (client: FeedbackClient, docId: string): void => {
+    const tracker = trackDocAccess(client, () => {
+      // A refusal found on a raise cannot repeat (the next mount starts
+      // unlocked), so only a narrowing counts against the guard.
+      if (typingAllowed(tracker.current())) remounted.delete(docId);
+      dropRefused(docId);
+    });
+    tracker.onChange((access) => {
+      if (typingAllowed(access)) remounted.delete(docId);
+    });
+  };
+  const dropRefused = (docId: string): void => {
+    if (remounted.has(docId)) return;
+    remounted.add(docId);
+    refused.add(docId);
+    const kept = live.get(docId);
+    if (kept) kept.abandon();
+    else if (store) void store.delete(docId);
+    o.onCopyRefused();
+  };
 
   return {
     async fetchMeta(docId) {
@@ -143,7 +170,11 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
     connect(docId, docType, url) {
       const found = pending.get(docId);
       pending.delete(docId);
-      if (!store || !found || docType !== 'markdown' || !found.meta) return o.connect(url);
+      if (!store || !found || docType !== 'markdown' || !found.meta) {
+        const client = o.connect(url);
+        track(client, docId);
+        return client;
+      }
       let persistence: DocPersistence | null = null;
       const client = o.connect(url, undefined, (frame) => {
         const sv = serverStateVectorOf(frame);
@@ -153,6 +184,7 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
         return false;
       });
       if (found.copy) seedFromCopy(client.ydoc, found.copy);
+      track(client, docId);
       persistence = persistDoc({
         ydoc: client.ydoc,
         docId,

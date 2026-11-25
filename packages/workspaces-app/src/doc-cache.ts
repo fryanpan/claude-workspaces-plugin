@@ -359,6 +359,9 @@ export interface DocPersistence {
    *  false, false for good: the copy it would have pushed is still in the doc. */
   acceptServerState(serverStateVector: Uint8Array): boolean;
   setMeta(meta: DocMeta): void;
+  /** Stop keeping a copy and delete the one there is: the doc holds edits
+   *  the server refused (`doc-access.ts`), and a copy would seed them back. */
+  abandon(): void;
 }
 
 /** Debounce for writing the copy in full after an edit. Each edit made here
@@ -445,6 +448,12 @@ export function persistDoc(o: PersistOptions): DocPersistence {
     setMeta(next) {
       meta = next;
       schedule();
+    },
+    abandon() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      refused = true;
+      void store.delete(docId);
     },
   };
 }

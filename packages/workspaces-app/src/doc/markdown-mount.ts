@@ -10,6 +10,7 @@ import { isMdxPath } from '@claude-workspaces/core/prose';
  * downloaded and parsed before a reader saw a word.
  */
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
+import { docAccessOf } from '../doc-access.ts';
 import { wireEditViewport } from '../edit-viewport.ts';
 import { type EditorHandle, createEditor } from '../editor.ts';
 import { setComponentDoc } from '../mdx-component.ts';
@@ -332,11 +333,12 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
   });
 
   // The #save-state chip, and the app preview pane beside the editor.
-  mountDocSaveState({ client, ydoc, canWrite, scope });
+  const access = docAccessOf(ydoc);
+  mountDocSaveState({ client, ydoc, canWrite, scope, access });
   mountDocArchive({ docId, client, ydoc, scope, canWrite, toast: showToast });
   mountDocPreview({ docId, ydoc, scope });
 
   // Last, because it speaks for the whole surface: the format bar, and whether
   // this browser may write at all, which alone decides if the doc mounts editable.
-  wireDocGates({ editor, scope, els: { formatBar, toggleFormat }, canWrite });
+  wireDocGates({ editor, scope, els: { formatBar, toggleFormat }, canWrite, access });
 }

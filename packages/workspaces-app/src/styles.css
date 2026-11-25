@@ -804,8 +804,10 @@ body.is-reading-width #editor > .ProseMirror {
      "we lost the server for a moment" is the opposite of nice-to-have, and
      a deploy usually catches Bryan on his phone. The crumb next to it
      already has `min-width: 0` + ellipsis, so the path truncates to make
-     room rather than the chip being pushed off. */
-  .save-state--offline {
+     room rather than the chip being pushed off. The access level's label
+     ("View only") stays for the same reason: it is why typing does nothing. */
+  .save-state--offline,
+  .save-state--role {
     display: inline-block;
   }
 }

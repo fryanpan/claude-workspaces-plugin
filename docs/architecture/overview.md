@@ -86,6 +86,7 @@ vitest's `node` project runs their tests.
 
 - It layers the same way: entries, controllers, views, models, transport.
 - Its models are DOM-free, which is what lets `board/board-model.ts`, `board/board-review-model.ts` and `board/board-presence-model.ts` be tested without a document.
+- `doc-access.ts` is transport beside `doc-cache.ts`: it reads the access level the server sends each doc socket, so the editor locks for a view or comment member, and it tells `doc-cache-boot.ts` to drop a copy holding edits the server refused.
 - Module placement: [client-and-core.md](client-and-core.md).
 
 ### `core`
