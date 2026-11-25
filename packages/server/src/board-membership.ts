@@ -328,7 +328,7 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     const cut = id.indexOf(':');
     if (cut <= 0 || docStore.docExists(id)) return '';
     if (boardWorkspacesHolding(id.slice(0, cut)).length === 0) return '';
-    return docStore.listedMember(id)?.setId ?? '';
+    return docStore.workspaces.listedMember(id)?.setId ?? '';
   }
 
   /**

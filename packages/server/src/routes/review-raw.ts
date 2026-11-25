@@ -14,7 +14,7 @@ import { boundFiles } from '../slow-fs.ts';
  * on every answer.
  *
  * What a request can reach is what a lazy open can reach and nothing more:
- * `docStore.resolveSetFile` refuses a path outside the set's root (by spelling
+ * `docStore.workspaces.resolveSetFile` refuses a path outside the set's root (by spelling
  * and by where a symlink lands), an excluded path, and anything the scan does
  * not list, the same checks `context-file` runs. On top of that, only a media
  * extension is served (`folder-file-types.ts`), so this is not a second way to
@@ -48,7 +48,7 @@ export async function serveReviewRaw(
   if (!relPath) return j(400, { error: 'path required' });
   const type = mediaTypeOf(relPath);
   if (!type) return j(415, { error: 'only video and image files are served raw' });
-  const res = await docStore.resolveSetFile(setId, relPath, { media: true });
+  const res = await docStore.workspaces.resolveSetFile(setId, relPath, { media: true });
   if (!res.ok) {
     const status = res.error === 'bad-path' ? 400 : res.error === 'unavailable' ? 503 : 404;
     return j(status, { error: res.error });

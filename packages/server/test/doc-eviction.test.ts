@@ -89,9 +89,9 @@ describe('evicting an idle doc', () => {
     const path = bound('wedged');
     docStore.flush();
 
-    expect(docStore.findAndReplace('wedged', { find: 'first line', replace: 'rescued' }).ok).toBe(
-      true,
-    );
+    expect(
+      docStore.docEdits.findAndReplace('wedged', { find: 'first line', replace: 'rescued' }).ok,
+    ).toBe(true);
     // Make the write throw: an unwritable parent directory is a real
     // transient failure (a permission change, a full disk) and needs no
     // stubbing of the writer under test.
@@ -138,9 +138,9 @@ describe('evicting an idle doc', () => {
     // fact the mtimes only approximate; the boot must trust it.
     const path = bound('wedged');
     docStore.flush();
-    expect(docStore.findAndReplace('wedged', { find: 'first line', replace: 'rescued' }).ok).toBe(
-      true,
-    );
+    expect(
+      docStore.docEdits.findAndReplace('wedged', { find: 'first line', replace: 'rescued' }).ok,
+    ).toBe(true);
     chmodSync(srcDir, 0o500);
     try {
       expect(docStore.evictDoc('wedged')).toBe(true);
@@ -276,17 +276,17 @@ describe('evicting an idle doc', () => {
     clock += 3 * DAY;
 
     expect(
-      docStore.findAndReplace('mid-write', {
+      docStore.docEdits.findAndReplace('mid-write', {
         find: 'first line',
         replace: 'typed, not yet flushed',
       }).ok,
     ).toBe(true);
     (docStore.peek('just-edited') as { lastHumanEditAt?: number }).lastHumanEditAt = clock;
-    expect(docStore.findAndReplace('wedged', { find: 'first line', replace: 'live edit' }).ok).toBe(
-      true,
-    );
+    expect(
+      docStore.docEdits.findAndReplace('wedged', { find: 'first line', replace: 'live edit' }).ok,
+    ).toBe(true);
     writeFileSync(wedgedPath, '# Title\n\nexternal edit\n');
-    expect(docStore.reconcileNow('wedged')).toBe('conflict');
+    expect(docStore.bindings.reconcileNow('wedged')).toBe('conflict');
     expect(docStore.getDoc('wedged')?.syncError).toBeDefined();
 
     expect(await docStore.evictIdleDocs()).toEqual([]);
@@ -298,7 +298,7 @@ describe('evicting an idle doc', () => {
     (docStore.peek('just-edited') as { lastHumanEditAt?: number }).lastHumanEditAt =
       clock - 3 * DAY;
     writeFileSync(wedgedPath, '# Title\n\nexternal edit, uncontested\n');
-    expect(docStore.reconcileNow('wedged')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('wedged')).toBe('apply');
     expect(docStore.getDoc('wedged')?.syncError).toBeUndefined();
     docStore.flush();
     // Clearing the wedge means reconciling, and a reconcile IS an
@@ -369,7 +369,7 @@ describe('evicting an idle doc', () => {
     const path = bound('flushme');
     docStore.flush();
     expect(
-      docStore.findAndReplace('flushme', {
+      docStore.docEdits.findAndReplace('flushme', {
         find: 'first line',
         replace: 'the sentence that must survive',
       }).ok,
@@ -407,7 +407,7 @@ describe('evicting an idle doc', () => {
       describe: 're-opening an evicted doc to re-establish its file binding',
     });
     expect(
-      docStore.findAndReplace('rebind', {
+      docStore.docEdits.findAndReplace('rebind', {
         find: 'first line',
         replace: 'written after coming back',
       }).ok,
@@ -434,7 +434,7 @@ describe('evicting an idle doc', () => {
 
     // In-memory edit, still inside its debounce window.
     expect(
-      docStore.findAndReplace('both', { find: 'baseline', replace: 'from the editor' }).ok,
+      docStore.docEdits.findAndReplace('both', { find: 'baseline', replace: 'from the editor' }).ok,
     ).toBe(true);
     expect(onDisk(path)).not.toContain('from the editor');
 
@@ -573,7 +573,7 @@ describe('booting against docs that are not loaded', () => {
       expect(remover.get('archive-me')?.docId).toBe(archivedId);
 
       expect(remover.deleteDoc('delete-me').ok).toBe(true);
-      const archived = remover.archiveDoc('archive-me', { archivedBy: 'test' });
+      const archived = remover.workspaces.archiveDoc('archive-me', { archivedBy: 'test' });
       expect(archived.ok).toBe(true);
       if (archived.ok) expect(archived.docId).toBe(archivedId);
       remover.flush();
@@ -639,7 +639,7 @@ describe('booting against docs that are not loaded', () => {
       second.evictDoc('member-a');
       expect(second.residentCount()).toBe(0);
 
-      const archived = second.archiveReview(setId, { archivedBy: 'test' });
+      const archived = second.workspaces.archiveReview(setId, { archivedBy: 'test' });
       expect(archived.ok).toBe(true);
 
       // The name is free: a NEW doc may take it, and it resolves there.
@@ -678,8 +678,8 @@ describe('booting against docs that are not loaded', () => {
         relPath,
       });
       // Control: the ids this test hard-codes are the ones the server mints.
-      expect(first.companionOf(memberId)).toBe(companionId);
-      expect(first.memberOfCompanion(companionId)).toBe(memberId);
+      expect(first.workspaces.companionOf(memberId)).toBe(companionId);
+      expect(first.workspaces.memberOfCompanion(companionId)).toBe(memberId);
       first.flush();
     } finally {
       first.stop();
@@ -688,14 +688,14 @@ describe('booting against docs that are not loaded', () => {
     const second = make(dataDir);
     try {
       expect(second.residentCount()).toBe(0);
-      expect(second.companionOf(memberId)).toBe(companionId);
-      expect(second.memberOfCompanion(companionId)).toBe(memberId);
+      expect(second.workspaces.companionOf(memberId)).toBe(companionId);
+      expect(second.workspaces.memberOfCompanion(companionId)).toBe(memberId);
       // Answered from the index, not by quietly loading both docs.
       expect(second.residentCount()).toBe(0);
       // Negative control: a member whose companion does not exist still
       // answers undefined, so the assertions above are not "returns an id
       // for anything asked".
-      expect(second.companionOf(memberDocId(setId, 'docs/absent.md'))).toBeUndefined();
+      expect(second.workspaces.companionOf(memberDocId(setId, 'docs/absent.md'))).toBeUndefined();
     } finally {
       second.stop();
     }

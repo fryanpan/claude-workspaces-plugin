@@ -13,9 +13,12 @@
  * seed made, recognised by the id it wrote to `seed-board.json` in the data
  * dir when it made it, never by name: a board somebody else made under the
  * same name would otherwise have the seeded addresses let into it. When the
- * marker names no board that still exists, or names a different board name,
- * the seed makes a new board, beside any same-named one, and lets nobody into
- * that one. Each address the seeded board's audience does not already admit is
+ * setting's name changes, the marked board is renamed to it: the id says the
+ * seed made it, so the new name cannot land on anybody else's board, and its
+ * links and members stay as they were. A rename by hand is kept, because the
+ * marker records the setting's name, not the board's. When the marker names
+ * no board that still exists, the seed makes a new board, beside any
+ * same-named one, and lets nobody into that one. Each address the seeded board's audience does not already admit is
  * added to it, exactly as the owner's Share panel adds one, and then given its
  * member row. Nothing is removed, so an address the owner removed comes back
  * on the next boot while the setting still names it: the setting is the
@@ -68,6 +71,8 @@ export interface SeedBoardDeps {
   createWorkspace: (name: string) => { id: string };
   /** Bring a new board's doc up; `createWorkspace` emits no event. */
   ensureWorkspace: (workspaceId: string) => void;
+  /** Rename the seed's own board when the setting's name changed. */
+  renameWorkspace: (workspaceId: string, name: string) => void;
   shareLinks: Pick<ShareLinks, 'audienceOf' | 'addToAudience' | 'isMember'>;
   /** Which board the seed made, kept across boots. */
   marker: SeedBoardMarker;
@@ -116,6 +121,8 @@ export function seedBoardMarker(dataDir: string): SeedBoardMarker {
 export interface SeedBoardResult {
   workspaceId: string;
   created: boolean;
+  /** The setting's name changed since the last boot, and the board took it. */
+  renamed: boolean;
   /** Addresses this boot added to the audience. */
   added: string[];
   /** Boards with the seed's name that the seed did not make, left untouched. */
@@ -125,11 +132,18 @@ export interface SeedBoardResult {
 /** Who the audience records as adding a seeded address. */
 export const SEED_ADDED_BY = 'deploy settings';
 
+/** Who the board's history records as renaming the seeded board. */
+export const SEED_ACTOR = { id: 'deploy-settings', name: SEED_ADDED_BY };
+
 export function applySeedBoard(seed: SeedBoard, deps: SeedBoardDeps): SeedBoardResult {
   const boards = deps.listWorkspaces();
   const mark = deps.marker.read();
-  const existing =
-    mark?.name === seed.name ? boards.find((w) => w.id === mark.workspaceId) : undefined;
+  const existing = mark ? boards.find((w) => w.id === mark.workspaceId) : undefined;
+  const renamed = existing !== undefined && mark?.name !== seed.name;
+  if (existing && renamed) {
+    deps.renameWorkspace(existing.id, seed.name);
+    deps.marker.write({ name: seed.name, workspaceId: existing.id });
+  }
   const notOurs = boards
     .filter((w) => w.name === seed.name && w.id !== existing?.id)
     .map((w) => w.id);
@@ -147,5 +161,5 @@ export function applySeedBoard(seed: SeedBoard, deps: SeedBoardDeps): SeedBoardR
   // Asking writes the member row an audience entry implies, so the person is
   // listed as a member before their first visit rather than at it.
   for (const who of seed.members) deps.shareLinks.isMember(workspaceId, who);
-  return { workspaceId, created: !existing, added, notOurs };
+  return { workspaceId, created: !existing, renamed, added, notOurs };
 }

@@ -116,11 +116,11 @@ describe('DocStore on the memory backend', () => {
     const kind = DOC_KINDS[0]!;
     kind.build(docStore);
     const before = viewOf(docStore.get(kind.docId)!.ydoc, kind);
-    expect(docStore.archiveDoc(kind.docId, { archivedBy: 'Alice' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveDoc(kind.docId, { archivedBy: 'Alice' }).ok).toBe(true);
     expect(state.has(kind.docId)).toBe(false);
     expect(state.has(kind.docId, 'archive')).toBe(true);
     expect(docStore.get(kind.docId)).toBeUndefined();
-    expect(docStore.unarchiveDoc(kind.docId, { archivedBy: 'Alice' }).ok).toBe(true);
+    expect(docStore.workspaces.unarchiveDoc(kind.docId, { archivedBy: 'Alice' }).ok).toBe(true);
     const after = viewOf(docStore.get(kind.docId)!.ydoc, kind);
     expect(after.text).toEqual(before.text);
     expect(after.stateVector).toEqual(before.stateVector);

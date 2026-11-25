@@ -158,7 +158,7 @@ describe('learning goals: going back', () => {
     );
     // His words are still in the doc, struck; the revision is offered beside them.
     expect(plainText(fx)).toContain(SLIDES);
-    expect(fx.docStore.listSuggestions(DOC_ID)).toMatchObject([
+    expect(fx.docStore.docSuggests.listSuggestions(DOC_ID)).toMatchObject([
       { kind: 'replace', deletedText: SLIDES, insertedText: NEW_FIRST },
     ]);
   });

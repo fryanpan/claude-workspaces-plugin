@@ -140,7 +140,7 @@ describe('links:titles — the needs-review mark', () => {
     expect(before[docUrl(asked)]).toBe(true);
     expect(before[docUrl(quiet)]).toBeUndefined();
 
-    handle.docStore.resolve(asked, threadId, PERSON);
+    handle.docStore.docThreads.resolve(asked, threadId, PERSON);
     expect((await marks([docUrl(asked)]))[docUrl(asked)]).toBeUndefined();
   });
 

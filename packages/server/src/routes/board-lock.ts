@@ -73,11 +73,11 @@ export async function handleBoardLock(
   if (locked) {
     for (const share of shares?.list() ?? []) {
       if (share.workspaceId !== workspaceId) continue;
-      closedSockets += docStore.closeSocketsForShare(share.shareId);
+      closedSockets += docStore.fanout.closeSocketsForShare(share.shareId);
       closedStreams += sse.closeForShare(share.shareId);
     }
     const onBoard = memberKeyOnBoard(workspaceId);
-    closedSockets += docStore.closeSocketsForShareMembers(onBoard);
+    closedSockets += docStore.fanout.closeSocketsForShareMembers(onBoard);
     closedStreams += sse.closeForShareMembers(onBoard);
   }
   return j(200, {

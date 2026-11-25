@@ -96,7 +96,7 @@ export async function handleWorkspaceDelete(
       let archivedDocs = 0;
       for (const docId of linkedDocIds) {
         if (stillHeld.has(docId)) continue;
-        const res = docStore.archiveDoc(docId, {
+        const res = docStore.workspaces.archiveDoc(docId, {
           archivedBy: 'board deleted',
           reason: `the only board holding it (${workspaceId}) was deleted`,
         });

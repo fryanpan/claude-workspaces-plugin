@@ -79,7 +79,7 @@ describe(`POST /workspaces/${WS}/docs/:docId/research-request`, () => {
     const { docId } = await jj<{ docId: string }>(
       await post(`/workspaces/${workspaceId}/huddles`, { kind: 'discussion' }),
     );
-    const set = handle.docStore.setDocContent(docId, NOTES);
+    const set = handle.docStore.docEdits.setDocContent(docId, NOTES);
     expect(set.ok).toBe(true);
     return docId;
   };

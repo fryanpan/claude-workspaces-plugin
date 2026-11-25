@@ -68,7 +68,7 @@ export function honoGates(ctx: HonoAppContext): MiddlewareHandler<HonoRouterEnv>
       !isOnBox(req.headers, requestAddress(req) ?? undefined)
     )
       return;
-    await docStore.openListedMember(id);
+    await docStore.workspaces.openListedMember(id);
   }
 
   return [

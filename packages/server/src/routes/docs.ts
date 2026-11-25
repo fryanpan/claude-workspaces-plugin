@@ -452,7 +452,7 @@ export async function handleDocCreateListRoutes(
     // the rounds already recorded. Watch-only — nothing here ever writes to
     // the agent's file. See `FileBindings.attachMockupFile`.
     if (type === 'mockup' && sourceUrl && isHtmlMockupSource(sourceUrl)) {
-      docStore.attachMockupFile(canonicalId, sourceUrl);
+      docStore.bindings.attachMockupFile(canonicalId, sourceUrl);
     }
     // Root-relative page links break inside a mockup; say so at bind time,
     // naming the board's app when it already serves the site whole.
@@ -543,7 +543,7 @@ export async function handleDocCreateListRoutes(
       : (m: DocMeta) => {
           const row = compactDocRow(decorate(m), {
             boardId: homeForDocIndexed(boardIndex, m),
-            threads: docStore.threadCounts(m.docId),
+            threads: docStore.catalog.threadCounts(m.docId),
             folder: filedFolder(scope.board, m, ctx.dataDir),
           });
           if (visitor) row.sourceUrl = undefined;

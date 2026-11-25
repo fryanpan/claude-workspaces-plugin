@@ -96,21 +96,23 @@ async function seed(): Promise<Fixture> {
   await thread(first, taskBodyDocId(openTask), 'Saltmarsh tides', 'Riverbend, which table?');
   const done = await thread(first, taskBodyDocId(resolvedTask), 'Harborlight buoy', 'Checked.');
   await first.docStore.postComment(taskBodyDocId(resolvedTask), done.id, PERSON, 'Thanks.');
-  first.docStore.resolve(taskBodyDocId(resolvedTask), done.id, PERSON);
+  first.docStore.docThreads.resolve(taskBodyDocId(resolvedTask), done.id, PERSON);
   await thread(first, taskBodyDocId(archivedTask), 'Riverbend gauge', 'Is it gone?');
   await thread(first, taskBodyDocId(retiredTask), 'Riverbend shoals', 'Charted?');
   const boardDoc = 'harborlight-notes';
   first.docStore.getOrCreate(boardDoc, { type: 'markdown', title: 'Harborlight notes' });
-  expect(first.docStore.setDocContent(boardDoc, '# Notes\n\nSaltmarsh plan\n').ok).toBe(true);
+  expect(first.docStore.docEdits.setDocContent(boardDoc, '# Notes\n\nSaltmarsh plan\n').ok).toBe(
+    true,
+  );
   t.attachDoc(live, boardDoc);
   const ask = await thread(first, boardDoc, 'Saltmarsh plan', 'Riverbend, ready to publish?');
 
   const band = t.addGoal(live, { title: 'Harborlight tides' }, { actor: AGENT });
   if (!band.ok) throw new Error('goal not added');
   const goal = taskBodyDocId(band.goal.id);
-  expect(first.docStore.setDocContent(goal, 'Ten Saltmarsh boats plan by the tides.\n').ok).toBe(
-    true,
-  );
+  expect(
+    first.docStore.docEdits.setDocContent(goal, 'Ten Saltmarsh boats plan by the tides.\n').ok,
+  ).toBe(true);
   await thread(first, goal, 'Saltmarsh boats', 'Does ten count the ferries?');
 
   const item = t.addReviewItem(itemTask, CHOICE, { actor: AGENT });

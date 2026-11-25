@@ -79,7 +79,7 @@ describe('a write-back still on the pool', () => {
   }
 
   function edit(docId: string, find: string, replace: string): void {
-    expect(docStore.findAndReplace(docId, { find, replace }).ok).toBe(true);
+    expect(docStore.docEdits.findAndReplace(docId, { find, replace }).ok).toBe(true);
   }
 
   function backups(): string[] {

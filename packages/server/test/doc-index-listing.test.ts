@@ -159,7 +159,7 @@ describe('an index-backed listing equals the hydrated listing', () => {
       expect(present.has(field)).toBe(true);
     }
 
-    const fromIndex = first.listFromIndex();
+    const fromIndex = first.catalog.listFromIndex();
     const a = byId(hydrated);
     const b = byId(fromIndex);
     expect([...b.keys()].sort()).toEqual([...a.keys()].sort());
@@ -183,7 +183,7 @@ describe('an index-backed listing equals the hydrated listing', () => {
     // A fresh DocStore over the same data dir is what a restart does.
     const second = makeDocStore(dataDir);
     const a = byId(before);
-    const b = byId(second.listFromIndex());
+    const b = byId(second.catalog.listFromIndex());
     expect([...b.keys()].sort()).toEqual([...a.keys()].sort());
     for (const [docId, row] of a) expect(b.get(docId)).toEqual(row);
   });
@@ -224,7 +224,7 @@ describe('an index-backed listing equals the hydrated listing', () => {
     addThread(doc.ydoc, 'done', 'resolved');
     docStore.flush();
 
-    const counts = docStore.threadCountsFromIndex('counted');
+    const counts = docStore.catalog.threadCountsFromIndex('counted');
     expect(counts).toEqual({ open: 1, total: 2 });
   });
 
@@ -235,7 +235,7 @@ describe('an index-backed listing equals the hydrated listing', () => {
     // Control: the row is in the live directory to begin with.
     expect(existsSync(join(dataDir, 'to-archive.index.json'))).toBe(true);
 
-    const res = docStore.archiveDoc('to-archive', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveDoc('to-archive', { archivedBy: 'Tester' });
     expect(res.ok).toBe(true);
 
     // The row must not be left in the LIVE directory. If it is, a restart
@@ -271,13 +271,13 @@ describe('an index-backed listing equals the hydrated listing', () => {
     docStore.getOrCreate('doomed', { type: 'markdown', title: 'Doomed' });
     docStore.flush();
     // Control: it is in the index to begin with.
-    expect(docStore.listFromIndex().some((r) => r.docId === 'doomed')).toBe(true);
+    expect(docStore.catalog.listFromIndex().some((r) => r.docId === 'doomed')).toBe(true);
 
     docStore.deleteDoc('doomed', { force: true });
-    expect(docStore.listFromIndex().some((r) => r.docId === 'doomed')).toBe(false);
+    expect(docStore.catalog.listFromIndex().some((r) => r.docId === 'doomed')).toBe(false);
     expect(
       makeDocStore(dataDir)
-        .listFromIndex()
+        .catalog.listFromIndex()
         .some((r) => r.docId === 'doomed'),
     ).toBe(false);
   });

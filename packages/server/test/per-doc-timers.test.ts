@@ -355,7 +355,7 @@ describe('per-doc timers', () => {
   it('reparse_from_disk still force-pulls an idle bound file', async () => {
     const { docStore, docIds, paths } = await seedBound(1);
     writeFileSync(paths[0], '# Doc 0\n\nforced in by reparse\n');
-    const res = docStore.reparseFromDisk(docIds[0]);
+    const res = docStore.bindings.reparseFromDisk(docIds[0]);
     expect(res.ok).toBe(true);
     expect(markdownOf(docStore, docIds[0])).toContain('forced in by reparse');
   });

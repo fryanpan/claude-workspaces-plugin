@@ -164,7 +164,7 @@ describe('a bound file that is not downloaded', () => {
     // And the owner can see why the file is not being written, and a deploy
     // still counts the write as owed.
     expect(store.getDoc(DOC_ID)?.syncError?.message).toContain('EDEADLK');
-    expect(store.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
 
     // The poll keeps asking, whatever the stat says.
     await waitFor(() => poolReads >= 2, { describe: 'the poll to retry the read twice' });
@@ -225,7 +225,7 @@ describe('a bound file that is not downloaded', () => {
     dataless = true;
     store = newStore(dataDir);
     expect(store.attachFile(DOC_ID, boundPath).ok).toBe(true);
-    store.findAndReplace(DOC_ID, {
+    store.docEdits.findAndReplace(DOC_ID, {
       find: 'still owed the file',
       replace: 'typed while it was away',
     });
@@ -237,7 +237,7 @@ describe('a bound file that is not downloaded', () => {
     await new Promise((r) => setTimeout(r, pastWriteBack())); // timed: past the write-back debounce
     expect(realReadFileSync(boundPath, 'utf8')).toBe(ON_DISK);
     // Held, not dropped: the debounce has fired, and a deploy still sees it.
-    expect(store.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
 
     dataless = false;
     await waitForFile(boundPath, (text) => text.includes('typed while it was away'), {
@@ -257,14 +257,14 @@ describe('a bound file that is not downloaded', () => {
     writeFileSync(boundPath, OWED);
     dataless = true;
     store = newStore(dataDir);
-    expect(store.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).toEqual([DOC_ID]);
 
     dataless = false;
     // Nothing to write, so nothing left owed — or every boot hydrates it again.
     await waitFor(() => readDocIndex(dataDir, DOC_ID)?.pendingFileWrite !== true, {
       describe: 'the index row to stop saying a write is owed',
     });
-    expect(store.pendingFileWrites()).toEqual([]);
+    expect(store.bindings.pendingFileWrites()).toEqual([]);
     expect(realReadFileSync(boundPath, 'utf8')).toBe(OWED);
   });
 });

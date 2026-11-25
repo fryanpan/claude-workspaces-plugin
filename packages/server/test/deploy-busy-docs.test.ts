@@ -1,5 +1,5 @@
 /**
- * `DocStore.pendingFileWrites` — the signal a deploy uses to decide whether a
+ * `DocStore.bindings.pendingFileWrites` — the signal a deploy uses to decide whether a
  * `git pull` would silently lose someone's un-flushed sentence.
  *
  * The whole value of this is timing, so the tests do not fake it: a real
@@ -32,7 +32,7 @@ describe('pendingFileWrites', () => {
       decorateDocMeta: (m) => ({ ...m, reviewUrl: `http://test/review/${m.docId}` }),
     });
     docStore.getOrCreate('c1', { type: 'code', sourceUrl: path });
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
   });
 
   afterEach(() => {
@@ -42,15 +42,15 @@ describe('pendingFileWrites', () => {
   it('is empty on an idle binding, names the doc mid-edit, and empties again', async () => {
     // Negative, positive, negative — in one test, on one binding, so the
     // empty answers are demonstrably not the only answer this can give.
-    expect(docStore.pendingFileWrites()).toEqual([]);
+    expect(docStore.bindings.pendingFileWrites()).toEqual([]);
 
     docStore.get('c1')?.ydoc.getText('content').insert(0, '// half a thought\n');
-    const busy = docStore.pendingFileWrites();
+    const busy = docStore.bindings.pendingFileWrites();
     expect(busy).toHaveLength(1);
     expect(busy[0]?.docId).toBe('c1');
     expect(busy[0]?.path).toBe(path);
 
-    await waitFor(() => docStore.pendingFileWrites().length === 0, {
+    await waitFor(() => docStore.bindings.pendingFileWrites().length === 0, {
       describe: 'the pending write-back to drain',
     });
   });
@@ -59,12 +59,12 @@ describe('pendingFileWrites', () => {
     docStore.get('c1')?.ydoc.getText('content').insert(0, 'x');
     // Positive control: with no root, and with the containing root, it is
     // there — so the absence below is about the root and nothing else.
-    expect(docStore.pendingFileWrites()).toHaveLength(1);
-    expect(docStore.pendingFileWrites(dataDir)).toHaveLength(1);
+    expect(docStore.bindings.pendingFileWrites()).toHaveLength(1);
+    expect(docStore.bindings.pendingFileWrites(dataDir)).toHaveLength(1);
 
     const elsewhere = mkdtempSync(join(tmpdir(), 'cw-other-'));
     try {
-      expect(docStore.pendingFileWrites(elsewhere)).toEqual([]);
+      expect(docStore.bindings.pendingFileWrites(elsewhere)).toEqual([]);
     } finally {
       rmSync(elsewhere, { recursive: true, force: true });
     }
@@ -81,13 +81,13 @@ describe('pendingFileWrites', () => {
       const bound = join(lookalike, 'Main.kt');
       writeFileSync(bound, 'fun main() {}\n');
       docStore.getOrCreate('c2', { type: 'code', sourceUrl: bound });
-      expect(docStore.attachFlatFile('c2', bound, { writeBack: true }).ok).toBe(true);
+      expect(docStore.bindings.attachFlatFile('c2', bound, { writeBack: true }).ok).toBe(true);
       docStore.get('c2')?.ydoc.getText('content').insert(0, 'x');
 
       // Positive control on the root that really does contain it.
-      expect(docStore.pendingFileWrites(lookalike).map((d) => d.docId)).toEqual(['c2']);
+      expect(docStore.bindings.pendingFileWrites(lookalike).map((d) => d.docId)).toEqual(['c2']);
       // …and the prefix-sharing sibling sees nothing.
-      expect(docStore.pendingFileWrites(repo)).toEqual([]);
+      expect(docStore.bindings.pendingFileWrites(repo)).toEqual([]);
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }

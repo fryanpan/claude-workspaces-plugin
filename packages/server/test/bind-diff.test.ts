@@ -383,7 +383,7 @@ describe('DocStore.bindDiff', () => {
       join(fixture.repo, 'src', 'kept.ts'),
       'line0 new\nline1\nline2 WORKTREE\nline3\n',
     );
-    expect(docStore.reparseFromDisk(keptDocId).ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk(keptDocId).ok).toBe(true);
     expect(keptDoc?.ydoc.getText('content').toString()).toContain('line0 new');
     // Thread still resolves to the (moved) line — snippet re-anchor keeps it.
     const threads = docStore.listThreads(keptDocId);
@@ -435,16 +435,18 @@ describe('DocStore.bindDiff', () => {
       { id: 'u1', name: 'T', kind: 'known', color: '#000' },
       'b',
     );
-    const all = docStore.listWorkspaceThreads(res.reviewId);
+    const all = docStore.workspaces.listWorkspaceThreads(res.reviewId);
     expect(all).toHaveLength(2);
     expect(all.map((t) => t.relPath).sort()).toEqual(['src/kept.ts', 'src/new.ts']);
     expect(all.every((t) => t.docId.length > 0)).toBe(true);
 
-    const one = docStore.listWorkspaceThreads(res.reviewId, { status: 'open' });
+    const one = docStore.workspaces.listWorkspaceThreads(res.reviewId, { status: 'open' });
     expect(one).toHaveLength(2);
     const kept = all.find((t) => t.relPath === 'src/kept.ts');
-    if (kept) docStore.resolve(kept.docId, kept.id);
-    expect(docStore.listWorkspaceThreads(res.reviewId, { status: 'open' })).toHaveLength(1);
+    if (kept) docStore.docThreads.resolve(kept.docId, kept.id);
+    expect(docStore.workspaces.listWorkspaceThreads(res.reviewId, { status: 'open' })).toHaveLength(
+      1,
+    );
   });
 
   it('groups changed files: explicit groups win, heuristic falls back', async () => {
@@ -728,7 +730,7 @@ describe('DocStore.bindDiff', () => {
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    const tree = docStore.buildWorkspaceTree(res.reviewId);
+    const tree = docStore.workspaces.buildWorkspaceTree(res.reviewId);
     expect(tree.totalOpen).toBe(0);
     const srcDir = tree.tree.children.find((c) => c.type === 'dir' && c.name === 'src');
     expect(srcDir).toBeDefined();
@@ -755,7 +757,7 @@ describe('DocStore.bindDiff', () => {
     const content = doc.ydoc.getText('content');
     doc.ydoc.transact(() => content.delete(0, content.length));
     expect(content.toString()).toBe('');
-    const rep = docStore.reparseFromDisk(docId);
+    const rep = docStore.bindings.reparseFromDisk(docId);
     expect(rep.ok).toBe(true);
     expect(content.toString()).toBe('line1\nline2 CHANGED\nline3\nline4 added\n');
   });

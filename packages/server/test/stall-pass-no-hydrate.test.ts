@@ -68,7 +68,7 @@ describe('one stall pass over cold docs loads none of them', () => {
         'Which index?',
       );
       expect(thread.ok).toBe(true);
-      if (i === 0 && thread.ok) handle.docStore.resolve(bodyId, thread.thread.id, ALICE);
+      if (i === 0 && thread.ok) handle.docStore.docThreads.resolve(bodyId, thread.thread.id, ALICE);
       if (i % 2 === 0) {
         const done = handle.tasks.transition(created.task.id, 'done', {
           actor: { id: ALICE.id, name: ALICE.name, kind: 'person' },
@@ -78,9 +78,9 @@ describe('one stall pass over cold docs loads none of them', () => {
       docs.push(bodyId);
     }
     handle.docStore.getOrCreate('harborlight-plan', { type: 'markdown', title: 'Plan' });
-    expect(handle.docStore.setDocContent('harborlight-plan', '# Plan\n\nHarborlight\n').ok).toBe(
-      true,
-    );
+    expect(
+      handle.docStore.docEdits.setDocContent('harborlight-plan', '# Plan\n\nHarborlight\n').ok,
+    ).toBe(true);
     handle.tasks.attachDoc(ws, 'harborlight-plan');
     const docThread = await handle.docStore.createThreadByFind(
       'harborlight-plan',

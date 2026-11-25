@@ -154,11 +154,11 @@ export async function handleShareSwitch(
     if (!enabled) {
       for (const share of shares?.list() ?? []) {
         if (share.workspaceId !== workspaceId) continue;
-        closedSockets += docStore.closeSocketsForShare(share.shareId);
+        closedSockets += docStore.fanout.closeSocketsForShare(share.shareId);
         closedStreams += sse.closeForShare(share.shareId);
       }
       const onBoard = memberKeyOnBoard(workspaceId);
-      closedSockets += docStore.closeSocketsForShareMembers(onBoard);
+      closedSockets += docStore.fanout.closeSocketsForShareMembers(onBoard);
       closedStreams += sse.closeForShareMembers(onBoard);
     }
     ctx.onSharingFlip(flip);
@@ -199,7 +199,7 @@ export function applyMasterFlip(
   let closedStreams = 0;
   if (!flip.enabled) {
     for (const share of shares?.list() ?? []) {
-      closedSockets += docStore.closeSocketsForShare(share.shareId);
+      closedSockets += docStore.fanout.closeSocketsForShare(share.shareId);
       closedStreams += sse.closeForShare(share.shareId);
     }
     // And every share-link and collaboration-hostname visitor, neither of
@@ -208,7 +208,7 @@ export function applyMasterFlip(
     // switch closed the door to new requests while an already-open
     // `/y/<doc>` kept reading AND writing, and an `/events/` stream kept
     // delivering.
-    closedSockets += docStore.closeSocketsForShareMembers(() => true);
+    closedSockets += docStore.fanout.closeSocketsForShareMembers(() => true);
     closedStreams += sse.closeForShareMembers(() => true);
     // And a tunnel caller of a route answered above admission (the home
     // feed's stream), whom neither sweep above can name.

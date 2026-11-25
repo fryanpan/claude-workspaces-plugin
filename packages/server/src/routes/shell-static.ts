@@ -354,7 +354,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     if (askedVersion === 'bad') return j(400, { error: 'bad version' });
     // Watch the source, so an edit reaches the page this reader is about to
     // have open. Idempotent, and watch-only: nothing here writes to the file.
-    docStore.attachMockupFile(doc.docId, source);
+    docStore.bindings.attachMockupFile(doc.docId, source);
     const live = askedVersion === null ? readMockupHtml(source) : null;
     if (live !== null) {
       captureMockup(dataDir, doc.docId, live);

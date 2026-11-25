@@ -90,13 +90,13 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
 
   it('a conflict reassert (editor-save shape) broadcasts the event with path + backup', () => {
     expect(
-      docStore.findAndReplace('d1', {
+      docStore.docEdits.findAndReplace('d1', {
         find: 'Intro paragraph.',
         replace: 'Live edit, not yet flushed.',
       }).ok,
     ).toBe(true);
     writeFileSync(path, EXT_ONE);
-    expect(docStore.reconcileNow('d1')).toBe('conflict');
+    expect(docStore.bindings.reconcileNow('d1')).toBe('conflict');
 
     const events = syncErrorEvents('d1');
     expect(events.length).toBe(1);
@@ -112,7 +112,7 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
 
   it('a git-shaped overwrite inside the 800ms write debounce broadcasts the event', async () => {
     expect(
-      docStore.findAndReplace('d1', {
+      docStore.docEdits.findAndReplace('d1', {
         find: 'Intro paragraph.',
         replace: 'Live edit racing the external write.',
       }).ok,
@@ -139,7 +139,7 @@ describe('doc.sync_error broadcast (in-process DocStore)', () => {
 
   it('a clean reconcile broadcasts nothing', () => {
     writeFileSync(path, EXT_ONE);
-    expect(docStore.reconcileNow('d1')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d1')).toBe('apply');
     expect(syncErrorEvents('d1').length).toBe(0);
   });
 });
@@ -203,10 +203,13 @@ describe('doc.sync_error reaches a watching SSE stream (HTTP end-to-end)', () =>
     // The git-shaped overwrite: un-flushed live edits, then the file is
     // rewritten out from under the doc.
     expect(
-      handle.docStore.findAndReplace(h1, { find: 'Intro paragraph.', replace: 'Un-flushed.' }).ok,
+      handle.docStore.docEdits.findAndReplace(h1, {
+        find: 'Intro paragraph.',
+        replace: 'Un-flushed.',
+      }).ok,
     ).toBe(true);
     writeFileSync(path, EXT_ONE);
-    expect(handle.docStore.reconcileNow(h1)).toBe('conflict');
+    expect(handle.docStore.bindings.reconcileNow(h1)).toBe('conflict');
 
     // timed: a failure DEADLINE, not a wait — the race settles the instant the
     // event arrives, and only a stream that never delivers pays the 3s.

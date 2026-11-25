@@ -212,7 +212,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { applySeedBoard, seedBoardMarker } from './seed-board.ts';
+import { SEED_ACTOR, applySeedBoard, seedBoardMarker } from './seed-board.ts';
 import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
@@ -1120,11 +1120,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         listWorkspaces: () => taskStore.listWorkspaces(),
         createWorkspace: (name) => taskStore.createWorkspace(name),
         ensureWorkspace: (id) => taskProjection.ensureWorkspace(id),
+        renameWorkspace: (id, name) => {
+          const r = taskStore.renameWorkspace(id, name, { actor: SEED_ACTOR });
+          if (!r.ok) throw new Error(`rename refused: ${r.error}`);
+        },
         shareLinks,
         marker: seedBoardMarker(dataDir),
       });
       console.log(
-        `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : 'present'}, ${seeded.added.length} address(es) added`,
+        `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : seeded.renamed ? 'renamed' : 'present'}, ${seeded.added.length} address(es) added`,
       );
       if (seeded.notOurs.length > 0) {
         console.warn(
@@ -1141,7 +1145,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // route (or the meeting capture) filed it.
   taskStore.setDocRevisionReader((docId) => docStore.settledContentRevision(docId));
   // When a doc last changed, for a rule that runs on that (scheduled-tasks.md).
-  taskStore.setDocActivityReader((docId) => docStore.activityAt(docId));
+  taskStore.setDocActivityReader((docId) => docStore.catalog.activityAt(docId));
   // The OTHER way to ask a person, made visible to the readiness gate.
   //
   // `add_review_item` writes into `task.reviews`, which the store reads
@@ -1521,7 +1525,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    *
    * ONE function because there are TWO routes: `POST /api/tasks/:id/body` and
    * `POST /api/docs/task:<id>/content`. The second one used to reach
-   * `docStore.setDocContent` directly and got none of this, which is how a
+   * `docStore.docEdits.setDocContent` directly and got none of this, which is how a
    * rewrite through `set_doc_content` destroyed a capture with nothing
    * recorded while both the caller and the board saw success.
    *
@@ -1542,7 +1546,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     },
   ): { ok: true } | { ok: false; error: string } => {
     const docId = taskProjection.ensureBodyDoc(task);
-    const res = docStore.setDocContent(docId, markdown);
+    const res = docStore.docEdits.setDocContent(docId, markdown);
     if (!res.ok) return res;
     taskProjection.flushBodySnapshot(task.id);
     // Attribution is the one half a route can lack: `POST /api/docs/:id/content`
@@ -3096,7 +3100,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     closeConnections: (memberKey) => {
       collabRooms.recheck();
       return (
-        docStore.closeSocketsForShareMembers((k) => k === memberKey) +
+        docStore.fanout.closeSocketsForShareMembers((k) => k === memberKey) +
         sse.closeForShareMembers((k) => k === memberKey)
       );
     },
@@ -3971,7 +3975,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // A tailnet widget door socket is authorized once at its upgrade too, by
     // a board token that expires and that the roster can revoke — and no
     // share is needed for the door, so this half runs without one.
-    docStore.closeSocketsForDeadWidgetGrants(
+    docStore.fanout.closeSocketsForDeadWidgetGrants(
       (token, origin) => boardWidgetGrantFor(token, origin) !== null,
     );
     // An agent grant whose person left the board or was archived: HTTP
@@ -3979,12 +3983,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // opened while it still held.
     const lapsed = new Set(agentGrantTokens.lapsedMemberKeys());
     if (lapsed.size > 0) {
-      docStore.closeSocketsForShareMembers((k) => lapsed.has(k));
+      docStore.fanout.closeSocketsForShareMembers((k) => lapsed.has(k));
       sse.closeForShareMembers((k) => lapsed.has(k));
     }
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
-    docStore.closeSocketsForDeadShares(isLive);
+    docStore.fanout.closeSocketsForDeadShares(isLive);
     // Websockets aren't the only long-lived grant — an SSE stream is
     // authorized once at open too, and would otherwise keep delivering
     // comments to a visitor whose share has lapsed.
@@ -3993,7 +3997,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // admitted them — so a lapsed share is found by asking their membership
     // again, the question DELETE /api/share/:id asks when one is revoked.
     const ended = collabMembershipEnded(collabMemberOf);
-    docStore.closeSocketsForShareMembers(ended);
+    docStore.fanout.closeSocketsForShareMembers(ended);
     sse.closeForShareMembers(ended);
   };
   // Armed whatever is configured: the widget door's hostname can be discovered

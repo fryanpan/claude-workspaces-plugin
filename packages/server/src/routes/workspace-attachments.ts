@@ -337,7 +337,7 @@ export async function handleWorkspaceAttachments(
             at: Date.now(),
           },
           {
-            markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
+            markDelivered: (d, t, c, at) => docStore.docThreads.markCommentDelivered(d, t, c, at),
             announce: (channel, f) =>
               sse.broadcastTransient(channel, f, { skipAgentStreams: true }),
           },

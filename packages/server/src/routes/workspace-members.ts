@@ -104,7 +104,7 @@ export async function handleWorkspaceMembers(
     // And the core's room hosts, whose connections carry no member key.
     collabRooms.recheck();
     return {
-      closedSockets: docStore.closeSocketsForShareMembers((k) => keys.has(k)),
+      closedSockets: docStore.fanout.closeSocketsForShareMembers((k) => keys.has(k)),
       closedStreams: sse.closeForShareMembers((k) => keys.has(k)),
     };
   };

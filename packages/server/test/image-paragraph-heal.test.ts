@@ -183,7 +183,7 @@ describe('an image line held as paragraph text', () => {
     ]);
     expect(docStore.listThreads('draft', { status: 'open' }).map((t) => t.id)).toEqual(['t-image']);
 
-    expect(docStore.resolve('draft', 't-image', READER)).not.toBeNull();
+    expect(docStore.docThreads.resolve('draft', 't-image', READER)).not.toBeNull();
     expect(blocksOf('draft')[2]).toBe('image:board-day-one.png');
     expect(docStore.listThreads('draft').map((t) => t.id)).toEqual(['t-image']);
   });
@@ -194,7 +194,10 @@ describe('an image line held as paragraph text', () => {
     docStore.getOrCreate('post', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post', path)).ok).toBe(true);
 
-    const res = docStore.findAndReplace('post', { find: 'PLACEHOLDER-ONE', replace: FIRST });
+    const res = docStore.docEdits.findAndReplace('post', {
+      find: 'PLACEHOLDER-ONE',
+      replace: FIRST,
+    });
 
     expect(res.ok).toBe(true);
     expect(blocksOf('post')[2]).toBe('image:board-day-one.png');
@@ -205,10 +208,10 @@ describe('an image line held as paragraph text', () => {
     writeFileSync(path, DRAFT);
     docStore.getOrCreate('post', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post', path)).ok).toBe(true);
-    const anchor = docStore.createAgentAnchor('post', { find: 'PLACEHOLDER-TWO' });
+    const anchor = docStore.docEdits.createAgentAnchor('post', { find: 'PLACEHOLDER-TWO' });
     if (!anchor.anchorId) throw new Error(`anchor: ${anchor.error}`);
 
-    const res = docStore.editAtAgentAnchor('post', anchor.anchorId, {
+    const res = docStore.docEdits.editAtAgentAnchor('post', anchor.anchorId, {
       kind: 'replace',
       text: SECOND,
     });

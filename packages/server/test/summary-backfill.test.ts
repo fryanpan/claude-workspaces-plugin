@@ -1,5 +1,5 @@
 /**
- * `docStore.backfillSummaries()` — the one-shot sweep over threads that already
+ * `docStore.activity.backfillSummaries()` — the one-shot sweep over threads that already
  * existed when generation shipped.
  *
  * Tested through a real server and re-read over HTTP for the same reason
@@ -54,7 +54,7 @@ const stubFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
 
-describe('DocStore.backfillSummaries', () => {
+describe('DocStore.activity.backfillSummaries', () => {
   let handle: ServerHandle;
   let dataDir: string;
   let base: string;
@@ -151,7 +151,7 @@ describe('DocStore.backfillSummaries', () => {
     expect((await getThread(docB, tB)).summary).toBeUndefined();
 
     process.env.CW_SUMMARIES = '1';
-    const { queued } = handle.docStore.backfillSummaries({ windowMs: 0 });
+    const { queued } = handle.docStore.activity.backfillSummaries({ windowMs: 0 });
     // Other docs from other tests in this file may be resident; what matters
     // is that these two are in the sweep.
     expect(queued).toBeGreaterThanOrEqual(2);
@@ -174,13 +174,13 @@ describe('DocStore.backfillSummaries', () => {
     const threadId = await seed(docId, ['agreed, real bug']);
     process.env.CW_SUMMARIES = '1';
 
-    const first = handle.docStore.backfillSummaries({ windowMs: 0 });
+    const first = handle.docStore.activity.backfillSummaries({ windowMs: 0 });
     await settle(first.queued);
     expect((await getThread(docId, threadId)).summary).toBeDefined();
     expect(calls.length).toBeGreaterThan(0); // positive control for the zero below
 
     calls = [];
-    const second = handle.docStore.backfillSummaries({ windowMs: 0 });
+    const second = handle.docStore.activity.backfillSummaries({ windowMs: 0 });
     expect(second.queued).toBe(0);
     await new Promise((r) => setTimeout(r, 30));
     expect(calls.length).toBe(0);
@@ -206,7 +206,7 @@ describe('DocStore.backfillSummaries', () => {
     expect(before.summary).toBeUndefined();
 
     process.env.CW_SUMMARIES = '1';
-    const { queued, open, resolved } = handle.docStore.backfillSummaries({ windowMs: 0 });
+    const { queued, open, resolved } = handle.docStore.activity.backfillSummaries({ windowMs: 0 });
     expect(resolved).toBeGreaterThanOrEqual(1);
     expect(open + resolved).toBe(queued);
     await settle(queued);
@@ -218,7 +218,7 @@ describe('DocStore.backfillSummaries', () => {
     const threadId = await seed(docId, ['agreed, real bug']);
 
     // Off — the state `beforeEach` left us in.
-    expect(handle.docStore.backfillSummaries({ windowMs: 0 })).toEqual({
+    expect(handle.docStore.activity.backfillSummaries({ windowMs: 0 })).toEqual({
       queued: 0,
       open: 0,
       resolved: 0,
@@ -230,7 +230,7 @@ describe('DocStore.backfillSummaries', () => {
     // POSITIVE CONTROL: the very same thread IS queued once generation is on,
     // so the zero above is the switch and not an empty doc map.
     process.env.CW_SUMMARIES = '1';
-    const { queued } = handle.docStore.backfillSummaries({ windowMs: 0 });
+    const { queued } = handle.docStore.activity.backfillSummaries({ windowMs: 0 });
     expect(queued).toBeGreaterThanOrEqual(1);
     await settle(queued);
     expect((await getThread(docId, threadId)).summary).toBeDefined();

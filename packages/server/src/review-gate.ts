@@ -1285,7 +1285,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
         held: (row) => isReviewPayloadHeld(row),
         judgement: (row) => row.judge,
         record: (judgement, o) => {
-          const res = docStore.judgeCommentReview(docId, threadId, commentId, judgement, o);
+          const res = docStore.docThreads.judgeCommentReview(
+            docId,
+            threadId,
+            commentId,
+            judgement,
+            o,
+          );
           return res.ok ? { ok: true, row: res.review } : { ok: false };
         },
         // Nothing to project: the payload lives in the doc's own CRDT, and
@@ -1425,7 +1431,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
       if (!stored || !isReviewPayloadHeld(stored) || stored.judge?.refused !== undefined) {
         return false;
       }
-      const res = docStore.judgeCommentReview(
+      const res = docStore.docThreads.judgeCommentReview(
         item.docId,
         item.threadId,
         item.commentId,

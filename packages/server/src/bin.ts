@@ -173,7 +173,7 @@ let handle: ReturnType<typeof createServer> | null = null;
 
 const deps = createServerDeps(cfg, {
   deployEnabled: args.includes('--deploy'),
-  busyDocs: () => handle?.docStore.pendingFileWrites(repoRoot) ?? [],
+  busyDocs: () => handle?.docStore.bindings.pendingFileWrites(repoRoot) ?? [],
 });
 const {
   share,

@@ -90,7 +90,10 @@ describe('a guarded bound doc hydrated off the main thread', () => {
     });
     expect(store.getDocStatus(DOC_ID)?.sourceParked).toBeUndefined();
 
-    const edited = store.findAndReplace(DOC_ID, { find: 'first line', replace: 'edited line' });
+    const edited = store.docEdits.findAndReplace(DOC_ID, {
+      find: 'first line',
+      replace: 'edited line',
+    });
     expect(edited.ok).toBe(true);
     await waitForFile(mdPath, (text) => text.includes('The edited line of the plan.'));
   });
@@ -101,7 +104,10 @@ describe('a guarded bound doc hydrated off the main thread', () => {
     store.get(DOC_ID);
     expect(store.boundPathOf(DOC_ID)).toBeUndefined();
     // The edit lands in the gap, before the pool read can come back.
-    const edited = store.findAndReplace(DOC_ID, { find: 'first line', replace: 'gap line' });
+    const edited = store.docEdits.findAndReplace(DOC_ID, {
+      find: 'first line',
+      replace: 'gap line',
+    });
     expect(edited.ok).toBe(true);
 
     await waitFor(() => store?.boundPathOf(DOC_ID) !== undefined, {

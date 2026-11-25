@@ -1,7 +1,7 @@
 {
   "machines": [
     { "project": "moi", "memory": 2048, "leadToken": "claude-account-1" },
-    { "project": "harborlight", "memory": 512, "seedBoard": "Sign-in check" },
-    { "project": "riverbend", "memory": 512, "seedBoard": "Sign-in check" }
+    { "project": "harborlight", "memory": 512, "seedBoard": "Harborlight sign-in check" },
+    { "project": "riverbend", "memory": 512, "seedBoard": "Riverbend sign-in check" }
   ]
 }

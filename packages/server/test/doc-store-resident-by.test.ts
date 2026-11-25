@@ -45,7 +45,7 @@ describe('resident docs by what holds them', () => {
 
   function make(docId: string): void {
     docStore.getOrCreate(docId, { type: 'markdown', title: docId });
-    expect(docStore.setDocContent(docId, `# ${docId}\n\nfirst line\n`).ok).toBe(true);
+    expect(docStore.docEdits.setDocContent(docId, `# ${docId}\n\nfirst line\n`).ok).toBe(true);
   }
 
   it('counts every resident doc once, under the first reason that keeps it', async () => {
@@ -67,7 +67,10 @@ describe('resident docs by what holds them', () => {
     (docStore.peek('harborlight-open') as { conns: Set<unknown> }).conns.add({ data: {} });
     recording.add('riverbend-recording');
     expect(
-      docStore.findAndReplace('saltmarsh-pending', { find: 'first line', replace: 'typed' }).ok,
+      docStore.docEdits.findAndReplace('saltmarsh-pending', {
+        find: 'first line',
+        replace: 'typed',
+      }).ok,
     ).toBe(true);
     (docStore.peek('alice-edited') as { lastHumanEditAt?: number }).lastHumanEditAt = clock;
     expect(docStore.get('harborlight-fresh')).toBeDefined();

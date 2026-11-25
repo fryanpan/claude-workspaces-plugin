@@ -111,12 +111,12 @@ describe('the meeting titler', () => {
 
   it('names the meeting at three bullets, once, and marks the title auto', async () => {
     meeting('d-early');
-    store.setDocContent('d-early', NOTES_2);
+    store.docEdits.setDocContent('d-early', NOTES_2);
     titler.onNotesLanded('d-early');
     await settle();
     expect(held.calls.length).toBe(0);
 
-    store.setDocContent('d-early', NOTES_3);
+    store.docEdits.setDocContent('d-early', NOTES_3);
     titler.onNotesLanded('d-early');
     await waitFor(() => held.calls.length === 1);
     expect(held.calls[0]).toContain('Night crew moves');
@@ -125,7 +125,7 @@ describe('the meeting titler', () => {
     expect(titleOf('d-early')?.titleSource).toBe('auto');
 
     // A fourth bullet in the same meeting asks nothing more.
-    store.setDocContent('d-early', NOTES_4);
+    store.docEdits.setDocContent('d-early', NOTES_4);
     titler.onNotesLanded('d-early');
     await settle();
     expect(held.calls.length).toBe(1);
@@ -133,7 +133,7 @@ describe('the meeting titler', () => {
 
   it('a rename that lands during the namer call wins', async () => {
     meeting('d-race');
-    store.setDocContent('d-race', NOTES_3);
+    store.docEdits.setDocContent('d-race', NOTES_3);
     titler.onNotesLanded('d-race');
     await waitFor(() => held.waiting() === 1);
 
@@ -154,13 +154,13 @@ describe('the meeting titler', () => {
 
   it('names again at the stop, over its own earlier topic', async () => {
     meeting('d-stop');
-    store.setDocContent('d-stop', NOTES_3);
+    store.docEdits.setDocContent('d-stop', NOTES_3);
     titler.onNotesLanded('d-stop');
     await waitFor(() => held.waiting() === 1);
     held.answer('Berth permit');
     await waitFor(() => titleOf('d-stop')?.title === 'Berth permit');
 
-    store.setDocContent('d-stop', NOTES_4);
+    store.docEdits.setDocContent('d-stop', NOTES_4);
     const end = titler.onMeetingEnd('d-stop');
     await waitFor(() => held.waiting() === 1);
     held.answer(TOPIC);
@@ -170,7 +170,7 @@ describe('the meeting titler', () => {
 
   it('never names a given title, a doc with no notes, or on a failed call', async () => {
     meeting('d-given', 'given');
-    store.setDocContent('d-given', NOTES_4);
+    store.docEdits.setDocContent('d-given', NOTES_4);
     titler.onNotesLanded('d-given');
     expect(await titler.onMeetingEnd('d-given')).toBe('named');
 
@@ -179,7 +179,7 @@ describe('the meeting titler', () => {
     expect(held.calls.length).toBe(0);
 
     meeting('d-fail');
-    store.setDocContent('d-fail', NOTES_4);
+    store.docEdits.setDocContent('d-fail', NOTES_4);
     const end = titler.onMeetingEnd('d-fail');
     await waitFor(() => held.waiting() === 1);
     held.answer(null);
@@ -218,7 +218,7 @@ describe('retitleClockTitles', () => {
       ...(opts.huddle === false ? {} : { huddle: true }),
       ...(opts.kind ? { huddleKind: opts.kind } : {}),
     });
-    if (opts.notes) store.setDocContent(docId, opts.notes);
+    if (opts.notes) store.docEdits.setDocContent(docId, opts.notes);
   };
   const meta = (docId: string) => store.get(docId)?.meta;
 
