@@ -268,9 +268,13 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
       return f.escalation ? f : undefined;
     });
     expect(feed.escalation).toMatchObject({ stuck: 1, lead: LEAD.id });
-    // POSITIVE CONTROL for the absence below: on the same server and tick,
-    // the board no Mac follows files for its owner at once.
-    expect(cloud.tasks.listReviewItems(loneTask).length).toBeGreaterThan(0);
+    // POSITIVE CONTROL for the absence below: on the same server, the board
+    // no Mac follows files for its owner with no grace. Polled, because each
+    // board is judged in its own pass and need not be dead on this one yet.
+    await waitFor(() => {
+      cloud.nudgeStalls();
+      return cloud.tasks.listReviewItems(loneTask).length > 0;
+    });
     const deadSince = feed.escalation?.deadSince as number;
 
     // The Mac's own pass tells Team Lead, once the feed has been re-read.
