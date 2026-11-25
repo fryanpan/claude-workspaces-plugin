@@ -483,6 +483,33 @@ never arrived inside the whole grace. They share that stem because
 the message into two strings without a shared stem would have made the more
 serious of the two faults the invisible one.
 
+## launchd runs it as Interactive
+
+The launchd job sets `ProcessType` to `Interactive`. With no `ProcessType`,
+launchd applies "light resource limits to the job, throttling its CPU usage
+and I/O bandwidth" (`man launchd.plist`). `Interactive` gives the job the same
+limits as an app, which is none. The server is a child of the supervisor, and
+`ps` showed both at the same priority, so one key on the job covers both.
+
+Without it, a busy Mac slows every request. The 25 November 2026 health check
+found that all 5 diff loads in 24 hours took over 2s, inside one six-minute
+window in which every request took 1 to 4s. The diff route's git read took
+about 10ms of that. The stall lines showed the server waiting rather than
+working: 21ms of CPU in a 3,890ms stall. `ps` showed the supervisor and the
+server at priority 20 while the 30+ Claude sessions on the machine ran at 31,
+so the scheduler served the sessions first.
+
+The other two templates in `scripts/launchd/` keep the default. The nightly
+doc triage is batch work nobody waits on. The git proxy for sandboxed leads
+serves agents, not a person looking at a page.
+
+A change to the template reaches prod only when the plist is installed again
+and launchd loads it again (bootout, then bootstrap). A deploy's restart (the
+server exits and `KeepAlive` relaunches it) and a manual kickstart both reuse
+the plist launchd already holds. `scripts/launchd/render-plist.test.ts`
+renders the template
+through the same function `install.sh` calls and checks the parsed result.
+
 ## Where things live
 
 | What | Where |
@@ -498,6 +525,7 @@ serious of the two faults the invisible one.
 | A day of those records, read back | `bun run starts:report` |
 | Restart ledger on disk | `supervisor-restarts.json` in the data directory |
 | Event-loop lag monitor and `timeSlice` | `packages/server/src/event-loop.ts` |
+| launchd job: `KeepAlive`, `ThrottleInterval`, `ProcessType` | `scripts/launchd/com.fryanpan.claude-workspaces.plist.template`, rendered by `scripts/launchd/render-plist.sh` |
 | Cases | `packages/server/test/supervisor-*.test.ts` |
 
 Where prod's data directory, checkout and launchd job live is in
