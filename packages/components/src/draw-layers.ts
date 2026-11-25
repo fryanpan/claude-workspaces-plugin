@@ -214,6 +214,15 @@ export class LayerStack {
       interactive: taps,
       className: `cw-map-${layer.type}`,
       style: () => style,
+      // A MultiPoint draws as a group of dots; each dot carries the feature,
+      // so a tap or hover on it reads that feature's properties.
+      onEachFeature: (feature: unknown, drawn: L.Layer) => {
+        if (drawn instanceof L.FeatureGroup) {
+          drawn.eachLayer((dot) => {
+            (dot as L.Layer & { feature?: unknown }).feature = feature;
+          });
+        }
+      },
       // A circle keeps its pixel radius at every zoom, on the shared canvas.
       ...(layer.type === 'circle'
         ? {

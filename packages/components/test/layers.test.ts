@@ -230,38 +230,6 @@ describe('readLayers', () => {
     }));
     expect(readLayers(many)).toEqual({ ok: false, error: 'a map draws at most 24 layers' });
   });
-
-  it('reads a card popup, a tooltip and clickable, and refuses a card link that is not http(s)', () => {
-    const [road] = only(
-      readLayers([
-        {
-          type: 'line',
-          id: 'roads',
-          data: [],
-          tooltip: '{name}',
-          clickable: true,
-          popup: {
-            title: '{name}',
-            lines: ['{speed} mph'],
-            link: { href: 'https://example.org/{slug}' },
-          },
-        },
-      ]),
-    );
-    expect(road).toMatchObject({
-      tooltip: '{name}',
-      clickable: true,
-      popup: {
-        title: '{name}',
-        lines: ['{speed} mph'],
-        link: { href: 'https://example.org/{slug}' },
-      },
-    });
-    const r = readLayers([
-      { type: 'line', id: 'roads', data: [], popup: { link: { href: '{url}' } } },
-    ]);
-    expect(r.ok ? '' : r.error).toContain('link.href must be an http(s) URL');
-  });
 });
 
 describe('readLayerData', () => {

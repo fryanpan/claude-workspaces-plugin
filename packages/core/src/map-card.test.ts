@@ -60,6 +60,18 @@ describe('a map popup read as words or a card', () => {
     expect(readPopup({ lines: Array(CARD_LINES + 1).fill('x') }, 'p')).toMatchObject({ ok: false });
   });
 
+  it('reads a card with no field as no popup', () => {
+    expect(readPopup({}, 'p')).toEqual({ ok: true, value: undefined });
+    const out = readMapSpec({ markers: [{ lat: 1, lng: 2, label: 'Alice', popup: {} }] });
+    expect(out.ok && out.spec.markers[0]?.popup).toBe('Alice');
+  });
+
+  it("lets a layer's link start with a whole key, judged once filled, and nothing else", () => {
+    expect(readPopup({ link: { href: '{url}' } }, 'p', true).ok).toBe(true);
+    expect(readPopup({ link: { href: '{url}' } }, 'p').ok).toBe(false);
+    expect(readPopup({ link: { href: 'javascript:{x}' } }, 'p', true).ok).toBe(false);
+  });
+
   it('fills a template as text from the properties', () => {
     expect(
       popupText('{name}: {speed} mph{gone}', { name: 'Riverbend Ave', speed: 20, gone: {} }),

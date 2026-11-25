@@ -269,8 +269,12 @@ or an event handler. The link must be an http(s) URL: a card with any other
 `href` (`javascript:`, `data:`, a bare path) is refused when the map mounts,
 and the map shows the message in its place. The link opens in a new tab
 (`target="_blank"`, `rel="noopener noreferrer"`) and reads as its `href`
-when `text` is left out. On a layer, every field is a `{key}` template filled
-from the tapped feature, and the filled link is checked again.
+when `text` is left out. A card with no field draws as no popup, so a
+marker's falls back to its label. On a layer, every field is a `{key}`
+template filled from the tapped feature. A layer's `href` starts with
+`http://` or `https://` (`"https://example.org/{slug}"`), or is a whole key
+(`"{url}"`); either way the filled link is checked again, and one that is
+not an http(s) URL once filled is left off that popup.
 
 **Tooltips.** `tooltip` on a marker, point or layer shows words while the
 pointer is over it: a marker's and a point's as given, a layer's filled from
@@ -294,17 +298,27 @@ el.addEventListener(FEATURE_CLICK, (e) => {
 
 `map.setView([lat, lng], zoom?)` moves the map from the host page; without
 `zoom` it keeps the current one. Called before the map first draws, it
-applies once it has, and called during a zoom animation, once that ends.
+applies once it has, and called during a zoom animation, once that ends. A
+center or zoom that is not a finite number changes nothing. Once a move
+ends, the map's `.cw-map-slot` holds the view as `data-zoom` and
+`data-center` (`"lat,lng"`, five decimals).
+
+Each dot of a `MultiPoint` in a circle layer is that feature: its tooltip,
+popup and tap all read the feature's properties and index.
 
 ## Wheel zoom
 
 A map in a page that scrolls should not take the page's scroll. So by
-default the mouse wheel over the map scrolls the page, and the map zooms
-with its + and − buttons, a pinch, or a double tap. With
+default the mouse wheel over the map is left to the page: it scrolls the
+page, the page's own wheel listeners hear it, and the map zooms with its +
+and − buttons, a pinch, or a double tap. With
 `cooperativeGestures: true`, holding Ctrl (or Cmd on a Mac) while turning
 the wheel zooms the map, and a plain wheel scrolls the page and shows, over
 the map for a second, "Use ⌘ + scroll to zoom the map" ("Ctrl" off a Mac).
 The hint is the element `.cw-map-gesture-hint`, which a host can restyle.
+On such a map a plain wheel still scrolls the page, but the page's own
+wheel listeners do not hear it: it is stopped on the map so that Leaflet
+does not zoom.
 
 ## State
 
@@ -364,7 +378,10 @@ line.
   (Ctrl or Cmd with the wheel zooms; a plain wheel shows a hint), `tooltip`
   on markers, points and layers, the `cw-map-feature-click` event with
   `setView` on the handle, `clickable` layers, and card popups (title,
-  lines, one http(s) link). Every 0.4.1 prop draws as before.
+  lines, one http(s) link). Every 0.4.1 prop draws as before except an
+  object as a marker's or point's `popup`: 0.4.1 ignored it (a marker showed
+  its label), and 0.5.0 reads it as a card, refusing the map when the card
+  has a field it cannot draw.
 - 0.4.1: a map naming `carto-light` draws on OpenStreetMap, because CARTO
   now stamps "API key required" on every tile requested without a key. No
   page needs `cartocdn.com` in its Content Security Policy any more.
@@ -398,6 +415,6 @@ CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/interaction-browser.
 the wheel hint and Ctrl zoom, tooltips on hover, the tap event and
 `setView`, and card popups with their link rules.
 
-The browser tests pack the tarball, installs it into a temporary folder and
-draws the map on a plain HTML page in headless Chromium, with every tile
+The browser tests pack the tarball, install it into a temporary folder and
+draw the map on a plain HTML page in headless Chromium, with every tile
 request answered locally.

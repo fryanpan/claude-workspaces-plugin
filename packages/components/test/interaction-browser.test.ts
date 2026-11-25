@@ -38,6 +38,10 @@ const PX_LAT = PX_LNG / Math.cos((LAT * Math.PI) / 180);
 /** The point sits this far west of the centre and the road this far south. */
 const POINT_WEST = 120;
 const ROAD_SOUTH = 90;
+/** The two dots of one MultiPoint feature sit this far north, east of the
+ *  centre by these amounts. */
+const STOPS_NORTH = 100;
+const STOPS_EAST = [150, 250];
 
 const TITLE_AS_MARKUP = '<img src=x onerror="window.pwned=1">Harborlight school';
 
@@ -46,6 +50,7 @@ const PAGE = `<!doctype html>
 <body style="margin: 0 16px; min-height: 3000px">
   <div id="map"></div>
   <div id="bad"></div>
+  <div id="plain"></div>
   <script type="module">
     import mount from './node_modules/@claude-workspaces/components/lib/map.js';
     window.clicks = [];
@@ -65,7 +70,16 @@ const PAGE = `<!doctype html>
           popup: { title: '{name}', lines: ['{speed} mph'], link: { href: 'https://example.org/roads/{slug}' } },
           data: [{ type: 'Feature', properties: { name: 'Riverbend Ave', speed: 20, slug: 'riverbend' },
             geometry: { type: 'LineString', coordinates: [[-122.52, ${LAT - ROAD_SOUTH / PX_LAT}], [-122.36, ${LAT - ROAD_SOUTH / PX_LAT}]] } }] },
+        { type: 'circle', id: 'stops', name: 'Stops', radius: 8, clickable: true, tooltip: '{name}',
+          data: { type: 'Feature', properties: { name: 'Bob stop' },
+            geometry: { type: 'MultiPoint', coordinates: ${JSON.stringify(STOPS_EAST.map((e) => [LNG + e / PX_LNG, LAT + STOPS_NORTH / PX_LAT]))} } } },
       ],
+    });
+    // A map without cooperativeGestures, as the board's StreetMap draws.
+    window.heard = 0;
+    window.addEventListener('wheel', () => window.heard++);
+    mount(document.getElementById('plain'), {
+      center: [${LAT}, ${LNG}], zoom: 14, height: 240, markers: [{ lat: ${LAT}, lng: ${LNG} }],
     });
     mount(document.getElementById('bad'), {
       markers: [{ lat: ${LAT}, lng: ${LNG}, popup: { title: 'Bob', link: { href: 'javascript:alert(1)' } } }],
@@ -93,14 +107,10 @@ const readCard = `(() => {
   };
 })()`;
 
-/** The zoom the map shows: the z of a loaded tile in the frontmost tile
- *  level. Leaflet puts the current level above the others. */
-const readZoom = `(() => {
-  const levels = [...document.querySelectorAll('#map .leaflet-tile-container')];
-  levels.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex));
-  const tile = levels[0]?.querySelector('img.leaflet-tile-loaded');
-  const m = tile && /\\/(\\d+)\\/\\d+\\/\\d+\\.png/.exec(tile.src);
-  return m ? Number(m[1]) : null;
+/** The view a map shows, as its slot says once a move ends. */
+const readView = (id: string) => `(() => {
+  const d = document.querySelector('#${id} .cw-map-slot')?.dataset;
+  return d && d.zoom ? { zoom: Number(d.zoom), center: d.center } : null;
 })()`;
 
 let dir = '';
@@ -118,7 +128,14 @@ let wheel: {
   hint: string;
   hintGone: boolean;
   afterCtrl: number;
-  afterSetView: number;
+  afterSetView: { zoom: number; center: string };
+};
+let plain: {
+  before: number;
+  scrolled: number;
+  heard: number;
+  afterPlain: number;
+  afterCtrl: number;
 };
 
 describe.skipIf(CHROME === null)(
@@ -174,12 +191,14 @@ describe.skipIf(CHROME === null)(
       })()`)) as { x: number; y: number };
       const mouse = async (type: string, x: number, y: number, extra: object = {}) =>
         p.cdp.send('Input.dispatchMouseEvent', { type, x, y, ...extra });
+      // A spot on the map clear of every feature, to move the pointer away to.
+      let away = { x: 0, y: 0 };
       const tooltipAt = async (name: string, x: number, y: number) => {
         // Moved again on every read: the canvas under the points reads a
         // hover at most once per 32ms, so a single move away can go unseen.
         let step = 0;
         await until(`no tooltip before ${name}`, async () => {
-          await mouse('mouseMoved', x - 200 - (step++ % 5), y - 150);
+          await mouse('mouseMoved', away.x - (step++ % 5), away.y);
           return (await p.cdp.evaluate(
             `document.querySelector('#map .cw-map-tooltip') ? null : true`,
           )) as true | null;
@@ -201,6 +220,8 @@ describe.skipIf(CHROME === null)(
               | true
               | null,
         );
+        // A mouse moves to what it taps, so the map knows what it is over.
+        await mouse('mouseMoved', x, y);
         for (const type of ['mousePressed', 'mouseReleased']) {
           await mouse(type, x, y, { button: 'left', clickCount: 1 });
         }
@@ -211,20 +232,28 @@ describe.skipIf(CHROME === null)(
       };
 
       const c = await centre();
+      away = { x: c.x - 300, y: c.y - 150 };
       await tooltipAt('marker', c.x, c.y);
       await tooltipAt('point', c.x - POINT_WEST, c.y);
       await tooltipAt('road', c.x + 200, c.y + ROAD_SOUTH);
       await tapAt('marker', c.x, c.y);
       await tapAt('point', c.x - POINT_WEST, c.y);
       await tapAt('road', c.x + 200, c.y + ROAD_SOUTH);
+      const [, eastmost = 0] = STOPS_EAST;
+      await tooltipAt('stop', c.x + eastmost, c.y - STOPS_NORTH);
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await mouse(type, c.x + eastmost, c.y - STOPS_NORTH, { button: 'left', clickCount: 1 });
+      }
+      await until('the stop tap', async () =>
+        ((await p.cdp.evaluate('window.clicks.length')) as number) === 4 ? true : null,
+      );
       clicks = (await p.cdp.evaluate('window.clicks')) as typeof clicks;
       pwned = await p.cdp.evaluate('window.pwned ?? null');
       await p.cdp.evaluate(`document.querySelector('#map .leaflet-popup-close-button')?.click()`);
 
-      const before = await until(
-        'a tile level',
-        async () => (await p.cdp.evaluate(readZoom)) as number | null,
-      );
+      const zoomOf = async (id: string) =>
+        ((await p.cdp.evaluate(readView(id))) as { zoom: number } | null)?.zoom ?? null;
+      const before = await until('a view', () => zoomOf('map'));
       await mouse('mouseWheel', c.x, c.y, { deltaX: 0, deltaY: 300 });
       const hint = await until('the hint', async () => {
         const t = await p.cdp.evaluate(
@@ -236,9 +265,10 @@ describe.skipIf(CHROME === null)(
         const y = (await p.cdp.evaluate('window.scrollY')) as number;
         return y > 0 ? y : null;
       });
-      // A wheel Leaflet took would have zoomed by now: its own debounce is 40ms.
+      // timed: a wheel Leaflet took would have zoomed inside this window; its
+      // own debounce is 40ms and its zoom animation 250ms.
       await sleep(400);
-      const afterPlain = (await p.cdp.evaluate(readZoom)) as number;
+      const afterPlain = await zoomOf('map');
       const hintGone = await until(
         'the hint to go',
         async () =>
@@ -252,15 +282,62 @@ describe.skipIf(CHROME === null)(
       // Ctrl is modifier 2.
       await mouse('mouseWheel', c2.x, c2.y, { deltaX: 0, deltaY: -300, modifiers: 2 });
       const afterCtrl = await until('a ctrl-wheel zoom', async () => {
-        const z = (await p.cdp.evaluate(readZoom)) as number | null;
+        const z = await zoomOf('map');
         return z !== null && z > before ? z : null;
       });
-      await p.cdp.evaluate(`window.handle.setView([${LAT}, ${LNG}], 11)`);
+      // A bad view from the page changes nothing and throws nothing.
+      await p.cdp.evaluate(`window.handle.setView([NaN, 1], 11); window.handle.setView('x')`);
+      await p.cdp.evaluate('window.handle.setView([37.75, -122.43], 11)');
       const afterSetView = await until('setView to land', async () => {
-        const z = (await p.cdp.evaluate(readZoom)) as number | null;
-        return z === 11 ? z : null;
+        const v = (await p.cdp.evaluate(readView('map'))) as {
+          zoom: number;
+          center: string;
+        } | null;
+        return v?.zoom === 11 ? v : null;
       });
-      wheel = { before, afterPlain, scrolled, hint, hintGone, afterCtrl, afterSetView };
+      wheel = {
+        before,
+        afterPlain: afterPlain ?? -1,
+        scrolled,
+        hint,
+        hintGone,
+        afterCtrl,
+        afterSetView,
+      };
+
+      // The map without the option: the wheel is the page's, Ctrl or not.
+      await p.cdp.evaluate('window.scrollTo(0, 0); window.heard = 0');
+      await until('back at the top', async () =>
+        (await p.cdp.evaluate('window.scrollY')) === 0 ? true : null,
+      );
+      const plainBefore = await until('the plain map view', () => zoomOf('plain'));
+      const at = (await p.cdp.evaluate(`(() => {
+        const r = document.querySelector('#plain .cw-map-slot').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`)) as { x: number; y: number };
+      await mouse('mouseWheel', at.x, at.y, { deltaX: 0, deltaY: 120 });
+      const plainScrolled = await until('the page to scroll over the plain map', async () => {
+        const y = (await p.cdp.evaluate('window.scrollY')) as number;
+        return y > 0 ? y : null;
+      });
+      const heard = (await p.cdp.evaluate('window.heard')) as number;
+      // timed: as above, long enough for a wheel zoom to have landed.
+      await sleep(400);
+      const plainAfter = (await zoomOf('plain')) ?? -1;
+      await p.cdp.evaluate('window.scrollTo(0, 0)');
+      await until('back at the top again', async () =>
+        (await p.cdp.evaluate('window.scrollY')) === 0 ? true : null,
+      );
+      await mouse('mouseWheel', at.x, at.y, { deltaX: 0, deltaY: -120, modifiers: 2 });
+      // timed: as above.
+      await sleep(400);
+      plain = {
+        before: plainBefore,
+        scrolled: plainScrolled,
+        heard,
+        afterPlain: plainAfter,
+        afterCtrl: (await zoomOf('plain')) ?? -1,
+      };
     }, SUITE_MS);
 
     afterAll(async () => {
@@ -277,6 +354,11 @@ describe.skipIf(CHROME === null)(
         expect(wheel.afterPlain).toBe(wheel.before);
         expect(wheel.hintGone).toBe(true);
         expect(wheel.afterCtrl).toBeGreaterThan(wheel.before);
+        // Without the option the wheel never zooms, and the page hears it.
+        expect(plain.scrolled).toBeGreaterThan(0);
+        expect(plain.heard).toBeGreaterThan(0);
+        expect(plain.afterPlain).toBe(plain.before);
+        expect(plain.afterCtrl).toBe(plain.before);
       },
       CASE_MS,
     );
@@ -288,6 +370,7 @@ describe.skipIf(CHROME === null)(
           marker: 'Harborlight school',
           point: 'Saltmarsh crash',
           road: 'Riverbend Ave',
+          stop: 'Bob stop',
         });
       },
       CASE_MS,
@@ -300,10 +383,12 @@ describe.skipIf(CHROME === null)(
           ['markers', 0],
           ['points', 0],
           ['roads', 0],
+          ['stops', 0],
         ]);
         expect(clicks[0]?.item.label).toBe('Harborlight');
         expect(clicks[2]?.item).toEqual({ name: 'Riverbend Ave', speed: 20, slug: 'riverbend' });
-        expect(wheel.afterSetView).toBe(11);
+        expect(clicks[3]?.item).toEqual({ name: 'Bob stop' });
+        expect(wheel.afterSetView).toEqual({ zoom: 11, center: '37.75000,-122.43000' });
       },
       CASE_MS,
     );

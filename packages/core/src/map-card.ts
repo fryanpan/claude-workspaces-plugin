@@ -38,8 +38,12 @@ export function isWebHref(href: string): boolean {
 export type PopupRead = { ok: true; value: MapPopup | undefined } | { ok: false; error: string };
 
 /** Read a `popup` prop: text, a number, a card, or nothing. `at` names it in
- *  the error, e.g. `markers[3].popup`. */
-export function readPopup(v: unknown, at: string): PopupRead {
+ *  the error, e.g. `markers[3].popup`. A card with no field is nothing.
+ *
+ *  `templated` is a layer's card, whose fields are `{key}` templates: its
+ *  link may also start with a whole key (`{url}`), since only the filled
+ *  value can be judged, and `popup-node.ts` judges it once filled. */
+export function readPopup(v: unknown, at: string, templated = false): PopupRead {
   if (v === undefined || v === null) return { ok: true, value: undefined };
   const words = text(v);
   if (words !== undefined) return { ok: true, value: words };
@@ -61,11 +65,14 @@ export function readPopup(v: unknown, at: string): PopupRead {
   if (v.link !== undefined) {
     const link = v.link;
     const href = isRecord(link) ? text(link.href) : undefined;
-    if (href === undefined || !isWebHref(href)) return bad('link.href must be an http(s) URL');
+    const keyed = templated && href !== undefined && /^\s*\{[^{}]+\}/.test(href);
+    if (href === undefined || !(isWebHref(href) || keyed)) {
+      return bad('link.href must be an http(s) URL');
+    }
     const label = isRecord(link) ? text(link.text) : undefined;
     card.link = label === undefined ? { href } : { href, text: label };
   }
-  return { ok: true, value: card };
+  return { ok: true, value: Object.keys(card).length > 0 ? card : undefined };
 }
 
 /** Fill `{key}` in `template` from `props`, as text. A key the feature

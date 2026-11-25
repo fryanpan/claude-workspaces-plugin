@@ -92,8 +92,8 @@ export function createLiveMap(
   hooks: LiveMapHooks = {},
 ): LiveMap {
   const map = L.map(slot, {
-    // On, but a wheel reaches Leaflet only through `wheelGate` below.
-    scrollWheelZoom: true,
+    // Off unless the spec asks for cooperative gestures; see `wheelGate`.
+    scrollWheelZoom: false,
     // Sized by the ResizeObserver below; Leaflet's own window listener would
     // outlive a map whose block was redrawn.
     trackResize: false,
@@ -110,9 +110,11 @@ export function createLiveMap(
       ...(properties ? { properties } : {}),
     });
 
-  // A doc scrolls; a wheel over the map scrolls the doc, not the map, unless
-  // the spec asks for cooperative gestures and Ctrl or Cmd is held. Caught on
-  // the way down, before Leaflet's own listener on the same element.
+  // A doc scrolls; a wheel over the map scrolls the doc, not the map. Without
+  // cooperative gestures Leaflet's wheel zoom is off and the wheel passes to
+  // the page untouched. With them it is on, and a plain wheel is caught on
+  // the way down, before Leaflet's own listener on the same element, so only
+  // Ctrl or Cmd with the wheel reaches it.
   let cooperative = false;
   const hint = doc.createElement('div');
   hint.className = 'cw-map-gesture-hint';
@@ -122,17 +124,23 @@ export function createLiveMap(
   slot.appendChild(hint);
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
   const wheelGate = (e: WheelEvent): void => {
-    if (cooperative && (e.ctrlKey || e.metaKey)) {
+    if (!cooperative) return;
+    if (e.ctrlKey || e.metaKey) {
       hint.classList.remove('is-shown');
       return;
     }
     e.stopImmediatePropagation();
-    if (!cooperative) return;
     hint.classList.add('is-shown');
     clearTimeout(hintTimer);
     hintTimer = setTimeout(() => hint.classList.remove('is-shown'), 1200);
   };
   slot.addEventListener('wheel', wheelGate, { capture: true });
+  // The view the map shows, for a page or a test to read.
+  map.on('moveend', () => {
+    const c = map.getCenter();
+    slot.dataset.zoom = String(map.getZoom());
+    slot.dataset.center = `${c.lat.toFixed(5)},${c.lng.toFixed(5)}`;
+  });
   if (base.script) {
     if (!keyed) throw new Error(`${base.label} needs a key`);
     addGoogleLayer(map, base.script, keyed.key, base.maxZoom, (why) => {
@@ -192,6 +200,8 @@ export function createLiveMap(
       layers?.remove();
       const group = L.layerGroup();
       cooperative = spec.cooperativeGestures;
+      if (cooperative) map.scrollWheelZoom.enable();
+      else map.scrollWheelZoom.disable();
       for (const [i, p] of spec.points.entries()) {
         const interactive = p.popup !== undefined || p.tooltip !== undefined;
         const dot = L.circleMarker([p.lat, p.lng], {

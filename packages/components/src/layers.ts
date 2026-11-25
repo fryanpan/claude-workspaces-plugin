@@ -341,10 +341,10 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     layer = heat;
   }
   if (layer.type !== 'heatmap') {
-    const popup = readPopup(raw.popup, `${at}.popup`);
+    const popup = readPopup(raw.popup, `${at}.popup`, true);
     if (!popup.ok) return popup;
     if (popup.value !== undefined) layer.popup = popup.value;
-    const tooltip = f.text('tooltip');
+    const tooltip = typeof raw.tooltip === 'number' ? String(raw.tooltip) : f.text('tooltip');
     if (tooltip !== undefined) layer.tooltip = tooltip;
     if (raw.clickable === true) layer.clickable = true;
   }

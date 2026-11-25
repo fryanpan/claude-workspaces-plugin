@@ -280,10 +280,13 @@ export default function mount(
   // Set while `draw` runs, whose own paint puts the layers.
   let drawing = false;
   let merged: Record<string, unknown> = props;
+  // The rows the map last drew, which a tap names; a failed redraw leaves
+  // the old dots on screen, so these stay the old rows too.
+  let drawnRows: Record<string, unknown> = props;
   let wanted: { center: [number, number]; zoom?: number } | null = null;
 
   const tapped = (hit: FeatureHit): void => {
-    const rows = hit.layer === 'markers' || hit.layer === 'points' ? merged[hit.layer] : null;
+    const rows = hit.layer === 'markers' || hit.layer === 'points' ? drawnRows[hit.layer] : null;
     const row = Array.isArray(rows) ? rows[hit.index] : undefined;
     const item = hit.properties ?? (isRecord(row) ? row : {});
     const detail: FeatureClick = {
@@ -346,6 +349,7 @@ export default function mount(
       const drawn = live.draw(spec, view !== framed);
       framed = view;
       drawnSpec = spec;
+      drawnRows = merged;
       // A view the page asked for before the first draw, over the fitted one.
       if (wanted) live.setView(wanted.center, wanted.zoom);
       wanted = null;
@@ -422,7 +426,10 @@ export default function mount(
       if (!gone) control.setVisible(id, on);
     },
     setView: (center: [number, number], zoom?: number): void => {
-      if (gone) return;
+      // A bad view from the host's handler changes nothing rather than throwing.
+      const ok = (n: unknown): boolean => typeof n === 'number' && Number.isFinite(n);
+      if (gone || !Array.isArray(center) || !ok(center[0]) || !ok(center[1])) return;
+      if (zoom !== undefined && !ok(zoom)) return;
       const at = zoom === undefined ? { center } : { center, zoom };
       if (live && drawnSpec) live.setView(at.center, at.zoom);
       else wanted = at;
