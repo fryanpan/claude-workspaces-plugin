@@ -528,7 +528,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   let showSettingsAt: (place: BoardSettingsPlace | null) => void = () => {};
 
   // ── The Home pane ───────────────────────────────────────────────────────
-  const { renderHomeRegion, loadHome } = createBoardHomeRegion({
+  const { renderHomeRegion, loadHome, loadAgentNotes } = createBoardHomeRegion({
     state,
     workspaceId,
     author,
@@ -801,6 +801,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     loadAgents,
     loadEvents,
     loadHome,
+    loadAgentNotes,
     loadReviewItems,
     loadDiscussion,
     libraryChanged: () => {
