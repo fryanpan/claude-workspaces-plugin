@@ -109,6 +109,24 @@ returns it as `openerProof`. It joins the doc-store group and moves no
 boundary. Tests: `org-relay-two-servers.test.ts` (two real servers),
 `org-relay-units.test.ts`, `org-relay-sender.test.ts`.
 
+The line after `to:` may name a kind (`relay-kinds.ts`): `dispatch: t-…`
+(one task id, then optional text), `wake` (optional text) or `restart-lead`
+(no text at all). The kind and the task id go in the delivered header,
+outside the quote. A message delivered to a seat is addressed to that seat's
+agent (`to: [agentId]`), so it lands on the agent's durable comment queue and
+wakes the session; the server refuses an agent not attached to the board,
+and the relay then posts it unaddressed, which still reaches the board's
+lead. A restart request is allowed only from a seat the recipient's
+`restartFrom` list names (`relay-rule.ts`), and is delivered as one fixed
+header line and nothing else, unaddressed. On a project machine `lead.sh`
+asks `lead-restart.ts` every 30 seconds whether such a line is waiting on
+its inbox doc. It acts only on a thread the relay's own board token opened
+(the opener proof), on this board, naming this lead, under ten minutes old
+and not handled before; it records the thread before it acts, so one request
+restarts the session once. Tests: `org-relay-kinds.test.ts`,
+`org-relay-kinds-two-servers.test.ts` (two real servers),
+`project-machine-lead-restart.test.ts`.
+
 **A dead board on another server reaches Team Lead on the Mac.** A board's
 own stall escalation looks for Team Lead only among the boards its server
 holds, and Team Lead's stream is on the Mac, so a project machine whose lead
@@ -120,8 +138,25 @@ board's view to `remote-escalations.ts` (Keep-moving group), which sends
 Team Lead one `workspace.stalled` frame per dead stretch with a `remote`
 field naming the origin. The board announces a Home change whenever the
 escalation its feed reports appears or goes, so the Mac re-reads it then. It
-rides the existing pull; nothing new calls the Mac. Tests: `remote-escalations.test.ts`,
-`remote-escalation-across-servers.test.ts`.
+rides the existing pull; nothing new calls the Mac. Once Team Lead has been
+told, the Mac says so to the board's server (`POST
+/workspaces/<board>/home-feed/escalation-ack`, the feed's own gate, body
+`{deadSince}`), and repeats it every five minutes while Team Lead stays
+reachable. The board then files nothing for its owner for fifteen minutes
+from the last word, and withdraws an item it had filed. A board whose feed a
+Mac follows (`home-feed-followers.ts`: a stream open, or a read in the last
+fifteen minutes) waits five minutes for that word before it files; a board
+no Mac follows files at once, as before. If the Mac cannot be told, or Team
+Lead is unreachable there, no word comes and the board files.
+
+The feed also carries the board's lead (`lead-status.ts`): its agent id,
+whether its session can be reached, and when it last sent a heartbeat and
+called a tool. On the Mac, `GET /api/home-remotes` (trusted-local, refused
+to share visitors) lists each followed board with whether it was reached, its
+lead, its escalation and how many items wait there, with no remote text, so
+Team Lead can read every lead's state from one place. Tests:
+`remote-escalations.test.ts`, `remote-team-lead-hold.test.ts`,
+`lead-status.test.ts`, `remote-escalation-across-servers.test.ts`.
 
 **GitHub events for boards on other machines.** GitHub is read once, by the
 broker on the Mac (`~/dev/github-claude-channel`, 127.0.0.1:7902, the

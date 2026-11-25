@@ -565,8 +565,13 @@ What a dead board says, and to whom — in order:
   so a Team Lead attached on both servers hears once, and the board
   announces a Home change whenever what the feed reports appears or goes,
   so the Mac re-reads it even when nothing on the queue moved.
-  The reader's item still stands, because the machine cannot tell that the
-  Mac told anybody.
+  Once Team Lead has heard, the Mac tells the board's server so
+  (`escalation-ack`), and repeats it every five minutes while Team Lead stays
+  reachable. The board then files no item for the reader for fifteen minutes
+  from the last word (`REMOTE_HOLD_MS`), and withdraws one it had filed. A
+  board a Mac follows waits `REMOTE_ACK_GRACE_MS` (five minutes) for the word
+  before filing; a board no Mac follows files at once. No word, and the
+  reader's item is filed as below.
 - **The reader only when Team Lead is unreachable too.** Then the board files
   ONE review item on the reader's queue, naming every stuck task — unfiled
   tasks first, then stalled ones — each with a relative link

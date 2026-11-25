@@ -475,6 +475,17 @@ five minutes resets the count. Root starts `lead.sh` itself again 10s after
 it exits, so a lead that kills its supervisor stops neither the server nor
 the machine.
 
+**A restart Team Lead asks for.** When `CW_LEAD_INBOX_DOC` (the lead seat's
+inbox doc) and `CW_RELAY_AGENT_ID` (the agent id of the org relay's board
+token) are both set, `lead.sh` runs `lead-restart.ts` every 30 seconds. It
+reads the inbox doc's threads over the board socket and answers `restart`
+only for the org relay's restart line for this lead, on a thread the relay's
+token opened, under ten minutes old and not handled before
+(`restart-handled.json` in the lead root, mode 600). `lead.sh` then ends the
+tmux session and starts it again at once, with no backoff. Without the two
+settings the check never runs. Which seats may ask is the relay config's
+`restartFrom` (cross-board.md).
+
 To look at the session (`--pty`, because tmux needs a terminal; `env -i`, so
 root's secrets stay root's):
 
