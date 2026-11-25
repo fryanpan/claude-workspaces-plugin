@@ -6,7 +6,7 @@
  *
  * - tools list and call through `/mcp`, as the session's own directory;
  * - a comment pushed on the server comes out of the relay as the same
- *   `notifications/claude/channel` line today's full child writes for it —
+ *   `notifications/claude/channel` line the full stdio child writes for it —
  *   the push is the whole reason a session keeps a child at all;
  * - `/mcp` refuses a request without the agent's token, even on a server that
  *   still serves tokenless callers elsewhere, and a relay whose mint is
@@ -161,7 +161,7 @@ describe.each(ARMS)('the $kind relay', (arm) => {
     expect(handle.docStore.peekMeta(docId)?.owner).toBe(workDir);
   }, 30_000);
 
-  it('writes a pushed comment as the same channel line today’s child writes', async () => {
+  it('writes a pushed comment as the same channel line the full child writes', async () => {
     const { base } = boot();
     const ws = await seedBoard(base);
     const docId = await makeDoc(base, ws, 'pushed');

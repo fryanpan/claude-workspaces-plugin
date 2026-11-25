@@ -1,12 +1,14 @@
 /**
  * Drives a session's MCP child over stdio, the way Claude Code does: one
  * JSON-RPC message per line in, one per line out. `relay-stdio.test.ts` uses
- * it to run the compiled relay, the node relay and today's full child through
- * the same cases.
+ * it to run the compiled relay and the node relay through the same cases, and
+ * to compare what they write with the full stdio child's.
  *
- * Every child is started through the plugin's own launcher
+ * Each relay is started through the plugin's own launcher
  * (packages/plugin/bin/claude-workspaces-mcp.sh), so a test proves the
- * launcher chose the child it names, not just that the child works.
+ * launcher chose the child it names, not just that the child works. The full
+ * child is no longer shipped (git tag mcp-full-child-rollback) and the
+ * launcher refuses to start it, so it runs from source under this bun.
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -16,7 +18,10 @@ import { waitFor } from './wait-for.ts';
 
 const REPO = resolve(import.meta.dir, '../../..');
 export const LAUNCHER = join(REPO, 'packages/plugin/bin/claude-workspaces-mcp.sh');
-export const BUNDLE = join(REPO, 'packages/plugin/mcp/index.js');
+/** What `.mcp.json` passes the launcher. */
+export const RELAY = join(REPO, 'packages/plugin/mcp/relay.js');
+/** The full stdio child's source entry. */
+const MCP_SOURCE = join(REPO, 'packages/mcp/src/mcp.ts');
 
 export type ChildKind = 'compiled' | 'node-relay' | 'full';
 
@@ -41,7 +46,7 @@ export const PATH_WITH_NODE = pathWithNode();
  * before any case runs.
  */
 export function launcherChoice(env: Record<string, string>): string {
-  const r = spawnSync('/bin/sh', [LAUNCHER, BUNDLE], {
+  const r = spawnSync('/bin/sh', [LAUNCHER, RELAY], {
     env: { PATH: PATH_WITH_NODE, HOME: tmpdir(), ...env, CW_MCP_PRINT_CHILD: '1' },
     encoding: 'utf8',
     timeout: 120_000,
@@ -71,8 +76,8 @@ export function nodeRelayArm(): ChildArm {
   };
 }
 
-/** Today's child, in full, through the rollback lever. */
-export const FULL_ARM: ChildArm = { kind: 'full', env: { CW_MCP_RELAY: '0' } };
+/** The full stdio child, from source: the reference the relays are compared with. */
+export const FULL_ARM: ChildArm = { kind: 'full', env: {} };
 
 export interface StdioChild {
   kind: ChildKind;
@@ -106,7 +111,9 @@ export function startChild(
   cwd: string,
   prefix: string[] = [],
 ): StdioChild {
-  const [file, ...args] = [...prefix, '/bin/sh', LAUNCHER, BUNDLE];
+  const command =
+    arm.kind === 'full' ? [process.execPath, MCP_SOURCE] : ['/bin/sh', LAUNCHER, RELAY];
+  const [file, ...args] = [...prefix, ...command];
   const proc: ChildProcess = spawn(file ?? '/bin/sh', args, {
     cwd,
     env: {

@@ -4,7 +4,7 @@
  * Replaces a test that grepped mcp.ts for `declared.isError === true ? err(`
  * — source text can match while the behaviour is gone (a refactor that keeps
  * the words and drops the branch), and cannot show what the OTHER side of
- * the wire sees. Here the bundle is spawned twice against a recording stub:
+ * the wire sees. Here the full child is spawned twice against a recording stub:
  *
  *  - without CW_AGENT_NAME, the tool answers `isError: true` naming the env
  *    var, and the stub receives NO attach and NO seat request — the refusal
@@ -15,12 +15,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { type Server, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLE = join(HERE, '../../plugin/mcp/index.js');
+import { BUN_BIN, MCP_SOURCE } from './harness/full-child.ts';
 const WS = 'w-lead1';
 
 type Recorded = { method: string; path: string };
@@ -41,7 +37,7 @@ class Child {
     // in from the session that runs the suite.
     for (const k of ['CW_AGENT_NAME', 'FEEDBACK_AGENT_NAME', 'FEEDBACK_AUTHOR']) delete env[k];
     if (agentName !== undefined) env.CW_AGENT_NAME = agentName;
-    this.proc = spawn(process.execPath, [BUNDLE], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.proc = spawn(BUN_BIN, [MCP_SOURCE], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc.stdout?.on('data', (d) => {
       this.pending += d.toString();
       let nl = this.pending.indexOf('\n');

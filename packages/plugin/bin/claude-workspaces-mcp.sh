@@ -15,8 +15,8 @@
 # /bin/sh is the one interpreter guaranteed to be present, so it does the
 # resolution itself instead of trusting the inherited environment.
 #
-# WHICH CHILD. The session's child is a relay by default: it carries MCP
-# between the session and the server's hosted connector at /mcp, and holds no
+# WHICH CHILD. The session's child is always a relay: it carries MCP between
+# the session and the server's hosted connector at /mcp, and holds no
 # connector of its own (packages/mcp/src/relay/relay-core.ts says why and how).
 # In order of preference:
 #
@@ -30,10 +30,16 @@
 #      no working build: Linux, a Mac without the command line tools, a
 #      failed build. Also whenever CW_ACCESS_CLIENT_ID or
 #      CW_ACCESS_SECRET_SERVICE is set.
-#   3. The full child, mcp/index.js — today's connector in-process — when
-#      CW_MCP_RELAY=0 (the rollback lever). A name, board or directory that
-#      is not ASCII stays on a relay: both percent-encode such values for the
-#      trip as headers (packages/mcp/src/relay/relay-wire.ts).
+#
+# A name, board or directory that is not ASCII stays on a relay: both
+# percent-encode such values for the trip as headers
+# (packages/mcp/src/relay/relay-wire.ts).
+#
+# THE FULL CHILD IS NOT SHIPPED. mcp/index.js, the connector run in-process,
+# was the rollback lever behind CW_MCP_RELAY=0. Its last release is the git
+# tag mcp-full-child-rollback. CW_MCP_RELAY=0 now fails with one line that
+# names the tag, and never starts a relay in its place: a session that asked
+# for the full child and silently got a relay would debug the wrong child.
 #
 # A WALLED LEAD (CW_BOARD_SOCKET set, by scripts/lead-sandbox.ts) gets the
 # node relay and nothing else: it alone dials a unix socket, and the wall
@@ -41,16 +47,25 @@
 # cannot run, the launch fails and says so rather than start a child with
 # no way to its board.
 #
-# Usage: /bin/sh claude-workspaces-mcp.sh <path-to-mcp/index.js> [args...]
+# Usage: /bin/sh claude-workspaces-mcp.sh <path-to-mcp/relay.js>
+#
+# Only the directory of $1 is read, so a registration from before the full
+# child was retired, which passes mcp/index.js, still finds the relay.
 
 set -u
 
 bundle="${1:-}"
 if [ -z "$bundle" ]; then
-  echo "claude-workspaces-mcp: no bundle path given (expected mcp/index.js as \$1)" >&2
+  echo "claude-workspaces-mcp: no bundle path given (expected mcp/relay.js as \$1)" >&2
   exit 64
 fi
-shift
+
+case "${CW_MCP_RELAY:-1}" in
+  0|off|false|no)
+    echo "claude-workspaces-mcp: CW_MCP_RELAY=${CW_MCP_RELAY} asks for the full MCP child, which this plugin no longer ships; to roll back, use the plugin dir at git tag mcp-full-child-rollback with CW_MCP_RELAY=0, or unset CW_MCP_RELAY for the relay." >&2
+    exit 64
+    ;;
+esac
 
 # Newest nvm version first: version dirs sort lexically, which is wrong across a
 # major boundary (v9 > v10), so compare numerically on each component.
@@ -118,12 +133,6 @@ find_node() {
 mcp_dir="${bundle%/*}"
 [ "$mcp_dir" = "$bundle" ] && mcp_dir=.
 relay_src="$mcp_dir/../relay/relay.swift"
-
-# Whether this session runs a relay rather than the full child.
-relay_wanted() {
-  case "${CW_MCP_RELAY:-1}" in 0|off|false|no) return 1 ;; esac
-  return 0
-}
 
 # Compile relay.swift into $relay_bin, once per source hash, under a lock.
 build_relay() {
@@ -193,21 +202,15 @@ compiled_relay() {
 }
 
 board_socket="${CW_BOARD_SOCKET:-}"
-if [ -n "$board_socket" ] && ! relay_wanted; then
-  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set, so only the node relay can reach the board, and it is off (CW_MCP_RELAY=0)." >&2
-  exit 64
-fi
 
-if relay_wanted; then
-  plugin_json="$mcp_dir/../.claude-plugin/plugin.json"
-  if [ -f "$plugin_json" ]; then
-    CW_RELAY_PLUGIN_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([0-9.]*\)".*/\1/p' "$plugin_json" | head -n 1)
-    export CW_RELAY_PLUGIN_VERSION
-  fi
-  if [ -z "$board_socket" ] && relay_bin=$(compiled_relay); then
-    [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "compiled $relay_bin"; exit 0; }
-    exec "$relay_bin"
-  fi
+plugin_json="$mcp_dir/../.claude-plugin/plugin.json"
+if [ -f "$plugin_json" ]; then
+  CW_RELAY_PLUGIN_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([0-9.]*\)".*/\1/p' "$plugin_json" | head -n 1)
+  export CW_RELAY_PLUGIN_VERSION
+fi
+if [ -z "$board_socket" ] && relay_bin=$(compiled_relay); then
+  [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "compiled $relay_bin"; exit 0; }
+  exec "$relay_bin"
 fi
 
 node_bin=$(find_node) || {
@@ -224,13 +227,9 @@ if [ "${CW_MCP_PRINT_NODE:-}" = "1" ]; then
   exit 0
 fi
 
-if relay_wanted && [ -f "$mcp_dir/relay.js" ]; then
+if [ -f "$mcp_dir/relay.js" ]; then
   [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "node-relay"; exit 0; }
   exec "$node_bin" "$mcp_dir/relay.js"
 fi
-if [ -n "$board_socket" ]; then
-  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set and $mcp_dir/relay.js is missing, so nothing can reach the board." >&2
-  exit 64
-fi
-[ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "full"; exit 0; }
-exec "$node_bin" "$bundle" "$@"
+echo "claude-workspaces-mcp: $mcp_dir/relay.js is missing, so nothing can reach the board." >&2
+exit 64

@@ -1,6 +1,6 @@
 /**
- * Watches survive an MCP child respawn — end to end, through the SHIPPED
- * BUNDLE, against a real server.
+ * Watches survive an MCP child respawn — end to end, through the full MCP
+ * child, against a real server.
  *
  * The scenario the task was filed on: a session watches docs, Claude Code
  * respawns (token switch, /clear, crash), and the new MCP child comes up with
@@ -29,7 +29,8 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const BUNDLE = resolve(import.meta.dir, '../../plugin/mcp/index.js');
+/** The full stdio child, run from source by this bun (its bundle is no longer shipped). */
+const MCP_SOURCE = resolve(import.meta.dir, '../../mcp/src/mcp.ts');
 
 interface Notification {
   method: string;
@@ -68,7 +69,10 @@ class McpChild {
     }
     childEnv.FEEDBACK_BASE_URL = baseUrl;
     for (const [k, v] of Object.entries(env)) if (v !== undefined) childEnv[k] = v;
-    this.child = spawn('node', [BUNDLE], { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(process.execPath, [MCP_SOURCE], {
+      env: childEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     // The child's own diagnostics, off by default. `stdio` already pipes
     // stderr, so without this it is captured and thrown away — and everything
     // this suite is about (a restore that could not connect, an SSE loop
@@ -505,8 +509,7 @@ describe('watches survive an MCP child respawn (through the real bundle)', () =>
  * Subscribed, seated, and invisible — with a restore notice that said
  * "watches restored" and nothing else.
  *
- * Driven through the shipped BUNDLE, because that is what a peer loads. Its
- * own server with a one-second freshness window, so "went away" is reachable
+ * Driven through the full MCP child over stdio. Its own server with a one-second freshness window, so "went away" is reachable
  * inside a test instead of five minutes later; sharing the suite's server
  * would age every other session in the file too.
  */
@@ -678,7 +681,7 @@ async function waitForPortRefused(port: number, timeoutMs = 5_000): Promise<bool
  * `failed` that never becomes `restored` is silent deafness with a status
  * field attached.
  *
- * So this drives it end to end through the shipped BUNDLE: watch under a live
+ * So this drives it end to end through the full MCP child: watch under a live
  * server, take that server away, respawn against the dead port, then bring the
  * SAME origin and data dir back and require a later tool call to flip to
  * `restored` and deliver a real event on the re-wired watch. Both halves are
@@ -818,11 +821,12 @@ describe('a restore that could not reach the server fails loudly, then recovers'
     // The error is CAPTURED, not swallowed. Pinned to what the field ACTUALLY
     // carries rather than to what would be useful: `http()` throws before it
     // has a status to report, so the message is whatever the runtime's fetch
-    // said — Node reduces a refused connection to the bare string "fetch
-    // failed", naming neither the port nor the cause. Recorded here so the
-    // day that improves, this line says where to look.
+    // said. Node reduces a refused connection to the bare string "fetch
+    // failed"; bun, which runs the child here, says "Unable to connect". Neither
+    // names the port or the cause. Recorded here so the day that improves, this
+    // line says where to look.
     expect(failed.restore.error ?? '').not.toBe('');
-    expect(failed.restore.error).toMatch(/fetch failed|ECONNREFUSED|refused/i);
+    expect(failed.restore.error).toMatch(/fetch failed|ECONNREFUSED|refused|unable to connect/i);
     expect(failed.restore.attempts).toBe(1);
     expect(failed.restore.restored).toEqual([]);
     // Nothing is wired, and the session is not pretending otherwise.

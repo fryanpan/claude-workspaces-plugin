@@ -1,5 +1,12 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -16,7 +23,12 @@ import { describe, expect, it } from 'vitest';
 
 const REPO = resolve(__dirname, '../../..');
 const LAUNCHER = resolve(REPO, 'packages/plugin/bin/claude-workspaces-mcp.sh');
-const BUNDLE = resolve(REPO, 'packages/plugin/mcp/index.js');
+/** The node relay: what `.mcp.json` passes the launcher, and the child it runs without a compiled relay. */
+const RELAY = resolve(REPO, 'packages/plugin/mcp/relay.js');
+/** The full stdio child's old bundle. The plugin stopped shipping it. */
+const OLD_BUNDLE = resolve(REPO, 'packages/plugin/mcp/index.js');
+/** The git tag on the last commit that shipped the full child. */
+const ROLLBACK_TAG = 'mcp-full-child-rollback';
 const MCP_JSON = resolve(REPO, 'packages/plugin/.mcp.json');
 
 /** A PATH with the usual system dirs and no node — what launchd hands a process. */
@@ -29,7 +41,15 @@ function run(
     stdin,
     timeoutMs = 20_000,
     env = { PATH: NODELESS_PATH, HOME: process.env.HOME ?? '' },
-  }: { stdin?: string; timeoutMs?: number; env?: Record<string, string> } = {},
+    holdStdin = false,
+  }: {
+    stdin?: string;
+    timeoutMs?: number;
+    env?: Record<string, string>;
+    /** Keep stdin open, as a session does. The node relay under bun can see
+     *  the EOF before it answers, and a session never sends one. */
+    holdStdin?: boolean;
+  } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, {
@@ -58,7 +78,7 @@ function run(
     child.on('close', () => clearTimeout(timer));
 
     if (stdin !== undefined) child.stdin.write(stdin);
-    child.stdin.end();
+    if (!holdStdin) child.stdin.end();
   });
 }
 
@@ -81,6 +101,21 @@ function nodelessLauncher(): { dir: string; copy: string } {
   const copy = join(dir, 'launcher.sh');
   writeFileSync(copy, stripped);
   return { dir, copy };
+}
+
+/**
+ * Settings that keep the compiled relay out of a run, so the launcher picks
+ * the node relay: a compiler that does not exist and an empty cache.
+ */
+function nodeRelayEnv(): Record<string, string> {
+  return {
+    CW_RELAY_SWIFTC: '/nonexistent/swiftc',
+    CW_RELAY_CACHE_DIR: mkdtempSync(join(tmpdir(), 'cw-launcher-relay-')),
+    // A closed port, so no discovery file is read and the relay answers
+    // initialize itself at once.
+    CW_BASE_URL: 'http://127.0.0.1:9',
+    CW_RELAY_INIT_WAIT_MS: '0',
+  };
 }
 
 /** This machine's bun, or null. The server suite needs it, so CI has one. */
@@ -106,37 +141,22 @@ const INITIALIZE = `${JSON.stringify({
 describe('plugin MCP launcher', () => {
   // Positive control for the negative test below: proves this harness can detect
   // a launcher that fails to start, so "it handshook" is not a vacuous pass.
-  it('bare `node` cannot start the bundle on a node-less PATH', async () => {
-    const { code, stdout, stderr } = await run('node', [BUNDLE], { stdin: INITIALIZE });
+  it('bare `node` cannot start the relay on a node-less PATH', async () => {
+    const { code, stdout, stderr } = await run('node', [RELAY], { stdin: INITIALIZE });
 
     expect(stdout).not.toContain('"result"');
     expect(code === 0 && stdout.length > 0).toBe(false);
     expect(`${stderr}`).toMatch(/ENOENT|not found|no such file/i);
   });
 
-  // Both children the launcher can pick on a node-less PATH: the full child
-  // (the rollback lever), and the node relay, which answers initialize itself
-  // when no server answers — CW_BASE_URL names a closed port so no discovery
-  // file is read, and a compiler that does not exist keeps the compiled relay
-  // out of it.
-  it.each([
-    ['full child', { CW_MCP_RELAY: '0' }],
-    [
-      'node relay',
-      {
-        CW_RELAY_SWIFTC: '/nonexistent/swiftc',
-        CW_RELAY_CACHE_DIR: mkdtempSync(join(tmpdir(), 'cw-launcher-relay-')),
-        CW_BASE_URL: 'http://127.0.0.1:9',
-        CW_RELAY_INIT_WAIT_MS: '0',
-      },
-    ],
-  ])('completes an MCP initialize handshake with no node on PATH: %s', async (name, env) => {
-    const { stdout, stderr } = await run('/bin/sh', [LAUNCHER, BUNDLE], {
+  // The node relay answers initialize itself when no server answers.
+  it('completes an MCP initialize handshake with no node on PATH', async () => {
+    const { stdout, stderr } = await run('/bin/sh', [LAUNCHER, RELAY], {
       stdin: INITIALIZE,
-      env: { PATH: NODELESS_PATH, HOME: process.env.HOME ?? '', ...env },
+      env: { PATH: NODELESS_PATH, HOME: process.env.HOME ?? '', ...nodeRelayEnv() },
     });
-    // Which child answered: only the relay prints this banner.
-    expect(stderr.includes('[relay] node relay started')).toBe(name === 'node relay');
+    // Which child answered: only the node relay prints this banner.
+    expect(stderr).toContain('[relay] node relay started');
 
     const line = stdout.split('\n').find((l) => l.trim().startsWith('{'));
     expect(
@@ -172,7 +192,7 @@ describe('plugin MCP launcher', () => {
     // locations were still searched, so it wasn't fatal, but it reads like a crash
     // in exactly the situation this launcher exists to handle.
     const stderr = await new Promise<string>((res) => {
-      const c = spawn('/bin/sh', [LAUNCHER, BUNDLE], {
+      const c = spawn('/bin/sh', [LAUNCHER, RELAY], {
         env: {},
         stdio: ['ignore', 'ignore', 'pipe'],
       });
@@ -192,10 +212,10 @@ describe('plugin MCP launcher', () => {
     const { dir, copy } = nodelessLauncher();
 
     const child = await new Promise<{ code: number | null; stderr: string }>((res) => {
-      const c = spawn('/bin/sh', [copy, BUNDLE], {
+      const c = spawn('/bin/sh', [copy, RELAY], {
         // HOME has no .nvm or .bun, PATH has neither, and the fallbacks now point nowhere.
-        // The full child, because on a Mac the compiled relay needs no node.
-        env: { PATH: join(dir, 'empty-bin'), HOME: dir, CW_MCP_RELAY: '0' },
+        // No compiler, because on a Mac the compiled relay needs no node.
+        env: { PATH: join(dir, 'empty-bin'), HOME: dir, ...nodeRelayEnv() },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';
@@ -216,10 +236,11 @@ describe('plugin MCP launcher', () => {
     mkdirSync(join(dir, '.bun', 'bin'), { recursive: true });
     symlinkSync(BUN as string, join(dir, '.bun', 'bin', 'bun'));
 
-    const { stdout } = await run('/bin/sh', [copy, BUNDLE], {
+    const { stdout } = await run('/bin/sh', [copy, RELAY], {
       stdin: INITIALIZE,
-      // The full bundle is what has to run under bun here.
-      env: { PATH: join(dir, 'empty-bin'), HOME: dir, CW_MCP_RELAY: '0' },
+      // The node relay is what has to run under bun here.
+      env: { PATH: join(dir, 'empty-bin'), HOME: dir, ...nodeRelayEnv() },
+      holdStdin: true,
     });
 
     const line = stdout.split('\n').find((l) => l.trim().startsWith('{'));
@@ -228,6 +249,60 @@ describe('plugin MCP launcher', () => {
       `no JSON-RPC line in output: ${JSON.stringify(stdout.slice(0, 400))}`,
     ).toBeTruthy();
     expect(JSON.parse(line as string).result?.serverInfo?.name).toBeTruthy();
+  });
+});
+
+// The full stdio child is no longer shipped. Its last release is tagged, and
+// the old lever must say where that is rather than start something else: a
+// session that asked for the full child and silently got a relay would be
+// debugging the wrong child.
+describe('the retired full child', () => {
+  it.each([
+    ['0', {}],
+    ['off', {}],
+    // A walled lead with the relay switched off: the same answer, not a
+    // second message about the socket.
+    ['0', { CW_BOARD_SOCKET: '/nonexistent/board.sock' }],
+  ])('CW_MCP_RELAY=%s fails loudly, naming the rollback tag', async (value, extra) => {
+    const { code, stdout, stderr } = await run('/bin/sh', [LAUNCHER, RELAY], {
+      stdin: INITIALIZE,
+      env: {
+        PATH: NODELESS_PATH,
+        HOME: process.env.HOME ?? '',
+        ...nodeRelayEnv(),
+        ...extra,
+        CW_MCP_RELAY: value,
+      },
+    });
+    expect(code).toBe(64);
+    // No child started: nothing on stdout, and no relay banner.
+    expect(stdout).toBe('');
+    expect(stderr).not.toContain('[relay]');
+    const lines = stderr.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(ROLLBACK_TAG);
+    expect(lines[0]).toContain('CW_MCP_RELAY');
+  });
+
+  it('still starts the relay for an old .mcp.json that passes mcp/index.js', async () => {
+    // A session holding the previous registration passes the old bundle's
+    // path. The launcher only reads its directory, so the relay still runs.
+    const { stdout, stderr } = await run('/bin/sh', [LAUNCHER, OLD_BUNDLE], {
+      stdin: INITIALIZE,
+      env: { PATH: NODELESS_PATH, HOME: process.env.HOME ?? '', ...nodeRelayEnv() },
+    });
+    expect(stderr).toContain('[relay] node relay started');
+    const line = stdout.split('\n').find((l) => l.trim().startsWith('{'));
+    expect(JSON.parse(line as string).result?.serverInfo?.name).toBeTruthy();
+  });
+
+  it('is not in the plugin tree, and the registration does not name it', () => {
+    expect(existsSync(OLD_BUNDLE)).toBe(false);
+    expect(existsSync(RELAY)).toBe(true);
+    const config = JSON.parse(readFileSync(MCP_JSON, 'utf8'));
+    const args: string[] = config.mcpServers['claude-workspaces'].args;
+    expect(args.some((a) => a.endsWith('/mcp/index.js'))).toBe(false);
+    expect(args).toContain('${CLAUDE_PLUGIN_ROOT}/mcp/relay.js');
   });
 });
 

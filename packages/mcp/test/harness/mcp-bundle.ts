@@ -1,5 +1,11 @@
 /**
- * A behavioural harness for the committed MCP bundle.
+ * A behavioural harness for the full stdio MCP child.
+ *
+ * It ran the committed bundle, `packages/plugin/mcp/index.js`, until the
+ * plugin stopped shipping it (git tag `mcp-full-child-rollback`). It now
+ * runs the same child from source under bun (`full-child.ts`). The names
+ * below (`startBundle`, `BundleHarness`) are kept so thirty callers did not
+ * move for a rename.
  *
  * The tests in this package used to assert `BUNDLE.toContain('some string')`
  * over `packages/plugin/mcp/index.js`. That passes on a tool whose handler was
@@ -7,8 +13,7 @@
  * that nothing calls — the string survives every one of those. It also fails
  * on a rename that keeps the feature working.
  *
- * So instead: run the bundle the way `.mcp.json` runs it — through
- * `packages/plugin/bin/claude-workspaces-mcp.sh` — speak MCP over its stdio,
+ * So instead: run the child, speak MCP over its stdio,
  * and point `CW_BASE_URL` at a stub HTTP server that records every request.
  * A declaration is then what `tools/list` returns, and a route is what the
  * handler actually asks for.
@@ -28,12 +33,8 @@
  */
 import { type ChildProcess, spawn } from 'node:child_process';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
-import { resolve } from 'node:path';
 import { isBackgroundRequest } from './background-requests.ts';
-
-const REPO = resolve(import.meta.dirname, '../../../..');
-const LAUNCHER = resolve(REPO, 'packages/plugin/bin/claude-workspaces-mcp.sh');
-const BUNDLE = resolve(REPO, 'packages/plugin/mcp/index.js');
+import { BUN_BIN, MCP_SOURCE } from './full-child.ts';
 
 /** One request the bundle made of the server, as the stub saw it. */
 export type Recorded = {
@@ -206,7 +207,7 @@ async function startStub(
 }
 
 /**
- * Boots the committed bundle against a stub server and completes the MCP
+ * Boots the full child against a stub server and completes the MCP
  * handshake. Call `stop()` in an `afterAll`.
  */
 export async function startBundle(
@@ -217,15 +218,12 @@ export async function startBundle(
   const stream: StreamHolder = { res: null };
   const { server, port } = await startStub(requests, respond, stream);
 
-  const child: ChildProcess = spawn('/bin/sh', [LAUNCHER, BUNDLE], {
+  const child: ChildProcess = spawn(BUN_BIN, [MCP_SOURCE], {
     env: {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
       CW_BASE_URL: `http://127.0.0.1:${port}`,
       CW_AGENT_NAME: 'Harness Agent',
-      // These tests are about the full child's own code, so they run it
-      // through the launcher's rollback lever rather than the relay.
-      CW_MCP_RELAY: '0',
       ...env,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
