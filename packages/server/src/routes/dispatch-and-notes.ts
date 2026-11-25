@@ -476,6 +476,7 @@ export async function handleDispatchAndNoteRoutes(
         ambiguous: target.ambiguous,
         ...(note.sessionId !== undefined ? { sessionId: note.sessionId } : {}),
       });
+      if (logged) ctx.announceAgentNote?.(boardId);
     }
     agentNotes.record({
       ...note,

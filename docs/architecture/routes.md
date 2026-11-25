@@ -176,6 +176,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws` | DELETE | `routes/workspace-delete.ts` | trusted-local |  |
 | `/workspaces/:ws` | GET | `routes/workspaces-create-read.ts` | share-scope |  |
 | `/workspaces/:ws/activity` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/workspaces/:ws/agent-notes` | GET | `routes/board-agent-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/agents` | GET | `routes/workspace-attachments.ts` | share-scope |  |
 | `/workspaces/:ws/agents` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/agents/:agent/mirror` | POST | `routes/lead-mirror.ts` | trusted-local |  |
