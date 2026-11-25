@@ -1,6 +1,6 @@
 {
   "name": "@claude-workspaces/components",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Components that run unchanged in a Claude Workspaces doc and on any site: the street map with GeoJSON line, polygon, circle and heatmap layers a host can switch, mounted from live doc state or from a JSON snapshot.",
   "license": "MIT",
   "type": "module",
