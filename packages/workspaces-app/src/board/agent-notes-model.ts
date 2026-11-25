@@ -47,9 +47,17 @@ export interface AgentNoteGroup {
   /** Set only for `attached`: the task the agent's latest note went to. */
   taskId?: string;
   latestAt: number;
+  /** The newest LISTED note's age. Not `latestAt`'s: for `attached` that is
+   *  the note the task took, which this group does not show. */
   age: string;
-  notes: ActivityNote[];
+  notes: AgentNote[];
   more: number;
+}
+
+/** A listed note: its first line to draw, and its whole text to expand to.
+ *  `age` is empty in a one-note group, whose header already carries it. */
+export interface AgentNote extends ActivityNote {
+  full: string;
 }
 
 const PLACEMENTS: ReadonlySet<string> = new Set<NotePlacement>([
@@ -59,18 +67,24 @@ const PLACEMENTS: ReadonlySet<string> = new Set<NotePlacement>([
 ]);
 const KINDS: ReadonlySet<string> = new Set(['turn', 'denial', 'status']);
 
-/** The state line. `title` is the attached task's title when the board has it.
- *  The two no-task states are past tense: they describe the newest logged
- *  note, and after a restart the server cannot see that a later note landed
- *  on a task, so a present-tense "holds" could be false. */
-export function statePhrase(placement: NotePlacement, title?: string): string {
+/** The state line, for `count` listed notes. `title` is the attached task's
+ *  title when the board has it. The two no-task states are past tense: they
+ *  describe the newest logged note, and after a restart the server cannot
+ *  see that a later note landed on a task, so a present-tense "holds" could
+ *  be false. `attached` says first that the listed notes went nowhere, so it
+ *  never reads as though they are on the task it names. */
+export function statePhrase(placement: NotePlacement, title?: string, count = 1): string {
+  const it = count === 1 ? 'this' : 'these';
   switch (placement) {
     case 'undecidable':
-      return 'held several tasks, so no one task took these';
+      return `held several tasks, so no one task took ${it}`;
     case 'unattachable':
-      return 'held no task, so there was nothing to put these on';
-    case 'attached':
-      return title ? `latest note went to “${title}”` : 'latest note went to a task';
+      return `held no task, so there was nothing to put ${it} on`;
+    case 'attached': {
+      const where = title ? `“${title}”` : 'a task';
+      const what = count === 1 ? 'this earlier note' : 'these earlier notes';
+      return `${what} went nowhere; the latest is on ${where}`;
+    }
   }
 }
 
@@ -137,16 +151,20 @@ export function agentNoteGroups(
       key: `agent:${a.agent}`,
       agent: a.agent,
       placement: a.placement,
-      state: statePhrase(a.placement, a.taskId ? titles.get(a.taskId) : undefined),
+      state: statePhrase(a.placement, a.taskId ? titles.get(a.taskId) : undefined, shown.length),
       ...(a.placement === 'attached' && a.taskId ? { taskId: a.taskId } : {}),
       latestAt: a.latestAt,
-      age: ageShort(a.latestAt, now),
-      notes: shown.map((n) => ({
-        at: n.at,
-        age: ageShort(n.at, now),
-        text: n.kind === 'denial' ? `${DENIAL_PREFIX}${n.text}` : firstLine(n.text),
-        kind: n.kind,
-      })),
+      age: ageShort(shown[0]?.at ?? a.latestAt, now),
+      notes: shown.map((n) => {
+        const full = n.kind === 'denial' ? `${DENIAL_PREFIX}${n.text}` : n.text;
+        return {
+          at: n.at,
+          age: shown.length === 1 ? '' : ageShort(n.at, now),
+          text: n.kind === 'denial' ? full : firstLine(n.text),
+          full,
+          kind: n.kind,
+        };
+      }),
       more: Math.max(0, hidden),
     });
   }

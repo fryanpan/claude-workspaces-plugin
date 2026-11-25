@@ -43,7 +43,12 @@ import {
   DENIAL_PREFIX,
   homeActivity,
 } from './activity-model.ts';
-import { type AgentNoteGroup, type AgentNotesWire, agentNoteGroups } from './agent-notes-model.ts';
+import {
+  type AgentNote,
+  type AgentNoteGroup,
+  type AgentNotesWire,
+  agentNoteGroups,
+} from './agent-notes-model.ts';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
 import { NOBODY, type OpenComment, ThreadCard, draftThread } from './thread-card.tsx';
 
@@ -249,6 +254,33 @@ function Group(props: {
  * it is plain text, because there is nowhere to go. No comment pill: a
  * comment is a thread on a task, and these have none.
  */
+/** A note in the Not on a task list. The pane shows a note by its first
+ *  line, cut to one row; these notes are nowhere else on the board, so a tap
+ *  opens the whole text in place and a second tap folds it back. */
+function AgentNoteLine(props: { note: AgentNote }) {
+  const { note } = props;
+  const [open, setOpen] = useState(false);
+  const text = open ? note.full : note.text;
+  return (
+    <button
+      type="button"
+      class={`board-activity-note board-activity-note-${note.kind} acti-note-toggle${open ? ' acti-note-open' : ''}`}
+      aria-expanded={open ? 'true' : 'false'}
+      onClick={() => setOpen((v) => !v)}
+    >
+      <span class="acti-text">
+        {note.kind === 'denial' ? <DenialText text={text} /> : <Marked text={text} />}
+      </span>
+      {note.age !== '' && (
+        <>
+          {' · '}
+          <span class="acti-age">{note.age}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
 function AgentGroup(props: { group: AgentNoteGroup; onOpenTask: (taskId: string) => void }) {
   const { group } = props;
   const taskId = group.taskId;
@@ -260,6 +292,11 @@ function AgentGroup(props: { group: AgentNoteGroup; onOpenTask: (taskId: string)
         <span class="acti-state">{group.state}</span>
       </span>
       <span class="acti-quiet acti-quiet-neutral">{group.age}</span>
+      {taskId && (
+        <span class="acti-open" aria-hidden="true">
+          ›
+        </span>
+      )}
     </>
   );
   return (
@@ -281,7 +318,7 @@ function AgentGroup(props: { group: AgentNoteGroup; onOpenTask: (taskId: string)
       )}
       <div class="acti-notes">
         {group.notes.map((n) => (
-          <NoteLine key={`${n.at}:${n.kind}:${n.text}`} note={n} />
+          <AgentNoteLine key={`${n.at}:${n.kind}:${n.text}`} note={n} />
         ))}
         {group.more > 0 && <div class="acti-more">{`+${group.more} more`}</div>}
       </div>

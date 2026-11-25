@@ -29,9 +29,9 @@ describe.skipIf(CHROME === null)('Not on a task, on an open Home page', () => {
   it('starts empty, then shows both agents with their reasons, on the same page', () => {
     expect(r.before).toEqual([]);
     const byAgent = Object.fromEntries(r.after.map((g) => [g.agent, g]));
-    expect(byAgent.Harborlight?.state).toBe('held several tasks, so no one task took these');
+    expect(byAgent.Harborlight?.state).toBe('held several tasks, so no one task took this');
     expect(byAgent.Harborlight?.notes).toEqual(['Both arms green; merged the index half.']);
-    expect(byAgent.Riverbend?.state).toBe('held no task, so there was nothing to put these on');
+    expect(byAgent.Riverbend?.state).toBe('held no task, so there was nothing to put this on');
     expect(byAgent.Riverbend?.notes).toEqual(['Parked on the retention call.']);
     // No reload: the marker set before the posts is still on the page.
     expect(r.samePage).toBe(true);

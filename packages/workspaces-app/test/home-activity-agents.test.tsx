@@ -71,8 +71,8 @@ describe('agentNoteGroups', () => {
       NOW,
     );
     expect(groups.map((g) => [g.agent, g.state])).toEqual([
-      ['Riverbend', 'held no task, so there was nothing to put these on'],
-      ['Harborlight', 'held several tasks, so no one task took these'],
+      ['Riverbend', 'held no task, so there was nothing to put this on'],
+      ['Harborlight', 'held several tasks, so no one task took this'],
     ]);
     // Each line is the note's first prose line, as a task group's is.
     expect(groups[1]?.notes.map((n) => n.text)).toEqual(['Merged the index half.']);
@@ -82,7 +82,9 @@ describe('agentNoteGroups', () => {
     const tasks = [task('t-9', 'Wire the index')];
     const [g] = agentNoteGroups([wire({ placement: 'attached', taskId: 't-9' })], tasks, NOW);
     expect(g?.taskId).toBe('t-9');
-    expect(g?.state).toBe('latest note went to “Wire the index”');
+    // The listed notes are NOT on that task: the state says so, and names
+    // the task only as where the newest one went.
+    expect(g?.state).toBe('this earlier note went nowhere; the latest is on “Wire the index”');
     expect(
       agentNoteGroups([wire({ placement: 'attached', taskId: 't-9', notes: [] })], tasks, NOW),
     ).toEqual([]);
@@ -118,6 +120,60 @@ describe('agentNoteGroups', () => {
     const [g] = agentNoteGroups([wire({ notes, latestAt: NOW - MIN, more: 4 })], [], NOW);
     expect(g?.notes.map((n) => n.text)).toEqual(['inside']);
     expect(g?.more).toBe(0);
+  });
+});
+
+describe('the words and ages a group shows', () => {
+  it('says this for one note and these for several', () => {
+    expect(statePhrase('undecidable', undefined, 1)).toBe(
+      'held several tasks, so no one task took this',
+    );
+    expect(statePhrase('undecidable', undefined, 2)).toBe(
+      'held several tasks, so no one task took these',
+    );
+    expect(statePhrase('unattachable', undefined, 3)).toBe(
+      'held no task, so there was nothing to put these on',
+    );
+    expect(statePhrase('attached', 'Wire the index', 2)).toBe(
+      'these earlier notes went nowhere; the latest is on “Wire the index”',
+    );
+    expect(statePhrase('attached', undefined, 1)).toBe(
+      'this earlier note went nowhere; the latest is on a task',
+    );
+  });
+
+  it('dates the header by the newest LISTED note, not by the placed one', () => {
+    const [g] = agentNoteGroups(
+      [
+        wire({
+          placement: 'attached',
+          taskId: 't-9',
+          latestAt: NOW - MIN,
+          notes: [
+            { at: NOW - 20 * MIN, kind: 'turn', text: 'a' },
+            { at: NOW - 30 * MIN, kind: 'turn', text: 'b' },
+          ],
+        }),
+      ],
+      [task('t-9', 'Wire the index')],
+      NOW,
+    );
+    expect(g?.age).toBe('20m');
+  });
+
+  it('shows a one-note group’s age once, in the header', () => {
+    const [one] = agentNoteGroups([wire({})], [], NOW);
+    expect(one?.age).toBe('2m');
+    expect(one?.notes[0]?.age).toBe('');
+    const notes = [1, 2].map((i) => ({ at: NOW - i * MIN, kind: 'turn' as const, text: `n${i}` }));
+    const [two] = agentNoteGroups([wire({ notes })], [], NOW);
+    expect(two?.notes.map((n) => n.age)).toEqual(['1m', '2m']);
+  });
+
+  it('keeps each note’s whole text beside its first line', () => {
+    const [g] = agentNoteGroups([wire({})], [], NOW);
+    expect(g?.notes[0]?.text).toBe('Merged the index half.');
+    expect(g?.notes[0]?.full).toBe('Merged the index half.\n\nDetails below.');
   });
 });
 
@@ -193,8 +249,9 @@ describe('the Not on a task list in the Home pane', () => {
       'Parked on the retention call.',
     );
     // Neither header is a control: there is no task to open.
-    expect(busy?.querySelector('button, [role="button"]')).toBeNull();
-    expect(idle?.querySelector('button, [role="button"]')).toBeNull();
+    expect(busy?.querySelector('.acti-head')?.tagName).toBe('DIV');
+    expect(idle?.querySelector('.acti-head')?.tagName).toBe('DIV');
+    expect(busy?.querySelector('.acti-open')).toBeNull();
     unmount();
   });
 
@@ -205,9 +262,34 @@ describe('the Not on a task list in the Home pane', () => {
     );
     const head = host.querySelector<HTMLButtonElement>('.acti-agent-group button.acti-head');
     expect(head).not.toBeNull();
+    // The one header that opens something says so with a chevron.
+    expect(head?.querySelector('.acti-open')).not.toBeNull();
     head?.click();
     await tick();
     expect(onOpenTask).toHaveBeenCalledWith('t-9');
+    unmount();
+  });
+
+  it('expands a note in place to its whole text, and folds it back', async () => {
+    const long = `${'word '.repeat(60)}end of the first line.\n\nThe second paragraph.`;
+    const { host, unmount } = mount([
+      wire({ notes: [{ at: NOW - 2 * MIN, kind: 'turn', text: long }] }),
+    ]);
+    const line = host.querySelector<HTMLButtonElement>(
+      '.acti-agent-group button.board-activity-note',
+    );
+    expect(line).not.toBeNull();
+    expect(line?.getAttribute('aria-expanded')).toBe('false');
+    expect(line?.textContent).not.toContain('The second paragraph.');
+    line?.click();
+    await tick();
+    expect(line?.getAttribute('aria-expanded')).toBe('true');
+    expect(line?.classList.contains('acti-note-open')).toBe(true);
+    expect(line?.textContent).toContain('The second paragraph.');
+    line?.click();
+    await tick();
+    expect(line?.getAttribute('aria-expanded')).toBe('false');
+    expect(line?.textContent).not.toContain('The second paragraph.');
     unmount();
   });
 

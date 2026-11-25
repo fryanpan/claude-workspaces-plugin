@@ -256,7 +256,7 @@ describe('GET /workspaces/:ws/agent-notes — the notes no task took', () => {
         'taskId',
       );
       // An agent that held several tasks and now holds one: an open Home's
-      // header turns to "latest note went to …" only if it is told to re-read.
+      // header names the task it went to only if it is told to re-read.
       const frame = await waitFor(() => page.find((f) => f.event === 'agent.noted'), {
         describe: 'an agent.noted frame for the placed note',
       });
