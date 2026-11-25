@@ -6,11 +6,12 @@
  *   <StreetMap title="Harborlight reports" src="data/reports.json"
  *              rings={[150, 300]} categories={{ Noise: "#4269d0" }} />
  *
- * - `markers`: `{ lat, lng, label?, popup?, category? }`, each drawn as a dot
- *   with a popup, and with every ring around it.
+ * - `markers`: `{ lat, lng, label?, popup?, tooltip?, category? }`, each drawn
+ *   as a dot with a popup (text, or a card: `map-card.ts`), a hover tooltip,
+ *   and every ring around it.
  * - `rings`: radius circles around every marker, in feet (`150`), or
  *   `{ feet | meters, color?, label? }`.
- * - `points`: `{ lat, lng, category?, popup? }`, small dots coloured by
+ * - `points`: `{ lat, lng, category?, popup?, tooltip? }`, small dots coloured by
  *   category; thousands draw on one canvas.
  * - `categories`: `{ name: "#hex" }` or `[{ name, color }]`, the legend's
  *   order and colours; a category with no colour takes the next one from the
@@ -18,12 +19,15 @@
  * - `center` `[lat, lng]` and `zoom`, else the map fits its data; `height`
  *   in pixels; `legend={false}` hides the legend; `basemap` names an entry in
  *   `map-basemaps.ts`, and a tag that names none draws on `DEFAULT_BASEMAP`.
+ * - `cooperativeGestures`: Ctrl or Cmd with the wheel zooms, and a plain
+ *   wheel shows a hint saying so; without it the wheel never zooms.
  *
  * `lat`/`latitude` and `lng`/`lon`/`longitude` are all read. Nothing here runs
  * the source: props arrive parsed by the page's literal parser, and every
  * string reaches the DOM as text.
  */
 import { BASEMAPS, DEFAULT_BASEMAP, basemapOf } from './map-basemaps.ts';
+import { type MapPopup, readPopup } from './map-card.ts';
 import { readOpenTag } from './tag-props.ts';
 
 /** Observable 10, the scheme PlotChart's categories draw in. */
@@ -56,14 +60,17 @@ export interface MapMarker {
   lat: number;
   lng: number;
   label?: string;
-  popup?: string;
+  popup?: MapPopup;
+  /** Shown on hover, as text. */
+  tooltip?: string;
   color: string;
 }
 
 export interface MapPoint {
   lat: number;
   lng: number;
-  popup?: string;
+  popup?: MapPopup;
+  tooltip?: string;
   color: string;
 }
 
@@ -92,6 +99,9 @@ export interface MapSpec {
    *  default map that cannot have Google's key draws on the fallback without
    *  a notice, because nobody asked for Google. */
   basemapNamed: boolean;
+  /** A plain wheel over the map scrolls the page and shows a hint; Ctrl or
+   *  Cmd with the wheel zooms. Off, the wheel never zooms. */
+  cooperativeGestures: boolean;
 }
 
 export type MapRead = { ok: true; spec: MapSpec } | { ok: false; error: string };
@@ -234,22 +244,31 @@ export function readMapSpec(props: Record<string, unknown>): MapRead {
     used.add(name);
     return palette.colorOf(name);
   };
-  const markers: MapMarker[] = markerRows.map((row) => {
+  const markers: MapMarker[] = [];
+  for (const [i, row] of markerRows.entries()) {
     const at = coords(row) as { lat: number; lng: number };
     const m: MapMarker = { ...at, color: categoryColor(row, '#1f2937') };
     const label = text(row.label);
     if (label !== undefined) m.label = label;
-    const popup = text(row.popup) ?? label;
-    if (popup !== undefined) m.popup = popup;
-    return m;
-  });
-  const points: MapPoint[] = pointRows.map((row) => {
+    const popup = readPopup(row.popup, `markers[${i}].popup`);
+    if (!popup.ok) return fail(popup.error);
+    const shown = popup.value ?? label;
+    if (shown !== undefined) m.popup = shown;
+    const tooltip = text(row.tooltip);
+    if (tooltip !== undefined) m.tooltip = tooltip;
+    markers.push(m);
+  }
+  const points: MapPoint[] = [];
+  for (const [i, row] of pointRows.entries()) {
     const at = coords(row) as { lat: number; lng: number };
     const p: MapPoint = { ...at, color: categoryColor(row, CATEGORY_COLORS[0] ?? '#4269d0') };
-    const popup = text(row.popup);
-    if (popup !== undefined) p.popup = popup;
-    return p;
-  });
+    const popup = readPopup(row.popup, `points[${i}].popup`);
+    if (!popup.ok) return fail(popup.error);
+    if (popup.value !== undefined) p.popup = popup.value;
+    const tooltip = text(row.tooltip);
+    if (tooltip !== undefined) p.tooltip = tooltip;
+    points.push(p);
+  }
 
   const spec: MapSpec = {
     markers,
@@ -260,6 +279,7 @@ export function readMapSpec(props: Record<string, unknown>): MapRead {
     legend: props.legend !== false,
     basemap,
     basemapNamed: props.basemap !== undefined,
+    cooperativeGestures: props.cooperativeGestures === true,
   };
   const c = props.center;
   if (Array.isArray(c) && c.length === 2) {
