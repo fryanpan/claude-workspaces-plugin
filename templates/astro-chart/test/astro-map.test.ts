@@ -7,7 +7,6 @@
  * OpenStreetMap with every tile answered locally. The doc half is
  * `packages/workspaces-app/test/components-map-doc-browser.test.ts`.
  */
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,12 +19,12 @@ import {
   until,
 } from '../../../packages/components/test/map-page-harness.ts';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
+import { buildFixture } from './build-fixture.ts';
 
 /** The browser these cases may launch, or null to skip them.
  *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
 const CHROME = chromeForSuite();
 
-const FIXTURE = join(import.meta.dirname, '..');
 const SUITE_MS = 180_000;
 const CASE_MS = 60_000;
 
@@ -38,17 +37,8 @@ describe.skipIf(CHROME === null)('the components map on an Astro page', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'astro-map-'));
     const out = join(dir, 'dist');
-    // Built with bun, as astro-page.test.ts explains.
-    const built = spawnSync(
-      'bun',
-      [join(FIXTURE, 'node_modules', 'astro', 'bin', 'astro.mjs'), 'build', '--outDir', out],
-      {
-        cwd: FIXTURE,
-        encoding: 'utf8',
-        timeout: 120_000,
-        env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' },
-      },
-    );
+    // One build at a time, and why: build-fixture.ts.
+    const built = await buildFixture(out);
     expect(built.status, `${built.stdout}\n${built.stderr}`).toBe(0);
 
     site = await serveDir(out);
