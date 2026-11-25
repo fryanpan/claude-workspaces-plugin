@@ -13,12 +13,13 @@
  *
  * All fixtures synthetic.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WALK_SLICE } from '../src/fs-scan-contained.ts';
+import * as fsScan from '../src/fs-scan.ts';
 import { type LibraryPayload, createMarkdownLister } from '../src/library.ts';
 import { MountStore } from '../src/mount-store.ts';
 import { RepoRegistry } from '../src/repo-registry.ts';
@@ -95,7 +96,7 @@ describe('a Library load on a large project', () => {
     mounts: new MountStore(dataDir, new RepoRegistry(dataDir)),
     dataDir,
     j: (status, body) => new Response(JSON.stringify(body), { status }),
-    safeJson: async () => null,
+    safeJson: async (r) => (await r.json()) as Record<string, unknown>,
     unfileFromDefault: () => {},
     markdownFiles,
     requestAddress: () => '127.0.0.1',
@@ -149,6 +150,54 @@ describe('a Library load on a large project', () => {
     expect(stale.turns).toBe(0);
     // The rebuild it started lands, and the next load shows the new file.
     await waitFor(async () => has(await load(ctx)), { describe: 'the rebuilt listing' });
+  });
+
+  it('starts no second rebuild when one took longer than the freshness window', async () => {
+    plant(root);
+    await bindReadme();
+    let clock = 0;
+    const lister = createMarkdownLister(() => clock);
+    const ctx = ctxWith(lister);
+    const scans = spyOn(fsScan, 'scanFolderPathsAsync');
+    try {
+      // The first listing takes "a minute": the clock moves while it builds.
+      const first = load(ctx);
+      setImmediate(() => {
+        clock += 60_000;
+      });
+      await first;
+      expect(scans).toHaveBeenCalledTimes(1);
+      // A load straight after it is fresh, so it starts nothing.
+      await load(ctx);
+      await load(ctx);
+      expect(scans).toHaveBeenCalledTimes(1);
+      // Control: once the window really passes, a load does rebuild.
+      clock += 60_000;
+      await load(ctx);
+      expect(scans).toHaveBeenCalledTimes(2);
+    } finally {
+      scans.mockRestore();
+    }
+  });
+
+  it('opens a listed file without listing inside the request', async () => {
+    plant(root);
+    await bindReadme();
+    const ctx = ctxWith(createMarkdownLister());
+    const board = handle.tasks.getWorkspace(WS);
+    if (!board) throw new Error('no board');
+    const { turns, value } = await turnsDuring(async () =>
+      handleLibraryRoutes(ctx, {
+        scope: { workspaceId: WS, rest: 'library/open', board },
+        req: new Request(`http://board.example/workspaces/${WS}/library/open`, {
+          method: 'POST',
+          body: JSON.stringify({ path: 'harborlight/log-3/entry-7.md' }),
+        }),
+        visitor: null,
+      }),
+    );
+    expect(value?.status).toBe(200);
+    expect(turns).toBeGreaterThanOrEqual((FOLDERS * PER_FOLDER) / 25);
   });
 
   it('is unchanged for a context whose lister has no async path', async () => {

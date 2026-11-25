@@ -52,18 +52,21 @@ export interface MarkdownLister {
  * file, so an online-only file costs a syscall, not a download.
  */
 export function createMarkdownLister(now: () => number = Date.now): MarkdownLister {
-  const cache = new Map<string, { at: number; files: ProjectFile[] }>();
+  // `at` is when the listing landed, so its freshness window starts then: a
+  // rebuild slower than the window, stamped with its start, would arrive
+  // already stale and every load after it would start another. `started` is
+  // when it was asked for, so an older build never replaces a newer one.
+  const cache = new Map<string, { at: number; started: number; files: ProjectFile[] }>();
   const building = new Map<string, Promise<ProjectFile[]>>();
-  const store = (root: string, at: number, files: ProjectFile[]): ProjectFile[] => {
+  const store = (root: string, started: number, files: ProjectFile[]): ProjectFile[] => {
     const held = cache.get(root);
-    // A build that started before the one already stored does not replace it.
-    if (!held || held.at <= at) cache.set(root, { at, files });
+    if (!held || held.started <= started) cache.set(root, { at: now(), started, files });
     return files;
   };
   const build = (root: string): Promise<ProjectFile[]> => {
     const running = building.get(root);
     if (running) return running;
-    const at = now();
+    const started = now();
     const next = scanFolderPathsAsync(root)
       .catch((err: unknown) => {
         // Fail closed, as the synchronous scan does: a repo git could not
@@ -73,7 +76,7 @@ export function createMarkdownLister(now: () => number = Date.now): MarkdownList
         return [];
       })
       .then((rels) => statSliced(root, rels))
-      .then((files) => store(root, at, files))
+      .then((files) => store(root, started, files))
       .finally(() => building.delete(root));
     building.set(root, next);
     return next;
@@ -81,8 +84,8 @@ export function createMarkdownLister(now: () => number = Date.now): MarkdownList
   const list = (root: string): readonly ProjectFile[] => {
     const hit = cache.get(root);
     if (hit && now() - hit.at < SCAN_TTL_MS) return hit.files;
-    const at = now();
-    return store(root, at, statAll(root, scanFolderPaths(root)));
+    const started = now();
+    return store(root, started, statAll(root, scanFolderPaths(root)));
   };
   const ready = async (root: string): Promise<readonly ProjectFile[]> => {
     const hit = cache.get(root);
