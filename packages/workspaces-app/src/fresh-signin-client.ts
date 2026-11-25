@@ -99,10 +99,12 @@ export async function sendCounted(
     const why = doc.createElement('p');
     const name = doc.createElement('b');
     name.textContent = req.name;
+    // The name sits mid-sentence: it can start in lower case (an address),
+    // which would open a sentence wrongly.
     why.append(
-      `${req.gerund} needs a sign-in from the last 10 minutes, and no passkey is set up yet. `,
+      `${req.gerund} needs a sign-in from the last 10 minutes, and no passkey is set up yet, so `,
       name,
-      ' stays as it is until you sign in again.',
+      ' waits until you sign in again.',
     );
     if (!(await ask(doc, "Confirm it's you", why, 'Cancel', 'Sign in again'))) break;
     const leaving = doc.createElement('p');
@@ -145,13 +147,21 @@ export async function resumeHeld(
   const req = held.request;
   const doc = deps.doc ?? document;
   const note = doc.createElement('p');
-  note.textContent = `You signed in again. This is the ${req.noun} you asked for before you left.`;
+  // Nothing here can see the sign-in, so it claims none: the server's answer
+  // below is what says whether it was renewed.
+  note.textContent = `This is the ${req.noun} you asked for before you left to sign in again.`;
   if (!(await ask(doc, `${req.verb} ${req.name} now?`, note, 'Not now', req.verb))) {
     deps.toast('Nothing changed');
     return null;
   }
-  const response = await sendCounted(req, deps);
-  return response ? { request: req, response } : null;
+  // Sent once. Still refused means the sign-in was not renewed, and asking
+  // again would send the person round the same loop.
+  const response = await send(req, deps);
+  if (await isConfirmRequired(response)) {
+    deps.toast('Your sign-in was not renewed, so nothing changed');
+    return null;
+  }
+  return { request: req, response };
 }
 
 /**

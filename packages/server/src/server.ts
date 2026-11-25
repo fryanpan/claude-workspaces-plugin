@@ -506,6 +506,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     boardSignIn,
     signInDoor,
+    signInAgainPath,
     ownerSignIn,
   } = createAccessDeps({
     dataDir,
@@ -3399,6 +3400,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requireEmailAuth,
     requireSignInToWrite,
     emailCodeSignIn,
+    signInAgainPath,
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
     // The operator allowlist doubles as the audience a `share_link` with no
     // `allowDomains` admits. Same list, same source; see the field's doc.
@@ -3675,7 +3677,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         req,
         pathname,
         personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
-        { shares, now: Date.now() },
+        {
+          shares,
+          now: Date.now(),
+          raisesAccess: (ws, match, role) => shareLinks.raisesAccess(ws, match, role),
+        },
       ),
     honoFront: createHonoFront([
       ...honoFamilies({

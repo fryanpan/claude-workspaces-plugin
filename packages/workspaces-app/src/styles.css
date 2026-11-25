@@ -912,6 +912,13 @@ body.is-reading-width #editor > .ProseMirror {
 .comment-pill:active {
   transform: scale(0.94);
 }
+/* A view member's page offers no way to start a comment, reply or resolve
+   (doc-gates.ts sets `role-view`): the server would refuse each. */
+body.role-view .comment-pill,
+body.role-view .thread .thread-reply,
+body.role-view .thread .thread-resolve {
+  display: none !important;
+}
 /* Slightly dimmer when the pill is offering a caret-only (tap-to-comment)
    action — it's helpful but not the primary affordance. */
 .comment-pill.caret {
@@ -2320,6 +2327,20 @@ body.composer-open #editor > .ProseMirror ::selection {
 .not-sent-retry:hover,
 .not-sent-retry:focus-visible {
   color: var(--red-strong);
+}
+/* Refused for who is asking (a view-only member's comment): the server's
+   reason, in the muted ink of an explanation, because there is nothing to
+   retry and nothing went wrong. */
+.not-sent-refused {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+/* In the doc's floating composer the note sits above the box, inset to the
+   quote's 14px rather than on the composer's border. */
+#composer > .not-sent {
+  margin: 0;
+  padding: 8px 14px 0;
 }
 
 /* ================= RECEIPT (the other half of "did that land") ==========

@@ -190,3 +190,35 @@ describe('the lock-out guard', () => {
     }
   });
 });
+
+describe('"Sign in again" through the door', () => {
+  const again = '/auth/sign-in?next=%2Fworkspaces&again=1';
+  const signInWith = (person: SignedInPerson | null): BoardSignIn => ({
+    ...fakeSignIn(person),
+    signInAgainPath: async (_req, next) =>
+      person ? `/auth/sign-in?next=${encodeURIComponent(next)}&again=1` : null,
+  });
+
+  it('better-auth: a session on the sign-in address goes through the sign-in again', async () => {
+    const door = createSignInDoor({ mode: 'better-auth', signIn: signInWith(alice) });
+    expect(await door.signInAgainPath(at(HOST), '/workspaces', stamped)).toBe(again);
+    // Not on the sign-in address: the cookie cannot be there.
+    expect(await door.signInAgainPath(at(SUBDOMAIN), '/workspaces', stamped)).toBeNull();
+    const none = createSignInDoor({ mode: 'better-auth', signIn: signInWith(null) });
+    expect(await none.signInAgainPath(at(HOST), '/workspaces', stamped)).toBeNull();
+  });
+
+  // In both, the stamp proves the person first, so renewing the session
+  // would leave the proof as old as it was.
+  it('both: the stamp, when it proves the person, is what has to be renewed', async () => {
+    const door = createSignInDoor({ mode: 'both', signIn: signInWith(alice) });
+    const withStamp = at(HOST, { 'cf-access-jwt-assertion': 'x' });
+    expect(await door.signInAgainPath(withStamp, '/workspaces', stamped)).toBeNull();
+    expect(await door.signInAgainPath(at(HOST), '/workspaces', stamped)).toBe(again);
+  });
+
+  it('access: never', async () => {
+    const door = createSignInDoor({ mode: 'access', signIn: signInWith(alice) });
+    expect(await door.signInAgainPath(at(HOST), '/workspaces', stamped)).toBeNull();
+  });
+});

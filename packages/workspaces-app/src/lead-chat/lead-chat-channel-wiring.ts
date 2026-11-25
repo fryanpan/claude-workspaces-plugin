@@ -57,11 +57,44 @@ export interface ChannelWiringOpts {
 const lineOf = (m: LeadChatMessage | undefined, meId: string | undefined): string | undefined =>
   m ? `${m.author.id === meId ? 'You' : m.author.name}: ${m.text.replace(/\s+/g, ' ')}` : undefined;
 
+/**
+ * Who reads `#general`, said on the channel. It is the owner's chat with the
+ * lead: the server answers a share visitor's read with a 403 and drops its
+ * frames from their stream (`redact-board-events.ts`), so "everyone on this
+ * board" was wrong for everyone the board was shared with.
+ */
+export function generalSub(leadName: string, ownersOnly: boolean): string {
+  // Short enough for the heading's one line at 430px: the part that says
+  // who is the part a truncation would cut.
+  return ownersOnly
+    ? `Only the owner and ${leadName} see this`
+    : `Only you and ${leadName} see this`;
+}
+
+/**
+ * What `#general` shows a reader the server refused, naming the people they
+ * can write to instead: the channel list is where those are.
+ */
+export function generalRefused(people: readonly string[]): string {
+  const head = 'Only the board’s owner can read this chat.';
+  return people.length === 0 ? head : `${head} Write to ${people.join(' or ')} instead.`;
+}
+
+/** The refused `#general`'s line in the channel list, in place of its last message. */
+const GENERAL_REFUSED_LINE = 'Only the owner can read this';
+
+const people = (list: readonly ChannelEntry[]): string[] =>
+  list.filter((c) => c.kind === 'person').map((c) => c.name);
+
 export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   const { doc, view, dm } = opts;
   let current = GENERAL;
+  /** The reader chose a channel, on this page or one before it. */
+  let chosen = false;
   try {
-    current = opts.session?.getItem(CHANNEL_KEY) ?? GENERAL;
+    const kept = opts.session?.getItem(CHANNEL_KEY) ?? null;
+    chosen = kept !== null;
+    current = kept ?? GENERAL;
   } catch {
     // Unkept: #general.
   }
@@ -71,15 +104,27 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   let generalUnread = false;
   let generalSeenOnce = false;
 
+  /** The server refused this reader #general (`LeadChatState.ownersOnly`). */
+  let generalIsRefused = false;
   const has = (id: string): boolean => dm.state().channels.some((c) => c.id === id);
-  /** The channel shown, once the list says it still exists. */
-  const shown = (): string => (current !== GENERAL && has(current) ? current : GENERAL);
+  /** The channel shown, once the list says it still exists. A reader refused
+   *  #general opens on a conversation they can use, a person's first. */
+  const shown = (): string => {
+    if (current !== GENERAL && has(current)) return current;
+    if (generalIsRefused) {
+      const channels = dm.state().channels;
+      const open = channels.find((c) => c.kind === 'person') ?? channels[0];
+      if (open && !chosen) return open.id;
+    }
+    return GENERAL;
+  };
 
   dm.watching((id) => opts.isOpen() && shown() === id);
 
   const pick = (id: string): void => {
     drafts.set(shown(), view.composer.value);
     current = id;
+    chosen = true;
     menuOpen = false;
     try {
       opts.session?.setItem(CHANNEL_KEY, id);
@@ -142,8 +187,12 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
         id: GENERAL,
         kind: 'general',
         name: '#general',
-        sub: `Everyone on this board and ${leadName}`,
-        ...(lineOf(newest, meId) ? { last: lineOf(newest, meId) } : {}),
+        sub: generalSub(leadName, s.ownersOnly === true),
+        ...(s.ownersOnly
+          ? { last: GENERAL_REFUSED_LINE }
+          : lineOf(newest, meId)
+            ? { last: lineOf(newest, meId) }
+            : {}),
         unread: generalUnread,
       },
     ];
@@ -165,7 +214,24 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   return {
     current: shown,
     model(s, open) {
+      generalIsRefused = s.ownersOnly === true;
       trackGeneral(s, open);
+      const showing = shown();
+      if (showing !== GENERAL && !dm.state().loaded.has(showing as DmChannelId))
+        void dm.show(showing as DmChannelId);
+      // Refused and nothing else to pick: the one channel still says whose it is.
+      if (s.ownersOnly && !s.meeting && !(dm.state().ready && dm.state().channels.length > 0)) {
+        const sub = generalSub(s.lead?.name ?? 'the lead', true);
+        const general: ChannelEntry = {
+          id: GENERAL,
+          kind: 'general',
+          name: '#general',
+          sub,
+          unread: false,
+        };
+        const picker = { channels: [general], current: GENERAL, menuOpen: false };
+        return { channel: { kind: 'general', sub, empty: generalRefused([]), picker } };
+      }
       if (!dm.state().ready || dm.state().channels.length === 0 || s.meeting) return {};
       const list = entries(s, open);
       const id = shown();
@@ -173,7 +239,14 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
       if (!entry) return {};
       const picker = { channels: list, current: entry.id, menuOpen };
       if (entry.kind === 'general') {
-        return { channel: { kind: 'general', sub: entry.sub, picker } };
+        return {
+          channel: {
+            kind: 'general',
+            sub: entry.sub,
+            ...(s.ownersOnly ? { empty: generalRefused(people(list)) } : {}),
+            picker,
+          },
+        };
       }
       const d = dm.state();
       const ch = d.channels.find((c) => c.id === id);

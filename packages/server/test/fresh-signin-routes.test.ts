@@ -243,6 +243,43 @@ describe('a fresh sign-in before a destructive action', () => {
       expect(await roles()).toBe('member');
     });
 
+    it('lowering a level, or re-posting the one they have, stays instant; raising it is asked', async () => {
+      const path = `/workspaces/${board}/members/${encodeURIComponent(MEMBER)}/role`;
+      const level = async () =>
+        (
+          (await (await local(`/workspaces/${board}/members`)).json()) as {
+            members: Array<{ email: string; accessRole?: string }>;
+          }
+        ).members.find((m) => m.email === MEMBER)?.accessRole;
+      expect((await asOwner(path, 'POST', { role: 'edit' }, STALE)).status).toBe(200);
+      expect((await asOwner(path, 'POST', { role: 'view' }, STALE)).status).toBe(200);
+      expect(await level()).toBe('view');
+      expect(await isConfirmRequired(await asOwner(path, 'POST', { role: 'comment' }, STALE))).toBe(
+        true,
+      );
+      expect(await level()).toBe('view');
+      expect((await asOwner(path, 'POST', { role: 'edit' }, 5)).status).toBe(200);
+      expect(await level()).toBe('edit');
+    });
+
+    it('sets the level an invited address arrives at on its entry, writing no member row', async () => {
+      const invited = 'harborlight@saltmarsh.example';
+      expect(
+        (await asOwner(`/workspaces/${board}/audience`, 'POST', { add: [invited] }, 5)).status,
+      ).toBe(200);
+      const path = `/workspaces/${board}/members/${encodeURIComponent(invited)}/role`;
+      // A lowering with a stale sign-in: instant, and only the entry moves.
+      expect((await asOwner(path, 'POST', { role: 'view' }, STALE)).status).toBe(200);
+      const read = (await (await local(`/workspaces/${board}/members`)).json()) as {
+        members: Array<{ email: string }>;
+        audience: Array<{ match: string; access?: string }>;
+      };
+      expect(read.members.map((m) => m.email)).not.toContain(invited);
+      expect(read.audience.find((a) => a.match === invited)?.access).toBe('view');
+      // An entry is never an Owner.
+      expect((await asOwner(path, 'POST', { role: 'owner' }, 5)).status).toBe(400);
+    });
+
     it("letting an address into a board's audience, while taking one out stays instant", async () => {
       const path = `/workspaces/${board}/audience`;
       const match = '@riverbend.example';

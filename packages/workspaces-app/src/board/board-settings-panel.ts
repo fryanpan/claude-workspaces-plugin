@@ -1,5 +1,5 @@
 import { deviceStorage, readLeadChatMode, writeLeadChatMode } from '../lead-chat/lead-chat-mode.ts';
-import { letInRequest, resumeAccessWrite, sendAccessWrite } from './access-writes.ts';
+import { letInRequest, resumeAccessWrite, roleRequest, sendAccessWrite } from './access-writes.ts';
 /**
  * The workspace settings panel: the three controls inside it, what each one
  * reads and writes, and when the panel itself opens and closes.
@@ -262,6 +262,12 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       const res = await sendAccessWrite(letInRequest(workspaceId, match), send, showToast);
       return res ? accessWriteOf(res) : { ok: false, message: 'Nothing changed.' };
     },
+    // A level that lets someone do more asks for a recent sign-in too.
+    setRole: async (match, role) => {
+      const res = await sendAccessWrite(roleRequest(workspaceId, match, role), send, showToast);
+      return res ? accessWriteOf(res) : { ok: false, message: 'Nothing changed.' };
+    },
+    legend: el('board-members-legend'),
     toast: showToast,
     onRole: (role: BoardRole | null) => {
       canEdit = role === 'owner';

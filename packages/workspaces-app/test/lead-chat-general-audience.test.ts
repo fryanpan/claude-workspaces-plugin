@@ -1,0 +1,102 @@
+/**
+ * `#general` says who can read it. It is the board owner's chat with the
+ * lead: a share visitor's read is refused with a 403 and its frames are
+ * dropped from their stream (`redact-board-events.ts` on the server), so the
+ * channel's old line, "Everyone on this board and <lead>", was wrong for
+ * every person the board was shared with.
+ */
+import { describe, expect, it } from 'vitest';
+import { generalRefused, generalSub } from '../src/lead-chat/lead-chat-channel-wiring.ts';
+import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
+
+const MSG = {
+  id: 'm1',
+  role: 'agent',
+  author: { id: 'a', name: 'Lead' },
+  text: 'The owner’s plan for Riverbend.',
+  ts: 1,
+};
+
+class QuietStream {
+  readyState = 1;
+  addEventListener() {}
+  close() {}
+}
+
+function clientAnswering(status: number, body: unknown) {
+  const fetchFake = (async () =>
+    new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+  return createLeadChatClient({
+    workspaceId: 'w-harbor',
+    fetch: fetchFake,
+    stream: new QuietStream() as unknown as EventSource,
+  });
+}
+
+const settled = async (client: ReturnType<typeof clientAnswering>) => {
+  for (let i = 0; i < 20 && !client.state().loaded; i++) await new Promise((r) => setTimeout(r, 0));
+  return client.state();
+};
+
+describe('who #general says can read it', () => {
+  it('tells the owner the people they share with do not see it', async () => {
+    const s = await settled(
+      clientAnswering(200, { lead: { agentId: 'a', name: 'Lead' }, messages: [], canTalk: true }),
+    );
+    expect(s.ownersOnly).toBeUndefined();
+    expect(generalSub('Lead', s.ownersOnly === true)).toBe('Only you and Lead see this');
+  });
+
+  it('tells a reader the server refused that it is the owner’s, and stops loading', async () => {
+    const s = await settled(clientAnswering(403, { error: 'out_of_share_scope' }));
+    expect(s.loaded).toBe(true);
+    expect(s.ownersOnly).toBe(true);
+    expect(s.canTalk).toBe(false);
+    expect(generalSub('Lead', true)).toBe('Only the owner and Lead see this');
+    expect(generalRefused([])).toBe('Only the board’s owner can read this chat.');
+    expect(generalRefused(['Alice', 'Bob'])).toBe(
+      'Only the board’s owner can read this chat. Write to Alice or Bob instead.',
+    );
+  });
+
+  it('drops the chat it held when a later read is refused', async () => {
+    const answers = [
+      {
+        status: 200,
+        body: { lead: { agentId: 'a', name: 'Lead' }, messages: [MSG], canTalk: true },
+      },
+      { status: 403, body: { error: 'out_of_share_scope' } },
+    ];
+    const listeners = new Map<string, () => void>();
+    const stream = {
+      readyState: 1,
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+      close() {},
+    };
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      fetch: (async () => {
+        const a = answers.shift() ?? { status: 403, body: {} };
+        return new Response(JSON.stringify(a.body), { status: a.status });
+      }) as unknown as typeof fetch,
+      stream: stream as unknown as EventSource,
+    });
+    await settled(client);
+    expect(client.state().messages).toHaveLength(1);
+    // The stream drops and comes back, which reads again.
+    listeners.get('error')?.();
+    listeners.get('open')?.();
+    for (let i = 0; i < 20 && !client.state().ownersOnly; i++)
+      await new Promise((r) => setTimeout(r, 0));
+    expect(client.state().ownersOnly).toBe(true);
+    expect(client.state().messages).toEqual([]);
+    expect(client.state().lead).toBe(null);
+  });
+
+  it('a failure that is not a refusal still reads as loading', async () => {
+    const client = clientAnswering(500, { error: 'boom' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(client.state().loaded).toBe(false);
+    expect(client.state().ownersOnly).toBeUndefined();
+  });
+});

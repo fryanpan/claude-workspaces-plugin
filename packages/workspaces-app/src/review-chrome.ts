@@ -477,6 +477,8 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
   const threadsPanel = new ThreadPanel({
     container: threadsListEl,
     currentUser: user,
+    // The page's one panel, alive as long as the page.
+    watchRole: true,
     threadLineLabel,
     canWrite: opts.canWrite,
     // The anchor highlight follows the panel's selection from here, once,

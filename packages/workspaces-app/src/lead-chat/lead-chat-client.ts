@@ -56,6 +56,9 @@ export interface LeadChatState extends LeadChatRead {
   more: boolean;
   /** A page back is on its way. */
   loadingOlder: boolean;
+  /** The board's chat is its owner's, and the server refused this reader
+   *  (a share visitor gets a 403). The channel says so rather than loading. */
+  ownersOnly?: boolean;
 }
 
 export type MeetingAnswer =
@@ -141,6 +144,22 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     readsOut++;
     try {
       const res = await doFetch(`${base}/lead-chat`, { credentials: 'same-origin' });
+      if (res.status === 403) {
+        // Nothing a reader held before the refusal stays: a demoted page
+        // must not keep showing the owner's chat it once read.
+        state = {
+          lead: null,
+          messages: [],
+          canTalk: false,
+          loaded: true,
+          meeting: null,
+          more: false,
+          loadingOlder: false,
+          ownersOnly: true,
+        };
+        changed();
+        return;
+      }
       if (!res.ok) return;
       const read = (await res.json()) as LeadChatRead;
       // Reads can overlap and answer out of order, and an older one must not

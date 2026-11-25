@@ -703,6 +703,11 @@ body.is-archived #editor .ProseMirror {
   overflow: hidden;
   max-height: 200px;
 }
+/* A reader who cannot type gets no formatting row at any width: the bar is
+   collapsed when the level lands, but nothing may open it again. */
+body.view-mode .format-bar {
+  display: none;
+}
 .format-bar.is-collapsed {
   /* `min-height` beats `max-height` when they disagree, so without this a
      collapsed bar still held 44px of empty row above every doc. */
