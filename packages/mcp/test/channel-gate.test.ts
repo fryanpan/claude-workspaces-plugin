@@ -92,8 +92,8 @@ describe('the channel gate on meeting frames', () => {
 /**
  * The gate as the artifact peers load actually applies it.
  *
- * `.mcp.json` runs `packages/plugin/mcp/index.js`, so a source-only change
- * reaches nobody — that is why this half exists at all. What it now measures
+ * This half drives the full child over its stdio (from source since the
+ * plugin stopped shipping `packages/plugin/mcp/index.js`). What it measures
  * is the SESSION's view: frames go down the bundle's own event stream, and
  * the channel notifications it writes to stdout are counted.
  *

@@ -21,4 +21,4 @@ export const MCP_SOURCE: string = resolve(import.meta.dirname, '../../src/mcp.ts
  */
 export const BUN_BIN: string = process.versions.bun
   ? process.execPath
-  : execFileSync('/bin/sh', ['-c', 'command -v bun'], { encoding: 'utf8' }).trim() || 'bun';
+  : execFileSync('/bin/sh', ['-c', 'command -v bun'], { encoding: 'utf8' }).trim();

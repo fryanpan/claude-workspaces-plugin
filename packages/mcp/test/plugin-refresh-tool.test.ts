@@ -3,10 +3,9 @@
  *
  * Two failures this covers, both of which have happened here before:
  *
- *  - A tool declared in `mcp.ts` and never built into
- *    `packages/plugin/mcp/index.js` is invisible to every peer, because
- *    `.mcp.json` loads the committed bundle, not the source. PR #69 shipped a
- *    schema change exactly that way and nobody got it.
+ *  - A tool is what the running child lists, not what the source says. When
+ *    peers loaded a committed bundle, PR #69 shipped a schema change that was
+ *    never rebuilt into it, and nobody got it.
  *  - The server route is covered end to end (plugin-refresh-routes.test.ts),
  *    and the pure refresher is covered by unit tests — but nothing yet checks
  *    that the MCP handler calls the path those tests serve. A tool pointed at

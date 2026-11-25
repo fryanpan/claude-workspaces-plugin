@@ -2,9 +2,9 @@
  * `register_dispatch` / `close_dispatch` reach peers, and reach the right
  * routes.
  *
- * A tool declared in `mcp.ts` but never built into
- * `packages/plugin/mcp/index.js` is invisible to every peer, and a handler
- * pointed at the wrong verb or path fails only in a peer's session. The routes
+ * A tool declared in the source but not in what the running child lists is
+ * invisible to every peer, and a handler pointed at the wrong verb or path
+ * fails only in a peer's session. The routes
  * themselves are covered end to end in
  * packages/server/test/dispatch-routes.test.ts.
  *

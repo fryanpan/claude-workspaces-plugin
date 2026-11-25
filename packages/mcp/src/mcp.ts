@@ -55,10 +55,11 @@ const AUTHOR = resolveAgentAuthor(process.env);
  * The plugin's version, read from packages/plugin/.claude-plugin/plugin.json
  * — the version a client sees in the initialize handshake. It used to be a
  * literal here, a third copy every release had to bump by hand, and it once
- * drifted three minor releases behind. `build:mcp` inlines the manifest's
- * value into the bundle, so a bump edits plugin.json and marketplace.json and
- * nothing else. Asserted against the manifest, through the real bundle, in
- * packages/mcp/test/launcher.test.ts.
+ * drifted three minor releases behind. A bundler inlines the manifest's
+ * value, so a bump edits plugin.json and marketplace.json and nothing else.
+ * (The plugin no longer ships this child; the relay's handshake version comes
+ * from the launcher, asserted against the manifest in
+ * packages/mcp/test/launcher.test.ts.)
  *
  * One constant rather than a read per use: the same value is reported to the
  * board on attach, so the board can say which sessions are running an older

@@ -351,9 +351,8 @@ describe('reviewAnsweredLine', () => {
  * `packages/server/test/review-answered-nudge-links.test.ts` — that is the
  * test that can tell `links` from a key nobody sends. What this block adds is
  * the two seams that suite cannot see: the switch in mcp.ts must call this
- * renderer rather than rebuild the sentence inline, and the BUNDLE must carry
- * the guard, because peers load `packages/plugin/mcp/index.js` and never the
- * source.
+ * renderer rather than rebuild the sentence inline, and the running child
+ * must carry the guard.
  */
 describe('the propagation clause on reviewAnsweredLine', () => {
   const CLAUSE = 'walk its links as the propagation checklist';

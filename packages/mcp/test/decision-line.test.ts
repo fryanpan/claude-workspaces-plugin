@@ -7,9 +7,8 @@
  * that can tell `links` from a key nobody sends. What this file adds is the
  * two seams that suite cannot see: the switch in mcp.ts must actually call
  * this renderer rather than rebuild the sentence inline (which is how the
- * unconditional clause survived in the first place), and the BUNDLE must carry
- * the guard, because peers load `packages/plugin/mcp/index.js` and never the
- * source.
+ * unconditional clause survived in the first place), and the running child
+ * must carry the guard.
  *
  * The bundle half used to be `BUNDLE.toContain('Array.isArray(p.links) && …')`.
  * A minifier that spelt the same test differently would have failed it, and a
