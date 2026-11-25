@@ -12,7 +12,8 @@
  * THREE ROUTES, one of them everybody's:
  *
  *   GET    /workspaces/<id>/members              the list, plus YOUR own role
- *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
+ *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner);
+ *                                                an `@domain` takes edit, comment or view
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
  *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
  *   POST   /workspaces/<id>/collab-core          the collab core on or off, for this
@@ -159,6 +160,20 @@ export async function handleWorkspaceMembers(
     const accessRole = parseAccessRole(body?.role);
     if (!accessRole) {
       return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
+    }
+    // An `@domain` row: one level for everyone that entry lets in.
+    if (email.startsWith('@')) {
+      if (accessRole === 'owner') {
+        return j(400, { error: "a domain's level is 'edit', 'comment' or 'view'" });
+      }
+      const levelBefore = shareLinks.audienceAccessOf(workspaceId, email);
+      if (levelBefore === null) return j(404, { error: 'not on this board', workspaceId });
+      if (widensAccess(levelBefore, accessRole)) {
+        const unproven = refuseUnproven('widens what a domain may do');
+        if (unproven) return unproven;
+      }
+      const moved = shareLinks.setAudienceAccess(workspaceId, email, accessRole) ?? [];
+      return j(200, { ok: true, workspaceId, match: email, accessRole, ...hangUp(moved) });
     }
     const { seat: role, access } = seatAndAccess(accessRole);
     const before = shareLinks.roleOf(workspaceId, email);

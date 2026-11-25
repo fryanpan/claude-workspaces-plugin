@@ -2321,6 +2321,14 @@ body.composer-open #editor > .ProseMirror ::selection {
 .not-sent-retry:focus-visible {
   color: var(--red-strong);
 }
+/* Refused for who is asking (a view-only member's comment): the server's
+   reason, in the muted ink of an explanation, because there is nothing to
+   retry and nothing went wrong. */
+.not-sent-refused {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
 
 /* ================= RECEIPT (the other half of "did that land") ==========
    The mark beside a comment YOU wrote: one grey tick, the server has it;

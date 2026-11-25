@@ -27,7 +27,7 @@ import {
   blurMarkdownComposer,
   focusMarkdownComposer,
 } from '../md-composer.ts';
-import { clearNotSent, markNotSent } from '../not-sent.ts';
+import { type Refused, clearNotSent, markFailed, refusalOf } from '../not-sent.ts';
 import type { ReviewSurface } from '../review-surface.ts';
 import type { ThreadPanel } from '../threads.ts';
 import { type ChromeSelection, anchorBody } from './anchor-body.ts';
@@ -304,13 +304,19 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     // Mirrors the button: no further keystrokes (or Enters) reach the editor
     // while the request is in flight, on top of the disabled-button guard.
     composerText.disabled = true;
+    // Set when the server said no because of who is asking: the composer
+    // shows its reason rather than offering a retry that meets the same no.
+    let refused: Refused | null = null;
     try {
       const res = await fetch(api(`docs/${encodeURIComponent(docId)}/threads`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ author: user, text, anchor, requestId }),
       });
-      if (!res.ok) throw new Error('post failed');
+      if (!res.ok) {
+        refused = await refusalOf(res);
+        throw new Error('post failed');
+      }
       const body = (await res.json()) as { thread: { id: string } };
       clearNotSent(composer);
       hideComposer();
@@ -327,11 +333,11 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
         }
       }, 150);
     } catch {
-      showToast('Failed to post comment');
+      if (!refused) showToast('Failed to post comment');
       // The toast is gone in seconds and the box stays open holding the
       // words — which is indistinguishable from a comment never sent. The
-      // note stands until the comment goes.
-      markNotSent({
+      // note stands until the comment goes, or says why it cannot.
+      markFailed(refused, {
         near: composer.querySelector('.composer-inner') ?? composerText,
         field: composerText,
         retry: () => void submitComposer(),

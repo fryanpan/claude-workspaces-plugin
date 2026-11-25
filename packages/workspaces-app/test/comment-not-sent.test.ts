@@ -271,3 +271,71 @@ describe('a new comment the server refused stays sayable', () => {
     expect(posts).toHaveLength(1);
   });
 });
+
+// ── refused for who is asking ──────────────────────────────────────────────
+
+const VIEW_ONLY = 'You can view this board. Ask its owner for more access.';
+
+describe('a comment refused for the member’s level says why, with no retry', () => {
+  it('the new-comment composer shows the server’s reason and keeps the draft', async () => {
+    plainComposers();
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: 'view_only', message: VIEW_ONLY }), { status: 403 }),
+      ),
+    );
+    chromeDom();
+    const chrome = mountReviewChrome(chromeOpts());
+    cleanups.push(() => chrome.destroy?.());
+    chrome.openComposer();
+    const ta = document.getElementById('composer-text') as HTMLTextAreaElement;
+    ta.value = 'Please look at this.';
+    document
+      .getElementById('composer-submit')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flush();
+    await flush();
+    const composer = document.getElementById('composer') as HTMLElement;
+    expect(notSent(composer)?.textContent).toBe(`Not sent. ${VIEW_ONLY}`);
+    expect(retryButton(composer)).toBeNull();
+    expect(ta.value).toBe('Please look at this.');
+    // Typing again retires it, as with every other "not sent".
+    ta.dispatchEvent(new Event('input'));
+    expect(notSent(composer)).toBeNull();
+  });
+
+  it('any other 403 is still a retry', async () => {
+    plainComposers();
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(new Response(JSON.stringify({ error: 'forbidden' }), { status: 403 })),
+    );
+    chromeDom();
+    const chrome = mountReviewChrome(chromeOpts());
+    cleanups.push(() => chrome.destroy?.());
+    chrome.openComposer();
+    (document.getElementById('composer-text') as HTMLTextAreaElement).value = 'Hello.';
+    document
+      .getElementById('composer-submit')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await flush();
+    await flush();
+    expect(retryButton(document.getElementById('composer') as HTMLElement)).not.toBeNull();
+  });
+
+  it('a reply refused the same way says the reason on the card', async () => {
+    plainComposers();
+    const { panel, container } = mountPanel({
+      onReply: () => Promise.resolve({ refused: VIEW_ONLY }),
+    });
+    panel.setThreads([makeThread('t1')]);
+    panel.setActive('t1');
+    const ta = container.querySelector<HTMLTextAreaElement>('.thread textarea');
+    if (!ta) throw new Error('no reply box rendered');
+    ta.value = 'Did this reach anyone?';
+    container.querySelector<HTMLButtonElement>('.thread-actions button.primary')?.click();
+    await flush();
+    expect(notSent(container)?.textContent).toBe(`Not sent. ${VIEW_ONLY}`);
+    expect(retryButton(container)).toBeNull();
+    expect(ta.value).toBe('Did this reach anyone?');
+  });
+});

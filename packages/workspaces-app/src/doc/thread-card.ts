@@ -36,7 +36,7 @@ import { commentHead, receiptMark } from '../comment-view.ts';
 import { currentWorkspaceId, docIdFromPathOrNull } from '../doc-path.ts';
 import { threadDecision } from '../long-thread.ts';
 import { attachMarkdownComposer } from '../md-composer.ts';
-import { clearNotSent, markNotSent } from '../not-sent.ts';
+import { clearNotSent, isRefused, markFailed } from '../not-sent.ts';
 import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
 import { isFoldingTap, sizeThreadSlots, syncFaceVisibility } from '../thread-morph.ts';
@@ -445,7 +445,7 @@ function slotB(
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok !== false) {
+        if (ok !== false && !isRefused(ok)) {
           clearNotSent(reply);
           return;
         }
@@ -453,7 +453,7 @@ function slotB(
           ta.value = text;
           refreshComposer();
         }
-        markNotSent({ near: actions, field: ta, retry: () => postReply(text) });
+        markFailed(ok, { near: actions, field: ta, retry: () => postReply(text) });
       });
   };
   const submitReply = () => postReply(ta.value.trim());
@@ -614,14 +614,14 @@ function compactAnswerField(
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok !== false) {
+        if (ok !== false && !isRefused(ok)) {
           clearNotSent(wrap.parentElement ?? wrap);
           return;
         }
         if (input.value === '') input.value = text;
         // Beside the field, not inside it: `.thread-answer-field` is a one-row
         // flex, and a note in it would take the field's width away.
-        markNotSent({ near: wrap, field: input, retry: () => sendText(text) });
+        markFailed(ok, { near: wrap, field: input, retry: () => sendText(text) });
       });
   };
   const send = () => sendText(input.value.trim());

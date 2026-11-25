@@ -632,6 +632,18 @@ body.board-body {
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
+/* What each person may do. The select and the text a member reads in its
+   place share one width, sized for "Can comment", so changing a level or
+   reading the list as a member moves nothing beside it. */
+.board-member .board-member-level,
+.board-member-level-text {
+  flex: none;
+  width: 15ch;
+}
+.board-member-level-text {
+  display: inline-block;
+  color: var(--fg-muted);
+}
 /* A person a domain let in sits under that domain's row. */
 .acc-under {
   margin-left: 6px;

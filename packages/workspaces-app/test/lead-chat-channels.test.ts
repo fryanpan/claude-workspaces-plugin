@@ -19,7 +19,10 @@ const LEAD = { agentId: 'harborlight-lead', name: 'Harborlight Lead' };
 const ME = { id: 'user-alice', name: 'Alice' };
 const BOB = { id: 'user-bob', name: 'Bob' };
 
-function boardChat(): { client: LeadChatClient; push: (m: LeadChatMessage) => void } {
+function boardChat(over: Partial<LeadChatState> = {}): {
+  client: LeadChatClient;
+  push: (m: LeadChatMessage) => void;
+} {
   let state: LeadChatState = {
     lead: LEAD,
     messages: [],
@@ -28,6 +31,7 @@ function boardChat(): { client: LeadChatClient; push: (m: LeadChatMessage) => vo
     meeting: null,
     more: false,
     loadingOlder: false,
+    ...over,
   };
   const fns: Array<(s: LeadChatState) => void> = [];
   const push = (m: LeadChatMessage) => {
@@ -121,10 +125,10 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-function mount(opts: { signedIn?: boolean } = {}) {
+function mount(opts: { signedIn?: boolean; board?: Partial<LeadChatState> } = {}) {
   const server = fakeServer(opts);
   const streams: Stream[] = [];
-  const board = boardChat();
+  const board = boardChat(opts.board);
   const dm = createDmClient({
     workspaceId: 'w-harbor',
     fetch: server.fetchFn as unknown as typeof fetch,
@@ -210,6 +214,30 @@ describe('the chat’s channels', () => {
     t.m.toggle();
     expect(t.view.picker.name.textContent).toBe('Bob');
     expect(t.view.list.textContent).toContain('Any time.');
+  });
+
+  it('says on #general that it is the owner’s chat, to the owner and to a visitor', async () => {
+    // The line under the heading, beside the picker that names the channel.
+    const heading = (t: ReturnType<typeof mount>) =>
+      t.view.picker.button.nextElementSibling?.textContent ?? '';
+    const owner = mount();
+    await vi.waitFor(() => expect(owner.streams.length).toBe(1));
+    owner.m.toggle();
+    await vi.waitFor(() => expect(owner.view.picker.name.textContent).toBe('#general'));
+    expect(heading(owner)).toBe(
+      'You and Harborlight Lead. People you share this board with don’t see it.',
+    );
+    owner.m.destroy();
+
+    // The server refused this reader's read of the board chat (a share visitor).
+    const visitor = mount({ board: { lead: null, canTalk: false, ownersOnly: true } });
+    await vi.waitFor(() => expect(visitor.streams.length).toBe(1));
+    visitor.m.toggle();
+    await vi.waitFor(() => expect(visitor.view.picker.name.textContent).toBe('#general'));
+    expect(heading(visitor)).toBe(
+      'The board owner’s chat with the lead. Only the owner can open it.',
+    );
+    expect(visitor.view.list.textContent).toContain('Only the board’s owner can read this chat');
   });
 
   it('marks a channel unread when a message lands while the chat is closed', async () => {

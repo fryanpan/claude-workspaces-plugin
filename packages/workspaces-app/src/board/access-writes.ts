@@ -39,6 +39,19 @@ export function letInRequest(workspaceId: string, match: string): CountedRequest
   };
 }
 
+/** Changing what one person, or everyone at a `@domain`, may do. */
+export function roleRequest(workspaceId: string, match: string, role: string): CountedRequest {
+  return {
+    method: 'POST',
+    url: `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(match)}/role`,
+    body: { role },
+    verb: 'Change',
+    gerund: 'Changing what someone can do',
+    noun: 'access change',
+    name: `what ${match} can do`,
+  };
+}
+
 /** Approving the card at `path`, which echoes the change it shows. */
 export function approveRequest(path: string, access: unknown, line: string): CountedRequest {
   return {
@@ -101,6 +114,7 @@ export async function resumeAccessWrite(
   const said = reply.data?.message;
   if (!reply.ok) toast(typeof said === 'string' ? said : `Could not finish: ${request.name}`);
   else if (request.verb === 'Approve') toast(`Approved. ${request.name}`);
+  else if (request.verb === 'Change') toast(`Changed ${request.name}`);
   else toast(`${request.name} can now sign in`);
   return true;
 }

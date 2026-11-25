@@ -40,28 +40,47 @@ export interface NotSentOpts {
 }
 
 /**
- * Put the "not sent" state on the composer `near` sits in, replacing any
- * note already there. Returns the note so a caller can read it in a test.
+ * A post the server turned away because of who is asking, not because of the
+ * network: a view-only member's comment, or a comment-only member's edit.
+ * Retrying sends the same words to the same refusal, so the composer says the
+ * server's own reason in place of "tap to retry".
  */
-export function markNotSent(opts: NotSentOpts): HTMLElement {
-  const { near, field, retry } = opts;
+export interface Refused {
+  refused: string;
+}
+
+export function isRefused(value: unknown): value is Refused {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { refused?: unknown }).refused === 'string'
+  );
+}
+
+/** The two refusals `request-admission.ts` writes for a member's level. */
+const LEVEL_REFUSALS = new Set(['view_only', 'comment_only']);
+
+/** The server's reason when `res` is a level refusal; null for any other failure. */
+export async function refusalOf(res: Response): Promise<Refused | null> {
+  if (res.status !== 403) return null;
+  const body: unknown = await res
+    .clone()
+    .json()
+    .catch(() => null);
+  if (typeof body !== 'object' || body === null) return null;
+  const { error, message } = body as { error?: unknown; message?: unknown };
+  if (typeof error !== 'string' || !LEVEL_REFUSALS.has(error)) return null;
+  return typeof message === 'string' && message ? { refused: message } : null;
+}
+
+/** Draw `note` before `near`, replacing any note there, gone once they type. */
+function place(note: HTMLElement, near: Element, field: NotSentOpts['field']): HTMLElement {
   const scope = near.parentElement ?? near;
   clearNotSent(scope);
-  const note = document.createElement('p');
-  note.className = NOTE_CLASS;
   // `alert` rather than `status`: the reader believes the comment is gone
   // to the agent, and a screen reader that waits for a quiet moment to say
   // otherwise is the same silence in another form.
   note.setAttribute('role', 'alert');
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = RETRY_CLASS;
-  button.textContent = opts.label ?? NOT_SENT_LABEL;
-  button.addEventListener('click', () => {
-    note.remove();
-    retry();
-  });
-  note.appendChild(button);
   near.insertAdjacentElement('beforebegin', note);
   // Not `{ once: true }` on the field: the note can be redrawn by a second
   // failure, and a listener spent on the first one would leave the second
@@ -72,6 +91,48 @@ export function markNotSent(opts: NotSentOpts): HTMLElement {
   };
   field.addEventListener('input', onInput);
   return note;
+}
+
+/**
+ * The refused state: the server's reason, and no retry, because a retry is
+ * the same refusal. The draft stays in the box, and typing clears the note.
+ */
+export function markRefused(opts: {
+  near: Element;
+  field: NotSentOpts['field'];
+  reason: string;
+}): HTMLElement {
+  const note = document.createElement('p');
+  note.className = `${NOTE_CLASS} not-sent-refused`;
+  note.textContent = `Not sent. ${opts.reason}`;
+  return place(note, opts.near, opts.field);
+}
+
+/** `markRefused` when the post came back as a level refusal, else `markNotSent`. */
+export function markFailed(outcome: unknown, opts: NotSentOpts): HTMLElement {
+  return isRefused(outcome)
+    ? markRefused({ near: opts.near, field: opts.field, reason: outcome.refused })
+    : markNotSent(opts);
+}
+
+/**
+ * Put the "not sent" state on the composer `near` sits in, replacing any
+ * note already there. Returns the note so a caller can read it in a test.
+ */
+export function markNotSent(opts: NotSentOpts): HTMLElement {
+  const { near, field, retry } = opts;
+  const note = document.createElement('p');
+  note.className = NOTE_CLASS;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = RETRY_CLASS;
+  button.textContent = opts.label ?? NOT_SENT_LABEL;
+  button.addEventListener('click', () => {
+    note.remove();
+    retry();
+  });
+  note.appendChild(button);
+  return place(note, near, field);
 }
 
 /** Take the state off `scope` — a post landed, or a retry is under way. */

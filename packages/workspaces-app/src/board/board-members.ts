@@ -5,11 +5,13 @@
  * A board's audience is a list of exact addresses and `@domain`s (Bryan, 29
  * Oct: "share a board with named emails or a whole domain, and only he can
  * change who is in"). The list draws each exact address — signed in or not
- * yet — then each domain with the people it let in indented under it. There
- * are no levels: every member's comment directs the agent the same way.
+ * yet — then each domain with the people it let in indented under it. Each
+ * person and each domain shows what it may do: Owner, edit, comment or view
+ * (`board-member-level.ts`).
  *
- * Two readers, one list. The owner gets Remove on every row and the Add form;
- * a member gets the same names with no controls at all. **The missing controls
+ * Two readers, one list. The owner gets a level select and Remove on every
+ * row, and the Add form; a member gets the same names and levels as text,
+ * with no controls at all. **The missing controls
  * are not the enforcement**: every write goes to a route that asks the server
  * who you are (`routes/workspace-members.ts`), and an add from anything but
  * the owner's own signed-in browser becomes a proposal rather than a change.
@@ -19,40 +21,28 @@
  */
 
 import { accessMatchProblem, readAccessMatch } from './access-match.ts';
+import {
+  type BoardAudienceEntry,
+  type BoardMemberEntry,
+  type BoardMembersView,
+  type BoardRole,
+  type Row,
+  accessRows,
+  isDomain,
+  shortDay,
+} from './board-access-rows.ts';
+import {
+  type AccessRole,
+  LEVEL_LEGEND,
+  levelSelect,
+  levelText,
+  levelToast,
+  ownerAsk,
+} from './board-member-level.ts';
 
 export { accessMatchProblem, readAccessMatch };
-
-/** The two levels a board has. Wire values; `roleLabel` is what a person sees. */
-export type BoardRole = 'owner' | 'member';
-
-export interface BoardMemberEntry {
-  email: string;
-  role: BoardRole;
-  /** When they first signed in. */
-  addedAt?: number;
-  /** The audience entry that admits them: their own address or an `@domain`. */
-  entry?: string;
-  /** The label of the link they came through, when it had one. */
-  link?: string;
-}
-
-/** One line of the board's audience. */
-export interface BoardAudienceEntry {
-  match: string;
-  addedAt: number;
-  addedBy?: string;
-}
-
-/** What `GET /workspaces/<id>/members` answers, narrowed to what is drawn. */
-export interface BoardMembersView {
-  /** The reader. `email: null` is the operator on their own machine — an owner
-   *  with no address, because none was ever proven and none is needed. */
-  you: { email: string | null; role: BoardRole };
-  members: BoardMemberEntry[];
-  audience?: BoardAudienceEntry[];
-  /** Access changes an agent proposed for this board, still unanswered. */
-  openProposals?: number;
-}
+export type { AccessRole, BoardAudienceEntry, BoardMemberEntry, BoardMembersView, BoardRole };
+export { LEVEL_LEGEND, accessRows, shortDay };
 
 /** What a write came back with. `message` is the server's, when it said one. */
 export interface AccessWriteResult {
@@ -71,6 +61,11 @@ export interface BoardMembersDeps {
   read: () => Promise<BoardMembersView | null>;
   /** Take an address or an `@domain` out. Resolves false when refused. */
   remove: (match: string) => Promise<boolean>;
+  /** Change what a person or everyone at a `@domain` may do. Absent draws
+   *  each level as text, the way a member reads it. */
+  setRole?: (match: string, role: AccessRole) => Promise<AccessWriteResult>;
+  /** The line under the list that says what each level means. */
+  legend?: HTMLElement;
   /** Let an address or an `@domain` in. Absent draws no Add form. */
   add?: (match: string) => Promise<AccessWriteResult>;
   /** The Add form (an input named `match`) and the line under it. */
@@ -127,14 +122,6 @@ export function roleLabel(role: BoardRole): string {
   return role === 'owner' ? 'Owner' : 'Regular User';
 }
 
-const isDomain = (match: string): boolean => match.startsWith('@');
-
-/** "9 Oct": the day is what a reader checks, never the time. */
-export function shortDay(ts: number | undefined): string {
-  if (ts === undefined || !Number.isFinite(ts)) return '';
-  return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-}
-
 /** What a write's reply means for the Add form. */
 export function accessWriteOf(res: {
   ok: boolean;
@@ -159,94 +146,6 @@ export function accessLinkLabel(openProposals: number): string {
     : `${openProposals} changes an agent proposed for this board`;
 }
 
-/** One row the list draws: who, how they got in, and what Remove takes out. */
-interface Row {
-  key: string;
-  title: string;
-  meta: string;
-  role?: BoardRole;
-  under: boolean;
-  /** What Remove sends; absent on a row with no control (your own). */
-  remove?: string;
-  ask: string;
-}
-
-/** What removing a signed-in person does, said in the confirmation. */
-const LOSES = 'They lose access at once, and any page they have open closes.';
-
-function signedIn(m: BoardMemberEntry): string {
-  const day = shortDay(m.addedAt);
-  const when = day ? `Signed in ${day}` : 'Signed in';
-  return m.link ? `${when} via link “${m.link}”` : when;
-}
-
-/** The rows in the order the mock draws them. */
-export function accessRows(view: BoardMembersView): Row[] {
-  const audience = view.audience ?? [];
-  const yours = view.you.email;
-  const rows: Row[] = [];
-  const person = (m: BoardMemberEntry, under: boolean, meta: string, ask: string): Row => ({
-    key: m.email,
-    title: m.email === yours ? `${m.email} (you)` : m.email,
-    meta,
-    under,
-    ask,
-    ...(m.role === 'owner' ? { role: m.role } : {}),
-    ...(m.email === yours ? {} : { remove: m.email }),
-  });
-  const listed = new Set<string>();
-  for (const e of audience.filter((x) => !isDomain(x.match))) {
-    const m = view.members.find((p) => p.email === e.match);
-    listed.add(e.match);
-    if (m) {
-      rows.push(person(m, false, signedIn(m), `Remove ${m.email}? ${LOSES}`));
-    } else {
-      rows.push({
-        key: e.match,
-        title: e.match,
-        meta: `Added ${shortDay(e.addedAt)} · not signed in yet`,
-        under: false,
-        remove: e.match,
-        ask: `Remove ${e.match}? They will not be able to sign in.`,
-      });
-    }
-  }
-  // A member the audience names no entry for: a board read before audiences
-  // existed. Drawn as its own row, so nobody who can get in goes unlisted.
-  for (const m of view.members) {
-    if (listed.has(m.email) || (m.entry && isDomain(m.entry))) continue;
-    listed.add(m.email);
-    rows.push(person(m, false, m.addedAt ? signedIn(m) : '', `Remove ${m.email}? ${LOSES}`));
-  }
-  for (const e of audience.filter((x) => isDomain(x.match))) {
-    const under = view.members.filter((m) => m.entry === e.match);
-    const n = under.length;
-    const count =
-      n === 0 ? 'nobody signed in yet' : n === 1 ? '1 person signed in' : `${n} people signed in`;
-    const losing =
-      n === 0 ? '' : ` ${n} signed-in ${n === 1 ? 'person loses' : 'people lose'} access.`;
-    rows.push({
-      key: e.match,
-      title: `Everyone at ${e.match}`,
-      meta: `Added ${shortDay(e.addedAt)} · ${count}`,
-      under: false,
-      remove: e.match,
-      ask: `Stop letting in everyone at ${e.match}?${losing}`,
-    });
-    for (const m of under) {
-      rows.push(
-        person(
-          m,
-          true,
-          signedIn(m),
-          `Remove ${m.email}? ${LOSES} ${e.match} will not let them back in.`,
-        ),
-      );
-    }
-  }
-  return rows;
-}
-
 export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   const doc = deps.list.ownerDocument;
   const btnClass = deps.buttonClass ?? 'board-btn';
@@ -255,9 +154,14 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   /** The row currently asking "are you sure" — one at a time, cleared by any
    *  repaint. Held here rather than in the DOM so a re-read wipes it. */
   let confirming: string | null = null;
+  /** The row asking "make them an Owner?" — the one level that hands over
+   *  the board, so it is asked in the row first, like a removal. */
+  let promoting: string | null = null;
   /** The row whose button takes focus after the next paint, so a keyboard or
    *  screen-reader user stays where they were rather than back at the top. */
   let focusAfter: string | null = null;
+  /** Back on the level control rather than Remove: the reader was choosing a level. */
+  let focusLevel = false;
 
   /**
    * Repaint on a LATER TURN, never inside the click that asked for it.
@@ -315,15 +219,75 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     return out;
   }
 
+  /** Change a level and say what it did, in the list's own words. */
+  function setLevel(row: Row, match: string, next: AccessRole): void {
+    const setRole = deps.setRole;
+    if (!setRole) return;
+    const who = isDomain(match) ? `Everyone at ${match}` : match;
+    const before = row.level ?? 'edit';
+    run(async () => {
+      const res = await setRole(match, next);
+      promoting = null;
+      focusAfter = row.key;
+      focusLevel = true;
+      await refresh();
+      if (!res.ok) deps.toast(res.message ?? `Could not change what ${who} can do`);
+      else if (res.proposed) deps.toast(`Filed ${match} as an Owner for the owner’s approval`);
+      else deps.toast(levelToast(who, before, next));
+    });
+  }
+
+  function promoteRow(row: Row, match: string): HTMLElement {
+    const out = el('div', `board-member board-member--confirm${row.under ? ' acc-under' : ''}`);
+    out.dataset.key = row.key;
+    out.appendChild(el('span', 'board-member-who', ownerAsk(match)));
+    const go = button('Make Owner', 'board-member-promote');
+    go.addEventListener('click', () => setLevel(row, match, 'owner'));
+    const cancel = button('Cancel', 'board-member-cancel');
+    cancel.addEventListener('click', () => {
+      promoting = null;
+      focusAfter = row.key;
+      focusLevel = true;
+      repaintSoon();
+    });
+    out.appendChild(go);
+    out.appendChild(cancel);
+    return out;
+  }
+
+  function levelControl(row: Row, canEdit: boolean): HTMLElement | null {
+    if (!row.level) return null;
+    const match = row.setRole;
+    if (!canEdit || !deps.setRole || !match) return levelText(doc, row.level);
+    const domain = isDomain(match);
+    return levelSelect(doc, {
+      current: row.level,
+      domain,
+      aria: domain ? `What everyone at ${match} can do` : `What ${match} can do`,
+      onPick: (next) => {
+        if (next !== 'owner') {
+          setLevel(row, match, next);
+          return;
+        }
+        promoting = row.key;
+        focusAfter = row.key;
+        repaintSoon();
+      },
+    });
+  }
+
   function drawRow(row: Row, canEdit: boolean): HTMLElement {
     if (confirming === row.key && row.remove) return confirmRow(row, row.remove);
+    if (promoting === row.key && row.setRole) return promoteRow(row, row.setRole);
     const out = el('div', `board-member${row.under ? ' acc-under' : ''}`);
     out.dataset.key = row.key;
     const who = el('span', 'acc-who');
     who.appendChild(el('span', 'board-member-who', row.title));
     if (row.meta) who.appendChild(el('span', 'acc-via', row.meta));
     out.appendChild(who);
-    if (row.role) out.appendChild(el('span', 'board-member-role-text', roleLabel(row.role)));
+    const level = levelControl(row, canEdit);
+    if (level) out.appendChild(level);
+    else if (row.role) out.appendChild(el('span', 'board-member-role-text', roleLabel(row.role)));
     if (canEdit && row.remove) {
       const remove = button('Remove', 'board-member-remove');
       remove.setAttribute('aria-label', `Remove ${row.remove}`);
@@ -348,13 +312,17 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
    *  the Remove that would act on Enter), the row's Remove otherwise. */
   function restoreFocus(): void {
     const key = focusAfter;
+    const toLevel = focusLevel;
     focusAfter = null;
+    focusLevel = false;
     if (key === null) return;
     const row = Array.from(deps.list.querySelectorAll<HTMLElement>('[data-key]')).find(
       (r) => r.dataset.key === key,
     );
     const target =
+      row?.querySelector<HTMLElement>('.board-member-promote') ??
       row?.querySelector<HTMLElement>('.board-member-cancel') ??
+      (toLevel ? row?.querySelector<HTMLElement>('.board-member-level') : null) ??
       row?.querySelector<HTMLElement>('.board-member-remove') ??
       (deps.form?.elements.namedItem('match') as HTMLElement | null);
     target?.focus();
@@ -388,11 +356,19 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     if (yours === null || !view.members.some((m) => m.email === yours)) {
       const you = el('div', 'board-member');
       you.appendChild(el('span', 'board-member-who', 'You'));
-      you.appendChild(el('span', 'board-member-role-text', roleLabel(view.you.role)));
+      you.appendChild(
+        view.you.accessRole
+          ? levelText(doc, view.you.accessRole)
+          : el('span', 'board-member-role-text', roleLabel(view.you.role)),
+      );
       deps.list.appendChild(you);
     }
     const rows = accessRows(view);
     for (const row of rows) deps.list.appendChild(drawRow(row, canEdit));
+    if (deps.legend) {
+      deps.legend.textContent = LEVEL_LEGEND;
+      deps.legend.classList.toggle('hidden', !rows.some((r) => r.level));
+    }
     deps.note.textContent =
       rows.length === 0
         ? 'Nobody else has been given access yet.'
@@ -407,6 +383,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   function show(next: BoardMembersView | null): void {
     view = next;
     confirming = null;
+    promoting = null;
     // Before the paint, so the panel's other controls settle on the same turn
     // this list does rather than one behind it.
     deps.onRole?.(view ? view.you.role : null);
@@ -417,7 +394,10 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     if (inFlight) return;
     const keep = confirming;
     view = await deps.read();
-    confirming = keep && view && accessRows(view).some((r) => r.key === keep) ? keep : null;
+    const listed = (key: string | null) =>
+      key && view && accessRows(view).some((r) => r.key === key) ? key : null;
+    confirming = listed(keep);
+    promoting = listed(promoting);
     deps.onRole?.(view ? view.you.role : null);
     paint();
   }

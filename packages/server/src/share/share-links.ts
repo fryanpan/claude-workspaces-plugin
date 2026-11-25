@@ -59,6 +59,7 @@ import {
 import {
   type BoardAudience,
   addAudienceEntries,
+  admittingEntry,
   boardAudienceAdmits,
   removeFromAudience,
   seedAudiences,
@@ -370,11 +371,16 @@ export class ShareLinks {
     if (this.loadFailed) return null;
     if (!boardAudienceAdmits(this.audienceOf(workspaceId), who)) return null;
     if (this.members.some((m) => m.workspaceId === workspaceId && m.email === who)) return null;
+    // A domain entry's level is the level its newcomers arrive at.
+    const audience = this.audienceOf(workspaceId);
+    const by = admittingEntry(audience, who);
+    const access = audience?.entries.find((e) => e.match === by)?.access;
     const row: ShareLinkMember = {
       workspaceId,
       email: who,
       addedAt: Date.now(),
       viaLinkId: AUDIENCE_ONLY,
+      ...(access ? { access } : {}),
     };
     this.members.push(row);
     this.save();
@@ -481,6 +487,42 @@ export class ShareLinks {
     return this.members
       .filter((m) => m.workspaceId === workspaceId && !this.admitted(m))
       .map((m) => m.email);
+  }
+
+  /** A domain entry's level, or null when the board holds no such domain. */
+  audienceAccessOf(workspaceId: string, match: string): AccessRole | null {
+    const entry = this.audienceOf(workspaceId)?.entries.find((e) => e.match === match);
+    return entry && match.startsWith('@') ? (entry.access ?? 'edit') : null;
+  }
+
+  /**
+   * Set what everyone a domain entry lets in may do: the entry's own level,
+   * which newcomers arrive at, and the level of every member it already
+   * admits. An Owner keeps their seat, and a person with an exact entry of
+   * their own is not the domain's. Answers whose level moved, so the caller
+   * can hang up what they have open, or null when there is no such domain.
+   */
+  setAudienceAccess(workspaceId: string, match: string, role: AccessRole): string[] | null {
+    this.refuseWhileUnreadable();
+    const current = this.audienceOf(workspaceId);
+    if (!match.startsWith('@') || role === 'owner') return null;
+    if (!current?.entries.some((e) => e.match === match)) return null;
+    const access = role === 'edit' ? undefined : role;
+    const entries = current.entries.map((e) => {
+      if (e.match !== match) return e;
+      const { access: _old, ...rest } = e;
+      return access ? { ...rest, access } : rest;
+    });
+    this.putAudience({ workspaceId, entries });
+    const next = this.audienceOf(workspaceId);
+    const moved: string[] = [];
+    for (const m of this.membersOf(workspaceId)) {
+      if (m.role === 'owner' || admittingEntry(next, m.email) !== match) continue;
+      if (m.access === access) continue;
+      this.setMemberRole(workspaceId, m.email, 'member', access);
+      moved.push(m.email);
+    }
+    return moved;
   }
 
   private putAudience(next: BoardAudience): void {

@@ -22,6 +22,7 @@
  * Pure functions over plain records; `share-links.ts` persists them.
  */
 import { normalizeEmail } from '@claude-workspaces/core';
+import { type MemberAccess, normalizeMemberAccess } from './board-access.ts';
 import { audienceEntryAdmits } from './shares.ts';
 
 export interface AudienceEntry {
@@ -33,6 +34,9 @@ export interface AudienceEntry {
   /** On a domain entry: addresses removed from the board that it would
    *  otherwise admit. */
   except?: string[];
+  /** On a domain entry: what the people it lets in may do. Absent = edit.
+   *  Set by the owner in Board Settings (`ShareLinks.setAudienceAccess`). */
+  access?: MemberAccess;
 }
 
 export interface BoardAudience {
@@ -190,6 +194,8 @@ export function storedAudiences(raw: unknown): BoardAudience[] {
         addedAt: typeof e.addedAt === 'number' ? e.addedAt : 0,
       };
       if (typeof e.addedBy === 'string') entry.addedBy = e.addedBy;
+      const access = e.match.startsWith('@') ? normalizeMemberAccess(e.access) : undefined;
+      if (access) entry.access = access;
       if (Array.isArray(e.except)) {
         const except = e.except.filter((x: unknown): x is string => typeof x === 'string');
         if (except.length > 0) entry.except = except.map((x: string) => normalizeEmail(x));

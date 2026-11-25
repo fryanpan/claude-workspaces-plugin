@@ -57,6 +57,22 @@ export interface ChannelWiringOpts {
 const lineOf = (m: LeadChatMessage | undefined, meId: string | undefined): string | undefined =>
   m ? `${m.author.id === meId ? 'You' : m.author.name}: ${m.text.replace(/\s+/g, ' ')}` : undefined;
 
+/**
+ * Who reads `#general`, said on the channel. It is the owner's chat with the
+ * lead: the server answers a share visitor's read with a 403 and drops its
+ * frames from their stream (`redact-board-events.ts`), so "everyone on this
+ * board" was wrong for everyone the board was shared with.
+ */
+export function generalSub(leadName: string, ownersOnly: boolean): string {
+  return ownersOnly
+    ? `The board owner’s chat with ${leadName}. Only the owner can open it.`
+    : `You and ${leadName}. People you share this board with don’t see it.`;
+}
+
+/** What `#general` shows a reader the server refused. */
+export const GENERAL_REFUSED =
+  'Only the board’s owner can read this chat. Write to them in their own channel instead.';
+
 export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   const { doc, view, dm } = opts;
   let current = GENERAL;
@@ -142,7 +158,7 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
         id: GENERAL,
         kind: 'general',
         name: '#general',
-        sub: `Everyone on this board and ${leadName}`,
+        sub: generalSub(leadName, s.ownersOnly === true),
         ...(lineOf(newest, meId) ? { last: lineOf(newest, meId) } : {}),
         unread: generalUnread,
       },
@@ -166,6 +182,19 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
     current: shown,
     model(s, open) {
       trackGeneral(s, open);
+      // Refused and nothing else to pick: the one channel still says whose it is.
+      if (s.ownersOnly && !s.meeting && !(dm.state().ready && dm.state().channels.length > 0)) {
+        const sub = generalSub(s.lead?.name ?? 'the lead', true);
+        const general: ChannelEntry = {
+          id: GENERAL,
+          kind: 'general',
+          name: '#general',
+          sub,
+          unread: false,
+        };
+        const picker = { channels: [general], current: GENERAL, menuOpen: false };
+        return { channel: { kind: 'general', sub, empty: GENERAL_REFUSED, picker } };
+      }
       if (!dm.state().ready || dm.state().channels.length === 0 || s.meeting) return {};
       const list = entries(s, open);
       const id = shown();
@@ -173,7 +202,14 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
       if (!entry) return {};
       const picker = { channels: list, current: entry.id, menuOpen };
       if (entry.kind === 'general') {
-        return { channel: { kind: 'general', sub: entry.sub, picker } };
+        return {
+          channel: {
+            kind: 'general',
+            sub: entry.sub,
+            ...(s.ownersOnly ? { empty: GENERAL_REFUSED } : {}),
+            picker,
+          },
+        };
       }
       const d = dm.state();
       const ch = d.channels.find((c) => c.id === id);
