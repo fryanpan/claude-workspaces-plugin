@@ -237,22 +237,98 @@ describe('private messages between a person and their own agent', () => {
   });
 });
 
-describe('a share visitor and private messages', () => {
-  it('refuses /api/me/messages to a share visitor, however they proved themselves', async () => {
-    const s = await startShareProofServer('Harborlight private');
-    try {
-      s.handle.shareLinks.addToAudience(s.board, ['alice@harborlight.example'], 'Saltmarsh');
-      expect(await s.join('alice@harborlight.example')).toBe(302);
-      const get = await s.visitor('alice@harborlight.example', '/api/me/messages');
-      expect(get.status).toBeGreaterThanOrEqual(400);
-      const sent = await s.visitor('alice@harborlight.example', '/api/me/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'from the share host' }),
+describe('a share member and private messages', () => {
+  const ALICE = 'alice@harborlight.example';
+  const BOB = 'bob@riverbend.example';
+  const SALTMARSH = 'saltmarsh@harborlight.example';
+  let s: Awaited<ReturnType<typeof startShareProofServer>>;
+  let base = '';
+  const at1 = (agentId: string) => mintAgentToken(agentId, agentTokenKey(loadCookieKey(s.dataDir)));
+  const pageOf = async (res: Response) => {
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      agentId: string;
+      messages: Array<{ from: string; text: string; personId: string }>;
+    };
+  };
+  /** Alice and Bob each name and are confirmed by their own agent, as they
+   *  would from their profile; the link is the person's, whichever host. */
+  async function link(email: string, agentId: string) {
+    const who = signedInPerson(s.handle, s.dataDir, base, { email });
+    const named = await fetch(`${base}/api/auth/profile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...who.headers },
+      body: JSON.stringify({ leadAgentId: agentId }),
+    });
+    expect(named.status).toBe(200);
+    const confirmed = await fetch(`${base}/api/agents/${agentId}/person`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(agentId)}` },
+      body: JSON.stringify({ personId: who.user.id }),
+    });
+    expect(await confirmed.json()).toMatchObject({ state: 'linked' });
+    return who.user.id;
+  }
+  const reply = (agentId: string, personId: string, text: string) =>
+    fetch(`${base}/api/agents/${agentId}/messages/${encodeURIComponent(personId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(agentId)}` },
+      body: JSON.stringify({ text }),
+    });
+
+  beforeAll(async () => {
+    s = await startShareProofServer('Harborlight private');
+    base = `http://127.0.0.1:${s.handle.port}`;
+    s.handle.shareLinks.addToAudience(s.board, [ALICE, BOB, SALTMARSH], 'Saltmarsh');
+    for (const email of [ALICE, BOB, SALTMARSH]) expect(await s.join(email)).toBe(302);
+    for (const [agentId, name] of [
+      [A1, 'Harborlight'],
+      [B1, 'Riverbend'],
+    ] as const) {
+      s.handle.tasks.attachAgent(s.board, {
+        agentId,
+        agentName: name,
+        runtime: 'claude-code-local',
       });
-      expect(sent.status).toBeGreaterThanOrEqual(400);
-    } finally {
-      await s.stop();
+      s.handle.identities.upsertAgent(agentId, name);
     }
+    const aliceId = await link(ALICE, A1);
+    const bobId = await link(BOB, B1);
+    expect((await reply(A1, aliceId, 'Alice, the tide is at six')).status).toBe(200);
+    expect((await reply(B1, bobId, 'Bob, the ferry is late')).status).toBe(200);
+  });
+
+  afterAll(async () => {
+    await s.stop();
+  });
+
+  it('reads the message her own agent sent her from the share host, and never the one sent to Bob', async () => {
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.agentId).toBe(A1);
+    expect(alice.messages.map((m) => m.text)).toEqual(['Alice, the tide is at six']);
+    const bob = await pageOf(await s.visitor(BOB, '/api/me/messages'));
+    expect(bob.messages.map((m) => m.text)).toEqual(['Bob, the ferry is late']);
+  });
+
+  it('sends to her own agent from the share host, and the reply names her', async () => {
+    const sent = await s.visitor(ALICE, '/api/me/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Thanks, A1' }),
+    });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ agentId: A1, message: { from: 'person' } });
+    const bob = await pageOf(await s.visitor(BOB, '/api/me/messages'));
+    expect(bob.messages.some((m) => m.text === 'Thanks, A1')).toBe(false);
+  });
+
+  it('still refuses a share visitor carrying a token, and names a missing lead agent', async () => {
+    const tokened = await s.visitor(ALICE, '/api/me/messages', {
+      headers: { authorization: `Bearer ${at1(A1)}` },
+    });
+    expect(tokened.status).toBe(403);
+    const unlinked = await s.visitor(SALTMARSH, '/api/me/messages');
+    expect(unlinked.status).toBe(409);
+    expect(await unlinked.json()).toMatchObject({ error: 'no_lead_agent' });
   });
 });

@@ -70,7 +70,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/home-remotes` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
 | `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
-| `/api/me/messages` | GET, POST | `routes/private-messages.ts` | trusted-local |  |
+| `/api/me/messages` | GET, POST | `routes/private-messages.ts` | share-scope | A share member reaches their own conversation: the path names no one, and whose it is comes from the request's person proof alone (`routes/private-messages.ts`). |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
