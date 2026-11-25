@@ -47,6 +47,11 @@ login and stores what it holds:
 
 ## Uninstall
 
+`sudo bash scripts/keeper-uninstall.sh` runs steps 1 to 4 and the Fly
+revoke, skips any step already done, and checks the result;
+`--dry-run` prints the steps without changing anything. The Cloudflare
+dashboard token is the one step it leaves to the browser. The steps it runs:
+
 Bryan runs these, on the Mac, because each needs the admin password. An
 installed keeper keeps running until then; nothing reaches it, and the board
 server no longer reads `CW_KEEPER_URL`.
