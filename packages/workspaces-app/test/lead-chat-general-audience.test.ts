@@ -44,9 +44,7 @@ describe('who #general says can read it', () => {
       clientAnswering(200, { lead: { agentId: 'a', name: 'Lead' }, messages: [], canTalk: true }),
     );
     expect(s.ownersOnly).toBeUndefined();
-    expect(generalSub('Lead', s.ownersOnly === true)).toBe(
-      'You and Lead. People you share this board with don’t see it.',
-    );
+    expect(generalSub('Lead', s.ownersOnly === true)).toBe('Only you and Lead see this');
   });
 
   it('tells a reader the server refused that it is the owner’s, and stops loading', async () => {
@@ -54,9 +52,7 @@ describe('who #general says can read it', () => {
     expect(s.loaded).toBe(true);
     expect(s.ownersOnly).toBe(true);
     expect(s.canTalk).toBe(false);
-    expect(generalSub('Lead', true)).toBe(
-      'The board owner’s chat with Lead. Only the owner can open it.',
-    );
+    expect(generalSub('Lead', true)).toBe('Only the owner and Lead see this');
     expect(GENERAL_REFUSED).toContain('Only the board’s owner can read this chat');
   });
 

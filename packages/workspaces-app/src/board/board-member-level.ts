@@ -26,7 +26,7 @@ const RANK: Record<AccessRole, number> = { view: 0, comment: 1, edit: 2, owner: 
 
 /** The one line under the list that says what the three lesser levels mean. */
 export const LEVEL_LEGEND =
-  'Can edit: change tasks, docs and settings agents read. Can comment: comment and reply only. Can view: read only.';
+  'Owner: everything except who has access. Can edit: change tasks and docs. Can comment: comment and reply. Can view: read only.';
 
 export function levelLabel(role: AccessRole): string {
   return LEVELS.find(([r]) => r === role)?.[1] ?? 'Can edit';
@@ -53,7 +53,8 @@ export function levelSelect(
   opts: {
     current: AccessRole;
     aria: string;
-    domain: boolean;
+    /** No Owner: a domain, or an address with no seat yet. */
+    noOwner: boolean;
     onPick: (next: AccessRole) => void;
   },
 ): HTMLSelectElement {
@@ -61,7 +62,7 @@ export function levelSelect(
   sel.className = 'board-select board-member-level';
   sel.setAttribute('aria-label', opts.aria);
   for (const [value, text] of LEVELS) {
-    if (value === 'owner' && opts.domain) continue;
+    if (value === 'owner' && opts.noOwner) continue;
     const o = doc.createElement('option');
     o.value = value;
     o.textContent = text;
@@ -70,8 +71,11 @@ export function levelSelect(
   sel.value = opts.current;
   sel.addEventListener('change', () => {
     const next = sel.value as AccessRole;
+    // An arrow key on a closed select fires one change per press; while the
+    // first is still being written, a second is dropped rather than queued
+    // behind it, and the select shows the level the server holds.
     sel.value = opts.current;
-    if (next !== opts.current) opts.onPick(next);
+    if (next !== opts.current && !sel.disabled) opts.onPick(next);
   });
   return sel;
 }

@@ -34,7 +34,7 @@ export interface AudienceEntry {
   /** On a domain entry: addresses removed from the board that it would
    *  otherwise admit. */
   except?: string[];
-  /** On a domain entry: what the people it lets in may do. Absent = edit.
+  /** What the people this entry lets in arrive able to do. Absent = edit.
    *  Set by the owner in Board Settings (`ShareLinks.setAudienceAccess`). */
   access?: MemberAccess;
 }
@@ -194,7 +194,7 @@ export function storedAudiences(raw: unknown): BoardAudience[] {
         addedAt: typeof e.addedAt === 'number' ? e.addedAt : 0,
       };
       if (typeof e.addedBy === 'string') entry.addedBy = e.addedBy;
-      const access = e.match.startsWith('@') ? normalizeMemberAccess(e.access) : undefined;
+      const access = normalizeMemberAccess(e.access);
       if (access) entry.access = access;
       if (Array.isArray(e.except)) {
         const except = e.except.filter((x: unknown): x is string => typeof x === 'string');

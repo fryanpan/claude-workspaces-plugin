@@ -45,10 +45,19 @@ export interface BoardRoleReading {
   person: { before: string; after: string; server: string | null; toast: string };
   /** Saltmarsh, admitted by `@domain`: the same, for Can comment on the domain row. */
   domain: { before: string; after: string; server: string | null; toast: string };
-  /** Bob, now view-only, sends a comment from the doc's composer. */
-  refused: { note: string; retry: boolean; kept: string; onServer: boolean };
+  /** Bob, now view-only, sends a comment from the doc's composer. `pill` and
+   *  `formatBar` are whether the comment pill and the formatting row are
+   *  drawn once text is selected (the composer is still reachable by key). */
+  refused: {
+    note: string;
+    retry: boolean;
+    kept: string;
+    onServer: boolean;
+    pill: boolean;
+    formatBar: boolean;
+  };
   /** The control: Saltmarsh, now comment-only, sends one and it lands. */
-  allowed: { note: string; onServer: boolean };
+  allowed: { note: string; onServer: boolean; pill: boolean };
 }
 
 const SHARE_AUD = 'aud-board-role';
@@ -266,6 +275,14 @@ async function main(): Promise<void> {
       toast: domainToast,
     };
 
+    /** Whether `selector` is drawn: in the layout and not display:none. */
+    const drawn = async (selector: string): Promise<boolean> =>
+      Boolean(
+        await member.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)});
+          return !!e && getComputedStyle(e).display !== 'none' && !e.classList.contains('hidden')
+            && !e.classList.contains('is-collapsed'); })()`),
+      );
+    let pillShown = false;
     /** Select the doc's paragraph, open the composer, and send `text`. */
     const comment = async (text: string): Promise<void> => {
       await member.evaluate(`(() => {
@@ -279,6 +296,7 @@ async function main(): Promise<void> {
         document.dispatchEvent(new Event('selectionchange'));
       })()`);
       await sleep(200);
+      pillShown = await drawn('#comment-pill');
       await member.evaluate(
         `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, bubbles: true }))`,
       );
@@ -317,6 +335,8 @@ async function main(): Promise<void> {
       ),
       kept: String(await member.evaluate(`document.getElementById('composer-text')?.value ?? ''`)),
       onServer: onServer(refusedText),
+      pill: pillShown,
+      formatBar: await drawn('#format-bar'),
     };
 
     step('Saltmarsh, comment-only, sends one (the control)');
@@ -326,7 +346,7 @@ async function main(): Promise<void> {
     const landed = await until('the comment to land', async () =>
       onServer(allowedText) ? true : null,
     ).catch(() => false);
-    const allowed = { note: await note(), onServer: landed };
+    const allowed = { note: await note(), onServer: landed, pill: pillShown };
 
     member.close();
     owner.close();

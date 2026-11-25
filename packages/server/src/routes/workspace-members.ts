@@ -161,24 +161,38 @@ export async function handleWorkspaceMembers(
     if (!accessRole) {
       return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
     }
-    // An `@domain` row: one level for everyone that entry lets in.
-    if (email.startsWith('@')) {
-      if (accessRole === 'owner') {
-        return j(400, { error: "a domain's level is 'edit', 'comment' or 'view'" });
-      }
+    const before = email.startsWith('@') ? null : shareLinks.roleOf(workspaceId, email);
+    // An audience entry with no member row: an `@domain` (one level for
+    // everyone it lets in), or an address nobody has signed in with yet (the
+    // level they arrive at). Neither is a seat, so neither can be Owner.
+    if (before === null) {
       const levelBefore = shareLinks.audienceAccessOf(workspaceId, email);
-      if (levelBefore === null) return j(404, { error: 'not on this board', workspaceId });
+      if (levelBefore === null) {
+        return j(404, {
+          error: email.startsWith('@') ? 'not on this board' : 'not a member',
+          workspaceId,
+        });
+      }
+      if (accessRole === 'owner') {
+        return j(400, { error: "an entry's level is 'edit', 'comment' or 'view'" });
+      }
       if (widensAccess(levelBefore, accessRole)) {
-        const unproven = refuseUnproven('widens what a domain may do');
+        const unproven = refuseUnproven('widens what an entry lets people do');
         if (unproven) return unproven;
       }
-      const moved = shareLinks.setAudienceAccess(workspaceId, email, accessRole) ?? [];
+      // Without the proof the store raises nobody, even on a change that
+      // reads as a narrowing of the entry itself.
+      const moved =
+        shareLinks.setAudienceAccess(
+          workspaceId,
+          email,
+          accessRole,
+          proven() ? { mayWiden: true } : {},
+        ) ?? [];
       return j(200, { ok: true, workspaceId, match: email, accessRole, ...hangUp(moved) });
     }
     const { seat: role, access } = seatAndAccess(accessRole);
-    const before = shareLinks.roleOf(workspaceId, email);
     const accessBefore = shareLinks.accessRoleOf(workspaceId, email);
-    if (before === null) return j(404, { error: 'not a member', workspaceId });
     // A promotion by anything but the owner's own browser is a proposal.
     if (role === 'owner' && before !== 'owner' && !proven()) {
       const change = {

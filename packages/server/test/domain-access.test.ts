@@ -57,7 +57,7 @@ describe('a domain entry’s level', () => {
 
   it('back to edit clears the stored level', () => {
     links.setAudienceAccess(BOARD, DOMAIN, 'view');
-    expect(links.setAudienceAccess(BOARD, DOMAIN, 'edit')).toEqual([EARLY]);
+    expect(links.setAudienceAccess(BOARD, DOMAIN, 'edit', { mayWiden: true })).toEqual([EARLY]);
     expect(links.accessRoleOf(BOARD, EARLY)).toBe('edit');
     expect(links.audienceOf(BOARD)?.entries.find((e) => e.match === DOMAIN)?.access).toBe(
       undefined,
@@ -77,9 +77,35 @@ describe('a domain entry’s level', () => {
     expect(again.accessRoleOf(BOARD, EARLY)).toBe('view');
   });
 
-  it('answers null for an entry the board does not hold, or an exact address', () => {
+  it('answers null for an entry the board does not hold', () => {
     expect(links.setAudienceAccess(BOARD, '@saltmarsh.example', 'view')).toBe(null);
-    expect(links.setAudienceAccess(BOARD, OWN_ENTRY, 'view')).toBe(null);
+    expect(links.setAudienceAccess(BOARD, 'nobody@riverbend.example', 'view')).toBe(null);
     expect(links.audienceAccessOf(BOARD, '@saltmarsh.example')).toBe(null);
+  });
+
+  it('never raises a member it moves unless the caller may widen', () => {
+    // Set on her own to view, below the domain's edit.
+    links.setMemberRole(BOARD, EARLY, 'member', 'view');
+    // Comment is below the domain's edit, so it reads as a narrowing...
+    expect(links.setAudienceAccess(BOARD, DOMAIN, 'comment')).toEqual([]);
+    // ...but it would raise her, so without the right to widen she stays.
+    expect(links.accessRoleOf(BOARD, EARLY)).toBe('view');
+    // Re-posting the level a domain already holds raises nobody either.
+    expect(links.setAudienceAccess(BOARD, DOMAIN, 'comment')).toEqual([]);
+    expect(links.accessRoleOf(BOARD, EARLY)).toBe('view');
+    // The owner's own page may.
+    expect(links.setAudienceAccess(BOARD, DOMAIN, 'edit', { mayWiden: true })).toEqual([EARLY]);
+    expect(links.accessRoleOf(BOARD, EARLY)).toBe('edit');
+  });
+
+  it('sets the level an exact address arrives at before they first sign in', () => {
+    links.addToAudience(BOARD, [LATE], 'Alice');
+    expect(links.audienceAccessOf(BOARD, LATE)).toBe('edit');
+    expect(links.setAudienceAccess(BOARD, LATE, 'view')).toEqual([]);
+    expect(links.audienceAccessOf(BOARD, LATE)).toBe('view');
+    // Their own entry admits them, at the level it carries.
+    expect(links.isMember(BOARD, LATE)).toBe(true);
+    expect(links.accessRoleOf(BOARD, LATE)).toBe('view');
+    expect(new ShareLinks({ dataDir }).audienceAccessOf(BOARD, LATE)).toBe('view');
   });
 });

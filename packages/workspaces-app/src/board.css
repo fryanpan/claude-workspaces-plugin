@@ -644,6 +644,9 @@ body.board-body {
   display: inline-block;
   color: var(--fg-muted);
 }
+.board-member-remove-gap {
+  visibility: hidden;
+}
 /* A person a domain let in sits under that domain's row. */
 .acc-under {
   margin-left: 6px;

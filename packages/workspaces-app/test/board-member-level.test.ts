@@ -126,7 +126,8 @@ describe('a level per person and per domain', () => {
     await tick();
     const asking = rowOf(m.list, BOB);
     expect(asking.textContent).toContain(`Make ${BOB} an Owner?`);
-    expect(document.activeElement).toBe(buttonSaying(asking, 'Make Owner'));
+    // Cancel holds focus, so a stray Enter hands nobody the board.
+    expect(document.activeElement).toBe(buttonSaying(asking, 'Cancel'));
     buttonSaying(asking, 'Cancel')?.click();
     await tick();
     expect(m.setRole).not.toHaveBeenCalled();
@@ -165,5 +166,72 @@ describe('a level per person and per domain', () => {
     expect(level(BOB)).toBe('Can view');
     expect(level(SALT)).toBe('Can comment');
     expect(level(DOMAIN)).toBe('Can comment');
+  });
+
+  it('offers a level for an address nobody has signed in with yet, without Owner', async () => {
+    const INVITED = 'saltmarsh@harborlight.example';
+    const m = mount({
+      view: { ...VIEW, audience: [...(VIEW.audience ?? []), { match: INVITED, addedAt: DAY }] },
+    });
+    await m.handle.refresh();
+    const sel = selectOf(m.list, INVITED);
+    expect(sel.value).toBe('edit');
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(['edit', 'comment', 'view']);
+    pick(sel, 'view');
+    await m.handle.settled();
+    expect(m.setRole).toHaveBeenCalledWith(INVITED, 'view');
+  });
+
+  it('draws no select for a person whose level the server did not say', async () => {
+    const m = mount({
+      view: {
+        ...VIEW,
+        members: VIEW.members.map(({ accessRole: _a, ...rest }) => rest),
+      },
+    });
+    await m.handle.refresh();
+    expect(rowOf(m.list, BOB).querySelector('select')).toBeNull();
+  });
+
+  it('sends one level at a time when the select fires twice', async () => {
+    let release: () => void = () => {};
+    const m = mount({
+      setRole: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true });
+        }),
+    });
+    await m.handle.refresh();
+    pick(selectOf(m.list, BOB), 'comment');
+    pick(selectOf(m.list, BOB), 'edit');
+    release();
+    await m.handle.settled();
+    expect(m.setRole).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the Owner question when a re-read says they became an Owner elsewhere', async () => {
+    let view: BoardMembersView = VIEW;
+    document.body.innerHTML = '<small id="note"></small><div id="list"></div>';
+    const list = document.getElementById('list') as HTMLElement;
+    const handle = mountBoardMembers({
+      list,
+      note: document.getElementById('note') as HTMLElement,
+      read: async () => view,
+      remove: async () => true,
+      setRole: async () => ({ ok: true }),
+      toast: () => {},
+    });
+    await handle.refresh();
+    pick(selectOf(list, BOB), 'owner');
+    await tick();
+    expect(rowOf(list, BOB).textContent).toContain('an Owner?');
+    view = {
+      ...VIEW,
+      members: VIEW.members.map((x) =>
+        x.email === BOB ? { ...x, role: 'owner', accessRole: 'owner' } : x,
+      ),
+    };
+    await handle.changed();
+    expect(rowOf(list, BOB).textContent).not.toContain('an Owner?');
   });
 });

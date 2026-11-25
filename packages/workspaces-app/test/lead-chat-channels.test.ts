@@ -224,19 +224,19 @@ describe('the chat’s channels', () => {
     await vi.waitFor(() => expect(owner.streams.length).toBe(1));
     owner.m.toggle();
     await vi.waitFor(() => expect(owner.view.picker.name.textContent).toBe('#general'));
-    expect(heading(owner)).toBe(
-      'You and Harborlight Lead. People you share this board with don’t see it.',
-    );
+    expect(heading(owner)).toBe('Only you and Harborlight Lead see this');
     owner.m.destroy();
 
     // The server refused this reader's read of the board chat (a share visitor).
     const visitor = mount({ board: { lead: null, canTalk: false, ownersOnly: true } });
     await vi.waitFor(() => expect(visitor.streams.length).toBe(1));
     visitor.m.toggle();
+    // It opens on a conversation they can use, not on the one they cannot.
+    await vi.waitFor(() => expect(visitor.view.picker.name.textContent).toBe('Bob'));
+    visitor.view.picker.button.click();
+    visitor.pick('#general');
     await vi.waitFor(() => expect(visitor.view.picker.name.textContent).toBe('#general'));
-    expect(heading(visitor)).toBe(
-      'The board owner’s chat with the lead. Only the owner can open it.',
-    );
+    expect(heading(visitor)).toBe('Only the owner and the lead see this');
     expect(visitor.view.list.textContent).toContain('Only the board’s owner can read this chat');
   });
 

@@ -78,6 +78,9 @@ describe.skipIf(CHROME === null)('Board Settings sets each member’s level', ()
         retry: false,
         kept: 'Harborlight question from Bob',
         onServer: false,
+        // No comment pill and no formatting row for a reader who can do neither.
+        pill: false,
+        formatBar: false,
       });
     },
     CASE_MS,
@@ -86,7 +89,7 @@ describe.skipIf(CHROME === null)('Board Settings sets each member’s level', ()
   it(
     'a comment-only member’s comment lands (the control)',
     () => {
-      expect(r.allowed).toEqual({ note: '', onServer: true });
+      expect(r.allowed).toEqual({ note: '', onServer: true, pill: true });
     },
     CASE_MS,
   );

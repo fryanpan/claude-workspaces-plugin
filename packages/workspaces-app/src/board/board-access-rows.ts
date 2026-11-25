@@ -57,8 +57,12 @@ export interface Row {
   title: string;
   meta: string;
   role?: BoardRole;
-  /** What this person, or everyone this domain lets in, may do. */
+  /** What this person, or everyone this domain lets in, may do. Absent when
+   *  the server did not say (an older one), so nothing guesses edit. */
   level?: AccessRole;
+  /** An entry with no seat behind it (a domain, or an address nobody has
+   *  signed in with yet): its select offers no Owner. */
+  seatless?: boolean;
   /** What the level control sends; absent on your own row and on an address
    *  nobody has signed in with yet, which has no level to change. */
   setRole?: string;
@@ -89,7 +93,7 @@ export function accessRows(view: BoardMembersView): Row[] {
     under,
     ask,
     ...(m.role === 'owner' ? { role: m.role } : {}),
-    level: m.accessRole ?? (m.role === 'owner' ? 'owner' : 'edit'),
+    ...(m.accessRole ? { level: m.accessRole } : {}),
     ...(m.email === yours ? {} : { remove: m.email, setRole: m.email }),
   });
   const listed = new Set<string>();
@@ -105,6 +109,9 @@ export function accessRows(view: BoardMembersView): Row[] {
         meta: `Added ${shortDay(e.addedAt)} · not signed in yet`,
         under: false,
         remove: e.match,
+        level: e.access ?? 'edit',
+        setRole: e.match,
+        seatless: true,
         ask: `Remove ${e.match}? They will not be able to sign in.`,
       });
     }
@@ -131,6 +138,7 @@ export function accessRows(view: BoardMembersView): Row[] {
       remove: e.match,
       level: e.access ?? 'edit',
       setRole: e.match,
+      seatless: true,
       ask: `Stop letting in everyone at ${e.match}?${losing}`,
     });
     for (const m of under) {

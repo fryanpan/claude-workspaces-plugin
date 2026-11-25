@@ -222,7 +222,11 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   /** Change a level and say what it did, in the list's own words. */
   function setLevel(row: Row, match: string, next: AccessRole): void {
     const setRole = deps.setRole;
-    if (!setRole) return;
+    if (!setRole || inFlight) return;
+    // Every select waits while one level is written (`levelSelect`).
+    for (const s of deps.list.querySelectorAll<HTMLSelectElement>('.board-member-level')) {
+      s.disabled = true;
+    }
     const who = isDomain(match) ? `Everyone at ${match}` : match;
     const before = row.level ?? 'edit';
     run(async () => {
@@ -262,7 +266,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const domain = isDomain(match);
     return levelSelect(doc, {
       current: row.level,
-      domain,
+      noOwner: row.seatless === true,
       aria: domain ? `What everyone at ${match} can do` : `What ${match} can do`,
       onPick: (next) => {
         if (next !== 'owner') {
@@ -297,8 +301,18 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
         repaintSoon();
       });
       out.appendChild(remove);
-    }
+    } else if (canEdit && level) out.appendChild(removeGap());
     return out;
+  }
+
+  /** Where Remove would be, on a row with none (your own), so its level
+   *  lines up with the level column above and below it. */
+  function removeGap(): HTMLButtonElement {
+    const gap = button('Remove', 'board-member-remove-gap');
+    gap.disabled = true;
+    gap.tabIndex = -1;
+    gap.setAttribute('aria-hidden', 'true');
+    return gap;
   }
 
   /** The key of the row after `key`, or the one before it when it was last. */
@@ -320,7 +334,6 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
       (r) => r.dataset.key === key,
     );
     const target =
-      row?.querySelector<HTMLElement>('.board-member-promote') ??
       row?.querySelector<HTMLElement>('.board-member-cancel') ??
       (toLevel ? row?.querySelector<HTMLElement>('.board-member-level') : null) ??
       row?.querySelector<HTMLElement>('.board-member-remove') ??
@@ -361,6 +374,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
           ? levelText(doc, view.you.accessRole)
           : el('span', 'board-member-role-text', roleLabel(view.you.role)),
       );
+      if (canEdit && view.you.accessRole) you.appendChild(removeGap());
       deps.list.appendChild(you);
     }
     const rows = accessRows(view);
@@ -397,7 +411,12 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const listed = (key: string | null) =>
       key && view && accessRows(view).some((r) => r.key === key) ? key : null;
     confirming = listed(keep);
-    promoting = listed(promoting);
+    // Made an Owner somewhere else meanwhile: nothing left to ask.
+    const asked = listed(promoting);
+    promoting =
+      asked && view && accessRows(view).find((r) => r.key === asked)?.level !== 'owner'
+        ? asked
+        : null;
     deps.onRole?.(view ? view.you.role : null);
     paint();
   }

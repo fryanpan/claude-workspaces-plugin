@@ -55,6 +55,7 @@ import {
   type RolesMode,
   accessRoleOf,
   normalizeMemberAccess,
+  widensAccess,
 } from './board-access.ts';
 import {
   type BoardAudience,
@@ -492,20 +493,30 @@ export class ShareLinks {
   /** A domain entry's level, or null when the board holds no such domain. */
   audienceAccessOf(workspaceId: string, match: string): AccessRole | null {
     const entry = this.audienceOf(workspaceId)?.entries.find((e) => e.match === match);
-    return entry && match.startsWith('@') ? (entry.access ?? 'edit') : null;
+    return entry ? (entry.access ?? 'edit') : null;
   }
 
   /**
-   * Set what everyone a domain entry lets in may do: the entry's own level,
-   * which newcomers arrive at, and the level of every member it already
-   * admits. An Owner keeps their seat, and a person with an exact entry of
-   * their own is not the domain's. Answers whose level moved, so the caller
-   * can hang up what they have open, or null when there is no such domain.
+   * Set the level an audience entry carries: a `@domain`'s, or an exact
+   * address's. It is the level a newcomer the entry admits arrives at, and
+   * every member it already admits moves to it. An Owner keeps their seat,
+   * and a person with an exact entry of their own is not the domain's.
+   *
+   * A member is RAISED only when `mayWiden` says the owner proved this
+   * request: a domain change that reads as a narrowing can still lift a
+   * member somebody set lower on their own, and re-posting a domain's level
+   * would lift them all. Answers whose level moved, so the caller can hang
+   * up what they have open, or null when the board holds no such entry.
    */
-  setAudienceAccess(workspaceId: string, match: string, role: AccessRole): string[] | null {
+  setAudienceAccess(
+    workspaceId: string,
+    match: string,
+    role: AccessRole,
+    opts: { mayWiden?: boolean } = {},
+  ): string[] | null {
     this.refuseWhileUnreadable();
     const current = this.audienceOf(workspaceId);
-    if (!match.startsWith('@') || role === 'owner') return null;
+    if (role === 'owner') return null;
     if (!current?.entries.some((e) => e.match === match)) return null;
     const access = role === 'edit' ? undefined : role;
     const entries = current.entries.map((e) => {
@@ -519,6 +530,7 @@ export class ShareLinks {
     for (const m of this.membersOf(workspaceId)) {
       if (m.role === 'owner' || admittingEntry(next, m.email) !== match) continue;
       if (m.access === access) continue;
+      if (!opts.mayWiden && widensAccess(accessRoleOf('member', m.access), role)) continue;
       this.setMemberRole(workspaceId, m.email, 'member', access);
       moved.push(m.email);
     }
